@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+# Execute sur le NAS via SSH par devforge-rollout.ps1 / devforge-rollout.sh
+set -euo pipefail
+
+ARTIFACT="${1:?Chemin de l artefact tar.gz requis}"
+CONTAINER="${2:-coolify}"
+HOST_ENV_FILE="${3:-}"
+if [[ "${HOST_ENV_FILE}" == "-" ]]; then
+    HOST_ENV_FILE=""
+fi
+ENABLE_AGENTS="${4:-false}"
+BACKUP_DIR="${5:-/tmp/devforge-backups}"
+
+STAGING="/tmp/devforge-rollout-$$"
+TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+BACKUP="${BACKUP_DIR}/devforge-backup-${TIMESTAMP}.tar.gz"
+CONTAINER_ENV="/var/www/html/.env"
+
+log() { printf '==> %s\n' "$*"; }
+fail() { printf 'ERREUR: %s\n' "$*" >&2; exit 1; }
+
+command -v docker >/dev/null 2>&1 || fail "docker introuvable sur le NAS"
+docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}" || fail "conteneur ${CONTAINER} introuvable"
+
+mkdir -p "${BACKUP_DIR}" "${STAGING}"
+
+log "Sauvegarde des fichiers DevForge dans le conteneur"
+docker exec "${CONTAINER}" sh -c '
+    cd /var/www/html
+    tar -czf - \
+        app/Http/Controllers/DevForgeController.php \
+        app/Http/Controllers/DevForge \
+        app/Services/DevForge \
+        config/devforge.php \
+        routes/devforge-api.php \
+        routes/devforge-applications.php \
+        routes/devforge-databases.php \
+        routes/devforge-database-backups.php \
+        routes/devforge-s3-storages.php \
+        routes/devforge-agents.php \
+        routes/devforge-core.php \
+        routes/devforge-realtime.php \
+        routes/devforge-simple.php \
+        public/devforge \
+        2>/dev/null || true
+' > "${BACKUP}" || true
+
+log "Extraction de ${ARTIFACT}"
+tar --warning=no-timestamp -xzf "${ARTIFACT}" -C "${STAGING}"
+
+log "Copie vers ${CONTAINER}:/var/www/html/"
+docker cp "${STAGING}/." "${CONTAINER}:/var/www/html/"
+
+set_env_in_container() {
+    local key="$1"
+    local value="$2"
+    docker exec "${CONTAINER}" sh -c "
+        if [ ! -f '${CONTAINER_ENV}' ]; then
+            touch '${CONTAINER_ENV}'
+        fi
+        if grep -q '^${key}=' '${CONTAINER_ENV}'; then
+            sed -i 's|^${key}=.*|${key}=${value}|' '${CONTAINER_ENV}'
+        else
+            echo '${key}=${value}' >> '${CONTAINER_ENV}'
+        fi
+    "
+}
+
+get_env_in_container() {
+    local key="$1"
+    docker exec "${CONTAINER}" printenv "${key}" 2>/dev/null || true
+}
+
+set_env_on_host() {
+    local key="$1"
+    local value="$2"
+    local file="$3"
+    local runner="$4"
+
+    if [[ ! -f "${file}" ]]; then
+        return 1
+    fi
+
+    if [[ "${runner}" == "sudo" ]]; then
+        if sudo grep -q "^${key}=" "${file}"; then
+            sudo sed -i "s|^${key}=.*|${key}=${value}|" "${file}"
+        else
+            echo "${key}=${value}" | sudo tee -a "${file}" >/dev/null
+        fi
+    else
+        if grep -q "^${key}=" "${file}"; then
+            sed -i "s|^${key}=.*|${key}=${value}|" "${file}"
+        else
+            echo "${key}=${value}" >> "${file}"
+        fi
+    fi
+}
+
+set_env_var() {
+    local key="$1"
+    local value="$2"
+    local current
+
+    current="$(get_env_in_container "${key}")"
+    if [[ "${current}" == "${value}" ]]; then
+        log "${key}=${value} (deja actif dans le conteneur)"
+        return 0
+    fi
+
+    if set_env_in_container "${key}" "${value}"; then
+        return 0
+    fi
+
+    if [[ -n "${HOST_ENV_FILE}" ]] && [[ -f "${HOST_ENV_FILE}" ]]; then
+        set_env_on_host "${key}" "${value}" "${HOST_ENV_FILE}" "no" && return 0
+    fi
+
+    if [[ -n "${HOST_ENV_FILE}" ]] && sudo test -f "${HOST_ENV_FILE}" 2>/dev/null; then
+        set_env_on_host "${key}" "${value}" "${HOST_ENV_FILE}" "sudo" && return 0
+    fi
+
+    fail "Impossible de mettre a jour ${key} dans ${CONTAINER_ENV} ni ${HOST_ENV_FILE}"
+}
+
+log "Mise a jour DEVFORGE_* dans le conteneur ${CONTAINER}"
+set_env_var DEVFORGE_ENABLED true
+if [[ "${ENABLE_AGENTS}" == "true" ]]; then
+    set_env_var DEVFORGE_AGENTS_ENABLED true
+else
+    set_env_var DEVFORGE_AGENTS_ENABLED false
+fi
+
+log "Migrations Laravel"
+docker exec -w /var/www/html "${CONTAINER}" php artisan migrate --force
+
+log "Verification agents IA"
+if ! docker exec -w /var/www/html "${CONTAINER}" php -r "require 'vendor/autoload.php'; exit(class_exists('App\\\\Models\\\\AiAgentMessage') ? 0 : 1);"; then
+    fail "Modele AiAgentMessage absent dans le conteneur"
+fi
+echo "MODEL_OK"
+
+if [[ "${ENABLE_AGENTS}" == "true" ]]; then
+    for migration in \
+        database/migrations/2026_07_13_100000_add_fallback_provider_to_ai_agents_table.php \
+        database/migrations/2026_07_13_110000_create_ai_agent_messages_table.php
+    do
+        if ! docker exec -w /var/www/html "${CONTAINER}" test -f "/var/www/html/${migration}"; then
+            fail "Migration manquante dans le conteneur: ${migration}"
+        fi
+        docker exec -w /var/www/html "${CONTAINER}" php artisan migrate --force --path="${migration}"
+    done
+    echo "AGENTS_MIGRATIONS_OK"
+fi
+
+log "Vidage des caches"
+docker exec -w /var/www/html "${CONTAINER}" php artisan config:clear
+docker exec -w /var/www/html "${CONTAINER}" php artisan route:clear
+
+log "Verification des routes DevForge"
+if ! docker exec -w /var/www/html "${CONTAINER}" php artisan route:list --path=devforge --except-vendor >/dev/null 2>&1; then
+    fail "Impossible de charger les routes DevForge - voir laravel.log"
+fi
+docker exec -w /var/www/html "${CONTAINER}" php artisan route:list --path=devforge --except-vendor 2>&1 | head -15 || true
+
+log "Configuration"
+docker exec -w /var/www/html "${CONTAINER}" php artisan config:show devforge.enabled
+docker exec -w /var/www/html "${CONTAINER}" php artisan config:show devforge.agents_enabled
+
+log "Build frontend"
+if ! docker exec "${CONTAINER}" test -f /var/www/html/public/devforge/index.html; then
+    fail "public/devforge/index.html manquant"
+fi
+echo "BUILD_OK"
+
+log "Route SPA Coolify"
+if docker exec "${CONTAINER}" grep -q "DevForgeController" /var/www/html/app/Providers/RouteServiceProvider.php; then
+    echo "WEB_ROUTE_OK"
+else
+    echo "AVERTISSEMENT: RouteServiceProvider ne reference pas DevForgeController"
+fi
+
+rm -rf "${STAGING}"
+
+HOST_IP="$(hostname -i 2>/dev/null | awk '{print $1}' | head -1)" || true
+if [[ -z "${HOST_IP}" ]]; then
+    HOST_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')" || true
+fi
+if [[ -z "${HOST_IP}" ]]; then
+    HOST_IP="10.1.0.58"
+fi
+printf '\nDeploiement DevForge termine.\n'
+printf 'Sauvegarde: %s\n' "${BACKUP}"
+printf 'Acces: http://%s:8080/devforge/\n' "${HOST_IP:-10.1.0.58}"

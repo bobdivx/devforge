@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\DevForgeController;
 use App\Http\Controllers\OauthController;
 use App\Http\Controllers\UploadController;
 use App\Livewire\Admin\Index as AdminIndex;
@@ -404,6 +405,11 @@ Route::middleware(['auth'])->group(function () {
     })->name('download.backup');
 
 });
+
+Route::get('/devforge/{path?}', DevForgeController::class)
+    ->where('path', '.*')
+    ->middleware('auth')
+    ->name('devforge');
 
 Route::any('/{any}', function () {
     if (auth()->user()) {

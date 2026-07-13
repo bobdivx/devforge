@@ -2,9 +2,17 @@
     "name": "coolify",
     "private": true,
     "type": "module",
+    "workspaces": [
+        "devforge"
+    ],
     "scripts": {
         "dev": "vite",
-        "build": "vite build"
+        "dev:laravel": "vite",
+        "dev:devforge": "npm run dev --workspace devforge",
+        "build": "npm run build:laravel && npm run build:devforge",
+        "build:laravel": "vite build",
+        "build:devforge": "npm run build --workspace devforge",
+        "test:devforge": "npm run test --workspace devforge"
     },
     "devDependencies": {
         "@tailwindcss/postcss": "4.1.18",
@@ -12,7 +20,7 @@
         "postcss": "8.5.15",
         "tailwind-scrollbar": "4.0.2",
         "tailwindcss": "4.1.18",
-        "vite": "7.3.2"
+        "vite": "7.3.6"
     },
     "dependencies": {
         "@tailwindcss/forms": "0.5.10",

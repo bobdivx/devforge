@@ -2,6 +2,13 @@
 
 namespace App\Providers;
 
+use App\Http\Controllers\DevForgeController;
+use App\Http\Middleware\CheckForcePasswordReset;
+use App\Http\Middleware\DecideWhatToDoWithUser;
+use App\Http\Middleware\EnsureDevForgeCurrentTeam;
+use App\Http\Middleware\EnsureDevForgeEnabled;
+use App\Http\Middleware\EnsureDevForgeUserIsVerified;
+use App\Http\Middleware\EnsureJsonResponse;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Support\Providers\RouteServiceProvider as ServiceProvider;
 use Illuminate\Http\Request;
@@ -27,12 +34,26 @@ class RouteServiceProvider extends ServiceProvider
         $this->configureRateLimiting();
 
         $this->routes(function () {
+            Route::middleware([EnsureJsonResponse::class, EnsureDevForgeEnabled::class, 'web', 'auth', EnsureDevForgeUserIsVerified::class, 'verified', EnsureDevForgeCurrentTeam::class])
+                ->withoutMiddleware([CheckForcePasswordReset::class, DecideWhatToDoWithUser::class])
+                ->prefix('api/devforge/v1')
+                ->as('devforge.api.')
+                ->group(base_path('routes/devforge-api.php'));
+
             Route::middleware('api')
                 ->prefix('api')
                 ->group(base_path('routes/api.php'));
 
             Route::prefix('webhooks')
                 ->group(base_path('routes/webhooks.php'));
+
+            Route::middleware('web')
+                ->group(function () {
+                    Route::get('/devforge/{path?}', DevForgeController::class)
+                        ->where('path', '.*')
+                        ->middleware('auth')
+                        ->name('devforge');
+                });
 
             Route::middleware('web')
                 ->group(base_path('routes/web.php'));
@@ -57,6 +78,10 @@ class RouteServiceProvider extends ServiceProvider
 
         RateLimiter::for('feedback', function (Request $request) {
             return Limit::perMinute(3)->by($request->user()?->id ?: $request->ip());
+        });
+
+        RateLimiter::for('devforge-agent-run', function (Request $request) {
+            return Limit::perMinute(10)->by($request->user()?->id ?: $request->ip());
         });
     }
 }

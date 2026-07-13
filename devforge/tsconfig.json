@@ -1,0 +1,22 @@
+{
+    "extends": "../node_modules/astro/tsconfigs/strict.json",
+    "compilerOptions": {
+        "jsx": "react-jsx",
+        "jsxImportSource": "preact",
+        "types": [
+            "vitest/globals",
+            "@testing-library/jest-dom"
+        ]
+    },
+    "include": [
+        ".astro/types.d.ts",
+        "src/**/*.astro",
+        "src/**/*.ts",
+        "src/**/*.tsx",
+        "tests/**/*.ts",
+        "tests/**/*.tsx"
+    ],
+    "exclude": [
+        "dist"
+    ]
+}

@@ -19,6 +19,8 @@ use App\Models\StandaloneDocker;
 use App\Models\SwarmDocker;
 use App\Notifications\Application\DeploymentFailed;
 use App\Notifications\Application\DeploymentSuccess;
+use App\Services\DevForge\Agent\DeploymentBuildAgentDispatcher;
+use App\Services\DevForge\Agent\DeploymentFailureAgentDispatcher;
 use App\Support\ValidationPatterns;
 use App\Traits\EnvironmentVariableAnalyzer;
 use App\Traits\ExecuteRemoteCommand;
@@ -294,6 +296,13 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
             'status' => ApplicationDeploymentStatus::IN_PROGRESS->value,
             'horizon_job_worker' => gethostname(),
         ]);
+
+        app(DeploymentBuildAgentDispatcher::class)->dispatch(
+            application: $this->application,
+            deploymentUuid: $this->deployment_uuid,
+            deploymentQueue: $this->application_deployment_queue,
+        );
+
         if ($this->server->isFunctional() === false) {
             $this->application_deployment_queue->addLogEntry('Server is not functional.');
             $this->fail('Server is not functional.');
@@ -4810,6 +4819,12 @@ COPY ./nginx.conf /etc/nginx/conf.d/default.conf");
     private function handleFailedDeployment(): void
     {
         $this->sendDeploymentNotification(DeploymentFailed::class);
+
+        app(DeploymentFailureAgentDispatcher::class)->dispatch(
+            application: $this->application,
+            deploymentUuid: $this->deployment_uuid,
+            deploymentQueue: $this->application_deployment_queue,
+        );
     }
 
     /**

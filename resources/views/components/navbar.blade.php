@@ -372,6 +372,18 @@
                         @endif
                     @endif
                     <div class="flex-1"></div>
+                    @if (config('devforge.enabled'))
+                        <li>
+                            <a title="Open DevForge" class="menu-item" href="{{ route('devforge') }}">
+                                <svg class="menu-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M12 3 4.5 7.2v9.6L12 21l7.5-4.2V7.2L12 3Z" />
+                                    <path d="m4.8 7.4 7.2 4.1 7.2-4.1M12 11.5V21" />
+                                </svg>
+                                <span class="menu-item-label" :class="collapsed && 'lg:hidden'">DevForge</span>
+                            </a>
+                        </li>
+                    @endif
                     <li>
                         <livewire:settings-dropdown trigger="changelog-sidebar" />
                     </li>

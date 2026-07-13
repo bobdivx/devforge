@@ -65,7 +65,11 @@ class FortifyServiceProvider extends ServiceProvider
                 return redirect()->route('register');
             }
 
-            return view('auth.login', [
+            $loginView = config('devforge.enabled')
+                ? 'auth.login-devforge'
+                : 'auth.login';
+
+            return view($loginView, [
                 'is_registration_enabled' => $settings->is_registration_enabled,
                 'enabled_oauth_providers' => $enabled_oauth_providers,
             ]);

@@ -5,6 +5,7 @@ namespace App\Actions\Database;
 use App\Models\StandaloneClickhouse;
 use App\Models\StandaloneDragonfly;
 use App\Models\StandaloneKeydb;
+use App\Models\StandaloneLibsql;
 use App\Models\StandaloneMariadb;
 use App\Models\StandaloneMongodb;
 use App\Models\StandaloneMysql;
@@ -22,7 +23,7 @@ class StartDatabase
         $job->onQueue(deployment_queue());
     }
 
-    public function handle(StandaloneRedis|StandalonePostgresql|StandaloneMongodb|StandaloneMysql|StandaloneMariadb|StandaloneKeydb|StandaloneDragonfly|StandaloneClickhouse $database)
+    public function handle(StandaloneRedis|StandalonePostgresql|StandaloneMongodb|StandaloneMysql|StandaloneMariadb|StandaloneKeydb|StandaloneDragonfly|StandaloneClickhouse|StandaloneLibsql $database)
     {
         $server = $database->destination->server;
         if (! $server->isFunctional()) {
@@ -52,6 +53,9 @@ class StartDatabase
                 break;
             case StandaloneClickhouse::class:
                 $activity = StartClickhouse::run($database);
+                break;
+            case StandaloneLibsql::class:
+                $activity = StartLibsql::run($database);
                 break;
         }
         if ($database->is_public && $database->public_port) {

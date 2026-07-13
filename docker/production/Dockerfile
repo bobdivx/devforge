@@ -55,6 +55,7 @@ FROM node:24-alpine AS static-assets
 
 WORKDIR /app
 COPY package*.json vite.config.js postcss.config.cjs ./
+COPY devforge/package.json ./devforge/package.json
 RUN --mount=type=cache,target=/root/.npm \
     npm ci
 COPY . .
@@ -137,7 +138,6 @@ COPY --chmod=755 docker/production/entrypoint.d/ /etc/entrypoint.d
 
 # Copy application files from previous stages
 COPY --from=base --chown=www-data:www-data /var/www/html/vendor ./vendor
-COPY --from=static-assets --chown=www-data:www-data /app/public/build ./public/build
 
 # Copy application source code
 COPY --chown=www-data:www-data composer.json composer.lock ./
@@ -147,6 +147,8 @@ COPY --chown=www-data:www-data config ./config
 COPY --chown=www-data:www-data database ./database
 COPY --chown=www-data:www-data lang ./lang
 COPY --chown=www-data:www-data public ./public
+COPY --from=static-assets --chown=www-data:www-data /app/public/build ./public/build
+COPY --from=static-assets --chown=www-data:www-data /app/public/devforge ./public/devforge
 COPY --chown=www-data:www-data routes ./routes
 COPY --chown=www-data:www-data storage ./storage
 COPY --chown=www-data:www-data templates ./templates

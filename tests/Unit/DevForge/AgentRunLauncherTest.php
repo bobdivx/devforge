@@ -1,0 +1,51 @@
+<?php
+
+use App\Jobs\Agent\RunAgentJob;
+use App\Models\AiAgent;
+use App\Models\AiAgentRun;
+use App\Models\AiProviderConfig;
+use App\Models\Team;
+use App\Services\DevForge\Agent\AgentRunLauncher;
+use Illuminate\Support\Facades\Queue;
+
+beforeEach(function () {
+    Queue::fake();
+});
+
+it('queues a run and marks the agent as running immediately', function () {
+    $team = Team::factory()->create();
+    $provider = AiProviderConfig::factory()->create(['team_id' => $team->id]);
+    $agent = AiAgent::factory()->create([
+        'team_id' => $team->id,
+        'provider_config_id' => $provider->id,
+        'status' => 'idle',
+    ]);
+
+    $run = app(AgentRunLauncher::class)->queue($agent, 'manual');
+
+    expect($run)->toBeInstanceOf(AiAgentRun::class)
+        ->and($run->status)->toBe('pending')
+        ->and($agent->fresh()->status)->toBe('running');
+
+    Queue::assertPushed(RunAgentJob::class, function (RunAgentJob $job) use ($agent, $run) {
+        return $job->agent->is($agent)
+            && $job->trigger === 'manual'
+            && $job->runId === $run->id;
+    });
+});
+
+it('returns null when the agent is already running', function () {
+    $team = Team::factory()->create();
+    $provider = AiProviderConfig::factory()->create(['team_id' => $team->id]);
+    $agent = AiAgent::factory()->running()->create([
+        'team_id' => $team->id,
+        'provider_config_id' => $provider->id,
+    ]);
+
+    AiAgentRun::factory()->running()->create(['agent_id' => $agent->id]);
+
+    $run = app(AgentRunLauncher::class)->queue($agent, 'manual');
+
+    expect($run)->toBeNull();
+    Queue::assertNothingPushed();
+});

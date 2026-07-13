@@ -61,6 +61,9 @@ class Kernel extends ConsoleKernel
             // Scheduled Jobs (Backups & Tasks)
             $this->scheduleInstance->job(new ScheduledJobManager)->everyMinute()->onOneServer();
 
+            // AI Agents
+            $this->scheduleInstance->command('agents:run-scheduled')->everyMinute()->onOneServer();
+
             $this->scheduleInstance->command('uploads:clear')->everyTwoMinutes();
 
         } else {
@@ -81,6 +84,9 @@ class Kernel extends ConsoleKernel
 
             // Scheduled Jobs (Backups & Tasks)
             $this->scheduleInstance->job(new ScheduledJobManager)->everyMinute()->onOneServer();
+
+            // AI Agents
+            $this->scheduleInstance->command('agents:run-scheduled')->everyMinute()->onOneServer();
 
             $this->scheduleInstance->job(new RegenerateSslCertJob)->twiceDaily()->onOneServer();
 

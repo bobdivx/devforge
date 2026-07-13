@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
 
 class CheckForcePasswordReset
@@ -15,8 +16,10 @@ class CheckForcePasswordReset
      */
     public function handle(Request $request, Closure $next): Response
     {
+        $path = $this->logicalPath($request);
+
         if (auth()->user()) {
-            if ($request->path() === 'auth/link') {
+            if ($path === 'auth/link') {
                 auth()->logout();
                 request()->session()->invalidate();
                 request()->session()->regenerateToken();
@@ -25,7 +28,7 @@ class CheckForcePasswordReset
             }
             $force_password_reset = auth()->user()->force_password_reset;
             if ($force_password_reset) {
-                if ($request->routeIs('auth.force-password-reset') || $request->path() === 'force-password-reset' || $request->path() === 'two-factor-challenge' || $request->path() === 'livewire/update' || $request->path() === 'logout') {
+                if ($request->routeIs('auth.force-password-reset') || in_array($path, ['force-password-reset', 'two-factor-challenge', 'livewire/update', 'logout'], true)) {
                     return $next($request);
                 }
 
@@ -34,5 +37,14 @@ class CheckForcePasswordReset
         }
 
         return $next($request);
+    }
+
+    private function logicalPath(Request $request): string
+    {
+        $path = $request->path();
+
+        return Str::startsWith($path, 'devforge/')
+            ? Str::after($path, 'devforge/')
+            : $path;
     }
 }

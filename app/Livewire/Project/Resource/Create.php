@@ -63,6 +63,8 @@ class Create extends Component
                     $database = create_standalone_dragonfly($environment->id, $destination);
                 } elseif ($type->value() === 'clickhouse') {
                     $database = create_standalone_clickhouse($environment->id, $destination);
+                } elseif ($type->value() === 'libsql') {
+                    $database = create_standalone_libsql($environment->id, $destination);
                 }
 
                 return redirect()->route('project.database.configuration', [

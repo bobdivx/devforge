@@ -127,6 +127,11 @@ class Project extends BaseModel
         return $this->hasManyThrough(StandaloneClickhouse::class, Environment::class);
     }
 
+    public function libsqls()
+    {
+        return $this->hasManyThrough(StandaloneLibsql::class, Environment::class);
+    }
+
     public function mongodbs()
     {
         return $this->hasManyThrough(StandaloneMongodb::class, Environment::class);
@@ -150,6 +155,7 @@ class Project extends BaseModel
             $this->mysqls()->count() == 0 &&
             $this->keydbs()->count() == 0 &&
             $this->dragonflies()->count() == 0 &&
+            $this->libsqls()->count() == 0 &&
             $this->clickhouses()->count() == 0 &&
             $this->mariadbs()->count() == 0 &&
             $this->mongodbs()->count() == 0 &&
@@ -158,7 +164,7 @@ class Project extends BaseModel
 
     public function databases()
     {
-        return $this->postgresqls()->get()->merge($this->redis()->get())->merge($this->mongodbs()->get())->merge($this->mysqls()->get())->merge($this->mariadbs()->get())->merge($this->keydbs()->get())->merge($this->dragonflies()->get())->merge($this->clickhouses()->get());
+        return $this->postgresqls()->get()->merge($this->redis()->get())->merge($this->mongodbs()->get())->merge($this->mysqls()->get())->merge($this->mariadbs()->get())->merge($this->keydbs()->get())->merge($this->dragonflies()->get())->merge($this->clickhouses()->get())->merge($this->libsqls()->get());
     }
 
     public function navigateTo()

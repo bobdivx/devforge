@@ -40,11 +40,30 @@ class TrustProxies extends Middleware
         return parent::handle($request, function ($request) use ($next) {
             // At this point proxy headers have been applied to the request,
             // so $request->secure() correctly reflects the actual protocol.
-            if ($request->secure() && config('session.secure') === null) {
+            if ($request->secure() && config('session.secure') === null && $this->shouldUseSecureSessionCookies($request)) {
                 config(['session.secure' => true]);
             }
 
             return $next($request);
         });
+    }
+
+    /**
+     * Avoid marking session cookies as Secure when the client reaches the app
+     * over common plain-HTTP ports (e.g. :8080). Some reverse proxies forward
+     * X-Forwarded-Proto: https while the browser still talks HTTP, which breaks
+     * login with a 419 CSRF mismatch.
+     */
+    private function shouldUseSecureSessionCookies(Request $request): bool
+    {
+        $host = strtolower($request->header('Host', ''));
+        $forwardedPort = $request->header('X-Forwarded-Port');
+        $port = $forwardedPort !== null ? (int) $forwardedPort : $request->getPort();
+
+        if (in_array($port, [80, 8080], true)) {
+            return false;
+        }
+
+        return ! preg_match('/:(80|8080)$/', $host);
     }
 }

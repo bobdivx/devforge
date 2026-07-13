@@ -38,6 +38,7 @@ class AuthServiceProvider extends ServiceProvider
         \App\Models\StandaloneKeydb::class => \App\Policies\DatabasePolicy::class,
         \App\Models\StandaloneDragonfly::class => \App\Policies\DatabasePolicy::class,
         \App\Models\StandaloneClickhouse::class => \App\Policies\DatabasePolicy::class,
+        \App\Models\StandaloneLibsql::class => \App\Policies\DatabasePolicy::class,
 
         // Notification policies - all use the shared NotificationPolicy
         \App\Models\EmailNotificationSettings::class => \App\Policies\NotificationPolicy::class,
@@ -55,6 +56,13 @@ class AuthServiceProvider extends ServiceProvider
 
         // Team policy
         \App\Models\Team::class => \App\Policies\TeamPolicy::class,
+
+        // S3 backup storage policy
+        \App\Models\S3Storage::class => \App\Policies\S3StoragePolicy::class,
+
+        // DevForge AI policies
+        \App\Models\AiAgent::class => \App\Policies\AiAgentPolicy::class,
+        \App\Models\AiProviderConfig::class => \App\Policies\AiProviderConfigPolicy::class,
 
         // Git source policies
         \App\Models\GithubApp::class => \App\Policies\GithubAppPolicy::class,
