@@ -7,6 +7,8 @@ import { AgentStatusBadge } from './AgentStatusBadge';
 import type { Agent, AgentChatMessage } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
 import { ApiError } from '../../lib/api-client';
+import { shouldOpenAgentSettings, syncAgentSettingsQueryParam } from '../../lib/agent-routes';
+import { formatAgentProviderDisplay } from '../../lib/llm-models';
 
 type Props = {
     agent: Agent;
@@ -37,7 +39,12 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
     const [sending, setSending] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [draft, setDraft] = useState('');
-    const [settingsOpen, setSettingsOpen] = useState(false);
+    const [settingsOpen, setSettingsOpen] = useState(() => shouldOpenAgentSettings(window.location.search));
+
+    const toggleSettings = (open: boolean) => {
+        setSettingsOpen(open);
+        syncAgentSettingsQueryParam(open);
+    };
     const scrollRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -62,8 +69,35 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
     }, [agent.uuid]);
 
     useEffect(() => {
+        setSettingsOpen(shouldOpenAgentSettings(window.location.search));
+    }, [agent.uuid]);
+
+    useEffect(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }, [messages, sending]);
+
+    const waitForChatReply = async (runUuid: string): Promise<void> => {
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+            await new Promise((resolve) => window.setTimeout(resolve, 1500));
+
+            const run = await domainApi.agentRun(agent.uuid, runUuid);
+            if (run.data.status === 'failed') {
+                throw new ApiError(502, { message: run.data.summary ?? 'La réponse de l\'agent a échoué.' });
+            }
+
+            if (run.data.status !== 'completed') {
+                continue;
+            }
+
+            const response = await domainApi.agentMessages(agent.uuid);
+            setMessages(response.data);
+            onAgentUpdated();
+
+            return;
+        }
+
+        throw new ApiError(504, { message: 'Délai dépassé en attendant la réponse de l\'agent.' });
+    };
 
     const sendMessage = async (content: string) => {
         const trimmed = content.trim();
@@ -90,9 +124,8 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
             setMessages((current) => [
                 ...current.filter((m) => m.uuid !== optimisticUser.uuid),
                 response.data.user,
-                response.data.assistant,
             ]);
-            onAgentUpdated();
+            await waitForChatReply(response.data.run_uuid);
         } catch (err) {
             setMessages((current) => current.filter((m) => m.uuid !== optimisticUser.uuid));
             setError(err instanceof ApiError ? err.message : 'Échec de l\'envoi du message.');
@@ -131,14 +164,16 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
                         <AgentStatusBadge status={agent.status} />
                     </div>
                     <p class="truncate text-[11px] text-base-content/50">
-                        {agent.provider ? `${agent.provider.provider}/${agent.provider.model}` : 'Aucun provider configuré'}
+                        {agent.provider
+                            ? formatAgentProviderDisplay(agent.provider.provider)
+                            : 'Auto (provider par défaut)'}
                     </p>
                 </div>
                 <button
                     class={`btn btn-ghost btn-sm btn-square ${settingsOpen ? 'bg-base-300' : ''}`}
                     type="button"
                     title="Configuration"
-                    onClick={() => setSettingsOpen((v) => !v)}
+                    onClick={() => toggleSettings(!settingsOpen)}
                 >
                     <Settings2 class="size-4" aria-hidden />
                 </button>
@@ -261,7 +296,7 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
                 {/* Panneau latéral configuration */}
                 {settingsOpen && (
                     <aside class="hidden w-80 shrink-0 overflow-y-auto border-s border-base-300 bg-base-200/30 lg:block">
-                        <AgentSettingsPanel agent={agent} onUpdated={onAgentUpdated} onClose={() => setSettingsOpen(false)} />
+                        <AgentSettingsPanel agent={agent} onUpdated={onAgentUpdated} onClose={() => toggleSettings(false)} />
                     </aside>
                 )}
             </div>
@@ -269,15 +304,15 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
             {/* Panneau mobile */}
             {settingsOpen && (
                 <div class="fixed inset-0 z-50 lg:hidden">
-                    <button class="absolute inset-0 bg-black/50" type="button" aria-label="Fermer" onClick={() => setSettingsOpen(false)} />
+                    <button class="absolute inset-0 bg-black/50" type="button" aria-label="Fermer" onClick={() => toggleSettings(false)} />
                     <aside class="absolute inset-y-0 end-0 w-full max-w-sm overflow-y-auto border-s border-base-300 bg-base-100 shadow-xl">
                         <div class="flex items-center justify-between border-b border-base-300 px-4 py-3">
                             <span class="text-sm font-semibold">Configuration</span>
-                            <button class="btn btn-ghost btn-sm btn-square" type="button" onClick={() => setSettingsOpen(false)}>
+                            <button class="btn btn-ghost btn-sm btn-square" type="button" onClick={() => toggleSettings(false)}>
                                 <PanelRightOpen class="size-4" aria-hidden />
                             </button>
                         </div>
-                        <AgentSettingsPanel agent={agent} onUpdated={onAgentUpdated} onClose={() => setSettingsOpen(false)} />
+                        <AgentSettingsPanel agent={agent} onUpdated={onAgentUpdated} onClose={() => toggleSettings(false)} />
                     </aside>
                 </div>
             )}

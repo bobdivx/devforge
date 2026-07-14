@@ -7,23 +7,29 @@ use App\Models\AiProviderConfig;
 use App\Services\DevForge\Agent\Contracts\LlmProvider;
 use App\Services\DevForge\Agent\LlmEndpointResolver;
 use App\Services\DevForge\Agent\Providers\GeminiModelFailoverProvider;
-use App\Services\DevForge\Agent\Providers\GeminiProvider;
 use App\Services\DevForge\Agent\Providers\OllamaProvider;
 use App\Services\DevForge\Agent\Providers\ResilientLlmProvider;
 
 class LlmProviderFactory
 {
+    public function __construct(
+        private readonly LlmModelCatalog $modelCatalog,
+    ) {}
+
     public function make(AiProviderConfig $config): LlmProvider
     {
         return match ($config->provider) {
             'gemini' => new GeminiModelFailoverProvider(
                 apiKey: (string) $config->api_key,
-                model: $config->model,
+                model: $config->resolvedModel(),
                 baseUrl: LlmEndpointResolver::geminiBaseUrl($config->base_url),
+                autoModels: LlmModelResolver::isAuto($config->model)
+                    ? $this->resolveAutoGeminiModels($config)
+                    : null,
             ),
             'ollama' => new OllamaProvider(
                 baseUrl: LlmEndpointResolver::ollamaBaseUrl($config->base_url),
-                model: $config->model,
+                model: $this->resolveOllamaModel($config),
             ),
             default => throw new \InvalidArgumentException("Provider non supporté : {$config->provider}"),
         };
@@ -31,7 +37,7 @@ class LlmProviderFactory
 
     public function makeForAgent(AiAgent $agent, ?\Closure $onFallback = null): LlmProvider
     {
-        $primaryConfig = $agent->providerConfig;
+        $primaryConfig = $agent->effectiveProviderConfig();
 
         if (! $primaryConfig) {
             throw new \InvalidArgumentException('Aucun provider LLM configuré pour cet agent.');
@@ -84,6 +90,40 @@ class LlmProviderFactory
 
     private function label(AiProviderConfig $config): string
     {
-        return "{$config->provider}/{$config->model}";
+        return LlmModelResolver::displayProviderLabel($config);
+    }
+
+    /** @return array<int, string> */
+    private function resolveAutoGeminiModels(AiProviderConfig $config): array
+    {
+        try {
+            $available = collect($this->modelCatalog->listForProvider(
+                'gemini',
+                apiKey: (string) $config->api_key,
+                baseUrl: LlmEndpointResolver::geminiBaseUrl($config->base_url),
+            ))->pluck('id')->all();
+
+            return LlmModelResolver::prioritizeGeminiModels($available);
+        } catch (\Throwable) {
+            return LlmModelResolver::defaultAutoGeminiModels();
+        }
+    }
+
+    private function resolveOllamaModel(AiProviderConfig $config): string
+    {
+        if (! LlmModelResolver::isAuto($config->model)) {
+            return trim($config->model);
+        }
+
+        try {
+            $models = $this->modelCatalog->listForProvider(
+                'ollama',
+                baseUrl: LlmEndpointResolver::ollamaBaseUrl($config->base_url),
+            );
+
+            return $models[0]['id'] ?? LlmModelResolver::defaultOllamaModel();
+        } catch (\Throwable) {
+            return LlmModelResolver::defaultOllamaModel();
+        }
     }
 }

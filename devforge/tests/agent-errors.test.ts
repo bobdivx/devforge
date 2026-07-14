@@ -85,4 +85,24 @@ describe('agent-errors', () => {
         expect(getAgentErrorMessage(agent)).toBeNull();
         expect(hasAgentError(agent)).toBe(false);
     });
+
+    it('hides stale failed runs once the agent is ready again', () => {
+        const agent = makeAgent({
+            status: 'idle',
+            latest_run: {
+                uuid: 'run-1',
+                status: 'failed',
+                trigger: 'event',
+                summary: 'Erreur: ancien bug corrigé',
+                tokens_used: 0,
+                iterations: 0,
+                started_at: null,
+                finished_at: '2026-07-13T00:00:00.000Z',
+                created_at: '2026-07-13T00:00:00.000Z',
+            },
+        });
+
+        expect(getAgentErrorMessage(agent)).toBeNull();
+        expect(hasAgentError(agent)).toBe(false);
+    });
 });

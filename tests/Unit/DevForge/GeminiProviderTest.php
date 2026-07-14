@@ -1,6 +1,7 @@
 <?php
 
 use App\Services\DevForge\Agent\AgentToolTurnBuilder;
+use App\Services\DevForge\Agent\LlmModelResolver;
 use App\Services\DevForge\Agent\Providers\GeminiModelFailoverProvider;
 use App\Services\DevForge\Agent\Providers\GeminiProvider;
 use Illuminate\Support\Facades\Http;
@@ -123,7 +124,7 @@ it('formats overloaded model errors clearly', function () {
     $provider = new GeminiProvider('AIzaTestKey', 'gemini-2.5-flash');
 
     expect(fn () => $provider->chat([['role' => 'user', 'content' => 'test']]))
-        ->toThrow(RuntimeException::class, 'modèle temporairement surchargé');
+        ->toThrow(RuntimeException::class, 'surchargé');
 });
 
 it('marks function call responses as unfinished so another round trip can run', function () {
@@ -257,12 +258,41 @@ it('falls back to another gemini model when the primary model is rate limited', 
             ]),
     ]);
 
-    $provider = new GeminiModelFailoverProvider('AIzaTestKey', 'gemini-2.5-flash');
+    $provider = new GeminiModelFailoverProvider('AIzaTestKey', 'gemini-2.0-flash-lite');
 
     $response = $provider->chat([
         ['role' => 'user', 'content' => 'Bonjour'],
     ]);
 
     expect($response->text)->toBe('OK via fallback');
+    Http::assertSentCount(2);
+});
+
+it('tries multiple auto models when the first model is unavailable', function () {
+    Http::fake([
+        'generativelanguage.googleapis.com/*' => Http::sequence()
+            ->push(['error' => ['message' => 'model not found']], 404)
+            ->push([
+                'choices' => [
+                    [
+                        'message' => ['role' => 'assistant', 'content' => 'OK auto'],
+                        'finish_reason' => 'stop',
+                    ],
+                ],
+                'usage' => ['total_tokens' => 4],
+            ]),
+    ]);
+
+    $provider = new GeminiModelFailoverProvider(
+        'AIzaTestKey',
+        LlmModelResolver::AUTO,
+        autoModels: ['gemini-2.5-flash', 'gemini-2.0-flash-lite'],
+    );
+
+    $response = $provider->chat([
+        ['role' => 'user', 'content' => 'Bonjour'],
+    ]);
+
+    expect($response->text)->toBe('OK auto');
     Http::assertSentCount(2);
 });

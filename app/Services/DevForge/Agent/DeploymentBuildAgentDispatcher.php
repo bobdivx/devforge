@@ -14,7 +14,9 @@ class DeploymentBuildAgentDispatcher
 {
     private const CONTEXT_MARKER = 'deployment_uuid';
 
-    private const EVENT_NAME = 'deployment_build_started';
+    private const EVENT_BUILD_STARTED = 'deployment_build_started';
+
+    private const EVENT_BUILD_COMPLETED = 'deployment_build_completed';
 
     public function __construct(private readonly AgentRunLauncher $agentRunLauncher) {}
 
@@ -22,6 +24,33 @@ class DeploymentBuildAgentDispatcher
         Application $application,
         string $deploymentUuid,
         ApplicationDeploymentQueue $deploymentQueue,
+    ): void {
+        $this->dispatchEvent(
+            application: $application,
+            deploymentUuid: $deploymentUuid,
+            deploymentQueue: $deploymentQueue,
+            event: self::EVENT_BUILD_STARTED,
+        );
+    }
+
+    public function dispatchCompleted(
+        Application $application,
+        string $deploymentUuid,
+        ApplicationDeploymentQueue $deploymentQueue,
+    ): void {
+        $this->dispatchEvent(
+            application: $application,
+            deploymentUuid: $deploymentUuid,
+            deploymentQueue: $deploymentQueue,
+            event: self::EVENT_BUILD_COMPLETED,
+        );
+    }
+
+    private function dispatchEvent(
+        Application $application,
+        string $deploymentUuid,
+        ApplicationDeploymentQueue $deploymentQueue,
+        string $event,
     ): void {
         if (! config('devforge.agents_enabled') || ! config('devforge.agents_monitor_build_enabled', true)) {
             return;
@@ -37,7 +66,7 @@ class DeploymentBuildAgentDispatcher
             return;
         }
 
-        if ($this->wasRecentlyHandled($team, $deploymentUuid, self::EVENT_NAME)) {
+        if ($this->wasRecentlyHandled($team, $deploymentUuid, $event)) {
             return;
         }
 
@@ -48,19 +77,21 @@ class DeploymentBuildAgentDispatcher
                 'team_id' => $team->id,
                 'application_uuid' => $application->uuid,
                 'deployment_uuid' => $deploymentUuid,
+                'event' => $event,
             ]);
 
             return;
         }
 
-        $context = $this->buildContext($application, $deploymentUuid, $deploymentQueue);
+        $context = $this->buildContext($application, $deploymentUuid, $deploymentQueue, $event);
 
         $this->agentRunLauncher->queue($agent, 'event', $context);
 
-        Log::info('DevForge: agent DevForge déclenché au démarrage du déploiement.', [
+        Log::info('DevForge: agent DevForge déclenché pour le déploiement.', [
             'agent_uuid' => $agent->uuid,
             'application_uuid' => $application->uuid,
             'deployment_uuid' => $deploymentUuid,
+            'event' => $event,
         ]);
     }
 
@@ -71,9 +102,8 @@ class DeploymentBuildAgentDispatcher
             ->where('type', 'devforge')
             ->where('is_active', true)
             ->where('status', '!=', 'running')
-            ->whereNotNull('provider_config_id')
             ->get()
-            ->filter(fn (AiAgent $agent): bool => $this->agentScore($agent, $applicationUuid) >= 0)
+            ->filter(fn (AiAgent $agent): bool => $agent->hasLlmProvider() && $this->agentScore($agent, $applicationUuid) >= 0)
             ->sortByDesc(fn (AiAgent $agent): int => $this->agentScore($agent, $applicationUuid))
             ->first();
     }
@@ -113,9 +143,10 @@ class DeploymentBuildAgentDispatcher
         Application $application,
         string $deploymentUuid,
         ApplicationDeploymentQueue $deploymentQueue,
+        string $event,
     ): array {
         return [
-            'event' => self::EVENT_NAME,
+            'event' => $event,
             self::CONTEXT_MARKER => $deploymentUuid,
             'application_uuid' => $application->uuid,
             'application_name' => $application->name,

@@ -4811,6 +4811,12 @@ COPY ./nginx.conf /etc/nginx/conf.d/default.conf");
         }
 
         $this->sendDeploymentNotification(DeploymentSuccess::class);
+
+        app(DeploymentBuildAgentDispatcher::class)->dispatchCompleted(
+            application: $this->application,
+            deploymentUuid: $this->deployment_uuid,
+            deploymentQueue: $this->application_deployment_queue,
+        );
     }
 
     /**

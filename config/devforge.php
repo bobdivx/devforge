@@ -18,6 +18,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Agent permissions (porté depuis forge-permission-engine.ts)
+    |--------------------------------------------------------------------------
+    |
+    | autonomous : accès total (défaut)
+    | tiered     : lecture seule auto, destructif → approbation
+    | plan_first : chaque outil demande validation
+    |
+    */
+    'agents_permission_mode' => env('DEVFORGE_AGENTS_PERMISSION_MODE', 'autonomous'),
+
+    'agents_permission_allowed_tools' => env('DEVFORGE_AGENTS_PERMISSION_ALLOWED_TOOLS', ''),
+
+    'agents_permission_denied_tools' => env('DEVFORGE_AGENTS_PERMISSION_DENIED_TOOLS', ''),
+
+    'agents_max_iterations' => (int) env('DEVFORGE_AGENTS_MAX_ITERATIONS', 30),
+
+    'agents_chat_max_iterations' => (int) env('DEVFORGE_AGENTS_CHAT_MAX_ITERATIONS', 20),
+
+    'agents_max_concurrent_subagents' => (int) env('DEVFORGE_AGENTS_MAX_CONCURRENT_SUBAGENTS', 3),
+
+    /*
+    |--------------------------------------------------------------------------
     | Ollama URL for agents running inside Docker
     |--------------------------------------------------------------------------
     |

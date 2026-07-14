@@ -45,10 +45,13 @@ class ResilientLlmProvider implements LlmProvider
         return str_contains($message, '[503]')
             || str_contains($message, '[429]')
             || str_contains($message, '[500]')
+            || str_contains($message, '[404]')
+            || str_contains($message, 'mode auto gemini')
             || str_contains($message, 'surcharg')
             || str_contains($message, 'high demand')
             || str_contains($message, 'quota')
             || str_contains($message, 'rate limit')
-            || str_contains($message, 'unavailable');
+            || str_contains($message, 'unavailable')
+            || str_contains($message, 'indisponible');
     }
 }

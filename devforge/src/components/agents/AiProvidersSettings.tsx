@@ -1,9 +1,9 @@
-import { CheckCircle, Plus, RefreshCw, Trash2, Wifi, XCircle } from 'lucide-preact';
+import { CheckCircle, Pencil, Plus, RefreshCw, Trash2, Wifi, XCircle } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
 import { ActionToolbar } from '../ui/ActionToolbar';
-import type { LlmModelOption, LlmProvider } from '../../lib/domain-api';
+import type { AiProviderConfig, LlmModelOption, LlmProvider } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
-import { CUSTOM_MODEL_VALUE, modelSelectValue } from '../../lib/llm-models';
+import { AUTO_MODEL_VALUE, CUSTOM_MODEL_VALUE, formatModelLabel, isAutoModel, modelSelectValue } from '../../lib/llm-models';
 import { useApiQuery } from '../../lib/use-api-query';
 import { useTeamContext } from '../../lib/team-context';
 
@@ -32,13 +32,20 @@ const emptyForm = (): NewProviderForm => ({
     name: '',
     api_key: '',
     base_url: 'http://localhost:11434',
-    model: '',
+    model: AUTO_MODEL_VALUE,
     is_default: false,
 });
 
-function canDiscoverModels(form: NewProviderForm): boolean {
+function canDiscoverModels(
+    form: NewProviderForm,
+    existing?: Pick<AiProviderConfig, 'has_api_key'> | null,
+): boolean {
     if (form.provider === 'gemini') {
-        return form.api_key.trim().length >= 8;
+        if (form.api_key.trim().length >= 8) {
+            return true;
+        }
+
+        return existing?.has_api_key === true;
     }
 
     return form.base_url.trim().length > 0;
@@ -48,6 +55,7 @@ export function AiProvidersSettings() {
     const { agentsEnabled } = useTeamContext();
     const query = useApiQuery(agentsEnabled ? 'ai-providers' : null, () => domainApi.aiProviders());
     const [showForm, setShowForm] = useState(false);
+    const [editingId, setEditingId] = useState<number | null>(null);
     const [form, setForm] = useState<NewProviderForm>(emptyForm());
     const [availableModels, setAvailableModels] = useState<LlmModelOption[]>([]);
     const [modelsLoading, setModelsLoading] = useState(false);
@@ -58,9 +66,44 @@ export function AiProvidersSettings() {
     const [deleting, setDeleting] = useState<Record<number, boolean>>({});
 
     const providers = query.data?.data ?? [];
+    const editingProvider = editingId ? providers.find((provider) => provider.id === editingId) ?? null : null;
+    const isEditing = editingId !== null;
 
-    const loadModels = async (currentForm: NewProviderForm) => {
-        if (! canDiscoverModels(currentForm)) {
+    const closeForm = () => {
+        setShowForm(false);
+        setEditingId(null);
+        setForm(emptyForm());
+        setAvailableModels([]);
+        setModelsError(null);
+    };
+
+    const openCreateForm = () => {
+        setEditingId(null);
+        setForm(emptyForm());
+        setAvailableModels([]);
+        setModelsError(null);
+        setShowForm(true);
+    };
+
+    const openEditForm = (provider: AiProviderConfig) => {
+        setEditingId(provider.id);
+        setForm({
+            provider: provider.provider,
+            name: provider.name,
+            api_key: '',
+            base_url: provider.base_url ?? 'http://localhost:11434',
+            model: provider.model,
+            is_default: provider.is_default,
+        });
+        setAvailableModels([]);
+        setModelsError(null);
+        setShowForm(true);
+    };
+
+    const loadModels = async (currentForm: NewProviderForm, providerId?: number | null) => {
+        const existing = providerId ? providers.find((provider) => provider.id === providerId) ?? null : null;
+
+        if (! canDiscoverModels(currentForm, existing)) {
             setAvailableModels([]);
             setModelsError(null);
             return;
@@ -73,14 +116,19 @@ export function AiProvidersSettings() {
             const result = await domainApi.discoverAiProviderModels({
                 provider: currentForm.provider,
                 ...(currentForm.provider === 'gemini'
-                    ? { api_key: currentForm.api_key }
+                    ? { ...(currentForm.api_key ? { api_key: currentForm.api_key } : {}) }
                     : { base_url: currentForm.base_url }),
+                ...(providerId ? { provider_id: providerId } : {}),
             });
 
             const models = result.data.models;
             setAvailableModels(models);
 
             setForm((previous) => {
+                if (isAutoModel(previous.model)) {
+                    return previous;
+                }
+
                 if (models.length === 0) {
                     return previous;
                 }
@@ -100,34 +148,41 @@ export function AiProvidersSettings() {
     };
 
     useEffect(() => {
-        if (! showForm || ! canDiscoverModels(form)) {
+        if (! showForm || ! canDiscoverModels(form, editingProvider)) {
             return;
         }
 
         const timer = window.setTimeout(() => {
-            void loadModels(form);
+            void loadModels(form, editingId);
         }, 400);
 
         return () => window.clearTimeout(timer);
-    }, [showForm, form.provider, form.api_key, form.base_url]);
+    }, [showForm, editingId, form.provider, form.api_key, form.base_url]);
 
-    const handleCreate = async (e: Event) => {
+    const handleSubmit = async (e: Event) => {
         e.preventDefault();
         setSubmitting(true);
         try {
-            await domainApi.createAiProvider({
-                provider: form.provider,
-                name: form.name,
-                model: form.model,
-                ...(form.provider === 'ollama' ? { base_url: form.base_url || null } : {}),
-                is_default: form.is_default,
-                ...(form.api_key ? { api_key: form.api_key } : {}),
-            } as Parameters<typeof domainApi.createAiProvider>[0]);
+            if (isEditing && editingId) {
+                await domainApi.updateAiProvider(editingId, {
+                    name: form.name,
+                    model: form.model,
+                    ...(form.provider === 'ollama' ? { base_url: form.base_url || null } : {}),
+                    is_default: form.is_default,
+                    ...(form.api_key ? { api_key: form.api_key } : {}),
+                });
+            } else {
+                await domainApi.createAiProvider({
+                    provider: form.provider,
+                    name: form.name,
+                    model: form.model,
+                    ...(form.provider === 'ollama' ? { base_url: form.base_url || null } : {}),
+                    is_default: form.is_default,
+                    ...(form.api_key ? { api_key: form.api_key } : {}),
+                } as Parameters<typeof domainApi.createAiProvider>[0]);
+            }
             await query.reload();
-            setShowForm(false);
-            setForm(emptyForm());
-            setAvailableModels([]);
-            setModelsError(null);
+            closeForm();
         } catch {
             // ignore
         } finally {
@@ -176,7 +231,7 @@ export function AiProvidersSettings() {
                     <p class="text-xs text-base-content/60">Configurez Gemini ou Ollama pour alimenter vos agents IA.</p>
                 </div>
                 <div class="card-toolbar w-full sm:w-auto">
-                    <button class="btn btn-primary btn-sm w-full sm:w-auto" type="button" onClick={() => setShowForm(true)}>
+                    <button class="btn btn-primary btn-sm w-full sm:w-auto" type="button" onClick={openCreateForm}>
                         <Plus class="size-3.5" aria-hidden />
                         Ajouter
                     </button>
@@ -201,7 +256,7 @@ export function AiProvidersSettings() {
                                     )}
                                 </div>
                                 <p class="text-[11px] text-base-content/50">
-                                    {provider.provider} · {provider.model}
+                                    {provider.provider} · {formatModelLabel(provider.model, provider.model_label)}
                                     {provider.base_url && ` · ${provider.base_url}`}
                                     {provider.has_api_key && ' · Clé API configurée'}
                                 </p>
@@ -215,6 +270,15 @@ export function AiProvidersSettings() {
                                 )}
                             </div>
                             <ActionToolbar class="shrink-0">
+                                <button
+                                    class="btn btn-ghost btn-xs"
+                                    type="button"
+                                    title="Modifier"
+                                    disabled={showForm && editingId === provider.id}
+                                    onClick={() => openEditForm(provider)}
+                                >
+                                    <Pencil class="size-3.5" aria-hidden />
+                                </button>
                                 {! provider.is_default && (
                                     <button
                                         class="btn btn-ghost btn-xs text-[11px]"
@@ -251,20 +315,21 @@ export function AiProvidersSettings() {
             )}
 
             {showForm && (
-                <form class="rounded-xl border border-primary/30 bg-base-100 p-4" onSubmit={handleCreate}>
-                    <h4 class="mb-4 text-sm font-semibold">Nouveau provider</h4>
+                <form class="rounded-xl border border-primary/30 bg-base-100 p-4" onSubmit={handleSubmit}>
+                    <h4 class="mb-4 text-sm font-semibold">{isEditing ? 'Modifier le provider' : 'Nouveau provider'}</h4>
                     <div class="grid gap-3 sm:grid-cols-2">
                         <label class="grid gap-1 text-xs">
                             <span class="font-medium">Type de provider</span>
                             <select
                                 class="select select-bordered select-sm"
                                 value={form.provider}
+                                disabled={isEditing}
                                 onChange={(e) => {
                                     const provider = (e.target as HTMLSelectElement).value as LlmProvider;
                                     setForm({
                                         ...form,
                                         provider,
-                                        model: '',
+                                        model: AUTO_MODEL_VALUE,
                                     });
                                     setAvailableModels([]);
                                     setModelsError(null);
@@ -293,13 +358,17 @@ export function AiProvidersSettings() {
                                 <input
                                     class="input input-bordered input-sm"
                                     type="password"
-                                    required
-                                    placeholder="AIza…"
+                                    required={! isEditing}
+                                    placeholder={isEditing && editingProvider?.has_api_key
+                                        ? 'Laisser vide pour conserver la clé actuelle'
+                                        : 'AIza…'}
                                     value={form.api_key}
                                     onInput={(e) => setForm({ ...form, api_key: (e.target as HTMLInputElement).value })}
                                 />
                                 <span class="text-[11px] text-base-content/50">
-                                    Les modèles disponibles seront chargés automatiquement depuis l&apos;API Google.
+                                    {isEditing && editingProvider?.has_api_key
+                                        ? 'La clé enregistrée reste active tant que vous ne saisissez pas une nouvelle valeur.'
+                                        : 'Les modèles disponibles seront chargés automatiquement depuis l\'API Google.'}
                                 </span>
                             </label>
                         )}
@@ -329,8 +398,8 @@ export function AiProvidersSettings() {
                                 <button
                                     class="btn btn-ghost btn-xs gap-1"
                                     type="button"
-                                    disabled={modelsLoading || ! canDiscoverModels(form)}
-                                    onClick={() => void loadModels(form)}
+                                    disabled={modelsLoading || ! canDiscoverModels(form, editingProvider)}
+                                    onClick={() => void loadModels(form, editingId)}
                                 >
                                     {modelsLoading
                                         ? <span class="loading loading-spinner loading-xs" />
@@ -341,9 +410,13 @@ export function AiProvidersSettings() {
                             <select
                                 class="select select-bordered select-sm"
                                 value={modelSelect}
-                                disabled={modelsLoading || (availableModels.length === 0 && ! showCustomModel)}
+                                disabled={modelsLoading && ! isAutoModel(form.model)}
                                 onChange={(e) => {
                                     const value = (e.target as HTMLSelectElement).value;
+                                    if (value === AUTO_MODEL_VALUE) {
+                                        setForm({ ...form, model: AUTO_MODEL_VALUE });
+                                        return;
+                                    }
                                     if (value === CUSTOM_MODEL_VALUE) {
                                         setForm({ ...form, model: '' });
                                         return;
@@ -351,9 +424,10 @@ export function AiProvidersSettings() {
                                     setForm({ ...form, model: value });
                                 }}
                             >
-                                {availableModels.length === 0 && (
+                                <option value={AUTO_MODEL_VALUE}>Auto (recommandé)</option>
+                                {availableModels.length === 0 && ! isAutoModel(form.model) && (
                                     <option value="">
-                                        {canDiscoverModels(form)
+                                        {canDiscoverModels(form, editingProvider)
                                             ? (modelsLoading ? 'Chargement des modèles…' : 'Aucun modèle chargé')
                                             : (form.provider === 'gemini'
                                                 ? 'Saisissez d’abord la clé API'
@@ -368,6 +442,9 @@ export function AiProvidersSettings() {
                                 ))}
                                 <option value={CUSTOM_MODEL_VALUE}>Autre modèle (saisie manuelle)</option>
                             </select>
+                            <p class="text-[11px] text-base-content/50">
+                                Auto choisit le meilleur modèle disponible pour ce provider, comme dans Cursor.
+                            </p>
                             {modelsError && (
                                 <span class="text-[11px] text-error">{modelsError}</span>
                             )}
@@ -395,10 +472,10 @@ export function AiProvidersSettings() {
                     </div>
 
                     <div class="form-actions mt-4">
-                        <button class="btn btn-ghost btn-sm" type="button" onClick={() => setShowForm(false)}>Annuler</button>
-                        <button class="btn btn-primary btn-sm" type="submit" disabled={submitting || ! form.model}>
+                        <button class="btn btn-ghost btn-sm" type="button" onClick={closeForm}>Annuler</button>
+                        <button class="btn btn-primary btn-sm" type="submit" disabled={submitting || (! isAutoModel(form.model) && ! form.model)}>
                             {submitting && <span class="loading loading-spinner loading-xs" />}
-                            Ajouter le provider
+                            {isEditing ? 'Enregistrer' : 'Ajouter le provider'}
                         </button>
                     </div>
                 </form>

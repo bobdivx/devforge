@@ -12,6 +12,7 @@ use App\Services\DevForge\Core\CurrentTeamContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
+use RuntimeException;
 
 class AgentMessageController extends Controller
 {
@@ -59,19 +60,35 @@ class AgentMessageController extends Controller
         }
 
         try {
-            $result = $this->chatService->send($agent, $validated['content']);
+            $result = $this->chatService->queueMessage($agent, $validated['content']);
         } catch (\InvalidArgumentException $exception) {
             abort(422, $exception->getMessage());
         } catch (\Throwable $exception) {
-            abort(502, $exception->getMessage());
+            abort($this->httpStatusForException($exception), $exception->getMessage());
         }
 
         return response()->json([
             'data' => [
                 'user' => $this->present($result['user']),
-                'assistant' => $this->present($result['assistant']),
+                'run_uuid' => $result['run']->uuid,
+                'status' => 'pending',
             ],
-        ], 201);
+        ], 202);
+    }
+
+    private function httpStatusForException(\Throwable $exception): int
+    {
+        $message = mb_strtolower($exception->getMessage());
+
+        if (str_contains($message, '[429]') || str_contains($message, 'quota') || str_contains($message, 'rate limit')) {
+            return 429;
+        }
+
+        if (str_contains($message, 'timed out') || str_contains($message, 'timeout')) {
+            return 504;
+        }
+
+        return 502;
     }
 
     private function currentTeam(Request $request): Team

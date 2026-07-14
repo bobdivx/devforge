@@ -159,3 +159,68 @@ it('does not dispatch twice for the same webhook build', function () {
 
     Queue::assertNothingPushed();
 });
+
+it('dispatches a devforge agent when a build completes successfully', function () {
+    Queue::fake();
+
+    $agent = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'type' => 'devforge',
+        'provider_config_id' => $this->provider->id,
+        'schedule_minutes' => 0,
+    ]);
+
+    $deployment = ApplicationDeploymentQueue::create([
+        'application_id' => $this->application->id,
+        'deployment_uuid' => 'completed-build-uuid',
+        'status' => 'finished',
+        'pull_request_id' => 0,
+        'is_webhook' => true,
+        'commit' => 'def456',
+    ]);
+
+    app(DeploymentBuildAgentDispatcher::class)->dispatchCompleted(
+        application: $this->application,
+        deploymentUuid: 'completed-build-uuid',
+        deploymentQueue: $deployment,
+    );
+
+    Queue::assertPushed(RunAgentJob::class, function (RunAgentJob $job) use ($agent): bool {
+        return $job->agent->is($agent)
+            && $job->trigger === 'event'
+            && ($job->context['event'] ?? null) === 'deployment_build_completed'
+            && ($job->context['deployment_uuid'] ?? null) === 'completed-build-uuid';
+    });
+});
+
+it('allows build completed dispatch after build started for the same deployment', function () {
+    Queue::fake();
+
+    $agent = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'type' => 'devforge',
+        'provider_config_id' => $this->provider->id,
+    ]);
+
+    AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'trigger' => 'event',
+        'logs' => '[07:00:00] Contexte événement: {"event":"deployment_build_started","deployment_uuid":"same-build-uuid"}',
+    ]);
+
+    $deployment = ApplicationDeploymentQueue::create([
+        'application_id' => $this->application->id,
+        'deployment_uuid' => 'same-build-uuid',
+        'status' => 'finished',
+        'pull_request_id' => 0,
+        'is_webhook' => true,
+    ]);
+
+    app(DeploymentBuildAgentDispatcher::class)->dispatchCompleted(
+        application: $this->application,
+        deploymentUuid: 'same-build-uuid',
+        deploymentQueue: $deployment,
+    );
+
+    Queue::assertPushed(RunAgentJob::class);
+});

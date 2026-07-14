@@ -155,6 +155,9 @@ fi
 log "Vidage des caches"
 docker exec -w /var/www/html "${CONTAINER}" php artisan config:clear
 docker exec -w /var/www/html "${CONTAINER}" php artisan route:clear
+docker exec -w /var/www/html "${CONTAINER}" php artisan optimize:clear 2>/dev/null || true
+docker exec -w /var/www/html "${CONTAINER}" php artisan queue:restart 2>/dev/null || true
+docker exec -w /var/www/html "${CONTAINER}" php artisan horizon:terminate 2>/dev/null || true
 
 log "Verification des routes DevForge"
 ROUTE_LIST_OUTPUT="$(docker exec -w /var/www/html "${CONTAINER}" php artisan route:list --path=devforge --except-vendor 2>&1)" || {

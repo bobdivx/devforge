@@ -164,7 +164,7 @@ export function CreateAgentModal({ open, onClose, onCreated }: Props) {
                         </div>
 
                         <div class="grid gap-1.5">
-                            <label class="text-xs font-medium" for="agent-provider">Provider LLM principal</label>
+                            <label class="text-xs font-medium" for="agent-provider">Provider LLM</label>
                             <select
                                 id="agent-provider"
                                 class="select select-bordered select-sm w-full"
@@ -174,11 +174,14 @@ export function CreateAgentModal({ open, onClose, onCreated }: Props) {
                                     setForm({ ...form, provider_config_id: v ? Number(v) : null });
                                 }}
                             >
-                                <option value="">Aucun (manuel uniquement)</option>
+                                <option value="">Auto (provider par défaut de l&apos;équipe)</option>
                                 {providers.map((p) => (
-                                    <option key={p.id} value={p.id}>{p.name} ({p.provider} / {p.model})</option>
+                                    <option key={p.id} value={p.id}>{p.name} ({p.provider})</option>
                                 ))}
                             </select>
+                            <p class="text-[11px] text-base-content/50">
+                                Le modèle est choisi automatiquement (mode Auto), comme dans Cursor. Configurez les providers dans Paramètres → Intelligence Artificielle.
+                            </p>
                             {providers.length === 0 && (
                                 <p class="text-[11px] text-warning">
                                     Aucun provider configuré. Ajoutez-en un dans Paramètres → Intelligence Artificielle.
@@ -201,7 +204,7 @@ export function CreateAgentModal({ open, onClose, onCreated }: Props) {
                                 {providers
                                     .filter((p) => p.id !== form.provider_config_id)
                                     .map((p) => (
-                                        <option key={p.id} value={p.id}>{p.name} ({p.provider} / {p.model})</option>
+                                        <option key={p.id} value={p.id}>{p.name} ({p.provider})</option>
                                     ))}
                             </select>
                             <p class="text-[11px] text-base-content/50">

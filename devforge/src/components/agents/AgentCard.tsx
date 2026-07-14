@@ -9,6 +9,8 @@ import { ActionToolbar } from '../ui/ActionToolbar';
 import { AgentAvatar } from './AgentAvatar';
 import { AgentErrorAlert } from './AgentErrorAlert';
 import { AgentStatusBadge } from './AgentStatusBadge';
+import { agentDetailPath } from '../../lib/agent-routes';
+import { formatAgentProviderDisplay } from '../../lib/llm-models';
 
 const typeLabels: Record<string, string> = {
     debug: 'Débogage',
@@ -74,7 +76,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
             setRunning(false);
             runStartedAtRef.current = null;
         }
-    }, [agent.status, agent.latest_run?.created_at]);
+    }, [agent.status, agent.latest_run?.status, agent.latest_run?.created_at]);
 
     useEffect(() => () => stopPolling(), []);
 
@@ -131,7 +133,8 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
         }
     };
 
-    const detailPath = `/agents/${agent.uuid}`;
+    const detailPath = agentDetailPath(agent.uuid);
+    const settingsPath = agentDetailPath(agent.uuid, { settings: true });
     const isRunning = agent.status === 'running' || running;
     const displayStatus = isRunning ? 'running' : agent.status;
 
@@ -167,7 +170,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                         <p class="text-[11px] text-base-content/50">
                             {typeLabels[agent.type] ?? agent.type}
                             {agent.provider && (
-                                <span class="ml-1 before:me-1 before:content-['·']">{agent.provider.provider}/{agent.provider.model}</span>
+                                <span class="ml-1 before:me-1 before:content-['·']">{formatAgentProviderDisplay(agent.provider.provider)}</span>
                             )}
                         </p>
                     </div>
@@ -180,7 +183,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
 
                 <AgentErrorAlert agent={agent} compact onNavigate={onNavigate} />
 
-                {runError && (
+                {runError && agent.status !== 'error' && (
                     <p class="rounded-md border border-error/30 bg-error/10 px-2 py-1.5 text-[11px] text-error" role="alert">
                         {runError}
                     </p>
@@ -219,9 +222,9 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                         </button>
                         <a
                             class="btn btn-ghost btn-xs"
-                            href={routeHref(detailPath)}
+                            href={routeHref(settingsPath)}
                             title="Configurer"
-                            onClick={(e) => onNavigate(e as unknown as MouseEvent, detailPath)}
+                            onClick={(e) => onNavigate(e as unknown as MouseEvent, settingsPath)}
                         >
                             <Settings2 class="size-3" aria-hidden />
                         </a>

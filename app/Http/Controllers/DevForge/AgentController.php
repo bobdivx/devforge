@@ -7,7 +7,10 @@ use App\Models\AiAgent;
 use App\Models\AiProviderConfig;
 use App\Models\Team;
 use App\Models\User;
+use App\Services\DevForge\Agent\AgentDirectives;
 use App\Services\DevForge\Agent\AgentRunLauncher;
+use App\Services\DevForge\Agent\LlmModelResolver;
+use App\Services\DevForge\Agent\Tool\AgentToolPackage;
 use App\Services\DevForge\Core\CurrentTeamContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -35,6 +38,7 @@ class AgentController extends Controller
 
         foreach ($agents as $agent) {
             $agent->recoverIfInterrupted();
+            $agent->recoverFromErrorState();
             $agent->refresh();
         }
 
@@ -79,6 +83,7 @@ class AgentController extends Controller
         $agent = AiAgent::create([
             'team_id' => $team->id,
             ...$this->normalizeAgentInput($validated),
+            ...$this->defaultAgentFields($validated),
         ]);
 
         return response()->json(['data' => $this->present($agent->load($this->agentRelations(false)))], 201);
@@ -88,6 +93,9 @@ class AgentController extends Controller
     {
         $agent = $this->findAgent($request, $uuid);
         $this->authorize('view', $agent);
+        $agent->recoverIfInterrupted();
+        $agent->recoverFromErrorState();
+        $agent->refresh();
 
         return response()->json([
             'data' => $this->present($agent->load([
@@ -139,8 +147,8 @@ class AgentController extends Controller
         $agent->refresh();
 
         abort_if($agent->status === 'running', 409, 'L\'agent est déjà en cours d\'exécution. Attendez la fin ou réessayez dans un instant.');
+        abort_if(! $agent->hasLlmProvider(), 422, 'Aucun provider LLM configuré. Ajoutez un provider dans Paramètres → Intelligence Artificielle.');
         abort_if(! $agent->is_active, 422, 'L\'agent est inactif.');
-        abort_if(! $agent->provider_config_id, 422, 'Aucun provider LLM configuré.');
 
         $run = $this->agentRunLauncher->queue($agent, 'manual');
 
@@ -178,6 +186,8 @@ class AgentController extends Controller
     {
         $latestRun = $agent->relationLoaded('runs') ? $agent->runs->first() : null;
 
+        $displayProvider = $agent->providerConfig ?? $agent->effectiveProviderConfig();
+
         return [
             'uuid' => $agent->uuid,
             'type' => $agent->type,
@@ -189,18 +199,21 @@ class AgentController extends Controller
             'trigger_mode' => $agent->triggerMode(),
             'is_active' => $agent->is_active,
             'status' => $agent->status,
+            'llm_available' => $agent->hasLlmProvider(),
             'last_run_at' => $agent->last_run_at?->toISOString(),
-            'provider' => $agent->providerConfig ? [
-                'id' => $agent->providerConfig->id,
-                'name' => $agent->providerConfig->name,
-                'provider' => $agent->providerConfig->provider,
-                'model' => $agent->providerConfig->model,
+            'provider' => $displayProvider ? [
+                'id' => $displayProvider->id,
+                'name' => $displayProvider->name,
+                'provider' => $displayProvider->provider,
+                'model' => LlmModelResolver::AUTO,
+                'model_label' => 'Auto',
             ] : null,
             'fallback_provider' => $agent->relationLoaded('fallbackProviderConfig') && $agent->fallbackProviderConfig ? [
                 'id' => $agent->fallbackProviderConfig->id,
                 'name' => $agent->fallbackProviderConfig->name,
                 'provider' => $agent->fallbackProviderConfig->provider,
                 'model' => $agent->fallbackProviderConfig->model,
+                'model_label' => $agent->fallbackProviderConfig->modelDisplayLabel(),
             ] : null,
             'parent_agent_id' => $agent->parent_agent_id,
             'resource_uuid' => $agent->resource_uuid,
@@ -212,6 +225,12 @@ class AgentController extends Controller
                 'trigger' => $latestRun->trigger,
                 'created_at' => $latestRun->created_at->toISOString(),
             ] : null,
+            'default_directives' => AgentDirectives::defaultSystemPrompt($agent->type),
+            'autonomous_playbook' => AgentDirectives::autonomousPlaybook($agent->type),
+            'tool_packages' => AgentToolPackage::listForApi(),
+            'enabled_tool_packages' => is_array($agent->metadata['tool_packages']['enabled'] ?? null)
+                ? $agent->metadata['tool_packages']['enabled']
+                : AgentToolPackage::defaultForAgentType($agent->type),
             'created_at' => $agent->created_at->toISOString(),
         ];
     }
@@ -247,5 +266,31 @@ class AgentController extends Controller
         }
 
         return $validated;
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function defaultAgentFields(array $validated): array
+    {
+        $type = (string) ($validated['type'] ?? 'debug');
+        $catalog = AgentDirectives::catalog()[$type] ?? null;
+
+        $fields = [];
+
+        if (empty($validated['system_prompt'])) {
+            $fields['system_prompt'] = AgentDirectives::defaultSystemPrompt($type);
+        }
+
+        if (empty($validated['description']) && $catalog !== null) {
+            $fields['description'] = $catalog['description'];
+        }
+
+        if (! array_key_exists('schedule_minutes', $validated) && $catalog !== null && $type !== 'devforge') {
+            $fields['schedule_minutes'] = $catalog['default_schedule'];
+        }
+
+        return $fields;
     }
 }

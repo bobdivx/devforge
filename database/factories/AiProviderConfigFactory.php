@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Models\AiProviderConfig;
 use App\Models\Team;
+use App\Services\DevForge\Agent\LlmModelResolver;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -21,7 +22,7 @@ class AiProviderConfigFactory extends Factory
             'name' => $this->faker->words(2, true),
             'api_key' => $this->faker->uuid(),
             'base_url' => null,
-            'model' => 'gemini-1.5-flash',
+            'model' => LlmModelResolver::AUTO,
             'is_default' => false,
         ];
     }
@@ -30,7 +31,7 @@ class AiProviderConfigFactory extends Factory
     {
         return $this->state(fn () => [
             'provider' => 'gemini',
-            'model' => 'gemini-1.5-flash',
+            'model' => LlmModelResolver::AUTO,
             'base_url' => null,
         ]);
     }
@@ -39,7 +40,7 @@ class AiProviderConfigFactory extends Factory
     {
         return $this->state(fn () => [
             'provider' => 'ollama',
-            'model' => 'llama3.2',
+            'model' => LlmModelResolver::AUTO,
             'base_url' => 'http://localhost:11434',
             'api_key' => null,
         ]);

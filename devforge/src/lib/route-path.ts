@@ -11,9 +11,10 @@ export function sanitizeResourceUuid(value: string | null | undefined): string |
 }
 
 export function normalizeRoutePath(pathname: string): string {
-    const withoutBase = pathname.startsWith(DEVFORGE_BASE_PATH)
-        ? pathname.slice(DEVFORGE_BASE_PATH.length)
-        : pathname;
+    const pathOnly = pathname.split(/[?#]/)[0];
+    const withoutBase = pathOnly.startsWith(DEVFORGE_BASE_PATH)
+        ? pathOnly.slice(DEVFORGE_BASE_PATH.length)
+        : pathOnly;
 
     const normalized = `/${withoutBase}`.replace(/\/+/g, '/').replace(/\/$/, '');
 

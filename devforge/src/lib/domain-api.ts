@@ -371,6 +371,7 @@ export type AiProviderConfig = {
     provider: LlmProvider;
     name: string;
     model: string;
+    model_label?: string;
     base_url: string | null;
     has_api_key: boolean;
     is_default: boolean;
@@ -406,12 +407,14 @@ export type Agent = {
     is_active: boolean;
     status: AgentStatus;
     last_run_at: string | null;
-    provider: { id: number; name: string; provider: LlmProvider; model: string } | null;
-    fallback_provider: { id: number; name: string; provider: LlmProvider; model: string } | null;
+    provider: { id: number; name: string; provider: LlmProvider; model: string; model_label?: string } | null;
+    fallback_provider: { id: number; name: string; provider: LlmProvider; model: string; model_label?: string } | null;
     parent_agent_id: number | null;
     resource_uuid: string | null;
     sub_agents_count: number;
     latest_run: Omit<AgentRun, 'logs' | 'actions_taken' | 'duration_seconds'> | null;
+    default_directives?: string;
+    autonomous_playbook?: string[];
     created_at: string;
 };
 
@@ -1196,7 +1199,7 @@ export const domainApi = {
     deleteAgent: (uuid: string) => mutate<void>(`/agents/${encodeURIComponent(uuid)}`, { method: 'DELETE' }),
     runAgent: (uuid: string) => mutate<ApiResponse<{ queued: boolean; agent_uuid: string; run_uuid: string; status: AgentStatus }>>(`/agents/${encodeURIComponent(uuid)}/run`, { method: 'POST' }),
     agentMessages: (uuid: string) => apiFetch<ApiListResponse<AgentChatMessage>>(`${API_BASE}/agents/${encodeURIComponent(uuid)}/messages`),
-    sendAgentMessage: (uuid: string, content: string) => mutate<ApiResponse<{ user: AgentChatMessage; assistant: AgentChatMessage }>>(`/agents/${encodeURIComponent(uuid)}/messages`, {
+    sendAgentMessage: (uuid: string, content: string) => mutate<ApiResponse<{ user: AgentChatMessage; run_uuid: string; status: 'pending' }>>(`/agents/${encodeURIComponent(uuid)}/messages`, {
         method: 'POST',
         body: JSON.stringify({ content }),
     }),

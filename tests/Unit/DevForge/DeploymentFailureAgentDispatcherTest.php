@@ -109,7 +109,7 @@ it('does not dispatch twice for the same failed deployment', function () {
     AiAgentRun::factory()->create([
         'agent_id' => $agent->id,
         'trigger' => 'event',
-        'logs' => '[07:00:00] Contexte événement: {"deployment_uuid":"duplicate-failure"}',
+        'logs' => '[07:00:00] Contexte événement: {"event":"deployment_failed","deployment_uuid":"duplicate-failure"}',
     ]);
 
     $deployment = ApplicationDeploymentQueue::create([
@@ -151,4 +151,64 @@ it('does nothing when agents are disabled', function () {
     );
 
     Queue::assertNothingPushed();
+});
+
+it('dispatches a devforge agent when a deployment fails and no deployment agent exists', function () {
+    Queue::fake();
+
+    $agent = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'type' => 'devforge',
+        'provider_config_id' => $this->provider->id,
+        'resource_uuid' => $this->application->uuid,
+        'schedule_minutes' => 0,
+    ]);
+
+    $deployment = ApplicationDeploymentQueue::create([
+        'application_id' => $this->application->id,
+        'deployment_uuid' => 'failed-devforge-uuid',
+        'status' => 'failed',
+        'pull_request_id' => 0,
+    ]);
+
+    app(DeploymentFailureAgentDispatcher::class)->dispatch(
+        application: $this->application,
+        deploymentUuid: 'failed-devforge-uuid',
+        deploymentQueue: $deployment,
+    );
+
+    Queue::assertPushed(RunAgentJob::class, fn (RunAgentJob $job): bool => $job->agent->is($agent));
+});
+
+it('dispatches failure agent after build started for the same deployment', function () {
+    Queue::fake();
+
+    $agent = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'type' => 'devforge',
+        'provider_config_id' => $this->provider->id,
+    ]);
+
+    AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'trigger' => 'event',
+        'logs' => '[07:00:00] Contexte événement: {"event":"deployment_build_started","deployment_uuid":"failed-after-start"}',
+    ]);
+
+    $deployment = ApplicationDeploymentQueue::create([
+        'application_id' => $this->application->id,
+        'deployment_uuid' => 'failed-after-start',
+        'status' => 'failed',
+        'pull_request_id' => 0,
+    ]);
+
+    app(DeploymentFailureAgentDispatcher::class)->dispatch(
+        application: $this->application,
+        deploymentUuid: 'failed-after-start',
+        deploymentQueue: $deployment,
+    );
+
+    Queue::assertPushed(RunAgentJob::class, function (RunAgentJob $job): bool {
+        return ($job->context['event'] ?? null) === 'deployment_failed';
+    });
 });

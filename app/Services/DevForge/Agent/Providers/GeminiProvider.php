@@ -15,7 +15,7 @@ class GeminiProvider implements LlmProvider
     private const MAX_RETRIES = 3;
 
     /** @var array<int, int> */
-    private const RETRYABLE_STATUS_CODES = [408, 429, 500, 502, 503, 504];
+    private const RETRYABLE_STATUS_CODES = [408, 500, 502, 503, 504];
 
     public function __construct(
         private readonly string $apiKey,
@@ -91,10 +91,15 @@ class GeminiProvider implements LlmProvider
             $message = $decoded['error']['message'] ?? $decoded['message'] ?? null;
         }
 
+        $model = $this->normalizeModelId($this->model);
+        $detail = $message ?: mb_substr($body, 0, 300);
+
         return match ($status) {
-            429 => 'Gemini API error [429]: quota ou limite de débit atteinte. Réessayez plus tard ou configurez un provider de secours (Ollama).',
-            503 => 'Gemini API error [503]: modèle temporairement surchargé. Réessayez dans quelques minutes ou choisissez un autre modèle (ex. gemini-2.0-flash).',
-            default => 'Gemini API error ['.$status.']: '.($message ?: mb_substr($body, 0, 300)),
+            429 => "Gemini [{$model}] [429]: {$detail}",
+            404 => "Gemini [{$model}] [404]: modèle indisponible ou non autorisé. {$detail}",
+            400 => "Gemini [{$model}] [400]: requête refusée. {$detail}",
+            503 => "Gemini [{$model}] [503]: modèle temporairement surchargé. {$detail}",
+            default => "Gemini [{$model}] [{$status}]: {$detail}",
         };
     }
 

@@ -27,12 +27,11 @@ function formatRawError(summary: string): string {
 }
 
 export function getAgentErrorMessage(agent: Agent): string | null {
-    const run = agent.latest_run;
-
-    if (agent.status !== 'error' && run?.status !== 'failed') {
+    if (agent.status !== 'error') {
         return null;
     }
 
+    const run = agent.latest_run;
     const summary = run?.summary?.trim();
 
     if (summary) {

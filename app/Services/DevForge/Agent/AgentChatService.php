@@ -2,6 +2,7 @@
 
 namespace App\Services\DevForge\Agent;
 
+use App\Jobs\Agent\RunAgentChatJob;
 use App\Models\AiAgent;
 use App\Models\AiAgentMessage;
 use App\Models\AiAgentRun;
@@ -9,13 +10,12 @@ use App\Services\DevForge\Agent\Contracts\LlmResponse;
 use App\Services\DevForge\Core\CoreResourceAction;
 use App\Services\DevForge\Core\CoreResourceCatalog;
 use App\Services\DevForge\DeploymentData;
+use App\Services\DevForge\Agent\Tool\IterationBudget;
 use Illuminate\Support\Collection;
 
 class AgentChatService
 {
     private const MAX_HISTORY = 30;
-
-    private const MAX_TOOL_ITERATIONS = 8;
 
     public function __construct(
         private readonly LlmProviderFactory $providerFactory,
@@ -38,13 +38,13 @@ class AgentChatService
     }
 
     /**
-     * @return array{user: AiAgentMessage, assistant: AiAgentMessage}
+     * @return array{user: AiAgentMessage, run: AiAgentRun}
      */
-    public function send(AiAgent $agent, string $content): array
+    public function queueMessage(AiAgent $agent, string $content): array
     {
         $agent->loadMissing(['team', 'providerConfig']);
 
-        if (! $agent->provider_config_id) {
+        if (! $agent->hasLlmProvider()) {
             throw new \InvalidArgumentException('Aucun provider LLM configuré pour cet agent.');
         }
 
@@ -61,8 +61,20 @@ class AgentChatService
             'started_at' => now(),
         ]);
 
+        $agent->update(['status' => 'running']);
+
+        RunAgentChatJob::dispatch($agent, $run, $userMessage);
+
+        return [
+            'user' => $userMessage,
+            'run' => $run,
+        ];
+    }
+
+    public function processQueuedRun(AiAgent $agent, AiAgentRun $run, AiAgentMessage $userMessage): AiAgentMessage
+    {
         try {
-            $reply = $this->generateReply($agent, $run);
+            $reply = $this->generateReply($agent, $run, $userMessage);
             $assistantMessage = AiAgentMessage::create([
                 'agent_id' => $agent->id,
                 'run_id' => $run->id,
@@ -84,10 +96,7 @@ class AgentChatService
 
             $agent->update(['status' => 'idle', 'last_run_at' => now()]);
 
-            return [
-                'user' => $userMessage,
-                'assistant' => $assistantMessage,
-            ];
+            return $assistantMessage;
         } catch (\Throwable $exception) {
             $run->appendLog('Erreur: '.$exception->getMessage());
             $run->update([
@@ -102,9 +111,26 @@ class AgentChatService
     }
 
     /**
+     * @return array{user: AiAgentMessage, assistant: AiAgentMessage}
+     *
+     * @deprecated Prefer queueMessage() for HTTP requests.
+     */
+    public function send(AiAgent $agent, string $content): array
+    {
+        $queued = $this->queueMessage($agent, $content);
+
+        $assistantMessage = $this->processQueuedRun($agent, $queued['run'], $queued['user']);
+
+        return [
+            'user' => $queued['user'],
+            'assistant' => $assistantMessage,
+        ];
+    }
+
+    /**
      * @return array{text: string, tokens_used: int, iterations: int}
      */
-    private function generateReply(AiAgent $agent, AiAgentRun $run): array
+    private function generateReply(AiAgent $agent, AiAgentRun $run, AiAgentMessage $userMessage): array
     {
         $provider = $this->providerFactory->makeForAgent(
             $agent,
@@ -113,35 +139,44 @@ class AgentChatService
             },
         );
 
+        $delegator = new AgentDelegator(
+            app(AgentRunner::class),
+            app(\App\Services\DevForge\Agent\Tool\AgentSubagentRegistry::class),
+        );
         $toolkit = new AgentToolkit(
             team: $agent->team,
             run: $run,
             catalog: $this->catalog,
             resourceAction: $this->resourceAction,
             deploymentData: $this->deploymentData,
+            agent: $agent,
             assignedResourceUuid: $agent->resource_uuid,
+            delegator: $delegator,
         );
 
+        $userContent = trim($userMessage->content);
         $history = $this->history($agent);
         $messages = [
-            ['role' => 'system', 'content' => $this->promptBuilder->chatSystemPrompt($agent)],
+            ['role' => 'system', 'content' => $this->promptBuilder->chatSystemPrompt($agent, $userContent)],
             ...$history->map(fn (AiAgentMessage $message): array => [
                 'role' => $message->role === 'assistant' ? 'assistant' : 'user',
                 'content' => $message->content,
             ])->all(),
         ];
 
-        $toolDefinitions = $toolkit->definitions();
-        $iterations = 0;
+        $budget = new IterationBudget((int) config('devforge.agents_chat_max_iterations', 20));
         $tokensUsed = 0;
         $summary = '';
+        $toolNudgeUsed = false;
+        $confirmationNudgeUsed = false;
+        $toolsUsedThisTurn = false;
 
-        while ($iterations < self::MAX_TOOL_ITERATIONS) {
-            $iterations++;
+        while ($budget->consume()) {
+            $iterations = $budget->getUsed();
             $run->appendLog("Itération chat #{$iterations}...");
 
             /** @var LlmResponse $response */
-            $response = $provider->chat($messages, $toolDefinitions);
+            $response = $provider->chat($messages, $toolkit->definitions());
             $tokensUsed += $response->tokensUsed;
 
             if ($response->text) {
@@ -149,19 +184,48 @@ class AgentChatService
             }
 
             if (! $response->hasToolCalls()) {
+                if (! $toolNudgeUsed && ! $toolsUsedThisTurn) {
+                    $toolNudgeUsed = true;
+                    $messages[] = ['role' => 'assistant', 'content' => $response->text ?: 'En attente d\'action.'];
+                    $messages[] = ['role' => 'user', 'content' => AgentDirectives::chatToolNudgeMessage($userContent)];
+                    $run->appendLog('Relance chat : premier tour sans outil — consigne d\'action envoyée.');
+                    continue;
+                }
+
+                if (! $confirmationNudgeUsed && AgentDirectives::defersToUser($response->text)) {
+                    $confirmationNudgeUsed = true;
+                    $messages[] = ['role' => 'assistant', 'content' => $response->text];
+                    $messages[] = ['role' => 'user', 'content' => AgentDirectives::chatConfirmationNudgeMessage()];
+                    $run->appendLog('Relance chat : demande de confirmation détectée — consigne d\'exécution immédiate.');
+                    continue;
+                }
+
                 break;
             }
 
+            $toolsUsedThisTurn = true;
+
             $toolResults = [];
+            $hadToolFailure = false;
             foreach ($response->toolCalls as $toolCall) {
+                $result = $toolkit->execute($toolCall['name'], $toolCall['arguments']);
+                if (isset($result['error'])) {
+                    $hadToolFailure = true;
+                }
                 $toolResults[] = [
                     'name' => $toolCall['name'],
-                    'result' => $toolkit->execute($toolCall['name'], $toolCall['arguments']),
+                    'result' => $result,
                 ];
+            }
+
+            if (! $hadToolFailure) {
+                $budget->refund();
             }
 
             AgentToolTurnBuilder::append($messages, $response, $toolResults);
         }
+
+        $iterations = $budget->getUsed();
 
         if ($summary === '') {
             $summary = 'Je n\'ai pas pu générer de réponse.';

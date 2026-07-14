@@ -65,12 +65,11 @@ class DeploymentFailureAgentDispatcher
     {
         return AiAgent::query()
             ->where('team_id', $team->id)
-            ->whereIn('type', ['deployment', 'debug'])
+            ->whereIn('type', ['deployment', 'debug', 'devforge'])
             ->where('is_active', true)
             ->where('status', '!=', 'running')
-            ->whereNotNull('provider_config_id')
             ->get()
-            ->filter(fn (AiAgent $agent): bool => $this->agentScore($agent, $applicationUuid) >= 0)
+            ->filter(fn (AiAgent $agent): bool => $agent->hasLlmProvider() && $this->agentScore($agent, $applicationUuid) >= 0)
             ->sortByDesc(fn (AiAgent $agent): int => $this->agentScore($agent, $applicationUuid))
             ->first();
     }
@@ -81,7 +80,12 @@ class DeploymentFailureAgentDispatcher
             return -1;
         }
 
-        $score = $agent->type === 'deployment' ? 100 : 50;
+        $score = match ($agent->type) {
+            'deployment' => 100,
+            'devforge' => 95,
+            'debug' => 50,
+            default => 0,
+        };
 
         if ($agent->resource_uuid === $applicationUuid) {
             $score += 50;
@@ -98,6 +102,7 @@ class DeploymentFailureAgentDispatcher
             ->where('trigger', 'event')
             ->where('created_at', '>=', now()->subHour())
             ->where('logs', 'like', '%"'.self::CONTEXT_MARKER.'":"'.$deploymentUuid.'"%')
+            ->where('logs', 'like', '%"event":"deployment_failed"%')
             ->whereHas('agent', fn ($query) => $query->where('team_id', $team->id))
             ->exists();
     }

@@ -97,7 +97,7 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
             {error && <p class="rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">{error}</p>}
 
             <ActionToolbar>
-                <button class="btn btn-primary btn-sm" type="button" disabled={running || !agent.provider} onClick={() => void handleRun()}>
+                <button class="btn btn-primary btn-sm" type="button" disabled={running} onClick={() => void handleRun()}>
                     {running ? <span class="loading loading-spinner loading-xs" /> : <Play class="size-3.5" aria-hidden />}
                     Lancer autonome
                 </button>
@@ -113,15 +113,16 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
                     <input class="input input-bordered input-sm" type="text" value={form.name ?? ''} onInput={(e) => setForm({ ...form, name: (e.target as HTMLInputElement).value })} />
                 </label>
                 <label class="grid gap-1 text-xs">
-                    <span class="font-medium">Provider principal</span>
+                    <span class="font-medium">Provider LLM</span>
                     <select class="select select-bordered select-sm" value={form.provider_config_id ?? ''} onChange={(e) => {
                         const v = (e.target as HTMLSelectElement).value;
                         setForm({ ...form, provider_config_id: v ? Number(v) : null });
                     }}
                     >
-                        <option value="">Aucun</option>
-                        {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        <option value="">Auto (provider par défaut)</option>
+                        {providers.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.provider})</option>)}
                     </select>
+                    <span class="text-[11px] text-base-content/50">Modèle en mode Auto — sélection automatique comme Cursor.</span>
                 </label>
                 <label class="grid gap-1 text-xs">
                     <span class="font-medium">Provider de secours</span>
@@ -145,8 +146,31 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
                     </label>
                 )}
                 <label class="grid gap-1 text-xs">
-                    <span class="font-medium">Prompt système</span>
-                    <textarea class="textarea textarea-bordered textarea-sm resize-y" rows={4} value={form.system_prompt ?? ''} onInput={(e) => setForm({ ...form, system_prompt: (e.target as HTMLTextAreaElement).value })} />
+                    <span class="font-medium">Directives agent (prompt système)</span>
+                    <textarea
+                        class="textarea textarea-bordered textarea-sm resize-y font-mono text-[11px]"
+                        rows={5}
+                        placeholder="Directives personnalisées pour cet agent…"
+                        value={form.system_prompt ?? ''}
+                        onInput={(e) => setForm({ ...form, system_prompt: (e.target as HTMLTextAreaElement).value })}
+                    />
+                    {agent.autonomous_playbook && agent.autonomous_playbook.length > 0 && (
+                        <div class="rounded-md border border-base-300 bg-base-200/40 px-3 py-2">
+                            <p class="mb-1 text-[10px] font-semibold uppercase tracking-wide text-base-content/60">Playbook autonome (au lancement)</p>
+                            <ol class="list-decimal space-y-0.5 pl-4 text-[11px] text-base-content/70">
+                                {agent.autonomous_playbook.map((step) => <li key={step}>{step}</li>)}
+                            </ol>
+                        </div>
+                    )}
+                    {agent.default_directives && (
+                        <button
+                            class="btn btn-ghost btn-xs justify-start px-0 text-primary"
+                            type="button"
+                            onClick={() => setForm({ ...form, system_prompt: agent.default_directives ?? '' })}
+                        >
+                            Réinitialiser aux directives par défaut
+                        </button>
+                    )}
                 </label>
                 <button class="btn btn-primary btn-sm" type="button" disabled={saving} onClick={() => void handleSave()}>
                     {saving && <span class="loading loading-spinner loading-xs" />}

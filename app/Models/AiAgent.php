@@ -86,6 +86,25 @@ class AiAgent extends Model
         return $this->hasMany(AiAgentRun::class, 'agent_id')->latest()->limit(1);
     }
 
+    public function recoverFromErrorState(): bool
+    {
+        if ($this->status !== 'error') {
+            return false;
+        }
+
+        $this->recoverIfInterrupted(maxAgeSeconds: 90);
+
+        if ($this->runs()
+            ->whereIn('status', ['pending', 'running'])
+            ->exists()) {
+            return false;
+        }
+
+        $this->update(['status' => 'idle']);
+
+        return true;
+    }
+
     public function recoverIfInterrupted(int $maxAgeSeconds = 330): bool
     {
         if ($this->status !== 'running') {
@@ -177,5 +196,23 @@ class AiAgent extends Model
         }
 
         return $this->schedule_minutes > 0 ? 'schedule' : 'manual';
+    }
+
+    public function effectiveProviderConfig(): ?AiProviderConfig
+    {
+        if ($this->providerConfig) {
+            return $this->providerConfig;
+        }
+
+        return AiProviderConfig::query()
+            ->where('team_id', $this->team_id)
+            ->orderByDesc('is_default')
+            ->orderBy('id')
+            ->first();
+    }
+
+    public function hasLlmProvider(): bool
+    {
+        return $this->effectiveProviderConfig() !== null;
     }
 }

@@ -1,13 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { CUSTOM_MODEL_VALUE, modelSelectValue } from '../src/lib/llm-models';
+import { formatAgentProviderDisplay, formatModelLabel, formatProviderModel, isAutoModel } from '../src/lib/llm-models';
 
 describe('llm-models', () => {
-    it('returns custom value when model is empty or unknown', () => {
-        expect(modelSelectValue('', [{ id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' }])).toBe(CUSTOM_MODEL_VALUE);
-        expect(modelSelectValue('unknown-model', [{ id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' }])).toBe(CUSTOM_MODEL_VALUE);
+    it('detects auto model values', () => {
+        expect(isAutoModel('auto')).toBe(true);
+        expect(isAutoModel('')).toBe(true);
+        expect(isAutoModel('gemini-2.5-flash')).toBe(false);
     });
 
-    it('keeps known model ids from the fetched catalog', () => {
-        expect(modelSelectValue('gemini-2.5-flash', [{ id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' }])).toBe('gemini-2.5-flash');
+    it('formats auto labels for display', () => {
+        expect(formatModelLabel('auto', 'Auto')).toBe('Auto');
+        expect(formatModelLabel('gemini-2.5-flash')).toBe('gemini-2.5-flash');
+        expect(formatProviderModel('gemini', 'auto', 'Auto')).toBe('gemini/Auto');
+    });
+
+    it('formats agent provider display as auto', () => {
+        expect(formatAgentProviderDisplay('gemini')).toBe('gemini/Auto');
     });
 });

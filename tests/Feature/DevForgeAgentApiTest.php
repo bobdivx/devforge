@@ -62,7 +62,27 @@ it('creates an agent with valid payload', function () {
         ->assertJsonPath('data.type', 'debug')
         ->assertJsonPath('data.status', 'idle');
 
-    expect(AiAgent::where('team_id', $this->team->id)->count())->toBe(1);
+    $agent = AiAgent::where('team_id', $this->team->id)->first();
+    expect($agent)->not->toBeNull()
+        ->and($agent->system_prompt)->toContain('débogage')
+        ->and($agent->description)->not->toBeEmpty();
+});
+
+it('creates an agent with default directives when system_prompt omitted', function () {
+    $provider = AiProviderConfig::factory()->create(['team_id' => $this->team->id]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/agents', [
+            'type' => 'security',
+            'name' => 'Security Agent',
+            'provider_config_id' => $provider->id,
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.type', 'security')
+        ->assertJsonStructure(['data' => ['default_directives', 'autonomous_playbook']]);
+
+    expect(AiAgent::first()->system_prompt)->toContain('sécurité');
 });
 
 it('forces devforge agents to webhook mode without schedule', function () {
@@ -241,7 +261,28 @@ it('returns a welcome message when the agent has no chat history', function () {
         ->assertJsonPath('data.0.uuid', 'welcome');
 });
 
-it('stores a chat message and returns an assistant reply', function () {
+it('queues a chat message for asynchronous processing', function () {
+    \Illuminate\Support\Facades\Queue::fake();
+
+    $provider = AiProviderConfig::factory()->create(['team_id' => $this->team->id]);
+    $agent = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'provider_config_id' => $provider->id,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson("/api/devforge/v1/agents/{$agent->uuid}/messages", [
+            'content' => 'Quel est l\'état de mes ressources ?',
+        ])
+        ->assertAccepted()
+        ->assertJsonPath('data.status', 'pending')
+        ->assertJsonStructure(['data' => ['user' => ['uuid', 'content'], 'run_uuid', 'status']]);
+
+    \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\Agent\RunAgentChatJob::class);
+});
+
+it('processes a queued chat message and stores an assistant reply', function () {
     Http::fake([
         'generativelanguage.googleapis.com/*' => Http::response([
             'candidates' => [
@@ -260,16 +301,36 @@ it('stores a chat message and returns an assistant reply', function () {
         'provider_config_id' => $provider->id,
     ]);
 
-    $this->actingAs($this->user)
-        ->withSession($this->session)
-        ->postJson("/api/devforge/v1/agents/{$agent->uuid}/messages", [
-            'content' => 'Quel est l\'état de mes ressources ?',
-        ])
-        ->assertCreated()
-        ->assertJsonPath('data.assistant.role', 'assistant')
-        ->assertJsonStructure(['data' => ['user' => ['uuid', 'content'], 'assistant' => ['uuid', 'content']]]);
+    \Illuminate\Support\Facades\Queue::fake();
+
+    $queued = app(\App\Services\DevForge\Agent\AgentChatService::class)->queueMessage(
+        $agent,
+        'Quel est l\'état de mes ressources ?',
+    );
+
+    app(\App\Services\DevForge\Agent\AgentChatService::class)->processQueuedRun(
+        $agent->fresh(),
+        $queued['run']->fresh(),
+        $queued['user']->fresh(),
+    );
 
     expect(\App\Models\AiAgentMessage::where('agent_id', $agent->id)->count())->toBe(2);
+    expect($agent->fresh()->status)->toBe('idle');
+});
+
+it('recovers agents stuck in error state when listing them', function () {
+    $agent = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'status' => 'error',
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/agents')
+        ->assertSuccessful()
+        ->assertJsonPath('data.0.status', 'idle');
+
+    expect($agent->fresh()->status)->toBe('idle');
 });
 
 // ── Agent Runs ────────────────────────────────────────────────────────────────
@@ -321,14 +382,29 @@ it('creates a gemini provider config', function () {
             'provider' => 'gemini',
             'name' => 'Gemini Flash',
             'api_key' => 'AIzaTestKey',
-            'model' => 'gemini-1.5-flash',
         ])
         ->assertCreated()
         ->assertJsonPath('data.provider', 'gemini')
+        ->assertJsonPath('data.model', 'auto')
+        ->assertJsonPath('data.model_label', 'Auto')
         ->assertJsonPath('data.has_api_key', true)
         ->assertJsonMissing(['api_key']); // ne pas exposer la clé
 
     expect(AiProviderConfig::where('team_id', $this->team->id)->count())->toBe(1);
+    expect(AiProviderConfig::where('team_id', $this->team->id)->value('model'))->toBe('auto');
+});
+
+it('creates a gemini provider config with explicit model', function () {
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/ai/providers', [
+            'provider' => 'gemini',
+            'name' => 'Gemini Flash',
+            'api_key' => 'AIzaTestKey',
+            'model' => 'gemini-1.5-flash',
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.model', 'gemini-1.5-flash');
 });
 
 it('rejects gemini provider without api key', function () {
@@ -367,6 +443,32 @@ it('sets a provider as default and unsets others', function () {
 
     expect($p1->fresh()->is_default)->toBeFalse();
     expect($p2->fresh()->is_default)->toBeTrue();
+});
+
+it('updates a provider name and model without replacing the api key', function () {
+    $provider = AiProviderConfig::factory()->create([
+        'team_id' => $this->team->id,
+        'provider' => 'gemini',
+        'name' => 'Gemini Flash',
+        'api_key' => 'AIzaOriginalKey',
+        'model' => 'gemini-1.5-flash',
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson("/api/devforge/v1/ai/providers/{$provider->id}", [
+            'name' => 'Gemini Pro Équipe',
+            'model' => 'gemini-2.5-flash',
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.name', 'Gemini Pro Équipe')
+        ->assertJsonPath('data.model', 'gemini-2.5-flash')
+        ->assertJsonPath('data.has_api_key', true);
+
+    $provider->refresh();
+    expect($provider->name)->toBe('Gemini Pro Équipe');
+    expect($provider->model)->toBe('gemini-2.5-flash');
+    expect($provider->api_key)->toBe('AIzaOriginalKey');
 });
 
 it('deletes a provider config', function () {

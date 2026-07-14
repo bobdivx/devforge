@@ -8,6 +8,7 @@ use App\Models\Team;
 use App\Models\User;
 use App\Services\DevForge\Agent\LlmEndpointResolver;
 use App\Services\DevForge\Agent\LlmModelCatalog;
+use App\Services\DevForge\Agent\LlmModelResolver;
 use App\Services\DevForge\Agent\LlmProviderFactory;
 use App\Services\DevForge\Core\CurrentTeamContext;
 use Illuminate\Http\JsonResponse;
@@ -93,9 +94,11 @@ class AiProviderController extends Controller
             'name' => ['required', 'string', 'max:100'],
             'api_key' => ['nullable', 'string'],
             'base_url' => ['nullable', 'string', 'url'],
-            'model' => ['required', 'string', 'max:100'],
+            'model' => ['nullable', 'string', 'max:100'],
             'is_default' => ['nullable', 'boolean'],
         ]);
+
+        $validated['model'] = LlmModelResolver::normalizeStoredModel($validated['model'] ?? null);
 
         $this->validateProviderConfig($validated);
 
@@ -120,9 +123,13 @@ class AiProviderController extends Controller
             'name' => ['sometimes', 'string', 'max:100'],
             'api_key' => ['sometimes', 'nullable', 'string'],
             'base_url' => ['sometimes', 'nullable', 'string', 'url'],
-            'model' => ['sometimes', 'string', 'max:100'],
+            'model' => ['sometimes', 'nullable', 'string', 'max:100'],
             'is_default' => ['sometimes', 'boolean'],
         ]);
+
+        if (array_key_exists('model', $validated)) {
+            $validated['model'] = LlmModelResolver::normalizeStoredModel($validated['model']);
+        }
 
         if (! empty($validated['is_default'])) {
             AiProviderConfig::where('team_id', $team->id)
@@ -207,6 +214,7 @@ class AiProviderController extends Controller
             'provider' => $config->provider,
             'name' => $config->name,
             'model' => $config->model,
+            'model_label' => LlmModelResolver::displayLabel($config),
             'base_url' => $config->base_url,
             'has_api_key' => ! empty($config->api_key),
             'is_default' => $config->is_default,
