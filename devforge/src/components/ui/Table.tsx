@@ -4,12 +4,13 @@ type TableProps = {
     headers: string[];
     children: ComponentChildren;
     caption?: string;
+    embedded?: boolean;
 };
 
-export function Table({ headers, children, caption }: TableProps) {
+export function Table({ headers, children, caption, embedded = false }: TableProps) {
     return (
-        <div class="overflow-x-auto rounded-2xl border border-base-300/70 bg-base-100">
-            <table class="table table-sm">
+        <div class={`min-w-0 max-w-full overflow-x-auto ${embedded ? '' : 'rounded-2xl border border-base-300/70 bg-base-100'}`}>
+            <table class="table table-sm w-full">
                 {caption && <caption class="sr-only">{caption}</caption>}
                 <thead>
                     <tr>

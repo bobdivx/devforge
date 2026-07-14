@@ -234,7 +234,7 @@ export function CreateAgentModal({ open, onClose, onCreated }: Props) {
                         )}
                     </div>
 
-                    <div class="flex justify-end gap-2 border-t border-base-300 px-5 py-4">
+                    <div class="form-actions border-t border-base-300 px-5 py-4">
                         <button class="btn btn-ghost btn-sm" type="button" onClick={onClose}>Annuler</button>
                         <button
                             class="btn btn-primary btn-sm"

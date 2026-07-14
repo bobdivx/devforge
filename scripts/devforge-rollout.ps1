@@ -56,6 +56,9 @@ if ([string]::IsNullOrWhiteSpace($EnvFile)) {
 
 $Script:SshPassword = $DeployConfig['NAS_SSH_PASSWORD']
 $Script:SshKeyPath = $DeployConfig['NAS_SSH_KEY_PATH']
+if (-not [string]::IsNullOrWhiteSpace($env:DEVFORGE_SSH_KEY) -and (Test-Path -LiteralPath $env:DEVFORGE_SSH_KEY)) {
+    $Script:SshKeyPath = $env:DEVFORGE_SSH_KEY
+}
 $Script:NasUseSudo = ($DeployConfig['NAS_USE_SUDO'] -eq 'true')
 
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -87,6 +90,10 @@ if (Get-Command plink -ErrorAction SilentlyContinue) {
     }
 }
 
+function Test-NasSshKeyReady {
+    return [bool]($Script:SshKeyPath -and (Test-Path -LiteralPath $Script:SshKeyPath))
+}
+
 function Format-ProcessArgument {
     param([string]$Value)
     if ($Value -match '[\s"]') {
@@ -95,12 +102,81 @@ function Format-ProcessArgument {
     return $Value
 }
 
-function Get-SshBaseArgs {
-    $args = @('-o', 'StrictHostKeyChecking=accept-new')
-    if ($Script:SshKeyPath -and (Test-Path $Script:SshKeyPath)) {
-        $args += @('-i', $Script:SshKeyPath, '-o', 'BatchMode=yes')
+function Get-SshIdentityPath {
+    if (-not (Test-NasSshKeyReady)) {
+        return $null
     }
-    return $args
+
+    return ($Script:SshKeyPath -replace '\\', '/')
+}
+
+function Get-SshBaseArgs {
+    $sshArgs = @('-o', 'StrictHostKeyChecking=accept-new')
+    $identityPath = Get-SshIdentityPath
+    if ($identityPath) {
+        $sshArgs += @(
+            '-i', $identityPath,
+            '-o', 'IdentitiesOnly=yes',
+            '-o', 'BatchMode=yes',
+            '-o', 'PasswordAuthentication=no',
+            '-o', 'PreferredAuthentications=publickey'
+        )
+    }
+    return $sshArgs
+}
+
+function Invoke-NasSshWithStdin {
+    param(
+        [string]$RemoteCommand,
+        [string]$InputFile
+    )
+
+    if (Test-NasSshKeyReady) {
+        $sshArgString = (@(Get-SshBaseArgs) + @($NasHost, $RemoteCommand) |
+            ForEach-Object { Format-ProcessArgument $_ }) -join ' '
+        $result = Invoke-CmdPipeline -Command "type `"$InputFile`" | ssh $sshArgString"
+        if ($result.Output) { Write-Host $result.Output }
+        if ($result.ExitCode -ne 0 -and $result.ExitCode -ne 141) {
+            throw "ssh a echoue (code $($result.ExitCode)): $($result.Output)"
+        }
+        return
+    }
+
+    if ($Script:PlinkExe -and $Script:SshPassword) {
+        $hostOnly = ($NasHost -split '@')[-1]
+        $userOnly = ($NasHost -split '@')[0]
+        $remoteTarget = "${userOnly}@${hostOnly}"
+        $plinkArgs = @('-ssh', '-batch', '-pw', $Script:SshPassword, $remoteTarget, $RemoteCommand) |
+            ForEach-Object { Format-ProcessArgument $_ }
+        $plinkCmd = "`"$Script:PlinkExe`" $($plinkArgs -join ' ')"
+        $result = Invoke-CmdPipeline -Command "type `"$InputFile`" | $plinkCmd"
+        if ($result.Output) { Write-Host $result.Output }
+        if ($result.ExitCode -ne 0) {
+            throw "plink a echoue (code $($result.ExitCode)): $($result.Output)"
+        }
+        return
+    }
+
+    if ($Script:SshPassExe -and $Script:SshPassword) {
+        $env:SSHPASS = $Script:SshPassword
+        $sshpassArgString = (@('-e', 'ssh') + @(Get-SshBaseArgs) + @($NasHost, $RemoteCommand) |
+            ForEach-Object { Format-ProcessArgument $_ }) -join ' '
+        $sshpassCmd = "`"$Script:SshPassExe`" $sshpassArgString"
+        $result = Invoke-CmdPipeline -Command "type `"$InputFile`" | $sshpassCmd"
+        if ($result.Output) { Write-Host $result.Output }
+        if ($result.ExitCode -ne 0 -and $result.ExitCode -ne 141) {
+            throw "sshpass a echoue (code $($result.ExitCode)): $($result.Output)"
+        }
+        return
+    }
+
+    $sshArgString = (@(Get-SshBaseArgs) + @($NasHost, $RemoteCommand) |
+        ForEach-Object { Format-ProcessArgument $_ }) -join ' '
+    $result = Invoke-CmdPipeline -Command "type `"$InputFile`" | ssh $sshArgString"
+    if ($result.Output) { Write-Host $result.Output }
+    if ($result.ExitCode -ne 0 -and $result.ExitCode -ne 141) {
+        throw "ssh a echoue (code $($result.ExitCode)): $($result.Output)"
+    }
 }
 
 function Invoke-CmdPipeline {
@@ -123,53 +199,6 @@ function Invoke-CmdPipeline {
         }
     } finally {
         $ErrorActionPreference = $previous
-    }
-}
-
-function Invoke-NasSshWithStdin {
-    param(
-        [string]$RemoteCommand,
-        [string]$InputFile
-    )
-
-    if ($Script:PlinkExe -and $Script:SshPassword -and -not $Script:SshKeyPath) {
-        $hostOnly = ($NasHost -split '@')[-1]
-        $userOnly = ($NasHost -split '@')[0]
-        $remoteTarget = "${userOnly}@${hostOnly}"
-        $plinkArgs = @('-ssh', '-batch', '-pw', $Script:SshPassword, $remoteTarget, $RemoteCommand) |
-            ForEach-Object { Format-ProcessArgument $_ }
-        $plinkCmd = "`"$Script:PlinkExe`" $($plinkArgs -join ' ')"
-        $result = Invoke-CmdPipeline -Command "type `"$InputFile`" | $plinkCmd"
-        if ($result.Output) { Write-Host $result.Output }
-        if ($result.ExitCode -ne 0) {
-            throw "plink a echoue (code $($result.ExitCode)): $($result.Output)"
-        }
-        return
-    }
-
-    $sshArgs = Get-SshBaseArgs
-    $sshExecutable = 'ssh'
-    $prefixArgs = @()
-
-    if ($Script:SshPassExe -and $Script:SshPassword -and -not $Script:SshKeyPath) {
-        $env:SSHPASS = $Script:SshPassword
-        $sshExecutable = $Script:SshPassExe
-        $prefixArgs = @('-e', 'ssh')
-    }
-
-    $sshArgString = ($prefixArgs + $sshArgs + @($NasHost, $RemoteCommand) |
-        ForEach-Object { Format-ProcessArgument $_ }) -join ' '
-    $sshCmd = if ($sshExecutable -eq 'ssh') {
-        "ssh $sshArgString"
-    } else {
-        "`"$sshExecutable`" $sshArgString"
-    }
-    $result = Invoke-CmdPipeline -Command "type `"$InputFile`" | $sshCmd"
-    if ($result.Output) {
-        Write-Host $result.Output
-    }
-    if ($result.ExitCode -ne 0 -and $result.ExitCode -ne 141) {
-        throw "ssh a echoue (code $($result.ExitCode)): $($result.Output)"
     }
 }
 
@@ -241,12 +270,15 @@ Ou: .\scripts\devforge-rollout.ps1 -NasHost bobdivx@10.1.0.58
     exit 0
 }
 
-if ($Script:SshPassExe -and $Script:SshPassword) {
+if (Test-NasSshKeyReady) {
+    Write-Host "SSH: cle $($Script:SshKeyPath) (sans mot de passe)" -ForegroundColor DarkGray
+} elseif ($Script:SshPassExe -and $Script:SshPassword) {
     Write-Host 'SSH: mot de passe depuis devforge-deploy.env (sshpass)' -ForegroundColor DarkGray
 } elseif ($Script:PlinkExe -and $Script:SshPassword) {
     Write-Host 'SSH: mot de passe depuis devforge-deploy.env (plink)' -ForegroundColor DarkGray
 } elseif ($Script:SshKeyPath) {
-    Write-Host "SSH: cle $Script:SshKeyPath" -ForegroundColor DarkGray
+    Write-Host "ATTENTION: cle introuvable: $($Script:SshKeyPath)" -ForegroundColor Yellow
+    Write-Host '  -> Lancez: .\scripts\devforge-setup-ssh-key.ps1' -ForegroundColor Yellow
 } elseif ($Script:SshPassword) {
     Write-Host 'ATTENTION: NAS_SSH_PASSWORD est defini mais ni plink ni sshpass detectes.' -ForegroundColor Yellow
     Write-Host '  -> Installez PuTTY: winget install PuTTY.PuTTY' -ForegroundColor Yellow

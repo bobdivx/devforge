@@ -621,3 +621,24 @@ test('do keyword with word boundary is not given sudo', function () {
 
     expect($result[0])->toBe('do');
 });
+
+test('does not inject sudo inside docker sh -c scripts when using semicolons', function () {
+    $commands = collect([
+        "docker run --rm alpine:3.20 sh -c 'rm -f /var/lib/sqld/data.db; cp /import.db /var/lib/sqld/data.db'",
+    ]);
+
+    $result = parseCommandsByLineForSudo($commands, $this->server);
+
+    expect($result[0])->toBe("sudo docker run --rm alpine:3.20 sh -c 'rm -f /var/lib/sqld/data.db; cp /import.db /var/lib/sqld/data.db'")
+        ->and($result[0])->not->toContain('&& sudo');
+});
+
+test('injects sudo inside docker sh -c scripts when using && operators', function () {
+    $commands = collect([
+        "docker run --rm alpine:3.20 sh -c 'rm -f /var/lib/sqld/data.db && cp /import.db /var/lib/sqld/data.db'",
+    ]);
+
+    $result = parseCommandsByLineForSudo($commands, $this->server);
+
+    expect($result[0])->toContain("&& sudo cp");
+});

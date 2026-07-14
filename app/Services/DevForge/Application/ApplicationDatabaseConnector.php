@@ -82,19 +82,63 @@ class ApplicationDatabaseConnector
      */
     public function connections(Application $application): array
     {
+        $knownDatabaseUuids = collect($this->linkableDatabases($application))
+            ->pluck('uuid')
+            ->flip();
+
+        $grouped = [];
+
+        foreach ($this->linkedEnvironmentVariables($application) as $variable) {
+            $databaseUuid = (string) str($variable->comment)->after(LibsqlConnectionEnvSync::LINK_COMMENT_PREFIX)->value();
+
+            if (! $knownDatabaseUuids->has($databaseUuid)) {
+                continue;
+            }
+
+            if (! isset($grouped[$databaseUuid])) {
+                $grouped[$databaseUuid] = [
+                    'database_uuid' => $databaseUuid,
+                    'env_keys' => [],
+                    'is_runtime' => (bool) $variable->is_runtime,
+                    'is_buildtime' => (bool) $variable->is_buildtime,
+                    'updated_at' => $variable->updated_at?->toISOString(),
+                ];
+            }
+
+            $grouped[$databaseUuid]['env_keys'][] = $variable->key;
+            $grouped[$databaseUuid]['is_runtime'] = $grouped[$databaseUuid]['is_runtime'] || (bool) $variable->is_runtime;
+            $grouped[$databaseUuid]['is_buildtime'] = $grouped[$databaseUuid]['is_buildtime'] || (bool) $variable->is_buildtime;
+
+            $updatedAt = $variable->updated_at?->toISOString();
+            if ($updatedAt !== null && ($grouped[$databaseUuid]['updated_at'] === null || $updatedAt > $grouped[$databaseUuid]['updated_at'])) {
+                $grouped[$databaseUuid]['updated_at'] = $updatedAt;
+            }
+        }
+
+        return collect($grouped)
+            ->map(function (array $connection): array {
+                $connection['env_keys'] = collect($connection['env_keys'])
+                    ->unique()
+                    ->sort()
+                    ->values()
+                    ->all();
+
+                return $connection;
+            })
+            ->sortBy('database_uuid')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return \Illuminate\Support\Collection<int, EnvironmentVariable>
+     */
+    private function linkedEnvironmentVariables(Application $application): \Illuminate\Support\Collection
+    {
         return $application->environment_variables()
             ->where('is_preview', false)
             ->get()
-            ->filter(fn (EnvironmentVariable $variable): bool => str($variable->comment ?? '')->startsWith(LibsqlConnectionEnvSync::LINK_COMMENT_PREFIX))
-            ->map(fn (EnvironmentVariable $variable): array => [
-                'env_key' => $variable->key,
-                'database_uuid' => str($variable->comment)->after(LibsqlConnectionEnvSync::LINK_COMMENT_PREFIX)->value(),
-                'is_runtime' => (bool) $variable->is_runtime,
-                'is_buildtime' => (bool) $variable->is_buildtime,
-                'updated_at' => $variable->updated_at?->toISOString(),
-            ])
-            ->values()
-            ->all();
+            ->filter(fn (EnvironmentVariable $variable): bool => str($variable->comment ?? '')->startsWith(LibsqlConnectionEnvSync::LINK_COMMENT_PREFIX));
     }
 
     /**
@@ -241,6 +285,10 @@ class ApplicationDatabaseConnector
 
             if ($migrateFromRemote) {
                 $migration = $this->libsqlTursoMigrationService->migrate($application, $database);
+
+                if ($this->libsqlTursoMigrationService->candidate($application) !== null) {
+                    $preferredKey = null;
+                }
 
                 auditLog('devforge.application.turso_migrated', [
                     'team_id' => $team->id,

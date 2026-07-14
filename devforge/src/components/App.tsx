@@ -2,7 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
 import { getBootstrap, switchTeam } from '../lib/api-client';
 import type { BootstrapData } from '../lib/bootstrap';
 import { findRoute, normalizeRoutePath, routeHref } from '../lib/routes';
-import { applyTheme, getInitialTheme, type Theme } from '../lib/theme';
+import {
+    applyStoredAppearance,
+    contentWidthClass,
+    getAppearancePreferences,
+    toggleResolvedTheme,
+    type AppearancePreferences,
+    type Theme,
+} from '../lib/appearance';
 import { TeamContext } from '../lib/team-context';
 import { DomainPage } from '../pages/_domain-pages';
 import { AuthGuard } from './AuthGuard';
@@ -22,6 +29,7 @@ export function App({ initialPath }: AppProps) {
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [theme, setTheme] = useState<Theme>('dark');
+    const [appearance, setAppearance] = useState<AppearancePreferences>(() => getAppearancePreferences());
     const [toasts, setToasts] = useState<Toast[]>([]);
     const [teamRevision, setTeamRevision] = useState(0);
     const route = useMemo(() => findRoute(pathname), [pathname]);
@@ -42,16 +50,21 @@ export function App({ initialPath }: AppProps) {
     }, []);
 
     useEffect(() => {
-        const initialTheme = getInitialTheme();
-        setTheme(initialTheme);
-        applyTheme(initialTheme);
+        const resolvedTheme = applyStoredAppearance();
+        setTheme(resolvedTheme);
+        setAppearance(getAppearancePreferences());
         setPathname(normalizeRoutePath(window.location.pathname));
         void loadBootstrap();
 
         const onPopState = () => setPathname(normalizeRoutePath(window.location.pathname));
         window.addEventListener('popstate', onPopState);
+        const onAppearanceChange = () => setAppearance(getAppearancePreferences());
+        window.addEventListener('devforge-appearance-changed', onAppearanceChange);
 
-        return () => window.removeEventListener('popstate', onPopState);
+        return () => {
+            window.removeEventListener('popstate', onPopState);
+            window.removeEventListener('devforge-appearance-changed', onAppearanceChange);
+        };
     }, [loadBootstrap]);
 
     useEffect(() => {
@@ -78,9 +91,11 @@ export function App({ initialPath }: AppProps) {
     };
 
     const toggleTheme = () => {
-        const nextTheme = theme === 'dark' ? 'light' : 'dark';
-        setTheme(nextTheme);
-        applyTheme(nextTheme);
+        setTheme((current) => {
+            const nextTheme = toggleResolvedTheme(current);
+            setAppearance(getAppearancePreferences());
+            return nextTheme;
+        });
     };
 
     const addToast = (message: string, tone: Toast['tone'] = 'info') => {
@@ -103,7 +118,7 @@ export function App({ initialPath }: AppProps) {
     };
 
     return (
-        <div class="dashboard-shell min-h-screen bg-base-200 text-base-content">
+        <div class="dashboard-shell min-h-screen bg-base-200 text-base-content" style={{ zoom: appearance.zoom === '90' ? 0.9 : 1 }}>
             <a class="btn btn-primary fixed start-2 top-2 z-[60] -translate-y-16 focus:translate-y-0" href="#devforge-content">
                 Aller au contenu
             </a>
@@ -148,7 +163,7 @@ export function App({ initialPath }: AppProps) {
                                         class="custom-scrollbar devforge-panel min-w-0 flex-1 overflow-x-hidden overflow-y-auto rounded-2xl bg-base-100/70 p-4 shadow-sm outline-none md:p-6"
                                         tabIndex={-1}
                                     >
-                                        <div class="mx-auto grid min-w-0 max-w-7xl gap-5">
+                                        <div class={`mx-auto grid min-w-0 ${contentWidthClass(appearance.pageWidth)} gap-5`}>
                                             <DomainPage
                                                 key={`${bootstrapData.current_team.id}-${teamRevision}`}
                                                 bootstrap={bootstrapData}

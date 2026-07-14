@@ -49,15 +49,17 @@ export function DeploymentAgentCard({ deploymentUuid, onSelectDeployment, pollWh
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-base-300/70 px-5 py-4">
+            <div class="toolbar-row border-b border-base-300/70 px-5 py-4">
                 <div>
                     <p class="text-sm font-semibold">Agent de déploiement</p>
                     <p class="text-xs text-base-content/50">Surveillance, diagnostics et relance automatique</p>
                 </div>
-                <button class="btn btn-ghost btn-sm" type="button" onClick={() => void query.reload()}>
+                <div class="card-toolbar w-full sm:w-auto">
+                    <button class="btn btn-ghost btn-sm w-full sm:w-auto" type="button" onClick={() => void query.reload()}>
                     <RefreshCw class="size-3.5" aria-hidden />
                     Actualiser
-                </button>
+                    </button>
+                </div>
             </div>
 
             <div class="grid gap-4 p-5">

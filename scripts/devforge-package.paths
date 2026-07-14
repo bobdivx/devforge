@@ -30,6 +30,9 @@ routes/devforge-agents.php
 routes/devforge-core.php
 routes/devforge-realtime.php
 routes/devforge-simple.php
+routes/devforge-destinations.php
+routes/devforge-tags.php
+routes/devforge-team.php
 public/devforge
 public/brand
 

@@ -1,4 +1,5 @@
 import type { ComponentChildren } from 'preact';
+import { ActionToolbar } from './ui/ActionToolbar';
 
 type PageHeaderProps = {
     title: string;
@@ -15,7 +16,7 @@ export function PageHeader({ title, description, eyebrow, actions }: PageHeaderP
                 <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1>
                 <p class="max-w-2xl text-sm text-base-content/55">{description}</p>
             </div>
-            {actions && <div class="flex flex-wrap items-center gap-2">{actions}</div>}
+            {actions && <ActionToolbar>{actions}</ActionToolbar>}
         </header>
     );
 }

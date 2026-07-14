@@ -5,6 +5,7 @@ import { domainApi } from '../../lib/domain-api';
 import { ApiError } from '../../lib/api-client';
 import { routeHref } from '../../lib/routes';
 import { scheduleLabel } from '../../lib/agent-triggers';
+import { ActionToolbar } from '../ui/ActionToolbar';
 import { AgentAvatar } from './AgentAvatar';
 import { AgentErrorAlert } from './AgentErrorAlert';
 import { AgentStatusBadge } from './AgentStatusBadge';
@@ -185,14 +186,14 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                     </p>
                 )}
 
-                <div class="flex items-center justify-between border-t border-base-300 pt-3">
+                <div class="flex flex-col gap-3 border-t border-base-300 pt-3 sm:flex-row sm:items-center sm:justify-between">
                     <div class="text-[11px] text-base-content/50">
                         {scheduleLabel(agent)}
                         <span class="ms-2 before:me-1 before:content-['·']">
                             {relativeTime(agent.last_run_at)}
                         </span>
                     </div>
-                    <div class="flex gap-1">
+                    <ActionToolbar>
                         <button
                             class="btn btn-ghost btn-xs gap-1"
                             type="button"
@@ -224,7 +225,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                         >
                             <Settings2 class="size-3" aria-hidden />
                         </a>
-                    </div>
+                    </ActionToolbar>
                 </div>
             </div>
         </article>

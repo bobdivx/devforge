@@ -114,6 +114,14 @@ class S3StorageService
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    public function present(S3Storage $storage): array
+    {
+        return $this->presenter->present($storage);
+    }
+
+    /**
      * @param  array<string, mixed>  $input
      * @return array<string, mixed>
      */

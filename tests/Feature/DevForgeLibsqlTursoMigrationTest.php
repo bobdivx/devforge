@@ -114,12 +114,13 @@ it('migrates remote turso data before connecting a libsql database', function ()
     ]);
 
     $this->mock(LibsqlDatabaseTransferService::class, function ($mock): void {
-        $mock->shouldReceive('import')
+        $mock->shouldReceive('importPayload')
             ->once()
             ->withArgs(fn ($database, string $sql): bool => $database->uuid === 'w5gu3c9d5ezohux0wv63s5m4'
                 && str_contains($sql, 'CREATE TABLE users'))
             ->andReturn([
                 'restarted' => true,
+                'format' => 'sql',
                 'message' => 'Import terminé. La base redémarre.',
             ]);
     });
@@ -153,7 +154,7 @@ it('dumps remote turso databases over http', function () {
 });
 
 it('creates a libsql database and migrates turso data when requested', function () {
-    Queue::fake();
+    StartDatabase::shouldRun()->never();
 
     $this->application->environment_variables()->create([
         'key' => 'TURSO_DATABASE_URL',
@@ -175,11 +176,12 @@ it('creates a libsql database and migrates turso data when requested', function 
     ]);
 
     $this->mock(LibsqlDatabaseTransferService::class, function ($mock): void {
-        $mock->shouldReceive('import')
+        $mock->shouldReceive('importPayload')
             ->once()
             ->withArgs(fn ($database, string $sql): bool => str_contains($sql, 'CREATE TABLE notes'))
             ->andReturn([
                 'restarted' => true,
+                'format' => 'sql',
                 'message' => 'Import terminé. La base redémarre.',
             ]);
     });
@@ -193,9 +195,22 @@ it('creates a libsql database and migrates turso data when requested', function 
             'destination_uuid' => $this->destination->uuid,
             'application_uuid' => $this->application->uuid,
             'migrate_from_remote' => true,
-            'instant_deploy' => false,
+            'instant_deploy' => true,
             'application_instant_deploy' => false,
         ])
         ->assertCreated()
-        ->assertJsonPath('meta.connection.migration.performed', true);
+        ->assertJsonPath('data.name', 'Turso app · libSQL')
+        ->assertJsonPath('meta.connection.migration.performed', true)
+        ->assertJsonPath('meta.connection.env_keys', ['TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN']);
+});
+
+it('returns a readable error when turso dump cannot be reached', function () {
+    Http::fake(function () {
+        throw new \Illuminate\Http\Client\ConnectionException('Connection refused');
+    });
+
+    $service = app(LibsqlTursoMigrationService::class);
+
+    expect(fn () => $service->dumpRemote('https://mydb-myorg.turso.io', 'remote-token'))
+        ->toThrow(\Symfony\Component\HttpKernel\Exception\HttpException::class, 'Impossible de joindre la base Turso distante');
 });

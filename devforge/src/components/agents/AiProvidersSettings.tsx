@@ -1,5 +1,6 @@
 import { CheckCircle, Plus, RefreshCw, Trash2, Wifi, XCircle } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
+import { ActionToolbar } from '../ui/ActionToolbar';
 import type { LlmModelOption, LlmProvider } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
 import { CUSTOM_MODEL_VALUE, modelSelectValue } from '../../lib/llm-models';
@@ -169,15 +170,17 @@ export function AiProvidersSettings() {
 
     return (
         <div class="grid gap-4">
-            <div class="flex items-center justify-between">
+            <div class="toolbar-row">
                 <div>
                     <h3 class="text-sm font-semibold">Providers LLM</h3>
                     <p class="text-xs text-base-content/60">Configurez Gemini ou Ollama pour alimenter vos agents IA.</p>
                 </div>
-                <button class="btn btn-primary btn-sm" type="button" onClick={() => setShowForm(true)}>
-                    <Plus class="size-3.5" aria-hidden />
-                    Ajouter
-                </button>
+                <div class="card-toolbar w-full sm:w-auto">
+                    <button class="btn btn-primary btn-sm w-full sm:w-auto" type="button" onClick={() => setShowForm(true)}>
+                        <Plus class="size-3.5" aria-hidden />
+                        Ajouter
+                    </button>
+                </div>
             </div>
 
             {providers.length === 0 && ! showForm && (
@@ -189,7 +192,7 @@ export function AiProvidersSettings() {
             {providers.length > 0 && (
                 <ul class="divide-y divide-base-300 rounded-xl border border-base-300 bg-base-100">
                     {providers.map((provider) => (
-                        <li key={provider.id} class="flex items-center gap-3 px-4 py-3">
+                        <li key={provider.id} class="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:gap-3">
                             <div class="min-w-0 flex-1">
                                 <div class="flex items-center gap-2">
                                     <p class="text-sm font-medium">{provider.name}</p>
@@ -211,7 +214,7 @@ export function AiProvidersSettings() {
                                     </div>
                                 )}
                             </div>
-                            <div class="flex shrink-0 gap-1">
+                            <ActionToolbar class="shrink-0">
                                 {! provider.is_default && (
                                     <button
                                         class="btn btn-ghost btn-xs text-[11px]"
@@ -241,7 +244,7 @@ export function AiProvidersSettings() {
                                 >
                                     <Trash2 class="size-3.5" aria-hidden />
                                 </button>
-                            </div>
+                            </ActionToolbar>
                         </li>
                     ))}
                 </ul>
@@ -391,7 +394,7 @@ export function AiProvidersSettings() {
                         </label>
                     </div>
 
-                    <div class="mt-4 flex gap-2">
+                    <div class="form-actions mt-4">
                         <button class="btn btn-ghost btn-sm" type="button" onClick={() => setShowForm(false)}>Annuler</button>
                         <button class="btn btn-primary btn-sm" type="submit" disabled={submitting || ! form.model}>
                             {submitting && <span class="loading loading-spinner loading-xs" />}

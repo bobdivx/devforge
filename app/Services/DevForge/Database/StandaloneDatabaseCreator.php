@@ -55,6 +55,31 @@ class StandaloneDatabaseCreator
             'name' => $validated['name'] ?? null,
         ], fn (?string $value): bool => filled($value));
 
+        $migrateFromRemote = filled($validated['application_uuid'] ?? null)
+            && (bool) ($validated['migrate_from_remote'] ?? false);
+        $instantDeploy = (bool) ($validated['instant_deploy'] ?? true);
+        $application = filled($validated['application_uuid'] ?? null)
+            ? $this->currentTeamResources->application($user, $validated['application_uuid'])
+            : null;
+
+        if ($application !== null && $otherData === []) {
+            $engineLabel = match ($validated['engine']) {
+                'libsql' => 'libSQL',
+                'postgresql' => 'PostgreSQL',
+                'mysql' => 'MySQL',
+                'mariadb' => 'MariaDB',
+                'mongodb' => 'MongoDB',
+                'redis' => 'Redis',
+                'keydb' => 'KeyDB',
+                'dragonfly' => 'Dragonfly',
+                'clickhouse' => 'ClickHouse',
+                default => str($validated['engine'])->title()->value(),
+            };
+            $otherData = [
+                'name' => $application->name.' · '.$engineLabel,
+            ];
+        }
+
         $database = $this->createDatabase(
             $validated['engine'],
             $environment->id,
@@ -63,22 +88,20 @@ class StandaloneDatabaseCreator
             $validated['image'] ?? null,
         );
 
-        $instantDeploy = (bool) ($validated['instant_deploy'] ?? true);
-        if ($instantDeploy) {
-            StartDatabase::dispatch($database);
-        }
-
         $connection = null;
-        if (filled($validated['application_uuid'] ?? null)) {
-            $application = $this->currentTeamResources->application($user, $validated['application_uuid']);
+        if ($application !== null) {
             Gate::forUser($user)->authorize('update', $application);
 
             $connection = $this->applicationDatabaseConnector->connect($user, $team, $application, [
                 'database_uuid' => (string) $database->uuid,
                 'env_key' => $validated['env_key'] ?? null,
                 'instant_deploy' => (bool) ($validated['application_instant_deploy'] ?? true),
-                'migrate_from_remote' => (bool) ($validated['migrate_from_remote'] ?? false),
+                'migrate_from_remote' => $migrateFromRemote,
             ]);
+        }
+
+        if ($instantDeploy && ! $migrateFromRemote) {
+            StartDatabase::run($database);
         }
 
         return [

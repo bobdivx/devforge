@@ -126,17 +126,33 @@ describe('déploiements DevForge', () => {
                     },
                 });
             }
+            if (url === `/api/devforge/v1/deployments/${deployment.uuid}/monitoring`) {
+                return jsonResponse({
+                    data: {
+                        deployment,
+                        agent_runs: [],
+                        redeployments: [],
+                        agents: {
+                            enabled: false,
+                            auto_fix_deployments: false,
+                            monitor_build: false,
+                            webhook_build: false,
+                        },
+                    },
+                });
+            }
             throw new Error(`URL inattendue : ${url}`);
         });
         render(withTeam(<DeploymentsPage />));
 
         expect(await screen.findByText('Application déployée')).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Logs' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Suivre' }));
 
-        expect(await screen.findByText('Déploiement terminé')).toBeInTheDocument();
+        expect(await screen.findByText('Logs de déploiement')).toBeInTheDocument();
+        expect((await screen.findAllByText('Déploiement terminé')).length).toBeGreaterThanOrEqual(1);
         expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(expect.arrayContaining([
-            `/api/devforge/v1/deployments/${deployment.uuid}`,
             `/api/devforge/v1/deployments/${deployment.uuid}/logs?after=0`,
+            `/api/devforge/v1/deployments/${deployment.uuid}/monitoring`,
         ]));
     });
 });

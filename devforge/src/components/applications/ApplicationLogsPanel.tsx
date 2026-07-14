@@ -1,5 +1,6 @@
 import { RefreshCw } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
+import { ActionToolbar } from '../ui/ActionToolbar';
 import { DataState } from '../ui/DataState';
 import { domainApi } from '../../lib/domain-api';
 import { useApiQuery } from '../../lib/use-api-query';
@@ -33,16 +34,16 @@ export function ApplicationLogsPanel({ applicationUuid, autoRefresh = true }: Pr
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-base-300/70 px-5 py-4">
+            <div class="toolbar-row border-b border-base-300/70 px-5 py-4">
                 <div>
                     <p class="text-sm font-semibold">Logs du conteneur</p>
                     <p class="text-xs text-base-content/50">Sortie stdout/stderr en temps réel</p>
                 </div>
-                <div class="flex flex-wrap items-center gap-2">
+                <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                     <label class="flex items-center gap-2 text-xs">
                         <span class="text-base-content/45">Lignes</span>
                         <select
-                            class="select select-bordered select-xs"
+                            class="select select-bordered select-sm w-full sm:w-auto"
                             value={lines}
                             onChange={(event) => setLines(Number((event.target as HTMLSelectElement).value))}
                         >
@@ -51,10 +52,12 @@ export function ApplicationLogsPanel({ applicationUuid, autoRefresh = true }: Pr
                             ))}
                         </select>
                     </label>
-                    <button class="btn btn-ghost btn-sm" type="button" onClick={() => void query.reload()}>
-                        <RefreshCw class="size-3.5" aria-hidden />
-                        Actualiser
-                    </button>
+                    <ActionToolbar>
+                        <button class="btn btn-ghost btn-sm" type="button" onClick={() => void query.reload()}>
+                            <RefreshCw class="size-3.5" aria-hidden />
+                            Actualiser
+                        </button>
+                    </ActionToolbar>
                 </div>
             </div>
 

@@ -7,6 +7,7 @@ use App\Models\Application;
 use App\Models\User;
 use App\Services\DevForge\Application\ApplicationContainerLogs;
 use App\Services\DevForge\Application\ApplicationDatabaseConnector;
+use App\Services\DevForge\Application\ApplicationEnvironmentVariableCatalog;
 use App\Services\DevForge\Application\ApplicationFromGithubCreator;
 use App\Services\DevForge\Core\CoreResourcePresenter;
 use App\Services\DevForge\CurrentTeamContext;
@@ -24,6 +25,7 @@ class ApplicationController extends Controller
         private readonly ApplicationFromGithubCreator $applicationFromGithubCreator,
         private readonly ApplicationDatabaseConnector $applicationDatabaseConnector,
         private readonly ApplicationContainerLogs $applicationContainerLogs,
+        private readonly ApplicationEnvironmentVariableCatalog $applicationEnvironmentVariableCatalog,
         private readonly CoreResourcePresenter $presenter,
     ) {}
 
@@ -102,6 +104,73 @@ class ApplicationController extends Controller
                 $application->loadMissing('destination.server'),
                 (int) ($validated['lines'] ?? 200),
             ),
+        ]);
+    }
+
+    public function environmentVariables(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('view', $application);
+
+        return response()->json([
+            'data' => $this->applicationEnvironmentVariableCatalog->list($application),
+        ]);
+    }
+
+    public function storeEnvironmentVariable(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('manageEnvironment', $application);
+
+        return response()->json([
+            'data' => $this->applicationEnvironmentVariableCatalog->store($application, $request->all()),
+        ], 201);
+    }
+
+    public function updateEnvironmentVariable(Request $request, string $applicationUuid, string $envUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('manageEnvironment', $application);
+
+        return response()->json([
+            'data' => $this->applicationEnvironmentVariableCatalog->update($application, $envUuid, $request->all()),
+        ]);
+    }
+
+    public function destroyEnvironmentVariable(Request $request, string $applicationUuid, string $envUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('manageEnvironment', $application);
+
+        $this->applicationEnvironmentVariableCatalog->destroy($application, $envUuid);
+
+        return response()->json([
+            'message' => 'Variable d’environnement supprimée.',
+        ]);
+    }
+
+    public function revealEnvironmentVariable(Request $request, string $applicationUuid, string $envUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('view', $application);
+
+        return response()->json([
+            'data' => $this->applicationEnvironmentVariableCatalog->reveal($application, $envUuid),
         ]);
     }
 }

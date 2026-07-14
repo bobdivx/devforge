@@ -3,12 +3,58 @@ import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
 import { DataState } from '../components/ui/DataState';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { LegacyEditBanner } from '../components/settings/SettingsPanels';
 import { domainApi } from '../lib/domain-api';
+import { parseSecuritySection } from '../lib/settings-tabs';
 import { useApiQuery } from '../lib/use-api-query';
 
-export function SecurityPage({ embedded = false }: { embedded?: boolean }) {
-    const query = useApiQuery('security-keys', () => domainApi.securityKeys());
+const sectionMeta = {
+    keys: {
+        title: 'Clés privées',
+        legacyPath: '/security/private-key',
+        description: 'Clés SSH et de déploiement accessibles à l’équipe active.',
+    },
+    'cloud-tokens': {
+        title: 'Jetons cloud',
+        legacyPath: '/security/cloud-tokens',
+        description: 'Jetons des fournisseurs cloud pour le provisionnement.',
+    },
+    'cloud-init-scripts': {
+        title: 'Scripts cloud-init',
+        legacyPath: '/security/cloud-init-scripts',
+        description: 'Scripts d’initialisation pour les nouveaux serveurs.',
+    },
+    'api-tokens': {
+        title: 'Jetons API',
+        legacyPath: '/security/api-tokens',
+        description: 'Jetons d’accès API Sanctum pour l’automatisation.',
+    },
+} as const;
+
+export function SecurityPage({
+    embedded = false,
+    path = '/settings/security',
+    legacyBaseUrl = '',
+}: {
+    embedded?: boolean;
+    path?: string;
+    legacyBaseUrl?: string;
+}) {
+    const section = parseSecuritySection(path);
+    const meta = sectionMeta[section];
+    const query = useApiQuery(section === 'keys' ? 'security-keys' : null, () => domainApi.securityKeys());
     const keys = query.data?.data ?? [];
+
+    if (section !== 'keys') {
+        return (
+            <>
+                {!embedded && (
+                    <PageHeader title={meta.title} description={meta.description} />
+                )}
+                <LegacyOnlySecuritySection meta={meta} legacyBaseUrl={legacyBaseUrl} />
+            </>
+        );
+    }
 
     return (
         <>
@@ -25,14 +71,17 @@ export function SecurityPage({ embedded = false }: { embedded?: boolean }) {
                 />
             )}
             {embedded && (
-                <div class="flex items-center justify-between gap-2">
-                    <p class="text-xs text-base-content/55">Clés privées accessibles à l’équipe active.</p>
-                    <button class="btn btn-ghost btn-sm" type="button" onClick={() => void query.reload()}>
+                <div class="toolbar-row">
+                    <p class="text-xs text-base-content/55">{meta.description}</p>
+                    <div class="card-toolbar w-full sm:w-auto">
+                        <button class="btn btn-ghost btn-sm w-full sm:w-auto" type="button" onClick={() => void query.reload()}>
                         <RefreshCw class="size-3.5" aria-hidden />
                         Actualiser
-                    </button>
+                        </button>
+                    </div>
                 </div>
             )}
+            <LegacyEditBanner legacyBaseUrl={legacyBaseUrl} legacyPath={meta.legacyPath} />
             <DataState loading={query.loading} error={query.error} empty={keys.length === 0} emptyMessage="Aucune clé privée." onRetry={() => void query.reload()}>
                 <div class="grid gap-2 md:grid-cols-2">
                     {keys.map((key) => (
@@ -47,5 +96,24 @@ export function SecurityPage({ embedded = false }: { embedded?: boolean }) {
                 </div>
             </DataState>
         </>
+    );
+}
+
+function LegacyOnlySecuritySection({
+    meta,
+    legacyBaseUrl,
+}: {
+    meta: (typeof sectionMeta)[keyof typeof sectionMeta];
+    legacyBaseUrl: string;
+}) {
+    return (
+        <div class="grid gap-4">
+            <LegacyEditBanner legacyBaseUrl={legacyBaseUrl} legacyPath={meta.legacyPath} description={meta.description} />
+            <Card title={meta.title}>
+                <p class="text-sm text-base-content/65">
+                    Cette section de sécurité est encore gérée dans Coolify.
+                </p>
+            </Card>
+        </div>
     );
 }

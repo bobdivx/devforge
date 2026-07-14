@@ -12,6 +12,7 @@ use App\Actions\Service\StopService;
 use App\Models\Application;
 use App\Models\Service;
 use Illuminate\Database\Eloquent\Model;
+use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Visus\Cuid2\Cuid2;
 
@@ -94,18 +95,29 @@ class CoreResourceAction
      */
     private function database(Model $database, string $action, array $options): array
     {
-        match ($action) {
-            'stop' => StopDatabase::dispatch(
-                $database,
-                (bool) ($options['docker_cleanup'] ?? true),
-            ),
-            'restart' => RestartDatabase::dispatch($database),
-            'start', 'deploy' => StartDatabase::dispatch($database),
-        };
+        try {
+            match ($action) {
+                'stop' => StopDatabase::run(
+                    $database,
+                    (bool) ($options['docker_cleanup'] ?? true),
+                ),
+                'restart' => RestartDatabase::run($database),
+                'start', 'deploy' => StartDatabase::run($database),
+            };
+        } catch (RuntimeException $exception) {
+            throw new HttpException(422, $exception->getMessage(), previous: $exception);
+        }
 
         return [
-            'queued' => true,
-            'message' => "Database {$action} request queued.",
+            'queued' => false,
+            'completed' => true,
+            'message' => match ($action) {
+                'stop' => 'Base arrêtée.',
+                'restart' => 'Base redémarrée.',
+                'start' => 'Base démarrée.',
+                'deploy' => 'Déploiement de la base terminé.',
+                default => "Database {$action} completed.",
+            },
         ];
     }
 

@@ -6,6 +6,7 @@ use App\Http\Middleware\RedirectToDevForge;
 use App\Models\InstanceSettings;
 use App\Models\Project;
 use App\Models\User;
+use App\Support\DevForge\LegacyInterfacePreference;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
@@ -116,7 +117,33 @@ test('real legacy routes support migration and explicit rollback', function () {
     $this->actingAs($user)
         ->withSession(['currentTeam' => $team])
         ->get('/projects?legacy=1')
+        ->assertSuccessful()
+        ->assertSessionHas(LegacyInterfacePreference::SESSION_KEY, true);
+
+    $this->actingAs($user)
+        ->withSession(['currentTeam' => $team, LegacyInterfacePreference::SESSION_KEY => true])
+        ->get('/projects')
         ->assertSuccessful();
+});
+
+test('visiting DevForge clears the persisted legacy interface preference', function () {
+    $user = User::factory()->create();
+    $team = $user->teams()->firstOrFail();
+
+    $this->withoutMiddleware(DecideWhatToDoWithUser::class)
+        ->actingAs($user)
+        ->withSession([
+            'currentTeam' => $team,
+            LegacyInterfacePreference::SESSION_KEY => true,
+        ])
+        ->get('/devforge/')
+        ->assertSuccessful()
+        ->assertSessionMissing(LegacyInterfacePreference::SESSION_KEY);
+
+    $this->actingAs($user)
+        ->withSession(['currentTeam' => $team])
+        ->get('/projects')
+        ->assertRedirect('/devforge/projects');
 });
 
 test('real dynamic legacy routes preserve parameters when migrating', function () {

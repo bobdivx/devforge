@@ -7,6 +7,7 @@ use App\Models\StandaloneDocker;
 use App\Models\StandaloneLibsql;
 use App\Models\StandalonePostgresql;
 use App\Models\User;
+use App\Services\DevForge\Database\LibsqlDatabaseExplorerService;
 use App\Services\DevForge\Database\LibsqlDatabaseTransferService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -54,13 +55,14 @@ it('exports libsql database sql', function () {
 
 it('imports libsql database sql from an uploaded file', function () {
     $this->mock(LibsqlDatabaseTransferService::class, function ($mock): void {
-        $mock->shouldReceive('import')
+        $mock->shouldReceive('importPayload')
             ->once()
-            ->withArgs(fn ($database, string $sql): bool => $database->uuid === 'w5gu3c9d5ezohux0wv63s5m4'
-                && str_contains($sql, 'CREATE TABLE users'))
+            ->withArgs(fn ($database, string $payload): bool => $database->uuid === 'w5gu3c9d5ezohux0wv63s5m4'
+                && str_contains($payload, 'CREATE TABLE users'))
             ->andReturn([
                 'restarted' => true,
-                'message' => 'Import terminé. La base redémarre.',
+                'format' => 'sql',
+                'message' => 'Import SQL terminé. La base redémarre.',
             ]);
     });
 
@@ -70,7 +72,32 @@ it('imports libsql database sql from an uploaded file', function () {
             'file' => UploadedFile::fake()->createWithContent('dump.sql', "PRAGMA foreign_keys=OFF;\nCREATE TABLE users (id INTEGER);\n"),
         ])
         ->assertSuccessful()
-        ->assertJsonPath('data.restarted', true);
+        ->assertJsonPath('data.restarted', true)
+        ->assertJsonPath('data.format', 'sql');
+});
+
+it('imports libsql database from an uploaded sqlite .db file', function () {
+    $sqlitePayload = "SQLite format 3\x00".str_repeat("\0", 128);
+
+    $this->mock(LibsqlDatabaseTransferService::class, function ($mock) use ($sqlitePayload): void {
+        $mock->shouldReceive('importPayload')
+            ->once()
+            ->withArgs(fn ($database, string $payload): bool => $database->uuid === 'w5gu3c9d5ezohux0wv63s5m4'
+                && LibsqlDatabaseTransferService::isSqliteDatabaseFile($payload))
+            ->andReturn([
+                'restarted' => true,
+                'format' => 'db',
+                'message' => 'Import du fichier .db terminé. La base redémarre.',
+            ]);
+    });
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->post('/api/devforge/v1/databases/'.$this->database->uuid.'/import-sql', [
+            'file' => UploadedFile::fake()->createWithContent('backup.db', $sqlitePayload),
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.format', 'db');
 });
 
 it('rejects sql transfer endpoints for non libsql databases', function () {
@@ -90,4 +117,45 @@ it('rejects sql transfer endpoints for non libsql databases', function () {
         ->withSession($this->session)
         ->getJson('/api/devforge/v1/databases/'.$postgresql->uuid.'/export-sql')
         ->assertStatus(422);
+});
+
+it('returns libsql explorer overview', function () {
+    $this->mock(LibsqlDatabaseExplorerService::class, function ($mock): void {
+        $mock->shouldReceive('overview')
+            ->once()
+            ->andReturn([
+                'available' => true,
+                'table_count' => 1,
+                'tables' => [
+                    ['name' => 'users', 'row_count' => null],
+                ],
+            ]);
+    });
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/databases/'.$this->database->uuid.'/explorer')
+        ->assertSuccessful()
+        ->assertJsonPath('data.table_count', 1)
+        ->assertJsonPath('data.tables.0.name', 'users');
+});
+
+it('returns empty explorer overview when data.db is missing', function () {
+    $this->mock(LibsqlDatabaseExplorerService::class, function ($mock): void {
+        $mock->shouldReceive('overview')
+            ->once()
+            ->andReturn([
+                'available' => false,
+                'table_count' => 0,
+                'tables' => [],
+                'message' => 'Aucun fichier data.db trouvé.',
+            ]);
+    });
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/databases/'.$this->database->uuid.'/explorer')
+        ->assertSuccessful()
+        ->assertJsonPath('data.available', false)
+        ->assertJsonPath('data.tables', []);
 });

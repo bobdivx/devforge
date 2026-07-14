@@ -30,7 +30,7 @@ export function MonitoringPage() {
             <Card title="Transport temps réel">
                 <DataState loading={realtime.loading} error={realtime.error} onRetry={() => void realtime.reload()}>
                     {realtime.data && (
-                        <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <div class="toolbar-row text-xs">
                             <span>{realtime.data.data.transport.driver} · {realtime.data.data.transport.host}:{realtime.data.data.transport.port}</span>
                             <StatusBadge label={`${realtime.data.data.polling.recommended_interval_ms} ms`} tone="success" />
                         </div>

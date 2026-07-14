@@ -17,6 +17,21 @@ Route::post('/applications/{applicationUuid}/connect-database', [ApplicationCont
 Route::get('/applications/{applicationUuid}/logs', [ApplicationController::class, 'logs'])
     ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
     ->name('applications.logs');
+Route::get('/applications/{applicationUuid}/environment-variables', [ApplicationController::class, 'environmentVariables'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.environment-variables.index');
+Route::post('/applications/{applicationUuid}/environment-variables', [ApplicationController::class, 'storeEnvironmentVariable'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.environment-variables.store');
+Route::put('/applications/{applicationUuid}/environment-variables/{envUuid}', [ApplicationController::class, 'updateEnvironmentVariable'])
+    ->where(['applicationUuid' => '[A-Za-z0-9-]{8,64}', 'envUuid' => '[A-Za-z0-9-]{8,64}'])
+    ->name('applications.environment-variables.update');
+Route::get('/applications/{applicationUuid}/environment-variables/{envUuid}/reveal', [ApplicationController::class, 'revealEnvironmentVariable'])
+    ->where(['applicationUuid' => '[A-Za-z0-9-]{8,64}', 'envUuid' => '[A-Za-z0-9-]{8,64}'])
+    ->name('applications.environment-variables.reveal');
+Route::delete('/applications/{applicationUuid}/environment-variables/{envUuid}', [ApplicationController::class, 'destroyEnvironmentVariable'])
+    ->where(['applicationUuid' => '[A-Za-z0-9-]{8,64}', 'envUuid' => '[A-Za-z0-9-]{8,64}'])
+    ->name('applications.environment-variables.destroy');
 
 Route::prefix('github')->name('github.')->group(function () {
     Route::get('/apps', [GithubController::class, 'apps'])->name('apps.index');

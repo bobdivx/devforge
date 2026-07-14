@@ -14,10 +14,13 @@ import {
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { ActionToolbar } from '../ui/ActionToolbar';
 import { DataState } from '../ui/DataState';
 import { DeploymentStatusIcon } from '../ui/DeploymentStatusIcon';
 import { ResourceStatusIcon } from '../ui/ResourceStatusIcon';
 import { Table } from '../ui/Table';
+import { Tabs } from '../ui/Tabs';
+import { ApplicationEnvironmentVariablesPanel } from './ApplicationEnvironmentVariablesPanel';
 import { ConnectDatabasePanel } from './ConnectDatabasePanel';
 import { ApplicationLogsPanel } from './ApplicationLogsPanel';
 import { DeploymentMonitorPanel } from './DeploymentMonitorPanel';
@@ -32,6 +35,7 @@ import {
     visitUrl,
     websiteScreenshotUrl,
 } from '../../lib/application-config';
+import { applicationTabs, type ApplicationTabId } from '../../lib/application-tabs';
 import { domainApi, type CoreAction, type Deployment } from '../../lib/domain-api';
 import { isDeploymentActive } from '../../lib/deployment-status';
 import { useApiQuery } from '../../lib/use-api-query';
@@ -164,6 +168,7 @@ type ApplicationDetailPanelProps = {
 export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: ApplicationDetailPanelProps) {
     const resourceQuery = useApiQuery(`core:applications:${uuid}`, () => domainApi.coreResource('applications', uuid));
     const deploymentsQuery = useApiQuery(`deployments:${uuid}`, () => domainApi.deployments(1, uuid, 8));
+    const [activeTab, setActiveTab] = useState<ApplicationTabId>('overview');
     const [acting, setActing] = useState<CoreAction | null>(null);
     const [pendingAction, setPendingAction] = useState<CoreAction | null>(null);
     const [actionError, setActionError] = useState<string | null>(null);
@@ -214,6 +219,7 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
 
             if (deploymentUuid) {
                 setFocusedDeploymentUuid(deploymentUuid);
+                setActiveTab('deployments');
             }
 
             await reload();
@@ -229,9 +235,9 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
     return (
         <DataState loading={resourceQuery.loading} error={resourceQuery.error} onRetry={() => void reload()}>
             {resource && config && (
-                <div class="grid gap-5">
-                    <div class="flex flex-wrap items-start justify-between gap-4">
-                        <div class="grid gap-2">
+                <div class="grid min-w-0 gap-5">
+                    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div class="grid min-w-0 gap-2">
                             <button class="btn btn-ghost btn-sm -ms-2 w-fit rounded-full px-3" type="button" onClick={onClose}>
                                 <ArrowLeft class="size-4" aria-hidden />
                                 Applications
@@ -243,7 +249,7 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                                 </p>
                             </div>
                         </div>
-                        <div class="flex flex-wrap items-center gap-2">
+                        <ActionToolbar>
                             {visit && (
                                 <a class="btn btn-primary btn-sm rounded-full" href={visit} rel="noreferrer" target="_blank">
                                     <ExternalLink class="size-3.5" aria-hidden />
@@ -277,187 +283,212 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                                 <RefreshCw class="size-3.5" aria-hidden />
                                 Actualiser
                             </button>
-                        </div>
+                        </ActionToolbar>
                     </div>
 
-                    <section class="overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-                        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-base-300/70 px-5 py-4">
-                            <div>
-                                <p class="text-sm font-semibold">Déploiement de production</p>
-                                <p class="text-xs text-base-content/50">État actuel et source de déploiement</p>
-                            </div>
-                            {latest && (
-                                <p class="text-xs text-base-content/45">
-                                    Dernier déploiement {relativeUpdatedAt(latest.finished_at ?? latest.created_at)}
-                                </p>
-                            )}
-                        </div>
-
-                        <div class="grid gap-5 p-5 lg:grid-cols-[minmax(220px,280px)_1fr]">
-                            <PreviewPanel name={resource.name} domain={domain} status={typeof status === 'string' ? status : 'running:healthy'} />
-
-                            <dl class="min-w-0">
-                                <DetailRow label="Déploiement">
-                                    <span class="font-mono text-xs text-base-content/70">{resource.uuid}</span>
-                                </DetailRow>
-                                <DetailRow label="Domaines">
-                                    {config.domains.length === 0 ? (
-                                        <span class="text-base-content/45">Aucun domaine</span>
-                                    ) : (
-                                        <ul class="grid gap-2">
-                                            {config.domains.map((item) => {
-                                                const href = visitUrl(item);
-
-                                                return (
-                                                    <li key={item}>
-                                                        {href ? (
-                                                            <a class="inline-flex items-center gap-2 text-primary hover:underline" href={href} rel="noreferrer" target="_blank">
-                                                                <Globe class="size-3.5 shrink-0" aria-hidden />
-                                                                <span class="truncate">{item}</span>
-                                                            </a>
-                                                        ) : (
-                                                            <span>{item}</span>
-                                                        )}
-                                                    </li>
-                                                );
-                                            })}
-                                        </ul>
-                                    )}
-                                </DetailRow>
-                                <DetailRow label="Statut">
-                                    <ResourceStatusIcon status={status} showLabel size="md" />
-                                </DetailRow>
-                                <DetailRow label="Mis à jour">
-                                    <span>{formatDateTime(resource.updated_at)}</span>
-                                </DetailRow>
-                                <DetailRow label="Source">
-                                    <div class="grid gap-1">
-                                        <span class="inline-flex items-center gap-2">
-                                            <GitBranch class="size-3.5 text-base-content/45" aria-hidden />
-                                            <span class="font-medium">{config.git_branch ?? 'branche inconnue'}</span>
-                                        </span>
-                                        {latest?.commit && (
-                                            <span class="font-mono text-xs text-base-content/55">
-                                                {shortCommit(latest.commit)}
-                                                {latest.commit_message ? ` · ${latest.commit_message}` : ''}
-                                            </span>
-                                        )}
-                                        {!latest?.commit && config.git_repository && (
-                                            <span class="text-xs text-base-content/55">{repositoryLabel(config.git_repository)}</span>
-                                        )}
-                                    </div>
-                                </DetailRow>
-                            </dl>
-                        </div>
-                    </section>
-
-                    <div class="grid gap-4 md:grid-cols-3">
-                        <MetricCard title="Build">
-                            <p><span class="text-base-content/45">Pack </span><span class="font-medium">{config.build_pack ?? '—'}</span></p>
-                            <p><span class="text-base-content/45">Branche </span><span class="font-medium">{config.git_branch ?? '—'}</span></p>
-                        </MetricCard>
-                        <MetricCard title="Git">
-                            <p class="truncate">
-                                <span class="text-base-content/45">Dépôt </span>
-                                <span class="font-medium">{repositoryLabel(config.git_repository) ?? '—'}</span>
-                            </p>
-                            <p><span class="text-base-content/45">Dernier commit </span><span class="font-mono text-xs">{shortCommit(latest?.commit ?? null) ?? '—'}</span></p>
-                        </MetricCard>
-                        <MetricCard title="Infrastructure">
-                            <p><span class="text-base-content/45">Serveur </span><span class="font-medium">{config.server?.name ?? '—'}</span></p>
-                            <p><span class="text-base-content/45">Environnement </span><span class="font-medium">{config.environment?.name ?? '—'}</span></p>
-                        </MetricCard>
-                    </div>
-
-                    <ConnectDatabasePanel
-                        applicationUuid={resource.uuid}
-                        canAct={canAct}
-                        onConnected={reload}
+                    <Tabs
+                        items={applicationTabs}
+                        active={activeTab}
+                        onChange={(tabId) => setActiveTab(tabId as ApplicationTabId)}
                     />
 
-                    {focusedDeploymentUuid && (
-                        <section class="grid gap-3">
-                            <div class="flex flex-wrap items-center justify-between gap-3">
-                                <div>
-                                    <p class="text-sm font-semibold">Suivi du déploiement</p>
-                                    <p class="text-xs text-base-content/50">
-                                        Logs en direct et intervention de l’agent IA
-                                    </p>
+                    {activeTab === 'overview' && (
+                        <>
+                            <section class="overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
+                                <div class="flex flex-wrap items-center justify-between gap-3 border-b border-base-300/70 px-5 py-4">
+                                    <div>
+                                        <p class="text-sm font-semibold">Déploiement de production</p>
+                                        <p class="text-xs text-base-content/50">État actuel et source de déploiement</p>
+                                    </div>
+                                    {latest && (
+                                        <p class="text-xs text-base-content/45">
+                                            Dernier déploiement {relativeUpdatedAt(latest.finished_at ?? latest.created_at)}
+                                        </p>
+                                    )}
                                 </div>
-                                {selectedDeployment && (
-                                    <DeploymentStatusIcon status={selectedDeployment.status} showLabel />
-                                )}
+
+                                <div class="grid gap-5 p-5 lg:grid-cols-[minmax(220px,280px)_1fr]">
+                                    <PreviewPanel name={resource.name} domain={domain} status={typeof status === 'string' ? status : 'running:healthy'} />
+
+                                    <dl class="min-w-0">
+                                        <DetailRow label="Déploiement">
+                                            <span class="font-mono text-xs text-base-content/70">{resource.uuid}</span>
+                                        </DetailRow>
+                                        <DetailRow label="Domaines">
+                                            {config.domains.length === 0 ? (
+                                                <span class="text-base-content/45">Aucun domaine</span>
+                                            ) : (
+                                                <ul class="grid gap-2">
+                                                    {config.domains.map((item) => {
+                                                        const href = visitUrl(item);
+
+                                                        return (
+                                                            <li key={item}>
+                                                                {href ? (
+                                                                    <a class="inline-flex items-center gap-2 text-primary hover:underline" href={href} rel="noreferrer" target="_blank">
+                                                                        <Globe class="size-3.5 shrink-0" aria-hidden />
+                                                                        <span class="truncate">{item}</span>
+                                                                    </a>
+                                                                ) : (
+                                                                    <span>{item}</span>
+                                                                )}
+                                                            </li>
+                                                        );
+                                                    })}
+                                                </ul>
+                                            )}
+                                        </DetailRow>
+                                        <DetailRow label="Statut">
+                                            <ResourceStatusIcon status={status} showLabel size="md" />
+                                        </DetailRow>
+                                        <DetailRow label="Mis à jour">
+                                            <span>{formatDateTime(resource.updated_at)}</span>
+                                        </DetailRow>
+                                        <DetailRow label="Source">
+                                            <div class="grid gap-1">
+                                                <span class="inline-flex items-center gap-2">
+                                                    <GitBranch class="size-3.5 text-base-content/45" aria-hidden />
+                                                    <span class="font-medium">{config.git_branch ?? 'branche inconnue'}</span>
+                                                </span>
+                                                {latest?.commit && (
+                                                    <span class="font-mono text-xs text-base-content/55">
+                                                        {shortCommit(latest.commit)}
+                                                        {latest.commit_message ? ` · ${latest.commit_message}` : ''}
+                                                    </span>
+                                                )}
+                                                {!latest?.commit && config.git_repository && (
+                                                    <span class="text-xs text-base-content/55">{repositoryLabel(config.git_repository)}</span>
+                                                )}
+                                            </div>
+                                        </DetailRow>
+                                    </dl>
+                                </div>
+                            </section>
+
+                            <div class="grid gap-4 md:grid-cols-3">
+                                <MetricCard title="Build">
+                                    <p><span class="text-base-content/45">Pack </span><span class="font-medium">{config.build_pack ?? '—'}</span></p>
+                                    <p><span class="text-base-content/45">Branche </span><span class="font-medium">{config.git_branch ?? '—'}</span></p>
+                                </MetricCard>
+                                <MetricCard title="Git">
+                                    <p class="truncate">
+                                        <span class="text-base-content/45">Dépôt </span>
+                                        <span class="font-medium">{repositoryLabel(config.git_repository) ?? '—'}</span>
+                                    </p>
+                                    <p><span class="text-base-content/45">Dernier commit </span><span class="font-mono text-xs">{shortCommit(latest?.commit ?? null) ?? '—'}</span></p>
+                                </MetricCard>
+                                <MetricCard title="Infrastructure">
+                                    <p><span class="text-base-content/45">Serveur </span><span class="font-medium">{config.server?.name ?? '—'}</span></p>
+                                    <p><span class="text-base-content/45">Environnement </span><span class="font-medium">{config.environment?.name ?? '—'}</span></p>
+                                </MetricCard>
                             </div>
-                            <DeploymentMonitorPanel
-                                deploymentUuid={focusedDeploymentUuid}
-                                deployment={selectedDeployment}
-                                onSelectDeployment={setFocusedDeploymentUuid}
-                            />
-                        </section>
+
+                            {resource.description && (
+                                <section class="rounded-2xl border border-base-300/70 bg-base-100 p-5 text-sm text-base-content/65 shadow-sm">
+                                    {resource.description}
+                                </section>
+                            )}
+                        </>
                     )}
 
-                    <ApplicationLogsPanel applicationUuid={resource.uuid} />
+                    {activeTab === 'deployments' && (
+                        <>
+                            {focusedDeploymentUuid && (
+                                <section class="grid gap-3">
+                                    <div class="flex flex-wrap items-center justify-between gap-3">
+                                        <div>
+                                            <p class="text-sm font-semibold">Suivi du déploiement</p>
+                                            <p class="text-xs text-base-content/50">
+                                                Logs en direct et intervention de l’agent IA
+                                            </p>
+                                        </div>
+                                        {selectedDeployment && (
+                                            <DeploymentStatusIcon status={selectedDeployment.status} showLabel />
+                                        )}
+                                    </div>
+                                    <DeploymentMonitorPanel
+                                        deploymentUuid={focusedDeploymentUuid}
+                                        deployment={selectedDeployment}
+                                        onSelectDeployment={setFocusedDeploymentUuid}
+                                    />
+                                </section>
+                            )}
 
-                    <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-                        <div class="flex items-center justify-between gap-3 border-b border-base-300/70 px-5 py-4">
-                            <div>
-                                <p class="text-sm font-semibold">Déploiements récents</p>
-                                <p class="text-xs text-base-content/50">Historique des livraisons pour cette application</p>
-                            </div>
-                            <Server class="size-4 text-base-content/35" aria-hidden />
-                        </div>
+                            <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
+                                <div class="flex items-center justify-between gap-3 border-b border-base-300/70 px-5 py-4">
+                                    <div>
+                                        <p class="text-sm font-semibold">Déploiements récents</p>
+                                        <p class="text-xs text-base-content/50">Historique des livraisons pour cette application</p>
+                                    </div>
+                                    <Server class="size-4 text-base-content/35" aria-hidden />
+                                </div>
 
-                        <DataState
-                            loading={deploymentsQuery.loading}
-                            error={deploymentsQuery.error}
-                            empty={deployments.length === 0}
-                            emptyMessage="Aucun déploiement enregistré pour cette application."
-                            onRetry={() => void deploymentsQuery.reload()}
-                        >
-                            <div class="overflow-x-auto px-2 pb-2">
-                                <Table headers={['Statut', 'Commit', 'Message', 'Date', 'Suivi']} caption="Déploiements récents">
-                                    {deployments.map((deployment) => {
-                                        const selected = deployment.uuid === focusedDeploymentUuid;
+                                <DataState
+                                    loading={deploymentsQuery.loading}
+                                    error={deploymentsQuery.error}
+                                    empty={deployments.length === 0}
+                                    emptyMessage="Aucun déploiement enregistré pour cette application."
+                                    onRetry={() => void deploymentsQuery.reload()}
+                                >
+                                    <div class="overflow-x-auto px-2 pb-2">
+                                        <Table headers={['Statut', 'Commit', 'Message', 'Date', 'Suivi']} caption="Déploiements récents">
+                                            {deployments.map((deployment) => {
+                                                const selected = deployment.uuid === focusedDeploymentUuid;
 
-                                        return (
-                                        <tr
-                                            class={selected ? 'bg-primary/5' : 'cursor-pointer hover:bg-base-200/40'}
-                                            key={deployment.uuid}
-                                            onClick={() => setFocusedDeploymentUuid(deployment.uuid)}
-                                        >
-                                            <td>
-                                                <DeploymentStatusIcon status={deployment.status} showLabel />
-                                            </td>
-                                            <td class="font-mono text-xs">{shortCommit(deployment.commit) ?? '—'}</td>
-                                            <td class="max-w-xs truncate text-sm">{deployment.commit_message ?? '—'}</td>
-                                            <td class="whitespace-nowrap text-xs text-base-content/55">
-                                                {formatDateTime(deployment.finished_at ?? deployment.created_at)}
-                                            </td>
-                                            <td class="text-end">
-                                                <button
-                                                    class={`btn btn-ghost btn-xs ${selected ? 'text-primary' : ''}`}
-                                                    type="button"
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        setFocusedDeploymentUuid(deployment.uuid);
-                                                    }}
+                                                return (
+                                                <tr
+                                                    class={selected ? 'bg-primary/5' : 'cursor-pointer hover:bg-base-200/40'}
+                                                    key={deployment.uuid}
+                                                    onClick={() => setFocusedDeploymentUuid(deployment.uuid)}
                                                 >
-                                                    <FileText class="size-3.5" aria-hidden />
-                                                    {selected ? 'Suivi actif' : 'Suivre'}
-                                                </button>
-                                            </td>
-                                        </tr>
-                                        );
-                                    })}
-                                </Table>
-                            </div>
-                        </DataState>
-                    </section>
+                                                    <td>
+                                                        <DeploymentStatusIcon status={deployment.status} showLabel />
+                                                    </td>
+                                                    <td class="font-mono text-xs">{shortCommit(deployment.commit) ?? '—'}</td>
+                                                    <td class="max-w-xs truncate text-sm">{deployment.commit_message ?? '—'}</td>
+                                                    <td class="whitespace-nowrap text-xs text-base-content/55">
+                                                        {formatDateTime(deployment.finished_at ?? deployment.created_at)}
+                                                    </td>
+                                                    <td class="text-end">
+                                                        <button
+                                                            class={`btn btn-ghost btn-xs ${selected ? 'text-primary' : ''}`}
+                                                            type="button"
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                setFocusedDeploymentUuid(deployment.uuid);
+                                                            }}
+                                                        >
+                                                            <FileText class="size-3.5" aria-hidden />
+                                                            {selected ? 'Suivi actif' : 'Suivre'}
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                                );
+                                            })}
+                                        </Table>
+                                    </div>
+                                </DataState>
+                            </section>
+                        </>
+                    )}
 
-                    {resource.description && (
-                        <section class="rounded-2xl border border-base-300/70 bg-base-100 p-5 text-sm text-base-content/65 shadow-sm">
-                            {resource.description}
-                        </section>
+                    {activeTab === 'databases' && (
+                        <ConnectDatabasePanel
+                            applicationUuid={resource.uuid}
+                            canAct={canAct}
+                            onConnected={reload}
+                        />
+                    )}
+
+                    {activeTab === 'logs' && (
+                        <ApplicationLogsPanel applicationUuid={resource.uuid} />
+                    )}
+
+                    {activeTab === 'variables' && (
+                        <ApplicationEnvironmentVariablesPanel
+                            applicationUuid={resource.uuid}
+                            canAct={canAct}
+                        />
                     )}
 
                     {actionError && <p class="text-sm text-error" role="alert">{actionError}</p>}

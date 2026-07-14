@@ -1,6 +1,5 @@
 import type { LucideIcon } from 'lucide-preact';
 import {
-    Activity,
     CircleAlert,
     CircleCheck,
     CircleHelp,
@@ -29,6 +28,50 @@ export function resourceStatusInput(resource: CoreResource): string | {
     validating: boolean;
 } {
     return resource.status;
+}
+
+export function classifyResourceStatusTone(status: string): ResourceStatusTone {
+    const normalized = status.trim().toLowerCase();
+    if (!normalized) {
+        return 'neutral';
+    }
+
+    const [primary, health] = normalized.split(':');
+
+    if (primary === 'running') {
+        if (health === 'unhealthy') {
+            return 'warning';
+        }
+
+        // running:unknown = conteneur actif sans healthcheck Docker (état normal Coolify)
+        return 'success';
+    }
+
+    if (primary === 'degraded' || primary === 'restarting') {
+        return 'warning';
+    }
+
+    if (primary === 'starting' || primary === 'created' || primary === 'paused') {
+        return 'warning';
+    }
+
+    if (primary === 'exited' || primary === 'stopped' || primary === 'dead') {
+        return 'error';
+    }
+
+    if (primary.includes('fail') || primary === 'unavailable' || primary === 'error') {
+        return 'error';
+    }
+
+    if (primary === 'unknown') {
+        return 'neutral';
+    }
+
+    if (primary.includes('valid') || primary.includes('progress')) {
+        return 'warning';
+    }
+
+    return 'neutral';
 }
 
 export function parseResourceStatus(status: string | {
@@ -62,10 +105,18 @@ export function parseResourceStatus(status: string | {
             return buildStatus(status, 'En ligne mais dégradé', 'Dégradé', 'warning', CircleAlert);
         }
         if (health === 'unknown') {
-            return buildStatus(status, 'En cours de fonctionnement', 'En cours', 'warning', Activity);
+            return buildStatus(status, 'En ligne', 'En ligne', 'success', CircleCheck);
         }
 
         return buildStatus(status, 'En cours de fonctionnement', 'En cours', 'success', Play);
+    }
+
+    if (primary === 'degraded') {
+        return buildStatus(status, 'Service dégradé', 'Dégradé', 'warning', CircleAlert);
+    }
+
+    if (primary === 'restarting') {
+        return buildStatus(status, 'Redémarrage en cours', 'Redémarrage', 'warning', Loader2, true);
     }
 
     if (primary === 'starting' || primary === 'created') {
@@ -92,7 +143,11 @@ export function parseResourceStatus(status: string | {
 }
 
 export function resourceStatusTone(status: string): ResourceStatusTone {
-    return parseResourceStatus(status).tone;
+    if (typeof status !== 'string') {
+        return parseResourceStatus(status).tone;
+    }
+
+    return classifyResourceStatusTone(status);
 }
 
 function buildStatus(

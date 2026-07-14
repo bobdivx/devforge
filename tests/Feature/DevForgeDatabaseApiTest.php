@@ -32,7 +32,7 @@ beforeEach(function () {
 });
 
 it('creates a postgresql database for the current team', function () {
-    Queue::fake();
+    StartDatabase::shouldRun()->once()->andReturn('started');
 
     $response = $this->actingAs($this->user)
         ->withSession($this->session)
@@ -59,12 +59,10 @@ it('creates a postgresql database for the current team', function () {
     expect($database)->not->toBeNull()
         ->and($database->environment_id)->toBe($this->environment->id)
         ->and($database->destination_id)->toBe($this->destination->id);
-
-    Queue::assertPushed(StartDatabase::class);
 });
 
 it('creates a libsql database for the current team', function () {
-    Queue::fake();
+    StartDatabase::shouldRun()->once()->andReturn('started');
 
     $response = $this->actingAs($this->user)
         ->withSession($this->session)
@@ -87,12 +85,10 @@ it('creates a libsql database for the current team', function () {
     expect($database)->not->toBeNull()
         ->and($database->libsql_auth_user)->toBe('libsql')
         ->and($database->environment_id)->toBe($this->environment->id);
-
-    Queue::assertPushed(StartDatabase::class);
 });
 
 it('creates a redis database without instant deploy', function () {
-    Queue::fake();
+    StartDatabase::shouldRun()->never();
 
     $this->actingAs($this->user)
         ->withSession($this->session)
@@ -106,8 +102,6 @@ it('creates a redis database without instant deploy', function () {
         ->assertCreated()
         ->assertJsonPath('data.engine', 'redis')
         ->assertJsonPath('meta.instant_deploy', false);
-
-    Queue::assertNothingPushed();
 });
 
 it('rejects database creation with a destination from another team', function () {
@@ -139,7 +133,7 @@ it('rejects unsupported database engines', function () {
 });
 
 it('connects a created libsql database to an application when requested', function () {
-    Queue::fake();
+    StartDatabase::shouldRun()->once()->andReturn('started');
 
     $application = Application::factory()->create([
         'name' => 'Demo app',
@@ -162,6 +156,7 @@ it('connects a created libsql database to an application when requested', functi
             'instant_deploy' => true,
         ])
         ->assertCreated()
+        ->assertJsonPath('data.name', 'Demo app · libSQL')
         ->assertJsonPath('meta.connection.env_key', 'LIBSQL_URL')
         ->assertJsonPath('meta.connection.application_uuid', $application->uuid);
 

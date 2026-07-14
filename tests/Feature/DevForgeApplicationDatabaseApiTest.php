@@ -104,8 +104,8 @@ it('connects a database to an application via environment variable', function ()
         ->withSession($this->session)
         ->getJson("/api/devforge/v1/applications/{$this->application->uuid}/linkable-databases")
         ->assertSuccessful()
-        ->assertJsonPath('meta.connections.0.env_key', 'DATABASE_URL')
         ->assertJsonPath('meta.connections.0.database_uuid', $this->database->uuid)
+        ->assertJsonPath('meta.connections.0.env_keys', ['DATABASE_URL'])
         ->assertJsonPath('data.0.uuid', $this->database->uuid)
         ->assertJsonPath('data.0.is_linkable', false)
         ->assertJsonPath('data.0.connected_applications.0.application_name', 'Linked app')
@@ -343,4 +343,77 @@ it('keeps LIBSQL_URL when the application already uses it', function () {
 
     expect(EnvironmentVariable::query()->where('resourceable_id', $this->application->id)->where('key', 'LIBSQL_URL')->first()?->real_value)
         ->toBe($libsql->internal_db_url);
+});
+
+it('groups libsql connection variables into a single application connection', function () {
+    $libsql = StandaloneLibsql::withoutEvents(fn () => StandaloneLibsql::create([
+        'uuid' => fake()->uuid(),
+        'name' => 'Grouped db',
+        'libsql_auth_user' => 'libsql',
+        'libsql_auth_token' => 'secret-token',
+        'status' => 'running:healthy',
+        'environment_id' => $this->environment->id,
+        'destination_id' => $this->destination->id,
+        'destination_type' => StandaloneDocker::class,
+    ]));
+
+    $comment = 'devforge:database:'.$libsql->uuid;
+
+    foreach (['TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN', 'LIBSQL_URL'] as $key) {
+        $this->application->environment_variables()->create([
+            'key' => $key,
+            'value' => 'placeholder',
+            'comment' => $comment,
+            'is_preview' => false,
+            'is_runtime' => true,
+            'is_buildtime' => true,
+        ]);
+    }
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson("/api/devforge/v1/applications/{$this->application->uuid}/linkable-databases")
+        ->assertSuccessful()
+        ->assertJsonCount(1, 'meta.connections')
+        ->assertJsonPath('meta.connections.0.database_uuid', $libsql->uuid)
+        ->assertJsonPath('meta.connections.0.env_keys', ['LIBSQL_URL', 'TURSO_AUTH_TOKEN', 'TURSO_DATABASE_URL']);
+});
+
+it('removes stale linked libsql variables when applying a turso connection', function () {
+    $libsql = StandaloneLibsql::withoutEvents(fn () => StandaloneLibsql::create([
+        'uuid' => fake()->uuid(),
+        'name' => 'Cleanup db',
+        'libsql_auth_user' => 'libsql',
+        'libsql_auth_token' => 'secret-token',
+        'status' => 'running:healthy',
+        'environment_id' => $this->environment->id,
+        'destination_id' => $this->destination->id,
+        'destination_type' => StandaloneDocker::class,
+    ]));
+
+    $comment = 'devforge:database:'.$libsql->uuid;
+
+    $this->application->environment_variables()->create([
+        'key' => 'LIBSQL_URL',
+        'value' => 'libsql://old:pass@host:8080',
+        'comment' => $comment,
+        'is_preview' => false,
+        'is_runtime' => true,
+        'is_buildtime' => true,
+    ]);
+
+    app(\App\Services\DevForge\Database\LibsqlConnectionEnvSync::class)->applyConnection(
+        $this->application,
+        $libsql,
+        'TURSO_DATABASE_URL',
+        true,
+        true,
+    );
+
+    expect(EnvironmentVariable::query()->where('resourceable_id', $this->application->id)->where('key', 'LIBSQL_URL')->exists())
+        ->toBeFalse()
+        ->and(EnvironmentVariable::query()->where('resourceable_id', $this->application->id)->where('key', 'TURSO_DATABASE_URL')->exists())
+        ->toBeTrue()
+        ->and(EnvironmentVariable::query()->where('resourceable_id', $this->application->id)->where('key', 'TURSO_AUTH_TOKEN')->exists())
+        ->toBeTrue();
 });

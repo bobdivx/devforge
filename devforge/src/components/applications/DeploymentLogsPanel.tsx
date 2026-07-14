@@ -1,6 +1,7 @@
 import { RefreshCw } from 'lucide-preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { DataState } from '../ui/DataState';
+import { ActionToolbar } from '../ui/ActionToolbar';
 import { DeploymentStatusIcon } from '../ui/DeploymentStatusIcon';
 import { domainApi, type Deployment } from '../../lib/domain-api';
 import { useDeploymentLogs } from '../../lib/use-deployment-logs';
@@ -45,7 +46,7 @@ export function DeploymentLogsPanel({
                             {logs.complete ? 'Déploiement terminé' : 'Suivi en direct'}
                         </p>
                     </div>
-                    <div class="flex flex-wrap items-center gap-2">
+                    <ActionToolbar>
                         {resolvedDeployment && (
                             <DeploymentStatusIcon status={resolvedDeployment.status} showLabel />
                         )}
@@ -53,7 +54,7 @@ export function DeploymentLogsPanel({
                             <RefreshCw class="size-3.5" aria-hidden />
                             Actualiser
                         </button>
-                    </div>
+                    </ActionToolbar>
                 </div>
             )}
 

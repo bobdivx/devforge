@@ -40,7 +40,7 @@ export function Modal({ open, title, onClose, children, footer }: ModalProps) {
                     </button>
                 </div>
                 <div class="grid gap-3">{children}</div>
-                {footer && <div class="modal-action">{footer}</div>}
+                {footer && <div class="modal-action form-actions mt-4">{footer}</div>}
             </div>
             <button class="modal-backdrop" type="button" aria-label="Fermer la fenêtre" onClick={onClose} />
         </div>

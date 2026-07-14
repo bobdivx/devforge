@@ -90,6 +90,59 @@ export async function apiFetch<T>(
     return payload as T;
 }
 
+export type UploadProgressHandler = (loaded: number, total: number) => void;
+
+export async function apiUploadWithProgress<T>(
+    input: string,
+    formData: FormData,
+    onProgress?: UploadProgressHandler,
+): Promise<T> {
+    await ensureCsrfCookie();
+
+    return new Promise<T>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', input);
+        xhr.withCredentials = true;
+        xhr.setRequestHeader('Accept', 'application/json');
+
+        const csrfToken = readCookie('XSRF-TOKEN');
+        if (csrfToken) {
+            xhr.setRequestHeader('X-XSRF-TOKEN', csrfToken);
+        }
+
+        xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+                onProgress?.(event.loaded, event.total);
+            }
+        };
+
+        xhr.onload = () => {
+            const contentType = xhr.getResponseHeader('content-type') ?? '';
+            let payload: unknown;
+
+            try {
+                payload = contentType.includes('application/json')
+                    ? JSON.parse(xhr.responseText || 'null')
+                    : xhr.responseText;
+            } catch {
+                reject(new ApiError(xhr.status, xhr.responseText));
+                return;
+            }
+
+            if (xhr.status >= 200 && xhr.status < 300) {
+                resolve(payload as T);
+                return;
+            }
+
+            reject(new ApiError(xhr.status, payload));
+        };
+
+        xhr.onerror = () => reject(new ApiError(0, null));
+        xhr.onabort = () => reject(new ApiError(0, null));
+        xhr.send(formData);
+    });
+}
+
 export function getBootstrap(): Promise<BootstrapResponse> {
     return apiFetch<BootstrapResponse>('/api/devforge/v1/bootstrap');
 }

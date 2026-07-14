@@ -157,10 +157,11 @@ docker exec -w /var/www/html "${CONTAINER}" php artisan config:clear
 docker exec -w /var/www/html "${CONTAINER}" php artisan route:clear
 
 log "Verification des routes DevForge"
-if ! docker exec -w /var/www/html "${CONTAINER}" php artisan route:list --path=devforge --except-vendor >/dev/null 2>&1; then
-    fail "Impossible de charger les routes DevForge - voir laravel.log"
-fi
-docker exec -w /var/www/html "${CONTAINER}" php artisan route:list --path=devforge --except-vendor 2>&1 | head -15 || true
+ROUTE_LIST_OUTPUT="$(docker exec -w /var/www/html "${CONTAINER}" php artisan route:list --path=devforge --except-vendor 2>&1)" || {
+    echo "${ROUTE_LIST_OUTPUT}" >&2
+    fail "Impossible de charger les routes DevForge - voir la sortie ci-dessus ou laravel.log"
+}
+echo "${ROUTE_LIST_OUTPUT}" | head -15 || true
 
 log "Configuration"
 docker exec -w /var/www/html "${CONTAINER}" php artisan config:show devforge.enabled

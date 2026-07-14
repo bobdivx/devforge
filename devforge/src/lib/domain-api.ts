@@ -1,4 +1,4 @@
-import { apiFetch, ApiError, ensureCsrfCookie } from './api-client';
+import { apiFetch, apiUploadWithProgress, ApiError, ensureCsrfCookie, type UploadProgressHandler } from './api-client';
 
 const API_BASE = '/api/devforge/v1';
 
@@ -67,6 +67,7 @@ export type CoreActionResult = {
     resource_type: string;
     action: CoreAction;
     queued?: boolean;
+    completed?: boolean;
     deployment_uuid?: string;
     message?: string;
 };
@@ -185,6 +186,7 @@ export type Profile = {
     name: string;
     email: string;
     email_verified: boolean;
+    two_factor_enabled: boolean;
 };
 
 export type Team = {
@@ -202,15 +204,95 @@ export type TeamMember = {
     role: string;
 };
 
+export type TeamInvitation = {
+    id: number;
+    email: string;
+    role: string;
+    via: 'email' | 'link';
+    link: string | null;
+    created_at: string | null;
+};
+
 export type InstanceSettings = {
-    instance_name: string;
-    fqdn: string | null;
-    is_registration_enabled: boolean;
-    is_api_enabled: boolean;
-    is_auto_update_enabled: boolean;
-    is_dns_validation_enabled: boolean;
-    instance_timezone: string;
-    is_mcp_server_enabled: boolean;
+    instance: {
+        instance_name: string;
+        fqdn: string | null;
+        instance_timezone: string;
+        public_ipv4: string | null;
+        public_ipv6: string | null;
+        public_port_min: number | null;
+        public_port_max: number | null;
+        helper_version: string | null;
+        dev_helper_version: string | null;
+        next_channel: string | null;
+    };
+    advanced: {
+        is_registration_enabled: boolean;
+        do_not_track: boolean;
+        is_dns_validation_enabled: boolean;
+        custom_dns_servers: string | null;
+        is_api_enabled: boolean;
+        allowed_ips: string | null;
+        is_sponsorship_popup_enabled: boolean;
+        disable_two_step_confirmation: boolean;
+        is_wire_navigate_enabled: boolean;
+        is_mcp_server_enabled: boolean;
+    };
+    email: {
+        smtp_enabled: boolean;
+        smtp_from_address: string | null;
+        smtp_from_name: string | null;
+        smtp_recipients: string | null;
+        smtp_host: string | null;
+        smtp_port: number | null;
+        smtp_encryption: string | null;
+        smtp_username: string | null;
+        smtp_password: boolean;
+        smtp_timeout: number | null;
+        resend_enabled: boolean;
+        resend_api_key: boolean;
+    };
+    updates: {
+        is_auto_update_enabled: boolean;
+        auto_update_frequency: string | null;
+        update_check_frequency: string | null;
+        new_version_available: boolean;
+    };
+};
+
+export type OauthProviderSettings = {
+    id: number;
+    provider: string;
+    enabled: boolean;
+    client_id: string | null;
+    client_secret: string | null;
+    redirect_uri: string | null;
+    tenant: string | null;
+    base_url: string | null;
+};
+
+export type TerminalConfig = {
+    enabled: boolean;
+    websocket_url: string;
+    connection: {
+        protocol: string;
+        host: string;
+        port: number | null;
+        path: string;
+    };
+    auth: {
+        method: string;
+        endpoint: string;
+        allowed_ips_endpoint: string;
+        credentials: string;
+    };
+    permissions: {
+        access: boolean;
+        connect_server: boolean;
+        connect_container: boolean;
+        execute_commands: boolean;
+    };
+    targets: Array<{ uuid: string; name: string; type: string }>;
 };
 
 export type NotificationChannel = {
@@ -226,11 +308,39 @@ export type SharedVariable = {
     project_id: number | null;
     environment_id: number | null;
     server_id: number | null;
+    project_uuid?: string | null;
+    environment_uuid?: string | null;
+    server_uuid?: string | null;
+    project_name?: string | null;
+    environment_name?: string | null;
+    server_name?: string | null;
     comment: string | null;
     is_multiline: boolean;
     is_literal: boolean;
     is_shown_once: boolean;
     value: '********' | null;
+    value_locked?: boolean;
+};
+
+export type SharedVariableInput = {
+    key: string;
+    value?: string | null;
+    scope: 'team' | 'project' | 'environment' | 'server';
+    comment?: string | null;
+    is_multiline?: boolean;
+    is_literal?: boolean;
+    is_shown_once?: boolean;
+    project_uuid?: string | null;
+    environment_uuid?: string | null;
+    server_uuid?: string | null;
+};
+
+export type SharedVariableUpdateInput = {
+    key?: string;
+    value?: string | null;
+    comment?: string | null;
+    is_multiline?: boolean;
+    is_literal?: boolean;
 };
 
 export type SharedVariables = Record<'team' | 'project' | 'environment' | 'server', SharedVariable[]>;
@@ -368,6 +478,86 @@ export type DeploymentTarget = {
     destinations: DeploymentDestination[];
 };
 
+export type DestinationSummary = {
+    uuid: string;
+    name: string;
+    type: 'standalone' | 'swarm';
+    network: string;
+    server: {
+        uuid: string;
+        name: string;
+    };
+    resource_count: number;
+};
+
+export type DestinationDetail = DestinationSummary & {
+    server: {
+        uuid: string;
+        name: string;
+        ip: string | null;
+    };
+    has_attached_resources: boolean;
+    supports_resources_page: boolean;
+};
+
+export type DestinationInput = {
+    server_uuid: string;
+    network: string;
+    name?: string | null;
+    type?: 'standalone' | 'swarm';
+};
+
+export type DestinationUpdateInput = {
+    name?: string;
+    network?: string;
+};
+
+export type DestinationResource = {
+    uuid: string;
+    type: 'application' | 'service' | 'database';
+    name: string;
+    project: string | null;
+    environment: string | null;
+};
+
+export type TagSummary = {
+    name: string;
+    applications_count: number;
+    services_count: number;
+};
+
+export type TagDetail = {
+    name: string;
+    webhook_url: string;
+    applications_count: number;
+    services_count: number;
+    applications: Array<{
+        uuid: string;
+        name: string;
+        fqdn: string | null;
+        status: string | null;
+    }>;
+    services: Array<{
+        uuid: string;
+        name: string;
+        status: string | null;
+    }>;
+};
+
+export type TagRedeployResult = {
+    tag: string;
+    applications_queued: number;
+    services_queued: number;
+    results: Array<{
+        resource_type: 'application' | 'service';
+        uuid: string;
+        name: string;
+        queued?: boolean;
+        message?: string;
+        error?: string;
+    }>;
+};
+
 export type CreateApplicationInput = {
     project_uuid: string;
     environment_uuid: string;
@@ -490,8 +680,8 @@ export type LinkableDatabase = {
 };
 
 export type ApplicationDatabaseConnection = {
-    env_key: string;
     database_uuid: string;
+    env_keys: string[];
     is_runtime: boolean;
     is_buildtime: boolean;
     updated_at: string | null;
@@ -520,6 +710,47 @@ export type ConnectDatabaseInput = {
     instant_deploy?: boolean;
     migrate_from_remote?: boolean;
 };
+
+export type ApplicationEnvironmentVariable = {
+    uuid: string;
+    key: string;
+    value: string | null;
+    has_value: boolean;
+    is_revealable: boolean;
+    comment: string | null;
+    is_preview: boolean;
+    is_runtime: boolean;
+    is_buildtime: boolean;
+    is_multiline: boolean;
+    is_literal: boolean;
+    is_shown_once: boolean;
+    is_shared: boolean;
+    is_coolify: boolean;
+    is_buildpack_control: boolean;
+    is_editable: boolean;
+    updated_at: string | null;
+};
+
+export type ApplicationEnvironmentVariables = {
+    production: ApplicationEnvironmentVariable[];
+    preview: ApplicationEnvironmentVariable[];
+};
+
+export type ApplicationEnvironmentVariableInput = {
+    key: string;
+    value?: string | null;
+    comment?: string | null;
+    is_preview?: boolean;
+    is_runtime?: boolean;
+    is_buildtime?: boolean;
+    is_multiline?: boolean;
+    is_literal?: boolean;
+    is_shown_once?: boolean;
+};
+
+export type ApplicationEnvironmentVariableUpdateInput = Partial<
+    Omit<ApplicationEnvironmentVariableInput, 'key' | 'is_preview'>
+>;
 
 export type ConnectDatabaseResult = {
     application_uuid: string;
@@ -575,6 +806,27 @@ export type LibsqlAccessUpdateResult = LibsqlCredentials & {
 export type DatabaseImportSqlResult = {
     restarted: boolean;
     message: string;
+    format?: 'sql' | 'db';
+};
+
+export type DatabaseExplorerTable = {
+    name: string;
+    row_count: number | null;
+};
+
+export type DatabaseExplorerOverview = {
+    available: boolean;
+    table_count: number;
+    tables: DatabaseExplorerTable[];
+    message?: string;
+};
+
+export type DatabaseTablePreview = {
+    table: string;
+    columns: string[];
+    rows: Array<Record<string, unknown>>;
+    row_count: number;
+    truncated: boolean;
 };
 
 export type ApplicationLogLine = {
@@ -664,13 +916,98 @@ export const domainApi = {
         body: JSON.stringify(input),
     }),
     teams: () => apiFetch<ApiResponse<Team[]>>(`${API_BASE}/teams`),
+    currentTeam: () => apiFetch<ApiResponse<Team>>(`${API_BASE}/teams/current`),
+    updateCurrentTeam: (input: Pick<Team, 'name' | 'description'>) => mutate<ApiResponse<Team>>('/teams/current', {
+        method: 'PUT',
+        body: JSON.stringify(input),
+    }),
     members: () => apiFetch<ApiResponse<TeamMember[]>>(`${API_BASE}/teams/current/members`),
+    updateTeamMember: (userId: number, role: string) => mutate<ApiResponse<TeamMember>>(
+        `/teams/current/members/${userId}`,
+        {
+            method: 'PUT',
+            body: JSON.stringify({ role }),
+        },
+    ),
+    removeTeamMember: (userId: number) => mutate<void>(`/teams/current/members/${userId}`, {
+        method: 'DELETE',
+    }),
+    teamInvitations: () => apiFetch<ApiResponse<TeamInvitation[]>>(`${API_BASE}/teams/current/invitations`),
+    createTeamInvitation: (input: { email: string; role: string; via: 'email' | 'link' }) => mutate<ApiResponse<TeamInvitation>>(
+        '/teams/current/invitations',
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+    ),
+    revokeTeamInvitation: (invitationId: number) => mutate<void>(
+        `/teams/current/invitations/${invitationId}`,
+        { method: 'DELETE' },
+    ),
     settings: () => apiFetch<ApiResponse<InstanceSettings>>(`${API_BASE}/settings`),
+    oauthSettings: () => apiFetch<ApiResponse<OauthProviderSettings[]>>(`${API_BASE}/settings/oauth`),
+    terminalConfig: () => apiFetch<ApiResponse<TerminalConfig>>(`${API_BASE}/terminal/config`),
     notifications: () => apiFetch<ApiResponse<NotificationChannel[]>>(`${API_BASE}/notifications`),
+    updateNotificationChannel: (channel: string, input: { events: Record<string, boolean>; enabled?: boolean }) => mutate<ApiResponse<NotificationChannel>>(
+        `/notifications/${encodeURIComponent(channel)}`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
     sharedVariables: () => apiFetch<ApiResponse<SharedVariables>>(`${API_BASE}/shared-variables`),
+    createSharedVariable: (input: SharedVariableInput) => mutate<ApiResponse<SharedVariable>>('/shared-variables', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    }),
+    updateSharedVariable: (id: number, input: SharedVariableUpdateInput) => mutate<ApiResponse<SharedVariable>>(
+        `/shared-variables/${id}`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    deleteSharedVariable: (id: number) => mutate<void>(`/shared-variables/${id}`, {
+        method: 'DELETE',
+    }),
     securityKeys: () => apiFetch<ApiResponse<SecurityKey[]>>(`${API_BASE}/security/keys`),
 
     deploymentTargets: () => apiFetch<ApiResponse<DeploymentTarget[]>>(`${API_BASE}/deployment-targets`),
+    destinations: () => apiFetch<ApiResponse<DestinationSummary[]>>(`${API_BASE}/destinations`),
+    createDestination: (input: DestinationInput) => mutate<ApiResponse<DestinationDetail>>('/destinations', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    }),
+    destination: (destinationUuid: string) => apiFetch<ApiResponse<DestinationDetail>>(`${API_BASE}/destinations/${encodeURIComponent(destinationUuid)}`),
+    updateDestination: (destinationUuid: string, input: DestinationUpdateInput) => mutate<ApiResponse<DestinationDetail>>(
+        `/destinations/${encodeURIComponent(destinationUuid)}`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    deleteDestination: (destinationUuid: string) => mutate<void>(
+        `/destinations/${encodeURIComponent(destinationUuid)}`,
+        { method: 'DELETE' },
+    ),
+    destinationResources: (destinationUuid: string) => apiFetch<ApiResponse<DestinationResource[]>>(`${API_BASE}/destinations/${encodeURIComponent(destinationUuid)}/resources`),
+    tags: () => apiFetch<ApiResponse<TagSummary[]>>(`${API_BASE}/tags`),
+    createTag: (name: string) => mutate<ApiResponse<TagSummary>>('/tags', {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+    }),
+    tag: (tagName: string) => apiFetch<ApiResponse<TagDetail>>(`${API_BASE}/tags/${encodeURIComponent(tagName)}`),
+    deleteTag: (tagName: string) => mutate<void>(
+        `/tags/${encodeURIComponent(tagName)}`,
+        { method: 'DELETE' },
+    ),
+    redeployTag: (tagName: string, force = false) => mutate<ApiResponse<TagRedeployResult>>(
+        `/tags/${encodeURIComponent(tagName)}/redeploy`,
+        {
+            method: 'POST',
+            body: JSON.stringify({ force }),
+        },
+    ),
     githubApps: () => apiFetch<ApiResponse<GithubAppSummary[]>>(`${API_BASE}/github/apps`),
     githubRepositories: (githubAppUuid: string) => apiFetch<ApiResponse<GithubRepository[]>>(`${API_BASE}/github/apps/${encodeURIComponent(githubAppUuid)}/repositories`),
     githubBranches: (githubAppUuid: string, owner: string, repo: string) => apiFetch<ApiResponse<GithubBranch[]>>(`${API_BASE}/github/apps/${encodeURIComponent(githubAppUuid)}/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`),
@@ -695,6 +1032,40 @@ export const domainApi = {
     ),
     applicationLogs: (applicationUuid: string, lines = 200) => apiFetch<ApiResponse<ApplicationLogs>>(
         `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/logs?lines=${lines}`,
+    ),
+    applicationEnvironmentVariables: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationEnvironmentVariables>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/environment-variables`,
+    ),
+    createApplicationEnvironmentVariable: (
+        applicationUuid: string,
+        input: ApplicationEnvironmentVariableInput,
+    ) => mutate<ApiResponse<ApplicationEnvironmentVariable>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/environment-variables`,
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+    ),
+    updateApplicationEnvironmentVariable: (
+        applicationUuid: string,
+        envUuid: string,
+        input: ApplicationEnvironmentVariableUpdateInput,
+    ) => mutate<ApiResponse<ApplicationEnvironmentVariable>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/environment-variables/${encodeURIComponent(envUuid)}`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    deleteApplicationEnvironmentVariable: (applicationUuid: string, envUuid: string) => mutate<{ message: string }>(
+        `/applications/${encodeURIComponent(applicationUuid)}/environment-variables/${encodeURIComponent(envUuid)}`,
+        { method: 'DELETE' },
+    ),
+    revealApplicationEnvironmentVariable: (applicationUuid: string, envUuid: string) => apiFetch<ApiResponse<{
+        uuid: string;
+        value: string | null;
+    }>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/environment-variables/${encodeURIComponent(envUuid)}/reveal`,
     ),
     createDatabase: (input: CreateDatabaseInput) => mutate<ApiResponse<CoreResource>>('/databases', {
         method: 'POST',
@@ -747,18 +1118,29 @@ export const domainApi = {
         link.click();
         URL.revokeObjectURL(url);
     },
-    importDatabaseSql: async (databaseUuid: string, file: File) => {
-        await ensureCsrfCookie();
+    importDatabaseSql: async (
+        databaseUuid: string,
+        file: File,
+        options?: { onUploadProgress?: UploadProgressHandler },
+    ) => {
         const formData = new FormData();
         formData.append('file', file);
 
-        return apiFetch<ApiResponse<DatabaseImportSqlResult>>(
+        return apiUploadWithProgress<ApiResponse<DatabaseImportSqlResult>>(
             `${API_BASE}/databases/${encodeURIComponent(databaseUuid)}/import-sql`,
-            { method: 'POST', body: formData },
+            formData,
+            options?.onUploadProgress,
         );
     },
+    databaseExplorer: (databaseUuid: string) => apiFetch<ApiResponse<DatabaseExplorerOverview>>(
+        `${API_BASE}/databases/${encodeURIComponent(databaseUuid)}/explorer`,
+    ),
+    databaseExplorerTable: (databaseUuid: string, table: string, limit = 50) => apiFetch<ApiResponse<DatabaseTablePreview>>(
+        `${API_BASE}/databases/${encodeURIComponent(databaseUuid)}/explorer/tables/${encodeURIComponent(table)}?limit=${limit}`,
+    ),
 
     s3Storages: () => apiFetch<ApiResponse<S3Storage[]>>(`${API_BASE}/s3-storages`),
+    s3Storage: (storageUuid: string) => apiFetch<ApiResponse<S3Storage>>(`${API_BASE}/s3-storages/${encodeURIComponent(storageUuid)}`),
     createS3Storage: (input: S3StorageInput) => mutate<ApiResponse<S3Storage>>('/s3-storages', {
         method: 'POST',
         body: JSON.stringify(input),

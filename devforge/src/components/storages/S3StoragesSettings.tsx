@@ -2,6 +2,7 @@ import { Cloud, Plus, RefreshCw, Trash2, Wifi } from 'lucide-preact';
 import { useState } from 'preact/hooks';
 import { domainApi, type S3Storage, type S3StorageInput } from '../../lib/domain-api';
 import { useApiQuery } from '../../lib/use-api-query';
+import { ActionToolbar } from '../ui/ActionToolbar';
 import { Card } from '../ui/Card';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { DataState } from '../ui/DataState';
@@ -119,7 +120,7 @@ export function S3StoragesSettings({ canManage = true }: S3StoragesSettingsProps
     return (
         <>
             <Card title="Destinations S3" eyebrow="Sauvegardes">
-                <div class="mb-3 flex justify-end">
+                <div class="toolbar-row mb-3">
                     {canManage && (
                         <button class="btn btn-primary btn-sm" type="button" onClick={openCreate}>
                             <Plus class="size-3.5" aria-hidden />
@@ -153,7 +154,7 @@ export function S3StoragesSettings({ canManage = true }: S3StoragesSettingsProps
                                         )}
                                     </div>
                                     {canManage && (
-                                        <div class="flex flex-wrap gap-2">
+                                        <ActionToolbar>
                                             <button
                                                 class="btn btn-ghost btn-sm"
                                                 type="button"
@@ -173,7 +174,7 @@ export function S3StoragesSettings({ canManage = true }: S3StoragesSettingsProps
                                             >
                                                 <Trash2 class="size-3.5" aria-hidden />
                                             </button>
-                                        </div>
+                                        </ActionToolbar>
                                     )}
                                 </li>
                             ))}
@@ -234,7 +235,7 @@ export function S3StoragesSettings({ canManage = true }: S3StoragesSettingsProps
                         <p class="text-xs text-base-content/50">Laissez les clés vides pour conserver les valeurs actuelles.</p>
                     )}
                     {error && <p class="text-xs text-error" role="alert">{error}</p>}
-                    <div class="flex justify-end gap-2">
+                    <div class="form-actions">
                         <button class="btn btn-ghost" type="button" onClick={() => setModalOpen(false)}>Annuler</button>
                         <button class="btn btn-primary" type="submit" disabled={submitting}>
                             {submitting ? 'Enregistrement…' : 'Enregistrer'}

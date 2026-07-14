@@ -94,7 +94,7 @@ class ResourceController extends Controller
 
         return response()->json([
             'data' => $this->resourceAction->execute($resource, $type, $action, $options),
-        ], 202);
+        ], $type === 'databases' ? 200 : 202);
     }
 
     private function currentTeam(Request $request): Team

@@ -28,6 +28,20 @@ class S3StorageController extends Controller
         ]);
     }
 
+    public function show(Request $request, string $storageUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $team = $this->currentTeamContext->resolve($user);
+        $storage = $this->s3StorageService->findForTeam($team, $storageUuid);
+        $this->authorize('view', $storage);
+
+        return response()->json([
+            'data' => $this->s3StorageService->present($storage),
+        ]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $user = $request->user();

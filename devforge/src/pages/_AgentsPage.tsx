@@ -2,6 +2,7 @@ import { Bot, Plus, RefreshCw } from 'lucide-preact';
 import { useState } from 'preact/hooks';
 import { AgentCard } from '../components/agents/AgentCard';
 import { CreateAgentModal } from '../components/agents/CreateAgentModal';
+import { ActionToolbar } from '../components/ui/ActionToolbar';
 import { PageHeader } from '../components/PageHeader';
 import { DataState } from '../components/ui/DataState';
 import { domainApi } from '../lib/domain-api';
@@ -23,7 +24,7 @@ export function AgentsPage() {
                 title="Agents IA"
                 description="Votre équipe d'agents autonomes qui surveille et améliore la plateforme."
                 actions={(
-                    <div class="flex gap-2">
+                    <>
                         <button class="btn btn-ghost btn-sm" type="button" onClick={() => void query.reload()}>
                             <RefreshCw class="size-3.5" aria-hidden />
                             Actualiser
@@ -32,7 +33,7 @@ export function AgentsPage() {
                             <Plus class="size-3.5" aria-hidden />
                             Nouvel agent
                         </button>
-                    </div>
+                    </>
                 )}
             />
 

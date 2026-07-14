@@ -33,6 +33,7 @@ class ProfileController extends Controller
             'name' => $user->name,
             'email' => $user->email,
             'email_verified' => $user->hasVerifiedEmail(),
+            'two_factor_enabled' => ! is_null($user->two_factor_confirmed_at),
         ];
     }
 }

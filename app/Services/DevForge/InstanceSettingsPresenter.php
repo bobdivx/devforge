@@ -1,0 +1,116 @@
+<?php
+
+namespace App\Services\DevForge;
+
+use App\Models\InstanceSettings;
+
+class InstanceSettingsPresenter
+{
+    public function __construct(
+        private readonly InstanceSettings $settings,
+    ) {}
+
+    public static function from(InstanceSettings $settings): self
+    {
+        return new self($settings);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function toArray(): array
+    {
+        return [
+            'instance' => $this->instance(),
+            'advanced' => $this->advanced(),
+            'email' => $this->email(),
+            'updates' => $this->updates(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function instance(): array
+    {
+        return [
+            'instance_name' => $this->settings->instance_name,
+            'fqdn' => $this->settings->fqdn,
+            'instance_timezone' => $this->settings->instance_timezone,
+            'public_ipv4' => $this->settings->public_ipv4,
+            'public_ipv6' => $this->settings->public_ipv6,
+            'public_port_min' => $this->settings->public_port_min,
+            'public_port_max' => $this->settings->public_port_max,
+            'helper_version' => $this->settings->helper_version,
+            'dev_helper_version' => $this->settings->dev_helper_version,
+            'next_channel' => $this->settings->next_channel,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function advanced(): array
+    {
+        return [
+            'is_registration_enabled' => (bool) $this->settings->is_registration_enabled,
+            'do_not_track' => (bool) $this->settings->do_not_track,
+            'is_dns_validation_enabled' => (bool) $this->settings->is_dns_validation_enabled,
+            'custom_dns_servers' => $this->settings->custom_dns_servers,
+            'is_api_enabled' => (bool) $this->settings->is_api_enabled,
+            'allowed_ips' => $this->settings->allowed_ips,
+            'is_sponsorship_popup_enabled' => (bool) $this->settings->is_sponsorship_popup_enabled,
+            'disable_two_step_confirmation' => (bool) $this->settings->disable_two_step_confirmation,
+            'is_wire_navigate_enabled' => (bool) ($this->settings->is_wire_navigate_enabled ?? true),
+            'is_mcp_server_enabled' => (bool) $this->settings->is_mcp_server_enabled,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function email(): array
+    {
+        return [
+            'smtp_enabled' => (bool) $this->settings->smtp_enabled,
+            'smtp_from_address' => $this->masked($this->settings->getRawOriginal('smtp_from_address')),
+            'smtp_from_name' => $this->masked($this->settings->getRawOriginal('smtp_from_name')),
+            'smtp_recipients' => $this->masked($this->settings->getRawOriginal('smtp_recipients')),
+            'smtp_host' => $this->masked($this->settings->getRawOriginal('smtp_host')),
+            'smtp_port' => $this->settings->smtp_port,
+            'smtp_encryption' => $this->settings->smtp_encryption,
+            'smtp_username' => $this->masked($this->settings->getRawOriginal('smtp_username')),
+            'smtp_password' => $this->hasSecret($this->settings->getRawOriginal('smtp_password')),
+            'smtp_timeout' => $this->settings->smtp_timeout,
+            'resend_enabled' => (bool) $this->settings->resend_enabled,
+            'resend_api_key' => $this->hasSecret($this->settings->getRawOriginal('resend_api_key')),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function updates(): array
+    {
+        return [
+            'is_auto_update_enabled' => (bool) $this->settings->is_auto_update_enabled,
+            'auto_update_frequency' => $this->settings->auto_update_frequency,
+            'update_check_frequency' => $this->settings->update_check_frequency,
+            'new_version_available' => (bool) $this->settings->new_version_available,
+        ];
+    }
+
+    private function masked(mixed $value): ?string
+    {
+        if (! filled($value)) {
+            return null;
+        }
+
+        return '********';
+    }
+
+    private function hasSecret(mixed $value): bool
+    {
+        return filled($value);
+    }
+}

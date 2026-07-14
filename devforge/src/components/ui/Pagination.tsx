@@ -1,3 +1,5 @@
+import { ActionToolbar } from './ActionToolbar';
+
 type PaginationProps = {
     page: number;
     lastPage: number;
@@ -11,14 +13,16 @@ export function Pagination({ page, lastPage, onPageChange, label = 'Pagination' 
     }
 
     return (
-        <nav class="flex items-center justify-end gap-2" aria-label={label}>
-            <button class="btn btn-sm" type="button" disabled={page === 1} onClick={() => onPageChange(page - 1)}>
-                Précédent
-            </button>
-            <span class="text-xs tabular-nums">Page {page} / {lastPage}</span>
-            <button class="btn btn-sm" type="button" disabled={page >= lastPage} onClick={() => onPageChange(page + 1)}>
-                Suivant
-            </button>
+        <nav class="pagination-nav" aria-label={label}>
+            <ActionToolbar>
+                <button class="btn btn-sm" type="button" disabled={page === 1} onClick={() => onPageChange(page - 1)}>
+                    Précédent
+                </button>
+                <button class="btn btn-sm" type="button" disabled={page >= lastPage} onClick={() => onPageChange(page + 1)}>
+                    Suivant
+                </button>
+            </ActionToolbar>
+            <span class="pagination-label">Page {page} / {lastPage}</span>
         </nav>
     );
 }

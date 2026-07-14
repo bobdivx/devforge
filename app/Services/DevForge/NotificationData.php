@@ -3,41 +3,34 @@
 namespace App\Services\DevForge;
 
 use App\Models\Team;
+use App\Services\DevForge\Notification\NotificationChannelPresenter;
+use App\Services\DevForge\Notification\NotificationChannelRegistry;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Gate;
 
 class NotificationData
 {
+    public function __construct(
+        private NotificationChannelPresenter $presenter,
+        private NotificationChannelRegistry $registry,
+    ) {}
+
     /**
      * @return array<int, array<string, mixed>>
      */
     public function forTeam(Team $team): array
     {
-        $channels = [
-            'email' => $team->emailNotificationSettings,
-            'discord' => $team->discordNotificationSettings,
-            'slack' => $team->slackNotificationSettings,
-            'telegram' => $team->telegramNotificationSettings,
-            'pushover' => $team->pushoverNotificationSettings,
-            'webhook' => $team->webhookNotificationSettings,
-        ];
+        return collect(NotificationChannelRegistry::CHANNEL_RELATIONS)
+            ->map(function (string $relation, string $channel) use ($team): ?array {
+                /** @var Model|null $settings */
+                $settings = $team->{$relation};
 
-        return collect($channels)
-            ->filter()
-            ->map(function (Model $settings, string $channel): array {
-                Gate::authorize('view', $settings);
+                if (! $settings) {
+                    return null;
+                }
 
-                return [
-                    'channel' => $channel,
-                    'enabled' => (bool) $settings->isEnabled(),
-                    'events' => collect($settings->getAttributes())
-                        ->filter(
-                            fn (mixed $value, string $key): bool => str_ends_with($key, '_notifications')
-                        )
-                        ->map(fn (mixed $value): bool => (bool) $value)
-                        ->all(),
-                ];
+                return $this->presenter->present($settings, $channel);
             })
+            ->filter()
             ->values()
             ->all();
     }

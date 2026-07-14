@@ -134,6 +134,12 @@ class LibsqlConnectionEnvSync
             );
         }
 
+        $application->environment_variables()
+            ->where('is_preview', false)
+            ->where('comment', $comment)
+            ->whereNotIn('key', $envKeys)
+            ->delete();
+
         return [
             'env_keys' => $envKeys,
             'primary_env_key' => $envKeys[0],

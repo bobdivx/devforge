@@ -1,5 +1,6 @@
 import { Plus, RefreshCw, Save, Trash2 } from 'lucide-preact';
 import { useMemo, useState } from 'preact/hooks';
+import { ActionToolbar } from '../components/ui/ActionToolbar';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
@@ -127,7 +128,7 @@ function ProjectCard({ project, permissions, onChanged, onMutate }: {
                     </DataState>
                 )}
 
-                <div class="mt-2 flex flex-wrap gap-2 border-t border-base-300 pt-2">
+                <ActionToolbar class="mt-2 border-t border-base-300 pt-2">
                     {permissions.create_resources && expanded && (
                         <details>
                             <summary class="cursor-pointer text-xs text-primary">Ajouter un environnement</summary>
@@ -147,7 +148,7 @@ function ProjectCard({ project, permissions, onChanged, onMutate }: {
                             <button class="btn btn-ghost btn-xs text-error" type="button" onClick={() => setDeleteOpen(true)}>Supprimer</button>
                         </>
                     )}
-                </div>
+                </ActionToolbar>
             </Card>
 
             <Modal open={editOpen} title={`Modifier ${project.name}`} onClose={() => setEditOpen(false)}>
@@ -229,7 +230,7 @@ export function ProjectsPage({ permissions, embedded = false }: ProjectsPageProp
                     title="Projets"
                     description="Projets et environnements de l’équipe active."
                     actions={(
-                        <div class="flex gap-2">
+                        <>
                             <button class="btn btn-ghost btn-sm" type="button" onClick={() => void reload()}>
                                 <RefreshCw class="size-3.5" aria-hidden />
                                 Actualiser
@@ -240,14 +241,14 @@ export function ProjectsPage({ permissions, embedded = false }: ProjectsPageProp
                                     Nouveau projet
                                 </button>
                             )}
-                        </div>
+                        </>
                     )}
                 />
             )}
             {embedded && (
-                <div class="flex items-center justify-between gap-2">
+                <div class="toolbar-row">
                     <p class="text-xs text-base-content/55">Projets et environnements de l’équipe active.</p>
-                    <div class="flex gap-2">
+                    <ActionToolbar>
                         <button class="btn btn-ghost btn-sm" type="button" onClick={() => void reload()}>
                             <RefreshCw class="size-3.5" aria-hidden />
                             Actualiser
@@ -258,7 +259,7 @@ export function ProjectsPage({ permissions, embedded = false }: ProjectsPageProp
                                 Nouveau projet
                             </button>
                         )}
-                    </div>
+                    </ActionToolbar>
                 </div>
             )}
 

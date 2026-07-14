@@ -5,6 +5,7 @@ import { CreateApplicationModal } from '../components/applications/CreateApplica
 import { CreateDatabaseModal } from '../components/databases/CreateDatabaseModal';
 import { DatabaseDetailPanel } from '../components/databases/DatabaseDetailPanel';
 import { PageHeader } from '../components/PageHeader';
+import { ActionToolbar } from '../components/ui/ActionToolbar';
 import { Breadcrumbs } from '../components/ui/Breadcrumbs';
 import { Card } from '../components/ui/Card';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
@@ -17,6 +18,21 @@ import { domainApi, type CoreAction, type CoreResource, type CoreResourceType } 
 import { parseResourceStatus } from '../lib/resource-status';
 import { useApiQuery } from '../lib/use-api-query';
 import { navigateTo, useNavigate } from '../lib/use-navigate';
+import { sanitizeResourceUuid } from '../lib/route-path';
+
+function readDatabaseDeepLink(): { uuid: string | null; tab: 'overview' | 'data' | 'backups' } {
+    if (typeof window === 'undefined') {
+        return { uuid: null, tab: 'overview' };
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+
+    return {
+        uuid: sanitizeResourceUuid(params.get('uuid')),
+        tab: tab === 'data' || tab === 'backups' ? tab : 'overview',
+    };
+}
 
 type CoreResourcesPageProps = {
     type: CoreResourceType;
@@ -49,6 +65,13 @@ const actionIcons = {
 
 function databaseCardTitle(resource: CoreResource): string {
     const applications = resource.connected_applications ?? [];
+
+    if (/^libsql-database-[a-z0-9]+$/i.test(resource.name) && applications.length > 0) {
+        return applications.length === 1
+            ? `Base de ${applications[0].application_name}`
+            : applications.map((application) => application.application_name).join(', ');
+    }
+
     if (applications.length === 0) {
         return 'Sans application';
     }
@@ -129,7 +152,7 @@ function ResourceDetail({ type, uuid, canAct, onClose, onChanged }: {
                                 </dl>
                             )}
                             {actionError && <p class="text-xs text-error" role="alert">{actionError}</p>}
-                            <div class="flex flex-wrap gap-2">
+                            <ActionToolbar>
                                 {canAct && type !== 'servers' && resource.actions.map((action) => {
                                     const Icon = actionIcons[action];
                                     return (
@@ -151,8 +174,8 @@ function ResourceDetail({ type, uuid, canAct, onClose, onChanged }: {
                                         </button>
                                     );
                                 })}
-                                <button class="btn btn-ghost btn-sm ms-auto" type="button" onClick={onClose}>Fermer</button>
-                            </div>
+                                <button class="btn btn-ghost btn-sm sm:ms-auto" type="button" onClick={onClose}>Fermer</button>
+                            </ActionToolbar>
                         </div>
                     )}
                 </DataState>
@@ -175,14 +198,23 @@ function ResourceDetail({ type, uuid, canAct, onClose, onChanged }: {
 
 export function CoreResourcesPage({ type, permissions, embedded = false, legacyBaseUrl = '', initialResourceUuid = null }: CoreResourcesPageProps) {
     const onNavigate = useNavigate();
+    const databaseDeepLink = type === 'databases' ? readDatabaseDeepLink() : { uuid: null, tab: 'overview' as const };
     const query = useApiQuery(`core:${type}`, () => domainApi.coreResources(type));
-    const [selectedUuid, setSelectedUuid] = useState<string | null>(initialResourceUuid);
+    const [selectedUuid, setSelectedUuid] = useState<string | null>(initialResourceUuid ?? databaseDeepLink.uuid);
+    const [databaseInitialTab, setDatabaseInitialTab] = useState<'overview' | 'data' | 'backups'>(databaseDeepLink.tab);
     const [search, setSearch] = useState('');
     const [createModalOpen, setCreateModalOpen] = useState(false);
     const resources = query.data?.data ?? [];
 
     useEffect(() => {
         setSearch('');
+        if (type === 'databases') {
+            const deepLink = readDatabaseDeepLink();
+            setSelectedUuid(initialResourceUuid ?? deepLink.uuid);
+            setDatabaseInitialTab(deepLink.tab);
+            return;
+        }
+
         if (initialResourceUuid) {
             setSelectedUuid(initialResourceUuid);
             return;
@@ -194,6 +226,10 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
         setSelectedUuid(null);
         if (initialResourceUuid && type === 'applications') {
             navigateTo('/applications');
+            return;
+        }
+        if (type === 'databases' && typeof window !== 'undefined' && window.location.search) {
+            navigateTo('/databases');
         }
     };
 
@@ -204,15 +240,17 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
     }, [resources, search, type]);
 
     const activeUuid = useMemo(() => {
-        if (!selectedUuid) {
+        const candidate = sanitizeResourceUuid(selectedUuid);
+
+        if (!candidate) {
             return null;
         }
 
         if (type === 'applications' || type === 'databases') {
-            return selectedUuid;
+            return candidate;
         }
 
-        return resources.some((resource) => resource.uuid === selectedUuid) ? selectedUuid : null;
+        return resources.some((resource) => resource.uuid === candidate) ? candidate : null;
     }, [resources, selectedUuid, type]);
 
     return (
@@ -253,12 +291,14 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                 />
             )}
             {embedded && (
-                <div class="flex items-center justify-between gap-2">
+                <div class="toolbar-row">
                     <p class="text-xs text-base-content/55">Hôtes, connexions et proxy de l’équipe active.</p>
-                    <button class="btn btn-ghost btn-sm" type="button" onClick={() => void query.reload()}>
-                        <RefreshCw class="size-3.5" aria-hidden />
-                        Actualiser
-                    </button>
+                    <div class="card-toolbar w-full sm:w-auto">
+                        <button class="btn btn-ghost btn-sm w-full sm:w-auto" type="button" onClick={() => void query.reload()}>
+                            <RefreshCw class="size-3.5" aria-hidden />
+                            Actualiser
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -277,6 +317,7 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                 <DatabaseDetailPanel
                     uuid={activeUuid}
                     canAct={permissions.create_resources}
+                    initialTab={databaseInitialTab}
                     onClose={closeDetail}
                     onChanged={query.reload}
                 />

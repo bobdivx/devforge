@@ -13,11 +13,14 @@ describe('routage DevForge', () => {
         expect(routeHref('/')).toBe('/devforge/');
         expect(routeHref('/applications')).toBe('/devforge/applications/');
         expect(routeHref('/settings/servers')).toBe('/devforge/settings/servers/');
+        expect(routeHref('/databases?uuid=btnfr114ubmua4nvk73y4h6u&tab=data')).toBe(
+            '/devforge/databases/?uuid=btnfr114ubmua4nvk73y4h6u&tab=data',
+        );
     });
 
     it('reconnaît les routes dynamiques de ressources', () => {
-        expect(findRoute('/devforge/server/server-uuid/metrics').page).toBe('settings');
-        expect(findRoute('/devforge/server/server-uuid/metrics').path).toBe('/settings/servers');
+        expect(findRoute('/devforge/server/server-uuid/metrics').page).toBe('server-detail');
+        expect(findRoute('/devforge/server/server-uuid/metrics').path).toBe('/server/server-uuid/metrics');
         expect(findRoute('/devforge/applications/app-uuid').page).toBe('application-detail');
         expect(findRoute('/devforge/applications/app-uuid').path).toBe('/applications/app-uuid');
         expect(routeHref('/applications/app-uuid')).toBe('/devforge/applications/app-uuid/');
@@ -40,12 +43,52 @@ describe('routage DevForge', () => {
         expect(findRoute('/devforge/security').path).toBe('/settings/security');
     });
 
+    it('résout les routes des variables partagées', () => {
+        expect(findRoute('/devforge/shared-variables').page).toBe('shared-variables');
+        expect(findRoute('/devforge/shared-variables/team').path).toBe('/shared-variables/team');
+        expect(findRoute('/devforge/shared-variables/projects').page).toBe('shared-variables');
+        expect(
+            findRoute('/devforge/shared-variables/project/project-uuid').path,
+        ).toBe('/shared-variables/project/project-uuid');
+    });
+
     it('résout les onglets paramètres', () => {
         expect(parseSettingsTab('/settings')).toBe('account');
         expect(parseSettingsTab('/settings/projects')).toBe('projects');
         expect(parseSettingsTab('/settings/storages')).toBe('storages');
         expect(parseSettingsTab('/settings/servers')).toBe('servers');
+        expect(parseSettingsTab('/settings/advanced')).toBe('advanced');
+        expect(parseSettingsTab('/settings/oauth')).toBe('oauth');
+        expect(parseSettingsTab('/notifications/email')).toBe('notifications');
+        expect(parseSettingsTab('/security/api-tokens')).toBe('security');
+        expect(parseSettingsTab('/team/members')).toBe('team');
+        expect(parseSettingsTab('/profile')).toBe('account');
         expect(settingsTabPath('security')).toBe('/settings/security');
+        expect(settingsTabPath('backup')).toBe('/settings/backup');
+    });
+
+    it('résout les pages standalone et routes legacy', () => {
+        expect(findRoute('/devforge/profile').page).toBe('profile');
+        expect(findRoute('/devforge/profile/appearance').path).toBe('/profile/appearance');
+        expect(findRoute('/devforge/terminal').page).toBe('terminal');
+        expect(findRoute('/devforge/sources').page).toBe('sources');
+        expect(findRoute('/devforge/source/github/app-uuid').page).toBe('sources');
+        expect(findRoute('/devforge/source/github/app-uuid').path).toBe('/source/github/app-uuid');
+        expect(findRoute('/devforge/notifications/slack').page).toBe('settings');
+        expect(findRoute('/devforge/notifications/slack').path).toBe('/notifications/slack');
+        expect(findRoute('/devforge/security/cloud-tokens').page).toBe('settings');
+        expect(findRoute('/devforge/security/cloud-tokens').path).toBe('/security/cloud-tokens');
+        expect(findRoute('/devforge/team').page).toBe('settings');
+        expect(findRoute('/devforge/team/members').path).toBe('/team/members');
+        expect(findRoute('/devforge/destinations').page).toBe('destinations');
+        expect(findRoute('/devforge/destination/dest-uuid').path).toBe('/destination/dest-uuid');
+        expect(findRoute('/devforge/tags/production').page).toBe('tags');
+        expect(findRoute('/devforge/tags/production').path).toBe('/tags/production');
+        expect(findRoute('/devforge/subscription').page).toBe('subscription');
+        expect(findRoute('/devforge/onboarding').page).toBe('onboarding');
+        expect(findRoute('/devforge/storages').page).toBe('storages');
+        expect(findRoute('/devforge/storages/storage-uuid').path).toBe('/storages/storage-uuid');
+        expect(findRoute('/devforge/storages/storage-uuid/resources').page).toBe('storages');
     });
 
     it('signale explicitement une route inconnue', () => {

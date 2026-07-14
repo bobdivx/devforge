@@ -53,8 +53,9 @@ describe('shell DevForge', () => {
         expect(await screen.findByText('Serveur principal')).toBeInTheDocument();
         expect(window.location.pathname).toBe('/devforge/settings/servers');
         expect(screen.getByRole('link', { name: 'Paramètres' })).toHaveAttribute('aria-current', 'page');
-        expect(screen.getByRole('tab', { selected: true })).toHaveTextContent('Serveurs');
-        expect(screen.getByRole('link', { name: 'Coolify' })).toHaveAttribute('href', 'https://coolify.io');
+        expect(screen.getByRole('combobox', { name: 'Section' })).toHaveValue('servers');
+        expect(screen.getByRole('button', { name: 'Serveurs' })).toHaveAttribute('aria-current', 'page');
+        expect(screen.getByRole('link', { name: 'Coolify' })).toHaveAttribute('href', 'http://localhost/?legacy=1');
         expect(screen.queryByRole('link', { name: 'Retour Coolify' })).not.toBeInTheDocument();
     });
 
@@ -67,7 +68,10 @@ describe('shell DevForge', () => {
         const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
             const url = String(input);
             if (url === '/api/devforge/v1/bootstrap') return jsonResponse({ data: bootstrapData });
-            if (url === '/api/devforge/v1/members') return jsonResponse({ data: [] });
+            if (url === '/api/devforge/v1/teams/current') {
+                return jsonResponse({ data: bootstrapData.current_team });
+            }
+            if (url === '/api/devforge/v1/teams/current/members') return jsonResponse({ data: [] });
             if (url === '/sanctum/csrf-cookie') return new Response(null, { status: 204 });
             if (url === '/api/devforge/v1/teams/switch') return jsonResponse({ data: betaData });
             throw new Error(`URL inattendue : ${url}`);
@@ -97,7 +101,7 @@ describe('shell DevForge', () => {
         render(<App initialPath="/" />);
 
         expect(await screen.findByRole('heading', { name: 'Session requise' })).toBeInTheDocument();
-        expect(screen.getByRole('link', { name: 'Se connecter' })).toHaveAttribute('href', '/login');
+        expect(screen.getByRole('link', { name: 'Se connecter' })).toHaveAttribute('href', '/login?redirect=/devforge/');
     });
 
     it('applique le thème sombre', async () => {

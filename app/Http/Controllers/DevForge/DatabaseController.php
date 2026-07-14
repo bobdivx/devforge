@@ -12,6 +12,7 @@ use App\Services\DevForge\Core\CoreResourceCatalog;
 use App\Services\DevForge\Core\CoreResourcePresenter;
 use App\Services\DevForge\CurrentTeamContext;
 use App\Services\DevForge\Database\LibsqlDatabaseAccessService;
+use App\Services\DevForge\Database\LibsqlDatabaseExplorerService;
 use App\Services\DevForge\Database\LibsqlDatabaseTransferService;
 use App\Services\DevForge\Database\StandaloneDatabaseCreator;
 use Illuminate\Database\Eloquent\Model;
@@ -29,6 +30,7 @@ class DatabaseController extends Controller
         private readonly ApplicationDatabaseConnector $applicationDatabaseConnector,
         private readonly LibsqlDatabaseTransferService $libsqlDatabaseTransferService,
         private readonly LibsqlDatabaseAccessService $libsqlDatabaseAccessService,
+        private readonly LibsqlDatabaseExplorerService $libsqlDatabaseExplorerService,
         private readonly CoreResourcePresenter $presenter,
     ) {}
 
@@ -146,11 +148,28 @@ class DatabaseController extends Controller
         $this->authorize('update', $database);
 
         $validated = validator($request->all(), [
-            'file' => ['required', 'file', 'mimes:sql,txt', 'max:32768'],
+            'file' => [
+                'required',
+                'file',
+                'max:524288',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (! $value instanceof \Illuminate\Http\UploadedFile) {
+                        $fail('Fichier invalide.');
+
+                        return;
+                    }
+
+                    $extension = strtolower($value->getClientOriginalExtension());
+
+                    if (! in_array($extension, ['sql', 'txt', 'db', 'sqlite'], true)) {
+                        $fail('Le fichier doit être au format .sql ou .db (export Turso).');
+                    }
+                },
+            ],
         ])->validate();
 
-        $sql = (string) file_get_contents($validated['file']->getRealPath());
-        $result = $this->libsqlDatabaseTransferService->import($database, $sql);
+        $payload = (string) file_get_contents($validated['file']->getRealPath());
+        $result = $this->libsqlDatabaseTransferService->importPayload($database, $payload);
 
         auditLog('devforge.database.imported', [
             'team_id' => $this->currentTeamContext->resolve($user)->id,
@@ -160,6 +179,40 @@ class DatabaseController extends Controller
 
         return response()->json([
             'data' => $result,
+        ]);
+    }
+
+    public function explorer(Request $request, string $databaseUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $database = $this->resolveLibsql($user, $databaseUuid);
+        $this->authorize('view', $database);
+
+        return response()->json([
+            'data' => $this->libsqlDatabaseExplorerService->overview($database),
+        ]);
+    }
+
+    public function explorerTable(Request $request, string $databaseUuid, string $table): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $database = $this->resolveLibsql($user, $databaseUuid);
+        $this->authorize('view', $database);
+
+        $validated = validator($request->all(), [
+            'limit' => ['nullable', 'integer', 'min:1', 'max:200'],
+        ])->validate();
+
+        return response()->json([
+            'data' => $this->libsqlDatabaseExplorerService->previewTable(
+                $database,
+                $table,
+                (int) ($validated['limit'] ?? 50),
+            ),
         ]);
     }
 

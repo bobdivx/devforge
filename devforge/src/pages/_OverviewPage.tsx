@@ -197,7 +197,7 @@ export function OverviewPage() {
                                                     </li>
                                                 ))}
                                             </ul>
-                                            <div class="mt-3 flex justify-end">
+                                            <div class="card-toolbar mt-3">
                                                 <a class="btn btn-ghost btn-sm rounded-full border border-base-300/80" href={routeHref('/agents')} onClick={(event) => onNavigate(event, '/agents')}>
                                                     <Bot class="size-3.5" aria-hidden />
                                                     Voir les agents

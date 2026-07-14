@@ -134,7 +134,16 @@ it('lists s3 storages for the current team', function () {
 
 });
 
+it('shows a single s3 storage for the current team', function () {
+    $storage = createDevForgeS3Storage($this->team);
 
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson("/api/devforge/v1/s3-storages/{$storage->uuid}")
+        ->assertOk()
+        ->assertJsonPath('data.uuid', $storage->uuid)
+        ->assertJsonPath('data.bucket', 'test-bucket');
+});
 
 it('creates an s3 storage for the current team', function () {
 

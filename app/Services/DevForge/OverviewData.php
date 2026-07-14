@@ -17,6 +17,7 @@ class OverviewData
         private readonly ResourceData $resourceData,
         private readonly ResourceStatusData $resourceStatusData,
         private readonly DeploymentData $deploymentData,
+        private readonly ResourceStatusClassifier $resourceStatusClassifier,
     ) {}
 
     /**
@@ -67,36 +68,9 @@ class OverviewData
      */
     private function summarizeHealth(array $statuses): array
     {
-        $all = collect($statuses)->flatMap(fn (array $items): array => $items);
+        $all = collect($statuses)->flatMap(fn (array $items): array => $items)->values()->all();
 
-        $running = $all->filter(fn (array $resource): bool => in_array(
-            (string) ($resource['status'] ?? 'unknown'),
-            ['running', 'started', 'healthy'],
-            true,
-        ))->count();
-
-        $degraded = $all->filter(fn (array $resource): bool => in_array(
-            (string) ($resource['status'] ?? 'unknown'),
-            ['degraded', 'unhealthy', 'unavailable', 'exited', 'error'],
-            true,
-        ))->count();
-
-        $stopped = $all->filter(fn (array $resource): bool => in_array(
-            (string) ($resource['status'] ?? 'unknown'),
-            ['stopped', 'exited:0', 'unknown'],
-            true,
-        ))->count();
-
-        $total = $all->count();
-        $score = $total > 0 ? (int) round(($running / $total) * 100) : 100;
-
-        return [
-            'score' => $score,
-            'total_resources' => $total,
-            'running' => $running,
-            'degraded' => $degraded,
-            'stopped' => $stopped,
-        ];
+        return $this->resourceStatusClassifier->summarize($all);
     }
 
     /**

@@ -164,7 +164,14 @@ export function CreateDatabaseModal({ open, onClose, onCreated }: Props) {
 
         domainApi.linkableDatabases(form.application_uuid)
             .then((response) => {
-                setTursoMigration(response.meta?.turso_migration ?? null);
+                const migration = response.meta?.turso_migration ?? null;
+                setTursoMigration(migration);
+                if (migration?.available) {
+                    setForm((current) => ({
+                        ...current,
+                        env_key: migration.env_keys[0] ?? current.env_key,
+                    }));
+                }
             })
             .catch(() => {
                 setTursoMigration(null);
@@ -396,7 +403,8 @@ export function CreateDatabaseModal({ open, onClose, onCreated }: Props) {
                                     {tursoMigration.env_keys.length > 0 && (
                                         <> ({tursoMigration.env_keys.join(' + ')})</>
                                     )}
-                                    .
+                                    . Export SQL via l’API Turso.
+                                    Si vous utilisez un fichier <span class="font-mono">.db</span> (<span class="font-mono">turso db export</span>), créez la base puis importez-le dans l’onglet Données.
                                 </p>
                             </>
                         )}

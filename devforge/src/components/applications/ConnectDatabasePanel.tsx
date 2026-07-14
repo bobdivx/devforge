@@ -1,4 +1,4 @@
-import { Database, Link2, LoaderCircle, Plus } from 'lucide-preact';
+import { Database, ExternalLink, Eye, Link2, LoaderCircle, Plus } from 'lucide-preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import {
     domainApi,
@@ -6,6 +6,7 @@ import {
     type LinkableDatabase,
     type TursoMigrationCandidate,
 } from '../../lib/domain-api';
+import { navigateTo } from '../../lib/use-navigate';
 
 type Props = {
     applicationUuid: string;
@@ -21,6 +22,7 @@ export function ConnectDatabasePanel({ applicationUuid, canAct, onConnected }: P
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
+    const [showAttachForm, setShowAttachForm] = useState(false);
     const [form, setForm] = useState({
         database_uuid: '',
         env_key: '',
@@ -58,6 +60,7 @@ export function ConnectDatabasePanel({ applicationUuid, canAct, onConnected }: P
             setDatabases(nextDatabases);
             setConnections(response.meta?.connections ?? []);
             setTursoMigration(response.meta?.turso_migration ?? null);
+            setShowAttachForm((response.meta?.connections ?? []).length === 0);
             setForm((current) => ({
                 ...current,
                 database_uuid: current.database_uuid && nextDatabases.some((db) => db.uuid === current.database_uuid && db.is_linkable)
@@ -129,7 +132,11 @@ export function ConnectDatabasePanel({ applicationUuid, canAct, onConnected }: P
             <div class="flex items-center justify-between gap-3 border-b border-base-300/70 px-5 py-4">
                 <div>
                     <p class="text-sm font-semibold">Bases de données</p>
-                    <p class="text-xs text-base-content/50">Rattacher une base du même environnement et serveur</p>
+                    <p class="text-xs text-base-content/50">
+                        {connections.length > 0
+                            ? 'Cette application utilise déjà une ou plusieurs bases.'
+                            : 'Rattacher une base du même environnement et serveur'}
+                    </p>
                 </div>
                 <Database class="size-4 text-base-content/35" aria-hidden />
             </div>
@@ -161,12 +168,11 @@ export function ConnectDatabasePanel({ applicationUuid, canAct, onConnected }: P
                         <ul class="grid gap-2">
                             {connections.map((connection) => (
                                 <li
-                                    class="rounded-xl border border-base-300/70 bg-base-200/30 px-3 py-2 text-sm"
-                                    key={`${connection.env_key}:${connection.database_uuid}`}
+                                    class="rounded-xl border border-success/25 bg-success/5 px-3 py-3 text-sm"
+                                    key={connection.database_uuid}
                                 >
                                     <div class="flex flex-wrap items-center gap-2">
-                                        <span class="font-mono text-xs text-primary">{connection.env_key}</span>
-                                        <span class="text-base-content/45">→</span>
+                                        <span class="badge badge-success badge-xs">Rattachée</span>
                                         <span class="font-medium">{connectionLabel(connection)}</span>
                                         {databases.find((item) => item.uuid === connection.database_uuid)?.engine && (
                                             <span class="badge badge-ghost badge-xs uppercase">
@@ -174,18 +180,57 @@ export function ConnectDatabasePanel({ applicationUuid, canAct, onConnected }: P
                                             </span>
                                         )}
                                     </div>
+                                    <p class="mt-1 flex flex-wrap gap-1 font-mono text-[11px] text-base-content/55">
+                                        {connection.env_keys.map((envKey) => (
+                                            <span class="rounded bg-base-100 px-1.5 py-0.5" key={envKey}>{envKey}</span>
+                                        ))}
+                                    </p>
                                     <p class="mt-1 text-[11px] text-base-content/45">
                                         {connection.is_runtime ? 'Runtime' : ''}
                                         {connection.is_runtime && connection.is_buildtime ? ' · ' : ''}
                                         {connection.is_buildtime ? 'Build' : ''}
                                     </p>
+                                    <div class="action-toolbar mt-3">
+                                        <button
+                                            class="btn btn-primary btn-sm"
+                                            type="button"
+                                            onClick={() => navigateTo(`/databases?uuid=${encodeURIComponent(connection.database_uuid)}&tab=data`)}
+                                        >
+                                            <Eye class="size-3.5" aria-hidden />
+                                            Voir les données
+                                        </button>
+                                        <button
+                                            class="btn btn-outline btn-sm"
+                                            type="button"
+                                            onClick={() => navigateTo(`/databases?uuid=${encodeURIComponent(connection.database_uuid)}`)}
+                                        >
+                                            <ExternalLink class="size-3.5" aria-hidden />
+                                            Ouvrir la base
+                                        </button>
+                                    </div>
                                 </li>
                             ))}
                         </ul>
+                        {linkableDatabases.length === 0 && (
+                            <p class="text-xs text-base-content/55">
+                                Aucune autre base compatible n’est disponible pour un second rattachement.
+                            </p>
+                        )}
                     </div>
                 )}
 
-                {!loading && databases.length > 0 && canAct && (
+                {!loading && connections.length > 0 && linkableDatabases.length > 0 && canAct && !showAttachForm && (
+                    <button
+                        class="btn btn-outline btn-sm w-fit"
+                        type="button"
+                        onClick={() => setShowAttachForm(true)}
+                    >
+                        <Plus class="size-3.5" aria-hidden />
+                        Rattacher une autre base
+                    </button>
+                )}
+
+                {!loading && databases.length > 0 && canAct && showAttachForm && (
                     <form class="grid gap-3" onSubmit={handleSubmit}>
                         <label class="grid gap-1 text-sm">
                             <span class="font-medium">Base à rattacher</span>
@@ -306,12 +351,23 @@ export function ConnectDatabasePanel({ applicationUuid, canAct, onConnected }: P
                             </p>
                         )}
 
-                        <button class="btn btn-primary btn-sm w-fit" type="submit" disabled={submitting || !form.database_uuid || linkableDatabases.length === 0}>
+                        <div class="action-toolbar">
+                        <button class="btn btn-primary btn-sm w-fit sm:w-auto" type="submit" disabled={submitting || !form.database_uuid || linkableDatabases.length === 0}>
                             {submitting
                                 ? <LoaderCircle class="size-3.5 animate-spin" aria-hidden />
                                 : <Link2 class="size-3.5" aria-hidden />}
                             {submitting ? 'Rattachement…' : 'Rattacher la base'}
                         </button>
+                        {connections.length > 0 && (
+                            <button
+                                class="btn btn-ghost btn-sm w-fit"
+                                type="button"
+                                onClick={() => setShowAttachForm(false)}
+                            >
+                                Annuler
+                            </button>
+                        )}
+                        </div>
                     </form>
                 )}
 

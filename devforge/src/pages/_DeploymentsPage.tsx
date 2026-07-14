@@ -1,5 +1,6 @@
 import { RefreshCw } from 'lucide-preact';
 import { useState } from 'preact/hooks';
+import { Pagination } from '../components/ui/Pagination';
 import { PageHeader } from '../components/PageHeader';
 import { DeploymentAgentCard } from '../components/applications/DeploymentAgentCard';
 import { DeploymentLogsPanel } from '../components/applications/DeploymentLogsPanel';
@@ -89,11 +90,7 @@ export function DeploymentsPage() {
                     </table>
                 </div>
                 {lastPage > 1 && (
-                    <nav class="flex items-center justify-end gap-2" aria-label="Pagination des déploiements">
-                        <button class="btn btn-sm" type="button" disabled={page === 1} onClick={() => setPage((current) => current - 1)}>Précédent</button>
-                        <span class="text-xs">Page {page} / {lastPage}</span>
-                        <button class="btn btn-sm" type="button" disabled={page >= lastPage} onClick={() => setPage((current) => current + 1)}>Suivant</button>
-                    </nav>
+                    <Pagination page={page} lastPage={lastPage} onPageChange={setPage} label="Pagination des déploiements" />
                 )}
             </DataState>
         </>

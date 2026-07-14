@@ -15,3 +15,6 @@ require __DIR__.'/devforge-s3-storages.php';
 require __DIR__.'/devforge-core.php';
 require __DIR__.'/devforge-realtime.php';
 require __DIR__.'/devforge-agents.php';
+require __DIR__.'/devforge-destinations.php';
+require __DIR__.'/devforge-tags.php';
+require __DIR__.'/devforge-team.php';

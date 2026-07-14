@@ -1,5 +1,6 @@
 import { AlertTriangle, LogIn, RefreshCw } from 'lucide-preact';
 import { ApiError } from '../../lib/api-client';
+import { ActionToolbar } from './ActionToolbar';
 
 type ErrorStateProps = {
     error: unknown;
@@ -35,7 +36,7 @@ export function ErrorState({ error, onRetry }: ErrorStateProps) {
                 <AlertTriangle class="mx-auto size-6 text-warning" aria-hidden />
                 <h1 class="mt-3 text-base font-semibold">{message.title}</h1>
                 <p class="mt-1 text-sm text-base-content/60">{message.description}</p>
-                <div class="mt-4 flex justify-center gap-2">
+                <ActionToolbar class="mt-4 justify-center sm:justify-center">
                     {(status === 401 || status === 419) && (
                         <a class="btn btn-primary btn-sm" href="/login?redirect=/devforge/">
                             <LogIn class="size-4" aria-hidden />
@@ -46,7 +47,7 @@ export function ErrorState({ error, onRetry }: ErrorStateProps) {
                         <RefreshCw class="size-4" aria-hidden />
                         Réessayer
                     </button>
-                </div>
+                </ActionToolbar>
             </div>
         </div>
     );

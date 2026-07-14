@@ -28,3 +28,10 @@ Route::get('/databases/{databaseUuid}/export-sql', [DatabaseController::class, '
 Route::post('/databases/{databaseUuid}/import-sql', [DatabaseController::class, 'importSql'])
     ->where('databaseUuid', $cuid)
     ->name('databases.import-sql');
+Route::get('/databases/{databaseUuid}/explorer', [DatabaseController::class, 'explorer'])
+    ->where('databaseUuid', $cuid)
+    ->name('databases.explorer');
+Route::get('/databases/{databaseUuid}/explorer/tables/{table}', [DatabaseController::class, 'explorerTable'])
+    ->where('databaseUuid', $cuid)
+    ->where('table', '[A-Za-z0-9_]+')
+    ->name('databases.explorer-table');

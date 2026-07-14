@@ -5,7 +5,9 @@ namespace App\Services\DevForge\Database;
 use App\Models\Application;
 use App\Models\EnvironmentVariable;
 use App\Models\StandaloneLibsql;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class LibsqlTursoMigrationService
@@ -43,8 +45,8 @@ class LibsqlTursoMigrationService
             throw new HttpException(422, 'Aucune base Turso distante détectée dans les variables de l’application.');
         }
 
-        $sql = $this->dumpRemote($source['https_url'], $source['auth_token']);
-        $result = $this->libsqlDatabaseTransferService->import($database, $sql);
+        $export = $this->fetchRemoteExport($source['https_url'], $source['auth_token']);
+        $result = $this->libsqlDatabaseTransferService->importPayload($database, $export);
 
         return [
             'performed' => true,
@@ -69,8 +71,8 @@ class LibsqlTursoMigrationService
         /** @var EnvironmentVariable|null $libsqlUrlVariable */
         $libsqlUrlVariable = $variables->get('LIBSQL_URL');
 
-        $databaseUrl = $this->plaintextValue($tursoUrlVariable)
-            ?? $this->extractUrlFromLibsqlUrl($this->plaintextValue($libsqlUrlVariable));
+        $databaseUrl = $this->plaintextValue($application, $tursoUrlVariable)
+            ?? $this->extractUrlFromLibsqlUrl($this->plaintextValue($application, $libsqlUrlVariable));
 
         if ($databaseUrl === null || $this->isLocalDevForgeLibsqlUrl($databaseUrl)) {
             return null;
@@ -82,8 +84,8 @@ class LibsqlTursoMigrationService
             return null;
         }
 
-        $authToken = $this->plaintextValue($tursoTokenVariable)
-            ?? $this->extractTokenFromLibsqlUrl($this->plaintextValue($libsqlUrlVariable));
+        $authToken = $this->plaintextValue($application, $tursoTokenVariable)
+            ?? $this->extractTokenFromLibsqlUrl($this->plaintextValue($application, $libsqlUrlVariable));
 
         $envKeys = [];
         if ($tursoUrlVariable !== null || $tursoTokenVariable !== null) {
@@ -105,16 +107,24 @@ class LibsqlTursoMigrationService
         ];
     }
 
-    public function dumpRemote(string $httpsUrl, ?string $authToken): string
+    public function fetchRemoteExport(string $httpsUrl, ?string $authToken): string
     {
         $request = Http::timeout(120)
-            ->accept('application/sql, text/plain, */*');
+            ->accept('application/sql, text/plain, application/octet-stream, */*');
 
         if (filled($authToken)) {
             $request = $request->withToken($authToken);
         }
 
-        $response = $request->get(rtrim($httpsUrl, '/').'/dump');
+        try {
+            $response = $request->get(rtrim($httpsUrl, '/').'/dump');
+        } catch (ConnectionException $exception) {
+            throw new HttpException(
+                422,
+                'Impossible de joindre la base Turso distante. Vérifiez l’URL, le jeton et la connectivité réseau.',
+                previous: $exception,
+            );
+        }
 
         if (! $response->successful()) {
             throw new HttpException(
@@ -123,28 +133,58 @@ class LibsqlTursoMigrationService
             );
         }
 
-        $sql = trim($response->body());
+        $body = $response->body();
 
-        if ($sql === '') {
+        if ($body === '') {
             throw new HttpException(422, 'L’export Turso est vide.');
         }
 
+        if (LibsqlDatabaseTransferService::isSqliteDatabaseFile($body)) {
+            return $body;
+        }
+
+        $sql = trim($body);
+
         if (! str($sql)->lower()->contains(['create', 'insert', 'pragma', 'begin'])) {
-            throw new HttpException(422, 'La réponse Turso ne ressemble pas à un export SQLite valide.');
+            throw new HttpException(
+                422,
+                'La réponse Turso ne ressemble pas à un export SQL valide. Exportez votre base avec « turso db export » et importez le fichier .db.',
+            );
         }
 
         return $sql."\n";
     }
 
-    private function plaintextValue(?EnvironmentVariable $variable): ?string
+    public function dumpRemote(string $httpsUrl, ?string $authToken): string
+    {
+        $export = $this->fetchRemoteExport($httpsUrl, $authToken);
+
+        if (LibsqlDatabaseTransferService::isSqliteDatabaseFile($export)) {
+            throw new HttpException(422, 'L’export distant est un fichier .db. Utilisez l’import manuel du fichier .db.');
+        }
+
+        return $export;
+    }
+
+    private function plaintextValue(Application $application, ?EnvironmentVariable $variable): ?string
     {
         if ($variable === null) {
             return null;
         }
 
-        $value = trim((string) $variable->value);
+        if (! $variable->relationLoaded('resourceable')) {
+            $variable->setRelation('resourceable', $application);
+        }
 
-        return $value === '' ? null : $value;
+        $rawValue = $variable->getAttributes()['value'] ?? null;
+        if (! is_string($rawValue) || $rawValue === '') {
+            return null;
+        }
+
+        $decrypted = trim(decrypt($rawValue));
+        $resolved = trim((string) $variable->get_real_environment_variables_with_server($decrypted, $application));
+
+        return $resolved === '' ? null : $resolved;
     }
 
     private function isDevForgeLinkedVariable(?EnvironmentVariable $variable): bool

@@ -2,13 +2,13 @@
 
 use App\Http\Controllers\DevForge\EnvironmentController;
 use App\Http\Controllers\DevForge\NotificationController;
+use App\Http\Controllers\DevForge\OauthSettingsController;
 use App\Http\Controllers\DevForge\OverviewController;
 use App\Http\Controllers\DevForge\ProfileController;
 use App\Http\Controllers\DevForge\ProjectController;
 use App\Http\Controllers\DevForge\SecurityController;
 use App\Http\Controllers\DevForge\SettingsController;
 use App\Http\Controllers\DevForge\SharedVariableController;
-use App\Http\Controllers\DevForge\TeamReadController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/overview', OverviewController::class)->name('overview');
@@ -33,9 +33,12 @@ Route::delete('/projects/{projectUuid}/environments/{environmentUuid}', [Environ
 
 Route::get('/profile', [ProfileController::class, 'show'])->name('profile.show');
 Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
-Route::get('/teams', [TeamReadController::class, 'index'])->name('teams.index');
-Route::get('/teams/current/members', [TeamReadController::class, 'members'])->name('teams.members');
 Route::get('/settings', SettingsController::class)->name('settings.show');
-Route::get('/notifications', NotificationController::class)->name('notifications.index');
-Route::get('/shared-variables', SharedVariableController::class)->name('shared-variables.index');
+Route::get('/settings/oauth', OauthSettingsController::class)->name('settings.oauth');
+Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
+Route::put('/notifications/{channel}', [NotificationController::class, 'update'])->name('notifications.update');
+Route::get('/shared-variables', [SharedVariableController::class, 'index'])->name('shared-variables.index');
+Route::post('/shared-variables', [SharedVariableController::class, 'store'])->name('shared-variables.store');
+Route::put('/shared-variables/{sharedVariable}', [SharedVariableController::class, 'update'])->name('shared-variables.update');
+Route::delete('/shared-variables/{sharedVariable}', [SharedVariableController::class, 'destroy'])->name('shared-variables.destroy');
 Route::get('/security/keys', [SecurityController::class, 'keys'])->name('security.keys.index');

@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\InstanceSettings;
+use App\Models\OauthSetting;
 use App\Models\Project;
 use App\Models\SharedEnvironmentVariable;
 use App\Models\Team;
@@ -188,6 +189,7 @@ it('reads and validates only the authenticated profile', function () {
         ->getJson('/api/devforge/v1/profile')
         ->assertSuccessful()
         ->assertJsonPath('data.id', $this->user->id)
+        ->assertJsonPath('data.two_factor_enabled', false)
         ->assertJsonMissingPath('data.password')
         ->assertJsonMissingPath('data.two_factor_secret');
 
@@ -221,6 +223,66 @@ it('lists only current team members and user teams', function () {
         ->getJson('/api/devforge/v1/teams')
         ->assertSuccessful()
         ->assertJsonFragment(['id' => $this->team->id]);
+});
+
+it('updates current team details and manages invitations for admins', function () {
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/teams/current')
+        ->assertSuccessful()
+        ->assertJsonPath('data.id', $this->team->id);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson('/api/devforge/v1/teams/current', [
+            'name' => 'DevForge Team Updated',
+            'description' => 'Updated description',
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.name', 'DevForge Team Updated')
+        ->assertJsonPath('data.description', 'Updated description');
+
+    $invitation = $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/teams/current/invitations', [
+            'email' => 'invited@example.com',
+            'role' => 'member',
+            'via' => 'link',
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.email', 'invited@example.com')
+        ->assertJsonPath('data.role', 'member');
+
+    $invitationId = $invitation->json('data.id');
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/teams/current/invitations')
+        ->assertSuccessful()
+        ->assertJsonFragment(['email' => 'invited@example.com']);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->deleteJson("/api/devforge/v1/teams/current/invitations/{$invitationId}")
+        ->assertNoContent();
+});
+
+it('updates and removes team members for admins', function () {
+    $member = User::factory()->create();
+    $this->team->members()->attach($member, ['role' => 'member']);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson("/api/devforge/v1/teams/current/members/{$member->id}", [
+            'role' => 'admin',
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.role', 'admin');
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->deleteJson("/api/devforge/v1/teams/current/members/{$member->id}")
+        ->assertNoContent();
 });
 
 it('returns masked shared variables notifications and private keys for current team only', function () {
@@ -287,11 +349,112 @@ it('returns only whitelisted settings to an instance admin', function () {
         ->withSession(['currentTeam' => $rootTeam])
         ->getJson('/api/devforge/v1/settings')
         ->assertSuccessful()
-        ->assertJsonPath('data.instance_name', 'DevForge')
+        ->assertJsonPath('data.instance.instance_name', 'DevForge')
         ->assertJsonMissingPath('data.smtp_password')
+        ->assertJsonMissingPath('data.email.smtp_password')
         ->assertJsonMissingPath('data.resend_api_key');
 
     expect($response->getContent())->not->toContain('must-never-be-returned');
+});
+
+it('returns masked oauth settings to an instance admin', function () {
+    $rootTeam = Team::factory()->create(['id' => 0]);
+    $rootTeam->members()->attach($this->user, ['role' => 'admin']);
+    InstanceSettings::unguarded(fn (): InstanceSettings => InstanceSettings::query()->create(['id' => 0]));
+
+    OauthSetting::create([
+        'provider' => 'github',
+        'enabled' => true,
+        'client_id' => 'github-client-id',
+        'client_secret' => 'github-client-secret',
+        'redirect_uri' => 'https://example.test/oauth/github/callback',
+    ]);
+
+    $response = $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $rootTeam])
+        ->getJson('/api/devforge/v1/settings/oauth')
+        ->assertSuccessful()
+        ->assertJsonPath('data.0.provider', 'github')
+        ->assertJsonPath('data.0.client_id', '********')
+        ->assertJsonPath('data.0.client_secret', '********')
+        ->assertJsonPath('data.0.redirect_uri', 'https://example.test/oauth/github/callback');
+
+    expect($response->getContent())->not->toContain('github-client-secret');
+});
+
+it('updates notification channel events and enabled flag for the current team', function () {
+    $this->team->discordNotificationSettings()->update([
+        'discord_enabled' => false,
+        'deployment_success_discord_notifications' => false,
+        'deployment_failure_discord_notifications' => true,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson('/api/devforge/v1/notifications/discord', [
+            'enabled' => true,
+            'events' => [
+                'deployment_success_discord_notifications' => true,
+                'deployment_failure_discord_notifications' => false,
+            ],
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.channel', 'discord')
+        ->assertJsonPath('data.enabled', true)
+        ->assertJsonPath('data.events.deployment_success_discord_notifications', true)
+        ->assertJsonPath('data.events.deployment_failure_discord_notifications', false);
+
+    expect($this->team->discordNotificationSettings()->first())
+        ->discord_enabled->toBeTrue()
+        ->deployment_success_discord_notifications->toBeTrue()
+        ->deployment_failure_discord_notifications->toBeFalse();
+});
+
+it('rejects unknown notification event keys', function () {
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson('/api/devforge/v1/notifications/discord', [
+            'events' => [
+                'not_a_real_event' => true,
+            ],
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['events']);
+});
+
+it('creates updates and deletes shared variables for the current team', function () {
+    $create = $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/shared-variables', [
+            'key' => 'TEAM_API_KEY',
+            'value' => 'secret-value',
+            'scope' => 'team',
+            'comment' => 'Jeton API',
+            'is_literal' => true,
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.key', 'TEAM_API_KEY')
+        ->assertJsonPath('data.scope', 'team')
+        ->assertJsonPath('data.value', '********');
+
+    $variableId = $create->json('data.id');
+    expect($create->getContent())->not->toContain('secret-value');
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson("/api/devforge/v1/shared-variables/{$variableId}", [
+            'comment' => 'Jeton API mis à jour',
+            'value' => 'rotated-secret',
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.comment', 'Jeton API mis à jour');
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->deleteJson("/api/devforge/v1/shared-variables/{$variableId}")
+        ->assertNoContent();
+
+    expect(SharedEnvironmentVariable::query()->find($variableId))->toBeNull();
 });
 
 it('requires an authenticated verified session', function () {

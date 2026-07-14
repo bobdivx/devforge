@@ -5,6 +5,7 @@ import { domainApi } from '../../lib/domain-api';
 import { isEventOnlyAgentType } from '../../lib/agent-triggers';
 import { ApiError } from '../../lib/api-client';
 import { navigateTo } from '../../lib/use-navigate';
+import { ActionToolbar } from '../ui/ActionToolbar';
 import { RunHistoryTable } from './RunHistoryTable';
 import { AgentRunLog } from './AgentRunLog';
 
@@ -95,15 +96,16 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
         <div class="grid gap-4 p-4">
             {error && <p class="rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">{error}</p>}
 
-            <div class="flex gap-2">
-                <button class="btn btn-primary btn-sm flex-1" type="button" disabled={running || !agent.provider} onClick={() => void handleRun()}>
+            <ActionToolbar>
+                <button class="btn btn-primary btn-sm" type="button" disabled={running || !agent.provider} onClick={() => void handleRun()}>
                     {running ? <span class="loading loading-spinner loading-xs" /> : <Play class="size-3.5" aria-hidden />}
                     Lancer autonome
                 </button>
-                <button class="btn btn-error btn-sm btn-outline btn-square" type="button" disabled={deleting} onClick={() => void handleDelete()}>
+                <button class="btn btn-error btn-sm btn-outline" type="button" disabled={deleting} onClick={() => void handleDelete()}>
                     <Trash2 class="size-3.5" aria-hidden />
+                    Supprimer
                 </button>
-            </div>
+            </ActionToolbar>
 
             <div class="grid gap-3">
                 <label class="grid gap-1 text-xs">

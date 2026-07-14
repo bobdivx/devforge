@@ -98,6 +98,9 @@ describe('ApplicationDetailPanel', () => {
             if (url.includes('/linkable-databases')) {
                 return jsonResponse({ data: [], meta: { connections: [] } });
             }
+            if (url.includes('/environment-variables')) {
+                return jsonResponse({ data: { production: [], preview: [] } });
+            }
             if (url.includes('/logs')) {
                 return jsonResponse({
                     data: {
@@ -124,6 +127,11 @@ describe('ApplicationDetailPanel', () => {
         );
 
         expect(await screen.findByRole('heading', { name: 'popcorn-web' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Vue d’ensemble' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Déploiements' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Bases de données' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Logs' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Variables' })).toBeInTheDocument();
         expect(screen.getByRole('img', { name: 'Capture d’écran de popcorn-web' })).toHaveAttribute(
             'src',
             'https://s.wordpress.com/mshots/v1/https%3A%2F%2Fpopcornn.app?w=960',
@@ -132,13 +140,9 @@ describe('ApplicationDetailPanel', () => {
         expect(screen.getByText(/84f8e3e · fix\(auth\): allow registration/)).toBeInTheDocument();
         expect(screen.getByRole('link', { name: 'Visiter' })).toHaveAttribute('href', 'https://popcornn.app');
         expect(screen.getByRole('button', { name: 'Déployer' })).toBeInTheDocument();
-        expect(screen.getByText('fix(auth): allow registration')).toBeInTheDocument();
+        expect(screen.getByText(/84f8e3e · fix\(auth\): allow registration/)).toBeInTheDocument();
         expect(screen.getByText('Serveur principal')).toBeInTheDocument();
-        expect(screen.getByText('Logs du conteneur')).toBeInTheDocument();
-        expect(await screen.findByText('Suivi du déploiement')).toBeInTheDocument();
-        expect(screen.getByText('Logs de déploiement')).toBeInTheDocument();
-        expect(screen.getByText('Agent de déploiement')).toBeInTheDocument();
-        expect(await screen.findByText('Server started on port 3000')).toBeInTheDocument();
-        expect(screen.getByText('Bases de données')).toBeInTheDocument();
+        expect(screen.queryByText('Logs du conteneur')).not.toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Bases de données' })).toBeInTheDocument();
     });
 });

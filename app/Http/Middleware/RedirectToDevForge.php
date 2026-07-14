@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\DevForge\LegacyInterfacePreference;
 use Closure;
 use Illuminate\Http\Request;
 use LogicException;
@@ -9,8 +10,14 @@ use Symfony\Component\HttpFoundation\Response;
 
 class RedirectToDevForge
 {
+    public function __construct(
+        private LegacyInterfacePreference $legacyInterfacePreference,
+    ) {}
+
     public function handle(Request $request, Closure $next): Response
     {
+        $this->legacyInterfacePreference->sync($request);
+
         if (! $this->shouldRedirect($request)) {
             return $next($request);
         }
@@ -37,7 +44,7 @@ class RedirectToDevForge
             return false;
         }
 
-        if ($request->boolean('legacy') || $request->is('devforge', 'devforge/*')) {
+        if ($this->legacyInterfacePreference->active($request) || $request->is('devforge', 'devforge/*')) {
             return false;
         }
 
