@@ -61,12 +61,39 @@ class OllamaProvider implements LlmProvider
      */
     private function formatMessages(array $messages): array
     {
-        return array_map(function (array $message): array {
-            return [
+        return array_values(array_map(function (array $message): array {
+            $formatted = [
                 'role' => $message['role'],
-                'content' => is_string($message['content']) ? $message['content'] : json_encode($message['content']),
+                'content' => is_string($message['content'])
+                    ? $message['content']
+                    : json_encode($message['content'], JSON_UNESCAPED_UNICODE),
             ];
-        }, $messages);
+
+            if (! empty($message['tool_calls']) && is_array($message['tool_calls'])) {
+                $formatted['tool_calls'] = array_values(array_map(function (array $call): array {
+                    $function = $call['function'] ?? [];
+                    $arguments = $function['arguments'] ?? [];
+
+                    if (is_string($arguments)) {
+                        $decoded = json_decode($arguments, true);
+                        $arguments = is_array($decoded) ? $decoded : [];
+                    }
+
+                    return [
+                        'function' => [
+                            'name' => (string) ($function['name'] ?? ''),
+                            'arguments' => $arguments,
+                        ],
+                    ];
+                }, $message['tool_calls']));
+            }
+
+            if (($message['role'] ?? '') === 'tool') {
+                $formatted['role'] = 'tool';
+            }
+
+            return $formatted;
+        }, $messages));
     }
 
     /** @param array<mixed> $data */
@@ -77,11 +104,16 @@ class OllamaProvider implements LlmProvider
 
         foreach ($message['tool_calls'] ?? [] as $call) {
             $fn = $call['function'] ?? [];
+            $arguments = $fn['arguments'] ?? [];
+
+            if (is_string($arguments)) {
+                $arguments = json_decode($arguments, true) ?? [];
+            }
+
             $toolCalls[] = [
+                'id' => (string) ($call['id'] ?? 'call_'.uniqid()),
                 'name' => $fn['name'] ?? '',
-                'arguments' => is_string($fn['arguments'] ?? '')
-                    ? json_decode($fn['arguments'], true) ?? []
-                    : ($fn['arguments'] ?? []),
+                'arguments' => is_array($arguments) ? $arguments : [],
             ];
         }
 

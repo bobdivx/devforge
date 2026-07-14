@@ -341,6 +341,25 @@ class AgentToolkit
             ];
         }
 
+        if ($this->canSpawnEphemeral()) {
+            $tools[] = [
+                'name' => 'spawn_task',
+                'description' => 'Lance une sous-tâche éphémère avec un modèle adapté à la difficulté (Auto · Flash-Lite / Flash / Pro). Isolée, synchrone, visible dans les logs du run.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'goal' => ['type' => 'string', 'description' => 'Objectif précis et autonome pour la sous-tâche'],
+                        'difficulty' => [
+                            'type' => 'string',
+                            'enum' => ['auto', 'light', 'standard', 'heavy'],
+                            'description' => 'Difficulté : light (inspection), standard (diagnostic), heavy (analyse profonde). Défaut auto.',
+                        ],
+                    ],
+                    'required' => ['goal'],
+                ],
+            ];
+        }
+
         return $tools;
     }
 
@@ -498,7 +517,13 @@ class AgentToolkit
     {
         return $this->delegator !== null
             && $this->agent !== null
-            && $this->agent->parent_agent_id === null;
+            && $this->agent->parent_agent_id === null
+            && ! ($this->runContext['ephemeral'] ?? false);
+    }
+
+    private function canSpawnEphemeral(): bool
+    {
+        return $this->canDelegate();
     }
 
     /**
@@ -635,6 +660,10 @@ class AgentToolkit
             'delegate_task' => $this->delegateTask(
                 $arguments['goal'] ?? '',
                 $arguments['child_agent_uuid'] ?? null,
+            ),
+            'spawn_task' => $this->spawnTask(
+                $arguments['goal'] ?? '',
+                $arguments['difficulty'] ?? 'auto',
             ),
             default => $this->executeCustomTool($toolName, $arguments),
         };
@@ -877,6 +906,26 @@ class AgentToolkit
             $this->run,
             $goal,
             $childAgentUuid,
+        );
+    }
+
+    /** @return array<mixed> */
+    private function spawnTask(string $goal, ?string $difficulty): array
+    {
+        if (! $this->canSpawnEphemeral()) {
+            return ['error' => 'Sous-tâches éphémères non disponibles pour cet agent.'];
+        }
+
+        $goal = trim($goal);
+        if ($goal === '') {
+            return ['error' => 'Objectif de sous-tâche vide.'];
+        }
+
+        return $this->delegator->spawnEphemeral(
+            $this->agent,
+            $this->run,
+            $goal,
+            $difficulty ?? 'auto',
         );
     }
 

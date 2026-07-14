@@ -91,3 +91,46 @@ it('has parent and sub-agent relationships', function () {
     expect($child->parent->id)->toBe($parent->id);
     expect($parent->subAgents->first()->id)->toBe($child->id);
 });
+
+it('syncs operational status from the latest run outcome', function () {
+    $agent = AiAgent::factory()->create(['status' => 'error']);
+
+    \App\Models\AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'status' => 'completed',
+        'finished_at' => now(),
+    ]);
+
+    expect($agent->syncOperationalStatus())->toBeTrue()
+        ->and($agent->fresh()->status)->toBe('idle');
+});
+
+it('keeps recent failures in error status', function () {
+    config()->set('devforge.agents_error_retention_hours', 24);
+
+    $agent = AiAgent::factory()->create(['status' => 'idle']);
+
+    \App\Models\AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'status' => 'failed',
+        'finished_at' => now()->subMinutes(10),
+    ]);
+
+    expect($agent->syncOperationalStatus())->toBeTrue()
+        ->and($agent->fresh()->status)->toBe('error');
+});
+
+it('expires stale failures according to retention hours', function () {
+    config()->set('devforge.agents_error_retention_hours', 2);
+
+    $agent = AiAgent::factory()->create(['status' => 'error']);
+
+    \App\Models\AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'status' => 'failed',
+        'finished_at' => now()->subHours(3),
+    ]);
+
+    expect($agent->syncOperationalStatus())->toBeTrue()
+        ->and($agent->fresh()->status)->toBe('idle');
+});

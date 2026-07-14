@@ -81,28 +81,87 @@ class AiAgent extends Model
         return $this->hasMany(AiAgentMessage::class, 'agent_id');
     }
 
+    public function sessions(): HasMany
+    {
+        return $this->hasMany(AiAgentSession::class, 'agent_id');
+    }
+
     public function latestRun(): HasMany
     {
         return $this->hasMany(AiAgentRun::class, 'agent_id')->latest()->limit(1);
     }
 
-    public function recoverFromErrorState(): bool
+    public function syncOperationalStatus(): bool
     {
-        if ($this->status !== 'error') {
-            return false;
-        }
-
         $this->recoverIfInterrupted(maxAgeSeconds: 90);
 
-        if ($this->runs()
-            ->whereIn('status', ['pending', 'running'])
-            ->exists()) {
+        if ($this->runs()->whereIn('status', ['pending', 'running'])->exists()) {
+            if ($this->status !== 'running') {
+                $this->update(['status' => 'running']);
+            }
+
+            return $this->wasChanged();
+        }
+
+        if (! $this->is_active) {
+            if ($this->status !== 'paused') {
+                $this->update(['status' => 'paused']);
+
+                return true;
+            }
+
             return false;
         }
 
-        $this->update(['status' => 'idle']);
+        $targetStatus = $this->resolveOperationalStatusFromLatestRun(
+            $this->runs()->latest()->first(),
+        );
 
-        return true;
+        if ($this->status !== $targetStatus) {
+            $this->update(['status' => $targetStatus]);
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @deprecated Use syncOperationalStatus() instead.
+     */
+    public function recoverFromErrorState(): bool
+    {
+        return $this->syncOperationalStatus();
+    }
+
+    private function resolveOperationalStatusFromLatestRun(?AiAgentRun $latestRun): string
+    {
+        if ($latestRun === null) {
+            return 'idle';
+        }
+
+        if ($latestRun->status === 'failed' && ! $this->isStaleFailure($latestRun)) {
+            return 'error';
+        }
+
+        return 'idle';
+    }
+
+    private function isStaleFailure(AiAgentRun $run): bool
+    {
+        $retentionHours = (int) config('devforge.agents_error_retention_hours', 24);
+
+        if ($retentionHours <= 0) {
+            return false;
+        }
+
+        $referenceAt = $run->finished_at ?? $run->created_at;
+
+        if ($referenceAt === null) {
+            return false;
+        }
+
+        return $referenceAt->copy()->addHours($retentionHours)->isPast();
     }
 
     public function recoverIfInterrupted(int $maxAgeSeconds = 330): bool

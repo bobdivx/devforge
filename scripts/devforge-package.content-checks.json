@@ -1,0 +1,40 @@
+{
+    "checks": [
+        {
+            "path": "app/Jobs/ApplicationDeploymentJob.php",
+            "must_contain": [
+                "DeploymentBuildAgentDispatcher",
+                "DeploymentFailureAgentDispatcher"
+            ],
+            "description": "Le job de déploiement doit déclencher les agents DevForge"
+        },
+        {
+            "path": "app/Services/DevForge/DeploymentMonitoringData.php",
+            "must_contain": [
+                "DeploymentAgentCatchUp"
+            ],
+            "description": "Le monitoring doit pouvoir rattraper les agents manquants"
+        },
+        {
+            "path": "app/Enums/TaskModelTier.php",
+            "must_contain": [
+                "enum TaskModelTier"
+            ],
+            "description": "Routage de modeles LLM pour les agents DevForge"
+        },
+        {
+            "path": "app/Services/DevForge/Agent/AgentRunner.php",
+            "must_contain": [
+                "TaskModelTier"
+            ],
+            "description": "Execution agent avec routage de modele"
+        },
+        {
+            "path": "config/devforge.php",
+            "must_contain": [
+                "agents_enabled"
+            ],
+            "description": "Configuration agents DevForge"
+        }
+    ]
+}

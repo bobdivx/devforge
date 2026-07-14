@@ -5,7 +5,7 @@ $devforgeEnabled = env('DEVFORGE_ENABLED', true);
 return [
     'enabled' => $devforgeEnabled,
 
-    'agents_enabled' => env('DEVFORGE_AGENTS_ENABLED', false),
+    'agents_enabled' => env('DEVFORGE_AGENTS_ENABLED', $devforgeEnabled),
 
     'agents_auto_fix_deployments' => env('DEVFORGE_AGENTS_AUTO_FIX_DEPLOYMENTS', true),
 
@@ -40,6 +40,37 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Smart model routing (Auto → tier → modèle adapté)
+    |--------------------------------------------------------------------------
+    */
+    'agents_smart_routing' => env('DEVFORGE_AGENTS_SMART_ROUTING', true),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Limite de runs agents par déploiement (quota LLM)
+    |--------------------------------------------------------------------------
+    |
+    | 0 = illimité (comportement historique)
+    | 1 = uniquement en cas d'échec (recommandé free tier Gemini)
+    | 2 = échec + début de build
+    | 3+ = échec + build + fin de build
+    |
+    */
+    'agents_per_deployment_max_runs' => (int) env('DEVFORGE_AGENTS_PER_DEPLOYMENT_MAX_RUNS', 1),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Error retention on agent cards (hours)
+    |--------------------------------------------------------------------------
+    |
+    | After this many hours, a failed run no longer keeps the agent in "error"
+    | status on the dashboard. Set to 0 to keep errors until the next success.
+    |
+    */
+    'agents_error_retention_hours' => (int) env('DEVFORGE_AGENTS_ERROR_RETENTION_HOURS', 24),
+
+    /*
+    |--------------------------------------------------------------------------
     | Ollama URL for agents running inside Docker
     |--------------------------------------------------------------------------
     |
@@ -48,6 +79,11 @@ return [
     |
     */
     'ollama_url' => env('DEVFORGE_OLLAMA_URL', ''),
+
+    /*
+    | IP hôte pour joindre Ollama depuis le conteneur Docker (fallback auto).
+    */
+    'ollama_host_ip' => env('DEVFORGE_OLLAMA_HOST_IP', ''),
 
     /*
     |--------------------------------------------------------------------------

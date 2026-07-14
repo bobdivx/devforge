@@ -3,6 +3,7 @@
 use App\Http\Controllers\DevForge\AgentController;
 use App\Http\Controllers\DevForge\AgentMessageController;
 use App\Http\Controllers\DevForge\AgentRunController;
+use App\Http\Controllers\DevForge\AgentSessionController;
 use App\Http\Controllers\DevForge\AiProviderController;
 use App\Http\Middleware\EnsureDevForgeAgentsEnabled;
 use Illuminate\Support\Facades\Route;
@@ -32,6 +33,30 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
             ->middleware('throttle:devforge-agent-run')
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->name('messages.store');
+
+        Route::get('/{uuid}/sessions', [AgentSessionController::class, 'index'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->name('sessions.index');
+        Route::post('/{uuid}/sessions', [AgentSessionController::class, 'store'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->name('sessions.store');
+        Route::patch('/{uuid}/sessions/{sessionUuid}', [AgentSessionController::class, 'update'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->where('sessionUuid', '[A-Za-z0-9-]{8,64}')
+            ->name('sessions.update');
+        Route::post('/{uuid}/sessions/{sessionUuid}/activate', [AgentSessionController::class, 'activate'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->where('sessionUuid', '[A-Za-z0-9-]{8,64}')
+            ->name('sessions.activate');
+        Route::get('/{uuid}/sessions/{sessionUuid}/messages', [AgentSessionController::class, 'messages'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->where('sessionUuid', '[A-Za-z0-9-]{8,64}')
+            ->name('sessions.messages.index');
+        Route::post('/{uuid}/sessions/{sessionUuid}/messages', [AgentSessionController::class, 'sendMessage'])
+            ->middleware('throttle:devforge-agent-run')
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->where('sessionUuid', '[A-Za-z0-9-]{8,64}')
+            ->name('sessions.messages.store');
 
         Route::get('/{uuid}/runs', [AgentRunController::class, 'index'])
             ->where('uuid', '[A-Za-z0-9-]{8,64}')

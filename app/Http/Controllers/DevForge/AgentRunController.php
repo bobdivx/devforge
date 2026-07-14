@@ -76,6 +76,7 @@ class AgentRunController extends Controller
             'tokens_used' => $run->tokens_used,
             'iterations' => $run->iterations,
             'duration_seconds' => $run->duration_in_seconds,
+            'metadata' => $run->metadata ?? [],
             'started_at' => $run->started_at?->toISOString(),
             'finished_at' => $run->finished_at?->toISOString(),
             'created_at' => $run->created_at->toISOString(),

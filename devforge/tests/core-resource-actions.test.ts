@@ -1,0 +1,43 @@
+import { describe, expect, it } from 'vitest';
+import {
+    canVisitApplication,
+    resolveCoreResourceActions,
+} from '../src/lib/core-resource-actions';
+import type { CoreResource } from '../src/lib/domain-api';
+
+function application(overrides: Partial<CoreResource> = {}): CoreResource {
+    return {
+        uuid: 'app-1',
+        type: 'application',
+        name: 'demo',
+        description: null,
+        status: 'running:healthy',
+        configuration: {},
+        actions: ['start', 'stop', 'restart', 'deploy'],
+        created_at: null,
+        updated_at: null,
+        ...overrides,
+    };
+}
+
+describe('resolveCoreResourceActions', () => {
+    it('n’expose que deploy pour une application arrêtée', () => {
+        expect(resolveCoreResourceActions(application({ status: 'exited:unknown' }))).toEqual(['deploy']);
+    });
+
+    it('n’expose pas démarrer pour une application en cours d’exécution', () => {
+        expect(resolveCoreResourceActions(application({ status: 'running:healthy' }))).toEqual([
+            'stop',
+            'restart',
+            'deploy',
+        ]);
+    });
+});
+
+describe('canVisitApplication', () => {
+    it('masque la visite sans domaine ou si l’application n’est pas en ligne', () => {
+        expect(canVisitApplication('running:healthy', null)).toBe(false);
+        expect(canVisitApplication('exited:unknown', 'https://demo.test')).toBe(false);
+        expect(canVisitApplication('running:healthy', 'https://demo.test')).toBe(true);
+    });
+});

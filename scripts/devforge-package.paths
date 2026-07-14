@@ -1,3 +1,9 @@
+# DevForge rollout manifest
+# - Lignes normales : fichier ou dossier (recursif dans tar)
+# - glob:pattern    : expansion automatique (ex: glob:app/Models/Ai*.php)
+# - Fichiers obligatoires supplementaires : scripts/devforge-package.required (fusion auto)
+# - Validation contenu : scripts/devforge-package.content-checks.json (bloque le rollout si echec)
+
 app/Http/Controllers/DevForgeController.php
 app/Http/Controllers/DevForge
 app/Http/Middleware/EnsureDevForgeCurrentTeam.php
@@ -7,16 +13,11 @@ app/Http/Middleware/EnsureDevForgeUserIsVerified.php
 app/Http/Middleware/EnsureJsonResponse.php
 app/Http/Middleware/RedirectToDevForge.php
 app/Http/Requests/DevForge
-app/Jobs/Agent
-app/Models/AiAgent.php
-app/Models/AiAgentMessage.php
-app/Models/AiAgentRun.php
-app/Models/AiProviderConfig.php
+glob:app/Models/Ai*.php
 app/Policies/AiAgentPolicy.php
 app/Policies/AiProviderConfigPolicy.php
 app/Services/DevForge
 app/Support/DevForge
-app/Events/AgentRunUpdated.php
 app/Console/Commands/RunScheduledAgentsCommand.php
 app/Providers/RouteServiceProvider.php
 app/Http/Kernel.php

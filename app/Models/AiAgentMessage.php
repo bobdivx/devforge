@@ -13,6 +13,7 @@ class AiAgentMessage extends Model
 
     protected $fillable = [
         'agent_id',
+        'session_id',
         'run_id',
         'role',
         'content',
@@ -35,6 +36,11 @@ class AiAgentMessage extends Model
     public function agent(): BelongsTo
     {
         return $this->belongsTo(AiAgent::class, 'agent_id');
+    }
+
+    public function session(): BelongsTo
+    {
+        return $this->belongsTo(AiAgentSession::class, 'session_id');
     }
 
     public function run(): BelongsTo

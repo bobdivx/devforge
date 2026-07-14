@@ -300,11 +300,16 @@ it('processes a queued chat message and stores an assistant reply', function () 
         'team_id' => $this->team->id,
         'provider_config_id' => $provider->id,
     ]);
+    $session = \App\Models\AiAgentSession::factory()->create([
+        'agent_id' => $agent->id,
+        'user_id' => $this->user->id,
+    ]);
 
     \Illuminate\Support\Facades\Queue::fake();
 
     $queued = app(\App\Services\DevForge\Agent\AgentChatService::class)->queueMessage(
         $agent,
+        $session,
         'Quel est l\'état de mes ressources ?',
     );
 
@@ -318,10 +323,54 @@ it('processes a queued chat message and stores an assistant reply', function () 
     expect($agent->fresh()->status)->toBe('idle');
 });
 
-it('recovers agents stuck in error state when listing them', function () {
+it('syncs agent status from the latest run when listing them', function () {
     $agent = AiAgent::factory()->create([
         'team_id' => $this->team->id,
         'status' => 'error',
+    ]);
+
+    \App\Models\AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'status' => 'failed',
+        'summary' => 'Erreur récente',
+        'finished_at' => now()->subMinutes(5),
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/agents')
+        ->assertSuccessful()
+        ->assertJsonPath('data.0.status', 'error');
+
+    \App\Models\AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'status' => 'completed',
+        'summary' => 'Mission terminée',
+        'finished_at' => now(),
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/agents')
+        ->assertSuccessful()
+        ->assertJsonPath('data.0.status', 'idle');
+
+    expect($agent->fresh()->status)->toBe('idle');
+});
+
+it('expires stale agent errors after the configured retention window', function () {
+    config()->set('devforge.agents_error_retention_hours', 1);
+
+    $agent = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'status' => 'error',
+    ]);
+
+    \App\Models\AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'status' => 'failed',
+        'summary' => 'Erreur ancienne',
+        'finished_at' => now()->subHours(2),
     ]);
 
     $this->actingAs($this->user)

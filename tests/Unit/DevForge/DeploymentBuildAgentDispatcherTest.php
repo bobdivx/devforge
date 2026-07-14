@@ -20,6 +20,7 @@ uses(RefreshDatabase::class);
 beforeEach(function () {
     config()->set('devforge.agents_enabled', true);
     config()->set('devforge.agents_monitor_build_enabled', true);
+    config()->set('devforge.agents_per_deployment_max_runs', 0);
 
     $this->user = User::factory()->create();
     $this->team = $this->user->teams()->firstOrFail();
@@ -99,6 +100,67 @@ it('dispatches a devforge agent when a manual deployment starts', function () {
             && ($job->context['deployment_uuid'] ?? null) === 'manual-build-uuid'
             && ($job->context['trigger_source'] ?? null) === 'manual';
     });
+});
+
+it('dispatches a deployment agent when a manual deployment starts', function () {
+    Queue::fake();
+
+    $agent = AiAgent::factory()->deployment()->create([
+        'team_id' => $this->team->id,
+        'provider_config_id' => $this->provider->id,
+        'schedule_minutes' => 10,
+    ]);
+
+    $deployment = ApplicationDeploymentQueue::create([
+        'application_id' => $this->application->id,
+        'deployment_uuid' => 'deployment-agent-build-uuid',
+        'status' => 'in_progress',
+        'pull_request_id' => 0,
+        'is_webhook' => false,
+    ]);
+
+    app(DeploymentBuildAgentDispatcher::class)->dispatch(
+        application: $this->application,
+        deploymentUuid: 'deployment-agent-build-uuid',
+        deploymentQueue: $deployment,
+    );
+
+    Queue::assertPushed(RunAgentJob::class, function (RunAgentJob $job) use ($agent): bool {
+        return $job->agent->is($agent)
+            && $job->trigger === 'event'
+            && ($job->context['event'] ?? null) === 'deployment_build_started';
+    });
+});
+
+it('prefers a deployment agent scoped to the application', function () {
+    Queue::fake();
+
+    AiAgent::factory()->devforge()->create([
+        'team_id' => $this->team->id,
+        'provider_config_id' => $this->provider->id,
+    ]);
+
+    $deploymentAgent = AiAgent::factory()->deployment()->create([
+        'team_id' => $this->team->id,
+        'provider_config_id' => $this->provider->id,
+        'resource_uuid' => $this->application->uuid,
+    ]);
+
+    $deployment = ApplicationDeploymentQueue::create([
+        'application_id' => $this->application->id,
+        'deployment_uuid' => 'scoped-build-uuid',
+        'status' => 'in_progress',
+        'pull_request_id' => 0,
+        'is_webhook' => true,
+    ]);
+
+    app(DeploymentBuildAgentDispatcher::class)->dispatch(
+        application: $this->application,
+        deploymentUuid: 'scoped-build-uuid',
+        deploymentQueue: $deployment,
+    );
+
+    Queue::assertPushed(RunAgentJob::class, fn (RunAgentJob $job): bool => $job->agent->is($deploymentAgent));
 });
 
 it('does not dispatch devforge agents for restart-only deployments', function () {
@@ -223,4 +285,32 @@ it('allows build completed dispatch after build started for the same deployment'
     );
 
     Queue::assertPushed(RunAgentJob::class);
+});
+
+it('does not dispatch build monitor when per deployment limit is one', function () {
+    config()->set('devforge.agents_per_deployment_max_runs', 1);
+
+    Queue::fake();
+
+    AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'type' => 'devforge',
+        'provider_config_id' => $this->provider->id,
+    ]);
+
+    $deployment = ApplicationDeploymentQueue::create([
+        'application_id' => $this->application->id,
+        'deployment_uuid' => 'quota-save-build',
+        'status' => 'in_progress',
+        'pull_request_id' => 0,
+        'is_webhook' => true,
+    ]);
+
+    app(DeploymentBuildAgentDispatcher::class)->dispatch(
+        application: $this->application,
+        deploymentUuid: 'quota-save-build',
+        deploymentQueue: $deployment,
+    );
+
+    Queue::assertNothingPushed();
 });

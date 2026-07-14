@@ -157,6 +157,15 @@ export type DeploymentAgentRun = {
     } | null;
 };
 
+export type DeploymentMonitoringDiagnostics = {
+    eligible_agents_count: number;
+    active_agents_count: number;
+    agents_with_provider_count: number;
+    agents_busy_count: number;
+    team_has_llm_provider: boolean;
+    blockers: Array<{ code: string; message: string }>;
+};
+
 export type DeploymentMonitoring = {
     deployment: Deployment;
     agent_runs: DeploymentAgentRun[];
@@ -167,6 +176,8 @@ export type DeploymentMonitoring = {
         monitor_build: boolean;
         webhook_build: boolean;
     };
+    diagnostics: DeploymentMonitoringDiagnostics;
+    catch_up_triggered?: boolean;
 };
 
 export type ResourceStatus = {
@@ -348,7 +359,7 @@ export type SharedVariables = Record<'team' | 'project' | 'environment' | 'serve
 export type AgentType = 'debug' | 'tech-watch' | 'github' | 'devforge' | 'deployment' | 'security';
 export type AgentStatus = 'idle' | 'running' | 'error' | 'paused';
 export type AgentRunStatus = 'pending' | 'running' | 'completed' | 'failed';
-export type AgentTrigger = 'scheduled' | 'manual' | 'event' | 'chat';
+export type AgentTrigger = 'scheduled' | 'manual' | 'event' | 'chat' | 'ephemeral' | 'delegation';
 
 export type AgentChatMessage = {
     uuid: string;
@@ -356,6 +367,15 @@ export type AgentChatMessage = {
     content: string;
     metadata: Record<string, unknown> | null;
     run_uuid: string | null;
+    session_uuid?: string | null;
+    created_at: string;
+};
+
+export type AgentChatSession = {
+    uuid: string;
+    title: string;
+    is_legacy: boolean;
+    last_message_at: string | null;
     created_at: string;
 };
 export type LlmProvider = 'gemini' | 'ollama';
@@ -378,6 +398,32 @@ export type AiProviderConfig = {
     created_at: string;
 };
 
+export type AgentModelRouting = {
+    tier: 'light' | 'standard' | 'heavy';
+    tier_label: string;
+    model_label: string;
+    reason: string;
+    display: string;
+};
+
+export type AgentEphemeralTask = {
+    run_uuid: string;
+    goal: string;
+    tier: string;
+    tier_label: string;
+    model_label: string;
+    display: string;
+    status: string;
+    summary: string | null;
+};
+
+export type AgentRunMetadata = {
+    model_routing?: AgentModelRouting;
+    ephemeral?: boolean;
+    parent_run_uuid?: string | null;
+    ephemeral_tasks?: AgentEphemeralTask[];
+};
+
 export type AgentRun = {
     uuid: string;
     status: AgentRunStatus;
@@ -387,6 +433,7 @@ export type AgentRun = {
     tokens_used: number;
     iterations: number;
     duration_seconds: number | null;
+    metadata?: AgentRunMetadata;
     started_at: string | null;
     finished_at: string | null;
     created_at: string;
@@ -412,7 +459,7 @@ export type Agent = {
     parent_agent_id: number | null;
     resource_uuid: string | null;
     sub_agents_count: number;
-    latest_run: Omit<AgentRun, 'logs' | 'actions_taken' | 'duration_seconds'> | null;
+    latest_run: (Omit<AgentRun, 'logs' | 'actions_taken' | 'duration_seconds'> & { metadata?: AgentRunMetadata }) | null;
     default_directives?: string;
     autonomous_playbook?: string[];
     created_at: string;
@@ -1198,8 +1245,28 @@ export const domainApi = {
     }),
     deleteAgent: (uuid: string) => mutate<void>(`/agents/${encodeURIComponent(uuid)}`, { method: 'DELETE' }),
     runAgent: (uuid: string) => mutate<ApiResponse<{ queued: boolean; agent_uuid: string; run_uuid: string; status: AgentStatus }>>(`/agents/${encodeURIComponent(uuid)}/run`, { method: 'POST' }),
-    agentMessages: (uuid: string) => apiFetch<ApiListResponse<AgentChatMessage>>(`${API_BASE}/agents/${encodeURIComponent(uuid)}/messages`),
-    sendAgentMessage: (uuid: string, content: string) => mutate<ApiResponse<{ user: AgentChatMessage; run_uuid: string; status: 'pending' }>>(`/agents/${encodeURIComponent(uuid)}/messages`, {
+    agentMessages: (uuid: string, sessionUuid?: string) => {
+        const query = sessionUuid ? `?session_uuid=${encodeURIComponent(sessionUuid)}` : '';
+        return apiFetch<ApiListResponse<AgentChatMessage>>(`${API_BASE}/agents/${encodeURIComponent(uuid)}/messages${query}`);
+    },
+    sendAgentMessage: (uuid: string, content: string, sessionUuid?: string) => mutate<ApiResponse<{ user: AgentChatMessage; run_uuid: string; session_uuid: string; status: 'pending' }>>(`/agents/${encodeURIComponent(uuid)}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content, session_uuid: sessionUuid }),
+    }),
+    agentSessions: (uuid: string) => apiFetch<ApiListResponse<AgentChatSession>>(`${API_BASE}/agents/${encodeURIComponent(uuid)}/sessions`),
+    createAgentSession: (uuid: string, title?: string) => mutate<ApiResponse<AgentChatSession>>(`/agents/${encodeURIComponent(uuid)}/sessions`, {
+        method: 'POST',
+        body: JSON.stringify({ title }),
+    }),
+    activateAgentSession: (uuid: string, sessionUuid: string) => mutate<ApiResponse<AgentChatSession>>(`/agents/${encodeURIComponent(uuid)}/sessions/${encodeURIComponent(sessionUuid)}/activate`, {
+        method: 'POST',
+    }),
+    updateAgentSession: (uuid: string, sessionUuid: string, title: string) => mutate<ApiResponse<AgentChatSession>>(`/agents/${encodeURIComponent(uuid)}/sessions/${encodeURIComponent(sessionUuid)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title }),
+    }),
+    agentSessionMessages: (uuid: string, sessionUuid: string) => apiFetch<ApiListResponse<AgentChatMessage>>(`${API_BASE}/agents/${encodeURIComponent(uuid)}/sessions/${encodeURIComponent(sessionUuid)}/messages`),
+    sendAgentSessionMessage: (uuid: string, sessionUuid: string, content: string) => mutate<ApiResponse<{ user: AgentChatMessage; run_uuid: string; session_uuid: string; status: 'pending' }>>(`/agents/${encodeURIComponent(uuid)}/sessions/${encodeURIComponent(sessionUuid)}/messages`, {
         method: 'POST',
         body: JSON.stringify({ content }),
     }),

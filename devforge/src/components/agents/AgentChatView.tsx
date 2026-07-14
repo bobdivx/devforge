@@ -4,11 +4,13 @@ import { AgentAvatar } from './AgentAvatar';
 import { AgentErrorAlert } from './AgentErrorAlert';
 import { AgentSettingsPanel } from './AgentSettingsPanel';
 import { AgentStatusBadge } from './AgentStatusBadge';
-import type { Agent, AgentChatMessage } from '../../lib/domain-api';
+import { AgentSessionPicker } from './AgentSessionPicker';
+import type { Agent, AgentChatMessage, AgentChatSession, AgentModelRouting } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
 import { ApiError } from '../../lib/api-client';
 import { shouldOpenAgentSettings, syncAgentSettingsQueryParam } from '../../lib/agent-routes';
 import { formatAgentProviderDisplay } from '../../lib/llm-models';
+import { AgentModelRoutingBadge } from './AgentModelRoutingBadge';
 
 type Props = {
     agent: Agent;
@@ -34,12 +36,16 @@ function renderContent(content: string) {
 }
 
 export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
+    const [activeSession, setActiveSession] = useState<AgentChatSession | null>(null);
     const [messages, setMessages] = useState<AgentChatMessage[]>([]);
     const [loading, setLoading] = useState(true);
     const [sending, setSending] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [draft, setDraft] = useState('');
     const [settingsOpen, setSettingsOpen] = useState(() => shouldOpenAgentSettings(window.location.search));
+    const [activeRouting, setActiveRouting] = useState<AgentModelRouting | null>(
+        agent.latest_run?.metadata?.model_routing ?? null,
+    );
 
     const toggleSettings = (open: boolean) => {
         setSettingsOpen(open);
@@ -48,11 +54,11 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-    const loadMessages = async () => {
+    const loadMessages = async (sessionUuid: string) => {
         setLoading(true);
         setError(null);
         try {
-            const response = await domainApi.agentMessages(agent.uuid);
+            const response = await domainApi.agentSessionMessages(agent.uuid, sessionUuid);
             setMessages(response.data);
             if (response.meta?.degraded) {
                 setError('Le chat est en mode dégradé : relancez le déploiement DevForge pour activer l\'historique.');
@@ -64,8 +70,15 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
         }
     };
 
+    const handleSessionChange = (session: AgentChatSession) => {
+        setActiveSession(session);
+        void loadMessages(session.uuid);
+    };
+
     useEffect(() => {
-        void loadMessages();
+        setActiveSession(null);
+        setMessages([]);
+        setLoading(true);
     }, [agent.uuid]);
 
     useEffect(() => {
@@ -76,11 +89,14 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }, [messages, sending]);
 
-    const waitForChatReply = async (runUuid: string): Promise<void> => {
+    const waitForChatReply = async (runUuid: string, sessionUuid: string): Promise<void> => {
         for (let attempt = 0; attempt < 120; attempt += 1) {
             await new Promise((resolve) => window.setTimeout(resolve, 1500));
 
             const run = await domainApi.agentRun(agent.uuid, runUuid);
+            if (run.data.metadata?.model_routing) {
+                setActiveRouting(run.data.metadata.model_routing);
+            }
             if (run.data.status === 'failed') {
                 throw new ApiError(502, { message: run.data.summary ?? 'La réponse de l\'agent a échoué.' });
             }
@@ -89,7 +105,7 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
                 continue;
             }
 
-            const response = await domainApi.agentMessages(agent.uuid);
+            const response = await domainApi.agentSessionMessages(agent.uuid, sessionUuid);
             setMessages(response.data);
             onAgentUpdated();
 
@@ -101,7 +117,7 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
 
     const sendMessage = async (content: string) => {
         const trimmed = content.trim();
-        if (!trimmed || sending || !agent.provider) {
+        if (!trimmed || sending || !agent.provider || !activeSession) {
             return;
         }
 
@@ -120,12 +136,12 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
         setMessages((current) => [...current.filter((m) => m.uuid !== 'welcome'), optimisticUser]);
 
         try {
-            const response = await domainApi.sendAgentMessage(agent.uuid, trimmed);
+            const response = await domainApi.sendAgentSessionMessage(agent.uuid, activeSession.uuid, trimmed);
             setMessages((current) => [
                 ...current.filter((m) => m.uuid !== optimisticUser.uuid),
                 response.data.user,
             ]);
-            await waitForChatReply(response.data.run_uuid);
+            await waitForChatReply(response.data.run_uuid, activeSession.uuid);
         } catch (err) {
             setMessages((current) => current.filter((m) => m.uuid !== optimisticUser.uuid));
             setError(err instanceof ApiError ? err.message : 'Échec de l\'envoi du message.');
@@ -159,15 +175,23 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
                 </button>
                 <AgentAvatar type={agent.type} color={agent.avatar_color} name={agent.name} />
                 <div class="min-w-0 flex-1">
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
                         <h1 class="truncate text-sm font-semibold">{agent.name}</h1>
                         <AgentStatusBadge status={agent.status} />
+                        <AgentModelRoutingBadge routing={activeRouting} compact />
                     </div>
-                    <p class="truncate text-[11px] text-base-content/50">
-                        {agent.provider
-                            ? formatAgentProviderDisplay(agent.provider.provider)
-                            : 'Auto (provider par défaut)'}
-                    </p>
+                    <div class="mt-0.5 flex flex-wrap items-center gap-2">
+                        <AgentSessionPicker
+                            agentUuid={agent.uuid}
+                            activeSessionUuid={activeSession?.uuid ?? null}
+                            onSessionChange={handleSessionChange}
+                        />
+                        <p class="truncate text-[11px] text-base-content/50">
+                            {agent.provider
+                                ? formatAgentProviderDisplay(agent.provider.provider, activeRouting)
+                                : 'Auto (provider par défaut)'}
+                        </p>
+                    </div>
                 </div>
                 <button
                     class={`btn btn-ghost btn-sm btn-square ${settingsOpen ? 'bg-base-300' : ''}`}

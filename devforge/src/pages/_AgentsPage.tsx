@@ -2,7 +2,6 @@ import { Bot, Plus, RefreshCw } from 'lucide-preact';
 import { useState } from 'preact/hooks';
 import { AgentCard } from '../components/agents/AgentCard';
 import { CreateAgentModal } from '../components/agents/CreateAgentModal';
-import { ActionToolbar } from '../components/ui/ActionToolbar';
 import { PageHeader } from '../components/PageHeader';
 import { DataState } from '../components/ui/DataState';
 import { domainApi } from '../lib/domain-api';

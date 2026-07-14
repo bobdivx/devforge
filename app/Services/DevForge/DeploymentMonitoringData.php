@@ -5,6 +5,8 @@ namespace App\Services\DevForge;
 use App\Models\AiAgentRun;
 use App\Models\ApplicationDeploymentQueue;
 use App\Models\Team;
+use App\Services\DevForge\Agent\DeploymentAgentCatchUp;
+use App\Services\DevForge\Agent\DeploymentAgentResolver;
 use Illuminate\Support\Collection;
 
 class DeploymentMonitoringData
@@ -13,6 +15,8 @@ class DeploymentMonitoringData
 
     public function __construct(
         private readonly DeploymentData $deploymentData,
+        private readonly DeploymentAgentResolver $agentResolver,
+        private readonly DeploymentAgentCatchUp $agentCatchUp,
     ) {}
 
     /**
@@ -22,6 +26,17 @@ class DeploymentMonitoringData
     {
         $deploymentUuid = (string) $deployment->deployment_uuid;
         $runs = $this->findRunsForDeployment($team, $deploymentUuid);
+        $catchUpTriggered = false;
+
+        if ($runs->isEmpty()) {
+            $catchUpTriggered = $this->agentCatchUp->maybeDispatch($deployment);
+
+            if ($catchUpTriggered) {
+                $runs = $this->findRunsForDeployment($team, $deploymentUuid);
+            }
+        }
+
+        $applicationUuid = $deployment->application?->uuid;
 
         return [
             'deployment' => $this->deploymentData->deployment($deployment),
@@ -36,6 +51,8 @@ class DeploymentMonitoringData
                 'monitor_build' => (bool) config('devforge.agents_monitor_build_enabled'),
                 'webhook_build' => (bool) config('devforge.agents_monitor_build_enabled'),
             ],
+            'diagnostics' => $this->agentResolver->diagnostics($team, is_string($applicationUuid) ? $applicationUuid : null),
+            'catch_up_triggered' => $catchUpTriggered,
         ];
     }
 

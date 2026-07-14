@@ -45,19 +45,12 @@ REMOTE_SCRIPT="${ROOT}/scripts/devforge-rollout-remote.sh"
 log() { printf '==> %s\n' "$*"; }
 
 collect_paths() {
-    mapfile -t paths < "${PATHS_FILE}"
-    local migrations
-    for migration in "${ROOT}"/database/migrations/2026_07_13_*; do
-        [[ -e "${migration}" ]] || continue
-        paths+=("${migration#${ROOT}/}")
-    done
-    local existing=()
-    for path in "${paths[@]}"; do
-        path="${path//$'\r'/}"
-        [[ -z "${path}" || "${path}" == \#* ]] && continue
-        [[ -e "${ROOT}/${path}" ]] && existing+=("${path}")
-    done
-    printf '%s\n' "${existing[@]}"
+    if command -v pwsh >/dev/null 2>&1; then
+        pwsh -NoProfile -File "${ROOT}/scripts/Resolve-DevForgePackage.ps1" -Root "${ROOT}"
+        return
+    fi
+
+    bash "${ROOT}/scripts/devforge-package-collect.sh"
 }
 
 if [[ "${SKIP_FRONTEND}" != "true" ]]; then
@@ -73,6 +66,7 @@ fi
 if [[ "${SKIP_BUILD}" != "true" ]]; then
     log "Préparation artefact"
     mapfile -t package_paths < <(collect_paths)
+    log "Fichiers dans le package: ${#package_paths[@]}"
     if [[ ${#package_paths[@]} -eq 0 ]]; then
         echo "Aucun fichier DevForge à empaqueter." >&2
         exit 1

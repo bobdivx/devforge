@@ -20,6 +20,7 @@ uses(RefreshDatabase::class);
 beforeEach(function () {
     config()->set('devforge.agents_enabled', true);
     config()->set('devforge.agents_auto_fix_deployments', true);
+    config()->set('devforge.agents_per_deployment_max_runs', 0);
 
     $this->user = User::factory()->create();
     $this->team = $this->user->teams()->firstOrFail();
@@ -211,4 +212,30 @@ it('dispatches failure agent after build started for the same deployment', funct
     Queue::assertPushed(RunAgentJob::class, function (RunAgentJob $job): bool {
         return ($job->context['event'] ?? null) === 'deployment_failed';
     });
+});
+
+it('still dispatches failure agent when per deployment limit is one', function () {
+    config()->set('devforge.agents_per_deployment_max_runs', 1);
+
+    Queue::fake();
+
+    $agent = AiAgent::factory()->debug()->create([
+        'team_id' => $this->team->id,
+        'provider_config_id' => $this->provider->id,
+    ]);
+
+    $deployment = ApplicationDeploymentQueue::create([
+        'application_id' => $this->application->id,
+        'deployment_uuid' => 'quota-save-failure',
+        'status' => 'failed',
+        'pull_request_id' => 0,
+    ]);
+
+    app(DeploymentFailureAgentDispatcher::class)->dispatch(
+        application: $this->application,
+        deploymentUuid: 'quota-save-failure',
+        deploymentQueue: $deployment,
+    );
+
+    Queue::assertPushed(RunAgentJob::class, fn (RunAgentJob $job): bool => $job->agent->is($agent));
 });

@@ -170,7 +170,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                         <p class="text-[11px] text-base-content/50">
                             {typeLabels[agent.type] ?? agent.type}
                             {agent.provider && (
-                                <span class="ml-1 before:me-1 before:content-['·']">{formatAgentProviderDisplay(agent.provider.provider)}</span>
+                                <span class="ml-1 before:me-1 before:content-['·']">{formatAgentProviderDisplay(agent.provider.provider, agent.latest_run?.metadata?.model_routing)}</span>
                             )}
                         </p>
                     </div>

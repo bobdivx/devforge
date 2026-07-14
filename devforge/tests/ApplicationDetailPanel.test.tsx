@@ -140,9 +140,64 @@ describe('ApplicationDetailPanel', () => {
         expect(screen.getByText(/84f8e3e · fix\(auth\): allow registration/)).toBeInTheDocument();
         expect(screen.getByRole('link', { name: 'Visiter' })).toHaveAttribute('href', 'https://popcornn.app');
         expect(screen.getByRole('button', { name: 'Déployer' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Arrêter' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Démarrer' })).not.toBeInTheDocument();
         expect(screen.getByText(/84f8e3e · fix\(auth\): allow registration/)).toBeInTheDocument();
         expect(screen.getByText('Serveur principal')).toBeInTheDocument();
         expect(screen.queryByText('Logs du conteneur')).not.toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'Bases de données' })).toBeInTheDocument();
+    });
+
+    it('masque visiter et n’affiche que déployer quand l’application est arrêtée', async () => {
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+            const url = String(input);
+            if (url.includes('/api/devforge/v1/core/applications/app-uuid-1234')) {
+                return jsonResponse({
+                    data: {
+                        ...application,
+                        status: 'exited:unknown',
+                    },
+                });
+            }
+            if (url.includes('/api/devforge/v1/deployments')) {
+                return jsonResponse({ data: [], meta: { total: 0 } });
+            }
+            if (url.includes('/linkable-databases')) {
+                return jsonResponse({ data: [], meta: { connections: [] } });
+            }
+            if (url.includes('/environment-variables')) {
+                return jsonResponse({ data: { production: [], preview: [] } });
+            }
+            if (url.includes('/logs')) {
+                return jsonResponse({
+                    data: {
+                        available: false,
+                        reason: 'stopped',
+                        message: null,
+                        container: null,
+                        container_status: 'exited',
+                        line_count: 0,
+                        items: [],
+                    },
+                });
+            }
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(
+            <ApplicationDetailPanel
+                uuid="app-uuid-1234"
+                canAct
+                onClose={() => undefined}
+                onChanged={async () => undefined}
+            />,
+        );
+
+        expect(await screen.findByRole('heading', { name: 'popcorn-web' })).toBeInTheDocument();
+        expect(screen.queryByRole('link', { name: 'Visiter' })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Déployer' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Démarrer' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Arrêter' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Redémarrer' })).not.toBeInTheDocument();
     });
 });

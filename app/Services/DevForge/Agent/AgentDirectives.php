@@ -176,8 +176,9 @@ class AgentDirectives
         5. Ta première réponse à une demande actionnable DOIT inclure au moins un appel d'outil — jamais une réponse texte seule.
         6. Enchaîne les outils jusqu'à une réponse complète basée sur des données réelles.
         7. Si le paquet github n'est pas actif : enable_tool_package(package="github") en premier.
-        8. Réponds en français. Sois concis dans le résumé final, pas avant d'avoir agi.
-        9. Ne révèle jamais de secrets.
+        8. Pour une sous-problème isolée et complexe, utilise spawn_task (éphémère, modèle adapté) plutôt que de tout faire en une seule passe.
+        9. Réponds en français. Sois concis dans le résumé final, pas avant d'avoir agi.
+        10. Ne révèle jamais de secrets.
         RULES;
     }
 

@@ -268,6 +268,93 @@ it('falls back to another gemini model when the primary model is rate limited', 
     Http::assertSentCount(2);
 });
 
+it('preserves gemini thought signatures on follow up tool turns', function () {
+    Http::fake([
+        'generativelanguage.googleapis.com/*' => Http::sequence()
+            ->push([
+                'choices' => [
+                    [
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => '',
+                            'tool_calls' => [
+                                [
+                                    'id' => 'call_sig',
+                                    'type' => 'function',
+                                    'function' => [
+                                        'name' => 'list_resources',
+                                        'arguments' => '{"type":"all"}',
+                                    ],
+                                    'extra_content' => [
+                                        'google' => ['thought_signature' => 'sig_test_123'],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'finish_reason' => 'stop',
+                    ],
+                ],
+                'usage' => ['total_tokens' => 4],
+            ])
+            ->push([
+                'choices' => [
+                    [
+                        'message' => ['role' => 'assistant', 'content' => 'OK'],
+                        'finish_reason' => 'stop',
+                    ],
+                ],
+                'usage' => ['total_tokens' => 4],
+            ]),
+    ]);
+
+    $provider = new GeminiProvider('AIzaTestKey', 'gemini-2.5-flash');
+    $messages = [['role' => 'user', 'content' => 'Liste']];
+    $first = $provider->chat($messages, [[
+        'name' => 'list_resources',
+        'description' => 'Liste',
+        'parameters' => ['type' => 'object', 'properties' => []],
+    ]]);
+
+    AgentToolTurnBuilder::append($messages, $first, [
+        ['name' => 'list_resources', 'result' => ['ok' => true]],
+    ]);
+
+    $provider->chat($messages);
+
+    Http::assertSent(function ($request, $index): bool {
+        if ($index !== 1) {
+            return true;
+        }
+
+        $payload = json_decode($request->body(), true);
+        $assistant = collect($payload['messages'] ?? [])->firstWhere('role', 'assistant');
+        $signature = $assistant['tool_calls'][0]['extra_content']['google']['thought_signature'] ?? null;
+
+        expect($signature)->toBe('sig_test_123');
+
+        return true;
+    });
+});
+
+it('stops model failover when gemini quota is globally exhausted', function () {
+    Http::fake([
+        'generativelanguage.googleapis.com/*' => Http::response([
+            'error' => ['message' => 'You exceeded your current quota, please check your plan and billing details.'],
+        ], 429),
+    ]);
+
+    $provider = new GeminiModelFailoverProvider(
+        'AIzaTestKey',
+        LlmModelResolver::AUTO,
+        autoModels: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'],
+    );
+
+    expect(fn () => $provider->chat([['role' => 'user', 'content' => 'test']]))
+        ->toThrow(RuntimeException::class, 'Quota Gemini atteint');
+
+    Http::assertSentCount(1);
+});
+
 it('tries multiple auto models when the first model is unavailable', function () {
     Http::fake([
         'generativelanguage.googleapis.com/*' => Http::sequence()

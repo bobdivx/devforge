@@ -17,6 +17,8 @@ class DeploymentFailureAgentDispatcher
     public function __construct(
         private readonly DeploymentData $deploymentData,
         private readonly AgentRunLauncher $agentRunLauncher,
+        private readonly DeploymentAgentResolver $agentResolver,
+        private readonly DeploymentAgentDispatchLimiter $dispatchLimiter,
     ) {}
 
     public function dispatch(
@@ -28,21 +30,10 @@ class DeploymentFailureAgentDispatcher
             return;
         }
 
-        $team = $application->environment?->project?->team;
+        $team = $this->agentResolver->resolveTeam($application);
 
         if (! $team instanceof Team) {
-            return;
-        }
-
-        if ($this->wasRecentlyHandled($team, $deploymentUuid)) {
-            return;
-        }
-
-        $agent = $this->resolveAgent($team, $application->uuid);
-
-        if (! $agent instanceof AiAgent) {
-            Log::info('DevForge: aucun agent actif pour traiter l\'échec de déploiement.', [
-                'team_id' => $team->id,
+            Log::warning('DevForge: impossible de résoudre l\'équipe pour l\'échec de déploiement.', [
                 'application_uuid' => $application->uuid,
                 'deployment_uuid' => $deploymentUuid,
             ]);
@@ -50,50 +41,46 @@ class DeploymentFailureAgentDispatcher
             return;
         }
 
+        if ($this->wasRecentlyHandled($team, $deploymentUuid)) {
+            return;
+        }
+
+        if (! $this->dispatchLimiter->allows(DeploymentAgentDispatchLimiter::EVENT_FAILED, $team, $deploymentUuid)) {
+            return;
+        }
+
+        $agent = $this->agentResolver->resolve($team, $application->uuid, DeploymentAgentResolver::FAILURE_TYPES);
+
+        if (! $agent instanceof AiAgent) {
+            Log::warning('DevForge: aucun agent éligible pour traiter l\'échec de déploiement.', [
+                'team_id' => $team->id,
+                'application_uuid' => $application->uuid,
+                'deployment_uuid' => $deploymentUuid,
+                'diagnostics' => $this->agentResolver->diagnostics($team, $application->uuid),
+            ]);
+
+            return;
+        }
+
         $context = $this->buildContext($application, $deploymentUuid, $deploymentQueue);
 
-        $this->agentRunLauncher->queue($agent, 'event', $context);
+        $run = $this->agentRunLauncher->queue($agent, 'event', $context);
+
+        if ($run === null) {
+            Log::warning('DevForge: agent trouvé mais indisponible pour l\'échec (déjà en cours).', [
+                'agent_uuid' => $agent->uuid,
+                'deployment_uuid' => $deploymentUuid,
+            ]);
+
+            return;
+        }
 
         Log::info('DevForge: agent IA déclenché après échec de déploiement.', [
             'agent_uuid' => $agent->uuid,
+            'run_uuid' => $run->uuid,
             'application_uuid' => $application->uuid,
             'deployment_uuid' => $deploymentUuid,
         ]);
-    }
-
-    private function resolveAgent(Team $team, string $applicationUuid): ?AiAgent
-    {
-        return AiAgent::query()
-            ->where('team_id', $team->id)
-            ->whereIn('type', ['deployment', 'debug', 'devforge'])
-            ->where('is_active', true)
-            ->where('status', '!=', 'running')
-            ->get()
-            ->filter(fn (AiAgent $agent): bool => $agent->hasLlmProvider() && $this->agentScore($agent, $applicationUuid) >= 0)
-            ->sortByDesc(fn (AiAgent $agent): int => $this->agentScore($agent, $applicationUuid))
-            ->first();
-    }
-
-    private function agentScore(AiAgent $agent, string $applicationUuid): int
-    {
-        if ($agent->resource_uuid !== null && $agent->resource_uuid !== '' && $agent->resource_uuid !== $applicationUuid) {
-            return -1;
-        }
-
-        $score = match ($agent->type) {
-            'deployment' => 100,
-            'devforge' => 95,
-            'debug' => 50,
-            default => 0,
-        };
-
-        if ($agent->resource_uuid === $applicationUuid) {
-            $score += 50;
-        } elseif ($agent->resource_uuid === null || $agent->resource_uuid === '') {
-            $score += 10;
-        }
-
-        return $score;
     }
 
     private function wasRecentlyHandled(Team $team, string $deploymentUuid): bool

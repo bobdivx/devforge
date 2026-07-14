@@ -26,8 +26,12 @@ export function formatProviderModel(provider: string, model: string, modelLabel?
     return `${provider}/${formatModelLabel(model, modelLabel)}`;
 }
 
-/** Affichage agent — toujours Auto (comme Cursor), sans exposer le modèle résolu. */
-export function formatAgentProviderDisplay(provider: string): string {
+/** Affichage agent — Auto + tier si connu depuis le dernier run. */
+export function formatAgentProviderDisplay(provider: string, routing?: { display?: string } | null): string {
+    if (routing?.display) {
+        return `${provider}/${routing.display}`;
+    }
+
     return `${provider}/Auto`;
 }
 

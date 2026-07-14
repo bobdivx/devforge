@@ -8,6 +8,7 @@ import { navigateTo } from '../../lib/use-navigate';
 import { ActionToolbar } from '../ui/ActionToolbar';
 import { RunHistoryTable } from './RunHistoryTable';
 import { AgentRunLog } from './AgentRunLog';
+import { AgentModelRoutingBadge } from './AgentModelRoutingBadge';
 
 type Props = {
     agent: Agent;
@@ -182,7 +183,32 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
                 <h3 class="mb-2 text-xs font-semibold">Exécutions autonomes</h3>
                 <RunHistoryTable runs={runs} selectedUuid={selectedRunUuid} onSelect={setSelectedRunUuid} />
                 {selectedRun && (
-                    <div class="mt-3">
+                    <div class="mt-3 space-y-3">
+                        <AgentModelRoutingBadge routing={selectedRun.metadata?.model_routing} />
+                        {(selectedRun.metadata?.ephemeral_tasks?.length ?? 0) > 0 && (
+                            <div class="rounded-lg border border-base-300 bg-base-200/40 p-3">
+                                <p class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-base-content/50">
+                                    Sous-tâches éphémères
+                                </p>
+                                <ul class="space-y-2">
+                                    {selectedRun.metadata?.ephemeral_tasks?.map((task) => (
+                                        <li key={task.run_uuid} class="text-xs">
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <AgentModelRoutingBadge routing={{
+                                                    tier: task.tier as 'light' | 'standard' | 'heavy',
+                                                    tier_label: task.tier_label,
+                                                    model_label: task.model_label,
+                                                    reason: task.goal,
+                                                    display: task.display,
+                                                }} compact ephemeral />
+                                                <span class="text-base-content/50">{task.status}</span>
+                                            </div>
+                                            <p class="mt-1 text-base-content/70">{task.goal}</p>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
                         <AgentRunLog logs={selectedRun.logs} />
                     </div>
                 )}

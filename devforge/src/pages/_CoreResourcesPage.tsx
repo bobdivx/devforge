@@ -13,6 +13,7 @@ import { DataState } from '../components/ui/DataState';
 import { FilterBar } from '../components/ui/FilterBar';
 import { ResourceStatusIcon } from '../components/ui/ResourceStatusIcon';
 import { resourceStatusInput } from '../lib/resource-status';
+import { resolveCoreResourceActions } from '../lib/core-resource-actions';
 import type { BootstrapPermissions } from '../lib/bootstrap';
 import { domainApi, type CoreAction, type CoreResource, type CoreResourceType } from '../lib/domain-api';
 import { parseResourceStatus } from '../lib/resource-status';
@@ -153,7 +154,7 @@ function ResourceDetail({ type, uuid, canAct, onClose, onChanged }: {
                             )}
                             {actionError && <p class="text-xs text-error" role="alert">{actionError}</p>}
                             <ActionToolbar>
-                                {canAct && type !== 'servers' && resource.actions.map((action) => {
+                                {canAct && type !== 'servers' && resolveCoreResourceActions(resource).map((action) => {
                                     const Icon = actionIcons[action];
                                     return (
                                         <button

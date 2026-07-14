@@ -165,6 +165,7 @@ class GeminiProvider implements LlmProvider
                 'id' => (string) ($call['id'] ?? ''),
                 'name' => (string) ($function['name'] ?? ''),
                 'arguments' => is_array($arguments) ? $arguments : [],
+                'extra_content' => is_array($call['extra_content'] ?? null) ? $call['extra_content'] : null,
             ];
         }
 

@@ -32,7 +32,12 @@ export function getAgentErrorMessage(agent: Agent): string | null {
     }
 
     const run = agent.latest_run;
-    const summary = run?.summary?.trim();
+
+    if (!run || run.status !== 'failed') {
+        return null;
+    }
+
+    const summary = run.summary?.trim();
 
     if (summary) {
         const normalized = summary.startsWith('Erreur:') || summary.startsWith('Erreur :')

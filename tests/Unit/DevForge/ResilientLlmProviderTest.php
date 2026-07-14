@@ -49,6 +49,43 @@ it('falls back to a secondary provider when the primary is overloaded', function
     expect($response->text)->toBe('réponse secours');
 });
 
+it('falls back when gemini quota message is raised', function () {
+    $primary = new class implements \App\Services\DevForge\Agent\Contracts\LlmProvider
+    {
+        public function chat(array $messages, array $tools = []): LlmResponse
+        {
+            throw new RuntimeException('Quota Gemini atteint sur les modèles chat essayés (gemini-2.5-flash).');
+        }
+
+        public function testConnection(): bool
+        {
+            return true;
+        }
+    };
+
+    $fallback = new class implements \App\Services\DevForge\Agent\Contracts\LlmProvider
+    {
+        public function chat(array $messages, array $tools = []): LlmResponse
+        {
+            return new LlmResponse(text: 'via ollama', toolCalls: [], tokensUsed: 1, isFinished: true);
+        }
+
+        public function testConnection(): bool
+        {
+            return true;
+        }
+    };
+
+    $provider = new ResilientLlmProvider(
+        primary: $primary,
+        fallback: $fallback,
+        primaryLabel: 'gemini/Auto',
+        fallbackLabel: 'ollama/llama3.2',
+    );
+
+    expect($provider->chat([['role' => 'user', 'content' => 'test']])->text)->toBe('via ollama');
+});
+
 it('resolves an automatic fallback provider for an agent', function () {
     config()->set('devforge.agents_auto_fallback', true);
 

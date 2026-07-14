@@ -13,10 +13,12 @@ class AiAgentRun extends Model
 
     protected $fillable = [
         'agent_id',
+        'session_id',
         'status',
         'trigger',
         'summary',
         'actions_taken',
+        'metadata',
         'logs',
         'tokens_used',
         'iterations',
@@ -28,6 +30,7 @@ class AiAgentRun extends Model
     {
         return [
             'actions_taken' => 'array',
+            'metadata' => 'array',
             'started_at' => 'datetime',
             'finished_at' => 'datetime',
             'tokens_used' => 'integer',
@@ -46,6 +49,11 @@ class AiAgentRun extends Model
         return $this->belongsTo(AiAgent::class, 'agent_id');
     }
 
+    public function session(): BelongsTo
+    {
+        return $this->belongsTo(AiAgentSession::class, 'session_id');
+    }
+
     public function getDurationInSecondsAttribute(): ?int
     {
         if (! $this->started_at || ! $this->finished_at) {
@@ -59,6 +67,13 @@ class AiAgentRun extends Model
     {
         $timestamp = now()->format('H:i:s');
         $this->logs = ($this->logs ?? '')."[{$timestamp}] {$line}\n";
+        $this->saveQuietly();
+    }
+
+    /** @param  array<string, mixed>  $data */
+    public function mergeMetadata(array $data): void
+    {
+        $this->metadata = array_merge($this->metadata ?? [], $data);
         $this->saveQuietly();
     }
 }

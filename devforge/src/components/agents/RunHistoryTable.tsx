@@ -1,11 +1,15 @@
 import { ChevronRight } from 'lucide-preact';
 import type { AgentRun } from '../../lib/domain-api';
 import { AgentStatusBadge } from './AgentStatusBadge';
+import { AgentModelRoutingBadge } from './AgentModelRoutingBadge';
 
 const triggerLabels: Record<string, string> = {
     scheduled: 'Planifié',
     manual: 'Manuel',
     event: 'Événement',
+    chat: 'Chat',
+    ephemeral: 'Sous-tâche',
+    delegation: 'Délégation',
 };
 
 function formatDuration(seconds: number | null): string {
@@ -43,6 +47,9 @@ export function RunHistoryTable({ runs, selectedUuid, onSelect }: Props) {
                             <p class="truncate text-xs font-medium">
                                 {run.summary ?? 'Exécution en cours…'}
                             </p>
+                            <div class="mt-1 flex flex-wrap items-center gap-1.5">
+                                <AgentModelRoutingBadge routing={run.metadata?.model_routing} compact />
+                            </div>
                             <p class="text-[11px] text-base-content/50">
                                 {triggerLabels[run.trigger] ?? run.trigger}
                                 {' · '}

@@ -6,10 +6,10 @@ import { isEventOnlyAgentType } from '../../lib/agent-triggers';
 
 const agentTypes: { value: AgentType; label: string; description: string }[] = [
     { value: 'debug', label: 'Débogage', description: 'Analyse les logs et erreurs de déploiement' },
-    { value: 'deployment', label: 'Déploiement', description: 'Surveille et relance les déploiements échoués' },
+    { value: 'deployment', label: 'Déploiement', description: 'Surveille chaque build et corrige les déploiements échoués' },
     { value: 'tech-watch', label: 'Veille Tech', description: 'Détecte les mises à jour et configurations obsolètes' },
     { value: 'github', label: 'GitHub', description: 'Surveille les PR et branches' },
-    { value: 'devforge', label: 'DevForge', description: 'Analyse la plateforme à chaque build webhook' },
+    { value: 'devforge', label: 'DevForge', description: 'Surveille chaque build (webhook ou manuel) et analyse la plateforme' },
     { value: 'security', label: 'Sécurité', description: 'Inspecte les configurations et signale les risques' },
 ];
 

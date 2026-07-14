@@ -1,0 +1,31 @@
+# Fichiers OBLIGATOIRES dans chaque rollout DevForge (fusionnés automatiquement).
+# Ne pas retirer — complète devforge-package.paths pour les fichiers hors arbres DevForge.
+
+# Déclenchement agents lors des déploiements Coolify core
+app/Jobs/ApplicationDeploymentJob.php
+
+# Exécution agents IA
+app/Jobs/Agent
+
+# Modèles / events agents (hors glob si paths incomplet)
+app/Models/AiAgent.php
+app/Models/AiAgentRun.php
+app/Models/AiAgentMessage.php
+app/Models/AiAgentSubagentRun.php
+app/Models/AiProviderConfig.php
+app/Events/AgentRunUpdated.php
+
+# Enums / helpers agents (hors app/Services/DevForge)
+app/Enums/TaskModelTier.php
+app/Helpers/SshMultiplexingHelper.php
+app/Services/DevForge/Agent/AgentSessionService.php
+app/Services/DevForge/Agent/AgentRunner.php
+app/Http/Controllers/DevForge/AgentSessionController.php
+app/Models/AiAgentSession.php
+app/Models/AiAgentSessionPreference.php
+app/Services/DevForge/Agent/DeploymentAgentDispatchLimiter.php
+app/Services/DevForge/Agent/DeploymentBuildAgentDispatcher.php
+app/Services/DevForge/Agent/DeploymentFailureAgentDispatcher.php
+app/Services/DevForge/Agent/DeploymentAgentCatchUp.php
+app/Services/DevForge/Agent/DeploymentAgentResolver.php
+app/Services/DevForge/DeploymentMonitoringData.php

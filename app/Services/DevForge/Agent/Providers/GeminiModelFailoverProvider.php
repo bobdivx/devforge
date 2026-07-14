@@ -8,6 +8,8 @@ use App\Services\DevForge\Agent\LlmModelResolver;
 
 class GeminiModelFailoverProvider implements LlmProvider
 {
+    private const MAX_AUTO_MODEL_ATTEMPTS = 4;
+
     /** @var array<int, string> */
     private const EXPLICIT_FALLBACK_MODELS = [
         'gemini-2.0-flash-lite',
@@ -33,13 +35,20 @@ class GeminiModelFailoverProvider implements LlmProvider
         $models = $this->modelsToTry();
         $lastException = null;
         $errors = [];
+        $triedModels = [];
 
         foreach ($models as $index => $model) {
+            $triedModels[] = $model;
+
             try {
                 return (new GeminiProvider($this->apiKey, $model, $this->baseUrl))->chat($messages, $tools);
             } catch (\Throwable $exception) {
                 $lastException = $exception;
                 $errors[] = $exception->getMessage();
+
+                if ($this->isAuthError($exception) || $this->isGlobalQuotaExhausted($exception)) {
+                    break;
+                }
 
                 if (! $this->isRetriable($exception) || $index === array_key_last($models)) {
                     break;
@@ -55,16 +64,7 @@ class GeminiModelFailoverProvider implements LlmProvider
             throw new \RuntimeException('Aucun modèle Gemini disponible.');
         }
 
-        if (count($errors) > 1) {
-            throw new \RuntimeException(
-                'Mode Auto Gemini : aucun modèle disponible. Modèles essayés : '
-                .implode(', ', $models).'. Détails : '.implode(' | ', $errors),
-                0,
-                $lastException,
-            );
-        }
-
-        throw $lastException;
+        throw new \RuntimeException($this->formatFailureMessage($triedModels, $errors, $lastException), 0, $lastException);
     }
 
     public function testConnection(): bool
@@ -80,13 +80,69 @@ class GeminiModelFailoverProvider implements LlmProvider
         if (LlmModelResolver::isAuto($this->model)) {
             $models = $this->autoModels ?? LlmModelResolver::defaultAutoGeminiModels();
 
-            return array_values(array_unique($models));
+            return array_slice(array_values(array_unique($models)), 0, self::MAX_AUTO_MODEL_ATTEMPTS);
         }
 
         return array_values(array_unique([
             $this->normalizeModelId($this->model),
             ...self::EXPLICIT_FALLBACK_MODELS,
         ]));
+    }
+
+    /**
+     * @param  array<int, string>  $models
+     * @param  array<int, string>  $errors
+     */
+    private function formatFailureMessage(array $models, array $errors, \Throwable $lastException): string
+    {
+        $lastError = $lastException->getMessage();
+
+        if ($this->allErrorsAreQuota($errors)) {
+            return 'Quota Gemini atteint sur les modèles chat essayés ('.implode(', ', $models).'). '
+                .'Dernière erreur : '.$lastError.'. '
+                .'Réessayez plus tard ou configurez un provider Ollama de secours.';
+        }
+
+        if (count($errors) > 1) {
+            return 'Mode Auto Gemini : échec après '.count($models).' modèles chat ('.implode(', ', $models).'). '
+                .'Dernière erreur : '.$lastError;
+        }
+
+        return $lastError;
+    }
+
+    /**
+     * @param  array<int, string>  $errors
+     */
+    private function allErrorsAreQuota(array $errors): bool
+    {
+        if ($errors === []) {
+            return false;
+        }
+
+        foreach ($errors as $error) {
+            $lower = mb_strtolower($error);
+            if (! str_contains($lower, '[429]') && ! str_contains($lower, 'quota') && ! str_contains($lower, 'rate limit')) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function isGlobalQuotaExhausted(\Throwable $exception): bool
+    {
+        $lower = mb_strtolower($exception->getMessage());
+
+        return str_contains($lower, 'exceeded your current quota')
+            || str_contains($lower, 'check your plan and billing');
+    }
+
+    private function isAuthError(\Throwable $exception): bool
+    {
+        $message = $exception->getMessage();
+
+        return str_contains($message, '[401]') || str_contains($message, '[403]');
     }
 
     private function isRetriable(\Throwable $exception): bool

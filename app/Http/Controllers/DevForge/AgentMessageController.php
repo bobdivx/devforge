@@ -5,9 +5,11 @@ namespace App\Http\Controllers\DevForge;
 use App\Http\Controllers\Controller;
 use App\Models\AiAgent;
 use App\Models\AiAgentMessage;
+use App\Models\AiAgentSession;
 use App\Models\Team;
 use App\Models\User;
 use App\Services\DevForge\Agent\AgentChatService;
+use App\Services\DevForge\Agent\AgentSessionService;
 use App\Services\DevForge\Core\CurrentTeamContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,6 +21,7 @@ class AgentMessageController extends Controller
     public function __construct(
         private readonly CurrentTeamContext $currentTeamContext,
         private readonly AgentChatService $chatService,
+        private readonly AgentSessionService $sessionService,
     ) {}
 
     public function index(Request $request, string $uuid): JsonResponse
@@ -33,16 +36,52 @@ class AgentMessageController extends Controller
             ]);
         }
 
-        $messages = $this->chatService->history($agent)
+        if (! Schema::hasTable('ai_agent_sessions')) {
+            return response()->json([
+                'data' => [$this->welcomeMessage($agent)],
+                'meta' => ['count' => 1, 'degraded' => true],
+            ]);
+        }
+
+        try {
+            $sessionUuid = $request->query('session_uuid');
+
+            if ($sessionUuid) {
+                $session = $this->sessionService->findForUser(
+                    $agent,
+                    $this->currentUser($request),
+                    (string) $sessionUuid,
+                );
+            } else {
+                $session = $this->sessionService->activeForUser($agent, $this->currentUser($request));
+            }
+        } catch (\Throwable) {
+            return response()->json([
+                'data' => [$this->welcomeMessage($agent)],
+                'meta' => ['count' => 1, 'degraded' => true],
+            ]);
+        }
+
+        if (! $session instanceof AiAgentSession) {
+            return response()->json([
+                'data' => [$this->welcomeMessage($agent)],
+                'meta' => ['count' => 1],
+            ]);
+        }
+
+        $messages = $this->chatService->history($agent, $session)
             ->map(fn (AiAgentMessage $message) => $this->present($message));
 
         if ($messages->isEmpty()) {
-            $messages = collect([$this->welcomeMessage($agent)]);
+            $messages = collect([$this->welcomeMessage($agent, $session)]);
         }
 
         return response()->json([
             'data' => $messages->values(),
-            'meta' => ['count' => $messages->count()],
+            'meta' => [
+                'count' => $messages->count(),
+                'session_uuid' => $session->uuid,
+            ],
         ]);
     }
 
@@ -53,6 +92,7 @@ class AgentMessageController extends Controller
 
         $validated = $request->validate([
             'content' => ['required', 'string', 'max:10000'],
+            'session_uuid' => ['nullable', 'string', 'max:64'],
         ]);
 
         if (! Schema::hasTable('ai_agent_messages')) {
@@ -60,7 +100,8 @@ class AgentMessageController extends Controller
         }
 
         try {
-            $result = $this->chatService->queueMessage($agent, $validated['content']);
+            $session = $this->resolveSession($request, $agent, $validated['session_uuid'] ?? null);
+            $result = $this->chatService->queueMessage($agent, $session, $validated['content']);
         } catch (\InvalidArgumentException $exception) {
             abort(422, $exception->getMessage());
         } catch (\Throwable $exception) {
@@ -71,9 +112,26 @@ class AgentMessageController extends Controller
             'data' => [
                 'user' => $this->present($result['user']),
                 'run_uuid' => $result['run']->uuid,
+                'session_uuid' => $session->uuid,
                 'status' => 'pending',
             ],
         ], 202);
+    }
+
+    private function resolveSession(Request $request, AiAgent $agent, ?string $sessionUuid = null): AiAgentSession
+    {
+        $user = $this->currentUser($request);
+        $sessionUuid ??= $request->query('session_uuid');
+
+        if (! Schema::hasTable('ai_agent_sessions')) {
+            throw new RuntimeException('Les sessions nécessitent la migration ai_agent_sessions.');
+        }
+
+        if ($sessionUuid) {
+            return $this->sessionService->findForUser($agent, $user, (string) $sessionUuid);
+        }
+
+        return $this->sessionService->resolveDefault($agent, $user);
     }
 
     private function httpStatusForException(\Throwable $exception): int
@@ -91,12 +149,17 @@ class AgentMessageController extends Controller
         return 502;
     }
 
-    private function currentTeam(Request $request): Team
+    private function currentUser(Request $request): User
     {
         $user = $request->user();
         abort_unless($user instanceof User, 401);
 
-        return $this->currentTeamContext->resolve($user);
+        return $user;
+    }
+
+    private function currentTeam(Request $request): Team
+    {
+        return $this->currentTeamContext->resolve($this->currentUser($request));
     }
 
     private function findAgent(Request $request, string $uuid): AiAgent
@@ -117,12 +180,13 @@ class AgentMessageController extends Controller
             'content' => $message->content,
             'metadata' => $message->metadata,
             'run_uuid' => $message->run?->uuid,
+            'session_uuid' => $message->session?->uuid,
             'created_at' => $message->created_at->toISOString(),
         ];
     }
 
     /** @return array<string, mixed> */
-    private function welcomeMessage(AiAgent $agent): array
+    private function welcomeMessage(AiAgent $agent, ?AiAgentSession $session = null): array
     {
         $description = $agent->description
             ? "\n\n{$agent->description}"
@@ -134,6 +198,7 @@ class AgentMessageController extends Controller
             'content' => "Bonjour, je suis **{$agent->name}**. Posez-moi une question sur votre infrastructure, vos déploiements ou demandez-moi d'analyser une ressource.{$description}",
             'metadata' => ['welcome' => true],
             'run_uuid' => null,
+            'session_uuid' => $session?->uuid,
             'created_at' => $agent->created_at?->toISOString() ?? now()->toISOString(),
         ];
     }

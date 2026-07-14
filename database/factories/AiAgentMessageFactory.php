@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Models\AiAgent;
 use App\Models\AiAgentMessage;
+use App\Models\AiAgentSession;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -17,6 +18,7 @@ class AiAgentMessageFactory extends Factory
     {
         return [
             'agent_id' => AiAgent::factory(),
+            'session_id' => AiAgentSession::factory(),
             'run_id' => null,
             'role' => $this->faker->randomElement(['user', 'assistant']),
             'content' => $this->faker->sentence(),

@@ -1,0 +1,284 @@
+<?php
+
+namespace App\Http\Controllers\DevForge;
+
+use App\Http\Controllers\Controller;
+use App\Models\AiAgent;
+use App\Models\AiAgentMessage;
+use App\Models\AiAgentSession;
+use App\Models\Team;
+use App\Models\User;
+use App\Services\DevForge\Agent\AgentChatService;
+use App\Services\DevForge\Agent\AgentSessionService;
+use App\Services\DevForge\Core\CurrentTeamContext;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
+
+class AgentSessionController extends Controller
+{
+    public function __construct(
+        private readonly CurrentTeamContext $currentTeamContext,
+        private readonly AgentSessionService $sessionService,
+        private readonly AgentChatService $chatService,
+    ) {}
+
+    public function index(Request $request, string $uuid): JsonResponse
+    {
+        $agent = $this->findAgent($request, $uuid);
+        $this->authorize('view', $agent);
+
+        if (! Schema::hasTable('ai_agent_sessions')) {
+            return response()->json([
+                'data' => [],
+                'meta' => ['count' => 0, 'degraded' => true],
+            ]);
+        }
+
+        $user = $this->currentUser($request);
+        $sessions = $this->sessionService
+            ->listForUser($agent, $user)
+            ->map(fn (AiAgentSession $session) => $this->present($session));
+
+        $active = $this->sessionService->activeForUser($agent, $user);
+
+        return response()->json([
+            'data' => $sessions->values(),
+            'meta' => [
+                'count' => $sessions->count(),
+                'active_session_uuid' => $active?->uuid,
+            ],
+        ]);
+    }
+
+    public function store(Request $request, string $uuid): JsonResponse
+    {
+        $agent = $this->findAgent($request, $uuid);
+        $this->authorize('chat', $agent);
+
+        if (! Schema::hasTable('ai_agent_sessions')) {
+            abort(503, 'Les sessions nécessitent la migration ai_agent_sessions. Relancez le déploiement DevForge.');
+        }
+
+        $validated = $request->validate([
+            'title' => ['nullable', 'string', 'max:120'],
+        ]);
+
+        $session = $this->sessionService->create(
+            $agent,
+            $this->currentUser($request),
+            $validated['title'] ?? null,
+        );
+
+        return response()->json([
+            'data' => $this->present($session),
+        ], 201);
+    }
+
+    public function update(Request $request, string $uuid, string $sessionUuid): JsonResponse
+    {
+        $agent = $this->findAgent($request, $uuid);
+        $this->authorize('chat', $agent);
+
+        $validated = $request->validate([
+            'title' => ['required', 'string', 'max:120'],
+        ]);
+
+        try {
+            $session = $this->sessionService->findForUser(
+                $agent,
+                $this->currentUser($request),
+                $sessionUuid,
+            );
+            $session = $this->sessionService->updateTitle(
+                $session,
+                $this->currentUser($request),
+                $validated['title'],
+            );
+        } catch (\InvalidArgumentException $exception) {
+            abort(422, $exception->getMessage());
+        }
+
+        return response()->json([
+            'data' => $this->present($session),
+        ]);
+    }
+
+    public function activate(Request $request, string $uuid, string $sessionUuid): JsonResponse
+    {
+        $agent = $this->findAgent($request, $uuid);
+        $this->authorize('chat', $agent);
+
+        try {
+            $session = $this->sessionService->activate(
+                $agent,
+                $this->currentUser($request),
+                $sessionUuid,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            abort(404, $exception->getMessage());
+        }
+
+        return response()->json([
+            'data' => $this->present($session),
+            'meta' => ['active_session_uuid' => $session->uuid],
+        ]);
+    }
+
+    public function messages(Request $request, string $uuid, string $sessionUuid): JsonResponse
+    {
+        $agent = $this->findAgent($request, $uuid);
+        $this->authorize('view', $agent);
+
+        if (! Schema::hasTable('ai_agent_messages')) {
+            return response()->json([
+                'data' => [$this->welcomeMessage($agent)],
+                'meta' => ['count' => 1, 'degraded' => true],
+            ]);
+        }
+
+        try {
+            $session = $this->sessionService->findForUser(
+                $agent,
+                $this->currentUser($request),
+                $sessionUuid,
+            );
+            $this->sessionService->rememberActive($agent, $this->currentUser($request), $session);
+        } catch (\InvalidArgumentException $exception) {
+            abort(404, $exception->getMessage());
+        }
+
+        $messages = $this->chatService
+            ->history($agent, $session)
+            ->map(fn (AiAgentMessage $message) => $this->presentMessage($message));
+
+        if ($messages->isEmpty()) {
+            $messages = collect([$this->welcomeMessage($agent)]);
+        }
+
+        return response()->json([
+            'data' => $messages->values(),
+            'meta' => [
+                'count' => $messages->count(),
+                'session_uuid' => $session->uuid,
+            ],
+        ]);
+    }
+
+    public function sendMessage(Request $request, string $uuid, string $sessionUuid): JsonResponse
+    {
+        $agent = $this->findAgent($request, $uuid);
+        $this->authorize('chat', $agent);
+
+        $validated = $request->validate([
+            'content' => ['required', 'string', 'max:10000'],
+        ]);
+
+        if (! Schema::hasTable('ai_agent_messages') || ! Schema::hasTable('ai_agent_sessions')) {
+            abort(503, 'Le chat nécessite les migrations sessions. Relancez le déploiement DevForge.');
+        }
+
+        try {
+            $session = $this->sessionService->findForUser(
+                $agent,
+                $this->currentUser($request),
+                $sessionUuid,
+            );
+            $result = $this->chatService->queueMessage($agent, $session, $validated['content']);
+        } catch (\InvalidArgumentException $exception) {
+            abort(422, $exception->getMessage());
+        } catch (\Throwable $exception) {
+            abort($this->httpStatusForException($exception), $exception->getMessage());
+        }
+
+        return response()->json([
+            'data' => [
+                'user' => $this->presentMessage($result['user']),
+                'run_uuid' => $result['run']->uuid,
+                'session_uuid' => $session->uuid,
+                'status' => 'pending',
+            ],
+        ], 202);
+    }
+
+    private function httpStatusForException(\Throwable $exception): int
+    {
+        $message = mb_strtolower($exception->getMessage());
+
+        if (str_contains($message, '[429]') || str_contains($message, 'quota') || str_contains($message, 'rate limit')) {
+            return 429;
+        }
+
+        if (str_contains($message, 'timed out') || str_contains($message, 'timeout')) {
+            return 504;
+        }
+
+        return 502;
+    }
+
+    private function currentUser(Request $request): User
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        return $user;
+    }
+
+    private function currentTeam(Request $request): Team
+    {
+        return $this->currentTeamContext->resolve($this->currentUser($request));
+    }
+
+    private function findAgent(Request $request, string $uuid): AiAgent
+    {
+        $team = $this->currentTeam($request);
+        $agent = AiAgent::where('uuid', $uuid)->where('team_id', $team->id)->first();
+        abort_unless($agent, 404, 'Agent introuvable.');
+
+        return $agent;
+    }
+
+    /** @return array<string, mixed> */
+    private function present(AiAgentSession $session): array
+    {
+        return [
+            'uuid' => $session->uuid,
+            'title' => $session->title,
+            'is_legacy' => $session->isLegacyShared(),
+            'last_message_at' => $session->last_message_at?->toISOString(),
+            'created_at' => $session->created_at->toISOString(),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function presentMessage(AiAgentMessage $message): array
+    {
+        return [
+            'uuid' => $message->uuid,
+            'role' => $message->role,
+            'content' => $message->content,
+            'metadata' => $message->metadata,
+            'run_uuid' => $message->run?->uuid,
+            'session_uuid' => $message->session?->uuid,
+            'created_at' => $message->created_at->toISOString(),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function welcomeMessage(AiAgent $agent): array
+    {
+        $description = $agent->description
+            ? "\n\n{$agent->description}"
+            : '';
+
+        return [
+            'uuid' => 'welcome',
+            'role' => 'assistant',
+            'content' => "Bonjour, je suis **{$agent->name}**. Posez-moi une question sur votre infrastructure, vos déploiements ou demandez-moi d'analyser une ressource.{$description}",
+            'metadata' => ['welcome' => true],
+            'run_uuid' => null,
+            'session_uuid' => null,
+            'created_at' => $agent->created_at?->toISOString() ?? now()->toISOString(),
+        ];
+    }
+}

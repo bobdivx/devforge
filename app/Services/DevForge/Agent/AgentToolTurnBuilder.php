@@ -20,7 +20,7 @@ class AgentToolTurnBuilder
                 ? (string) $toolCall['id']
                 : 'call_'.Str::uuid()->toString();
 
-            $toolCalls[] = [
+            $entry = [
                 'id' => $toolCallId,
                 'type' => 'function',
                 'function' => [
@@ -28,6 +28,12 @@ class AgentToolTurnBuilder
                     'arguments' => json_encode($toolCall['arguments'], JSON_UNESCAPED_UNICODE),
                 ],
             ];
+
+            if (! empty($toolCall['extra_content']) && is_array($toolCall['extra_content'])) {
+                $entry['extra_content'] = $toolCall['extra_content'];
+            }
+
+            $toolCalls[] = $entry;
         }
 
         $assistantMessage = [

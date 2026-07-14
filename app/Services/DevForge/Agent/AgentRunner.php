@@ -2,6 +2,7 @@
 
 namespace App\Services\DevForge\Agent;
 
+use App\Enums\TaskModelTier;
 use App\Events\AgentRunUpdated;
 use App\Models\AiAgent;
 use App\Models\AiAgentRun;
@@ -24,6 +25,7 @@ class AgentRunner
         private readonly CoreResourceAction $resourceAction,
         private readonly DeploymentData $deploymentData,
         private readonly AgentPromptBuilder $promptBuilder,
+        private readonly TaskModelRouter $taskModelRouter,
     ) {}
 
     public function run(AiAgent $agent, AiAgentRun $run, array $context = []): void
@@ -42,14 +44,29 @@ class AgentRunner
             return;
         }
 
+        $taskMessage = (string) ($context['delegated_goal'] ?? $context['user_message'] ?? '');
+        $tier = $context['task_tier'] ?? null;
+        if (! $tier instanceof TaskModelTier) {
+            $tier = $this->taskModelRouter->classify($taskMessage, $run->trigger, $agent->type, $context);
+        }
+
+        $reason = $this->taskModelRouter->reason($taskMessage, $run->trigger, $agent->type, $context, $tier);
+        $routing = $this->taskModelRouter->routingPayload($tier, $reason);
+        $run->mergeMetadata([
+            'model_routing' => $routing,
+            'ephemeral' => (bool) ($context['ephemeral'] ?? false),
+            'parent_run_uuid' => $context['parent_run_uuid'] ?? null,
+        ]);
+
         $provider = $this->providerFactory->makeForAgent(
             $agent,
             function (\Throwable $exception, string $primaryLabel, string $fallbackLabel) use ($run): void {
                 $run->appendLog("Provider {$primaryLabel} indisponible : ".mb_substr($exception->getMessage(), 0, 200));
                 $run->appendLog("Bascule vers le provider de secours : {$fallbackLabel}");
             },
+            config('devforge.agents_smart_routing', true) ? $tier : null,
         );
-        $delegator = new AgentDelegator($this, new \App\Services\DevForge\Agent\Tool\AgentSubagentRegistry);
+        $delegator = new AgentDelegator($this, new \App\Services\DevForge\Agent\Tool\AgentSubagentRegistry, $this->taskModelRouter);
         $toolkit = new AgentToolkit(
             team: $agent->team,
             run: $run,
@@ -68,7 +85,8 @@ class AgentRunner
         ];
 
         $run->update(['status' => 'running', 'started_at' => now()]);
-        $run->appendLog('Agent démarré — provider: '.$providerConfig->provider.'/Auto');
+        $run->appendLog('Agent démarré — '.$routing['display'].' ('.$routing['tier_label'].')');
+        $run->appendLog('Routage : '.$reason);
 
         $budget = new IterationBudget((int) config('devforge.agents_max_iterations', 30));
         $summary = '';

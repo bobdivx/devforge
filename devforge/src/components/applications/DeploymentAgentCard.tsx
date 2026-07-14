@@ -72,6 +72,12 @@ export function DeploymentAgentCard({ deploymentUuid, onSelectDeployment, pollWh
                                 </p>
                             )}
 
+                            {monitoring.agents.enabled && !monitoring.agents.monitor_build && (
+                                <p class="rounded-xl border border-base-300 bg-base-200/60 px-3 py-2 text-xs text-base-content/65">
+                                    La surveillance des builds est désactivée. Aucun agent ne sera déclenché au démarrage d’un déploiement.
+                                </p>
+                            )}
+
                             {monitoring.agents.enabled && !monitoring.agents.auto_fix_deployments && monitoring.deployment.status.includes('fail') && (
                                 <p class="rounded-xl border border-base-300 bg-base-200/60 px-3 py-2 text-xs text-base-content/65">
                                     L’auto-correction des déploiements est désactivée. Aucun agent ne sera déclenché automatiquement après un échec.
@@ -79,13 +85,34 @@ export function DeploymentAgentCard({ deploymentUuid, onSelectDeployment, pollWh
                             )}
 
                             {monitoring.agent_runs.length === 0 ? (
-                                <div class="flex items-center gap-3 rounded-xl border border-dashed border-base-300 px-4 py-5 text-sm text-base-content/55">
-                                    <Bot class="size-5 shrink-0 text-base-content/35" aria-hidden />
-                                    <p>
-                                        {monitoring.deployment.status.includes('fail')
-                                            ? 'Aucun agent n’a encore été déclenché pour cet échec.'
-                                            : 'Aucune intervention agent liée à ce déploiement.'}
-                                    </p>
+                                <div class="grid gap-3 rounded-xl border border-dashed border-base-300 px-4 py-5 text-sm text-base-content/55">
+                                    <div class="flex items-center gap-3">
+                                        <Bot class="size-5 shrink-0 text-base-content/35" aria-hidden />
+                                        <p>
+                                            {monitoring.deployment.status.includes('fail')
+                                                ? 'Aucun agent n’a encore été déclenché pour cet échec.'
+                                                : 'Aucune intervention agent liée à ce déploiement.'}
+                                        </p>
+                                    </div>
+                                    {monitoring.diagnostics.blockers.length > 0 && (
+                                        <ul class="grid gap-2 border-t border-base-300/60 pt-3 text-xs">
+                                            {monitoring.diagnostics.blockers.map((blocker) => (
+                                                <li class="rounded-lg border border-warning/25 bg-warning/5 px-3 py-2 text-warning" key={blocker.code}>
+                                                    {blocker.message}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                    {monitoring.catch_up_triggered && (
+                                        <p class="border-t border-base-300/60 pt-3 text-xs text-primary">
+                                            Agent déclenché automatiquement — actualisation en cours…
+                                        </p>
+                                    )}
+                                    {monitoring.diagnostics.blockers.length === 0 && monitoring.diagnostics.eligible_agents_count > 0 && !monitoring.catch_up_triggered && (
+                                        <p class="border-t border-base-300/60 pt-3 text-xs text-base-content/50">
+                                            {monitoring.diagnostics.eligible_agents_count} agent(s) éligible(s) — relancez le déploiement ou actualisez après avoir redéployé Coolify avec la dernière version DevForge.
+                                        </p>
+                                    )}
                                 </div>
                             ) : monitoring.agent_runs.map((run) => (
                                 <AgentRunCard

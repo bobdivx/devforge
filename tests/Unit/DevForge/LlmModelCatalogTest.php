@@ -3,21 +3,14 @@
 use App\Services\DevForge\Agent\LlmModelCatalog;
 use Illuminate\Support\Facades\Http;
 
-it('lists gemini models that support generateContent', function () {
+it('lists only chat compatible gemini models from openai endpoint', function () {
     Http::fake([
-        'generativelanguage.googleapis.com/v1beta/models*' => Http::response([
-            'models' => [
-                [
-                    'name' => 'models/gemini-2.5-flash',
-                    'displayName' => 'Gemini 2.5 Flash',
-                    'description' => 'Fast model',
-                    'supportedGenerationMethods' => ['generateContent', 'countTokens'],
-                ],
-                [
-                    'name' => 'models/text-embedding-004',
-                    'displayName' => 'Text Embedding',
-                    'supportedGenerationMethods' => ['embedContent'],
-                ],
+        'generativelanguage.googleapis.com/*' => Http::response([
+            'data' => [
+                ['id' => 'gemini-2.5-flash', 'owned_by' => 'google'],
+                ['id' => 'gemini-2.5-flash-native-audio-latest', 'owned_by' => 'google'],
+                ['id' => 'gemini-2.5-flash-image', 'owned_by' => 'google'],
+                ['id' => 'text-embedding-004', 'owned_by' => 'google'],
             ],
         ]),
     ]);
@@ -25,8 +18,7 @@ it('lists gemini models that support generateContent', function () {
     $models = app(LlmModelCatalog::class)->listForProvider('gemini', apiKey: 'AIzaTestKey');
 
     expect($models)->toHaveCount(1)
-        ->and($models[0]['id'])->toBe('gemini-2.5-flash')
-        ->and($models[0]['label'])->toBe('Gemini 2.5 Flash');
+        ->and($models[0]['id'])->toBe('gemini-2.5-flash');
 });
 
 it('lists ollama models from tags endpoint', function () {

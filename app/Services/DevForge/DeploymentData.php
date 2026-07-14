@@ -31,6 +31,7 @@ class DeploymentData
     public function find(Team $team, string $deploymentUuid): ApplicationDeploymentQueue
     {
         $deployment = $this->queryFor($team)
+            ->with('application')
             ->where('deployment_uuid', $deploymentUuid)
             ->first();
 

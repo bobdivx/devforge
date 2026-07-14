@@ -86,6 +86,26 @@ describe('agent-errors', () => {
         expect(hasAgentError(agent)).toBe(false);
     });
 
+    it('returns null when status is error but the latest run is not failed', () => {
+        const agent = makeAgent({
+            status: 'error',
+            latest_run: {
+                uuid: 'run-1',
+                status: 'completed',
+                trigger: 'manual',
+                summary: 'Mission terminée',
+                tokens_used: 10,
+                iterations: 1,
+                started_at: null,
+                finished_at: '2026-07-13T00:00:00.000Z',
+                created_at: '2026-07-13T00:00:00.000Z',
+            },
+        });
+
+        expect(getAgentErrorMessage(agent)).toBeNull();
+        expect(hasAgentError(agent)).toBe(false);
+    });
+
     it('hides stale failed runs once the agent is ready again', () => {
         const agent = makeAgent({
             status: 'idle',

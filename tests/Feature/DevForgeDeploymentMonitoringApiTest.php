@@ -86,10 +86,22 @@ it('returns deployment monitoring with linked agent runs and redeployments', fun
         ->assertSuccessful()
         ->assertJsonPath('data.deployment.uuid', 'failed-deploy-uuid')
         ->assertJsonPath('data.agents.enabled', true)
+        ->assertJsonPath('data.diagnostics.eligible_agents_count', 1)
         ->assertJsonPath('data.agent_runs.0.summary', 'Build corrigé et redéployé.')
         ->assertJsonPath('data.agent_runs.0.event_context.event', 'deployment_failed')
         ->assertJsonPath('data.agent_runs.0.actions_taken.0.deployment_uuid', $redeployUuid)
         ->assertJsonPath('data.redeployments.0.uuid', $redeployUuid);
+});
+
+it('returns diagnostics blockers when no agent can run', function () {
+    monitoringDeployment($this->application, 'blocked-deploy-uuid');
+
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson('/api/devforge/v1/deployments/blocked-deploy-uuid/monitoring')
+        ->assertSuccessful()
+        ->assertJsonPath('data.diagnostics.eligible_agents_count', 0)
+        ->assertJson(fn ($json) => $json->where('data.diagnostics.blockers', fn ($blockers): bool => count($blockers) > 0)->etc());
 });
 
 it('scopes deployment monitoring to the current team', function () {

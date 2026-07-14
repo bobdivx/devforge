@@ -64,6 +64,7 @@ $Script:NasUseSudo = ($DeployConfig['NAS_USE_SUDO'] -eq 'true')
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $Artifact = Join-Path $Root "devforge-rollout-$timestamp.tar.gz"
 $PathsFile = Join-Path $Root 'scripts/devforge-package.paths'
+$PackageResolver = Join-Path $Root 'scripts/Resolve-DevForgePackage.ps1'
 $RemoteScript = Join-Path $Root 'scripts/devforge-rollout-remote.sh'
 
 $Script:SshPassExe = $null
@@ -207,32 +208,12 @@ function Write-Step([string]$Message) {
 }
 
 function Get-PackagePaths {
-    if (-not (Test-Path $PathsFile)) {
-        throw "Liste de packaging introuvable: $PathsFile"
-    }
-    $paths = Get-Content $PathsFile | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') }
-    Get-ChildItem -Path (Join-Path $Root 'database/migrations/2026_07_13_*') -ErrorAction SilentlyContinue |
-        ForEach-Object {
-            $relative = $_.FullName.Substring($Root.Length + 1) -replace '\\', '/'
-            $paths += $relative
-        }
-    Get-ChildItem -Path (Join-Path $Root 'database/migrations/*ai_agent*') -ErrorAction SilentlyContinue |
-        ForEach-Object {
-            $relative = $_.FullName.Substring($Root.Length + 1) -replace '\\', '/'
-            $paths += $relative
-        }
-    $existing = @($paths | Where-Object { Test-Path (Join-Path $Root $_) } | Select-Object -Unique)
-
-    $apiFile = Join-Path $Root 'routes/devforge-api.php'
-    $requiredRoutes = Select-String -Path $apiFile -Pattern "require __DIR__\.'/([^']+)'" -AllMatches |
-        ForEach-Object { $_.Matches } |
-        ForEach-Object { "routes/$($_.Groups[1].Value)" }
-    $missingRoutes = $requiredRoutes | Where-Object { $_ -notin $existing }
-    if ($missingRoutes.Count -gt 0) {
-        throw "devforge-package.paths manque des routes requises par devforge-api.php: $($missingRoutes -join ', ')"
+    if (-not (Test-Path $PackageResolver)) {
+        throw "Resolveur de package introuvable: $PackageResolver"
     }
 
-    return $existing
+    . $PackageResolver
+    return Get-DevForgePackagePaths -Root $Root
 }
 
 if (-not $SkipFrontend) {
@@ -251,6 +232,7 @@ if (-not $SkipFrontend) {
 if (-not $SkipBuild) {
     Write-Step 'Preparation artefact'
     $existing = @(Get-PackagePaths)
+    Write-Host "Fichiers dans le package: $($existing.Count)" -ForegroundColor DarkGray
     if ($existing.Count -eq 0) { throw 'Aucun fichier DevForge a empaqueter.' }
     $tarArgs = @('-czf', $Artifact) + ($existing | ForEach-Object { $_ })
     & tar @tarArgs

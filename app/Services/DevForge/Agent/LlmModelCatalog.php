@@ -50,7 +50,8 @@ class LlmModelCatalog
                     'description' => isset($model['owned_by']) ? (string) $model['owned_by'] : null,
                 ];
             })
-            ->filter(fn (array $model): bool => $model['id'] !== '' && str_starts_with($model['id'], 'gemini-'))
+            ->filter(fn (array $model): bool => $model['id'] !== ''
+                && LlmModelResolver::isChatCompatibleGeminiModel($model['id']))
             ->sortBy('label', SORT_NATURAL | SORT_FLAG_CASE)
             ->values()
             ->all();
@@ -77,7 +78,8 @@ class LlmModelCatalog
                 'label' => (string) ($model['name'] ?? ''),
                 'description' => isset($model['details']['family']) ? (string) $model['details']['family'] : null,
             ])
-            ->filter(fn (array $model): bool => $model['id'] !== '')
+            ->filter(fn (array $model): bool => $model['id'] !== ''
+                && LlmModelResolver::isToolCallingOllamaModel($model['id']))
             ->sortBy('label', SORT_NATURAL | SORT_FLAG_CASE)
             ->values()
             ->all();

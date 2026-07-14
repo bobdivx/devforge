@@ -13,6 +13,7 @@ class CoreResourcePresenter
 {
     public function __construct(
         private readonly ApplicationDatabaseConnector $applicationDatabaseConnector,
+        private readonly CoreResourceActionsResolver $actionsResolver,
     ) {}
 
     /**
@@ -116,7 +117,7 @@ class CoreResourcePresenter
                 'destination' => $this->destinationReference($application),
                 'server' => $this->serverReference($application),
             ],
-            'actions' => ['start', 'stop', 'restart', 'deploy'],
+            'actions' => $this->actionsResolver->forResource('application', (string) $application->status),
         ];
     }
 
@@ -139,7 +140,7 @@ class CoreResourcePresenter
                 'environment' => $this->environment($service),
                 'server' => $this->serverReference($service),
             ],
-            'actions' => ['start', 'stop', 'restart', 'deploy'],
+            'actions' => $this->actionsResolver->forResource('service', (string) $service->status),
         ];
     }
 
@@ -165,7 +166,7 @@ class CoreResourcePresenter
                 'environment' => $this->environment($database),
                 'server' => $this->serverReference($database),
             ],
-            'actions' => ['start', 'stop', 'restart', 'deploy'],
+            'actions' => $this->actionsResolver->forResource('database', (string) $database->status),
         ];
     }
 

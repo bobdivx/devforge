@@ -38,7 +38,7 @@ class AgentController extends Controller
 
         foreach ($agents as $agent) {
             $agent->recoverIfInterrupted();
-            $agent->recoverFromErrorState();
+            $agent->syncOperationalStatus();
             $agent->refresh();
         }
 
@@ -94,7 +94,7 @@ class AgentController extends Controller
         $agent = $this->findAgent($request, $uuid);
         $this->authorize('view', $agent);
         $agent->recoverIfInterrupted();
-        $agent->recoverFromErrorState();
+        $agent->syncOperationalStatus();
         $agent->refresh();
 
         return response()->json([
@@ -223,6 +223,7 @@ class AgentController extends Controller
                 'status' => $latestRun->status,
                 'summary' => $latestRun->summary,
                 'trigger' => $latestRun->trigger,
+                'metadata' => $latestRun->metadata ?? [],
                 'created_at' => $latestRun->created_at->toISOString(),
             ] : null,
             'default_directives' => AgentDirectives::defaultSystemPrompt($agent->type),

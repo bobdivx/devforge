@@ -7,7 +7,6 @@ use App\Models\AiAgentRun;
 use App\Models\Application;
 use App\Models\ApplicationDeploymentQueue;
 use App\Models\Team;
-use App\Services\DevForge\Agent\AgentRunLauncher;
 use Illuminate\Support\Facades\Log;
 
 class DeploymentBuildAgentDispatcher
@@ -18,7 +17,11 @@ class DeploymentBuildAgentDispatcher
 
     private const EVENT_BUILD_COMPLETED = 'deployment_build_completed';
 
-    public function __construct(private readonly AgentRunLauncher $agentRunLauncher) {}
+    public function __construct(
+        private readonly AgentRunLauncher $agentRunLauncher,
+        private readonly DeploymentAgentResolver $agentResolver,
+        private readonly DeploymentAgentDispatchLimiter $dispatchLimiter,
+    ) {}
 
     public function dispatch(
         Application $application,
@@ -60,21 +63,10 @@ class DeploymentBuildAgentDispatcher
             return;
         }
 
-        $team = $application->environment?->project?->team;
+        $team = $this->agentResolver->resolveTeam($application);
 
         if (! $team instanceof Team) {
-            return;
-        }
-
-        if ($this->wasRecentlyHandled($team, $deploymentUuid, $event)) {
-            return;
-        }
-
-        $agent = $this->resolveAgent($team, $application->uuid);
-
-        if (! $agent instanceof AiAgent) {
-            Log::info('DevForge: aucun agent DevForge actif pour surveiller le déploiement.', [
-                'team_id' => $team->id,
+            Log::warning('DevForge: impossible de résoudre l\'équipe pour la surveillance du déploiement.', [
                 'application_uuid' => $application->uuid,
                 'deployment_uuid' => $deploymentUuid,
                 'event' => $event,
@@ -83,46 +75,49 @@ class DeploymentBuildAgentDispatcher
             return;
         }
 
+        if ($this->wasRecentlyHandled($team, $deploymentUuid, $event)) {
+            return;
+        }
+
+        if (! $this->dispatchLimiter->allows($event, $team, $deploymentUuid)) {
+            return;
+        }
+
+        $agent = $this->agentResolver->resolve($team, $application->uuid, DeploymentAgentResolver::BUILD_TYPES);
+
+        if (! $agent instanceof AiAgent) {
+            Log::warning('DevForge: aucun agent éligible pour surveiller le déploiement.', [
+                'team_id' => $team->id,
+                'application_uuid' => $application->uuid,
+                'deployment_uuid' => $deploymentUuid,
+                'event' => $event,
+                'diagnostics' => $this->agentResolver->diagnostics($team, $application->uuid),
+            ]);
+
+            return;
+        }
+
         $context = $this->buildContext($application, $deploymentUuid, $deploymentQueue, $event);
 
-        $this->agentRunLauncher->queue($agent, 'event', $context);
+        $run = $this->agentRunLauncher->queue($agent, 'event', $context);
 
-        Log::info('DevForge: agent DevForge déclenché pour le déploiement.', [
+        if ($run === null) {
+            Log::warning('DevForge: agent trouvé mais indisponible (déjà en cours).', [
+                'agent_uuid' => $agent->uuid,
+                'deployment_uuid' => $deploymentUuid,
+                'event' => $event,
+            ]);
+
+            return;
+        }
+
+        Log::info('DevForge: agent IA déclenché pour la surveillance du déploiement.', [
             'agent_uuid' => $agent->uuid,
+            'run_uuid' => $run->uuid,
             'application_uuid' => $application->uuid,
             'deployment_uuid' => $deploymentUuid,
             'event' => $event,
         ]);
-    }
-
-    private function resolveAgent(Team $team, string $applicationUuid): ?AiAgent
-    {
-        return AiAgent::query()
-            ->where('team_id', $team->id)
-            ->where('type', 'devforge')
-            ->where('is_active', true)
-            ->where('status', '!=', 'running')
-            ->get()
-            ->filter(fn (AiAgent $agent): bool => $agent->hasLlmProvider() && $this->agentScore($agent, $applicationUuid) >= 0)
-            ->sortByDesc(fn (AiAgent $agent): int => $this->agentScore($agent, $applicationUuid))
-            ->first();
-    }
-
-    private function agentScore(AiAgent $agent, string $applicationUuid): int
-    {
-        if ($agent->resource_uuid !== null && $agent->resource_uuid !== '' && $agent->resource_uuid !== $applicationUuid) {
-            return -1;
-        }
-
-        $score = 100;
-
-        if ($agent->resource_uuid === $applicationUuid) {
-            $score += 50;
-        } elseif ($agent->resource_uuid === null || $agent->resource_uuid === '') {
-            $score += 10;
-        }
-
-        return $score;
     }
 
     private function wasRecentlyHandled(Team $team, string $deploymentUuid, string $event): bool
@@ -132,7 +127,9 @@ class DeploymentBuildAgentDispatcher
             ->where('created_at', '>=', now()->subHour())
             ->where('logs', 'like', '%"'.self::CONTEXT_MARKER.'":"'.$deploymentUuid.'"%')
             ->where('logs', 'like', '%"event":"'.$event.'"%')
-            ->whereHas('agent', fn ($query) => $query->where('team_id', $team->id)->where('type', 'devforge'))
+            ->whereHas('agent', fn ($query) => $query
+                ->where('team_id', $team->id)
+                ->whereIn('type', DeploymentAgentResolver::BUILD_TYPES))
             ->exists();
     }
 

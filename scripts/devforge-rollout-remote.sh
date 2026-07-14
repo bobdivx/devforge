@@ -30,6 +30,8 @@ docker exec "${CONTAINER}" sh -c '
     tar -czf - \
         app/Http/Controllers/DevForgeController.php \
         app/Http/Controllers/DevForge \
+        app/Jobs/ApplicationDeploymentJob.php \
+        app/Jobs/Agent \
         app/Services/DevForge \
         config/devforge.php \
         routes/devforge-api.php \
@@ -126,6 +128,54 @@ log "Mise a jour DEVFORGE_* dans le conteneur ${CONTAINER}"
 set_env_var DEVFORGE_ENABLED true
 if [[ "${ENABLE_AGENTS}" == "true" ]]; then
     set_env_var DEVFORGE_AGENTS_ENABLED true
+    set_env_var DEVFORGE_AGENTS_AUTO_FALLBACK true
+    set_env_var DEVFORGE_AGENTS_PER_DEPLOYMENT_MAX_RUNS 1
+
+    HOST_IP="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.' | head -1)" || true
+    if [[ -z "${HOST_IP}" ]]; then
+        HOST_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')" || true
+    fi
+
+    OLLAMA_URL=""
+
+    if docker ps -a --format '{{.Names}}' | grep -qx ollama; then
+        docker start ollama 2>/dev/null || true
+        sleep 3
+        OLLAMA_PORT="$(docker port ollama 11434/tcp 2>/dev/null | head -1 | sed 's/.*://')"
+        if [[ -n "${OLLAMA_PORT}" ]] && curl -sf "http://127.0.0.1:${OLLAMA_PORT}/api/tags" >/dev/null 2>&1; then
+            OLLAMA_URL="http://${HOST_IP:-127.0.0.1}:${OLLAMA_PORT}"
+            log "Ollama detecte (conteneur Docker) sur ${OLLAMA_URL}"
+        fi
+    fi
+
+    if [[ -z "${OLLAMA_URL}" ]]; then
+        OLLAMA_URL="http://${HOST_IP:-127.0.0.1}:11434"
+    fi
+
+    if [[ -n "${OLLAMA_URL}" ]] && curl -sf "${OLLAMA_URL}/api/tags" >/dev/null 2>&1; then
+        log "Ollama detecte sur ${OLLAMA_URL}"
+        set_env_var DEVFORGE_OLLAMA_URL "${OLLAMA_URL}"
+        set_env_var DEVFORGE_OLLAMA_HOST_IP "${HOST_IP}"
+    else
+        log "Ollama absent — installation pour fallback agents..."
+        if ! command -v ollama >/dev/null 2>&1; then
+            curl -fsSL https://ollama.com/install.sh | sh || true
+        fi
+        if command -v systemctl >/dev/null 2>&1; then
+            sudo systemctl enable ollama 2>/dev/null || systemctl enable ollama 2>/dev/null || true
+            sudo systemctl start ollama 2>/dev/null || systemctl start ollama 2>/dev/null || true
+        fi
+        sleep 5
+        if curl -sf "${OLLAMA_URL}/api/tags" >/dev/null 2>&1; then
+            log "Telechargement modele Ollama leger (llama3.2:3b)..."
+            ollama pull llama3.2:3b 2>/dev/null || ollama pull llama3.2 2>/dev/null || true
+            set_env_var DEVFORGE_OLLAMA_URL "${OLLAMA_URL}"
+            set_env_var DEVFORGE_OLLAMA_HOST_IP "${HOST_IP}"
+            log "Fallback Ollama configure : ${OLLAMA_URL}"
+        else
+            log "AVERTISSEMENT: Ollama indisponible — les agents echoueront si le quota Gemini est depasse"
+        fi
+    fi
 else
     set_env_var DEVFORGE_AGENTS_ENABLED false
 fi
@@ -137,7 +187,13 @@ log "Verification agents IA"
 if ! docker exec -w /var/www/html "${CONTAINER}" php -r "require 'vendor/autoload.php'; exit(class_exists('App\\\\Models\\\\AiAgentMessage') ? 0 : 1);"; then
     fail "Modele AiAgentMessage absent dans le conteneur"
 fi
-echo "MODEL_OK"
+if ! docker exec -w /var/www/html "${CONTAINER}" grep -q 'DeploymentBuildAgentDispatcher' /var/www/html/app/Jobs/ApplicationDeploymentJob.php 2>/dev/null; then
+    fail "ApplicationDeploymentJob.php ne declenche pas les agents DevForge — relancez nas-fix-devforge.ps1"
+fi
+if ! docker exec -w /var/www/html "${CONTAINER}" test -f /var/www/html/app/Enums/TaskModelTier.php; then
+    fail "TaskModelTier.php absent — rollout incomplet (agents IA)"
+fi
+echo "AGENT_DISPATCH_OK"
 
 if [[ "${ENABLE_AGENTS}" == "true" ]]; then
     for migration in \

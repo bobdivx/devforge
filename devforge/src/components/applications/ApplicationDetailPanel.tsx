@@ -36,6 +36,7 @@ import {
     websiteScreenshotUrl,
 } from '../../lib/application-config';
 import { applicationTabs, type ApplicationTabId } from '../../lib/application-tabs';
+import { canVisitApplication, resolveCoreResourceActions } from '../../lib/core-resource-actions';
 import { domainApi, type CoreAction, type Deployment } from '../../lib/domain-api';
 import { isDeploymentActive } from '../../lib/deployment-status';
 import { useApiQuery } from '../../lib/use-api-query';
@@ -77,8 +78,8 @@ function MetricCard({ title, children }: { title: string; children: ComponentChi
     );
 }
 
-function PreviewPanel({ name, domain, status }: { name: string; domain: string | null; status: string }) {
-    const href = visitUrl(domain);
+function PreviewPanel({ name, domain, status, canVisit }: { name: string; domain: string | null; status: string; canVisit: boolean }) {
+    const href = canVisit ? visitUrl(domain) : null;
     const screenshotUrl = websiteScreenshotUrl(domain);
     const [screenshotState, setScreenshotState] = useState<'loading' | 'loaded' | 'error'>(
         screenshotUrl ? 'loading' : 'error',
@@ -180,7 +181,8 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
     const domain = config ? primaryDomain(config.domains) : null;
     const deployments = deploymentsQuery.data?.data ?? [];
     const latest = latestDeployment(deployments);
-    const visit = visitUrl(domain);
+    const visit = canVisitApplication(status, domain) ? visitUrl(domain) : null;
+    const availableActions = resource ? resolveCoreResourceActions(resource) : [];
     const selectedDeployment = deployments.find((deployment) => deployment.uuid === focusedDeploymentUuid) ?? null;
     const hasActiveDeployment = deployments.some((deployment) => isDeploymentActive(deployment.status));
 
@@ -256,7 +258,7 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                                     Visiter
                                 </a>
                             )}
-                            {canAct && resource.actions.map((action) => {
+                            {canAct && availableActions.map((action) => {
                                 const Icon = actionIcons[action];
                                 const primary = action === 'deploy';
 
@@ -308,7 +310,12 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                                 </div>
 
                                 <div class="grid gap-5 p-5 lg:grid-cols-[minmax(220px,280px)_1fr]">
-                                    <PreviewPanel name={resource.name} domain={domain} status={typeof status === 'string' ? status : 'running:healthy'} />
+                                    <PreviewPanel
+                                        name={resource.name}
+                                        domain={domain}
+                                        status={typeof status === 'string' ? status : 'running:healthy'}
+                                        canVisit={visit !== null}
+                                    />
 
                                     <dl class="min-w-0">
                                         <DetailRow label="Déploiement">
@@ -320,7 +327,7 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                                             ) : (
                                                 <ul class="grid gap-2">
                                                     {config.domains.map((item) => {
-                                                        const href = visitUrl(item);
+                                                        const href = visit !== null ? visitUrl(item) : null;
 
                                                         return (
                                                             <li key={item}>
