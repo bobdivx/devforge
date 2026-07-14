@@ -7,6 +7,22 @@ function formatRawError(summary: string): string {
         return 'Gemini est temporairement surchargé. L\'agent réessaie automatiquement et bascule vers un provider de secours si configuré (ex. Ollama local ou un autre modèle Gemini).';
     }
 
+    if (lower.includes('does not support tools') || lower.includes('codegemma')) {
+        return 'Le modèle Ollama choisi ne supporte pas les outils (ex. codegemma). En mode Auto, DevForge privilégie llama3.2 ou qwen2.5.';
+    }
+
+    if (lower.includes("can't find closing '}' symbol") || lower.includes('closing \'}\' symbol')) {
+        return 'Erreur de format multi-tours Ollama (arguments d\'outils). Redéployez DevForge et relancez l\'agent.';
+    }
+
+    if (lower.includes('undefined array key') && lower.includes('uuid')) {
+        return 'Erreur interne lors d\'un appel d\'outil sans identifiant — corrigée dans la dernière version DevForge. Relancez l\'agent.';
+    }
+
+    if (lower.includes('[400]') && lower.includes('ollama')) {
+        return 'Requête Ollama refusée. Vérifiez que le modèle supporte les outils (llama3.2, qwen2.5) sur votre instance Ollama.';
+    }
+
     if (lower.includes('[429]') || lower.includes('quota') || lower.includes('rate limit')) {
         return 'Quota ou limite de débit Gemini atteint. Réessayez plus tard ou vérifiez votre clé API.';
     }

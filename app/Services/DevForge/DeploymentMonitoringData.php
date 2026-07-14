@@ -3,6 +3,7 @@
 namespace App\Services\DevForge;
 
 use App\Models\AiAgentRun;
+use App\Models\AiAgentSubagentRun;
 use App\Models\ApplicationDeploymentQueue;
 use App\Models\Team;
 use App\Services\DevForge\Agent\DeploymentAgentCatchUp;
@@ -63,7 +64,10 @@ class DeploymentMonitoringData
     {
         return AiAgentRun::query()
             ->with('agent')
-            ->where('logs', 'like', '%"deployment_uuid":"'.$deploymentUuid.'"%')
+            ->where(function ($query) use ($deploymentUuid): void {
+                $query->where('logs', 'like', '%"deployment_uuid":"'.$deploymentUuid.'"%')
+                    ->orWhere('metadata->deployment_uuid', $deploymentUuid);
+            })
             ->whereHas('agent', fn ($query) => $query->where('team_id', $team->id))
             ->latest()
             ->limit(10)
@@ -89,7 +93,9 @@ class DeploymentMonitoringData
             'started_at' => $run->started_at?->toISOString(),
             'finished_at' => $run->finished_at?->toISOString(),
             'created_at' => $run->created_at->toISOString(),
-            'event_context' => $this->parseEventContext($run->logs),
+            'event_context' => $this->parseEventContext($run->logs) ?? $this->metadataEventContext($run),
+            'metadata' => $run->metadata ?? [],
+            'subagent_runs' => $this->presentSubagentRuns($run),
             'logs' => $run->logs,
             'agent' => $agent ? [
                 'uuid' => $agent->uuid,
@@ -158,5 +164,62 @@ class DeploymentMonitoringData
         }
 
         return null;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function metadataEventContext(AiAgentRun $run): ?array
+    {
+        $metadata = $run->metadata;
+
+        if (! is_array($metadata) || ! isset($metadata['event'])) {
+            return null;
+        }
+
+        return array_filter([
+            'event' => is_string($metadata['event'] ?? null) ? $metadata['event'] : null,
+            'deployment_uuid' => is_string($metadata['deployment_uuid'] ?? null) ? $metadata['deployment_uuid'] : null,
+            'application_uuid' => is_string($metadata['application_uuid'] ?? null) ? $metadata['application_uuid'] : null,
+        ], fn (?string $value): bool => $value !== null && $value !== '');
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function presentSubagentRuns(AiAgentRun $run): array
+    {
+        return AiAgentSubagentRun::query()
+            ->with(['childAgent', 'childRun'])
+            ->where('parent_run_id', $run->id)
+            ->latest()
+            ->get()
+            ->map(function (AiAgentSubagentRun $entry): array {
+                $child = $entry->childAgent;
+                $childRun = $entry->childRun;
+
+                return [
+                    'uuid' => (string) $entry->id,
+                    'status' => $entry->status,
+                    'reason' => $entry->reason,
+                    'output' => $entry->output,
+                    'error' => $entry->error,
+                    'started_at' => $entry->started_at?->toISOString(),
+                    'finished_at' => $entry->finished_at?->toISOString(),
+                    'child_agent' => $child ? [
+                        'uuid' => $child->uuid,
+                        'name' => $child->name,
+                        'type' => $child->type,
+                        'avatar_color' => $child->avatar_color,
+                    ] : null,
+                    'child_run' => $childRun ? [
+                        'uuid' => $childRun->uuid,
+                        'status' => $childRun->status,
+                        'summary' => $childRun->summary,
+                    ] : null,
+                ];
+            })
+            ->values()
+            ->all();
     }
 }

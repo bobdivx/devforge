@@ -84,6 +84,23 @@ it('registers custom tools via request_tool', function () {
     expect($names)->toContain('show_uptime');
 });
 
+it('returns a clear error when get_resource_status is missing uuid', function () {
+    $agent = AiAgent::factory()->create(['team_id' => $this->team->id, 'type' => 'debug']);
+    $toolkit = makeToolkit($this->team, $agent, $this->run);
+
+    $result = $toolkit->execute('enable_tool_package', [
+        'package' => AgentToolPackage::PACKAGE_CORE,
+        'reason' => 'test',
+    ]);
+
+    expect($result['enabled'] ?? false)->toBeTrue();
+
+    $status = $toolkit->execute('get_resource_status', []);
+
+    expect($status)->toHaveKey('error')
+        ->and($status['error'])->toContain('uuid');
+});
+
 it('exposes github PR and Actions tools when github package is enabled', function () {
     $agent = AiAgent::factory()->create(['team_id' => $this->team->id, 'type' => 'github']);
     $toolkit = makeToolkit($this->team, $agent, $this->run);

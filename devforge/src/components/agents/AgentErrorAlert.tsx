@@ -1,6 +1,7 @@
 import { AlertCircle } from 'lucide-preact';
 import type { Agent } from '../../lib/domain-api';
 import { getAgentErrorMessage } from '../../lib/agent-errors';
+import { agentDetailPath } from '../../lib/agent-routes';
 import { routeHref } from '../../lib/routes';
 
 type Props = {
@@ -16,8 +17,12 @@ export function AgentErrorAlert({ agent, compact = false, onNavigate }: Props) {
         return null;
     }
 
-    const detailPath = `/agents/${agent.uuid}`;
     const runUuid = agent.latest_run?.uuid;
+
+    const detailPath = agentDetailPath(agent.uuid, {
+        view: 'runs',
+        run: runUuid,
+    });
 
     return (
         <div

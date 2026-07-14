@@ -61,31 +61,19 @@ class DeploymentAgentCatchUp
 
     private function dispatchFailure(\App\Models\Application $application, ApplicationDeploymentQueue $deployment): bool
     {
-        if (! config('devforge.agents_enabled') || ! config('devforge.agents_auto_fix_deployments')) {
-            return false;
-        }
-
-        $this->failureDispatcher->dispatch(
+        return $this->failureDispatcher->dispatch(
             application: $application,
             deploymentUuid: (string) $deployment->deployment_uuid,
             deploymentQueue: $deployment,
-        );
-
-        return true;
+        ) !== null;
     }
 
     private function dispatchBuildStart(\App\Models\Application $application, ApplicationDeploymentQueue $deployment): bool
     {
-        if (! config('devforge.agents_enabled') || ! config('devforge.agents_monitor_build_enabled', true)) {
-            return false;
-        }
-
-        $this->buildDispatcher->dispatch(
+        return $this->buildDispatcher->dispatch(
             application: $application,
             deploymentUuid: (string) $deployment->deployment_uuid,
             deploymentQueue: $deployment,
-        );
-
-        return true;
+        ) !== null;
     }
 }

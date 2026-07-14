@@ -66,6 +66,30 @@ it('triggers a failure agent on monitoring when deployment failed without prior 
     Queue::assertPushed(RunAgentJob::class, fn (RunAgentJob $job): bool => $job->agent->is($agent));
 });
 
+it('does not report catch up when the eligible agent is already running', function () {
+    Queue::fake();
+    config()->set('devforge.agents_enabled', true);
+    config()->set('devforge.agents_auto_fix_deployments', true);
+
+    $failedDeployment = catchUpDeployment($this->application, 'catch-up-busy-uuid');
+    $failedDeployment->load('application');
+
+    $provider = AiProviderConfig::factory()->create(['team_id' => $this->team->id]);
+    AiAgent::factory()->deployment()->create([
+        'team_id' => $this->team->id,
+        'provider_config_id' => $provider->id,
+        'status' => 'running',
+    ]);
+
+    $payload = app(DeploymentMonitoringData::class)->forDeployment($this->team, $failedDeployment);
+
+    expect($payload['catch_up_triggered'])->toBeFalse()
+        ->and($payload['agent_runs'])->toBeEmpty()
+        ->and($payload['diagnostics']['blockers'])->not->toBeEmpty();
+
+    Queue::assertNothingPushed();
+});
+
 it('does not catch up twice for the same failed deployment', function () {
     Queue::fake();
     config()->set('devforge.agents_enabled', true);

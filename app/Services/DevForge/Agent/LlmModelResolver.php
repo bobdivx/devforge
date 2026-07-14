@@ -35,7 +35,7 @@ class LlmModelResolver
         'gemini-3.',
     ];
 
-    private const DEFAULT_OLLAMA_MODEL = 'llama3.2';
+    private const DEFAULT_OLLAMA_MODEL = 'llama3.2:latest';
 
     /** @var array<int, string> */
     public const AUTO_OLLAMA_PRIORITY = [

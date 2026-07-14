@@ -4,6 +4,8 @@ namespace App\Services\DevForge\Agent\Providers;
 
 use App\Services\DevForge\Agent\Contracts\LlmProvider;
 use App\Services\DevForge\Agent\Contracts\LlmResponse;
+use App\Services\DevForge\Agent\LlmModelResolver;
+use App\Services\DevForge\Agent\OllamaMessageNormalizer;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 
@@ -14,14 +16,25 @@ class OllamaProvider implements LlmProvider
         private readonly string $model = 'llama3.2',
     ) {}
 
+    public function model(): string
+    {
+        return $this->model;
+    }
+
     /** {@inheritdoc} */
     public function chat(array $messages, array $tools = []): LlmResponse
     {
         $payload = [
             'model' => $this->model,
-            'messages' => $this->formatMessages($messages),
+            'messages' => OllamaMessageNormalizer::formatMessages($messages),
             'stream' => false,
         ];
+
+        if (count($tools) > 0 && ! LlmModelResolver::isToolCallingOllamaModel($this->model)) {
+            throw new \RuntimeException(
+                "Le modèle Ollama « {$this->model} » ne supporte pas les outils. Utilisez llama3.2 ou qwen2.5."
+            );
+        }
 
         if (count($tools) > 0) {
             $payload['tools'] = array_map(fn ($t) => [
@@ -55,47 +68,6 @@ class OllamaProvider implements LlmProvider
         }
     }
 
-    /**
-     * @param  array<array{role: string, content: string|array<mixed>}>  $messages
-     * @return array<mixed>
-     */
-    private function formatMessages(array $messages): array
-    {
-        return array_values(array_map(function (array $message): array {
-            $formatted = [
-                'role' => $message['role'],
-                'content' => is_string($message['content'])
-                    ? $message['content']
-                    : json_encode($message['content'], JSON_UNESCAPED_UNICODE),
-            ];
-
-            if (! empty($message['tool_calls']) && is_array($message['tool_calls'])) {
-                $formatted['tool_calls'] = array_values(array_map(function (array $call): array {
-                    $function = $call['function'] ?? [];
-                    $arguments = $function['arguments'] ?? [];
-
-                    if (is_string($arguments)) {
-                        $decoded = json_decode($arguments, true);
-                        $arguments = is_array($decoded) ? $decoded : [];
-                    }
-
-                    return [
-                        'function' => [
-                            'name' => (string) ($function['name'] ?? ''),
-                            'arguments' => $arguments,
-                        ],
-                    ];
-                }, $message['tool_calls']));
-            }
-
-            if (($message['role'] ?? '') === 'tool') {
-                $formatted['role'] = 'tool';
-            }
-
-            return $formatted;
-        }, $messages));
-    }
-
     /** @param array<mixed> $data */
     private function parseResponse(array $data): LlmResponse
     {
@@ -104,16 +76,11 @@ class OllamaProvider implements LlmProvider
 
         foreach ($message['tool_calls'] ?? [] as $call) {
             $fn = $call['function'] ?? [];
-            $arguments = $fn['arguments'] ?? [];
-
-            if (is_string($arguments)) {
-                $arguments = json_decode($arguments, true) ?? [];
-            }
 
             $toolCalls[] = [
                 'id' => (string) ($call['id'] ?? 'call_'.uniqid()),
                 'name' => $fn['name'] ?? '',
-                'arguments' => is_array($arguments) ? $arguments : [],
+                'arguments' => OllamaMessageNormalizer::normalizeToolArguments($fn['arguments'] ?? []),
             ];
         }
 

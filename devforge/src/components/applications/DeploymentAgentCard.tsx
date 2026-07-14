@@ -1,4 +1,4 @@
-import { ArrowRight, Bot, RefreshCw, Rocket } from 'lucide-preact';
+import { ArrowRight, Bot, ExternalLink, RefreshCw, Rocket } from 'lucide-preact';
 import { useEffect } from 'preact/hooks';
 import { AgentAvatar } from '../agents/AgentAvatar';
 import { AgentRunLog } from '../agents/AgentRunLog';
@@ -7,6 +7,8 @@ import { DataState } from '../ui/DataState';
 import { DeploymentStatusIcon } from '../ui/DeploymentStatusIcon';
 import { domainApi, type DeploymentAgentRun } from '../../lib/domain-api';
 import { formatDateTime } from '../../lib/application-config';
+import { agentDetailPath } from '../../lib/agent-routes';
+import { routeHref } from '../../lib/routes';
 import { useApiQuery } from '../../lib/use-api-query';
 
 type Props = {
@@ -33,10 +35,21 @@ export function DeploymentAgentCard({ deploymentUuid, onSelectDeployment, pollWh
         () => domainApi.deploymentMonitoring(deploymentUuid),
     );
     const monitoring = query.data?.data ?? null;
+    const blockers = monitoring?.diagnostics?.blockers ?? [];
     const hasActiveRun = monitoring?.agent_runs.some((run) => run.status === 'pending' || run.status === 'running') ?? false;
+    const hasActiveSubagent = monitoring?.agent_runs.some((run) =>
+        (run.subagent_runs ?? []).some((sub) => sub.status === 'pending' || sub.status === 'running'),
+    ) ?? false;
+    const awaitingAgent = Boolean(
+        monitoring
+        && monitoring.agent_runs.length === 0
+        && (monitoring.deployment.status.includes('fail') || monitoring.deployment.status.includes('progress'))
+        && (monitoring.diagnostics?.eligible_agents_count ?? 0) > 0,
+    );
+    const shouldPoll = pollWhileActive && (hasActiveRun || hasActiveSubagent || monitoring?.catch_up_triggered || awaitingAgent);
 
     useEffect(() => {
-        if (!pollWhileActive || !hasActiveRun) {
+        if (!shouldPoll) {
             return;
         }
 
@@ -45,7 +58,7 @@ export function DeploymentAgentCard({ deploymentUuid, onSelectDeployment, pollWh
         }, 3000);
 
         return () => window.clearInterval(interval);
-    }, [hasActiveRun, pollWhileActive, deploymentUuid]);
+    }, [shouldPoll, pollWhileActive, deploymentUuid]);
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
@@ -94,9 +107,9 @@ export function DeploymentAgentCard({ deploymentUuid, onSelectDeployment, pollWh
                                                 : 'Aucune intervention agent liée à ce déploiement.'}
                                         </p>
                                     </div>
-                                    {monitoring.diagnostics.blockers.length > 0 && (
+                                    {blockers.length > 0 && (
                                         <ul class="grid gap-2 border-t border-base-300/60 pt-3 text-xs">
-                                            {monitoring.diagnostics.blockers.map((blocker) => (
+                                            {blockers.map((blocker) => (
                                                 <li class="rounded-lg border border-warning/25 bg-warning/5 px-3 py-2 text-warning" key={blocker.code}>
                                                     {blocker.message}
                                                 </li>
@@ -105,10 +118,15 @@ export function DeploymentAgentCard({ deploymentUuid, onSelectDeployment, pollWh
                                     )}
                                     {monitoring.catch_up_triggered && (
                                         <p class="border-t border-base-300/60 pt-3 text-xs text-primary">
-                                            Agent déclenché automatiquement — actualisation en cours…
+                                            Agent déclenché — chargement de l&apos;intervention…
                                         </p>
                                     )}
-                                    {monitoring.diagnostics.blockers.length === 0 && monitoring.diagnostics.eligible_agents_count > 0 && !monitoring.catch_up_triggered && (
+                                    {shouldPoll && !monitoring.catch_up_triggered && monitoring.agent_runs.length === 0 && (
+                                        <p class="border-t border-base-300/60 pt-3 text-xs text-primary">
+                                            En attente de l&apos;agent — actualisation automatique…
+                                        </p>
+                                    )}
+                                    {blockers.length === 0 && monitoring.diagnostics.eligible_agents_count > 0 && !monitoring.catch_up_triggered && !shouldPoll && (
                                         <p class="border-t border-base-300/60 pt-3 text-xs text-base-content/50">
                                             {monitoring.diagnostics.eligible_agents_count} agent(s) éligible(s) — relancez le déploiement ou actualisez après avoir redéployé Coolify avec la dernière version DevForge.
                                         </p>
@@ -164,6 +182,13 @@ type AgentRunCardProps = {
 
 function AgentRunCard({ deploymentUuid, run, onSelectDeployment }: AgentRunCardProps) {
     const event = typeof run.event_context?.event === 'string' ? run.event_context.event : null;
+    const agentDetailHref = run.agent
+        ? routeHref(agentDetailPath(run.agent.uuid, { view: 'runs', run: run.uuid }))
+        : null;
+    const ephemeralTasks = Array.isArray(run.metadata?.ephemeral_tasks)
+        ? run.metadata.ephemeral_tasks as Array<{ goal?: string; status?: string; model_label?: string }>
+        : [];
+    const subagents = run.subagent_runs ?? [];
 
     return (
         <article class="rounded-xl border border-base-300/70 bg-base-200/20 p-4">
@@ -182,7 +207,18 @@ function AgentRunCard({ deploymentUuid, run, onSelectDeployment }: AgentRunCardP
                         </div>
                     )}
                     <div class="min-w-0">
-                        <p class="font-medium">{run.agent?.name ?? 'Agent'}</p>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <p class="font-medium">{run.agent?.name ?? 'Agent'}</p>
+                            {agentDetailHref && (
+                                <a
+                                    class="btn btn-ghost btn-xs h-auto min-h-0 gap-1 px-1 text-[11px] text-primary"
+                                    href={agentDetailHref}
+                                >
+                                    <ExternalLink class="size-3" aria-hidden />
+                                    Détail
+                                </a>
+                            )}
+                        </div>
                         <p class="text-xs text-base-content/50">{eventLabel(event)}</p>
                         {run.summary && <p class="mt-1 text-sm text-base-content/70">{run.summary}</p>}
                     </div>
@@ -219,6 +255,36 @@ function AgentRunCard({ deploymentUuid, run, onSelectDeployment }: AgentRunCardP
                                         Voir le redéploiement
                                     </button>
                                 )}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+
+            {(subagents.length > 0 || ephemeralTasks.length > 0) && (
+                <div class="mb-3 rounded-lg border border-base-300/60 bg-base-100/80 p-3">
+                    <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/45">Sous-agents</p>
+                    <ul class="grid gap-2">
+                        {subagents.map((sub) => (
+                            <li
+                                class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-base-300/50 px-3 py-2 text-xs"
+                                key={sub.uuid}
+                            >
+                                <span class="min-w-0">
+                                    <span class="font-medium">{sub.child_agent?.name ?? 'Sous-agent'}</span>
+                                    {sub.reason && <span class="text-base-content/45"> · {sub.reason}</span>}
+                                </span>
+                                <AgentRunStatusBadge status={(sub.child_run?.status ?? sub.status) as DeploymentAgentRun['status']} />
+                            </li>
+                        ))}
+                        {ephemeralTasks.map((task, index) => (
+                            <li
+                                class="rounded-lg border border-base-300/50 px-3 py-2 text-xs"
+                                key={`ephemeral-${index}`}
+                            >
+                                <span class="font-medium">{task.model_label ?? 'Tâche éphémère'}</span>
+                                {task.goal && <p class="mt-1 text-base-content/55">{task.goal}</p>}
+                                {task.status && <p class="mt-1 text-base-content/45">{task.status}</p>}
                             </li>
                         ))}
                     </ul>

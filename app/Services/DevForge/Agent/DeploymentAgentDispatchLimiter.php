@@ -72,7 +72,10 @@ class DeploymentAgentDispatchLimiter
         return AiAgentRun::query()
             ->where('trigger', 'event')
             ->where('created_at', '>=', now()->subDay())
-            ->where('logs', 'like', '%"deployment_uuid":"'.$deploymentUuid.'"%')
+            ->where(function ($query) use ($deploymentUuid): void {
+                $query->where('logs', 'like', '%"deployment_uuid":"'.$deploymentUuid.'"%')
+                    ->orWhere('metadata->deployment_uuid', $deploymentUuid);
+            })
             ->whereHas('agent', fn ($query) => $query->where('team_id', $team->id))
             ->count();
     }

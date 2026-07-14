@@ -1,4 +1,4 @@
-import { Play, Trash2 } from 'lucide-preact';
+import { Play, Trash2, CheckCircle2 } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
 import type { Agent, AgentInput, AiProviderConfig } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
@@ -9,6 +9,8 @@ import { ActionToolbar } from '../ui/ActionToolbar';
 import { RunHistoryTable } from './RunHistoryTable';
 import { AgentRunLog } from './AgentRunLog';
 import { AgentModelRoutingBadge } from './AgentModelRoutingBadge';
+import { AgentRunProgress } from './AgentRunProgress';
+import { useAgentRunTracker } from '../../lib/use-agent-run-tracker';
 
 type Props = {
     agent: Agent;
@@ -20,17 +22,47 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
     const [providers, setProviders] = useState<AiProviderConfig[]>([]);
     const [form, setForm] = useState<Partial<AgentInput>>({});
     const [saving, setSaving] = useState(false);
-    const [running, setRunning] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [runs, setRuns] = useState<Awaited<ReturnType<typeof domainApi.agentRuns>>['data']>([]);
     const [selectedRunUuid, setSelectedRunUuid] = useState<string | null>(null);
     const [selectedRun, setSelectedRun] = useState<Awaited<ReturnType<typeof domainApi.agentRun>>['data'] | null>(null);
 
+    const refreshRuns = () => {
+        domainApi.agentRuns(agent.uuid).then((r) => setRuns(r.data)).catch(() => {});
+    };
+
+    const {
+        isLaunching,
+        isTracking,
+        activeRun,
+        runError,
+        outcome,
+        launch,
+        trackExistingRun,
+    } = useAgentRunTracker(agent.uuid, {
+        onRefresh: () => {
+            onUpdated();
+            refreshRuns();
+        },
+    });
+
     useEffect(() => {
         domainApi.aiProviders().then((r) => setProviders(r.data)).catch(() => {});
-        domainApi.agentRuns(agent.uuid).then((r) => setRuns(r.data)).catch(() => {});
+        refreshRuns();
     }, [agent.uuid]);
+
+    useEffect(() => {
+        if (agent.status === 'running' && agent.latest_run?.uuid && !isTracking) {
+            trackExistingRun(agent.latest_run.uuid);
+        }
+    }, [agent.status, agent.latest_run?.uuid, isTracking, trackExistingRun]);
+
+    useEffect(() => {
+        if (outcome === 'completed' && activeRun?.uuid) {
+            setSelectedRunUuid(activeRun.uuid);
+        }
+    }, [outcome, activeRun?.uuid]);
 
     useEffect(() => {
         setForm({
@@ -67,18 +99,13 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
     };
 
     const handleRun = async () => {
-        setRunning(true);
-        try {
-            await domainApi.runAgent(agent.uuid);
-            onUpdated();
-            const r = await domainApi.agentRuns(agent.uuid);
-            setRuns(r.data);
-        } catch (err) {
-            setError(err instanceof ApiError ? err.message : 'Impossible de lancer l\'agent.');
-        } finally {
-            setRunning(false);
-        }
+        setError(null);
+        await launch();
     };
+
+    const isBusy = isTracking || agent.status === 'running';
+    const showProgress = isTracking && activeRun && (activeRun.status === 'running' || activeRun.status === 'pending');
+    const runFeedback = runError ?? (outcome === 'failed' && activeRun?.summary ? activeRun.summary : null);
 
     const handleDelete = async () => {
         if (!confirm(`Supprimer l'agent "${agent.name}" ?`)) {
@@ -97,10 +124,36 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
         <div class="grid gap-4 p-4">
             {error && <p class="rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">{error}</p>}
 
+            {showProgress && activeRun && <AgentRunProgress run={activeRun} />}
+
+            {outcome === 'completed' && !isTracking && (
+                <p class="flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs text-success" role="status">
+                    <CheckCircle2 class="size-4 shrink-0" aria-hidden />
+                    {activeRun?.summary?.trim() || 'Exécution terminée avec succès.'}
+                </p>
+            )}
+
+            {runFeedback && (
+                <p class="rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs text-error" role="alert">
+                    {runFeedback}
+                </p>
+            )}
+
             <ActionToolbar>
-                <button class="btn btn-primary btn-sm" type="button" disabled={running} onClick={() => void handleRun()}>
-                    {running ? <span class="loading loading-spinner loading-xs" /> : <Play class="size-3.5" aria-hidden />}
-                    Lancer autonome
+                <button class="btn btn-primary btn-sm gap-1" type="button" disabled={isBusy} onClick={() => void handleRun()} aria-busy={isLaunching}>
+                    {isLaunching ? (
+                        <>
+                            <span class="loading loading-spinner loading-xs" aria-hidden />
+                            Démarrage…
+                        </>
+                    ) : isBusy ? (
+                        <>En cours</>
+                    ) : (
+                        <>
+                            <Play class="size-3.5" aria-hidden />
+                            Lancer autonome
+                        </>
+                    )}
                 </button>
                 <button class="btn btn-error btn-sm btn-outline" type="button" disabled={deleting} onClick={() => void handleDelete()}>
                     <Trash2 class="size-3.5" aria-hidden />

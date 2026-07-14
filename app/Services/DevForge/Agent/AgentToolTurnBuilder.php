@@ -54,6 +54,7 @@ class AgentToolTurnBuilder
             $messages[] = [
                 'role' => 'tool',
                 'tool_call_id' => $toolCallId,
+                'name' => (string) ($toolCall['name'] ?? ''),
                 'content' => json_encode($result, JSON_UNESCAPED_UNICODE),
             ];
         }

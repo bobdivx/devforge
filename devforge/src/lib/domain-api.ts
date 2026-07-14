@@ -126,6 +126,27 @@ export type DeploymentLogs = {
     complete: boolean;
 };
 
+export type DeploymentSubagentRun = {
+    uuid: string;
+    status: string;
+    reason: string | null;
+    output: string | null;
+    error: string | null;
+    started_at: string | null;
+    finished_at: string | null;
+    child_agent: {
+        uuid: string;
+        name: string;
+        type: AgentType;
+        avatar_color: string;
+    } | null;
+    child_run: {
+        uuid: string;
+        status: AgentRunStatus;
+        summary: string | null;
+    } | null;
+};
+
 export type DeploymentAgentRun = {
     uuid: string;
     status: AgentRunStatus;
@@ -148,6 +169,8 @@ export type DeploymentAgentRun = {
     finished_at: string | null;
     created_at: string;
     event_context: Record<string, unknown> | null;
+    metadata?: Record<string, unknown>;
+    subagent_runs?: DeploymentSubagentRun[];
     logs?: string | null;
     agent: {
         uuid: string;

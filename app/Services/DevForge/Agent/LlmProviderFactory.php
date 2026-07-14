@@ -123,6 +123,14 @@ class LlmProviderFactory
         }
     }
 
+    public function describeResolvedModel(AiProviderConfig $config): string
+    {
+        return match ($config->provider) {
+            'ollama' => 'ollama/'.$this->resolveOllamaModel($config),
+            default => LlmModelResolver::displayProviderLabel($config),
+        };
+    }
+
     private function label(AiProviderConfig $config): string
     {
         return LlmModelResolver::displayProviderLabel($config);
@@ -157,7 +165,11 @@ class LlmProviderFactory
     private function resolveOllamaModel(AiProviderConfig $config): string
     {
         if (! LlmModelResolver::isAuto($config->model)) {
-            return trim($config->model);
+            $explicit = trim($config->model);
+
+            if ($explicit !== '' && LlmModelResolver::isToolCallingOllamaModel($explicit)) {
+                return $explicit;
+            }
         }
 
         try {
@@ -166,11 +178,17 @@ class LlmProviderFactory
                 baseUrl: LlmEndpointResolver::ollamaBaseUrl($config->base_url),
             );
 
-            return LlmModelResolver::pickBestOllamaModelForTools(
+            $picked = LlmModelResolver::pickBestOllamaModelForTools(
                 collect($models)->pluck('id')->all(),
-            ) ?? LlmModelResolver::defaultOllamaModel();
+            );
+
+            if ($picked !== null) {
+                return $picked;
+            }
         } catch (\Throwable) {
-            return LlmModelResolver::defaultOllamaModel();
+            // Fallback below.
         }
+
+        return LlmModelResolver::defaultOllamaModel();
     }
 }

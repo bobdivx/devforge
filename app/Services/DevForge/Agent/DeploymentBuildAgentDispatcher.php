@@ -27,8 +27,8 @@ class DeploymentBuildAgentDispatcher
         Application $application,
         string $deploymentUuid,
         ApplicationDeploymentQueue $deploymentQueue,
-    ): void {
-        $this->dispatchEvent(
+    ): ?AiAgentRun {
+        return $this->dispatchEvent(
             application: $application,
             deploymentUuid: $deploymentUuid,
             deploymentQueue: $deploymentQueue,
@@ -40,8 +40,8 @@ class DeploymentBuildAgentDispatcher
         Application $application,
         string $deploymentUuid,
         ApplicationDeploymentQueue $deploymentQueue,
-    ): void {
-        $this->dispatchEvent(
+    ): ?AiAgentRun {
+        return $this->dispatchEvent(
             application: $application,
             deploymentUuid: $deploymentUuid,
             deploymentQueue: $deploymentQueue,
@@ -54,13 +54,13 @@ class DeploymentBuildAgentDispatcher
         string $deploymentUuid,
         ApplicationDeploymentQueue $deploymentQueue,
         string $event,
-    ): void {
+    ): ?AiAgentRun {
         if (! config('devforge.agents_enabled') || ! config('devforge.agents_monitor_build_enabled', true)) {
-            return;
+            return null;
         }
 
         if ($deploymentQueue->restart_only) {
-            return;
+            return null;
         }
 
         $team = $this->agentResolver->resolveTeam($application);
@@ -72,15 +72,15 @@ class DeploymentBuildAgentDispatcher
                 'event' => $event,
             ]);
 
-            return;
+            return null;
         }
 
         if ($this->wasRecentlyHandled($team, $deploymentUuid, $event)) {
-            return;
+            return null;
         }
 
         if (! $this->dispatchLimiter->allows($event, $team, $deploymentUuid)) {
-            return;
+            return null;
         }
 
         $agent = $this->agentResolver->resolve($team, $application->uuid, DeploymentAgentResolver::BUILD_TYPES);
@@ -94,7 +94,7 @@ class DeploymentBuildAgentDispatcher
                 'diagnostics' => $this->agentResolver->diagnostics($team, $application->uuid),
             ]);
 
-            return;
+            return null;
         }
 
         $context = $this->buildContext($application, $deploymentUuid, $deploymentQueue, $event);
@@ -108,7 +108,7 @@ class DeploymentBuildAgentDispatcher
                 'event' => $event,
             ]);
 
-            return;
+            return null;
         }
 
         Log::info('DevForge: agent IA déclenché pour la surveillance du déploiement.', [
@@ -118,6 +118,8 @@ class DeploymentBuildAgentDispatcher
             'deployment_uuid' => $deploymentUuid,
             'event' => $event,
         ]);
+
+        return $run;
     }
 
     private function wasRecentlyHandled(Team $team, string $deploymentUuid, string $event): bool

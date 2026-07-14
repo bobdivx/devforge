@@ -106,6 +106,25 @@ describe('agent-errors', () => {
         expect(hasAgentError(agent)).toBe(false);
     });
 
+    it('returns a friendly message for ollama models without tools', () => {
+        const agent = makeAgent({
+            status: 'error',
+            latest_run: {
+                uuid: 'run-1',
+                status: 'failed',
+                trigger: 'manual',
+                summary: 'Erreur: Ollama API error [400]: codegemma:2b does not support tools',
+                tokens_used: 0,
+                iterations: 0,
+                started_at: null,
+                finished_at: '2026-07-13T00:00:00.000Z',
+                created_at: '2026-07-13T00:00:00.000Z',
+            },
+        });
+
+        expect(getAgentErrorMessage(agent)).toContain('llama3.2');
+    });
+
     it('hides stale failed runs once the agent is ready again', () => {
         const agent = makeAgent({
             status: 'idle',

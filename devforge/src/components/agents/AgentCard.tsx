@@ -1,16 +1,17 @@
-import { Play, Settings2, Pause, RefreshCw } from 'lucide-preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { CheckCircle2, Play, Settings2, Pause, RefreshCw, Zap } from 'lucide-preact';
+import { useEffect, useState } from 'preact/hooks';
 import type { Agent } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
-import { ApiError } from '../../lib/api-client';
 import { routeHref } from '../../lib/routes';
 import { scheduleLabel } from '../../lib/agent-triggers';
 import { ActionToolbar } from '../ui/ActionToolbar';
 import { AgentAvatar } from './AgentAvatar';
 import { AgentErrorAlert } from './AgentErrorAlert';
 import { AgentStatusBadge } from './AgentStatusBadge';
+import { AgentRunProgress } from './AgentRunProgress';
 import { agentDetailPath } from '../../lib/agent-routes';
 import { formatAgentProviderDisplay } from '../../lib/llm-models';
+import { useAgentRunTracker } from '../../lib/use-agent-run-tracker';
 
 const typeLabels: Record<string, string> = {
     debug: 'Débogage',
@@ -47,73 +48,30 @@ type Props = {
 };
 
 export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
-    const [running, setRunning] = useState(false);
     const [toggling, setToggling] = useState(false);
-    const [runError, setRunError] = useState<string | null>(null);
-    const pollIntervalRef = useRef<number | null>(null);
-    const runStartedAtRef = useRef<string | null>(null);
-
-    const stopPolling = () => {
-        if (pollIntervalRef.current !== null) {
-            window.clearInterval(pollIntervalRef.current);
-            pollIntervalRef.current = null;
-        }
-    };
+    const {
+        isLaunching,
+        isTracking,
+        activeRun,
+        runError,
+        outcome,
+        launch,
+        trackExistingRun,
+    } = useAgentRunTracker(agent.uuid, { onRefresh });
 
     useEffect(() => {
-        if (agent.status === 'running') {
-            setRunning(true);
-            return;
+        if (agent.status === 'running' && agent.latest_run?.uuid && !isTracking) {
+            trackExistingRun(agent.latest_run.uuid);
         }
-
-        const latestRunAt = agent.latest_run?.created_at ?? null;
-        const hasFreshRun = runStartedAtRef.current !== null
-            && latestRunAt !== null
-            && new Date(latestRunAt).getTime() >= new Date(runStartedAtRef.current).getTime();
-
-        if (hasFreshRun || agent.status === 'error') {
-            stopPolling();
-            setRunning(false);
-            runStartedAtRef.current = null;
-        }
-    }, [agent.status, agent.latest_run?.status, agent.latest_run?.created_at]);
-
-    useEffect(() => () => stopPolling(), []);
-
-    const pollAfterRun = () => {
-        stopPolling();
-        let attempts = 0;
-
-        pollIntervalRef.current = window.setInterval(() => {
-            attempts += 1;
-            onRefresh();
-
-            if (attempts >= 90) {
-                stopPolling();
-                setRunning(false);
-                runStartedAtRef.current = null;
-            }
-        }, 1500);
-    };
+    }, [agent.status, agent.latest_run?.uuid, isTracking, trackExistingRun]);
 
     const handleRun = async (e: MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        if (running || agent.status === 'running') {
+        if (isTracking || agent.status === 'running') {
             return;
         }
-        setRunning(true);
-        setRunError(null);
-        runStartedAtRef.current = new Date().toISOString();
-        try {
-            await domainApi.runAgent(agent.uuid);
-            onRefresh();
-            pollAfterRun();
-        } catch (error) {
-            setRunError(error instanceof ApiError ? error.message : "Impossible de lancer l'agent.");
-            setRunning(false);
-            runStartedAtRef.current = null;
-        }
+        await launch();
     };
 
     const handleToggleActive = async (e: MouseEvent) => {
@@ -135,8 +93,15 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
 
     const detailPath = agentDetailPath(agent.uuid);
     const settingsPath = agentDetailPath(agent.uuid, { settings: true });
-    const isRunning = agent.status === 'running' || running;
-    const displayStatus = isRunning ? 'running' : agent.status;
+    const runsPath = agentDetailPath(agent.uuid, {
+        view: 'runs',
+        run: activeRun?.uuid ?? agent.latest_run?.uuid ?? null,
+    });
+    const isBusy = isTracking || agent.status === 'running';
+    const displayStatus = isBusy ? 'running' : agent.status;
+    const showProgress = isTracking && activeRun && (activeRun.status === 'running' || activeRun.status === 'pending');
+    const showSuccess = outcome === 'completed' && !isTracking;
+    const displayError = runError ?? (outcome === 'failed' && activeRun?.summary ? activeRun.summary : null);
 
     return (
         <article
@@ -170,23 +135,54 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                         <p class="text-[11px] text-base-content/50">
                             {typeLabels[agent.type] ?? agent.type}
                             {agent.provider && (
-                                <span class="ml-1 before:me-1 before:content-['·']">{formatAgentProviderDisplay(agent.provider.provider, agent.latest_run?.metadata?.model_routing)}</span>
+                                <span class="ml-1 before:me-1 before:content-['·']">{formatAgentProviderDisplay(agent.provider.provider, activeRun?.metadata?.model_routing ?? agent.latest_run?.metadata?.model_routing)}</span>
                             )}
                         </p>
                     </div>
-                    <AgentStatusBadge status={displayStatus} />
+                    <AgentStatusBadge status={displayStatus} spinning={isLaunching} />
                 </div>
 
                 {agent.description && (
                     <p class="line-clamp-2 text-xs text-base-content/65">{agent.description}</p>
                 )}
 
-                <AgentErrorAlert agent={agent} compact onNavigate={onNavigate} />
+                {showProgress && (
+                    <>
+                        <AgentRunProgress run={activeRun} compact />
+                        <a
+                            class="btn btn-ghost btn-xs h-auto min-h-0 gap-1.5 self-start px-0 text-[11px] text-primary hover:bg-transparent"
+                            href={routeHref(runsPath)}
+                            onClick={(e) => onNavigate(e as unknown as MouseEvent, runsPath)}
+                        >
+                            <Zap class="size-3" aria-hidden />
+                            Voir l&apos;exécution en direct
+                        </a>
+                    </>
+                )}
 
-                {runError && agent.status !== 'error' && (
-                    <p class="rounded-md border border-error/30 bg-error/10 px-2 py-1.5 text-[11px] text-error" role="alert">
-                        {runError}
+                {showSuccess && (
+                    <p class="flex items-center gap-1.5 rounded-md border border-success/30 bg-success/10 px-2 py-1.5 text-[11px] text-success" role="status">
+                        <CheckCircle2 class="size-3.5 shrink-0" aria-hidden />
+                        <span class="truncate">{activeRun?.summary?.trim() || 'Exécution terminée avec succès.'}</span>
                     </p>
+                )}
+
+                {!showSuccess && !displayError && <AgentErrorAlert agent={agent} compact onNavigate={onNavigate} />}
+
+                {displayError && (
+                    <>
+                        <p class="rounded-md border border-error/30 bg-error/10 px-2 py-1.5 text-[11px] text-error" role="alert">
+                            {displayError}
+                        </p>
+                        <a
+                            class="btn btn-ghost btn-xs h-auto min-h-0 gap-1.5 self-start px-0 text-[11px] text-error hover:bg-transparent"
+                            href={routeHref(runsPath)}
+                            onClick={(e) => onNavigate(e as unknown as MouseEvent, runsPath)}
+                        >
+                            <Zap class="size-3" aria-hidden />
+                            Voir les logs
+                        </a>
+                    </>
                 )}
 
                 <div class="flex flex-col gap-3 border-t border-base-300 pt-3 sm:flex-row sm:items-center sm:justify-between">
@@ -201,7 +197,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                             class="btn btn-ghost btn-xs gap-1"
                             type="button"
                             title={agent.is_active ? "Suspendre l'agent" : "Activer l'agent"}
-                            disabled={toggling}
+                            disabled={toggling || isBusy}
                             onClick={handleToggleActive}
                         >
                             {toggling
@@ -209,16 +205,26 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                                 : <Pause class="size-3" aria-hidden />}
                         </button>
                         <button
-                            class={`btn btn-xs gap-1 ${isRunning ? 'btn-disabled' : 'btn-primary'}`}
+                            class={`btn btn-xs gap-1 ${isBusy ? 'btn-primary pointer-events-none' : 'btn-primary'}`}
                             type="button"
-                            title="Lancer maintenant"
-                            disabled={isRunning || !agent.is_active || !agent.provider}
+                            title={isBusy ? 'Exécution en cours…' : 'Lancer maintenant'}
+                            disabled={isBusy || !agent.is_active || !agent.provider}
                             onClick={handleRun}
+                            aria-busy={isLaunching}
                         >
-                            {isRunning
-                                ? <span class="loading loading-spinner loading-xs" aria-label="En cours" />
-                                : <Play class="size-3" aria-hidden />}
-                            {!isRunning && 'Lancer'}
+                            {isLaunching ? (
+                                <>
+                                    <span class="loading loading-spinner loading-xs" aria-hidden />
+                                    Démarrage…
+                                </>
+                            ) : isBusy ? (
+                                <>En cours</>
+                            ) : (
+                                <>
+                                    <Play class="size-3" aria-hidden />
+                                    Lancer
+                                </>
+                            )}
                         </button>
                         <a
                             class="btn btn-ghost btn-xs"

@@ -25,9 +25,9 @@ class DeploymentFailureAgentDispatcher
         Application $application,
         string $deploymentUuid,
         ApplicationDeploymentQueue $deploymentQueue,
-    ): void {
+    ): ?AiAgentRun {
         if (! config('devforge.agents_enabled') || ! config('devforge.agents_auto_fix_deployments')) {
-            return;
+            return null;
         }
 
         $team = $this->agentResolver->resolveTeam($application);
@@ -38,15 +38,15 @@ class DeploymentFailureAgentDispatcher
                 'deployment_uuid' => $deploymentUuid,
             ]);
 
-            return;
+            return null;
         }
 
         if ($this->wasRecentlyHandled($team, $deploymentUuid)) {
-            return;
+            return null;
         }
 
         if (! $this->dispatchLimiter->allows(DeploymentAgentDispatchLimiter::EVENT_FAILED, $team, $deploymentUuid)) {
-            return;
+            return null;
         }
 
         $agent = $this->agentResolver->resolve($team, $application->uuid, DeploymentAgentResolver::FAILURE_TYPES);
@@ -59,7 +59,7 @@ class DeploymentFailureAgentDispatcher
                 'diagnostics' => $this->agentResolver->diagnostics($team, $application->uuid),
             ]);
 
-            return;
+            return null;
         }
 
         $context = $this->buildContext($application, $deploymentUuid, $deploymentQueue);
@@ -72,7 +72,7 @@ class DeploymentFailureAgentDispatcher
                 'deployment_uuid' => $deploymentUuid,
             ]);
 
-            return;
+            return null;
         }
 
         Log::info('DevForge: agent IA déclenché après échec de déploiement.', [
@@ -81,6 +81,8 @@ class DeploymentFailureAgentDispatcher
             'application_uuid' => $application->uuid,
             'deployment_uuid' => $deploymentUuid,
         ]);
+
+        return $run;
     }
 
     private function wasRecentlyHandled(Team $team, string $deploymentUuid): bool

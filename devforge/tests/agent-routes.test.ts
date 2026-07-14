@@ -1,24 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { agentDetailPath, shouldOpenAgentSettings } from '../src/lib/agent-routes';
-import { findRoute, normalizeRoutePath } from '../src/lib/routes';
+import {
+    agentDetailPath,
+    agentDetailSessionUuid,
+    syncAgentDetailQuery,
+} from '../src/lib/agent-routes';
 
-describe('agent-routes', () => {
-    it('construit le chemin de configuration avec le paramètre settings', () => {
-        expect(agentDetailPath('agent-uuid')).toBe('/agents/agent-uuid');
-        expect(agentDetailPath('agent-uuid', { settings: true })).toBe('/agents/agent-uuid?settings=1');
+describe('agent-routes sessions', () => {
+    it('builds agent detail path with session query', () => {
+        expect(agentDetailPath('abc-123', { session: 'sess-456' })).toBe('/agents/abc-123?session=sess-456');
     });
 
-    it('détecte le paramètre settings dans la query string', () => {
-        expect(shouldOpenAgentSettings('?settings=1')).toBe(true);
-        expect(shouldOpenAgentSettings('?settings=true')).toBe(true);
-        expect(shouldOpenAgentSettings('')).toBe(false);
-        expect(shouldOpenAgentSettings('?settings=0')).toBe(false);
+    it('reads session uuid from search params', () => {
+        expect(agentDetailSessionUuid('?session=sess-789')).toBe('sess-789');
+        expect(agentDetailSessionUuid('')).toBeNull();
     });
-});
 
-describe('normalizeRoutePath avec query agent', () => {
-    it('ignore la query string pour la résolution de route', () => {
-        expect(normalizeRoutePath('/devforge/agents/agent-uuid/?settings=1')).toBe('/agents/agent-uuid');
-        expect(findRoute('/agents/agent-uuid?settings=1').page).toBe('agent-detail');
+    it('syncs session into the url', () => {
+        window.history.replaceState({}, '', '/agents/abc-123');
+
+        syncAgentDetailQuery({ session: 'sess-111' });
+
+        expect(window.location.search).toBe('?session=sess-111');
     });
 });

@@ -86,6 +86,7 @@ class AgentRunner
 
         $run->update(['status' => 'running', 'started_at' => now()]);
         $run->appendLog('Agent démarré — '.$routing['display'].' ('.$routing['tier_label'].')');
+        $run->appendLog('Modèle LLM : '.$this->providerFactory->describeResolvedModel($providerConfig));
         $run->appendLog('Routage : '.$reason);
 
         $budget = new IterationBudget((int) config('devforge.agents_max_iterations', 30));

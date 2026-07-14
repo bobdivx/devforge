@@ -618,43 +618,51 @@ class AgentToolkit
                 (int) ($arguments['limit'] ?? 10),
             ),
             'list_resources' => $this->listResources($arguments['type'] ?? 'all'),
-            'get_resource_status' => $this->getResourceStatus($arguments['uuid'], $arguments['type']),
+            'get_resource_status' => $this->getResourceStatus(
+                (string) ($arguments['uuid'] ?? ''),
+                (string) ($arguments['type'] ?? ''),
+            ),
             'get_deployment_logs' => $this->getDeploymentLogs(
                 $arguments['application_uuid'] ?? null,
                 (int) ($arguments['limit'] ?? 5),
                 $arguments['deployment_uuid'] ?? null,
                 (int) ($arguments['log_lines'] ?? 80),
             ),
-            'control_resource' => $this->controlResource($arguments['uuid'], $arguments['type'], $arguments['action'], $arguments['reason'] ?? ''),
-            'get_server_metrics' => $this->getServerMetrics($arguments['server_uuid']),
-            'send_notification' => $this->sendNotification($arguments['message'], $arguments['level'] ?? 'info'),
+            'control_resource' => $this->controlResource(
+                (string) ($arguments['uuid'] ?? ''),
+                (string) ($arguments['type'] ?? ''),
+                (string) ($arguments['action'] ?? ''),
+                (string) ($arguments['reason'] ?? ''),
+            ),
+            'get_server_metrics' => $this->getServerMetrics((string) ($arguments['server_uuid'] ?? '')),
+            'send_notification' => $this->sendNotification((string) ($arguments['message'] ?? ''), $arguments['level'] ?? 'info'),
             'exec_command' => $this->execCommand(
-                $arguments['server_uuid'],
-                $arguments['command'],
+                (string) ($arguments['server_uuid'] ?? ''),
+                (string) ($arguments['command'] ?? ''),
                 (int) ($arguments['timeout'] ?? 60),
             ),
             'read_remote_file' => $this->serverExecutor->readRemoteFile(
-                $arguments['server_uuid'],
-                $arguments['path'],
+                (string) ($arguments['server_uuid'] ?? ''),
+                (string) ($arguments['path'] ?? ''),
             ),
             'list_remote_dir' => $this->serverExecutor->listRemoteDir(
-                $arguments['server_uuid'],
+                (string) ($arguments['server_uuid'] ?? ''),
                 $arguments['path'] ?? '.',
             ),
             'docker_logs' => $this->serverExecutor->dockerLogs(
-                $arguments['server_uuid'],
-                $arguments['container'],
+                (string) ($arguments['server_uuid'] ?? ''),
+                (string) ($arguments['container'] ?? ''),
                 (int) ($arguments['lines'] ?? 100),
             ),
             'http_request' => $this->httpRequest(
-                $arguments['url'],
+                (string) ($arguments['url'] ?? ''),
                 $arguments['method'] ?? 'GET',
                 $arguments['body'] ?? null,
                 is_array($arguments['headers'] ?? null) ? $arguments['headers'] : [],
             ),
             'write_remote_file' => $this->serverExecutor->writeRemoteFile(
-                $arguments['server_uuid'],
-                $arguments['path'],
+                (string) ($arguments['server_uuid'] ?? ''),
+                (string) ($arguments['path'] ?? ''),
                 $arguments['content'] ?? '',
             ),
             'delegate_task' => $this->delegateTask(
@@ -736,6 +744,10 @@ class AgentToolkit
     /** @return array<mixed> */
     private function getResourceStatus(string $uuid, string $type): array
     {
+        if ($uuid === '' || $type === '') {
+            return ['error' => 'Paramètres uuid et type requis pour get_resource_status.'];
+        }
+
         $resource = $this->catalog->find($this->team, $type, $uuid);
 
         if (! $resource || ! $this->matchesAssignedResource($resource)) {
@@ -812,6 +824,10 @@ class AgentToolkit
     /** @return array<mixed> */
     private function controlResource(string $uuid, string $type, string $action, string $reason): array
     {
+        if ($uuid === '' || $type === '' || $action === '') {
+            return ['error' => 'Paramètres uuid, type et action requis pour control_resource.'];
+        }
+
         if ($action === 'deploy' && $this->deployActionsTaken >= self::MAX_DEPLOY_ACTIONS_PER_RUN) {
             return ['error' => 'Limite de redéploiements automatiques atteinte pour ce run (max '.self::MAX_DEPLOY_ACTIONS_PER_RUN.').'];
         }

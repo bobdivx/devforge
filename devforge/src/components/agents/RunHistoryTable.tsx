@@ -1,15 +1,22 @@
-import { ChevronRight } from 'lucide-preact';
+import { ChevronRight, Clock, Zap } from 'lucide-preact';
 import type { AgentRun } from '../../lib/domain-api';
-import { AgentStatusBadge } from './AgentStatusBadge';
+import { AgentRunStatusBadge } from './AgentRunStatusBadge';
 import { AgentModelRoutingBadge } from './AgentModelRoutingBadge';
 
 const triggerLabels: Record<string, string> = {
     scheduled: 'Planifié',
     manual: 'Manuel',
-    event: 'Événement',
+    event: 'Webhook',
     chat: 'Chat',
     ephemeral: 'Sous-tâche',
     delegation: 'Délégation',
+};
+
+const triggerIcons: Record<string, string> = {
+    scheduled: '⏱',
+    manual: '▶',
+    event: '⚡',
+    chat: '💬',
 };
 
 function formatDuration(seconds: number | null): string {
@@ -22,6 +29,28 @@ function formatDuration(seconds: number | null): string {
     return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
+function runTitle(run: AgentRun): string {
+    const summary = run.summary?.trim();
+
+    if (summary && summary.length <= 80) {
+        return summary.replace(/^Erreur:\s*/i, '');
+    }
+
+    if (summary) {
+        return `${summary.slice(0, 77)}…`;
+    }
+
+    const trigger = triggerLabels[run.trigger] ?? run.trigger;
+    const date = new Date(run.created_at).toLocaleString('fr-FR', {
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+
+    return `${trigger} · ${date}`;
+}
+
 type Props = {
     runs: AgentRun[];
     selectedUuid: string | null;
@@ -30,39 +59,77 @@ type Props = {
 
 export function RunHistoryTable({ runs, selectedUuid, onSelect }: Props) {
     if (runs.length === 0) {
-        return <p class="py-4 text-center text-xs text-base-content/50">Aucune exécution enregistrée.</p>;
+        return (
+            <div class="flex flex-col items-center gap-3 px-6 py-10 text-center">
+                <div class="grid size-12 place-items-center rounded-2xl bg-base-200 text-base-content/40">
+                    <Zap class="size-6" aria-hidden />
+                </div>
+                <div>
+                    <p class="text-sm font-medium text-base-content/80">Aucune exécution pour l&apos;instant</p>
+                    <p class="mt-1 text-xs text-base-content/50">
+                        Les runs webhook et manuels apparaîtront ici avec leurs logs.
+                    </p>
+                </div>
+            </div>
+        );
     }
 
     return (
-        <ul class="divide-y divide-base-300">
-            {runs.map((run) => (
-                <li key={run.uuid}>
-                    <button
-                        class={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-base-200 ${selectedUuid === run.uuid ? 'bg-base-200' : ''}`}
-                        type="button"
-                        onClick={() => onSelect(run.uuid)}
-                    >
-                        <AgentStatusBadge status={run.status as 'idle' | 'running' | 'error' | 'paused'} />
-                        <div class="min-w-0 flex-1">
-                            <p class="truncate text-xs font-medium">
-                                {run.summary ?? 'Exécution en cours…'}
-                            </p>
-                            <div class="mt-1 flex flex-wrap items-center gap-1.5">
-                                <AgentModelRoutingBadge routing={run.metadata?.model_routing} compact />
+        <ul class="space-y-2 p-2">
+            {runs.map((run) => {
+                const selected = selectedUuid === run.uuid;
+                const isLive = run.status === 'running' || run.status === 'pending';
+
+                return (
+                    <li key={run.uuid}>
+                        <button
+                            class={`group flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition-all ${
+                                selected
+                                    ? 'border-primary/40 bg-primary/10 shadow-sm ring-1 ring-primary/20'
+                                    : 'border-base-300/80 bg-base-100 hover:border-base-content/20 hover:bg-base-200/50'
+                            }`}
+                            type="button"
+                            onClick={() => onSelect(run.uuid)}
+                        >
+                            <div class="mt-0.5 shrink-0">
+                                <span class="flex size-9 items-center justify-center rounded-lg bg-base-200 text-base text-base-content/70 group-hover:bg-base-300/80">
+                                    {triggerIcons[run.trigger] ?? '•'}
+                                </span>
                             </div>
-                            <p class="text-[11px] text-base-content/50">
-                                {triggerLabels[run.trigger] ?? run.trigger}
-                                {' · '}
-                                {new Date(run.created_at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                                {' · '}
-                                {formatDuration(run.duration_seconds)}
-                                {run.tokens_used > 0 && ` · ${run.tokens_used} tokens`}
-                            </p>
-                        </div>
-                        <ChevronRight class="size-3.5 shrink-0 text-base-content/40" aria-hidden />
-                    </button>
-                </li>
-            ))}
+                            <div class="min-w-0 flex-1">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <AgentRunStatusBadge status={run.status} />
+                                    {isLive && (
+                                        <span class="badge badge-success badge-xs">Live</span>
+                                    )}
+                                </div>
+                                <p class="mt-1.5 line-clamp-2 text-xs font-medium leading-snug text-base-content">
+                                    {runTitle(run)}
+                                </p>
+                                <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                    <AgentModelRoutingBadge routing={run.metadata?.model_routing} compact />
+                                </div>
+                                <p class="mt-1.5 flex flex-wrap items-center gap-1 text-[10px] text-base-content/50">
+                                    <Clock class="size-3 shrink-0" aria-hidden />
+                                    <span>{triggerLabels[run.trigger] ?? run.trigger}</span>
+                                    <span aria-hidden>·</span>
+                                    <span>
+                                        {new Date(run.created_at).toLocaleString('fr-FR', {
+                                            day: '2-digit',
+                                            month: '2-digit',
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                        })}
+                                    </span>
+                                    <span aria-hidden>·</span>
+                                    <span>{formatDuration(run.duration_seconds)}</span>
+                                </p>
+                            </div>
+                            <ChevronRight class={`mt-2 size-4 shrink-0 ${selected ? 'text-primary' : 'text-base-content/30'}`} aria-hidden />
+                        </button>
+                    </li>
+                );
+            })}
         </ul>
     );
 }
