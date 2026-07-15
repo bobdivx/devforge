@@ -18,10 +18,22 @@ export function diskUsageTone(
     return 'success';
 }
 
-export function diskUsageLabel(usage: number | null): string {
+export function diskUsageLabel(usage: number | null, partition?: string | null): string {
     if (usage === null) {
         return 'Non mesuré';
     }
 
+    if (partition) {
+        return `${usage} % — ${partition}`;
+    }
+
     return `${usage} % utilisés`;
+}
+
+export function workloadDiskLabel(partitions: Record<string, number> | null | undefined): string | null {
+    if (partitions?.['/media/Docker'] !== undefined) {
+        return '/media/Docker';
+    }
+
+    return partitions?.['/'] !== undefined ? 'racine /' : null;
 }

@@ -10,6 +10,7 @@ use App\Services\DevForge\Core\CoreResourceAction;
 use App\Services\DevForge\Core\CoreResourceCatalog;
 use App\Services\DevForge\Core\CoreResourcePresenter;
 use App\Services\DevForge\Core\CurrentTeamContext;
+use App\Services\DevForge\Database\StandaloneDatabaseRuntimeGuard;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,6 +22,7 @@ class ResourceController extends Controller
         private readonly CoreResourceCatalog $catalog,
         private readonly CoreResourcePresenter $presenter,
         private readonly CoreResourceAction $resourceAction,
+        private readonly StandaloneDatabaseRuntimeGuard $databaseRuntimeGuard,
     ) {}
 
     public function catalog(Request $request): JsonResponse
@@ -67,6 +69,11 @@ class ResourceController extends Controller
     {
         $resource = $this->resource($request, $type, $uuid);
         $this->authorize('view', $resource);
+
+        if ($type === 'databases') {
+            $this->databaseRuntimeGuard->ensureRunning($resource);
+            $resource->refresh();
+        }
 
         return response()->json([
             'data' => $this->presenter->present($resource, $type),

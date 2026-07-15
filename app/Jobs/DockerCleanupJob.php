@@ -71,7 +71,7 @@ class DockerCleanupJob implements ShouldBeEncrypted, ShouldQueue
                 return;
             }
 
-            $this->usageBefore = $this->server->getDiskUsage();
+            $this->usageBefore = $this->server->getWorkloadDiskUsage();
 
             if ($this->manualCleanup || $this->server->settings->force_docker_cleanup) {
                 $cleanup_log = CleanupDocker::run(
@@ -79,7 +79,7 @@ class DockerCleanupJob implements ShouldBeEncrypted, ShouldQueue
                     deleteUnusedVolumes: $this->deleteUnusedVolumes,
                     deleteUnusedNetworks: $this->deleteUnusedNetworks
                 );
-                $usageAfter = $this->server->getDiskUsage();
+                $usageAfter = $this->server->getWorkloadDiskUsage();
                 $message = ($this->manualCleanup ? 'Manual' : 'Forced').' Docker cleanup job executed successfully. Disk usage before: '.$this->usageBefore.'%, Disk usage after: '.$usageAfter.'%.';
 
                 $this->execution_log->update([
@@ -120,7 +120,7 @@ class DockerCleanupJob implements ShouldBeEncrypted, ShouldQueue
                     deleteUnusedVolumes: $this->deleteUnusedVolumes,
                     deleteUnusedNetworks: $this->deleteUnusedNetworks
                 );
-                $usageAfter = $this->server->getDiskUsage();
+                $usageAfter = $this->server->getWorkloadDiskUsage();
                 $diskSaved = $this->usageBefore - $usageAfter;
 
                 if ($diskSaved > 0) {

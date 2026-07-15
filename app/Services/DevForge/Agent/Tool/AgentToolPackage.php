@@ -37,8 +37,13 @@ class AgentToolPackage
                     'get_server_metrics',
                     'send_notification',
                     'exec_command',
+                    'get_application_source_info',
+                    'list_application_source',
+                    'read_application_source',
+                    'write_application_source',
                     'read_remote_file',
                     'list_remote_dir',
+                    'search_remote_files',
                     'docker_logs',
                     'http_request',
                     'write_remote_file',
@@ -63,7 +68,7 @@ class AgentToolPackage
                     'get_github_workflow_run',
                     'list_github_commits',
                 ],
-                'default_for_types' => ['github'],
+                'default_for_types' => ['github', 'debug', 'deployment', 'devforge', 'tech-watch'],
             ],
         ];
     }

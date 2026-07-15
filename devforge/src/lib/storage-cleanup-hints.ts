@@ -25,9 +25,9 @@ export function criticalDiskHints(diskUsage: number | null): string[] {
     }
 
     return [
+        'Utilisez le bouton « Diagnostiquer l’espace » pour voir ce qui occupe le disque (Docker, /data/coolify, logs…).',
         'Utilisez le bouton « Nettoyage agressif » : volumes inutilisés + suppression des anciennes images d’applications.',
-        'Ouvrez Configurer → section « Répartition Docker » pour voir ce qui occupe l’espace.',
         'Supprimez les déploiements en échec, previews et applications inutilisées.',
-        'Si toujours à 100 %, l’espace est peut‑être hors Docker (Postgres, logs, sauvegardes).',
+        'Vérifiez /data/coolify/backups et /var/log si le diagnostic montre peu d’espace récupérable dans Docker.',
     ];
 }

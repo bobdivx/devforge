@@ -2,6 +2,17 @@
 # Execute sur le NAS via SSH par devforge-rollout.ps1 / devforge-rollout.sh
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${SCRIPT_DIR}/devforge-nas-data-dir.sh" ]]; then
+    # shellcheck source=scripts/devforge-nas-data-dir.sh
+    source "${SCRIPT_DIR}/devforge-nas-data-dir.sh"
+elif [[ -f "$(dirname "${SCRIPT_DIR}")/scripts/devforge-nas-data-dir.sh" ]]; then
+    source "$(dirname "${SCRIPT_DIR}")/scripts/devforge-nas-data-dir.sh"
+else
+    devforge_resolve_data_dir() { echo "${DEVFORGE_DATA_DIR:-/DATA/.devforge}"; }
+    devforge_cleanup_stale_temp() { rm -rf /tmp/devforge-rollout-* /tmp/devforge-staging-* 2>/dev/null || true; }
+fi
+
 ARTIFACT="${1:?Chemin de l artefact tar.gz requis}"
 CONTAINER="${2:-coolify}"
 HOST_ENV_FILE="${3:-}"
@@ -9,18 +20,27 @@ if [[ "${HOST_ENV_FILE}" == "-" ]]; then
     HOST_ENV_FILE=""
 fi
 ENABLE_AGENTS="${4:-false}"
-BACKUP_DIR="${5:-/tmp/devforge-backups}"
 
-STAGING="/tmp/devforge-rollout-$$"
+DATA_DIR="$(devforge_resolve_data_dir)"
+BACKUP_DIR="${5:-${DATA_DIR}/backups}"
+STAGING="${DATA_DIR}/staging/rollout-$$"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP="${BACKUP_DIR}/devforge-backup-${TIMESTAMP}.tar.gz"
 CONTAINER_ENV="/var/www/html/.env"
+
+cleanup_staging() {
+    rm -rf "${STAGING}" 2>/dev/null || true
+}
+trap cleanup_staging EXIT
 
 log() { printf '==> %s\n' "$*"; }
 fail() { printf 'ERREUR: %s\n' "$*" >&2; exit 1; }
 
 command -v docker >/dev/null 2>&1 || fail "docker introuvable sur le NAS"
 docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}" || fail "conteneur ${CONTAINER} introuvable"
+
+log "Nettoyage des anciens fichiers temporaires DevForge"
+devforge_cleanup_stale_temp "${DATA_DIR}"
 
 mkdir -p "${BACKUP_DIR}" "${STAGING}"
 
@@ -40,6 +60,7 @@ docker exec "${CONTAINER}" sh -c '
         routes/devforge-database-backups.php \
         routes/devforge-s3-storages.php \
         routes/devforge-server-storage.php \
+        routes/devforge-server-files.php \
         routes/devforge-agents.php \
         routes/devforge-core.php \
         routes/devforge-realtime.php \
@@ -250,5 +271,6 @@ if [[ -z "${HOST_IP}" ]]; then
     HOST_IP="10.1.0.58"
 fi
 printf '\nDeploiement DevForge termine.\n'
+printf 'Donnees DevForge: %s\n' "${DATA_DIR}"
 printf 'Sauvegarde: %s\n' "${BACKUP}"
 printf 'Acces: http://%s:8080/devforge/\n' "${HOST_IP:-10.1.0.58}"

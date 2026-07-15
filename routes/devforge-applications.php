@@ -32,6 +32,18 @@ Route::get('/applications/{applicationUuid}/environment-variables/{envUuid}/reve
 Route::delete('/applications/{applicationUuid}/environment-variables/{envUuid}', [ApplicationController::class, 'destroyEnvironmentVariable'])
     ->where(['applicationUuid' => '[A-Za-z0-9-]{8,64}', 'envUuid' => '[A-Za-z0-9-]{8,64}'])
     ->name('applications.environment-variables.destroy');
+Route::get('/applications/{applicationUuid}/source', [ApplicationController::class, 'sourceInfo'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.source.info');
+Route::get('/applications/{applicationUuid}/source/list', [ApplicationController::class, 'sourceList'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.source.list');
+Route::get('/applications/{applicationUuid}/source/read', [ApplicationController::class, 'sourceRead'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.source.read');
+Route::put('/applications/{applicationUuid}/source/write', [ApplicationController::class, 'sourceWrite'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.source.write');
 
 Route::prefix('github')->name('github.')->group(function () {
     Route::get('/apps', [GithubController::class, 'apps'])->name('apps.index');

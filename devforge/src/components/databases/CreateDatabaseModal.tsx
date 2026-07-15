@@ -443,18 +443,9 @@ export function CreateDatabaseModal({ open, onClose, onCreated }: Props) {
                     />
                 </label>
 
-                <label class="flex items-center gap-2 text-sm">
-                    <input
-                        class="checkbox checkbox-sm"
-                        type="checkbox"
-                        checked={form.instant_deploy}
-                        onChange={(event) => setForm((current) => ({
-                            ...current,
-                            instant_deploy: (event.target as HTMLInputElement).checked,
-                        }))}
-                    />
-                    <span>Démarrer immédiatement après la création</span>
-                </label>
+                <p class="rounded-lg border border-base-300/70 bg-base-200/40 p-3 text-xs text-base-content/60">
+                    Les bases DevForge restent actives en permanence et démarrent automatiquement après la création.
+                </p>
 
                 {engineHint && (
                     <p class="rounded-lg border border-base-300/70 bg-base-200/40 p-3 text-xs text-base-content/60">

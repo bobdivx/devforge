@@ -15,6 +15,8 @@ export type ApplicationConfiguration = {
     project: AppReference | null;
     environment: AppReference | null;
     server: AppReference | null;
+    remote_workdir: string | null;
+    base_directory: string | null;
 };
 
 export function parseApplicationConfiguration(configuration: Record<string, unknown>): ApplicationConfiguration {
@@ -28,6 +30,8 @@ export function parseApplicationConfiguration(configuration: Record<string, unkn
         project: parseReference(configuration.project),
         environment: parseReference(configuration.environment),
         server: parseReference(configuration.server),
+        remote_workdir: stringOrNull(configuration.remote_workdir),
+        base_directory: stringOrNull(configuration.base_directory),
     };
 }
 

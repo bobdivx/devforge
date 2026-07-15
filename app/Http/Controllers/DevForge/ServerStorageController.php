@@ -18,7 +18,7 @@ class ServerStorageController extends Controller
         $team = $teamContext->resolve($request->user());
 
         return response()->json([
-            'data' => $storageService->overview($team, (bool) ($validated['refresh_disk'] ?? true)),
+            'data' => $storageService->overview($team, (bool) ($validated['refresh_disk'] ?? false)),
             'meta' => $storageService->meta(),
         ]);
     }
@@ -31,14 +31,34 @@ class ServerStorageController extends Controller
     ): JsonResponse {
         $validated = $request->validate([
             'refresh_disk' => ['nullable', 'boolean'],
+            'docker_report' => ['nullable', 'boolean'],
         ]);
         $team = $teamContext->resolve($request->user());
         $server = $storageService->findForTeam($team, $serverUuid);
         $this->authorize('view', $server);
 
         return response()->json([
-            'data' => $storageService->show($server, (bool) ($validated['refresh_disk'] ?? false)),
+            'data' => $storageService->show(
+                $server,
+                (bool) ($validated['refresh_disk'] ?? false),
+                (bool) ($validated['docker_report'] ?? false),
+            ),
             'meta' => $storageService->meta(),
+        ]);
+    }
+
+    public function diskBreakdown(
+        Request $request,
+        string $serverUuid,
+        CurrentTeamContext $teamContext,
+        ServerStorageService $storageService,
+    ): JsonResponse {
+        $team = $teamContext->resolve($request->user());
+        $server = $storageService->findForTeam($team, $serverUuid);
+        $this->authorize('view', $server);
+
+        return response()->json([
+            'data' => $storageService->diskBreakdown($server),
         ]);
     }
 

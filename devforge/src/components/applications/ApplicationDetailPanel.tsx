@@ -24,6 +24,7 @@ import { ApplicationEnvironmentVariablesPanel } from './ApplicationEnvironmentVa
 import { ConnectDatabasePanel } from './ConnectDatabasePanel';
 import { ApplicationLogsPanel } from './ApplicationLogsPanel';
 import { DeploymentMonitorPanel } from './DeploymentMonitorPanel';
+import { ApplicationSourceExplorer } from './ApplicationSourceExplorer';
 import {
     formatDateTime,
     latestDeployment,
@@ -387,6 +388,16 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                                 <MetricCard title="Infrastructure">
                                     <p><span class="text-base-content/45">Serveur </span><span class="font-medium">{config.server?.name ?? '—'}</span></p>
                                     <p><span class="text-base-content/45">Environnement </span><span class="font-medium">{config.environment?.name ?? '—'}</span></p>
+                                    {config.server?.uuid && (
+                                        <button
+                                            class="btn btn-ghost btn-xs mt-2 w-fit"
+                                            type="button"
+                                            onClick={() => setActiveTab('files')}
+                                        >
+                                            <FileText class="size-3.5" aria-hidden />
+                                            Code source Git
+                                        </button>
+                                    )}
                                 </MetricCard>
                             </div>
 
@@ -496,6 +507,10 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                             applicationUuid={resource.uuid}
                             canAct={canAct}
                         />
+                    )}
+
+                    {activeTab === 'files' && (
+                        <ApplicationSourceExplorer applicationUuid={resource.uuid} />
                     )}
 
                     {actionError && <p class="text-sm text-error" role="alert">{actionError}</p>}

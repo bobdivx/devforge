@@ -5,6 +5,7 @@ import { DataState } from '../components/ui/DataState';
 import { ResourceStatusIcon } from '../components/ui/ResourceStatusIcon';
 import { Tabs } from '../components/ui/Tabs';
 import { LegacyEditBanner, SettingsDetailList } from '../components/settings/SettingsPanels';
+import { ServerFileExplorer } from '../components/servers/ServerFileExplorer';
 import { domainApi } from '../lib/domain-api';
 import { resourceStatusInput } from '../lib/resource-status';
 import {
@@ -87,6 +88,11 @@ export function ServerPage({ path, legacyBaseUrl = '' }: ServerPageProps) {
                         )}
                     </DataState>
                 </Card>
+            ) : activeSection === 'files' ? (
+                <ServerFileExplorer
+                    serverUuid={serverUuid}
+                    terminalEnabled={resource?.configuration?.terminal_enabled !== false}
+                />
             ) : (
                 <LegacyEditBanner
                     legacyBaseUrl={legacyBaseUrl}

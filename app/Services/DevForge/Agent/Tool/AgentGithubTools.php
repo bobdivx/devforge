@@ -60,6 +60,131 @@ class AgentGithubTools
     }
 
     /** @return array<mixed> */
+    public function getBranchHeadSha(string $githubAppUuid, string $owner, string $repo, string $branch): array
+    {
+        $ref = $this->gitRefPath($branch);
+
+        return $this->apiGet($githubAppUuid, "/repos/{$owner}/{$repo}/git/ref/{$ref}", [], function (array $payload): array {
+            return [
+                'sha' => $payload['object']['sha'] ?? null,
+                'ref' => $payload['ref'] ?? null,
+            ];
+        }, single: true);
+    }
+
+    /** @return array<mixed> */
+    public function createBranch(
+        string $githubAppUuid,
+        string $owner,
+        string $repo,
+        string $branchName,
+        string $sha,
+    ): array {
+        return $this->apiPost($githubAppUuid, "/repos/{$owner}/{$repo}/git/refs", [
+            'ref' => "refs/heads/{$branchName}",
+            'sha' => $sha,
+        ], function (array $payload): array {
+            return [
+                'branch' => str_replace('refs/heads/', '', (string) ($payload['ref'] ?? '')),
+                'sha' => $payload['object']['sha'] ?? null,
+            ];
+        });
+    }
+
+    /** @return array<mixed> */
+    public function createPullRequest(
+        string $githubAppUuid,
+        string $owner,
+        string $repo,
+        string $title,
+        string $head,
+        string $base,
+        string $body = '',
+    ): array {
+        return $this->apiPost($githubAppUuid, "/repos/{$owner}/{$repo}/pulls", [
+            'title' => mb_substr(trim($title), 0, 256),
+            'head' => $head,
+            'base' => $base,
+            'body' => mb_substr(trim($body), 0, 4000),
+        ], function (array $payload): array {
+            return [
+                'number' => $payload['number'] ?? null,
+                'title' => $payload['title'] ?? null,
+                'state' => $payload['state'] ?? null,
+                'html_url' => $payload['html_url'] ?? null,
+                'head' => $payload['head']['ref'] ?? null,
+                'base' => $payload['base']['ref'] ?? null,
+            ];
+        });
+    }
+
+    /** @return array<mixed> */
+    public function writeFile(
+        string $githubAppUuid,
+        string $owner,
+        string $repo,
+        string $path,
+        string $content,
+        string $message,
+        ?string $sha = null,
+        ?string $branch = null,
+    ): array {
+        if (mb_strlen($content) > 32000) {
+            return ['error' => 'Contenu trop volumineux (max 32 Ko).'];
+        }
+
+        $message = trim($message);
+        if ($message === '') {
+            return ['error' => 'Message de commit requis.'];
+        }
+
+        try {
+            $githubApp = $this->githubCatalog->appForTeam($this->team, $githubAppUuid);
+            $token = generateGithubInstallationToken($githubApp);
+            if (! $token) {
+                return ['error' => 'Impossible de générer un token GitHub App.'];
+            }
+
+            $payload = [
+                'message' => mb_substr($message, 0, 500),
+                'content' => base64_encode($content),
+            ];
+
+            if ($sha !== null && $sha !== '') {
+                $payload['sha'] = $sha;
+            }
+
+            if ($branch !== null && $branch !== '') {
+                $payload['branch'] = $branch;
+            }
+
+            $response = Http::GitHub($githubApp->api_url, $token)
+                ->timeout(30)
+                ->put($this->contentsEndpoint($owner, $repo, $path), $payload);
+
+            if (! $response->successful()) {
+                return ['error' => mb_substr($response->json('message', 'Échec écriture GitHub'), 0, 500)];
+            }
+
+            $json = $response->json();
+            if (! is_array($json)) {
+                return ['error' => 'Réponse GitHub inattendue.'];
+            }
+
+            return [
+                'path' => $json['content']['path'] ?? $path,
+                'sha' => $json['content']['sha'] ?? null,
+                'commit_sha' => $json['commit']['sha'] ?? null,
+                'commit_url' => $json['commit']['html_url'] ?? null,
+                'branch' => $branch,
+                'size' => (int) ($json['content']['size'] ?? mb_strlen($content)),
+            ];
+        } catch (\Throwable $exception) {
+            return ['error' => mb_substr($exception->getMessage(), 0, 500)];
+        }
+    }
+
+    /** @return array<mixed> */
     public function listDir(string $githubAppUuid, string $owner, string $repo, string $path = '', ?string $ref = null): array
     {
         $result = $this->fetchGithubContent($githubAppUuid, $owner, $repo, $path, $ref, decodeFile: false);
@@ -247,6 +372,39 @@ class AgentGithubTools
      * @param  callable(array): array  $mapper
      * @return array<mixed>
      */
+    private function apiPost(
+        string $githubAppUuid,
+        string $endpoint,
+        array $payload,
+        callable $mapper,
+    ): array {
+        try {
+            $githubApp = $this->githubCatalog->appForTeam($this->team, $githubAppUuid);
+            $token = generateGithubInstallationToken($githubApp);
+            if (! $token) {
+                return ['error' => 'Impossible de générer un token GitHub App.'];
+            }
+
+            $response = Http::GitHub($githubApp->api_url, $token)
+                ->timeout(30)
+                ->post($endpoint, $payload);
+
+            if (! $response->successful()) {
+                return ['error' => mb_substr($response->json('message', 'Échec API GitHub'), 0, 500)];
+            }
+
+            $json = $response->json();
+
+            return is_array($json) ? $mapper($json) : ['error' => 'Réponse GitHub inattendue.'];
+        } catch (\Throwable $exception) {
+            return ['error' => mb_substr($exception->getMessage(), 0, 500)];
+        }
+    }
+
+    /**
+     * @param  callable(array): array  $mapper
+     * @return array<mixed>
+     */
     private function apiGet(
         string $githubAppUuid,
         string $endpoint,
@@ -303,7 +461,7 @@ class AgentGithubTools
                 return ['error' => 'Impossible de générer un token GitHub App.'];
             }
 
-            $endpoint = '/repos/'.rawurlencode($owner).'/'.rawurlencode($repo).'/contents/'.implode('/', array_map('rawurlencode', array_filter(explode('/', trim($path, '/')))));
+            $endpoint = $this->contentsEndpoint($owner, $repo, $path);
             $query = $ref ? ['ref' => $ref] : [];
 
             $response = Http::GitHub($githubApp->api_url, $token)
@@ -347,5 +505,19 @@ class AgentGithubTools
         } catch (\Throwable $exception) {
             return ['error' => mb_substr($exception->getMessage(), 0, 500)];
         }
+    }
+
+    private function contentsEndpoint(string $owner, string $repo, string $path): string
+    {
+        $segments = array_map('rawurlencode', array_filter(explode('/', trim($path, '/'))));
+
+        return '/repos/'.rawurlencode($owner).'/'.rawurlencode($repo).'/contents/'.implode('/', $segments);
+    }
+
+    private function gitRefPath(string $branch): string
+    {
+        $segments = array_map('rawurlencode', explode('/', trim($branch, '/')));
+
+        return 'heads/'.implode('/', $segments);
     }
 }

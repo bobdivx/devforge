@@ -112,10 +112,12 @@ class CoreResourcePresenter
                 'git_repository' => $this->safeUrl($application->git_repository),
                 'git_branch' => $application->git_branch,
                 'domains' => $this->domains($application->fqdn),
+                'base_directory' => $application->base_directory ?: '',
                 'project' => $this->project($application),
                 'environment' => $this->environment($application),
                 'destination' => $this->destinationReference($application),
                 'server' => $this->serverReference($application),
+                'remote_workdir' => $application->workdir(),
             ],
             'actions' => $this->actionsResolver->forResource('application', (string) $application->status),
         ];

@@ -5,6 +5,7 @@ namespace App\Services\DevForge;
 use App\Models\Application;
 use App\Models\Environment;
 use App\Models\Project;
+use App\Models\Team;
 use App\Models\User;
 
 class CurrentTeamResources
@@ -34,8 +35,14 @@ class CurrentTeamResources
 
     public function application(User $user, string $applicationUuid): Application
     {
-        $team = $this->currentTeamContext->resolve($user);
+        return $this->applicationForTeam(
+            $this->currentTeamContext->resolve($user),
+            $applicationUuid,
+        );
+    }
 
+    public function applicationForTeam(Team $team, string $applicationUuid): Application
+    {
         return Application::query()
             ->where('uuid', $applicationUuid)
             ->whereRelation('environment.project', 'team_id', $team->id)

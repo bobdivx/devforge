@@ -66,6 +66,7 @@ $Artifact = Join-Path $Root "devforge-rollout-$timestamp.tar.gz"
 $PathsFile = Join-Path $Root 'scripts/devforge-package.paths'
 $PackageResolver = Join-Path $Root 'scripts/Resolve-DevForgePackage.ps1'
 $RemoteScript = Join-Path $Root 'scripts/devforge-rollout-remote.sh'
+$NasDataDirScript = Join-Path $Root 'scripts/devforge-nas-data-dir.sh'
 
 $Script:SshPassExe = $null
 $Script:PlinkExe = $null
@@ -289,14 +290,15 @@ $bundlePath = Join-Path $env:TEMP "devforge-bundle-$timestamp.tar.gz"
 New-Item -ItemType Directory -Force -Path $bundleStaging | Out-Null
 Copy-Item -Path $Artifact -Destination (Join-Path $bundleStaging 'rollout.tar.gz') -Force
 Copy-Item -Path $RemoteScript -Destination (Join-Path $bundleStaging 'remote.sh') -Force
-& tar -czf $bundlePath -C $bundleStaging rollout.tar.gz remote.sh
+Copy-Item -Path $NasDataDirScript -Destination (Join-Path $bundleStaging 'devforge-nas-data-dir.sh') -Force
+& tar -czf $bundlePath -C $bundleStaging rollout.tar.gz remote.sh devforge-nas-data-dir.sh
 if ($LASTEXITCODE -ne 0) { throw 'Creation du bundle SSH a echoue.' }
 Remove-Item -Recurse -Force $bundleStaging
 
 $hostEnvToken = if ($hostEnvArg) { $hostEnvArg } else { '-' }
 
-$remoteStaging = "/tmp/devforge-staging-$timestamp"
-$remoteCmd = 'mkdir -p STAGING && tar --warning=no-timestamp -xzf - -C STAGING && sed -i ''s/\r$//'' STAGING/remote.sh && chmod +x STAGING/remote.sh && bash STAGING/remote.sh STAGING/rollout.tar.gz CONTAINER HOSTENV AGENTS && rm -rf STAGING'
+$remoteStaging = "/DATA/.devforge/staging/bundle-$timestamp"
+$remoteCmd = 'mkdir -p STAGING && tar --warning=no-timestamp -xzf - -C STAGING && sed -i ''s/\r$//'' STAGING/remote.sh STAGING/devforge-nas-data-dir.sh && chmod +x STAGING/remote.sh && bash STAGING/remote.sh STAGING/rollout.tar.gz CONTAINER HOSTENV AGENTS && rm -rf STAGING'
 $remoteCmd = $remoteCmd.Replace('STAGING', $remoteStaging).Replace('CONTAINER', $ContainerName).Replace('HOSTENV', $hostEnvToken).Replace('AGENTS', $agentsFlag)
 
 Write-Step 'Transfert + application sur le NAS'

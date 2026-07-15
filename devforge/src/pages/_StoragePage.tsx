@@ -1,4 +1,4 @@
-import { useState } from 'preact/hooks';
+import { useCallback, useState } from 'preact/hooks';
 import { PageHeader } from '../components/PageHeader';
 import { ServerStorageCard } from '../components/storage/ServerStorageCard';
 import { DataState } from '../components/ui/DataState';
@@ -12,21 +12,50 @@ type Props = {
     permissions: BootstrapPermissions;
 };
 
+async function refreshDisksInBackground(
+    servers: ServerStorageSummary[],
+    onServerUpdated: (server: ServerStorageSummary) => void,
+): Promise<void> {
+    await Promise.allSettled(
+        servers
+            .filter((server) => server.status.functional)
+            .map(async (server) => {
+                try {
+                    const response = await domainApi.refreshServerDiskUsage(server.uuid);
+                    onServerUpdated({
+                        ...server,
+                        disk_usage_percent: response.data.disk_usage_percent,
+                        disk_partitions: response.data.disk_partitions ?? null,
+                    });
+                } catch {
+                    // Conserver la valeur en cache ou null si la mesure SSH échoue.
+                }
+            }),
+    );
+}
+
 export function StoragePage({ permissions }: Props) {
     const [servers, setServers] = useState<ServerStorageSummary[]>([]);
+    const [measuringDisks, setMeasuringDisks] = useState(false);
+
+    const handleServerUpdated = useCallback((updated: ServerStorageSummary) => {
+        setServers((current) => current.map((server) => (
+            server.uuid === updated.uuid ? updated : server
+        )));
+    }, []);
+
     const query = useApiQuery('server-storage', async () => {
-        const response = await domainApi.serverStorageOverview();
+        const response = await domainApi.serverStorageOverview(false);
         setServers(response.data);
+        setMeasuringDisks(true);
+        void refreshDisksInBackground(response.data, handleServerUpdated).finally(() => {
+            setMeasuringDisks(false);
+        });
+
         return response;
     });
 
     const schedulerHealthy = query.data?.meta?.scheduler_healthy ?? true;
-
-    const handleServerUpdated = (updated: ServerStorageSummary) => {
-        setServers((current) => current.map((server) => (
-            server.uuid === updated.uuid ? updated : server
-        )));
-    };
 
     return (
         <div class="grid gap-5">
@@ -56,6 +85,9 @@ export function StoragePage({ permissions }: Props) {
                 <div class="mb-3 flex flex-wrap items-center gap-2 text-xs text-base-content/55">
                     <StatusBadge label="Automatique" tone="success" />
                     <span>Nettoyage Docker selon le seuil configuré · Surveillance disque via cron</span>
+                    {measuringDisks && (
+                        <StatusBadge label="Mesure disque…" tone="warning" />
+                    )}
                 </div>
 
                 <div class="grid gap-4">

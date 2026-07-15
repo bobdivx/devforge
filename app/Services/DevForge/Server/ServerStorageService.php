@@ -27,10 +27,13 @@ class ServerStorageService
     /**
      * @return array<string, mixed>
      */
-    public function show(Server $server, bool $refreshDisk = false): array
+    public function show(Server $server, bool $refreshDisk = false, bool $includeDockerReport = false): array
     {
         $payload = $this->presentServer($server, $refreshDisk, includeExecutions: true);
-        $payload['docker_disk_report'] = $this->getDockerDiskReport($server);
+
+        if ($includeDockerReport) {
+            $payload['docker_disk_report'] = $this->getDockerDiskReport($server);
+        }
 
         return $payload;
     }
@@ -42,6 +45,7 @@ class ServerStorageService
     {
         return [
             'disk_usage_percent' => $this->resolveDiskUsagePercent($server),
+            'disk_partitions' => $this->resolveDiskPartitions($server),
         ];
     }
 
@@ -190,6 +194,7 @@ class ServerStorageService
             ->first();
 
         $diskUsage = $refreshDisk ? $this->resolveDiskUsagePercent($server) : null;
+        $diskPartitions = $refreshDisk ? $this->resolveDiskPartitions($server) : null;
 
         $payload = [
             'uuid' => $server->uuid,
@@ -201,6 +206,7 @@ class ServerStorageService
                 'functional' => $server->isFunctional(),
             ],
             'disk_usage_percent' => $diskUsage,
+            'disk_partitions' => $diskPartitions,
             'disk_alert_threshold' => (int) ($settings?->server_disk_usage_notification_threshold ?? 80),
             'cleanup' => [
                 'force_docker_cleanup' => (bool) ($settings?->force_docker_cleanup ?? false),
@@ -269,17 +275,85 @@ class ServerStorageService
             return null;
         }
 
-        try {
-            $usage = $server->getDiskUsage();
+        $partitions = $this->resolveDiskPartitions($server);
 
-            if ($usage === null || $usage === '') {
-                return null;
-            }
-
-            return (int) $usage;
-        } catch (\Throwable) {
+        if ($partitions === null) {
             return null;
         }
+
+        foreach (['/media/Docker', '/'] as $mount) {
+            if (isset($partitions[$mount])) {
+                return $partitions[$mount];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<string, int>|null
+     */
+    private function resolveDiskPartitions(Server $server): ?array
+    {
+        if (! $server->isFunctional()) {
+            return null;
+        }
+
+        $partitions = [];
+
+        foreach (['/' => '/', '/media/Docker' => '/media/Docker'] as $key => $mount) {
+            try {
+                $usage = $server->getDiskUsageForMount($mount);
+
+                if ($usage !== null && $usage !== '') {
+                    $partitions[$key] = (int) $usage;
+                }
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+
+        return $partitions === [] ? null : $partitions;
+    }
+
+    /**
+     * @return array{report: string|null}
+     */
+    public function diskBreakdown(Server $server): array
+    {
+        return [
+            'report' => $this->getHostDiskBreakdown($server),
+        ];
+    }
+
+    private function getHostDiskBreakdown(Server $server): ?string
+    {
+        if (! $server->isFunctional()) {
+            return null;
+        }
+
+        $sections = [
+            ['Espace racine (df -h /)', 'df -h / 2>/dev/null | tail -1 || echo "(indisponible)"'],
+            ['Docker data (df -h /media/Docker)', 'df -h /media/Docker 2>/dev/null | tail -1 || echo "(non monté)"'],
+            ['Inodes (df -i /)', 'df -i / 2>/dev/null | tail -1 || echo "(indisponible)"'],
+            ['Répertoires clés', 'du -xh --max-depth=1 /DATA/.devforge /data/coolify /var/lib/docker /var/log /tmp 2>/dev/null | sort -hr | head -25 || echo "(du indisponible)"'],
+            ['Docker (docker system df)', 'docker system df 2>/dev/null || echo "(docker indisponible)"'],
+        ];
+
+        $lines = [];
+
+        foreach ($sections as [$title, $command]) {
+            $lines[] = "=== {$title} ===";
+
+            try {
+                $output = instant_remote_process([$command], $server, false, timeout: 45);
+                $lines[] = is_string($output) && trim($output) !== '' ? trim($output) : '(aucune sortie)';
+            } catch (\Throwable $exception) {
+                $lines[] = '(erreur: '.$exception->getMessage().')';
+            }
+        }
+
+        return implode("\n", $lines);
     }
 
     private function getDockerDiskReport(Server $server): ?string

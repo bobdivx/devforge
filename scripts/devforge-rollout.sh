@@ -41,6 +41,7 @@ TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 ARTIFACT="${ROOT}/devforge-rollout-${TIMESTAMP}.tar.gz"
 PATHS_FILE="${ROOT}/scripts/devforge-package.paths"
 REMOTE_SCRIPT="${ROOT}/scripts/devforge-rollout-remote.sh"
+NAS_DATA_DIR_SCRIPT="${ROOT}/scripts/devforge-nas-data-dir.sh"
 
 log() { printf '==> %s\n' "$*"; }
 
@@ -90,16 +91,18 @@ if [[ "${SKIP_BUILD}" == "true" && ! -f "${ARTIFACT}" ]]; then
     [[ -n "${ARTIFACT}" ]] || { echo "Aucun artefact trouvé." >&2; exit 1; }
 fi
 
-REMOTE_ARTIFACT="/tmp/devforge-rollout-${TIMESTAMP}.tar.gz"
-REMOTE_SCRIPT_PATH="/tmp/devforge-rollout-remote.sh"
+REMOTE_DIR="/DATA/.devforge/staging/deploy-${TIMESTAMP}"
+REMOTE_ARTIFACT="${REMOTE_DIR}/rollout.tar.gz"
 
 log "Transfert vers ${NAS_HOST}"
+ssh "${NAS_HOST}" "mkdir -p '${REMOTE_DIR}' /DATA/.devforge/backups"
 scp "${ARTIFACT}" "${NAS_HOST}:${REMOTE_ARTIFACT}"
-scp "${REMOTE_SCRIPT}" "${NAS_HOST}:${REMOTE_SCRIPT_PATH}"
+scp "${REMOTE_SCRIPT}" "${NAS_HOST}:${REMOTE_DIR}/remote.sh"
+scp "${NAS_DATA_DIR_SCRIPT}" "${NAS_HOST}:${REMOTE_DIR}/devforge-nas-data-dir.sh"
 
 log "Application sur le NAS"
-ssh "${NAS_HOST}" "sed -i 's/\\r\$//' '${REMOTE_SCRIPT_PATH}' && chmod +x '${REMOTE_SCRIPT_PATH}' && bash '${REMOTE_SCRIPT_PATH}' '${REMOTE_ARTIFACT}' '${CONTAINER_NAME}' '${ENV_FILE}' '${ENABLE_AGENTS}'"
-ssh "${NAS_HOST}" "rm -f '${REMOTE_ARTIFACT}' '${REMOTE_SCRIPT_PATH}'"
+ssh "${NAS_HOST}" "sed -i 's/\\r\$//' '${REMOTE_DIR}/remote.sh' '${REMOTE_DIR}/devforge-nas-data-dir.sh' && chmod +x '${REMOTE_DIR}/remote.sh' && bash '${REMOTE_DIR}/remote.sh' '${REMOTE_ARTIFACT}' '${CONTAINER_NAME}' '${ENV_FILE}' '${ENABLE_AGENTS}'"
+ssh "${NAS_HOST}" "rm -rf '${REMOTE_DIR}'"
 
 if [[ "${KEEP_ARTIFACT}" != "true" ]]; then
     rm -f "${ARTIFACT}"

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { RefreshCw, Trash2 } from 'lucide-preact';
 import { Card } from '../ui/Card';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { ProgressBar } from '../ui/ProgressBar';
 import { StatusBadge } from '../ui/StatusBadge';
 import {
     domainApi,
@@ -9,7 +10,7 @@ import {
     type ServerStorageMonitoringSettings,
     type ServerStorageSummary,
 } from '../../lib/domain-api';
-import { diskUsageLabel, diskUsageTone } from '../../lib/disk-usage';
+import { diskUsageLabel, diskUsageTone, workloadDiskLabel } from '../../lib/disk-usage';
 import { cleanupFreedNoSpace, criticalDiskHints } from '../../lib/storage-cleanup-hints';
 import { useServerCleanupTracker } from '../../lib/use-server-cleanup-tracker';
 import { CleanupProgressPanel } from './CleanupProgressPanel';
@@ -31,6 +32,7 @@ function toFormState(server: ServerStorageSummary): FormState {
 
 export function ServerStorageCard({ server, canManage, onUpdated }: Props) {
     const [diskUsage, setDiskUsage] = useState(server.disk_usage_percent);
+    const [diskPartitions, setDiskPartitions] = useState(server.disk_partitions ?? null);
     const [form, setForm] = useState<FormState>(() => toFormState(server));
     const [expanded, setExpanded] = useState(false);
     const [detail, setDetail] = useState(server);
@@ -41,11 +43,15 @@ export function ServerStorageCard({ server, canManage, onUpdated }: Props) {
     const [confirmAggressive, setConfirmAggressive] = useState(false);
     const [feedback, setFeedback] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [diskBreakdown, setDiskBreakdown] = useState<string | null>(null);
+    const [loadingBreakdown, setLoadingBreakdown] = useState(false);
+    const [breakdownError, setBreakdownError] = useState<string | null>(null);
 
     const cleanupTracker = useServerCleanupTracker(server.uuid, {
         onComplete: (updated) => {
             if (updated) {
                 setDiskUsage(updated.disk_usage_percent);
+                setDiskPartitions(updated.disk_partitions ?? null);
                 setDetail(updated);
                 onUpdated(updated);
 
@@ -58,9 +64,10 @@ export function ServerStorageCard({ server, canManage, onUpdated }: Props) {
 
     useEffect(() => {
         setDiskUsage(server.disk_usage_percent);
+        setDiskPartitions(server.disk_partitions ?? null);
         setForm(toFormState(server));
         setDetail(server);
-    }, [server.uuid, server.disk_usage_percent, server.cleanup, server.monitoring, server.last_cleanup]);
+    }, [server.uuid, server.disk_usage_percent, server.disk_partitions, server.cleanup, server.monitoring, server.last_cleanup]);
 
     const toggleExpanded = async () => {
         if (expanded) {
@@ -72,7 +79,7 @@ export function ServerStorageCard({ server, canManage, onUpdated }: Props) {
         setError(null);
 
         try {
-            const response = await domainApi.serverStorage(server.uuid, false);
+            const response = await domainApi.serverStorage(server.uuid, false, true);
             setDetail(response.data);
             onUpdated(response.data);
             setExpanded(true);
@@ -96,11 +103,37 @@ export function ServerStorageCard({ server, canManage, onUpdated }: Props) {
         try {
             const response = await domainApi.refreshServerDiskUsage(server.uuid);
             setDiskUsage(response.data.disk_usage_percent);
-            onUpdated({ ...server, disk_usage_percent: response.data.disk_usage_percent });
+            setDiskPartitions(response.data.disk_partitions ?? null);
+            onUpdated({
+                ...server,
+                disk_usage_percent: response.data.disk_usage_percent,
+                disk_partitions: response.data.disk_partitions ?? null,
+            });
         } catch {
             setError('Impossible d’actualiser l’utilisation disque.');
         } finally {
             setRefreshingDisk(false);
+        }
+    };
+
+    const runDiskBreakdown = async () => {
+        setLoadingBreakdown(true);
+        setBreakdownError(null);
+        setDiskBreakdown(null);
+
+        try {
+            const response = await domainApi.serverStorageDiskBreakdown(server.uuid);
+            const report = response.data.report?.trim() ?? '';
+
+            if (report === '') {
+                setBreakdownError('Diagnostic vide — le serveur n’a pas renvoyé de données.');
+            } else {
+                setDiskBreakdown(report);
+            }
+        } catch {
+            setBreakdownError('Impossible d’analyser l’espace disque (timeout ou serveur indisponible).');
+        } finally {
+            setLoadingBreakdown(false);
         }
     };
 
@@ -146,6 +179,8 @@ export function ServerStorageCard({ server, canManage, onUpdated }: Props) {
     };
 
     const displayError = error ?? (cleanupTracker.phase === 'failed' ? cleanupTracker.error : null);
+    const workloadLabel = workloadDiskLabel(diskPartitions);
+    const rootInodeCritical = (diskPartitions?.['/'] ?? 0) >= 95;
     const lastCleanupMessage = server.last_cleanup?.message ?? detail.last_cleanup?.message ?? null;
     const cleanupHadNoGain = cleanupFreedNoSpace(lastCleanupMessage);
     const diskCritical = diskUsage !== null && diskUsage >= form.server_disk_usage_notification_threshold;
@@ -154,9 +189,12 @@ export function ServerStorageCard({ server, canManage, onUpdated }: Props) {
     return (
         <Card title={server.name}>
             <div class="flex flex-wrap items-start justify-between gap-3">
-                <div class="min-w-0 flex-1 space-y-2">
+                <div class="min-w-0 flex-1 space-y-3">
                     <div class="flex flex-wrap items-center gap-2">
-                        <StatusBadge label={diskUsageLabel(diskUsage)} tone={usageTone} />
+                        <StatusBadge label={diskUsageLabel(diskUsage, workloadLabel)} tone={usageTone} />
+                        {rootInodeCritical && workloadLabel === '/media/Docker' && (
+                            <StatusBadge label="Racine / à 100 % (CasaOS)" tone="warning" />
+                        )}
                         {!server.status.functional && (
                             <StatusBadge label="Serveur indisponible" tone="error" />
                         )}
@@ -180,10 +218,10 @@ export function ServerStorageCard({ server, canManage, onUpdated }: Props) {
                         )}
                     </div>
                     {diskUsage !== null && (
-                        <progress
-                            class={`progress w-full max-w-md ${usageTone === 'error' ? 'progress-error' : usageTone === 'warning' ? 'progress-warning' : 'progress-success'}`}
-                            max="100"
+                        <ProgressBar
                             value={diskUsage}
+                            label={workloadLabel ? `Utilisation ${workloadLabel}` : 'Utilisation disque'}
+                            tone={usageTone === 'neutral' ? 'primary' : usageTone}
                         />
                     )}
                     {server.description && (
@@ -226,6 +264,16 @@ export function ServerStorageCard({ server, canManage, onUpdated }: Props) {
                             Nettoyage agressif
                         </button>
                     )}
+                    {diskCritical && (
+                        <button
+                            class="btn btn-outline btn-sm"
+                            type="button"
+                            disabled={loadingBreakdown || !server.status.functional}
+                            onClick={() => void runDiskBreakdown()}
+                        >
+                            {loadingBreakdown ? 'Analyse…' : 'Diagnostiquer l’espace'}
+                        </button>
+                    )}
                     <button class="btn btn-ghost btn-sm" type="button" disabled={loadingDetail} onClick={() => void toggleExpanded()}>
                         {loadingDetail ? 'Chargement…' : expanded ? 'Réduire' : 'Configurer'}
                     </button>
@@ -234,10 +282,21 @@ export function ServerStorageCard({ server, canManage, onUpdated }: Props) {
 
             {diskCritical && hints.length > 0 && (
                 <div class="mt-3 rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">
-                    <p class="font-medium">Disque critique — utilisez « Nettoyage agressif » pour appliquer volumes + suppression d’images immédiatement.</p>
+                    <p class="font-medium">
+                        {cleanupHadNoGain
+                            ? 'Nettoyage Docker terminé sans libérer d’espace — l’occupation est probablement hors Docker.'
+                            : 'Disque critique — utilisez « Nettoyage agressif » ou « Diagnostiquer l’espace ».'}
+                    </p>
                     <ul class="mt-2 list-disc space-y-1 ps-5 text-xs text-base-content/75">
                         {hints.map((hint) => <li key={hint}>{hint}</li>)}
                     </ul>
+                </div>
+            )}
+
+            {diskBreakdown && (
+                <div class="mt-3">
+                    <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/45">Diagnostic disque hôte</p>
+                    <pre class="custom-scrollbar max-h-64 overflow-auto rounded-lg border border-base-300/70 bg-base-200/40 p-3 text-[11px] leading-relaxed text-base-content/75">{diskBreakdown}</pre>
                 </div>
             )}
 
@@ -249,6 +308,10 @@ export function ServerStorageCard({ server, canManage, onUpdated }: Props) {
                         phaseLabel={cleanupTracker.phaseLabel}
                     />
                 </div>
+            )}
+
+            {breakdownError && (
+                <p class="mt-3 text-xs text-error">{breakdownError}</p>
             )}
 
             {feedback && !cleanupTracker.isTracking && <p class="mt-3 text-xs text-success">{feedback}</p>}

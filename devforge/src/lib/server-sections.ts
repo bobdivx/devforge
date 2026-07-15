@@ -2,6 +2,7 @@ import { normalizeRoutePath } from './route-path';
 
 export type ServerSectionId =
     | 'overview'
+    | 'files'
     | 'advanced'
     | 'swarm'
     | 'sentinel'
@@ -32,6 +33,7 @@ export type ServerSection = {
 
 export const serverSections: ServerSection[] = [
     { id: 'overview', label: 'Vue d’ensemble', legacySuffix: '', description: 'État et configuration générale du serveur.' },
+    { id: 'files', label: 'Fichiers', legacySuffix: '/files', description: 'Parcourir et éditer les fichiers distants via SSH.' },
     { id: 'resources', label: 'Ressources', legacySuffix: '/resources', description: 'Applications, services et bases déployés sur ce serveur.' },
     { id: 'destinations', label: 'Destinations', legacySuffix: '/destinations', description: 'Réseaux Docker et destinations de déploiement.' },
     { id: 'metrics', label: 'Métriques', legacySuffix: '/metrics', description: 'Métriques système et conteneurs.' },
@@ -56,6 +58,7 @@ export const serverSections: ServerSection[] = [
 
 const legacyPathBySection: Record<string, ServerSectionId> = {
     '': 'overview',
+    files: 'files',
     resources: 'resources',
     destinations: 'destinations',
     metrics: 'metrics',

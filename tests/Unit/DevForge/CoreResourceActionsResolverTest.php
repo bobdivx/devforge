@@ -18,11 +18,12 @@ it('returns lifecycle actions for running applications', function () {
         ->and($resolver->forResource('application', 'starting:unknown'))->toBe(['stop', 'restart', 'deploy']);
 });
 
-it('returns start for stopped databases and stop/restart when running', function () {
+it('returns restart only for databases regardless of status', function () {
     $resolver = new CoreResourceActionsResolver;
 
-    expect($resolver->forResource('database', 'exited:unknown'))->toBe(['start'])
-        ->and($resolver->forResource('database', 'running:healthy'))->toBe(['stop', 'restart']);
+    expect($resolver->forResource('database', 'exited:unknown'))->toBe(['restart'])
+        ->and($resolver->forResource('database', 'stopped'))->toBe(['restart'])
+        ->and($resolver->forResource('database', 'running:healthy'))->toBe(['restart']);
 });
 
 it('returns start for stopped services and lifecycle actions when running', function () {

@@ -57,7 +57,7 @@ class StandaloneDatabaseCreator
 
         $migrateFromRemote = filled($validated['application_uuid'] ?? null)
             && (bool) ($validated['migrate_from_remote'] ?? false);
-        $instantDeploy = (bool) ($validated['instant_deploy'] ?? true);
+        $instantDeploy = true;
         $application = filled($validated['application_uuid'] ?? null)
             ? $this->currentTeamResources->application($user, $validated['application_uuid'])
             : null;

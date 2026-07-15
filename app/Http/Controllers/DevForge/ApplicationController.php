@@ -9,6 +9,7 @@ use App\Services\DevForge\Application\ApplicationContainerLogs;
 use App\Services\DevForge\Application\ApplicationDatabaseConnector;
 use App\Services\DevForge\Application\ApplicationEnvironmentVariableCatalog;
 use App\Services\DevForge\Application\ApplicationFromGithubCreator;
+use App\Services\DevForge\Application\ApplicationSourceService;
 use App\Services\DevForge\Core\CoreResourcePresenter;
 use App\Services\DevForge\CurrentTeamContext;
 use App\Services\DevForge\CurrentTeamResources;
@@ -26,6 +27,7 @@ class ApplicationController extends Controller
         private readonly ApplicationDatabaseConnector $applicationDatabaseConnector,
         private readonly ApplicationContainerLogs $applicationContainerLogs,
         private readonly ApplicationEnvironmentVariableCatalog $applicationEnvironmentVariableCatalog,
+        private readonly ApplicationSourceService $applicationSourceService,
         private readonly CoreResourcePresenter $presenter,
     ) {}
 
@@ -171,6 +173,108 @@ class ApplicationController extends Controller
 
         return response()->json([
             'data' => $this->applicationEnvironmentVariableCatalog->reveal($application, $envUuid),
+        ]);
+    }
+
+    public function sourceInfo(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->applicationSourceService->applicationForUser($user, $applicationUuid);
+        $this->authorize('view', $application);
+
+        return response()->json([
+            'data' => $this->applicationSourceService->info($application),
+        ]);
+    }
+
+    public function sourceList(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $validated = $request->validate([
+            'path' => ['nullable', 'string', 'max:4096'],
+        ]);
+
+        $application = $this->applicationSourceService->applicationForUser($user, $applicationUuid);
+        $this->authorize('view', $application);
+        $team = $this->currentTeamContext->resolve($user);
+
+        return response()->json([
+            'data' => $this->applicationSourceService->listDirectory(
+                $team,
+                $application,
+                $validated['path'] ?? null,
+            ),
+        ]);
+    }
+
+    public function sourceRead(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $validated = $request->validate([
+            'path' => ['required', 'string', 'max:4096'],
+        ]);
+
+        $application = $this->applicationSourceService->applicationForUser($user, $applicationUuid);
+        $this->authorize('view', $application);
+        $team = $this->currentTeamContext->resolve($user);
+
+        return response()->json([
+            'data' => $this->applicationSourceService->readFile(
+                $team,
+                $application,
+                $validated['path'],
+            ),
+        ]);
+    }
+
+    public function sourceWrite(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $validated = $request->validate([
+            'path' => ['required', 'string', 'max:4096'],
+            'content' => ['required', 'string', 'max:32768'],
+            'commit_message' => ['required', 'string', 'max:500'],
+            'sha' => ['nullable', 'string', 'max:64'],
+            'mode' => ['nullable', 'string', 'in:direct,pull_request'],
+            'redeploy' => ['nullable', 'boolean'],
+            'branch_name' => ['nullable', 'string', 'max:120'],
+            'pr_title' => ['nullable', 'string', 'max:256'],
+            'pr_body' => ['nullable', 'string', 'max:4000'],
+        ]);
+
+        $application = $this->applicationSourceService->applicationForUser($user, $applicationUuid);
+        $this->authorize('update', $application);
+        $team = $this->currentTeamContext->resolve($user);
+
+        $options = [
+            'mode' => $validated['mode'] ?? 'direct',
+            'branch_name' => $validated['branch_name'] ?? null,
+            'pr_title' => $validated['pr_title'] ?? null,
+            'pr_body' => $validated['pr_body'] ?? null,
+        ];
+
+        if (array_key_exists('redeploy', $validated)) {
+            $options['redeploy'] = (bool) $validated['redeploy'];
+        }
+
+        return response()->json([
+            'data' => $this->applicationSourceService->writeFile(
+                $team,
+                $application,
+                $validated['path'],
+                $validated['content'],
+                $validated['commit_message'],
+                $validated['sha'] ?? null,
+                $options,
+            ),
         ]);
     }
 }

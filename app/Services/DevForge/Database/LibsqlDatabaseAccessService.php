@@ -11,6 +11,7 @@ class LibsqlDatabaseAccessService
 {
     public function __construct(
         private readonly LibsqlConnectionEnvSync $libsqlConnectionEnvSync,
+        private readonly LinkedDatabaseEnvSync $linkedDatabaseEnvSync,
     ) {}
 
     /**
@@ -55,7 +56,7 @@ class LibsqlDatabaseAccessService
         $database->libsql_auth_token = Str::password(length: 64, symbols: false);
         $database->save();
 
-        $synced = $this->libsqlConnectionEnvSync->syncLinkedApplications($database, $redeployApplications);
+        $synced = $this->linkedDatabaseEnvSync->syncLinkedApplications($database, $redeployApplications);
 
         auditLog('devforge.database.token_regenerated', [
             'database_uuid' => $database->uuid,
@@ -93,7 +94,7 @@ class LibsqlDatabaseAccessService
             StartDatabase::dispatch($database);
         }
 
-        $synced = $this->libsqlConnectionEnvSync->syncLinkedApplications(
+        $synced = $this->linkedDatabaseEnvSync->syncLinkedApplications(
             $database,
             (bool) ($validated['redeploy_applications'] ?? false),
         );

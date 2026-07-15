@@ -48,6 +48,7 @@ export function useServerCleanupTracker(serverUuid: string, options: Options = {
             const updated: ServerStorageSummary = {
                 ...storageResponse.data,
                 disk_usage_percent: diskResponse.data.disk_usage_percent,
+                disk_partitions: diskResponse.data.disk_partitions ?? storageResponse.data.disk_partitions ?? null,
             };
 
             onCompleteRef.current?.(updated);

@@ -2,14 +2,17 @@
 
 namespace App\Services\DevForge\Database;
 
-use App\Actions\Database\StartDatabase;
-use App\Actions\Database\StopDatabase;
 use App\Models\StandaloneLibsql;
 use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class LibsqlDatabaseTransferService
 {
+    public function __construct(
+        private readonly StandaloneDatabaseRuntimeGuard $runtimeGuard,
+        private readonly DatabaseImportFinalizer $importFinalizer,
+    ) {}
+
     private const SQLITE_RUNNER_IMAGE = 'alpine:3.20';
 
     private const DB_RELATIVE_PATH = '/var/lib/sqld/data.db';
@@ -181,10 +184,7 @@ class LibsqlDatabaseTransferService
         $remoteSqlPath = '/tmp/devforge-libsql-import-'.$database->uuid.'-'.time().'.sql';
         $this->writeRemoteFile($server, $remoteSqlPath, $normalizedSql."\n");
 
-        $wasRunning = $database->isRunning();
-        if ($wasRunning) {
-            StopDatabase::run($database, dockerCleanup: false);
-        }
+        $this->runtimeGuard->stopForMaintenance($database);
 
         try {
             $volume = escapeshellarg($this->volumeName($database));
@@ -198,13 +198,11 @@ class LibsqlDatabaseTransferService
             $this->runOnServer($server, ['rm -f '.escapeshellarg($remoteSqlPath)], throwError: false);
         }
 
-        StartDatabase::run($database);
-
-        return [
-            'restarted' => true,
-            'format' => 'sql',
-            'message' => 'Import SQL terminé. La base redémarre.',
-        ];
+        return $this->importFinalizer->finalize(
+            $database,
+            'sql',
+            'Import SQL terminé. La base est active.',
+        );
     }
 
     /**
@@ -222,10 +220,7 @@ class LibsqlDatabaseTransferService
         $remoteDbPath = '/tmp/devforge-libsql-import-'.$database->uuid.'-'.time().'.db';
         $this->writeRemoteFile($server, $remoteDbPath, $dbContents);
 
-        $wasRunning = $database->isRunning();
-        if ($wasRunning) {
-            StopDatabase::run($database, dockerCleanup: false);
-        }
+        $this->runtimeGuard->stopForMaintenance($database);
 
         try {
             $volume = escapeshellarg($this->volumeName($database));
@@ -239,13 +234,11 @@ class LibsqlDatabaseTransferService
             $this->runOnServer($server, ['rm -f '.escapeshellarg($remoteDbPath)], throwError: false);
         }
 
-        StartDatabase::run($database);
-
-        return [
-            'restarted' => true,
-            'format' => 'db',
-            'message' => 'Import du fichier .db terminé. La base redémarre.',
-        ];
+        return $this->importFinalizer->finalize(
+            $database,
+            'db',
+            'Import du fichier .db terminé. La base est active.',
+        );
     }
 
     private function assertDatabaseFileExists(StandaloneLibsql $database): void

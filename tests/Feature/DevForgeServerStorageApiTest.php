@@ -42,7 +42,16 @@ it('lists server storage overview for the current team only', function () {
         ->assertJsonPath('data.0.uuid', $this->server->uuid)
         ->assertJsonPath('data.0.cleanup.docker_cleanup_threshold', 75)
         ->assertJsonPath('data.0.monitoring.server_disk_usage_notification_threshold', 85)
+        ->assertJsonPath('data.0.disk_usage_percent', null)
         ->assertJsonMissing(['name' => 'Foreign host'])
+        ->assertJsonStructure(['data' => [['disk_usage_percent']]]);
+});
+
+it('can refresh live disk measurement on overview', function () {
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson('/api/devforge/v1/server-storage?refresh_disk=1')
+        ->assertSuccessful()
         ->assertJsonStructure(['data' => [['disk_usage_percent']]]);
 });
 
@@ -83,7 +92,24 @@ it('shows server storage detail with cleanup executions', function () {
         ->assertSuccessful()
         ->assertJsonPath('data.uuid', $this->server->uuid)
         ->assertJsonCount(1, 'data.executions')
-        ->assertJsonPath('data.executions.0.status', 'success');
+        ->assertJsonPath('data.executions.0.status', 'success')
+        ->assertJsonMissingPath('data.docker_disk_report');
+});
+
+it('includes docker disk report only when requested', function () {
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson('/api/devforge/v1/server-storage/'.$this->server->uuid.'?docker_report=1')
+        ->assertSuccessful()
+        ->assertJsonStructure(['data' => ['docker_disk_report']]);
+});
+
+it('returns host disk breakdown for authorized users', function () {
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson('/api/devforge/v1/server-storage/'.$this->server->uuid.'/disk-breakdown')
+        ->assertSuccessful()
+        ->assertJsonPath('data.report', fn ($value) => is_string($value) && $value !== '');
 });
 
 it('accepts coolify cuid server identifiers on disk refresh route', function () {
@@ -93,7 +119,7 @@ it('accepts coolify cuid server identifiers on disk refresh route', function () 
         ->withSession(['currentTeam' => $this->team])
         ->postJson('/api/devforge/v1/server-storage/'.$this->server->uuid.'/disk')
         ->assertSuccessful()
-        ->assertJsonStructure(['data' => ['disk_usage_percent']]);
+        ->assertJsonStructure(['data' => ['disk_usage_percent', 'disk_partitions']]);
 });
 
 it('updates docker cleanup and monitoring settings', function () {

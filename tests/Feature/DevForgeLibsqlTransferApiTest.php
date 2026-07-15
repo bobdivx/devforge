@@ -62,7 +62,10 @@ it('imports libsql database sql from an uploaded file', function () {
             ->andReturn([
                 'restarted' => true,
                 'format' => 'sql',
-                'message' => 'Import SQL terminé. La base redémarre.',
+                'message' => 'Import SQL terminé. La base est active.',
+                'linked_applications' => [],
+                'env_variables_synced' => 0,
+                'redeployments_queued' => 0,
             ]);
     });
 
@@ -87,7 +90,10 @@ it('imports libsql database from an uploaded sqlite .db file', function () {
             ->andReturn([
                 'restarted' => true,
                 'format' => 'db',
-                'message' => 'Import du fichier .db terminé. La base redémarre.',
+                'message' => 'Import du fichier .db terminé. La base est active.',
+                'linked_applications' => [],
+                'env_variables_synced' => 0,
+                'redeployments_queued' => 0,
             ]);
     });
 

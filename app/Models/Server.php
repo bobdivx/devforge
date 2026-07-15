@@ -727,6 +727,33 @@ $schema://$host {
         // return instant_remote_process(["df /| tail -1 | awk '{ print $5}' | sed 's/%//g'"], $this, false);
     }
 
+    public function getDiskUsageForMount(string $mount): ?string
+    {
+        $safeMount = preg_replace('/[^a-zA-Z0-9_\\/\\.-]/', '', $mount) ?? $mount;
+
+        return instant_remote_process(
+            ["df {$safeMount} --output=pcent 2>/dev/null | tail -1 | tr -cd 0-9"],
+            $this,
+            false,
+        );
+    }
+
+    /**
+     * Partition la plus pertinente pour les builds Docker (ex. /media/Docker sur CasaOS).
+     */
+    public function getWorkloadDiskUsage(): ?string
+    {
+        foreach (['/media/Docker', '/'] as $mount) {
+            $usage = $this->getDiskUsageForMount($mount);
+
+            if ($usage !== null && $usage !== '') {
+                return $usage;
+            }
+        }
+
+        return null;
+    }
+
     public function definedResources()
     {
         $applications = $this->applications();

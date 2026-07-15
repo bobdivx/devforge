@@ -163,9 +163,11 @@ class AgentPromptBuilder
         Étapes :
         1. get_deployment_logs avec deployment_uuid
         2. get_resource_status sur l'application
-        3. docker_logs si conteneur identifiable
-        4. control_resource deploy UNE FOIS si correction transitoire possible
-        5. Résumé actionnable
+        3. read_application_source sur les fichiers liés à l'erreur (Dockerfile, package.json, etc.)
+        4. write_application_source si correction évidente (redeploy=true en mode direct, ou mode pull_request si risqué)
+        5. docker_logs si conteneur identifiable
+        6. control_resource deploy UNE FOIS si correction transitoire possible
+        7. Résumé actionnable
 
         Première action : appel d'outil obligatoire.
         CONTEXT);

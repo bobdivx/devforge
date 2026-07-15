@@ -46,8 +46,45 @@ it('auto-enables github package for github agent type', function () {
         ->and($names)->toContain('read_github_file');
 });
 
-it('enables github package on demand and persists to agent metadata', function () {
+it('auto-enables github package for deployment and debug agent types', function () {
+    foreach (['deployment', 'debug', 'devforge'] as $type) {
+        $agent = AiAgent::factory()->create(['team_id' => $this->team->id, 'type' => $type]);
+        $toolkit = makeToolkit($this->team, $agent, $this->run);
+        $names = collect($toolkit->definitions())->pluck('name');
+
+        expect($names)->toContain('read_github_file')
+            ->and($names)->toContain('list_application_source')
+            ->and($names)->toContain('read_application_source')
+            ->and($names)->toContain('write_application_source');
+    }
+});
+
+it('exposes application source tools in core package', function () {
     $agent = AiAgent::factory()->create(['team_id' => $this->team->id, 'type' => 'debug']);
+    $toolkit = makeToolkit($this->team, $agent, $this->run);
+    $names = collect($toolkit->definitions())->pluck('name');
+
+    expect($names)->toContain('get_application_source_info')
+        ->and($names)->toContain('list_application_source')
+        ->and($names)->toContain('read_application_source')
+        ->and($names)->toContain('write_application_source');
+});
+
+it('returns a clear error when write_application_source is missing commit_message', function () {
+    $agent = AiAgent::factory()->create(['team_id' => $this->team->id, 'type' => 'debug']);
+    $toolkit = makeToolkit($this->team, $agent, $this->run);
+
+    $result = $toolkit->execute('write_application_source', [
+        'path' => 'README.md',
+        'content' => 'hello',
+    ]);
+
+    expect($result)->toHaveKey('error')
+        ->and($result['error'])->toContain('commit_message');
+});
+
+it('enables github package on demand and persists to agent metadata', function () {
+    $agent = AiAgent::factory()->create(['team_id' => $this->team->id, 'type' => 'security']);
     $toolkit = makeToolkit($this->team, $agent, $this->run);
 
     $before = collect($toolkit->definitions())->pluck('name');
@@ -82,6 +119,16 @@ it('registers custom tools via request_tool', function () {
 
     $names = collect($toolkit->definitions())->pluck('name');
     expect($names)->toContain('show_uptime');
+});
+
+it('returns a clear error when read_application_source is missing path', function () {
+    $agent = AiAgent::factory()->create(['team_id' => $this->team->id, 'type' => 'debug']);
+    $toolkit = makeToolkit($this->team, $agent, $this->run);
+
+    $result = $toolkit->execute('read_application_source', []);
+
+    expect($result)->toHaveKey('error')
+        ->and($result['error'])->toContain('path');
 });
 
 it('returns a clear error when get_resource_status is missing uuid', function () {

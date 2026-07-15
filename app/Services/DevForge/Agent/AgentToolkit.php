@@ -4,6 +4,7 @@ namespace App\Services\DevForge\Agent;
 
 use App\Models\AiAgent;
 use App\Models\AiAgentRun;
+use App\Models\Application;
 use App\Models\Team;
 use App\Services\DevForge\Agent\Tool\AgentCustomTools;
 use App\Services\DevForge\Agent\Tool\AgentGithubTools;
@@ -15,8 +16,9 @@ use App\Services\DevForge\Agent\Tool\AgentToolPackage;
 use App\Services\DevForge\Agent\Tool\AgentToolkitSession;
 use App\Services\DevForge\Core\CoreResourceAction;
 use App\Services\DevForge\Core\CoreResourceCatalog;
-use App\Services\DevForge\DeploymentData;
+use App\Services\DevForge\Application\ApplicationSourceService;
 use App\Services\DevForge\Github\GithubAppCatalog;
+use App\Services\DevForge\Server\ServerPathValidator;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Http;
 
@@ -262,7 +264,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'read_remote_file',
-                'description' => 'Lit un fichier sur un serveur distant (logs, configs). Max 32 Ko.',
+                'description' => 'Lit un fichier de configuration de déploiement sur le serveur (docker-compose, .env Coolify). Pour le code source de l\'app, préfère read_application_source.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -274,7 +276,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'list_remote_dir',
-                'description' => 'Liste le contenu d\'un répertoire sur un serveur distant.',
+                'description' => 'Liste un répertoire de déploiement Coolify sur le serveur (applications/{uuid}/). Pour le code source, préfère list_application_source.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -322,6 +324,119 @@ class AgentToolkit
                         'content' => ['type' => 'string', 'description' => 'Contenu à écrire'],
                     ],
                     'required' => ['server_uuid', 'path', 'content'],
+                ],
+            ],
+            [
+                'name' => 'get_application_source_info',
+                'description' => 'Retourne dépôt Git, branche déployée, base_directory et disponibilité du code source d\'une application Coolify.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID de l\'application. Omis si contexte déploiement ou agent lié à l\'app.',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'list_application_source',
+                'description' => 'Liste le code source Git d\'une application (branche déployée, base_directory). Préféré à list_github_dir.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID de l\'application. Omis si contexte déploiement ou agent lié à l\'app.',
+                        ],
+                        'path' => [
+                            'type' => 'string',
+                            'description' => 'Chemin relatif dans le repo (défaut: base_directory de l\'app)',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'read_application_source',
+                'description' => 'Lit un fichier du code source Git d\'une application (branche déployée). Préféré à read_github_file.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID de l\'application. Omis si contexte déploiement ou agent lié à l\'app.',
+                        ],
+                        'path' => [
+                            'type' => 'string',
+                            'description' => 'Chemin relatif du fichier dans le repo',
+                        ],
+                    ],
+                    'required' => ['path'],
+                ],
+            ],
+            [
+                'name' => 'write_application_source',
+                'description' => 'Modifie un fichier Git (commit direct sur la branche déployée ou PR). mode=direct redéploie par défaut ; mode=pull_request ouvre une PR sans redeploy.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID de l\'application. Omis si contexte déploiement ou agent lié à l\'app.',
+                        ],
+                        'path' => [
+                            'type' => 'string',
+                            'description' => 'Chemin relatif du fichier dans le repo',
+                        ],
+                        'content' => [
+                            'type' => 'string',
+                            'description' => 'Nouveau contenu complet du fichier (max 32 Ko)',
+                        ],
+                        'commit_message' => [
+                            'type' => 'string',
+                            'description' => 'Message de commit Git',
+                        ],
+                        'sha' => [
+                            'type' => 'string',
+                            'description' => 'SHA du blob actuel (depuis read_application_source) pour éviter les conflits',
+                        ],
+                        'mode' => [
+                            'type' => 'string',
+                            'enum' => ['direct', 'pull_request'],
+                            'description' => 'direct = commit sur branche déployée ; pull_request = branche + PR',
+                        ],
+                        'redeploy' => [
+                            'type' => 'boolean',
+                            'description' => 'Redéployer après commit direct (défaut: true en mode direct)',
+                        ],
+                        'branch_name' => [
+                            'type' => 'string',
+                            'description' => 'Nom de branche pour pull_request (auto-généré si omis)',
+                        ],
+                        'pr_title' => [
+                            'type' => 'string',
+                            'description' => 'Titre de la PR (défaut: commit_message)',
+                        ],
+                        'pr_body' => [
+                            'type' => 'string',
+                            'description' => 'Description de la PR',
+                        ],
+                    ],
+                    'required' => ['path', 'content', 'commit_message'],
+                ],
+            ],
+            [
+                'name' => 'search_remote_files',
+                'description' => 'Recherche des fichiers par nom (find) ou contenu (grep) sur un serveur distant.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'server_uuid' => ['type' => 'string', 'description' => 'UUID du serveur'],
+                        'pattern' => ['type' => 'string', 'description' => 'Motif (glob ou texte)'],
+                        'mode' => ['type' => 'string', 'enum' => ['name', 'content'], 'default' => 'name'],
+                        'path' => ['type' => 'string', 'description' => 'Racine de recherche (défaut: /data/coolify)'],
+                    ],
+                    'required' => ['server_uuid', 'pattern'],
                 ],
             ],
         ];
@@ -665,6 +780,35 @@ class AgentToolkit
                 (string) ($arguments['path'] ?? ''),
                 $arguments['content'] ?? '',
             ),
+            'search_remote_files' => $this->searchRemoteFiles(
+                (string) ($arguments['server_uuid'] ?? ''),
+                (string) ($arguments['pattern'] ?? ''),
+                $arguments['mode'] ?? 'name',
+                $arguments['path'] ?? null,
+            ),
+            'get_application_source_info' => $this->getApplicationSourceInfo(
+                isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
+            ),
+            'list_application_source' => $this->listApplicationSource(
+                isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
+                isset($arguments['path']) ? (string) $arguments['path'] : null,
+            ),
+            'read_application_source' => $this->readApplicationSource(
+                isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
+                (string) ($arguments['path'] ?? ''),
+            ),
+            'write_application_source' => $this->writeApplicationSource(
+                isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
+                (string) ($arguments['path'] ?? ''),
+                (string) ($arguments['content'] ?? ''),
+                (string) ($arguments['commit_message'] ?? ''),
+                isset($arguments['sha']) ? (string) $arguments['sha'] : null,
+                is_string($arguments['mode'] ?? null) ? (string) $arguments['mode'] : null,
+                array_key_exists('redeploy', $arguments) ? (bool) $arguments['redeploy'] : null,
+                isset($arguments['branch_name']) ? (string) $arguments['branch_name'] : null,
+                isset($arguments['pr_title']) ? (string) $arguments['pr_title'] : null,
+                isset($arguments['pr_body']) ? (string) $arguments['pr_body'] : null,
+            ),
             'delegate_task' => $this->delegateTask(
                 $arguments['goal'] ?? '',
                 $arguments['child_agent_uuid'] ?? null,
@@ -953,6 +1097,42 @@ class AgentToolkit
         return $this->serverExecutor->execOnServer($serverUuid, $command, $timeout);
     }
 
+    /** @return array<mixed> */
+    private function searchRemoteFiles(string $serverUuid, string $pattern, string $mode = 'name', ?string $path = null): array
+    {
+        $pattern = trim($pattern);
+        if ($pattern === '') {
+            return ['error' => 'Motif de recherche requis.'];
+        }
+
+        $root = ServerPathValidator::normalizeDirectory($path);
+        $escapedRoot = escapeshellarg($root);
+        $escapedPattern = escapeshellarg($pattern);
+
+        $command = $mode === 'content'
+            ? "cd {$escapedRoot} && grep -rIn --exclude-dir=node_modules --exclude-dir=.git {$escapedPattern} . 2>/dev/null | head -200"
+            : "find {$escapedRoot} -name {$escapedPattern} -not -path '*/node_modules/*' -not -path '*/.git/*' 2>/dev/null | head -200";
+
+        $result = $this->serverExecutor->execOnServer($serverUuid, $command, 45);
+
+        if (! $result['success']) {
+            return ['error' => $result['error'] ?? 'Recherche impossible.'];
+        }
+
+        $lines = array_values(array_filter(
+            explode("\n", trim($result['output'] ?? '')),
+            fn (string $line): bool => $line !== '',
+        ));
+
+        return [
+            'path' => $root,
+            'pattern' => $pattern,
+            'mode' => $mode,
+            'results' => $lines,
+            'result_count' => count($lines),
+        ];
+    }
+
     /**
      * @param  array<string, string>  $headers
      * @return array<mixed>
@@ -1090,6 +1270,158 @@ class AgentToolkit
         }
 
         return (string) $resource->getAttribute('uuid') === $this->assignedResourceUuid;
+    }
+
+    private function applicationSourceService(): ApplicationSourceService
+    {
+        return app(ApplicationSourceService::class);
+    }
+
+    private function resolveApplicationUuid(?string $applicationUuid): ?string
+    {
+        if ($applicationUuid !== null && $applicationUuid !== '') {
+            return $applicationUuid;
+        }
+
+        $contextUuid = $this->runContext['application_uuid'] ?? null;
+        if (is_string($contextUuid) && $contextUuid !== '') {
+            return $contextUuid;
+        }
+
+        if ($this->assignedResourceUuid !== null
+            && $this->assignedResourceUuid !== ''
+            && $this->catalog->find($this->team, 'applications', $this->assignedResourceUuid) !== null) {
+            return $this->assignedResourceUuid;
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<string, mixed>|Application
+     */
+    private function resolveApplication(?string $applicationUuid): array|Application
+    {
+        $uuid = $this->resolveApplicationUuid($applicationUuid);
+
+        if ($uuid === null) {
+            return ['error' => 'application_uuid requis (ou contexte déploiement / agent lié à une application).'];
+        }
+
+        try {
+            $application = $this->applicationSourceService()->applicationForTeam($this->team, $uuid);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+            return ['error' => "Application {$uuid} introuvable."];
+        }
+
+        if (! $this->matchesAssignedResource($application)) {
+            return ['error' => 'Agent limité à une autre ressource — accès refusé.'];
+        }
+
+        return $application;
+    }
+
+    /** @return array<string, mixed> */
+    private function getApplicationSourceInfo(?string $applicationUuid): array
+    {
+        $application = $this->resolveApplication($applicationUuid);
+        if (is_array($application)) {
+            return $application;
+        }
+
+        return $this->applicationSourceService()->info($application);
+    }
+
+    /** @return array<string, mixed> */
+    private function listApplicationSource(?string $applicationUuid, ?string $path): array
+    {
+        $application = $this->resolveApplication($applicationUuid);
+        if (is_array($application)) {
+            return $application;
+        }
+
+        try {
+            return $this->applicationSourceService()->listDirectory($this->team, $application, $path);
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            return ['error' => collect($exception->errors())->flatten()->first() ?? 'Source indisponible.'];
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private function readApplicationSource(?string $applicationUuid, string $path): array
+    {
+        if ($path === '') {
+            return ['error' => 'Paramètre path requis pour read_application_source.'];
+        }
+
+        $application = $this->resolveApplication($applicationUuid);
+        if (is_array($application)) {
+            return $application;
+        }
+
+        try {
+            return $this->applicationSourceService()->readFile($this->team, $application, $path);
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            return ['error' => collect($exception->errors())->flatten()->first() ?? 'Fichier source indisponible.'];
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private function writeApplicationSource(
+        ?string $applicationUuid,
+        string $path,
+        string $content,
+        string $commitMessage,
+        ?string $sha,
+        ?string $mode = null,
+        ?bool $redeploy = null,
+        ?string $branchName = null,
+        ?string $prTitle = null,
+        ?string $prBody = null,
+    ): array {
+        if ($path === '') {
+            return ['error' => 'Paramètre path requis pour write_application_source.'];
+        }
+
+        if (trim($commitMessage) === '') {
+            return ['error' => 'Paramètre commit_message requis pour write_application_source.'];
+        }
+
+        $application = $this->resolveApplication($applicationUuid);
+        if (is_array($application)) {
+            return $application;
+        }
+
+        $options = [];
+        if ($mode !== null && $mode !== '') {
+            $options['mode'] = $mode;
+        }
+        if ($redeploy !== null) {
+            $options['redeploy'] = $redeploy;
+        }
+        if ($branchName !== null && $branchName !== '') {
+            $options['branch_name'] = $branchName;
+        }
+        if ($prTitle !== null && $prTitle !== '') {
+            $options['pr_title'] = $prTitle;
+        }
+        if ($prBody !== null && $prBody !== '') {
+            $options['pr_body'] = $prBody;
+        }
+
+        try {
+            return $this->applicationSourceService()->writeFile(
+                $this->team,
+                $application,
+                $path,
+                $content,
+                $commitMessage,
+                $sha,
+                $options,
+            );
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            return ['error' => collect($exception->errors())->flatten()->first() ?? 'Écriture source impossible.'];
+        }
     }
 
     /**

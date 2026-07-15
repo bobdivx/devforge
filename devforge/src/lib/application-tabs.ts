@@ -3,7 +3,8 @@ export type ApplicationTabId =
     | 'deployments'
     | 'databases'
     | 'logs'
-    | 'variables';
+    | 'variables'
+    | 'files';
 
 export type ApplicationTab = {
     id: ApplicationTabId;
@@ -16,4 +17,5 @@ export const applicationTabs: ApplicationTab[] = [
     { id: 'databases', label: 'Bases de données' },
     { id: 'logs', label: 'Logs' },
     { id: 'variables', label: 'Variables' },
+    { id: 'files', label: 'Code source' },
 ];

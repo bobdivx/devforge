@@ -30,7 +30,7 @@ it('decodes sqlite json array output', function () {
 });
 
 it('builds sqlite docker commands without inner && operators', function () {
-    $service = new LibsqlDatabaseTransferService;
+    $service = app(LibsqlDatabaseTransferService::class);
     $method = new ReflectionMethod($service, 'sqliteCommand');
     $method->setAccessible(true);
 
@@ -44,7 +44,7 @@ it('prefixes remote commands with sudo for non-root servers without re-parsing i
     $server = Mockery::mock(Server::class)->makePartial();
     $server->shouldReceive('isNonRoot')->andReturn(true);
 
-    $service = new LibsqlDatabaseTransferService;
+    $service = app(LibsqlDatabaseTransferService::class);
     $method = new ReflectionMethod($service, 'wrapCommandsForServer');
     $method->setAccessible(true);
 

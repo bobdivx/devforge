@@ -14,7 +14,7 @@ class CoreResourceActionsResolver
         return match ($type) {
             'application' => $this->applicationActions($status, $primary),
             'service' => $this->serviceActions($status, $primary),
-            'database' => $this->databaseActions($primary),
+            'database' => $this->databaseActions(),
             default => [],
         };
     }
@@ -46,13 +46,9 @@ class CoreResourceActionsResolver
     /**
      * @return array<int, string>
      */
-    private function databaseActions(string $primary): array
+    private function databaseActions(): array
     {
-        if (in_array($primary, ['exited', 'stopped', 'dead'], true)) {
-            return ['start'];
-        }
-
-        return ['stop', 'restart'];
+        return ['restart'];
     }
 
     private function isStopped(string $status, string $primary): bool

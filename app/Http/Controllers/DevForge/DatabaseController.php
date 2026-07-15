@@ -15,6 +15,7 @@ use App\Services\DevForge\Database\LibsqlDatabaseAccessService;
 use App\Services\DevForge\Database\LibsqlDatabaseExplorerService;
 use App\Services\DevForge\Database\LibsqlDatabaseTransferService;
 use App\Services\DevForge\Database\StandaloneDatabaseCreator;
+use App\Services\DevForge\Database\StandaloneDatabaseRuntimeGuard;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,6 +33,7 @@ class DatabaseController extends Controller
         private readonly LibsqlDatabaseAccessService $libsqlDatabaseAccessService,
         private readonly LibsqlDatabaseExplorerService $libsqlDatabaseExplorerService,
         private readonly CoreResourcePresenter $presenter,
+        private readonly StandaloneDatabaseRuntimeGuard $databaseRuntimeGuard,
     ) {}
 
     public function store(Request $request): JsonResponse
@@ -268,6 +270,9 @@ class DatabaseController extends Controller
     {
         $database = $this->resolveDatabase($user, $databaseUuid);
         abort_unless($database instanceof StandaloneLibsql, 422, 'L’import/export SQL est disponible uniquement pour libSQL.');
+
+        $this->databaseRuntimeGuard->ensureRunning($database);
+        $database->refresh();
 
         return $database;
     }

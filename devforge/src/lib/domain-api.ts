@@ -721,6 +721,7 @@ export type ServerStorageSummary = {
         functional: boolean;
     };
     disk_usage_percent: number | null;
+    disk_partitions?: Record<string, number> | null;
     disk_alert_threshold: number;
     cleanup: ServerStorageCleanupSettings;
     monitoring: ServerStorageMonitoringSettings;
@@ -731,6 +732,45 @@ export type ServerStorageSummary = {
 
 export type ServerStorageMeta = {
     scheduler_healthy: boolean;
+};
+
+export type ServerFilesystemEntry = {
+    name: string;
+    type: 'file' | 'directory' | 'symlink' | 'other';
+    size: number;
+    permissions: string;
+    modified_label: string;
+    symlink_target: string | null;
+};
+
+export type ServerFilesystemListing = {
+    path: string;
+    parent_path: string | null;
+    entries: ServerFilesystemEntry[];
+    entry_count: number;
+};
+
+export type ServerFilesystemFile = {
+    path: string;
+    content: string;
+    size: number;
+    truncated: boolean;
+    max_bytes: number;
+};
+
+export type ServerFilesystemSearch = {
+    path: string;
+    pattern: string;
+    mode: 'name' | 'content';
+    results: string[];
+    result_count: number;
+    truncated: boolean;
+};
+
+export type ServerFilesystemMeta = {
+    default_path: string;
+    read_max_bytes: number;
+    write_max_bytes: number;
 };
 
 export type DatabaseBackupRetention = {
@@ -929,6 +969,9 @@ export type DatabaseImportSqlResult = {
     restarted: boolean;
     message: string;
     format?: 'sql' | 'db';
+    linked_applications?: Array<{ uuid: string; name: string }>;
+    env_variables_synced?: number;
+    redeployments_queued?: number;
 };
 
 export type DatabaseExplorerTable = {
@@ -966,6 +1009,66 @@ export type ApplicationLogs = {
     items: ApplicationLogLine[];
 };
 
+export type ApplicationSourceInfo = {
+    available: boolean;
+    reason: string | null;
+    git_repository: string | null;
+    git_branch: string | null;
+    git_commit_sha: string | null;
+    base_directory: string;
+    initial_path: string;
+    owner: string | null;
+    repo: string | null;
+    github_app_uuid: string | null;
+    github_app_name: string | null;
+    html_url: string | null;
+};
+
+export type ApplicationSourceEntry = {
+    name: string;
+    path: string;
+    type: 'file' | 'directory';
+    size: number;
+};
+
+export type ApplicationSourceListing = {
+    path: string;
+    parent_path: string | null;
+    entries: ApplicationSourceEntry[];
+    entry_count: number;
+    ref: string;
+    repository: string;
+};
+
+export type ApplicationSourceFile = {
+    path: string;
+    content: string;
+    size: number;
+    truncated: boolean;
+    sha: string | null;
+    ref: string;
+    repository: string;
+};
+
+export type ApplicationSourceWriteResult = {
+    mode: 'direct' | 'pull_request';
+    path: string;
+    sha: string | null;
+    commit_sha: string | null;
+    commit_url: string | null;
+    ref: string;
+    branch: string;
+    repository: string;
+    size: number;
+    pull_request_number?: number | null;
+    pull_request_url?: string | null;
+    redeploy?: {
+        queued: boolean;
+        deployment_uuid?: string | null;
+        message?: string | null;
+    } | null;
+};
+
 export type RealtimeMetadata = {
     transport: {
         driver: string;
@@ -982,10 +1085,13 @@ export type RealtimeMetadata = {
     };
 };
 
-async function mutate<T>(path: string, init: RequestInit): Promise<T> {
+async function mutate<T>(path: string, init: RequestInit, timeoutMs = 20_000): Promise<T> {
     await ensureCsrfCookie();
-    return apiFetch<T>(`${API_BASE}${path}`, init);
+    return apiFetch<T>(`${API_BASE}${path}`, init, timeoutMs);
 }
+
+/** SSH disk / Docker cleanup calls can exceed the default 20 s client timeout. */
+const STORAGE_API_TIMEOUT_MS = 120_000;
 
 export const domainApi = {
     overview: () => apiFetch<ApiResponse<Overview>>(`${API_BASE}/overview`),
@@ -1162,6 +1268,35 @@ export const domainApi = {
     applicationLogs: (applicationUuid: string, lines = 200) => apiFetch<ApiResponse<ApplicationLogs>>(
         `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/logs?lines=${lines}`,
     ),
+    applicationSourceInfo: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationSourceInfo>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/source`,
+    ),
+    listApplicationSourceDirectory: (applicationUuid: string, path?: string) => apiFetch<ApiResponse<ApplicationSourceListing>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/source/list${path ? `?path=${encodeURIComponent(path)}` : ''}`,
+    ),
+    readApplicationSourceFile: (applicationUuid: string, path: string) => apiFetch<ApiResponse<ApplicationSourceFile>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/source/read?path=${encodeURIComponent(path)}`,
+    ),
+    writeApplicationSourceFile: (
+        applicationUuid: string,
+        input: {
+            path: string;
+            content: string;
+            commit_message: string;
+            sha?: string | null;
+            mode?: 'direct' | 'pull_request';
+            redeploy?: boolean;
+            branch_name?: string;
+            pr_title?: string;
+            pr_body?: string;
+        },
+    ) => mutate<ApiResponse<ApplicationSourceWriteResult>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/source/write`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
     applicationEnvironmentVariables: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationEnvironmentVariables>>(
         `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/environment-variables`,
     ),
@@ -1269,15 +1404,40 @@ export const domainApi = {
     ),
 
     s3Storages: () => apiFetch<ApiResponse<S3Storage[]>>(`${API_BASE}/s3-storages`),
-    serverStorageOverview: (refreshDisk = true) => apiFetch<ApiResponse<ServerStorageSummary[]> & { meta: ServerStorageMeta }>(
-        `${API_BASE}/server-storage${refreshDisk ? '' : '?refresh_disk=0'}`,
+    serverStorageOverview: (refreshDisk = false) => apiFetch<ApiResponse<ServerStorageSummary[]> & { meta: ServerStorageMeta }>(
+        `${API_BASE}/server-storage${refreshDisk ? '?refresh_disk=1' : '?refresh_disk=0'}`,
+        {},
+        refreshDisk ? STORAGE_API_TIMEOUT_MS : 20_000,
     ),
-    serverStorage: (serverUuid: string, refreshDisk = false) => apiFetch<ApiResponse<ServerStorageSummary> & { meta: ServerStorageMeta }>(
-        `${API_BASE}/server-storage/${encodeURIComponent(serverUuid)}${refreshDisk ? '?refresh_disk=1' : ''}`,
-    ),
-    refreshServerDiskUsage: (serverUuid: string) => mutate<ApiResponse<{ disk_usage_percent: number | null }>>(
+    serverStorage: (
+        serverUuid: string,
+        refreshDisk = false,
+        dockerReport = false,
+    ) => {
+        const params = new URLSearchParams();
+        if (refreshDisk) {
+            params.set('refresh_disk', '1');
+        }
+        if (dockerReport) {
+            params.set('docker_report', '1');
+        }
+        const query = params.toString();
+
+        return apiFetch<ApiResponse<ServerStorageSummary> & { meta: ServerStorageMeta }>(
+            `${API_BASE}/server-storage/${encodeURIComponent(serverUuid)}${query ? `?${query}` : ''}`,
+            {},
+            dockerReport || refreshDisk ? STORAGE_API_TIMEOUT_MS : 30_000,
+        );
+    },
+    refreshServerDiskUsage: (serverUuid: string) => mutate<ApiResponse<{ disk_usage_percent: number | null; disk_partitions?: Record<string, number> | null }>>(
         `/server-storage/${encodeURIComponent(serverUuid)}/disk`,
         { method: 'POST', body: JSON.stringify({}) },
+        STORAGE_API_TIMEOUT_MS,
+    ),
+    serverStorageDiskBreakdown: (serverUuid: string) => apiFetch<ApiResponse<{ report: string | null }>>(
+        `${API_BASE}/server-storage/${encodeURIComponent(serverUuid)}/disk-breakdown`,
+        {},
+        STORAGE_API_TIMEOUT_MS,
     ),
     updateServerStorage: (serverUuid: string, input: Partial<ServerStorageCleanupSettings & ServerStorageMonitoringSettings>) => mutate<ApiResponse<ServerStorageSummary> & { meta: ServerStorageMeta }>(
         `/server-storage/${encodeURIComponent(serverUuid)}`,
@@ -1296,6 +1456,33 @@ export const domainApi = {
         `/server-storage/${encodeURIComponent(serverUuid)}/cleanup`,
         { method: 'POST', body: JSON.stringify(input ?? {}) },
     ),
+    serverFilesystemMeta: () => apiFetch<{ meta: ServerFilesystemMeta }>(`${API_BASE}/server-files/meta`),
+    listServerDirectory: (serverUuid: string, path?: string) => apiFetch<ApiResponse<ServerFilesystemListing> & { meta: ServerFilesystemMeta }>(
+        `${API_BASE}/server-files/${encodeURIComponent(serverUuid)}/list${path ? `?path=${encodeURIComponent(path)}` : ''}`,
+    ),
+    readServerFile: (serverUuid: string, path: string) => apiFetch<ApiResponse<ServerFilesystemFile> & { meta: ServerFilesystemMeta }>(
+        `${API_BASE}/server-files/${encodeURIComponent(serverUuid)}/read?path=${encodeURIComponent(path)}`,
+    ),
+    writeServerFile: (serverUuid: string, path: string, content: string) => mutate<ApiResponse<{ path: string; bytes_written: number; message: string }> & { meta: ServerFilesystemMeta }>(
+        `/server-files/${encodeURIComponent(serverUuid)}`,
+        { method: 'PUT', body: JSON.stringify({ path, content }) },
+    ),
+    searchServerFiles: (
+        serverUuid: string,
+        input: { pattern: string; mode?: 'name' | 'content'; path?: string },
+    ) => {
+        const params = new URLSearchParams({ pattern: input.pattern });
+        if (input.mode) {
+            params.set('mode', input.mode);
+        }
+        if (input.path) {
+            params.set('path', input.path);
+        }
+
+        return apiFetch<ApiResponse<ServerFilesystemSearch> & { meta: ServerFilesystemMeta }>(
+            `${API_BASE}/server-files/${encodeURIComponent(serverUuid)}/search?${params.toString()}`,
+        );
+    },
     s3Storage: (storageUuid: string) => apiFetch<ApiResponse<S3Storage>>(`${API_BASE}/s3-storages/${encodeURIComponent(storageUuid)}`),
     createS3Storage: (input: S3StorageInput) => mutate<ApiResponse<S3Storage>>('/s3-storages', {
         method: 'POST',

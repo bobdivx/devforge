@@ -638,7 +638,7 @@ export function DatabaseDetailPanel({ uuid, canAct, onClose, onChanged, initialT
                                         key={action}
                                         disabled={acting !== null || deletingDatabase}
                                         onClick={() => {
-                                            if (['stop', 'restart'].includes(action)) {
+                                            if (action === 'restart') {
                                                 setPendingAction(action);
                                                 return;
                                             }
