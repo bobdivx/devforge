@@ -33,7 +33,7 @@ class AgentToolTurnBuilder
                 $entry['extra_content'] = $toolCall['extra_content'];
             }
 
-            $toolCalls[] = $entry;
+            $toolCalls[] = GeminiThoughtSignature::ensureOnToolCall($entry);
         }
 
         $assistantMessage = [
@@ -55,7 +55,7 @@ class AgentToolTurnBuilder
                 'role' => 'tool',
                 'tool_call_id' => $toolCallId,
                 'name' => (string) ($toolCall['name'] ?? ''),
-                'content' => json_encode($result, JSON_UNESCAPED_UNICODE),
+                'content' => AgentToolResultEncoder::encode($result),
             ];
         }
     }

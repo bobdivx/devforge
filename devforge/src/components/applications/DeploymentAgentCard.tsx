@@ -61,7 +61,7 @@ export function DeploymentAgentCard({ deploymentUuid, onSelectDeployment, pollWh
     }, [shouldPoll, pollWhileActive, deploymentUuid]);
 
     return (
-        <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
+        <section class="min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
             <div class="toolbar-row border-b border-base-300/70 px-5 py-4">
                 <div>
                     <p class="text-sm font-semibold">Agent de déploiement</p>
@@ -75,7 +75,7 @@ export function DeploymentAgentCard({ deploymentUuid, onSelectDeployment, pollWh
                 </div>
             </div>
 
-            <div class="grid gap-4 p-5">
+            <div class="grid min-w-0 gap-4 overflow-hidden p-5">
                 <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
                     {monitoring && (
                         <>
@@ -128,7 +128,18 @@ export function DeploymentAgentCard({ deploymentUuid, onSelectDeployment, pollWh
                                     )}
                                     {blockers.length === 0 && monitoring.diagnostics.eligible_agents_count > 0 && !monitoring.catch_up_triggered && !shouldPoll && (
                                         <p class="border-t border-base-300/60 pt-3 text-xs text-base-content/50">
-                                            {monitoring.diagnostics.eligible_agents_count} agent(s) éligible(s) — relancez le déploiement ou actualisez après avoir redéployé Coolify avec la dernière version DevForge.
+                                            {monitoring.diagnostics.eligible_agents_count} agent(s) éligible(s).
+                                            {' '}
+                                            {monitoring.diagnostics.eligible_agents?.[0] ? (
+                                                <a
+                                                    class="link link-primary"
+                                                    href={routeHref(agentDetailPath(monitoring.diagnostics.eligible_agents[0].uuid, { view: 'runs' }))}
+                                                >
+                                                    Voir {monitoring.diagnostics.eligible_agents[0].name} → Exécutions
+                                                </a>
+                                            ) : (
+                                                'Actualisez après le déploiement pour lier l’intervention.'
+                                            )}
                                         </p>
                                     )}
                                 </div>
@@ -191,9 +202,9 @@ function AgentRunCard({ deploymentUuid, run, onSelectDeployment }: AgentRunCardP
     const subagents = run.subagent_runs ?? [];
 
     return (
-        <article class="rounded-xl border border-base-300/70 bg-base-200/20 p-4">
-            <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
-                <div class="flex min-w-0 items-start gap-3">
+        <article class="min-w-0 overflow-hidden rounded-xl border border-base-300/70 bg-base-200/20 p-4">
+            <div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div class="flex min-w-0 items-start gap-3 overflow-hidden">
                     {run.agent ? (
                         <AgentAvatar
                             type={run.agent.type}
@@ -206,9 +217,9 @@ function AgentRunCard({ deploymentUuid, run, onSelectDeployment }: AgentRunCardP
                             <Bot class="size-4" aria-hidden />
                         </div>
                     )}
-                    <div class="min-w-0">
-                        <div class="flex flex-wrap items-center gap-2">
-                            <p class="font-medium">{run.agent?.name ?? 'Agent'}</p>
+                    <div class="min-w-0 flex-1 overflow-hidden">
+                        <div class="flex min-w-0 flex-wrap items-center gap-2">
+                            <p class="truncate font-medium">{run.agent?.name ?? 'Agent'}</p>
                             {agentDetailHref && (
                                 <a
                                     class="btn btn-ghost btn-xs h-auto min-h-0 gap-1 px-1 text-[11px] text-primary"
@@ -220,10 +231,21 @@ function AgentRunCard({ deploymentUuid, run, onSelectDeployment }: AgentRunCardP
                             )}
                         </div>
                         <p class="text-xs text-base-content/50">{eventLabel(event)}</p>
-                        {run.summary && <p class="mt-1 text-sm text-base-content/70">{run.summary}</p>}
+                        {run.linkage === 'context' && (
+                            <p class="mt-1 text-[10px] text-base-content/45">
+                                Associé à cette période de déploiement (lancement manuel ou lien indirect)
+                            </p>
+                        )}
+                        {run.summary && (
+                            <p class="mt-1 line-clamp-2 break-words text-sm text-base-content/70 sm:line-clamp-3">
+                                {run.summary}
+                            </p>
+                        )}
                     </div>
                 </div>
-                <AgentRunStatusBadge status={run.status} />
+                <div class="shrink-0 self-start">
+                    <AgentRunStatusBadge status={run.status} />
+                </div>
             </div>
 
             <dl class="mb-3 grid gap-1 text-xs text-base-content/55 sm:grid-cols-3">
@@ -291,7 +313,11 @@ function AgentRunCard({ deploymentUuid, run, onSelectDeployment }: AgentRunCardP
                 </div>
             )}
 
-            {run.logs && <AgentRunLog logs={run.logs} />}
+            {run.logs && (
+                <div class="min-w-0 overflow-hidden">
+                    <AgentRunLog logs={run.logs} class="max-h-80 w-full max-w-full" />
+                </div>
+            )}
         </article>
     );
 }

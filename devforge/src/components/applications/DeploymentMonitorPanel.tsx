@@ -10,8 +10,8 @@ type Props = {
 
 export function DeploymentMonitorPanel({ deploymentUuid, deployment = null, onSelectDeployment }: Props) {
     return (
-        <div class="grid gap-4 xl:grid-cols-2">
-            <DeploymentLogsPanel deploymentUuid={deploymentUuid} deployment={deployment} />
+        <div class="grid min-w-0 gap-4 xl:grid-cols-2">
+            <DeploymentLogsPanel class="min-w-0" deploymentUuid={deploymentUuid} deployment={deployment} />
             <DeploymentAgentCard
                 deploymentUuid={deploymentUuid}
                 onSelectDeployment={onSelectDeployment}

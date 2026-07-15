@@ -23,7 +23,7 @@ export function AgentRunLog({ logs, class: className = '' }: Props) {
     return (
         <pre
             ref={containerRef}
-            class={`max-h-80 overflow-y-auto rounded-lg bg-base-300 p-3 text-[11px] leading-relaxed text-base-content/80 ${className}`}
+            class={`w-full max-w-full min-w-0 overflow-x-auto overflow-y-auto whitespace-pre-wrap break-all rounded-lg bg-base-300 p-3 text-[11px] leading-relaxed text-base-content/80 ${className}`}
         >
             {logs}
         </pre>

@@ -75,6 +75,37 @@ class DeploymentController extends Controller
         ]);
     }
 
+    public function toggleDebugLogs(
+        Request $request,
+        string $deploymentUuid,
+        CurrentTeamContext $teamContext,
+        DeploymentData $deploymentData,
+    ): JsonResponse {
+        $validated = $request->validate([
+            'enabled' => ['nullable', 'boolean'],
+        ]);
+        $team = $teamContext->resolve($request->user());
+        $deployment = $deploymentData->find($team, $deploymentUuid);
+        $application = $deployment->application;
+
+        abort_if(is_null($application), 404, 'Application not found.');
+        $this->authorize('update', $application);
+
+        $settings = $application->settings;
+        abort_if(is_null($settings), 404, 'Application settings not found.');
+
+        $settings->is_debug_enabled = array_key_exists('enabled', $validated)
+            ? (bool) $validated['enabled']
+            : ! $settings->is_debug_enabled;
+        $settings->save();
+
+        return response()->json([
+            'data' => [
+                'is_debug_enabled' => (bool) $settings->is_debug_enabled,
+            ],
+        ]);
+    }
+
     public function monitoring(
         Request $request,
         string $deploymentUuid,

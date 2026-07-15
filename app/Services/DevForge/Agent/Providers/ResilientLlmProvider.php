@@ -3,7 +3,8 @@
 namespace App\Services\DevForge\Agent\Providers;
 
 use App\Services\DevForge\Agent\Contracts\LlmProvider;
-use App\Services\DevForge\Agent\Contracts\LlmResponse;
+use App\Services\DevForge\Agent\OllamaMessageNormalizer;
+use App\Services\DevForge\Agent\Providers\OllamaProvider;
 
 class ResilientLlmProvider implements LlmProvider
 {
@@ -29,7 +30,10 @@ class ResilientLlmProvider implements LlmProvider
                 ($this->onFallback)($exception, $this->primaryLabel, $this->fallbackLabel);
             }
 
-            return $this->fallback->chat($messages, $tools);
+            return $this->fallback->chat(
+                $this->prepareFallbackMessages($messages),
+                $tools,
+            );
         }
     }
 
@@ -54,5 +58,18 @@ class ResilientLlmProvider implements LlmProvider
             || str_contains($message, 'rate limit')
             || str_contains($message, 'unavailable')
             || str_contains($message, 'indisponible');
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $messages
+     * @return array<int, array<string, mixed>>
+     */
+    private function prepareFallbackMessages(array $messages): array
+    {
+        if ($this->fallback instanceof OllamaProvider) {
+            return OllamaMessageNormalizer::compressForOllamaFallback($messages);
+        }
+
+        return $messages;
     }
 }

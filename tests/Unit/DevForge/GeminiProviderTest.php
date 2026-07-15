@@ -336,6 +336,73 @@ it('preserves gemini thought signatures on follow up tool turns', function () {
     });
 });
 
+it('adds skip validator when thought signature is missing on follow up turns', function () {
+    Http::fake([
+        'generativelanguage.googleapis.com/*' => Http::sequence()
+            ->push([
+                'choices' => [
+                    [
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => '',
+                            'tool_calls' => [
+                                [
+                                    'id' => 'call_no_sig',
+                                    'type' => 'function',
+                                    'function' => [
+                                        'name' => 'list_resources',
+                                        'arguments' => '{"type":"all"}',
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'finish_reason' => 'tool_calls',
+                    ],
+                ],
+                'usage' => ['total_tokens' => 4],
+            ])
+            ->push([
+                'choices' => [
+                    [
+                        'message' => ['role' => 'assistant', 'content' => 'OK'],
+                        'finish_reason' => 'stop',
+                    ],
+                ],
+                'usage' => ['total_tokens' => 4],
+            ]),
+    ]);
+
+    $provider = new GeminiProvider('AIzaTestKey', 'gemini-2.5-flash');
+    $messages = [['role' => 'user', 'content' => 'Liste']];
+    $tools = [[
+        'name' => 'list_resources',
+        'description' => 'Liste',
+        'parameters' => ['type' => 'object', 'properties' => []],
+    ]];
+
+    $first = $provider->chat($messages, $tools);
+
+    AgentToolTurnBuilder::append($messages, $first, [
+        ['name' => 'list_resources', 'result' => ['ok' => true]],
+    ]);
+
+    $provider->chat($messages, $tools);
+
+    Http::assertSent(function ($request, $index): bool {
+        if ($index !== 1) {
+            return true;
+        }
+
+        $payload = json_decode($request->body(), true);
+        $assistant = collect($payload['messages'] ?? [])->firstWhere('role', 'assistant');
+        $signature = $assistant['tool_calls'][0]['extra_content']['google']['thought_signature'] ?? null;
+
+        expect($signature)->toBe('skip_thought_signature_validator');
+
+        return true;
+    });
+});
+
 it('stops model failover when gemini quota is globally exhausted', function () {
     Http::fake([
         'generativelanguage.googleapis.com/*' => Http::response([

@@ -151,7 +151,7 @@ export function OverviewPage() {
                                                 <tr key={deployment.uuid}>
                                                     <td class="max-w-[10rem] truncate font-medium sm:max-w-none">
                                                         <a class="hover:text-primary" href={routeHref('/deployments')} onClick={(event) => onNavigate(event, '/deployments')}>
-                                                            {deployment.application.name}
+                                                            {deployment.application?.name ?? '—'}
                                                         </a>
                                                     </td>
                                                     <td class="whitespace-nowrap">
@@ -183,17 +183,21 @@ export function OverviewPage() {
                                         </div>
                                     ) : (
                                         <>
-                                            <ul class="divide-y divide-base-300/70">
+                                            <ul class="min-w-0 divide-y divide-base-300/70">
                                                 {overview.agent_activity.map((activity) => (
-                                                    <li class="flex min-w-0 items-center justify-between gap-3 py-3" key={activity.uuid}>
-                                                        <div class="min-w-0">
+                                                    <li class="flex min-w-0 items-start gap-3 py-3 sm:items-center" key={activity.uuid}>
+                                                        <div class="min-w-0 flex-1 overflow-hidden">
                                                             <p class="truncate text-sm font-medium">{activity.agent?.name ?? 'Agent'}</p>
-                                                            <p class="truncate text-xs text-base-content/55">{activity.summary || 'Exécution sans résumé'}</p>
+                                                            <p class="line-clamp-2 break-words text-xs text-base-content/55 sm:line-clamp-1">
+                                                                {activity.summary || 'Exécution sans résumé'}
+                                                            </p>
                                                         </div>
-                                                        <ResourceStatusIcon
-                                                            status={activity.status === 'completed' ? 'running:healthy' : activity.status === 'failed' ? 'exited' : 'starting:unknown'}
-                                                            showLabel
-                                                        />
+                                                        <div class="shrink-0">
+                                                            <ResourceStatusIcon
+                                                                status={activity.status === 'completed' ? 'running:healthy' : activity.status === 'failed' ? 'exited' : 'starting:unknown'}
+                                                                showLabel
+                                                            />
+                                                        </div>
                                                     </li>
                                                 ))}
                                             </ul>

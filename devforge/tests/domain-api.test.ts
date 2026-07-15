@@ -177,4 +177,28 @@ describe('API métiers DevForge', () => {
 
         expect(fetchMock.mock.calls[0][0]).toBe('/api/devforge/v1/applications/app-uuid-1234/logs?lines=500');
     });
+
+    it('bascule les logs debug de déploiement sans dupliquer le préfixe API', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce(new Response(null, { status: 204 }))
+            .mockResolvedValueOnce(jsonResponse({ data: { is_debug_enabled: true } }));
+
+        await domainApi.toggleDeploymentDebugLogs('deployment-1', true);
+
+        expect(fetchMock.mock.calls[1][0]).toBe('/api/devforge/v1/deployments/deployment-1/debug-logs');
+        expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({
+            method: 'PATCH',
+            body: JSON.stringify({ enabled: true }),
+        }));
+    });
+
+    it('utilise les endpoints de stockage serveur', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce(new Response(null, { status: 204 }))
+            .mockResolvedValueOnce(jsonResponse({ data: { disk_usage_percent: 91 } }));
+
+        await domainApi.refreshServerDiskUsage('server-1');
+
+        expect(fetchMock.mock.calls[1][0]).toBe('/api/devforge/v1/server-storage/server-1/disk');
+    });
 });

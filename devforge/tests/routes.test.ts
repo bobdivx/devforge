@@ -87,6 +87,7 @@ describe('routage DevForge', () => {
         expect(findRoute('/devforge/subscription').page).toBe('subscription');
         expect(findRoute('/devforge/onboarding').page).toBe('onboarding');
         expect(findRoute('/devforge/storages').page).toBe('storages');
+        expect(findRoute('/devforge/storage').page).toBe('storage');
         expect(findRoute('/devforge/storages/storage-uuid').path).toBe('/storages/storage-uuid');
         expect(findRoute('/devforge/storages/storage-uuid/resources').page).toBe('storages');
     });
@@ -101,6 +102,21 @@ describe('routage DevForge', () => {
         expect(visibleRoutes(true).some(({ page }) => page === 'agents')).toBe(true);
         expect(visibleRoutes(false).some(({ path }) => path === '/projects')).toBe(false);
         expect(visibleRoutes(false).some(({ path }) => path === '/servers')).toBe(false);
+    });
+
+    it('expose Stockage dans le menu principal', () => {
+        const routes = visibleRoutes(false);
+        const storage = routes.find(({ page }) => page === 'storage');
+
+        expect(storage?.path).toBe('/storage');
+        expect(storage?.label).toBe('Stockage');
+
+        const deploymentIndex = routes.findIndex(({ page }) => page === 'deployments');
+        const monitoringIndex = routes.findIndex(({ page }) => page === 'monitoring');
+        const storageIndex = routes.findIndex(({ page }) => page === 'storage');
+
+        expect(storageIndex).toBeGreaterThan(deploymentIndex);
+        expect(storageIndex).toBeLessThan(monitoringIndex);
     });
 
     it('priorise les applications dans le menu principal', () => {

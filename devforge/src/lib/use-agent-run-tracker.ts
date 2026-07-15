@@ -10,11 +10,18 @@ const MAX_POLL_ATTEMPTS = 120;
 type RunOutcome = 'completed' | 'failed' | 'timeout' | null;
 
 type Options = {
-    onRefresh?: () => void;
+    /** Called on each poll tick while the run is active */
+    onPoll?: () => void;
+    /** Called when the run reaches a terminal status (or on poll error / timeout) */
+    onComplete?: () => void;
 };
 
 export function useAgentRunTracker(agentUuid: string, options: Options = {}) {
-    const { onRefresh } = options;
+    const { onPoll, onComplete } = options;
+    const onPollRef = useRef(onPoll);
+    const onCompleteRef = useRef(onComplete);
+    onPollRef.current = onPoll;
+    onCompleteRef.current = onComplete;
     const [isLaunching, setIsLaunching] = useState(false);
     const [isTracking, setIsTracking] = useState(false);
     const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
@@ -43,7 +50,7 @@ export function useAgentRunTracker(agentUuid: string, options: Options = {}) {
             try {
                 const response = await domainApi.agentRun(agentUuid, runUuid);
                 setActiveRun(response.data);
-                onRefresh?.();
+                onPollRef.current?.();
 
                 if (isTerminalAgentRunStatus(response.data.status)) {
                     stopPolling();
@@ -54,6 +61,8 @@ export function useAgentRunTracker(agentUuid: string, options: Options = {}) {
                         setRunError(response.data.summary?.trim() || 'L\'exécution a échoué.');
                     }
 
+                    onCompleteRef.current?.();
+
                     return;
                 }
             } catch (error) {
@@ -61,6 +70,8 @@ export function useAgentRunTracker(agentUuid: string, options: Options = {}) {
                 setIsTracking(false);
                 setRunError(error instanceof ApiError ? error.message : 'Impossible de suivre l\'exécution.');
                 setOutcome('failed');
+                onCompleteRef.current?.();
+
                 return;
             }
 
@@ -69,6 +80,7 @@ export function useAgentRunTracker(agentUuid: string, options: Options = {}) {
                 setIsTracking(false);
                 setOutcome('timeout');
                 setRunError('Délai dépassé — ouvrez les logs pour voir si l\'agent tourne encore.');
+                onCompleteRef.current?.();
             }
         };
 
@@ -76,7 +88,7 @@ export function useAgentRunTracker(agentUuid: string, options: Options = {}) {
         pollRef.current = window.setInterval(() => {
             void tick();
         }, POLL_INTERVAL_MS);
-    }, [agentUuid, onRefresh, stopPolling]);
+    }, [agentUuid, stopPolling]);
 
     const launch = useCallback(async () => {
         setRunError(null);

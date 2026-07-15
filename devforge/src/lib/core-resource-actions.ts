@@ -28,7 +28,6 @@ export function resolveCoreResourceActions(resource: CoreResource): CoreAction[]
         return resource.actions;
     }
 
-    const primary = resourceStatusPrimary(status);
     let resolved: CoreAction[] = [];
 
     if (resource.type === 'application') {

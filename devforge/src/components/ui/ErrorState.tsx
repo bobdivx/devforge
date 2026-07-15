@@ -8,6 +8,10 @@ type ErrorStateProps = {
 };
 
 const messages: Record<number, { title: string; description: string }> = {
+    0: {
+        title: 'Connexion impossible',
+        description: 'Le serveur ne répond pas ou met trop de temps. Vérifiez que Coolify tourne, puis réessayez.',
+    },
     401: {
         title: 'Session requise',
         description: 'Connectez-vous à Coolify pour ouvrir votre espace DevForge.',

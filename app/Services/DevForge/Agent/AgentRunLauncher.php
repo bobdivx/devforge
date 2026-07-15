@@ -14,7 +14,13 @@ class AgentRunLauncher
     public function queue(AiAgent $agent, string $trigger, array $context = []): ?AiAgentRun
     {
         $agent->refresh();
-        $agent->recoverIfInterrupted();
+
+        if (in_array($trigger, ['event', 'delegation'], true)) {
+            $agent->prepareForEventDispatch();
+        } else {
+            $agent->recoverIfInterrupted();
+        }
+
         $agent->refresh();
 
         if ($agent->status === 'running') {

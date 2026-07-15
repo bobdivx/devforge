@@ -102,6 +102,7 @@ describe('déploiements DevForge', () => {
             updated_at: null,
             finished_at: null,
             application: { uuid: 'application-uuid-1234', name: 'Application déployée' },
+            is_debug_enabled: false,
         };
         const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
             const url = String(input);
@@ -120,6 +121,7 @@ describe('déploiements DevForge', () => {
                             stream: 'stdout',
                             message: 'Déploiement terminé',
                             command: false,
+                            hidden: false,
                         }],
                         next_cursor: 1,
                         complete: true,

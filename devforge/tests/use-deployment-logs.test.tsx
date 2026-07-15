@@ -17,14 +17,14 @@ describe('useDeploymentLogs', () => {
         const deploymentLogs = vi.spyOn(domainApi, 'deploymentLogs')
             .mockResolvedValueOnce({
                 data: {
-                    items: [{ cursor: 1, stream: 'stdout', message: 'Étape 1', timestamp: null, command: false }],
+                    items: [{ cursor: 1, stream: 'stdout', message: 'Étape 1', timestamp: null, command: false, hidden: false }],
                     next_cursor: 1,
                     complete: false,
                 },
             })
             .mockResolvedValueOnce({
                 data: {
-                    items: [{ cursor: 2, stream: 'stdout', message: 'Étape 2', timestamp: null, command: false }],
+                    items: [{ cursor: 2, stream: 'stdout', message: 'Étape 2', timestamp: null, command: false, hidden: false }],
                     next_cursor: 2,
                     complete: false,
                 },
@@ -49,7 +49,7 @@ describe('useDeploymentLogs', () => {
         const deploymentLogs = vi.spyOn(domainApi, 'deploymentLogs')
             .mockResolvedValueOnce({
                 data: {
-                    items: [{ cursor: 1, stream: 'stdout', message: 'Terminé', timestamp: null, command: false }],
+                    items: [{ cursor: 1, stream: 'stdout', message: 'Terminé', timestamp: null, command: false, hidden: false }],
                     next_cursor: 1,
                     complete: true,
                 },

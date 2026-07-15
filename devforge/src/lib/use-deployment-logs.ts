@@ -13,10 +13,11 @@ export type DeploymentLogsState = {
 
 export function useDeploymentLogs(
     deploymentUuid: string | null,
-    options?: { enabled?: boolean; intervalMs?: number },
+    options?: { enabled?: boolean; intervalMs?: number; debugKey?: boolean },
 ): DeploymentLogsState {
     const enabled = options?.enabled !== false && deploymentUuid !== null;
     const intervalMs = options?.intervalMs ?? DEFAULT_INTERVAL_MS;
+    const debugKey = options?.debugKey ?? false;
     const [lines, setLines] = useState<DeploymentLog[]>([]);
     const [complete, setComplete] = useState(false);
     const [loading, setLoading] = useState(enabled);
@@ -98,7 +99,7 @@ export function useDeploymentLogs(
         }
 
         void fetchLogs(true);
-    }, [deploymentUuid, enabled, fetchLogs]);
+    }, [deploymentUuid, enabled, debugKey, fetchLogs]);
 
     useEffect(() => {
         if (!enabled || !deploymentUuid || complete) {

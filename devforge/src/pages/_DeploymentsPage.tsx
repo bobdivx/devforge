@@ -68,7 +68,7 @@ export function DeploymentsPage() {
                                     key={deployment.uuid}
                                     onClick={() => setSelected(deployment)}
                                 >
-                                    <td class="font-medium">{deployment.application.name}</td>
+                                    <td class="font-medium">{deployment.application?.name ?? '—'}</td>
                                     <td><DeploymentStatusIcon status={deployment.status} showLabel /></td>
                                     <td class="max-w-48 truncate font-mono text-[11px]">{deployment.commit || '—'}</td>
                                     <td class="text-xs">{deployment.created_at ? new Date(deployment.created_at).toLocaleString('fr-FR') : '—'}</td>

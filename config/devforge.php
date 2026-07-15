@@ -60,6 +60,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Stale agent recovery (déploiements / événements)
+    |--------------------------------------------------------------------------
+    |
+    | Ollama est plus lent que Gemini : un run peut bloquer l'agent en "running"
+    | et empêcher le déclenchement sur un nouveau déploiement.
+    |
+    */
+    'agents_event_stale_seconds' => (int) env('DEVFORGE_AGENTS_EVENT_STALE_SECONDS', 90),
+
+    'agents_pending_stale_seconds' => (int) env('DEVFORGE_AGENTS_PENDING_STALE_SECONDS', 45),
+
+    /*
+    |--------------------------------------------------------------------------
     | Error retention on agent cards (hours)
     |--------------------------------------------------------------------------
     |

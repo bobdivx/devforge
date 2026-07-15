@@ -41,7 +41,8 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
         launch,
         trackExistingRun,
     } = useAgentRunTracker(agent.uuid, {
-        onRefresh: () => {
+        onPoll: refreshRuns,
+        onComplete: () => {
             onUpdated();
             refreshRuns();
         },
@@ -262,7 +263,7 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
                                 </ul>
                             </div>
                         )}
-                        <AgentRunLog logs={selectedRun.logs} />
+                        <AgentRunLog logs={selectedRun.logs} class="max-h-80" />
                     </div>
                 )}
             </div>

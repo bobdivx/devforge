@@ -2,8 +2,10 @@
 
 namespace App\Services\DevForge\Agent\Providers;
 
+use App\Services\DevForge\Agent\AgentToolResultEncoder;
 use App\Services\DevForge\Agent\Contracts\LlmProvider;
 use App\Services\DevForge\Agent\Contracts\LlmResponse;
+use App\Services\DevForge\Agent\GeminiThoughtSignature;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
@@ -126,23 +128,56 @@ class GeminiProvider implements LlmProvider
     private function formatMessages(array $messages): array
     {
         return array_values(array_map(function (array $message): array {
+            $role = (string) ($message['role'] ?? 'user');
+            $hasToolCalls = ! empty($message['tool_calls']) && is_array($message['tool_calls']);
+
             $formatted = [
-                'role' => $message['role'],
-                'content' => is_string($message['content'])
-                    ? $message['content']
-                    : json_encode($message['content'], JSON_UNESCAPED_UNICODE),
+                'role' => $role,
+                'content' => $this->formatMessageContent($message['content'] ?? '', $role),
             ];
 
-            if (! empty($message['tool_calls'])) {
-                $formatted['tool_calls'] = $message['tool_calls'];
+            if ($hasToolCalls && ($formatted['content'] === '' || $formatted['content'] === null)) {
+                unset($formatted['content']);
+            }
+
+            if ($hasToolCalls) {
+                $formatted['tool_calls'] = GeminiThoughtSignature::ensureOnToolCalls($message['tool_calls']);
             }
 
             if (! empty($message['tool_call_id'])) {
                 $formatted['tool_call_id'] = $message['tool_call_id'];
             }
 
+            if (! empty($message['name']) && $role === 'tool') {
+                $formatted['name'] = (string) $message['name'];
+            }
+
             return $formatted;
         }, $messages));
+    }
+
+    private function formatMessageContent(mixed $content, string $role): ?string
+    {
+        if ($role === 'tool') {
+            $text = is_string($content) ? $content : (json_encode($content, JSON_UNESCAPED_UNICODE) ?: '');
+
+            return $this->truncateToolContent($text);
+        }
+
+        if (is_string($content)) {
+            return $content;
+        }
+
+        return json_encode($content, JSON_UNESCAPED_UNICODE) ?: '';
+    }
+
+    private function truncateToolContent(string $content): string
+    {
+        if (strlen($content) <= AgentToolResultEncoder::MAX_BYTES) {
+            return $content;
+        }
+
+        return AgentToolResultEncoder::encode(json_decode($content, true) ?? ['raw' => $content]);
     }
 
     /** @param array<mixed> $data */

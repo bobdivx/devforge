@@ -129,15 +129,15 @@ export function AgentSessionPicker({ agentUuid, activeSessionUuid, onSessionChan
                     </span>
                 </button>
                 <button
-                    class="btn btn-ghost btn-xs btn-square shrink-0"
+                    class="btn btn-ghost btn-sm btn-square shrink-0"
                     type="button"
                     title="Nouvelle conversation"
                     disabled={loading || creating}
                     onClick={() => void handleCreate()}
                 >
                     {creating
-                        ? <span class="loading loading-spinner loading-xs" />
-                        : <MessageSquarePlus class="size-3.5" aria-hidden />}
+                        ? <span class="loading loading-spinner loading-sm" />
+                        : <MessageSquarePlus class="size-4" aria-hidden />}
                 </button>
             </div>
 

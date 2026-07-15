@@ -204,23 +204,23 @@ export function AgentConversationView({
                 </p>
                 <div class="flex items-center gap-1">
                     <button
-                        class="btn btn-ghost btn-xs gap-1.5"
+                        class="btn btn-ghost btn-sm gap-2"
                         type="button"
                         onClick={() => void refreshSessions()}
                         disabled={loadingSessions}
                     >
-                        <RefreshCw class="size-3.5" aria-hidden />
+                        <RefreshCw class="size-4" aria-hidden />
                         Actualiser
                     </button>
                     <button
-                        class="btn btn-primary btn-xs gap-1.5"
+                        class="btn btn-primary btn-sm gap-2"
                         type="button"
                         disabled={creating || loadingSessions}
                         onClick={() => void handleCreate()}
                     >
                         {creating
-                            ? <span class="loading loading-spinner loading-xs" aria-hidden />
-                            : <MessageSquarePlus class="size-3.5" aria-hidden />}
+                            ? <span class="loading loading-spinner loading-sm" aria-hidden />
+                            : <MessageSquarePlus class="size-4" aria-hidden />}
                         Nouvelle
                     </button>
                 </div>

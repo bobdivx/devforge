@@ -18,3 +18,4 @@ require __DIR__.'/devforge-agents.php';
 require __DIR__.'/devforge-destinations.php';
 require __DIR__.'/devforge-tags.php';
 require __DIR__.'/devforge-team.php';
+require __DIR__.'/devforge-server-storage.php';

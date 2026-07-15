@@ -38,7 +38,8 @@ class DockerCleanupJob implements ShouldBeEncrypted, ShouldQueue
         public Server $server,
         public bool $manualCleanup = false,
         public bool $deleteUnusedVolumes = false,
-        public bool $deleteUnusedNetworks = false
+        public bool $deleteUnusedNetworks = false,
+        public ?int $executionId = null,
     ) {
         $this->onQueue('high');
     }
@@ -46,9 +47,19 @@ class DockerCleanupJob implements ShouldBeEncrypted, ShouldQueue
     public function handle(): void
     {
         try {
-            $this->execution_log = DockerCleanupExecution::create([
-                'server_id' => $this->server->id,
-            ]);
+            if ($this->executionId !== null) {
+                $this->execution_log = DockerCleanupExecution::query()->find($this->executionId);
+            }
+
+            if ($this->execution_log === null) {
+                $this->execution_log = DockerCleanupExecution::create([
+                    'server_id' => $this->server->id,
+                ]);
+            } elseif ($this->execution_log->status === 'running') {
+                $this->execution_log->update([
+                    'message' => 'Nettoyage Docker en cours…',
+                ]);
+            }
 
             if (! $this->server->isFunctional()) {
                 $this->execution_log->update([

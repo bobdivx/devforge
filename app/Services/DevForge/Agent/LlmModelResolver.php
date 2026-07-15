@@ -39,6 +39,7 @@ class LlmModelResolver
 
     /** @var array<int, string> */
     public const AUTO_OLLAMA_PRIORITY = [
+        'llama3.2:latest',
         'llama3.2:3b',
         'llama3.2',
         'llama3.1:8b',

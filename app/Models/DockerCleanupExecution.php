@@ -14,6 +14,14 @@ class DockerCleanupExecution extends BaseModel
         'finished_at',
     ];
 
+    protected function casts(): array
+    {
+        return [
+            'cleanup_log' => 'array',
+            'finished_at' => 'datetime',
+        ];
+    }
+
     public function server(): BelongsTo
     {
         return $this->belongsTo(Server::class);

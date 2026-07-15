@@ -3,6 +3,7 @@
 
 # Déclenchement agents lors des déploiements Coolify core
 app/Jobs/ApplicationDeploymentJob.php
+app/Jobs/DockerCleanupJob.php
 
 # Exécution agents IA
 app/Jobs/Agent

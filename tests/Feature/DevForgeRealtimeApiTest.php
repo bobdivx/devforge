@@ -126,6 +126,81 @@ it('polls deployment logs with a cursor and redacts application secrets', functi
     expect($response->json('data.items.0.message'))->toContain(REDACTED);
 });
 
+it('hides debug deployment logs until debug mode is enabled on the application', function () {
+    $deployment = devForgeDeployment($this->application, 'deployment-debug-logs', [
+        'logs' => json_encode([
+            [
+                'output' => 'public line',
+                'type' => 'stdout',
+                'timestamp' => now()->toISOString(),
+                'hidden' => false,
+                'batch' => 1,
+                'order' => 1,
+                'command' => null,
+            ],
+            [
+                'output' => 'docker build output',
+                'type' => 'stdout',
+                'timestamp' => now()->toISOString(),
+                'hidden' => true,
+                'batch' => 1,
+                'order' => 2,
+                'command' => null,
+            ],
+        ], JSON_THROW_ON_ERROR),
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson('/api/devforge/v1/deployments/'.$deployment->deployment_uuid.'/logs')
+        ->assertSuccessful()
+        ->assertJsonCount(1, 'data.items')
+        ->assertJsonPath('data.items.0.message', 'public line');
+
+    $this->application->settings->update(['is_debug_enabled' => true]);
+
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson('/api/devforge/v1/deployments/'.$deployment->deployment_uuid.'/logs')
+        ->assertSuccessful()
+        ->assertJsonCount(2, 'data.items')
+        ->assertJsonPath('data.items.1.hidden', true)
+        ->assertJsonPath('data.items.1.message', 'docker build output');
+});
+
+it('toggles deployment debug logs for authorized users', function () {
+    $deployment = devForgeDeployment($this->application, 'deployment-toggle-debug');
+
+    expect($this->application->settings->is_debug_enabled)->toBeFalse();
+
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->patchJson('/api/devforge/v1/deployments/'.$deployment->deployment_uuid.'/debug-logs')
+        ->assertSuccessful()
+        ->assertJsonPath('data.is_debug_enabled', true);
+
+    expect($this->application->settings->fresh()->is_debug_enabled)->toBeTrue();
+
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->patchJson('/api/devforge/v1/deployments/'.$deployment->deployment_uuid.'/debug-logs', [
+            'enabled' => false,
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.is_debug_enabled', false);
+});
+
+it('includes debug log preference on deployment payloads', function () {
+    $this->application->settings->update(['is_debug_enabled' => true]);
+    $deployment = devForgeDeployment($this->application, 'deployment-debug-flag');
+
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson('/api/devforge/v1/deployments/'.$deployment->deployment_uuid)
+        ->assertSuccessful()
+        ->assertJsonPath('data.is_debug_enabled', true);
+});
+
 it('returns tenant-scoped status and stable realtime metadata', function () {
     $otherTeam = Team::factory()->create();
     $otherProject = Project::factory()->create(['team_id' => $otherTeam->id]);

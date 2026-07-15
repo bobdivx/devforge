@@ -90,8 +90,14 @@ class DeploymentFailureAgentDispatcher
         return AiAgentRun::query()
             ->where('trigger', 'event')
             ->where('created_at', '>=', now()->subHour())
-            ->where('logs', 'like', '%"'.self::CONTEXT_MARKER.'":"'.$deploymentUuid.'"%')
-            ->where('logs', 'like', '%"event":"deployment_failed"%')
+            ->where(function ($query) use ($deploymentUuid): void {
+                $query->where('logs', 'like', '%"'.self::CONTEXT_MARKER.'":"'.$deploymentUuid.'"%')
+                    ->orWhere('metadata->deployment_uuid', $deploymentUuid);
+            })
+            ->where(function ($query): void {
+                $query->where('logs', 'like', '%"event":"deployment_failed"%')
+                    ->orWhere('metadata->event', 'deployment_failed');
+            })
             ->whereHas('agent', fn ($query) => $query->where('team_id', $team->id))
             ->exists();
     }

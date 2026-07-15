@@ -71,7 +71,7 @@ describe('ApplicationDetailPanel', () => {
                 if (url.includes('/logs')) {
                     return jsonResponse({
                         data: {
-                            items: [{ cursor: 1, stream: 'stdout', message: 'Build complete', timestamp: null, command: false }],
+                            items: [{ cursor: 1, stream: 'stdout', message: 'Build complete', timestamp: null, command: false, hidden: false }],
                             next_cursor: 1,
                             complete: true,
                         },

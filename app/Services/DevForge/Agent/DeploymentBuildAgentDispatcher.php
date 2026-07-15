@@ -127,7 +127,10 @@ class DeploymentBuildAgentDispatcher
         return AiAgentRun::query()
             ->where('trigger', 'event')
             ->where('created_at', '>=', now()->subHour())
-            ->where('logs', 'like', '%"'.self::CONTEXT_MARKER.'":"'.$deploymentUuid.'"%')
+            ->where(function ($query) use ($deploymentUuid): void {
+                $query->where('logs', 'like', '%"'.self::CONTEXT_MARKER.'":"'.$deploymentUuid.'"%')
+                    ->orWhere('metadata->deployment_uuid', $deploymentUuid);
+            })
             ->where('logs', 'like', '%"event":"'.$event.'"%')
             ->whereHas('agent', fn ($query) => $query
                 ->where('team_id', $team->id)

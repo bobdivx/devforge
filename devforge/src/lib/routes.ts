@@ -18,6 +18,8 @@ import {
 
     Tag,
 
+    HardDrive,
+
     MapPin,
 
     CreditCard,
@@ -73,6 +75,8 @@ export type PageKey =
 
     | 'storages'
 
+    | 'storage'
+
     | 'server-detail'
 
     | 'agents'
@@ -111,6 +115,8 @@ export const appRoutes: AppRoute[] = [
 
     { path: '/deployments', label: 'Déploiements', description: 'Files et historiques de livraison.', icon: Rocket, page: 'deployments' },
 
+    { path: '/storage', label: 'Stockage', description: 'Espace disque, nettoyage Docker et surveillance.', icon: HardDrive, page: 'storage' },
+
     { path: '/monitoring', label: 'Supervision', description: 'État et métriques système.', icon: Activity, page: 'monitoring' },
 
     { path: '/settings', label: 'Paramètres', description: 'Projets, serveurs, équipe et configuration.', icon: Settings, page: 'settings' },
@@ -146,6 +152,8 @@ export const staticRoutePaths = [
     '/sources',
 
     '/storages',
+
+    '/storage',
 
     '/destinations',
 
@@ -231,13 +239,25 @@ export function visibleRoutes(agentsEnabled: boolean): AppRoute[] {
 
 
 
-const applicationsRoute = appRoutes[1];
+function appRouteByPage(page: PageKey): AppRoute {
+    const route = appRoutes.find((entry) => entry.page === page);
 
-const databasesRoute = appRoutes[2];
+    if (!route) {
+        throw new Error(`Route manquante dans appRoutes: ${page}`);
+    }
 
-const servicesRoute = appRoutes[3];
+    return route;
+}
 
-const settingsRoute = appRoutes[6];
+
+
+const applicationsRoute = appRouteByPage('applications');
+
+const databasesRoute = appRouteByPage('databases');
+
+const servicesRoute = appRouteByPage('services');
+
+const settingsRoute = appRouteByPage('settings');
 
 const sharedVariablesRoute: AppRoute = {
 
@@ -253,7 +273,7 @@ const sharedVariablesRoute: AppRoute = {
 
 };
 
-const agentsRoute = appRoutes[7];
+const agentsRoute = appRouteByPage('agents');
 
 const profileRoute: AppRoute = {
     path: '/profile',
@@ -468,7 +488,7 @@ export function findRoute(pathname: string): AppRoute {
 
 
 
-        if (['profile', 'terminal', 'sources', 'storages', 'destinations', 'tags', 'subscription', 'onboarding', 'server-detail'].includes(dynamicRoute.route.page)) {
+        if (['profile', 'terminal', 'sources', 'storages', 'storage', 'destinations', 'tags', 'subscription', 'onboarding', 'server-detail'].includes(dynamicRoute.route.page)) {
 
             return {
 

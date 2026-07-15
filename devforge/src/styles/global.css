@@ -295,3 +295,17 @@ input {
 .card:hover {
     transition: border-color 150ms ease;
 }
+
+@keyframes cleanup-progress-slide {
+    0% {
+        transform: translateX(-120%);
+    }
+
+    100% {
+        transform: translateX(420%);
+    }
+}
+
+.cleanup-progress-bar {
+    animation: cleanup-progress-slide 1.6s ease-in-out infinite;
+}

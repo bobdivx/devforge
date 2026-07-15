@@ -29,7 +29,7 @@ export function AgentDetailPage({ path }: Props) {
                 <AgentChatView
                     agent={agent}
                     onBack={(e) => onNavigate(e, '/agents')}
-                    onAgentUpdated={() => void agentQuery.reload()}
+                    onAgentUpdated={() => void agentQuery.reload({ silent: true })}
                 />
             )}
         </DataState>

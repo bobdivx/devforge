@@ -107,22 +107,20 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
 
     return (
         <div class="flex h-[calc(100dvh-4.5rem)] min-h-[32rem] flex-col overflow-hidden rounded-xl border border-base-300 bg-base-100">
-            <header class="flex shrink-0 items-center gap-3 border-b border-base-300 px-4 py-3">
+            <header class="grid shrink-0 grid-cols-[auto_auto_minmax(0,1fr)_auto] grid-rows-[auto_auto] gap-x-2 gap-y-2 border-b border-base-300 px-3 py-2.5 sm:gap-x-3 sm:px-4 sm:py-3">
                 <button
-                    class="btn btn-ghost btn-sm btn-square"
+                    class="btn btn-ghost btn-sm btn-square col-start-1 row-start-1"
                     type="button"
                     title="Retour aux agents"
                     onClick={onBack}
                 >
                     <ArrowLeft class="size-4" aria-hidden />
                 </button>
-                <AgentAvatar type={agent.type} color={agent.avatar_color} name={agent.name} />
-                <div class="min-w-0 flex-1">
-                    <div class="flex flex-wrap items-center gap-2">
-                        <h1 class="truncate text-sm font-semibold">{agent.name}</h1>
-                        <AgentStatusBadge status={agent.status} />
-                        <AgentModelRoutingBadge routing={activeRouting} compact />
-                    </div>
+                <div class="col-start-2 row-start-1">
+                    <AgentAvatar type={agent.type} color={agent.avatar_color} name={agent.name} />
+                </div>
+                <div class="col-start-3 row-start-1 min-w-0 self-center">
+                    <h1 class="truncate text-sm font-semibold">{agent.name}</h1>
                     <p class="mt-0.5 truncate text-[11px] text-base-content/50">
                         {agent.provider
                             ? formatAgentProviderDisplay(agent.provider.provider, activeRouting)
@@ -130,13 +128,17 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
                     </p>
                 </div>
                 <button
-                    class={`btn btn-ghost btn-sm btn-square ${settingsOpen ? 'bg-base-300' : ''}`}
+                    class={`btn btn-ghost btn-sm btn-square col-start-4 row-start-1 ${settingsOpen ? 'bg-base-300' : ''}`}
                     type="button"
                     title="Configuration"
                     onClick={() => toggleSettings(!settingsOpen)}
                 >
                     <Settings2 class="size-4" aria-hidden />
                 </button>
+                <div class="col-span-3 col-start-2 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5">
+                    <AgentStatusBadge status={agent.status} />
+                    <AgentModelRoutingBadge routing={activeRouting} compact />
+                </div>
             </header>
 
             <AgentViewSwitcher

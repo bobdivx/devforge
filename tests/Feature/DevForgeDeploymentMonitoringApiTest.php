@@ -93,6 +93,36 @@ it('returns deployment monitoring with linked agent runs and redeployments', fun
         ->assertJsonPath('data.redeployments.0.uuid', $redeployUuid);
 });
 
+it('links a manual agent run to a deployment by application and time window', function () {
+    $failedDeployment = monitoringDeployment($this->application, 'contextual-deploy-uuid', [
+        'created_at' => now()->subMinutes(5),
+        'finished_at' => now()->subMinute(),
+    ]);
+
+    $provider = AiProviderConfig::factory()->create(['team_id' => $this->team->id]);
+    $agent = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'type' => 'deployment',
+        'provider_config_id' => $provider->id,
+        'resource_uuid' => $this->application->uuid,
+    ]);
+
+    AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'status' => 'running',
+        'trigger' => 'manual',
+        'summary' => 'Analyse lancée depuis la fiche agent.',
+        'created_at' => now()->subMinutes(3),
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson('/api/devforge/v1/deployments/contextual-deploy-uuid/monitoring')
+        ->assertSuccessful()
+        ->assertJsonPath('data.agent_runs.0.summary', 'Analyse lancée depuis la fiche agent.')
+        ->assertJsonPath('data.agent_runs.0.linkage', 'context');
+});
+
 it('returns diagnostics blockers when no agent can run', function () {
     monitoringDeployment($this->application, 'blocked-deploy-uuid');
 

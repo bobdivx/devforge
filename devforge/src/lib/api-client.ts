@@ -57,6 +57,7 @@ export async function ensureCsrfCookie(): Promise<void> {
 export async function apiFetch<T>(
     input: string,
     init: RequestInit = {},
+    timeoutMs = 20_000,
 ): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set('Accept', 'application/json');
@@ -73,11 +74,32 @@ export async function apiFetch<T>(
         headers.set('X-XSRF-TOKEN', csrfToken);
     }
 
-    const response = await fetch(input, {
-        ...init,
-        credentials: 'include',
-        headers,
-    });
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+    let response: Response;
+
+    try {
+        response = await fetch(input, {
+            ...init,
+            credentials: 'include',
+            headers,
+            signal: controller.signal,
+        });
+    } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+            throw new ApiError(0, {
+                message: `Délai dépassé (${Math.round(timeoutMs / 1000)} s) en attendant la réponse du serveur.`,
+            });
+        }
+
+        throw new ApiError(0, {
+            message: 'Impossible de joindre le serveur Coolify.',
+        });
+    } finally {
+        window.clearTimeout(timeoutId);
+    }
+
     const contentType = response.headers.get('content-type') ?? '';
     const payload = contentType.includes('application/json')
         ? await response.json()

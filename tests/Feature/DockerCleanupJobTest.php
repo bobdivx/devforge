@@ -43,6 +43,29 @@ it('creates a failed execution record when server is not functional', function (
         ->and($execution->finished_at)->not->toBeNull();
 });
 
+it('reuses a pre-created execution record when an execution id is provided', function () {
+    $user = User::factory()->create();
+    $team = $user->teams()->first();
+    $server = Server::factory()->create(['team_id' => $team->id]);
+
+    $execution = DockerCleanupExecution::create([
+        'server_id' => $server->id,
+        'status' => 'running',
+        'message' => 'Nettoyage Docker en file d\'attente…',
+    ]);
+
+    $server->settings->update(['is_reachable' => false]);
+
+    $job = new DockerCleanupJob($server, executionId: $execution->id);
+    $job->handle();
+
+    expect($execution->fresh())
+        ->id->toBe($execution->id)
+        ->status->toBe('failed');
+
+    expect(DockerCleanupExecution::query()->where('server_id', $server->id)->count())->toBe(1);
+});
+
 it('creates a failed execution record when server is force disabled', function () {
     $user = User::factory()->create();
     $team = $user->teams()->first();

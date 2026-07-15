@@ -210,6 +210,41 @@ class AiAgent extends Model
         $this->releaseRunningState('Interrompu pour un nouveau lancement manuel.', $activeRun);
     }
 
+    public function prepareForEventDispatch(?int $maxStaleSeconds = null): void
+    {
+        $maxStaleSeconds ??= (int) config('devforge.agents_event_stale_seconds', 90);
+
+        if ($this->status !== 'running') {
+            $this->syncOperationalStatus();
+
+            return;
+        }
+
+        if ($this->recoverIfInterrupted($maxStaleSeconds)) {
+            return;
+        }
+
+        $activeRun = $this->runs()
+            ->whereIn('status', ['pending', 'running'])
+            ->latest()
+            ->first();
+
+        if ($activeRun === null) {
+            $this->releaseRunningState('Exécution interrompue sans run actif.');
+
+            return;
+        }
+
+        if ($activeRun->status === 'pending' && $activeRun->started_at === null) {
+            $pendingGrace = (int) config('devforge.agents_pending_stale_seconds', 45);
+            $referenceAt = $activeRun->created_at;
+
+            if ($referenceAt !== null && $referenceAt->copy()->addSeconds($pendingGrace)->isPast()) {
+                $this->releaseRunningState('Run en attente expiré (file d\'attente ou worker indisponible).', $activeRun);
+            }
+        }
+    }
+
     private function releaseRunningState(string $summary, ?AiAgentRun $activeRun = null): void
     {
         if ($activeRun) {

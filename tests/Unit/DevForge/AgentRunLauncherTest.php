@@ -49,3 +49,35 @@ it('returns null when the agent is already running', function () {
     expect($run)->toBeNull();
     Queue::assertNothingPushed();
 });
+
+it('recovers a stale pending event run before queueing a deployment agent', function () {
+    $team = Team::factory()->create();
+    $provider = AiProviderConfig::factory()->create([
+        'team_id' => $team->id,
+        'provider' => 'ollama',
+        'model' => 'auto',
+        'base_url' => 'http://ollama.test',
+    ]);
+    $agent = AiAgent::factory()->running()->create([
+        'team_id' => $team->id,
+        'provider_config_id' => $provider->id,
+    ]);
+
+    AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'status' => 'pending',
+        'trigger' => 'event',
+        'started_at' => null,
+        'created_at' => now()->subMinutes(2),
+    ]);
+
+    $run = app(AgentRunLauncher::class)->queue($agent, 'event', [
+        'event' => 'deployment_failed',
+        'deployment_uuid' => 'deploy-stale-pending',
+    ]);
+
+    expect($run)->toBeInstanceOf(AiAgentRun::class)
+        ->and($agent->fresh()->status)->toBe('running');
+
+    Queue::assertPushed(RunAgentJob::class);
+});

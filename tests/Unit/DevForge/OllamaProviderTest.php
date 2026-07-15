@@ -16,6 +16,38 @@ it('returns an empty array for malformed tool argument strings', function () {
         ->toBe([]);
 });
 
+it('compresses gemini tool history for ollama fallback', function () {
+    $messages = [
+        ['role' => 'system', 'content' => 'Tu es un agent.'],
+        ['role' => 'user', 'content' => 'Inspecte'],
+        [
+            'role' => 'assistant',
+            'content' => '',
+            'tool_calls' => [[
+                'id' => 'call_1',
+                'type' => 'function',
+                'function' => [
+                    'name' => 'get_deployment_logs',
+                    'arguments' => '{}',
+                ],
+            ]],
+        ],
+        [
+            'role' => 'tool',
+            'name' => 'get_deployment_logs',
+            'content' => '{"deployments":[]}',
+        ],
+    ];
+
+    $compressed = OllamaMessageNormalizer::compressForOllamaFallback($messages);
+
+    expect($compressed)->toHaveCount(2)
+        ->and($compressed[0]['role'])->toBe('system')
+        ->and($compressed[1]['role'])->toBe('user')
+        ->and($compressed[1]['content'])->toContain('get_deployment_logs')
+        ->and($compressed[1]['content'])->toContain('Résultat get_deployment_logs');
+});
+
 it('formats assistant history with object arguments for ollama replay', function () {
     $messages = [
         ['role' => 'user', 'content' => 'Inspecte'],

@@ -13,6 +13,9 @@ Route::get('/deployments/{deploymentUuid}', [DeploymentController::class, 'show'
 Route::get('/deployments/{deploymentUuid}/logs', [DeploymentController::class, 'logs'])
     ->where('deploymentUuid', '[A-Za-z0-9_-]{1,255}')
     ->name('deployments.logs');
+Route::patch('/deployments/{deploymentUuid}/debug-logs', [DeploymentController::class, 'toggleDebugLogs'])
+    ->where('deploymentUuid', '[A-Za-z0-9_-]{1,255}')
+    ->name('deployments.debug-logs');
 Route::get('/deployments/{deploymentUuid}/monitoring', [DeploymentController::class, 'monitoring'])
     ->where('deploymentUuid', '[A-Za-z0-9_-]{1,255}')
     ->name('deployments.monitoring');

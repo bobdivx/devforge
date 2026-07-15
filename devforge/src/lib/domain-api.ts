@@ -109,7 +109,8 @@ export type Deployment = {
     created_at: string | null;
     updated_at: string | null;
     finished_at: string | null;
-    application: { uuid: string; name: string };
+    application: { uuid: string; name: string } | null;
+    is_debug_enabled: boolean;
 };
 
 export type DeploymentLog = {
@@ -118,6 +119,7 @@ export type DeploymentLog = {
     stream: 'stdout' | 'stderr';
     message: string;
     command: boolean;
+    hidden: boolean;
 };
 
 export type DeploymentLogs = {
@@ -171,6 +173,7 @@ export type DeploymentAgentRun = {
     event_context: Record<string, unknown> | null;
     metadata?: Record<string, unknown>;
     subagent_runs?: DeploymentSubagentRun[];
+    linkage?: 'direct' | 'context';
     logs?: string | null;
     agent: {
         uuid: string;
@@ -187,6 +190,7 @@ export type DeploymentMonitoringDiagnostics = {
     agents_busy_count: number;
     team_has_llm_provider: boolean;
     blockers: Array<{ code: string; message: string }>;
+    eligible_agents?: Array<{ uuid: string; name: string; type: AgentType }>;
 };
 
 export type DeploymentMonitoring = {
@@ -684,6 +688,51 @@ export type S3StorageInput = {
     endpoint: string;
 };
 
+export type ServerStorageCleanupSettings = {
+    force_docker_cleanup: boolean;
+    docker_cleanup_frequency: string;
+    docker_cleanup_threshold: number;
+    delete_unused_volumes: boolean;
+    delete_unused_networks: boolean;
+    disable_application_image_retention: boolean;
+};
+
+export type ServerStorageMonitoringSettings = {
+    server_disk_usage_notification_threshold: number;
+    server_disk_usage_check_frequency: string;
+};
+
+export type ServerStorageExecution = {
+    id: number;
+    status: string;
+    message: string | null;
+    cleanup_log: string | null;
+    created_at: string | null;
+    finished_at: string | null;
+};
+
+export type ServerStorageSummary = {
+    uuid: string;
+    name: string;
+    description: string | null;
+    status: {
+        reachable: boolean;
+        usable: boolean;
+        functional: boolean;
+    };
+    disk_usage_percent: number | null;
+    disk_alert_threshold: number;
+    cleanup: ServerStorageCleanupSettings;
+    monitoring: ServerStorageMonitoringSettings;
+    last_cleanup: ServerStorageExecution | null;
+    executions?: ServerStorageExecution[];
+    docker_disk_report?: string | null;
+};
+
+export type ServerStorageMeta = {
+    scheduler_healthy: boolean;
+};
+
 export type DatabaseBackupRetention = {
     amount: number;
     days: number;
@@ -980,6 +1029,13 @@ export const domainApi = {
     },
     deployment: (uuid: string) => apiFetch<ApiResponse<Deployment>>(`${API_BASE}/deployments/${encodeURIComponent(uuid)}`),
     deploymentLogs: (uuid: string, after = 0) => apiFetch<ApiResponse<DeploymentLogs>>(`${API_BASE}/deployments/${encodeURIComponent(uuid)}/logs?after=${after}`),
+    toggleDeploymentDebugLogs: (uuid: string, enabled?: boolean) => mutate<ApiResponse<{ is_debug_enabled: boolean }>>(
+        `/deployments/${encodeURIComponent(uuid)}/debug-logs`,
+        {
+            method: 'PATCH',
+            body: JSON.stringify(enabled === undefined ? {} : { enabled }),
+        },
+    ),
     deploymentMonitoring: (uuid: string) => apiFetch<ApiResponse<DeploymentMonitoring>>(`${API_BASE}/deployments/${encodeURIComponent(uuid)}/monitoring`),
     statuses: () => apiFetch<ApiResponse<ResourceStatuses>>(`${API_BASE}/resources/status`),
     realtime: () => apiFetch<ApiResponse<RealtimeMetadata>>(`${API_BASE}/realtime`),
@@ -1213,6 +1269,33 @@ export const domainApi = {
     ),
 
     s3Storages: () => apiFetch<ApiResponse<S3Storage[]>>(`${API_BASE}/s3-storages`),
+    serverStorageOverview: (refreshDisk = true) => apiFetch<ApiResponse<ServerStorageSummary[]> & { meta: ServerStorageMeta }>(
+        `${API_BASE}/server-storage${refreshDisk ? '' : '?refresh_disk=0'}`,
+    ),
+    serverStorage: (serverUuid: string, refreshDisk = false) => apiFetch<ApiResponse<ServerStorageSummary> & { meta: ServerStorageMeta }>(
+        `${API_BASE}/server-storage/${encodeURIComponent(serverUuid)}${refreshDisk ? '?refresh_disk=1' : ''}`,
+    ),
+    refreshServerDiskUsage: (serverUuid: string) => mutate<ApiResponse<{ disk_usage_percent: number | null }>>(
+        `/server-storage/${encodeURIComponent(serverUuid)}/disk`,
+        { method: 'POST', body: JSON.stringify({}) },
+    ),
+    updateServerStorage: (serverUuid: string, input: Partial<ServerStorageCleanupSettings & ServerStorageMonitoringSettings>) => mutate<ApiResponse<ServerStorageSummary> & { meta: ServerStorageMeta }>(
+        `/server-storage/${encodeURIComponent(serverUuid)}`,
+        { method: 'PUT', body: JSON.stringify(input) },
+    ),
+    runServerStorageCleanup: (
+        serverUuid: string,
+        input?: {
+            delete_unused_volumes?: boolean;
+            delete_unused_networks?: boolean;
+            force_docker_cleanup?: boolean;
+            disable_application_image_retention?: boolean;
+            aggressive?: boolean;
+        },
+    ) => mutate<ApiResponse<{ queued: boolean; execution_id: number; aggressive?: boolean; message: string }>>(
+        `/server-storage/${encodeURIComponent(serverUuid)}/cleanup`,
+        { method: 'POST', body: JSON.stringify(input ?? {}) },
+    ),
     s3Storage: (storageUuid: string) => apiFetch<ApiResponse<S3Storage>>(`${API_BASE}/s3-storages/${encodeURIComponent(storageUuid)}`),
     createS3Storage: (input: S3StorageInput) => mutate<ApiResponse<S3Storage>>('/s3-storages', {
         method: 'POST',

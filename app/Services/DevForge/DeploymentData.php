@@ -64,6 +64,7 @@ class DeploymentData
                 'uuid' => $application->uuid,
                 'name' => $application->name,
             ] : null,
+            'is_debug_enabled' => (bool) data_get($application, 'settings.is_debug_enabled', false),
         ];
     }
 
@@ -74,7 +75,6 @@ class DeploymentData
     {
         $application = $deployment->application;
         $lines = decode_remote_command_output($deployment)
-            ->reject(fn (array $line): bool => (bool) data_get($line, 'hidden', false))
             ->values()
             ->map(function (array $line, int $index) use ($application): array {
                 return [
@@ -83,6 +83,7 @@ class DeploymentData
                     'stream' => data_get($line, 'stderr', false) ? 'stderr' : 'stdout',
                     'message' => $this->secretRedactor->redact((string) data_get($line, 'line', ''), $application),
                     'command' => (bool) data_get($line, 'command', false),
+                    'hidden' => (bool) data_get($line, 'hidden', false),
                 ];
             });
 
@@ -120,7 +121,7 @@ class DeploymentData
                 'updated_at',
                 'finished_at',
             ])
-            ->with('application:id,uuid,name,environment_id')
+            ->with('application:id,uuid,name,environment_id', 'application.settings')
             ->whereIn('application_id', $applicationIds);
     }
 }

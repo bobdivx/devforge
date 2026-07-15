@@ -57,7 +57,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
         outcome,
         launch,
         trackExistingRun,
-    } = useAgentRunTracker(agent.uuid, { onRefresh });
+    } = useAgentRunTracker(agent.uuid, { onComplete: onRefresh });
 
     useEffect(() => {
         if (agent.status === 'running' && agent.latest_run?.uuid && !isTracking) {

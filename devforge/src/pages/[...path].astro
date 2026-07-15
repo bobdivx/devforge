@@ -40,6 +40,29 @@ const { initialPath } = Astro.props;
         </script>
     </head>
     <body>
+        <script is:inline>
+            setTimeout(() => {
+                const island = document.querySelector('astro-island[ssr]');
+                if (!island) {
+                    return;
+                }
+
+                island.innerHTML = `
+                    <div style="min-height:18rem;display:grid;place-items:center;padding:1.5rem;font-family:system-ui,sans-serif;">
+                        <div style="max-width:28rem;text-align:center;border:1px solid #404040;border-radius:0.75rem;padding:1.25rem;background:#171717;color:#e5e5e5;">
+                            <p style="font-weight:600;margin:0 0 0.5rem;">Interface DevForge non chargée</p>
+                            <p style="margin:0 0 1rem;font-size:0.875rem;opacity:0.75;">
+                                Le JavaScript n'a pas pu démarrer (build incomplet ou cache navigateur).
+                                Reconstruisez DevForge sur le serveur, puis rechargez sans cache.
+                            </p>
+                            <button type="button" onclick="location.reload()" style="cursor:pointer;border:1px solid #525252;background:#262626;color:inherit;border-radius:0.5rem;padding:0.45rem 0.9rem;font-size:0.875rem;">
+                                Recharger
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }, 15000);
+        </script>
         <App initialPath={initialPath} client:load />
     </body>
 </html>

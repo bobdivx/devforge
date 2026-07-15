@@ -46,6 +46,11 @@ class DeploymentAgentResolver
             ->whereIn('type', $types)
             ->where('is_active', true)
             ->get()
+            ->map(function (AiAgent $agent): AiAgent {
+                $agent->prepareForEventDispatch();
+
+                return $agent->fresh() ?? $agent;
+            })
             ->filter(fn (AiAgent $agent): bool => $agent->hasLlmProvider() && $this->agentScore($agent, $applicationUuid, $types) >= 0)
             ->filter(fn (AiAgent $agent): bool => $agent->status !== 'running');
     }
@@ -121,6 +126,14 @@ class DeploymentAgentResolver
             'agents_busy_count' => $busyAgents->count(),
             'team_has_llm_provider' => $teamHasProvider,
             'blockers' => $blockers,
+            'eligible_agents' => $eligible
+                ->map(fn (AiAgent $agent): array => [
+                    'uuid' => $agent->uuid,
+                    'name' => $agent->name,
+                    'type' => $agent->type,
+                ])
+                ->values()
+                ->all(),
         ];
     }
 

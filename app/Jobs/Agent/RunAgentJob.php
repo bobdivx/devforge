@@ -36,10 +36,34 @@ class RunAgentJob implements ShouldQueue
         $run = $this->resolveRun();
 
         if ($run === null) {
+            $this->recoverAgentAfterMissingRun();
+
             return;
         }
 
         $runner->run($this->agent->fresh(), $run, $this->context);
+    }
+
+    private function recoverAgentAfterMissingRun(): void
+    {
+        $this->agent->refresh();
+
+        if ($this->runId === null) {
+            return;
+        }
+
+        $run = AiAgentRun::query()
+            ->whereKey($this->runId)
+            ->where('agent_id', $this->agent->id)
+            ->first();
+
+        if ($run !== null && in_array($run->status, ['pending', 'running'], true)) {
+            return;
+        }
+
+        if ($this->agent->status === 'running') {
+            $this->agent->prepareForEventDispatch();
+        }
     }
 
     public function failed(\Throwable $exception): void

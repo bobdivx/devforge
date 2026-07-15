@@ -14,6 +14,9 @@ class DeploymentMonitoringData
 {
     private const CONTEXT_PREFIX = 'Contexte événement: ';
 
+    /** @var array<int, string> */
+    private array $runLinkage = [];
+
     public function __construct(
         private readonly DeploymentData $deploymentData,
         private readonly DeploymentAgentResolver $agentResolver,
@@ -26,18 +29,19 @@ class DeploymentMonitoringData
     public function forDeployment(Team $team, ApplicationDeploymentQueue $deployment): array
     {
         $deploymentUuid = (string) $deployment->deployment_uuid;
-        $runs = $this->findRunsForDeployment($team, $deploymentUuid);
+        $this->runLinkage = [];
+
+        $runs = $this->findRunsForDeployment($team, $deploymentUuid, $deployment);
         $catchUpTriggered = false;
 
         if ($runs->isEmpty()) {
             $catchUpTriggered = $this->agentCatchUp->maybeDispatch($deployment);
 
-            if ($catchUpTriggered) {
-                $runs = $this->findRunsForDeployment($team, $deploymentUuid);
-            }
+            $runs = $this->findRunsForDeployment($team, $deploymentUuid, $deployment);
         }
 
         $applicationUuid = $deployment->application?->uuid;
+        $diagnostics = $this->agentResolver->diagnostics($team, is_string($applicationUuid) ? $applicationUuid : null);
 
         return [
             'deployment' => $this->deploymentData->deployment($deployment),
@@ -52,7 +56,7 @@ class DeploymentMonitoringData
                 'monitor_build' => (bool) config('devforge.agents_monitor_build_enabled'),
                 'webhook_build' => (bool) config('devforge.agents_monitor_build_enabled'),
             ],
-            'diagnostics' => $this->agentResolver->diagnostics($team, is_string($applicationUuid) ? $applicationUuid : null),
+            'diagnostics' => $diagnostics,
             'catch_up_triggered' => $catchUpTriggered,
         ];
     }
@@ -60,17 +64,75 @@ class DeploymentMonitoringData
     /**
      * @return Collection<int, AiAgentRun>
      */
-    private function findRunsForDeployment(Team $team, string $deploymentUuid): Collection
+    private function findRunsForDeployment(Team $team, string $deploymentUuid, ApplicationDeploymentQueue $deployment): Collection
+    {
+        $direct = $this->queryDirectDeploymentRuns($team, $deploymentUuid);
+
+        foreach ($direct as $run) {
+            $this->runLinkage[$run->id] = 'direct';
+        }
+
+        if ($direct->isNotEmpty()) {
+            return $direct;
+        }
+
+        $contextual = $this->findContextualRunsForDeployment($team, $deployment);
+
+        foreach ($contextual as $run) {
+            $this->runLinkage[$run->id] = 'context';
+        }
+
+        return $contextual;
+    }
+
+    /**
+     * @return Collection<int, AiAgentRun>
+     */
+    private function queryDirectDeploymentRuns(Team $team, string $deploymentUuid): Collection
     {
         return AiAgentRun::query()
             ->with('agent')
             ->where(function ($query) use ($deploymentUuid): void {
                 $query->where('logs', 'like', '%"deployment_uuid":"'.$deploymentUuid.'"%')
-                    ->orWhere('metadata->deployment_uuid', $deploymentUuid);
+                    ->orWhere('logs', 'like', '%"deployment_uuid": "'.$deploymentUuid.'"%')
+                    ->orWhere('logs', 'like', '%'.$deploymentUuid.'%')
+                    ->orWhere('metadata->deployment_uuid', $deploymentUuid)
+                    ->orWhere('actions_taken', 'like', '%'.$deploymentUuid.'%');
             })
             ->whereHas('agent', fn ($query) => $query->where('team_id', $team->id))
             ->latest()
             ->limit(10)
+            ->get();
+    }
+
+    /**
+     * @return Collection<int, AiAgentRun>
+     */
+    private function findContextualRunsForDeployment(Team $team, ApplicationDeploymentQueue $deployment): Collection
+    {
+        $applicationUuid = $deployment->application?->uuid;
+
+        if (! is_string($applicationUuid) || $applicationUuid === '') {
+            return collect();
+        }
+
+        $windowStart = ($deployment->created_at ?? now())->copy()->subMinutes(10);
+        $windowEnd = ($deployment->finished_at ?? $deployment->updated_at ?? now())->copy()->addHour();
+
+        return AiAgentRun::query()
+            ->with('agent')
+            ->whereIn('trigger', ['event', 'manual'])
+            ->whereBetween('created_at', [$windowStart, $windowEnd])
+            ->whereHas('agent', function ($query) use ($team, $applicationUuid): void {
+                $query->where('team_id', $team->id)
+                    ->where(function ($scoped) use ($applicationUuid): void {
+                        $scoped->whereNull('resource_uuid')
+                            ->orWhere('resource_uuid', '')
+                            ->orWhere('resource_uuid', $applicationUuid);
+                    });
+            })
+            ->latest()
+            ->limit(5)
             ->get();
     }
 
@@ -97,6 +159,7 @@ class DeploymentMonitoringData
             'metadata' => $run->metadata ?? [],
             'subagent_runs' => $this->presentSubagentRuns($run),
             'logs' => $run->logs,
+            'linkage' => $this->runLinkage[$run->id] ?? 'direct',
             'agent' => $agent ? [
                 'uuid' => $agent->uuid,
                 'name' => $agent->name,

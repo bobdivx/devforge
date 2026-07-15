@@ -16,6 +16,7 @@ import { SharedVariablesPage } from './_SharedVariablesPage';
 import { SourcesPage } from './_SourcesPage';
 import { ServerPage } from './_ServerPage';
 import { StoragesPage } from './storages/_StoragesPage';
+import { StoragePage } from './_StoragePage';
 import { SubscriptionPage } from './_SubscriptionPage';
 import { TagsPage } from './_TagsPage';
 import { TerminalPage } from './_TerminalPage';
@@ -113,6 +114,8 @@ export function DomainPage({ bootstrap, route, onSwitchTeam }: DomainPageProps) 
             return <SubscriptionPage bootstrap={bootstrap} />;
         case 'onboarding':
             return <OnboardingPage bootstrap={bootstrap} />;
+        case 'storage':
+            return <StoragePage permissions={bootstrap.permissions} />;
         case 'storages':
             return (
                 <StoragesPage
