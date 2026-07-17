@@ -235,9 +235,31 @@ if (-not $SkipBuild) {
     $existing = @(Get-PackagePaths)
     Write-Host "Fichiers dans le package: $($existing.Count)" -ForegroundColor DarkGray
     if ($existing.Count -eq 0) { throw 'Aucun fichier DevForge a empaqueter.' }
-    $tarArgs = @('-czf', $Artifact) + ($existing | ForEach-Object { $_ })
+
+    . $PackageResolver
+    $staging = Join-Path $env:TEMP "devforge-pkg-$timestamp"
+    if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
+    New-Item -ItemType Directory -Force -Path $staging | Out-Null
+
+    foreach ($deployPath in $existing) {
+        $src = Get-DevForgeSourceFullPath -Root $Root -DeployRelativePath $deployPath
+        $dest = Join-Path $staging ($deployPath -replace '/', [IO.Path]::DirectorySeparatorChar)
+        $destParent = Split-Path $dest -Parent
+        if (-not (Test-Path $destParent)) {
+            New-Item -ItemType Directory -Force -Path $destParent | Out-Null
+        }
+        if (Test-Path $src -PathType Container) {
+            Copy-Item -Path $src -Destination $dest -Recurse -Force
+        } else {
+            Copy-Item -Path $src -Destination $dest -Force
+        }
+    }
+
+    $tarArgs = @('-czf', $Artifact, '-C', $staging, '.')
     & tar @tarArgs
-    if ($LASTEXITCODE -ne 0) { throw 'tar a echoue.' }
+    $tarExit = $LASTEXITCODE
+    Remove-Item -Recurse -Force $staging -ErrorAction SilentlyContinue
+    if ($tarExit -ne 0) { throw 'tar a echoue.' }
     Write-Host "Artefact: $Artifact ($([math]::Round((Get-Item $Artifact).Length / 1MB, 2)) Mo)" -ForegroundColor Green
 }
 

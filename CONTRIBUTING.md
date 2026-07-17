@@ -4,7 +4,7 @@
 
 You can ask for guidance anytime on our [Discord server](https://coollabs.io/discord) in the `#contribute` channel.
 
-To understand the tech stack, please refer to the [Tech Stack](TECH_STACK.md) document.
+To understand the tech stack, please refer to the [Tech Stack](docs/TECH_STACK.md) document.
 
 ## Table of Contents
 

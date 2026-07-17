@@ -13,7 +13,7 @@ on:
       - docker/coolify-realtime/Dockerfile
       - docker/testing-host/Dockerfile
       - templates/**
-      - CHANGELOG.md
+      - docs/CHANGELOG.md
 
 permissions:
   contents: read
@@ -58,7 +58,7 @@ jobs:
       - name: Get Version
         id: version
         run: |
-          echo "VERSION=$(docker run --rm -v "$(pwd):/app" -w /app php:8.2-alpine3.16 php bootstrap/getVersion.php)"|xargs >> $GITHUB_OUTPUT
+          echo "VERSION=$(docker run --rm -v "$(pwd):/app" -w /app php:8.2-alpine3.16 php backend/bootstrap/getVersion.php)"|xargs >> $GITHUB_OUTPUT
 
       - name: Build and Push Image (${{ matrix.arch }})
         uses: docker/build-push-action@v6
@@ -98,7 +98,7 @@ jobs:
       - name: Get Version
         id: version
         run: |
-          echo "VERSION=$(docker run --rm -v "$(pwd):/app" -w /app php:8.2-alpine3.16 php bootstrap/getVersion.php)"|xargs >> $GITHUB_OUTPUT
+          echo "VERSION=$(docker run --rm -v "$(pwd):/app" -w /app php:8.2-alpine3.16 php backend/bootstrap/getVersion.php)"|xargs >> $GITHUB_OUTPUT
 
       - name: Create & publish manifest on ${{ env.GITHUB_REGISTRY }}
         run: |

@@ -1,6 +1,9 @@
 # Résolution et validation du manifeste DevForge (source unique pour rollout PS1).
 # Usage dot-source: . .\scripts\Resolve-DevForgePackage.ps1
-# Usage CLI:       pwsh -File scripts/Resolve-DevForgePackage.ps1 [-Root C:\path\coolify]
+# Usage CLI:       powershell -File scripts/Resolve-DevForgePackage.ps1 [-Root C:\path\coolify]
+#
+# Les chemins du manifeste sont relatifs au layout DÉPLOIEMENT (/var/www/html : app/, routes/, …).
+# En monorepo, les sources Laravel vivent sous backend/ ; frontend/ reste à la racine du repo.
 
 param(
     [string]$Root = ''
@@ -12,14 +15,55 @@ if ([string]::IsNullOrWhiteSpace($Root)) {
 
 $script:DevForgePackageRoot = $Root
 
+function Get-DevForgeLaravelRoot {
+    param([Parameter(Mandatory = $true)][string]$Root)
+
+    $backend = Join-Path $Root 'backend'
+    if (Test-Path (Join-Path $backend 'artisan')) {
+        return $backend
+    }
+
+    return $Root
+}
+
+function ConvertTo-DevForgeRepoSourcePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$DeployRelativePath
+    )
+
+    $normalized = (($DeployRelativePath -replace '\\', '/').TrimStart('/').TrimEnd('/'))
+
+    if ($normalized -eq 'frontend' -or $normalized.StartsWith('frontend/') -or $normalized.StartsWith('scripts/')) {
+        return $normalized
+    }
+
+    $laravelRoot = Get-DevForgeLaravelRoot -Root $Root
+    if ($laravelRoot -eq $Root) {
+        return $normalized
+    }
+
+    return "backend/$normalized"
+}
+
+function Get-DevForgeSourceFullPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$DeployRelativePath
+    )
+
+    return Join-Path $Root (ConvertTo-DevForgeRepoSourcePath -Root $Root -DeployRelativePath $DeployRelativePath)
+}
+
 function Expand-DevForgeGlobPath {
     param(
         [string]$Root,
         [string]$Pattern
     )
 
+    $laravelRoot = Get-DevForgeLaravelRoot -Root $Root
     $normalized = $Pattern -replace '/', [IO.Path]::DirectorySeparatorChar
-    $fullPattern = Join-Path $Root $normalized
+    $fullPattern = Join-Path $laravelRoot $normalized
     $parent = Split-Path $fullPattern -Parent
     $leaf = Split-Path $fullPattern -Leaf
 
@@ -29,7 +73,7 @@ function Expand-DevForgeGlobPath {
 
     return @(Get-ChildItem -Path $parent -Filter $leaf -Recurse -File -ErrorAction SilentlyContinue |
         ForEach-Object {
-            $_.FullName.Substring($Root.Length + 1) -replace '\\', '/'
+            $_.FullName.Substring($laravelRoot.Length + 1) -replace '\\', '/'
         })
 }
 
@@ -54,7 +98,8 @@ function Get-DevForgePackagePaths {
     $pathsFile = Join-Path $Root 'scripts/devforge-package.paths'
     $requiredFile = Join-Path $Root 'scripts/devforge-package.required'
     $checksFile = Join-Path $Root 'scripts/devforge-package.content-checks.json'
-    $apiFile = Join-Path $Root 'routes/devforge-api.php'
+    $laravelRoot = Get-DevForgeLaravelRoot -Root $Root
+    $apiFile = Join-Path $laravelRoot 'routes/devforge-api.php'
 
     $collected = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 
@@ -77,12 +122,12 @@ function Get-DevForgePackagePaths {
     }
 
     foreach ($migration in @(
-        (Join-Path $Root 'database/migrations/2026_07_13_*'),
-        (Join-Path $Root 'database/migrations/*ai_agent*'),
-        (Join-Path $Root 'database/migrations/*ai_provider*')
+        (Join-Path $laravelRoot 'database/migrations/2026_07_13_*'),
+        (Join-Path $laravelRoot 'database/migrations/*ai_agent*'),
+        (Join-Path $laravelRoot 'database/migrations/*ai_provider*')
     )) {
         Get-ChildItem -Path $migration -ErrorAction SilentlyContinue | ForEach-Object {
-            $relative = $_.FullName.Substring($Root.Length + 1) -replace '\\', '/'
+            $relative = $_.FullName.Substring($laravelRoot.Length + 1) -replace '\\', '/'
             [void]$collected.Add($relative)
         }
     }
@@ -118,7 +163,9 @@ function Get-DevForgePackagePaths {
         }
     }
 
-    $existing = @($collected | Where-Object { Test-Path (Join-Path $Root $_) } | Sort-Object)
+    $existing = @($collected | Where-Object {
+            Test-Path (Get-DevForgeSourceFullPath -Root $Root -DeployRelativePath $_)
+        } | Sort-Object)
 
     if ($existing.Count -eq 0) {
         throw 'Aucun fichier DevForge a empaqueter.'
@@ -186,7 +233,7 @@ function Test-DevForgePackageIntegrity {
     $checksJson = Get-Content $ChecksFile -Raw -Encoding UTF8 | ConvertFrom-Json
     foreach ($check in $checksJson.checks) {
         $relativePath = ([string]$check.path) -replace '\\', '/'
-        $fullPath = Join-Path $Root $relativePath
+        $fullPath = Get-DevForgeSourceFullPath -Root $Root -DeployRelativePath $relativePath
 
         if (-not (Test-Path $fullPath)) {
             throw "Validation contenu impossible - fichier absent du depot: $relativePath ($($check.description))"

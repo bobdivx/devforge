@@ -1,64 +1,64 @@
-{
-    "checks": [
-        {
-            "path": "app/Jobs/ApplicationDeploymentJob.php",
-            "must_contain": [
-                "DeploymentBuildAgentDispatcher",
-                "DeploymentFailureAgentDispatcher",
-                "GithubPackagesBuildAuthInjector"
-            ],
-            "description": "Le job de déploiement doit déclencher les agents DevForge et injecter l'auth npm GitHub Packages"
-        },
-        {
-            "path": "app/Services/DevForge/DeploymentMonitoringData.php",
-            "must_contain": [
-                "DeploymentAgentCatchUp"
-            ],
-            "description": "Le monitoring doit pouvoir rattraper les agents manquants"
-        },
-        {
-            "path": "app/Enums/TaskModelTier.php",
-            "must_contain": [
-                "enum TaskModelTier"
-            ],
-            "description": "Routage de modeles LLM pour les agents DevForge"
-        },
-        {
-            "path": "app/Services/DevForge/Agent/AgentRunner.php",
-            "must_contain": [
-                "TaskModelTier"
-            ],
-            "description": "Execution agent avec routage de modele"
-        },
-        {
-            "path": "config/devforge.php",
-            "must_contain": [
-                "agents_enabled",
-                "agents_job_timeout"
-            ],
-            "description": "Configuration agents DevForge"
-        },
-        {
-            "path": "app/Jobs/Agent/RunAgentJob.php",
-            "must_contain": [
-                "agents_job_timeout",
-                "failOnTimeout"
-            ],
-            "description": "Job agent avec timeout configurable et echec propre"
-        },
-        {
-            "path": "app/Services/DevForge/Agent/Providers/ResilientLlmProvider.php",
-            "must_contain": [
-                "use App\\Services\\DevForge\\Agent\\Contracts\\LlmResponse"
-            ],
-            "description": "ResilientLlmProvider doit importer Contracts\\LlmResponse"
-        },
-        {
-            "path": "app/Services/DevForge/Agent/AgentToolkit.php",
-            "must_contain": [
-                "use App\\Services\\DevForge\\DeploymentData"
-            ],
-            "description": "AgentToolkit doit importer DevForge\\DeploymentData"
-        }
-    ]
+﻿{
+    "checks":  [
+                   {
+                       "path":  "app/Jobs/ApplicationDeploymentJob.php",
+                       "must_contain":  [
+                                            "DeploymentBuildAgentDispatcher",
+                                            "DeploymentFailureAgentDispatcher",
+                                            "GithubPackagesBuildAuthInjector"
+                                        ],
+                       "description":  "Le job de dÃ©ploiement doit dÃ©clencher les agents DevForge et injecter l\u0027auth npm GitHub Packages"
+                   },
+                   {
+                       "path":  "app/Services/DevForge/DeploymentMonitoringData.php",
+                       "must_contain":  [
+                                            "DeploymentAgentCatchUp"
+                                        ],
+                       "description":  "Le monitoring doit pouvoir rattraper les agents manquants"
+                   },
+                   {
+                       "path":  "app/Enums/TaskModelTier.php",
+                       "must_contain":  [
+                                            "enum TaskModelTier"
+                                        ],
+                       "description":  "Routage de modeles LLM pour les agents DevForge"
+                   },
+                   {
+                       "path":  "app/Services/DevForge/Agent/AgentRunner.php",
+                       "must_contain":  [
+                                            "TaskModelTier"
+                                        ],
+                       "description":  "Execution agent avec routage de modele"
+                   },
+                   {
+                       "path":  "config/devforge.php",
+                       "must_contain":  [
+                                            "agents_enabled",
+                                            "agents_job_timeout"
+                                        ],
+                       "description":  "Configuration agents DevForge"
+                   },
+                   {
+                       "path":  "app/Jobs/Agent/RunAgentJob.php",
+                       "must_contain":  [
+                                            "agents_job_timeout",
+                                            "failOnTimeout"
+                                        ],
+                       "description":  "Job agent avec timeout configurable et echec propre"
+                   },
+                   {
+                       "path":  "app/Services/DevForge/Agent/Providers/ResilientLlmProvider.php",
+                       "must_contain":  [
+                                            "use App\\Services\\DevForge\\Agent\\Contracts\\LlmResponse"
+                                        ],
+                       "description":  "ResilientLlmProvider doit importer Contracts\\LlmResponse"
+                   },
+                   {
+                       "path":  "app/Services/DevForge/Agent/AgentToolkit.php",
+                       "must_contain":  [
+                                            "use App\\Services\\DevForge\\DeploymentData"
+                                        ],
+                       "description":  "AgentToolkit doit importer DevForge\\DeploymentData"
+                   }
+               ]
 }

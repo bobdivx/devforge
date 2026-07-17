@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Collecte et valide les chemins DevForge (parite avec Resolve-DevForgePackage.ps1)
+# Chemins du manifeste = layout deploiement (/var/www/html). Sources Laravel = backend/.
 
 set -euo pipefail
 
@@ -7,6 +8,24 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PATHS_FILE="${ROOT}/scripts/devforge-package.paths"
 REQUIRED_FILE="${ROOT}/scripts/devforge-package.required"
 CHECKS_FILE="${ROOT}/scripts/devforge-package.content-checks.json"
+
+if [[ -f "${ROOT}/backend/artisan" ]]; then
+    LARAVEL_ROOT="${ROOT}/backend"
+else
+    LARAVEL_ROOT="${ROOT}"
+fi
+
+source_path() {
+    local path="$1"
+    path="${path//\\//}"
+    path="${path#/}"
+    path="${path%/}"
+    if [[ "${path}" == "frontend" || "${path}" == frontend/* || "${path}" == scripts/* ]]; then
+        echo "${ROOT}/${path}"
+        return
+    fi
+    echo "${LARAVEL_ROOT}/${path}"
+}
 
 declare -A SEEN=()
 PATHS=()
@@ -16,8 +35,12 @@ add_path() {
     path="${path//$'\r'/}"
     [[ -z "${path}" || "${path}" == \#* ]] && return 0
     path="${path//\\//}"
+    path="${path#/}"
+    path="${path%/}"
     [[ -n "${SEEN[$path]+x}" ]] && return 0
-    [[ -e "${ROOT}/${path}" ]] || return 0
+    local src
+    src="$(source_path "${path}")"
+    [[ -e "${src}" ]] || return 0
     SEEN["$path"]=1
     PATHS+=("$path")
 }
@@ -27,10 +50,10 @@ expand_glob() {
     local dir_part file_part parent
     file_part="$(basename "${pattern}")"
     dir_part="$(dirname "${pattern}")"
-    parent="${ROOT}/${dir_part}"
+    parent="${LARAVEL_ROOT}/${dir_part}"
     [[ -d "${parent}" ]] || return 0
     while IFS= read -r -d '' file; do
-        add_path "${file#${ROOT}/}"
+        add_path "${file#${LARAVEL_ROOT}/}"
     done < <(find "${parent}" -type f -name "${file_part}" -print0 2>/dev/null || true)
 }
 
@@ -52,12 +75,12 @@ read_list_file "${PATHS_FILE}"
 read_list_file "${REQUIRED_FILE}"
 
 for migration in \
-    "${ROOT}"/database/migrations/2026_07_13_* \
-    "${ROOT}"/database/migrations/*ai_agent* \
-    "${ROOT}"/database/migrations/*ai_provider*
+    "${LARAVEL_ROOT}"/database/migrations/2026_07_13_* \
+    "${LARAVEL_ROOT}"/database/migrations/*ai_agent* \
+    "${LARAVEL_ROOT}"/database/migrations/*ai_provider*
 do
     [[ -e "${migration}" ]] || continue
-    add_path "${migration#${ROOT}/}"
+    add_path "${migration#${LARAVEL_ROOT}/}"
 done
 
 if command -v php >/dev/null 2>&1; then
@@ -84,13 +107,20 @@ if [[ -f "${REQUIRED_FILE}" ]]; then
 fi
 
 if [[ -f "${CHECKS_FILE}" ]] && command -v python3 >/dev/null 2>&1; then
-    python3 - "${ROOT}" "${CHECKS_FILE}" <<'PY'
-import json, sys
-root, checks_file = sys.argv[1], sys.argv[2]
+    python3 - "${ROOT}" "${LARAVEL_ROOT}" "${CHECKS_FILE}" <<'PY'
+import json, sys, os
+root, laravel_root, checks_file = sys.argv[1], sys.argv[2], sys.argv[3]
 checks = json.load(open(checks_file, encoding="utf-8"))
+
+def source_path(path: str) -> str:
+    path = path.replace("\\", "/").strip("/")
+    if path == "frontend" or path.startswith("frontend/") or path.startswith("scripts/"):
+        return f"{root}/{path}"
+    return f"{laravel_root}/{path}"
+
 for check in checks.get("checks", []):
     path = check["path"]
-    full = f"{root}/{path}"
+    full = source_path(path)
     try:
         content = open(full, encoding="utf-8").read()
     except OSError:

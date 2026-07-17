@@ -42,7 +42,7 @@ RUN docker-php-serversideup-set-id www-data $USER_ID:$GROUP_ID && \
     docker-php-serversideup-set-file-permissions --owner $USER_ID:$GROUP_ID --service nginx
 
 WORKDIR /var/www/html
-COPY --chown=www-data:www-data composer.json composer.lock ./
+COPY --chown=www-data:www-data backend/composer.json backend/composer.lock ./
 RUN --mount=type=cache,target=/tmp/cache \
     COMPOSER_CACHE_DIR=/tmp/cache composer install --no-dev --no-interaction --no-plugins --no-scripts --prefer-dist
 
@@ -54,8 +54,10 @@ USER www-data
 FROM node:24-alpine AS static-assets
 
 WORKDIR /app
-COPY package*.json vite.config.js postcss.config.cjs ./
-COPY devforge/package.json ./devforge/package.json
+COPY package*.json ./
+COPY backend/vite.config.js ./backend/vite.config.js
+COPY backend/postcss.config.cjs ./backend/postcss.config.cjs
+COPY frontend/package.json ./frontend/package.json
 RUN --mount=type=cache,target=/root/.npm \
     npm ci
 COPY . .
@@ -140,22 +142,22 @@ COPY --chmod=755 docker/production/entrypoint.d/ /etc/entrypoint.d
 COPY --from=base --chown=www-data:www-data /var/www/html/vendor ./vendor
 
 # Copy application source code
-COPY --chown=www-data:www-data composer.json composer.lock ./
-COPY --chown=www-data:www-data app ./app
-COPY --chown=www-data:www-data bootstrap ./bootstrap
-COPY --chown=www-data:www-data config ./config
-COPY --chown=www-data:www-data database ./database
-COPY --chown=www-data:www-data lang ./lang
-COPY --chown=www-data:www-data public ./public
-COPY --from=static-assets --chown=www-data:www-data /app/public/build ./public/build
-COPY --from=static-assets --chown=www-data:www-data /app/public/devforge ./public/devforge
-COPY --chown=www-data:www-data routes ./routes
-COPY --chown=www-data:www-data storage ./storage
-COPY --chown=www-data:www-data templates ./templates
-COPY --chown=www-data:www-data resources/views ./resources/views
-COPY --chown=www-data:www-data artisan artisan
-COPY --chown=www-data:www-data openapi.yaml ./openapi.yaml
-COPY --chown=www-data:www-data changelogs/ ./changelogs/
+COPY --chown=www-data:www-data backend/composer.json backend/composer.lock ./
+COPY --chown=www-data:www-data backend/app ./app
+COPY --chown=www-data:www-data backend/bootstrap ./bootstrap
+COPY --chown=www-data:www-data backend/config ./config
+COPY --chown=www-data:www-data backend/database ./database
+COPY --chown=www-data:www-data backend/lang ./lang
+COPY --chown=www-data:www-data backend/public ./public
+COPY --from=static-assets --chown=www-data:www-data /app/backend/public/build ./public/build
+COPY --from=static-assets --chown=www-data:www-data /app/backend/public/devforge ./public/devforge
+COPY --chown=www-data:www-data backend/routes ./routes
+COPY --chown=www-data:www-data backend/storage ./storage
+COPY --chown=www-data:www-data backend/templates ./templates
+COPY --chown=www-data:www-data backend/resources/views ./resources/views
+COPY --chown=www-data:www-data backend/artisan artisan
+COPY --chown=www-data:www-data backend/openapi.yaml ./openapi.yaml
+COPY --chown=www-data:www-data docs/changelogs/ ./changelogs/
 
 RUN composer dump-autoload
 

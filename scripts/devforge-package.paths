@@ -1,9 +1,10 @@
-# DevForge rollout manifest
+﻿# DevForge rollout manifest
 # - Lignes normales : fichier ou dossier (recursif dans tar)
 # - glob:pattern    : expansion automatique (ex: glob:app/Models/Ai*.php)
 # - Fichiers obligatoires supplementaires : scripts/devforge-package.required (fusion auto)
 # - Validation contenu : scripts/devforge-package.content-checks.json (bloque le rollout si echec)
 
+frontend/
 app/Http/Controllers/DevForgeController.php
 app/Http/Controllers/DevForge
 app/Http/Middleware/EnsureDevForgeCurrentTeam.php
@@ -48,7 +49,7 @@ routes/devforge-team.php
 public/devforge
 public/brand
 
-# libSQL + création de bases (helpers et actions Coolify core patchés)
+# libSQL + crÃ©ation de bases (helpers et actions Coolify core patchÃ©s)
 bootstrap/helpers/constants.php
 bootstrap/helpers/databases.php
 app/Models/StandaloneLibsql.php

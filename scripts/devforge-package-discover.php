@@ -2,21 +2,24 @@
 
 /**
  * Découvre les classes App\* référencées par le code DevForge / agents
- * et retourne leurs chemins relatifs (une ligne par fichier).
+ * et retourne leurs chemins relatifs au layout déploiement (une ligne par fichier).
  *
- * Usage: php scripts/devforge-package-discover.php [root]
+ * Usage: php scripts/devforge-package-discover.php [repoRoot]
  */
 
 declare(strict_types=1);
 
-$root = isset($argv[1]) && $argv[1] !== '' ? rtrim($argv[1], '/\\') : dirname(__DIR__);
+$repoRoot = isset($argv[1]) && $argv[1] !== '' ? rtrim($argv[1], '/\\') : dirname(__DIR__);
+$laravelRoot = is_file($repoRoot.'/backend/artisan')
+    ? $repoRoot.'/backend'
+    : $repoRoot;
 
 $scanRoots = [
-    $root.'/app/Services/DevForge',
-    $root.'/app/Jobs/Agent',
-    $root.'/app/Http/Controllers/DevForge',
-    $root.'/app/Jobs/ApplicationDeploymentJob.php',
-    $root.'/app/Console/Commands/RunScheduledAgentsCommand.php',
+    $laravelRoot.'/app/Services/DevForge',
+    $laravelRoot.'/app/Jobs/Agent',
+    $laravelRoot.'/app/Http/Controllers/DevForge',
+    $laravelRoot.'/app/Jobs/ApplicationDeploymentJob.php',
+    $laravelRoot.'/app/Console/Commands/RunScheduledAgentsCommand.php',
 ];
 
 $discovered = [];
@@ -56,7 +59,7 @@ foreach ($scanRoots as $scanRoot) {
             }
 
             $relative = 'app/'.str_replace('\\', '/', $class).'.php';
-            $full = $root.'/'.$relative;
+            $full = $laravelRoot.'/'.$relative;
 
             if (is_file($full)) {
                 $discovered[$relative] = true;

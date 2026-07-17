@@ -24,7 +24,7 @@ services:
       retries: 10
       timeout: 2s
     volumes:
-      - .:/var/www/html/:cached
+      - ./backend:/var/www/html/:cached
       - dev_backups_data:/var/www/html/storage/app/backups
     networks:
       - coolify
@@ -33,7 +33,7 @@ services:
     ports:
       - "${FORWARD_DB_PORT:-5432}:5432"
     env_file:
-      - .env
+      - ./backend/.env
     environment:
       POSTGRES_USER: "${DB_USERNAME:-coolify}"
       POSTGRES_PASSWORD: "${DB_PASSWORD:-password}"
@@ -51,7 +51,7 @@ services:
     ports:
       - "${FORWARD_REDIS_PORT:-6379}:6379"
     env_file:
-      - .env
+      - ./backend/.env
     healthcheck:
       test: redis-cli ping
       interval: 5s
@@ -66,12 +66,12 @@ services:
       context: .
       dockerfile: ./docker/coolify-realtime/Dockerfile
     env_file:
-      - .env
+      - ./backend/.env
     ports:
       - "${FORWARD_SOKETI_PORT:-6001}:6001"
       - "6002:6002"
     volumes:
-      - ./storage:/var/www/html/storage
+      - ./backend/storage:/var/www/html/storage
       - ./docker/coolify-realtime/terminal-server.js:/terminal/terminal-server.js
       - ./docker/coolify-realtime/terminal-utils.js:/terminal/terminal-utils.js
     environment:
@@ -90,27 +90,27 @@ services:
     image: node:24-alpine
     pull_policy: always
     container_name: coolify-vite
-    working_dir: /var/www/html
+    working_dir: /repo
     environment:
       VITE_HOST: "${VITE_HOST:-localhost}"
       VITE_PORT: "${VITE_PORT:-5173}"
     ports:
       - "${VITE_PORT:-5173}:${VITE_PORT:-5173}"
     volumes:
-      - .:/var/www/html/:cached
+      - .:/repo/:cached
     command: sh -c "npm install && npm run dev"
     networks:
       - coolify
-  devforge:
+  frontend:
     image: node:24-alpine
     pull_policy: always
-    container_name: coolify-devforge
-    working_dir: /var/www/html
+    container_name: coolify-frontend
+    working_dir: /repo
     ports:
       - "${DEVFORGE_PORT:-4321}:4321"
     volumes:
-      - .:/var/www/html/:cached
-    command: sh -c "npm install && npm run dev:devforge"
+      - .:/repo/:cached
+    command: sh -c "npm install && npm run dev:frontend"
     networks:
       - coolify
   testing-host:

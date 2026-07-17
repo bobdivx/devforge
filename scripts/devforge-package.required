@@ -1,14 +1,14 @@
-# Fichiers OBLIGATOIRES dans chaque rollout DevForge (fusionnés automatiquement).
-# Ne pas retirer — complète devforge-package.paths pour les fichiers hors arbres DevForge.
+﻿# Fichiers OBLIGATOIRES dans chaque rollout DevForge (fusionnÃ©s automatiquement).
+# Ne pas retirer â€” complÃ¨te devforge-package.paths pour les fichiers hors arbres DevForge.
 
-# Déclenchement agents lors des déploiements Coolify core
+# DÃ©clenchement agents lors des dÃ©ploiements Coolify core
 app/Jobs/ApplicationDeploymentJob.php
 app/Jobs/DockerCleanupJob.php
 
-# Exécution agents IA
+# ExÃ©cution agents IA
 app/Jobs/Agent
 
-# Modèles / events agents (hors glob si paths incomplet)
+# ModÃ¨les / events agents (hors glob si paths incomplet)
 app/Models/AiAgent.php
 app/Models/AiAgentRun.php
 app/Models/AiAgentMessage.php
