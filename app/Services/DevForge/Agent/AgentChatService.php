@@ -142,6 +142,12 @@ class AgentChatService
 
             }
 
+            if (isset($reply['steps']) && is_array($reply['steps']) && $reply['steps'] !== []) {
+
+                $metadata['steps'] = $reply['steps'];
+
+            }
+
             $assistantMessage = AiAgentMessage::create([
 
                 'agent_id' => $agent->id,
@@ -401,7 +407,12 @@ class AgentChatService
 
         $confirmationNudgeUsed = false;
 
+        $proseToolNudgeUsed = false;
+
         $toolsUsedThisTurn = false;
+
+        /** @var list<array<string, mixed>> $steps */
+        $steps = [];
 
         while ($budget->consume()) {
 
@@ -422,6 +433,27 @@ class AgentChatService
 
             if (! $response->hasToolCalls()) {
 
+                // Intention réparation + aucun tool_call → exécution déterministe (ne dépend pas du LLM).
+                if ($steps === [] && AgentDirectives::isChatRepairIntent($userContent)) {
+                    $run->appendLog('Fallback chat : intention réparation sans tool_call — exécution autonome forcée.');
+
+                    $harness = app(AgentRepairHarness::class)->execute(
+                        $toolkit,
+                        $agent,
+                        $run,
+                        $runContext,
+                        $userContent,
+                    );
+
+                    return [
+                        'text' => $harness['text'],
+                        'tokens_used' => $tokensUsed,
+                        'iterations' => $budget->getUsed(),
+                        'steps' => $harness['steps'],
+                        ...isset($harness['pending_approval']) ? ['pending_approval' => $harness['pending_approval']] : [],
+                    ];
+                }
+
                 if (! $toolNudgeUsed && ! $toolsUsedThisTurn) {
 
                     $toolNudgeUsed = true;
@@ -431,6 +463,20 @@ class AgentChatService
                     $messages[] = ['role' => 'user', 'content' => AgentDirectives::chatToolNudgeMessage($userContent)];
 
                     $run->appendLog('Relance chat : premier tour sans outil — consigne d\'action envoyée.');
+
+                    continue;
+
+                }
+
+                if (! $proseToolNudgeUsed && AgentDirectives::mentionsToolWithoutCalling($response->text)) {
+
+                    $proseToolNudgeUsed = true;
+
+                    $messages[] = ['role' => 'assistant', 'content' => $response->text];
+
+                    $messages[] = ['role' => 'user', 'content' => AgentDirectives::chatProseToolNudgeMessage()];
+
+                    $run->appendLog('Relance chat : outils décrits en texte — consigne tool_call forcée.');
 
                     continue;
 
@@ -482,6 +528,14 @@ class AgentChatService
 
                     $hadToolFailure = true;
 
+                    $steps[] = [
+                        'type' => 'tool',
+                        'name' => (string) $toolCall['name'],
+                        'args_summary' => $this->summarizeToolArgs($toolCall['arguments'] ?? []),
+                        'result_summary' => 'Reporté (approbation en cours)',
+                        'status' => 'skipped',
+                    ];
+
                     continue;
 
                 }
@@ -520,6 +574,16 @@ class AgentChatService
 
                 ];
 
+                $steps[] = [
+                    'type' => 'tool',
+                    'name' => (string) $toolCall['name'],
+                    'args_summary' => $this->summarizeToolArgs($toolCall['arguments'] ?? []),
+                    'result_summary' => $this->summarizeToolResult($result),
+                    'status' => isset($result['error'])
+                        ? 'error'
+                        : (($result['status'] ?? null) === 'ask' || ! empty($result['pending_approval']) ? 'awaiting_approval' : 'done'),
+                ];
+
             }
 
             if (! $hadToolFailure) {
@@ -550,6 +614,8 @@ class AgentChatService
 
                     'pending_approval' => $pendingApproval,
 
+                    'steps' => $steps,
+
                 ];
 
             }
@@ -559,21 +625,106 @@ class AgentChatService
         $iterations = $budget->getUsed();
 
         if ($summary === '') {
-
             $summary = 'Je n\'ai pas pu générer de réponse.';
+        }
 
+        $summary = $this->sanitizeAssistantReply($summary, $steps);
+
+        if ($steps === [] && AgentDirectives::isChatRepairIntent($userContent)) {
+            $run->appendLog('Fallback chat : réponse sans outils après boucle — exécution autonome forcée.');
+
+            $harness = app(AgentRepairHarness::class)->execute(
+                $toolkit,
+                $agent,
+                $run,
+                $runContext,
+                $userContent,
+            );
+
+            return [
+                'text' => $harness['text'],
+                'tokens_used' => $tokensUsed,
+                'iterations' => $iterations,
+                'steps' => $harness['steps'],
+                ...isset($harness['pending_approval']) ? ['pending_approval' => $harness['pending_approval']] : [],
+            ];
         }
 
         return [
-
             'text' => $summary,
-
             'tokens_used' => $tokensUsed,
-
             'iterations' => $iterations,
-
+            'steps' => $steps,
         ];
+    }
 
+    /**
+     * @param  list<array<string, mixed>>  $steps
+     */
+    private function sanitizeAssistantReply(string $text, array $steps): string
+    {
+        $cleaned = preg_replace('/```(?:json)?\s*\{[\s\S]*?\}\s*```/u', '', $text) ?? $text;
+        $cleaned = preg_replace('/^\s*\{[^{}]*"method"\s*:\s*"[^"]+"[^{}]*\}\s*$/mu', '', $cleaned) ?? $cleaned;
+        $cleaned = trim(preg_replace("/\n{3,}/", "\n\n", $cleaned) ?? $cleaned);
+
+        if ($steps !== [] && ($cleaned === '' || AgentDirectives::mentionsToolWithoutCalling($cleaned))) {
+            return 'Actions exécutées. Voir le détail ci-dessus.';
+        }
+
+        if ($steps === [] && AgentDirectives::mentionsToolWithoutCalling($cleaned)) {
+            return 'Les actions n’ont pas été exécutées (description d’outil au lieu d’un appel réel). Réessayez avec une consigne plus directe, par exemple « corrige le déploiement maintenant ».';
+        }
+
+        return $cleaned !== '' ? $cleaned : $text;
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     */
+    private function summarizeToolArgs(array $arguments): string
+    {
+        $parts = [];
+        foreach ($arguments as $key => $value) {
+            if (! is_scalar($value) && $value !== null) {
+                continue;
+            }
+            $parts[] = $key.'='.mb_substr((string) $value, 0, 48);
+            if (count($parts) >= 3) {
+                break;
+            }
+        }
+
+        return implode(', ', $parts);
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    private function summarizeToolResult(array $result): string
+    {
+        if (isset($result['error']) && is_string($result['error'])) {
+            return mb_substr($result['error'], 0, 160);
+        }
+
+        if (($result['status'] ?? null) === 'ask' || ! empty($result['pending_approval'])) {
+            return 'Approbation requise';
+        }
+
+        if (isset($result['ok']) && $result['ok'] === true) {
+            $hint = is_string($result['hint'] ?? null) ? $result['hint'] : null;
+
+            return $hint !== null ? mb_substr($hint, 0, 160) : 'OK';
+        }
+
+        if (is_string($result['message'] ?? null)) {
+            return mb_substr($result['message'], 0, 160);
+        }
+
+        if (is_string($result['deployment_uuid'] ?? null)) {
+            return 'Déploiement '.$result['deployment_uuid'];
+        }
+
+        return 'Terminé';
     }
 
     /**

@@ -3,7 +3,6 @@ import { useEffect, useState } from 'preact/hooks';
 import { AgentChatPanel, waitForChatReply } from '../agents/AgentChatPanel';
 import {
     applicationAgentSessionTitle,
-    applicationChatSuggestions,
     pickApplicationChatAgent,
 } from '../../lib/application-agent-chat';
 import { agentDetailPath } from '../../lib/agent-routes';
@@ -26,7 +25,6 @@ export function ApplicationAgentChatCard({ application }: Props) {
     const [setupMessage, setSetupMessage] = useState<string | null>(null);
 
     const sessionTitle = applicationAgentSessionTitle(application.name);
-    const suggestions = applicationChatSuggestions(application.name);
 
     useEffect(() => {
         let cancelled = false;
@@ -47,7 +45,7 @@ export function ApplicationAgentChatCard({ application }: Props) {
 
                 const selected = pickApplicationChatAgent(agentsResponse.data, application.uuid);
                 if (!selected) {
-                    setSetupMessage('Aucun agent IA actif avec provider n’est disponible pour cette application.');
+                    setSetupMessage('Aucun agent IA actif n’est disponible. Configurez-en un pour discuter.');
                     return;
                 }
 
@@ -77,7 +75,7 @@ export function ApplicationAgentChatCard({ application }: Props) {
                 }
             } catch (err) {
                 if (!cancelled) {
-                    setError(err instanceof ApiError ? err.message : 'Impossible de préparer le chat application.');
+                    setError(err instanceof ApiError ? err.message : 'Impossible de préparer le chat.');
                 }
             } finally {
                 if (!cancelled) {
@@ -193,39 +191,41 @@ export function ApplicationAgentChatCard({ application }: Props) {
 
     return (
         <section class="min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="toolbar-row border-b border-base-300/70 px-4 py-4 sm:px-5">
+            <div class="flex items-center justify-between gap-3 border-b border-base-300/70 px-3 py-3 sm:px-5 sm:py-4">
                 <div class="min-w-0">
                     <p class="inline-flex items-center gap-2 text-sm font-semibold">
-                        <Bot class="size-4 text-primary" aria-hidden />
-                        Assistant IA · {application.name}
+                        <Bot class="size-4 shrink-0 text-primary" aria-hidden />
+                        <span class="truncate">Chat</span>
                     </p>
-                    <p class="mt-1 text-xs text-base-content/50">
-                        Chat scopé sur cette application — l’agent connaît l’UUID, le dépôt et le build pack.
+                    <p class="mt-0.5 truncate text-xs text-base-content/50">
+                        {agent ? agent.name : application.name}
+                        {agent?.provider ? ` · ${agent.provider.model}` : ''}
                     </p>
                 </div>
                 {agent && (
                     <a
-                        class="btn btn-ghost btn-sm shrink-0 gap-1.5 rounded-full border border-base-300/80"
+                        class="btn btn-ghost btn-sm shrink-0 gap-1.5 rounded-full border border-base-300/80 px-2.5 sm:px-3"
                         href={agentDetailPath(agent.uuid, { view: 'chat', session: session?.uuid })}
+                        title="Ouvrir l’agent"
                     >
-                        Ouvrir
+                        <span class="hidden sm:inline">Ouvrir</span>
                         <ExternalLink class="size-3.5" aria-hidden />
                     </a>
                 )}
             </div>
 
-            <div class="flex h-[28rem] min-h-0 flex-col">
+            <div class="flex h-[min(22rem,60dvh)] min-h-[16rem] flex-col sm:h-[26rem]">
                 {loading && (
                     <div class="flex flex-1 items-center justify-center gap-2 text-xs text-base-content/50">
                         <span class="loading loading-spinner loading-sm" />
-                        Préparation du chat…
+                        Préparation…
                     </div>
                 )}
 
                 {!loading && setupMessage && (
-                    <div class="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+                    <div class="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center sm:px-6">
                         <p class="text-sm text-base-content/70">{setupMessage}</p>
-                        <a class="btn btn-primary btn-sm" href="/agents">
+                        <a class="btn btn-primary btn-sm rounded-full" href="/agents">
                             Configurer un agent
                         </a>
                     </div>
@@ -244,16 +244,15 @@ export function ApplicationAgentChatCard({ application }: Props) {
                         onSend={(content) => void handleSend(content)}
                         onResolveApproval={(messageUuid, decision) => void resolveApproval(messageUuid, decision)}
                         approvingMessageUuid={approvingMessageUuid}
-                        suggestions={suggestions}
-                        placeholder={`Ex. : Remplacer l’adapter Vercel par @astrojs/node pour ${application.name}…`}
+                        placeholder="Écrire un message…"
                         hideSessionHeader
                     />
                 )}
 
                 {!loading && !setupMessage && agent && !session && (
-                    <div class="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+                    <div class="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center sm:px-6">
                         <p class="text-sm text-error" role="alert">
-                            {error ?? 'Impossible de préparer la conversation application.'}
+                            {error ?? 'Impossible de préparer la conversation.'}
                         </p>
                     </div>
                 )}

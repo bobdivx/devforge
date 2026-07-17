@@ -9,6 +9,7 @@ use App\Jobs\CheckTraefikVersionJob;
 use App\Jobs\CleanupInstanceStuffsJob;
 use App\Jobs\CleanupOrphanedPreviewContainersJob;
 use App\Jobs\CleanupStaleMultiplexedConnections;
+use App\Jobs\DevForge\ApplicationReadinessWatchdogJob;
 use App\Jobs\PullChangelog;
 use App\Jobs\PullTemplatesFromCDN;
 use App\Jobs\RegenerateSslCertJob;
@@ -64,6 +65,10 @@ class Kernel extends ConsoleKernel
             // AI Agents
             $this->scheduleInstance->command('agents:run-scheduled')->everyMinute()->onOneServer();
 
+            $this->scheduleInstance->job(new ApplicationReadinessWatchdogJob)
+                ->everyThreeMinutes()
+                ->onOneServer();
+
             $this->scheduleInstance->command('uploads:clear')->everyTwoMinutes();
 
         } else {
@@ -87,6 +92,10 @@ class Kernel extends ConsoleKernel
 
             // AI Agents
             $this->scheduleInstance->command('agents:run-scheduled')->everyMinute()->onOneServer();
+
+            $this->scheduleInstance->job(new ApplicationReadinessWatchdogJob)
+                ->everyThreeMinutes()
+                ->onOneServer();
 
             $this->scheduleInstance->job(new RegenerateSslCertJob)->twiceDaily()->onOneServer();
 

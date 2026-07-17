@@ -183,9 +183,7 @@ test('adds ownership changes for Coolify data paths', function () {
 
     $result = parseCommandsByLineForSudo($commands, $this->server);
 
-    // Note: The && operator adds another sudo, creating double sudo for chown/chmod
-    // This is existing behavior that may need refactoring but isn't part of this bug fix
-    expect($result[0])->toBe('sudo mkdir -p /data/coolify/logs && sudo sudo chown -R ubuntu:ubuntu /data/coolify/logs && sudo sudo chmod -R o-rwx /data/coolify/logs');
+    expect($result[0])->toBe('sudo mkdir -p /data/coolify/logs && sudo chown -R ubuntu: /data/coolify/logs && sudo chmod -R o-rwx /data/coolify/logs');
 });
 
 test('adds ownership changes for Coolify tmp paths', function () {
@@ -195,9 +193,7 @@ test('adds ownership changes for Coolify tmp paths', function () {
 
     $result = parseCommandsByLineForSudo($commands, $this->server);
 
-    // Note: The && operator adds another sudo, creating double sudo for chown/chmod
-    // This is existing behavior that may need refactoring but isn't part of this bug fix
-    expect($result[0])->toBe('sudo mkdir -p /tmp/coolify/cache && sudo sudo chown -R ubuntu:ubuntu /tmp/coolify/cache && sudo sudo chmod -R o-rwx /tmp/coolify/cache');
+    expect($result[0])->toBe('sudo mkdir -p /tmp/coolify/cache && sudo chown -R ubuntu: /tmp/coolify/cache && sudo chmod -R o-rwx /tmp/coolify/cache');
 });
 
 test('does not add ownership changes for system paths', function () {
@@ -641,4 +637,19 @@ test('injects sudo inside docker sh -c scripts when using && operators', functio
     $result = parseCommandsByLineForSudo($commands, $this->server);
 
     expect($result[0])->toContain("&& sudo cp");
+});
+
+test('parseLineForSudo sudo-ifies tee in env write pipes', function () {
+    $command = "echo 'YWJj' | base64 -d | tee /media/Docker/AppData/coolify/data/applications/appuuid/.env > /dev/null";
+
+    $result = parseLineForSudo($command, $this->server);
+
+    expect($result)->toContain('| sudo tee ')
+        ->and($result)->not->toStartWith('sudo echo');
+});
+
+test('shouldChangeOwnership allows coolify paths under /media mounts', function () {
+    expect(shouldChangeOwnership('/media/Docker/AppData/coolify/data/applications/appuuid'))->toBeTrue()
+        ->and(shouldChangeOwnership('/data/coolify/applications/appuuid'))->toBeTrue()
+        ->and(shouldChangeOwnership('/media/other'))->toBeFalse();
 });

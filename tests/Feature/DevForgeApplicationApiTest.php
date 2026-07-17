@@ -161,7 +161,13 @@ it('creates an application from a github repository', function () {
         ->assertJsonPath('data.configuration.git_branch', 'main')
         ->assertJsonPath('meta.instant_deploy', false);
 
-    expect($response->json('data.uuid'))->not->toBeEmpty();
+    $uuid = $response->json('data.uuid');
+    expect($uuid)->not->toBeEmpty();
+
+    $application = \App\Models\Application::query()->where('uuid', $uuid)->first();
+    expect($application)->not->toBeNull()
+        ->and($application->readiness)->not->toBeNull()
+        ->and($application->readiness->autonomous_enabled)->toBeTrue();
 });
 
 it('rejects destinations from another team', function () {

@@ -14,6 +14,9 @@ app/Http/Middleware/EnsureJsonResponse.php
 app/Http/Middleware/RedirectToDevForge.php
 app/Http/Requests/DevForge
 glob:app/Models/Ai*.php
+app/Models/ApplicationReadiness.php
+app/Models/ApplicationReadinessIntervention.php
+app/Jobs/DevForge
 app/Policies/AiAgentPolicy.php
 app/Policies/AiProviderConfigPolicy.php
 app/Services/DevForge
@@ -21,7 +24,11 @@ app/Support/DevForge
 app/Console/Commands/RunScheduledAgentsCommand.php
 app/Providers/RouteServiceProvider.php
 app/Http/Kernel.php
+app/Console/Kernel.php
 config/devforge.php
+glob:database/migrations/*application_readiness*
+bootstrap/helpers/sudo.php
+bootstrap/helpers/shared.php
 routes/devforge-api.php
 routes/devforge-applications.php
 routes/devforge-databases.php

@@ -31,6 +31,7 @@ const application = {
 
 afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
 });
 
 describe('ApplicationDetailPanel', () => {
@@ -114,6 +115,24 @@ describe('ApplicationDetailPanel', () => {
                     },
                 });
             }
+            if (url.includes('/readiness')) {
+                return jsonResponse({
+                    data: {
+                        uuid: 'readiness-1',
+                        status: 'idle',
+                        autonomous_enabled: true,
+                        last_probe_at: null,
+                        last_probe_ok: null,
+                        last_probe_error: null,
+                        last_http_status: null,
+                        round: 0,
+                        max_rounds: 5,
+                        last_deployment_uuid: null,
+                        probe_url: 'https://popcornn.app',
+                        intervention: null,
+                    },
+                });
+            }
             if (url.includes('/api/devforge/v1/agents')) {
                 return jsonResponse({ data: [] });
             }
@@ -130,8 +149,9 @@ describe('ApplicationDetailPanel', () => {
         );
 
         expect(await screen.findByRole('heading', { name: 'popcorn-web' })).toBeInTheDocument();
-        expect(await screen.findByText('Assistant IA · popcorn-web')).toBeInTheDocument();
+        expect(await screen.findByText('Chat')).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'Vue d’ensemble' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Paramètres' })).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'Déploiements' })).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'Bases de données' })).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'Logs' })).toBeInTheDocument();
@@ -140,14 +160,17 @@ describe('ApplicationDetailPanel', () => {
             'src',
             'https://s.wordpress.com/mshots/v1/https%3A%2F%2Fpopcornn.app?w=960',
         );
-        expect(screen.getByText('Déploiement de production')).toBeInTheDocument();
+        expect(screen.getByText('Production')).toBeInTheDocument();
         expect(screen.getByText(/84f8e3e · fix\(auth\): allow registration/)).toBeInTheDocument();
         expect(screen.getByRole('link', { name: 'Visiter' })).toHaveAttribute('href', 'https://popcornn.app');
         expect(screen.getByRole('button', { name: 'Déployer' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Arrêter' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Danger' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Supprimer' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Démarrer' })).not.toBeInTheDocument();
         expect(screen.getByText(/84f8e3e · fix\(auth\): allow registration/)).toBeInTheDocument();
-        expect(screen.getByText('Serveur principal')).toBeInTheDocument();
+        expect(screen.getByText(/Serveur principal/)).toBeInTheDocument();
+        expect(await screen.findByLabelText('État de l’application')).toBeInTheDocument();
         expect(screen.queryByText('Logs du conteneur')).not.toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'Bases de données' })).toBeInTheDocument();
     });
@@ -185,6 +208,24 @@ describe('ApplicationDetailPanel', () => {
                     },
                 });
             }
+            if (url.includes('/readiness')) {
+                return jsonResponse({
+                    data: {
+                        uuid: 'readiness-1',
+                        status: 'idle',
+                        autonomous_enabled: true,
+                        last_probe_at: null,
+                        last_probe_ok: null,
+                        last_probe_error: null,
+                        last_http_status: null,
+                        round: 0,
+                        max_rounds: 5,
+                        last_deployment_uuid: null,
+                        probe_url: null,
+                        intervention: null,
+                    },
+                });
+            }
             if (url.includes('/api/devforge/v1/agents')) {
                 return jsonResponse({ data: [] });
             }
@@ -207,4 +248,5 @@ describe('ApplicationDetailPanel', () => {
         expect(screen.queryByRole('button', { name: 'Arrêter' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Redémarrer' })).not.toBeInTheDocument();
     });
+
 });

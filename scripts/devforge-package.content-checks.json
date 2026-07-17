@@ -4,9 +4,10 @@
             "path": "app/Jobs/ApplicationDeploymentJob.php",
             "must_contain": [
                 "DeploymentBuildAgentDispatcher",
-                "DeploymentFailureAgentDispatcher"
+                "DeploymentFailureAgentDispatcher",
+                "GithubPackagesBuildAuthInjector"
             ],
-            "description": "Le job de déploiement doit déclencher les agents DevForge"
+            "description": "Le job de déploiement doit déclencher les agents DevForge et injecter l'auth npm GitHub Packages"
         },
         {
             "path": "app/Services/DevForge/DeploymentMonitoringData.php",

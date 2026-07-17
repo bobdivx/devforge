@@ -161,11 +161,17 @@ class AgentDirectives
         6. Documente chaque action importante avec send_notification.
         7. N'arrête ou ne redéploie une ressource que si c'est justifié.
         8. Variables Coolify (PUPPETEER_SKIP_DOWNLOAD, secrets build) → upsert_application_env_var, jamais write_application_source sur .env.
-        9. « Permission denied » sous data/applications Coolify = ownership host (ops), pas un bug app.
-        10. Après un deploy mis en file : résume et arrête — ne poll pas les logs en boucle.
-        11. Termine par un résumé structuré : constats → actions prises → recommandations.
-        12. Réponds en français.
-        13. Ne dis JAMAIS « je n'ai pas accès » sans avoir tenté enable_tool_package ou list_tool_packages.
+        9. « Permission denied » sur écriture .env / applications/* = fix_application_host_permissions (autonomie),
+           jamais de DUMMY_* / *_TRIGGER. Si l’outil échoue, documente l’erreur SSH concrète.
+        10. « Read-only file system » pendant mkdir d’une app Coolify = fix_coolify_base_config_path
+            (recharge la config BASE_CONFIG_PATH réelle — ne suppose pas un chemin hôte).
+        11. Site statique qui sert la page nginx par défaut / publish_directory vide :
+            déduis le dossier depuis les logs de build (get_deployment_logs / get_application_runtime_settings)
+            puis update_application_runtime_settings(publish_directory=…, redeploy=true).
+        12. Après un deploy mis en file : résume et arrête — ne poll pas les logs en boucle.
+        13. Termine par un résumé structuré : constats → actions prises → recommandations.
+        14. Réponds en français.
+        15. Ne dis JAMAIS « je n'ai pas accès » sans avoir tenté enable_tool_package, list_tool_packages, fix_application_host_permissions ou fix_coolify_base_config_path.
         RULES;
     }
 
@@ -180,11 +186,13 @@ class AgentDirectives
         3. Si la question porte sur tes capacités (fichiers, GitHub, serveurs, outils), PROUVE-LE avec des appels d'outil immédiats, puis résume avec des faits concrets.
         4. Si une application ou ressource est mentionnée, investigue-la tout de suite (get_application_source_info, list_application_source, read_application_source, get_deployment_logs, docker_logs). read_remote_file = config Coolify sur le serveur uniquement.
         5. Ta première réponse à une demande actionnable DOIT inclure au moins un appel d'outil — jamais une réponse texte seule.
-        6. Enchaîne les outils jusqu'à une réponse complète basée sur des données réelles.
-        7. Le paquet github est activé par défaut pour les agents de déploiement et debug ; utilise list_application_source / read_application_source en priorité pour le code source.
-        8. Pour une sous-problème isolée et complexe, utilise spawn_task (éphémère, modèle adapté) plutôt que de tout faire en une seule passe.
-        9. Réponds en français. Sois concis dans le résumé final, pas avant d'avoir agi.
-        10. Ne révèle jamais de secrets.
+        6. INTERDIT de décrire un outil en prose ou JSON (`{"method":"spawn_task"...}`) : émets un vrai tool_call.
+           L’UI affiche automatiquement une carte Actions — ne réécris pas la commande pour l’utilisateur.
+        7. Enchaîne les outils jusqu'à une réponse complète basée sur des données réelles.
+        8. Le paquet github est activé par défaut pour les agents de déploiement et debug ; utilise list_application_source / read_application_source en priorité pour le code source.
+        9. Pour une sous-problème isolée et complexe, utilise spawn_task (éphémère, modèle adapté) plutôt que de tout faire en une seule passe.
+        10. Réponds en français. Sois concis dans le résumé final, pas avant d'avoir agi.
+        11. Ne révèle jamais de secrets.
         RULES;
     }
 
@@ -199,6 +207,10 @@ class AgentDirectives
         $scopeHint = $agent?->resource_uuid
             ? " Scope agent : ressource UUID {$agent->resource_uuid}."
             : '';
+
+        if (preg_match('/r[ée]par|fix|corrige|branche|git_branch|remote branch|spawn_task|red[ée]ploi|permission denied/i', $userMessage)) {
+            return 'Agis MAINTENANT avec de VRAIS tool_calls (pas de JSON en texte) : get_deployment_logs, fix_application_host_permissions, update_application_git_branch, update_application_runtime_settings, control_resource, spawn_task.'.$scopeHint;
+        }
 
         if (preg_match('/acc[èe]s|github|fichier|repo|d[ée]p[ôo]t|outil|capacit|peux.?tu|as.?tu/i', $userMessage)) {
             return 'Démontre tes accès MAINTENANT : get_application_source_info, list_application_source, read_application_source, list_resources, get_deployment_logs. Ne demande pas de confirmation.'.$scopeHint;
@@ -219,6 +231,22 @@ class AgentDirectives
         return null;
     }
 
+    public static function isChatRepairIntent(string $userMessage): bool
+    {
+        $message = trim($userMessage);
+        if ($message === '') {
+            return false;
+        }
+
+        // Impératif / demande explicite de réparation ou redéploiement.
+        if (preg_match('/\b(?:r[ée]par(?:e|er|é|ée|ation)?|fix(?:er)?|corrige(?:r)?|red[ée]ploi(?:e|er)?)\b/iu', $message) === 1) {
+            return true;
+        }
+
+        // Problèmes host / permissions souvent collés tels quels depuis les logs.
+        return (bool) preg_match('/permission\s+denied|\bchown\b|\bchmod\b|droits?\s+(?:host|fichier)/iu', $message);
+    }
+
     public static function defersToUser(string $text): bool
     {
         if (trim($text) === '') {
@@ -231,9 +259,349 @@ class AgentDirectives
         );
     }
 
+    /**
+     * Detects when the model writes about tools (or JSON tool payloads) instead of emitting tool_calls.
+     */
+    public static function mentionsToolWithoutCalling(?string $text): bool
+    {
+        if ($text === null || trim($text) === '') {
+            return false;
+        }
+
+        $names = implode('|', array_map(
+            static fn (string $name): string => preg_quote($name, '/'),
+            self::chatKnownToolNames(),
+        ));
+
+        if (preg_match('/\b(?:'.$names.')\b/i', $text) === 1) {
+            return true;
+        }
+
+        return (bool) preg_match(
+            '/("method"\s*:\s*"(?:spawn_task|control_resource|update_application_git_branch|fix_application_host_permissions)")|```(?:json)?\s*\{[^}]*"(?:spawn_task|control_resource|method)"/iu',
+            $text,
+        );
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function chatKnownToolNames(): array
+    {
+        return [
+            'fix_application_host_permissions',
+            'fix_coolify_base_config_path',
+            'spawn_task',
+            'control_resource',
+            'update_application_git_branch',
+            'upsert_application_env_var',
+            'update_application_runtime_settings',
+            'get_application_runtime_settings',
+            'write_application_source',
+            'get_deployment_logs',
+            'list_resources',
+            'get_resource_status',
+            'list_github_branches',
+            'get_application_git_info',
+            'enable_tool_package',
+            'delegate_task',
+            'http_request',
+            'docker_logs',
+        ];
+    }
+
+    public static function isHostPermissionDiagnosis(?string $text): bool
+    {
+        if ($text === null || trim($text) === '') {
+            return false;
+        }
+
+        // Symptôme (permission) + cible typique Coolify (.env / tee / applications), sans path hôte figé.
+        $hasPermissionSignal = (bool) preg_match(
+            '/permission\s+denied|operation not permitted|tee:.*(?:denied|permission)|ownership|\bchown\b|\bchmod\b/iu',
+            $text,
+        );
+        $hasCoolifyTarget = (bool) preg_match(
+            '/\bapplications\/|\.env\b|(?:cr[ée]ation|écriture|ecriture).*\.env|\.env.*(?:permission|denied|échec|echec)/iu',
+            $text,
+        );
+
+        // Diagnostic LLM sans recopier l’erreur OS : « problème de création/écriture .env ».
+        $hasEnvWriteDiagnosis = (bool) preg_match(
+            '/(?:cr[ée]ation|écriture|ecriture|owned?ership).*\.env|\.env.*(?:échec|echec|permission|denied)/iu',
+            $text,
+        );
+
+        return ($hasPermissionSignal && $hasCoolifyTarget) || $hasEnvWriteDiagnosis;
+    }
+
+    /**
+     * @param  array<int, mixed>  $failureExcerpt
+     */
+    public static function failureExcerptHasHostPermissionIssue(array $failureExcerpt): bool
+    {
+        return self::failureExcerptMatches($failureExcerpt, [self::class, 'isHostPermissionDiagnosis'])
+            || self::failureExcerptContextMatches(
+                $failureExcerpt,
+                static fn (string $blob): bool => (bool) preg_match('/permission\s+denied|tee:.*permission/iu', $blob)
+                    && (bool) preg_match('/\bapplications\/|\.env\b/iu', $blob),
+            );
+    }
+
+    public static function isCoolifyBaseConfigPathIssue(?string $text): bool
+    {
+        if ($text === null || trim($text) === '') {
+            return false;
+        }
+
+        // Symptôme FS en lecture seule lors d'un mkdir Coolify — le chemin exact varie (NAS, Docker, volume).
+        $readOnly = (bool) preg_match('/read-only\s+file\s+system/iu', $text);
+        $mkdir = (bool) preg_match('/\bmkdir\b|cannot create directory/iu', $text);
+        $coolifyContext = (bool) preg_match('/\bcoolify\b|\bapplications\//iu', $text);
+
+        return $readOnly && $mkdir && $coolifyContext;
+    }
+
+    /**
+     * @param  array<int, mixed>  $failureExcerpt
+     */
+    public static function failureExcerptHasCoolifyBaseConfigPathIssue(array $failureExcerpt): bool
+    {
+        // Une ligne peut dire « Read-only », une autre « mkdir …/applications/… » — juger le blob entier.
+        return self::failureExcerptContextMatches(
+            $failureExcerpt,
+            static function (string $blob): bool {
+                $readOnly = (bool) preg_match('/read-only\s+file\s+system/iu', $blob);
+                $mkdirOrCreate = (bool) preg_match('/\bmkdir\b|cannot create directory/iu', $blob);
+                $coolifyContext = (bool) preg_match('/\bcoolify\b|\bapplications\//iu', $blob);
+
+                return $readOnly && $mkdirOrCreate && $coolifyContext;
+            },
+        ) || self::failureExcerptMatches($failureExcerpt, [self::class, 'isCoolifyBaseConfigPathIssue']);
+    }
+
+    public static function isMissingStaticPublishDirectoryIssue(?string $text): bool
+    {
+        if ($text === null || trim($text) === '') {
+            return false;
+        }
+
+        // Page d'accueil nginx stock / message probe — pas de chemin de build hardcodé.
+        return (bool) preg_match(
+            '/Welcome to nginx!|publish_directory probablement incorrect|Page nginx par d[ée]faut|nginx is successfully installed/iu',
+            $text,
+        );
+    }
+
+    /**
+     * @param  array<int, mixed>  $failureExcerpt
+     */
+    public static function failureExcerptHasMissingStaticPublishDirectoryIssue(array $failureExcerpt): bool
+    {
+        return self::failureExcerptMatches($failureExcerpt, [self::class, 'isMissingStaticPublishDirectoryIssue']);
+    }
+
+    public static function isReadinessPlatformCrash(?string $text): bool
+    {
+        if ($text === null || trim($text) === '') {
+            return false;
+        }
+
+        return (bool) preg_match(
+            '/ApplicationReadiness(?:Service)?[^\n]{0,80}not found|Class\s+[^\n]{0,40}ApplicationReadiness/iu',
+            $text,
+        );
+    }
+
+    /**
+     * @param  array<int, mixed>  $failureExcerpt
+     */
+    public static function failureExcerptHasReadinessPlatformCrash(array $failureExcerpt): bool
+    {
+        return self::failureExcerptMatches($failureExcerpt, [self::class, 'isReadinessPlatformCrash']);
+    }
+
+    public static function isInvalidChownGroupIssue(?string $text): bool
+    {
+        if ($text === null || trim($text) === '') {
+            return false;
+        }
+
+        return (bool) preg_match('/chown:\s*invalid group:/iu', $text);
+    }
+
+    /**
+     * @param  array<int, mixed>  $failureExcerpt
+     */
+    public static function failureExcerptHasInvalidChownGroupIssue(array $failureExcerpt): bool
+    {
+        return self::failureExcerptMatches($failureExcerpt, [self::class, 'isInvalidChownGroupIssue']);
+    }
+
+    public static function isNpmPrivateRegistryAuthIssue(?string $text): bool
+    {
+        if ($text === null || trim($text) === '') {
+            return false;
+        }
+
+        $blob = mb_strtolower($text);
+
+        $authFailure = str_contains($blob, 'npm error code e401')
+            || str_contains($blob, '401 unauthorized')
+            || str_contains($blob, 'unauthenticated: user cannot be authenticated')
+            || (str_contains($blob, 'e401') && str_contains($blob, 'npm'));
+
+        $privateRegistry = str_contains($blob, 'npm.pkg.github.com')
+            || str_contains($blob, 'github.com/download/@')
+            || str_contains($blob, 'pkgs.dev.azure.com')
+            || str_contains($blob, 'registry.gitlab.com');
+
+        return $authFailure && $privateRegistry;
+    }
+
+    /**
+     * @param  array<int, mixed>  $failureExcerpt
+     */
+    public static function failureExcerptHasNpmPrivateRegistryAuthIssue(array $failureExcerpt): bool
+    {
+        return self::failureExcerptContextMatches(
+            $failureExcerpt,
+            static fn (string $blob): bool => self::isNpmPrivateRegistryAuthIssue($blob),
+        ) || self::failureExcerptMatches($failureExcerpt, [self::class, 'isNpmPrivateRegistryAuthIssue']);
+    }
+
+    /**
+     * Infer publish directory from build output (framework-agnostic), never assume a host path.
+     *
+     * @param  array<int, mixed>  $failureExcerpt
+     */
+    public static function inferStaticPublishDirectory(array $failureExcerpt = [], ?string $hint = null): ?string
+    {
+        $blob = $hint ?? '';
+        foreach ($failureExcerpt as $line) {
+            $blob .= "\n".(is_array($line) ? (string) ($line['message'] ?? '') : (is_string($line) ? $line : ''));
+        }
+
+        // Astro / Vite / Next export / generic "build directory: /app/<dir>"
+        if (preg_match('/directory:\s*\/app\/([A-Za-z0-9._\/-]+)\b/i', $blob, $m) === 1) {
+            return self::normalizePublishDirectory($m[1]);
+        }
+
+        if (preg_match('/\b(?:output|outdir|outDir|publish(?:_directory)?)\s*[:=]\s*["\']?([A-Za-z0-9._\/-]+)/i', $blob, $m) === 1) {
+            return self::normalizePublishDirectory($m[1]);
+        }
+
+        // Heuristique framework uniquement si aucun chemin n'est dans les logs.
+        if (preg_match('/\b(?:astro|vite)\s+build\b/i', $blob) === 1) {
+            return '/dist';
+        }
+
+        if (preg_match('/\bnext\s+(?:build|export)\b/i', $blob) === 1) {
+            return '/out';
+        }
+
+        return null;
+    }
+
+    /**
+     * Choisit un dossier de publish parmi les entrées source (repo Git), sans chemin hôte hardcodé.
+     *
+     * @param  array<int, mixed>  $entries
+     */
+    public static function pickStaticPublishDirectoryFromSourceEntries(array $entries): ?string
+    {
+        $dirs = [];
+        foreach ($entries as $entry) {
+            if (! is_array($entry)) {
+                continue;
+            }
+            if (($entry['type'] ?? '') !== 'directory' && ($entry['type'] ?? '') !== 'dir') {
+                continue;
+            }
+            $name = trim((string) ($entry['name'] ?? ''), '/');
+            if ($name !== '') {
+                $dirs[strtolower($name)] = $name;
+            }
+        }
+
+        foreach (['dist', 'build', 'out', 'www', 'public', '_site', 'docs'] as $candidate) {
+            if (isset($dirs[$candidate])) {
+                return '/'.$dirs[$candidate];
+            }
+        }
+
+        return null;
+    }
+
+    public static function normalizePublishDirectory(?string $directory): ?string
+    {
+        if ($directory === null) {
+            return null;
+        }
+
+        $dir = trim($directory, "/ \t\"'");
+        if ($dir === '' || strtolower($dir) === 'null') {
+            return null;
+        }
+
+        return '/'.$dir;
+    }
+
+    /**
+     * @param  array<int, mixed>  $failureExcerpt
+     * @param  callable(string): bool  $matcher
+     */
+    private static function failureExcerptMatches(array $failureExcerpt, callable $matcher): bool
+    {
+        foreach ($failureExcerpt as $line) {
+            $message = is_array($line)
+                ? (string) ($line['message'] ?? '')
+                : (is_string($line) ? $line : '');
+
+            if ($message !== '' && $matcher($message)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<int, mixed>  $failureExcerpt
+     * @param  callable(string): bool  $matcher
+     */
+    private static function failureExcerptContextMatches(array $failureExcerpt, callable $matcher): bool
+    {
+        $blob = '';
+        foreach ($failureExcerpt as $line) {
+            $blob .= "\n".(is_array($line) ? (string) ($line['message'] ?? '') : (is_string($line) ? $line : ''));
+        }
+
+        return $blob !== '' && $matcher($blob);
+    }
+
     public static function toolNudgeMessage(): string
     {
         return 'Tu n\'as pas encore utilisé d\'outil. Commence IMMÉDIATEMENT par list_resources ou get_deployment_logs selon ta mission. Ne réponds pas sans agir.';
+    }
+
+    public static function deploymentFailureCorrectionNudgeMessage(?string $assistantText = null): string
+    {
+        return 'STOP — diagnostic insuffisant. Applique MAINTENANT une vraie correction via tool_call : '
+            .'fix_coolify_base_config_path (si Read-only pendant mkdir Coolify), fix_application_host_permissions (si Permission denied), '
+            .'update_application_runtime_settings (déduis publish_directory depuis les logs de build si page nginx par défaut), '
+            .'update_application_git_branch, upsert_application_env_var (variable RÉELLE citée dans les logs) '
+            .'ou write_application_source, puis redeploy si besoin. '
+            .'INTERDIT d’inventer une variable factice (DUMMY_*, *_TRIGGER, FORCE_REDEPLOY). '
+            .'Tu es autonome : corrige toi-même, ne délègue pas à « ops ».';
+    }
+
+    public static function deploymentFailureHostPermissionNudgeMessage(): string
+    {
+        return 'Permission denied hôte détecté. '
+            .'Appelle MAINTENANT fix_application_host_permissions (redeploy=true) — '
+            .'l’outil fait chown/chmod ciblé sur applications/<uuid> puis redéploie. '
+            .'INTERDIT : upsert factice (DUMMY_*), send_notification sans fix, conclure sans tool_call.';
     }
 
     public static function chatToolNudgeMessage(?string $userMessage = null): string
@@ -245,6 +613,13 @@ class AgentDirectives
         }
 
         return 'STOP — n\'attends pas de validation utilisateur. Appelle un outil MAINTENANT (list_resources, get_deployment_logs, enable_tool_package, get_application_git_info…). Ne réponds pas en texte seul.';
+    }
+
+    public static function chatProseToolNudgeMessage(): string
+    {
+        return 'INTERDIT d’écrire {"method":"spawn_task"...} ou de décrire un outil en texte. '
+            .'Émets un vrai tool_call maintenant (spawn_task, fix_application_host_permissions, control_resource, etc.). '
+            .'Aucune explication avant l’appel.';
     }
 
     public static function chatConfirmationNudgeMessage(): string

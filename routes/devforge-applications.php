@@ -8,6 +8,9 @@ Route::get('/deployment-targets', [ApplicationController::class, 'deploymentTarg
     ->name('deployment-targets.index');
 Route::post('/applications', [ApplicationController::class, 'store'])
     ->name('applications.store');
+Route::delete('/applications/{applicationUuid}', [ApplicationController::class, 'destroy'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.destroy');
 Route::get('/applications/{applicationUuid}/domains', [ApplicationController::class, 'domains'])
     ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
     ->name('applications.domains.show');
@@ -23,6 +26,12 @@ Route::get('/applications/{applicationUuid}/linkable-databases', [ApplicationCon
 Route::post('/applications/{applicationUuid}/connect-database', [ApplicationController::class, 'connectDatabase'])
     ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
     ->name('applications.connect-database');
+Route::post('/applications/{applicationUuid}/databases/{databaseUuid}/reset', [ApplicationController::class, 'resetLinkedDatabase'])
+    ->where([
+        'applicationUuid' => '[A-Za-z0-9-]{8,64}',
+        'databaseUuid' => '[A-Za-z0-9-]{8,64}',
+    ])
+    ->name('applications.databases.reset');
 Route::get('/applications/{applicationUuid}/logs', [ApplicationController::class, 'logs'])
     ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
     ->name('applications.logs');
@@ -53,6 +62,27 @@ Route::get('/applications/{applicationUuid}/source/read', [ApplicationController
 Route::put('/applications/{applicationUuid}/source/write', [ApplicationController::class, 'sourceWrite'])
     ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
     ->name('applications.source.write');
+Route::get('/applications/{applicationUuid}/runtime-settings', [ApplicationController::class, 'runtimeSettings'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.runtime-settings.show');
+Route::put('/applications/{applicationUuid}/runtime-settings', [ApplicationController::class, 'updateRuntimeSettings'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.runtime-settings.update');
+Route::get('/applications/{applicationUuid}/readiness', [ApplicationController::class, 'readiness'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.readiness.show');
+Route::patch('/applications/{applicationUuid}/readiness', [ApplicationController::class, 'updateReadiness'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.readiness.update');
+Route::post('/applications/{applicationUuid}/readiness/probe', [ApplicationController::class, 'probeReadiness'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.readiness.probe');
+Route::post('/applications/{applicationUuid}/readiness/interventions/{interventionUuid}/done', [ApplicationController::class, 'acknowledgeReadinessIntervention'])
+    ->where([
+        'applicationUuid' => '[A-Za-z0-9-]{8,64}',
+        'interventionUuid' => '[A-Za-z0-9-]{8,64}',
+    ])
+    ->name('applications.readiness.interventions.done');
 
 Route::prefix('github')->name('github.')->group(function () {
     Route::get('/apps', [GithubController::class, 'apps'])->name('apps.index');

@@ -21,6 +21,8 @@ use App\Notifications\Application\DeploymentFailed;
 use App\Notifications\Application\DeploymentSuccess;
 use App\Services\DevForge\Agent\DeploymentBuildAgentDispatcher;
 use App\Services\DevForge\Agent\DeploymentFailureAgentDispatcher;
+use App\Services\DevForge\Application\GithubPackagesBuildAuthInjector;
+use App\Services\DevForge\Readiness\ApplicationReadinessService;
 use App\Support\ValidationPatterns;
 use App\Traits\EnvironmentVariableAnalyzer;
 use App\Traits\ExecuteRemoteCommand;
@@ -1695,6 +1697,25 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
                     }
                 }
             }
+        }
+
+        // 3.5 Inject GitHub App installation token as NODE_AUTH_TOKEN for private packages
+        // (fresh token each deploy — never persisted). User-defined vars below can override.
+        try {
+            $githubPackagesAuth = app(GithubPackagesBuildAuthInjector::class)
+                ->buildTimeAdditions($this->application, array_keys($envs_dict));
+            foreach ($githubPackagesAuth as $key => $value) {
+                $envs_dict[$key] = escapeBashEnvValue($value);
+                $this->application_deployment_queue->addLogEntry(
+                    "Injected build-time {$key} from GitHub App installation token (npm.pkg.github.com).",
+                    hidden: true,
+                );
+            }
+        } catch (\Throwable $e) {
+            $this->application_deployment_queue->addLogEntry(
+                'GitHub Packages build auth skipped: '.mb_substr($e->getMessage(), 0, 200),
+                hidden: true,
+            );
         }
 
         // 4. Add user-defined build-time variables LAST (highest priority - can override everything)
@@ -4817,6 +4838,17 @@ COPY ./nginx.conf /etc/nginx/conf.d/default.conf");
             deploymentUuid: $this->deployment_uuid,
             deploymentQueue: $this->application_deployment_queue,
         );
+
+        try {
+            app(ApplicationReadinessService::class)->onDeploymentFinished(
+                $this->application,
+                $this->deployment_uuid,
+            );
+        } catch (\Throwable $e) {
+            // Must catch Error too (e.g. missing ApplicationReadiness class on partial rollouts)
+            // so a readiness failure never rolls back a successful container start.
+            \Log::warning('DevForge readiness: échec du hook post-déploiement '.$this->deployment_uuid.': '.$e->getMessage());
+        }
     }
 
     /**

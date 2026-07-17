@@ -128,6 +128,16 @@ class DeploymentFailureAgentDispatcher
             self::CONTEXT_MARKER => $deploymentUuid,
             'application_uuid' => $application->uuid,
             'application_name' => $application->name,
+            'git_branch' => $application->git_branch ?: null,
+            'build_pack' => $application->build_pack ?: null,
+            'install_command' => $application->install_command ?: null,
+            'build_command' => $application->build_command ?: null,
+            'start_command' => $application->start_command ?: null,
+            'ports_exposes' => $application->ports_exposes ?: null,
+            'base_directory' => $application->base_directory ?: null,
+            'publish_directory' => $application->publish_directory ?: null,
+            'is_static' => (bool) ($application->settings?->is_static ?? false),
+            'workdir' => $application->workdir(),
             'commit' => $deploymentQueue->commit ?: null,
             'commit_message' => $deploymentQueue->commit_message ?: null,
             'status' => $deploymentQueue->status,
@@ -260,7 +270,7 @@ class DeploymentFailureAgentDispatcher
     private function isBuildNoise(string $message): bool
     {
         return (bool) preg_match(
-            '/SecretsUsedInArgOrEnv|UndefinedVar|warnings found \(use docker|Do not use ARG or ENV instructions/i',
+            '/SecretsUsedInArgOrEnv|UndefinedVar|warnings found \(use docker|Do not use ARG or ENV instructions|npm warn\b|No such container:/i',
             $message,
         );
     }
@@ -268,7 +278,7 @@ class DeploymentFailureAgentDispatcher
     private function isFailureSignal(string $message): bool
     {
         return (bool) preg_match(
-            '/\bERROR\b|npm ERR!|ELIFECYCLE|ERESOLVE|ENOENT|failed to (build|solve)|did not complete successfully|exit code:\s*[1-9]|exit status [1-9]/i',
+            '/\bERROR\b|npm ERR!|ELIFECYCLE|ERESOLVE|ENOENT|Permission denied|EACCES|tee:.*Permission|Read-only file system|cannot create directory|failed to (build|solve)|did not complete successfully|exit code:\s*[1-9]|exit status [1-9]|Remote branch .+ not found|Could not find remote branch/i',
             $message,
         );
     }
@@ -276,7 +286,7 @@ class DeploymentFailureAgentDispatcher
     private function isFailureContext(string $message): bool
     {
         return (bool) preg_match(
-            '/^Dockerfile:|^\s*-{3,}\s*$|^\s*\d+\s*\||>>>\s*RUN|npm ci|package-lock|npm warn|npm error/i',
+            '/^Dockerfile:|^\s*-{3,}\s*$|^\s*\d+\s*\||>>>\s*RUN|npm ci|package-lock|npm error|docker-compose\.ya?ml|\.env\b|data\/applications|AppData\/coolify/i',
             $message,
         );
     }

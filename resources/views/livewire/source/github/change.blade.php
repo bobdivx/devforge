@@ -378,7 +378,8 @@
                         contents: 'read',
                         metadata: 'read',
                         emails: 'read',
-                        administration: 'read'
+                        administration: 'read',
+                        packages: 'read'
                     };
                     const default_events = ['push'];
                     if (preview_deployment_permissions) {

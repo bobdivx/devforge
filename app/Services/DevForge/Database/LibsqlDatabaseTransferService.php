@@ -253,6 +253,46 @@ class LibsqlDatabaseTransferService
     }
 
     /**
+     * Wipe all application data and recreate an empty SQLite database.
+     *
+     * @return array{reset: bool, restarted: bool, message: string}
+     */
+    public function resetEmpty(StandaloneLibsql $database): array
+    {
+        $server = $database->destination->server;
+        abort_unless($server->isFunctional(), 422, 'Le serveur n’est pas disponible.');
+
+        $this->runtimeGuard->stopForMaintenance($database);
+
+        try {
+            $volume = escapeshellarg($this->volumeName($database));
+            $prepare = $this->prepareModernLayoutShellSnippet();
+            $resetCommand = "docker run --rm -v {$volume}:/var/lib/sqld "
+                .escapeshellarg(self::SQLITE_RUNNER_IMAGE)
+                ." sh -c 'apk add --no-cache sqlite >/dev/null 2>&1; {$prepare}"
+                .'sqlite3 '.self::DB_PATH_MODERN." \"PRAGMA user_version = 0;\"'";
+
+            $this->runRemoteProcess(
+                $server,
+                [$resetCommand],
+                'La réinitialisation de la base sur le serveur a échoué',
+            );
+        } catch (\Throwable $exception) {
+            $this->runtimeGuard->ensureRunning($database);
+
+            throw $exception;
+        }
+
+        $this->runtimeGuard->ensureRunning($database);
+
+        return [
+            'reset' => true,
+            'restarted' => true,
+            'message' => 'Base vidée et redémarrée. Les tables applicatives doivent être recréées (migration / premier démarrage).',
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function import(StandaloneLibsql $database, string $sql): array

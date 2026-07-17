@@ -329,6 +329,71 @@ it('keeps actionable npm errors in the failure excerpt instead of docker secret 
     });
 });
 
+it('prefers host Permission denied signals over npm warn noise in the failure excerpt', function () {
+    Queue::fake();
+
+    AiAgent::factory()->deployment()->create([
+        'team_id' => $this->team->id,
+        'provider_config_id' => $this->provider->id,
+    ]);
+
+    $deployment = ApplicationDeploymentQueue::create([
+        'application_id' => $this->application->id,
+        'deployment_uuid' => 'perm-denied-failure',
+        'status' => 'failed',
+        'pull_request_id' => 0,
+        'logs' => json_encode([
+            [
+                'command' => null,
+                'output' => 'Error response from daemon: No such container: perm-denied-failure',
+                'type' => 'stderr',
+                'timestamp' => now()->toIso8601String(),
+                'hidden' => false,
+                'batch' => 1,
+            ],
+            [
+                'command' => null,
+                'output' => "npm warn config production Use `--omit=dev` instead.\nnpm warn deprecated node-domexception@1.0.0",
+                'type' => 'stderr',
+                'timestamp' => now()->toIso8601String(),
+                'hidden' => false,
+                'batch' => 2,
+            ],
+            [
+                'command' => null,
+                'output' => 'tee: /media/Docker/AppData/coolify/data/applications/app-uuid/.env: Permission denied',
+                'type' => 'stderr',
+                'timestamp' => now()->toIso8601String(),
+                'hidden' => false,
+                'batch' => 3,
+            ],
+            [
+                'command' => null,
+                'output' => 'tee: /media/Docker/AppData/coolify/data/applications/app-uuid/docker-compose.yaml: Permission denied',
+                'type' => 'stderr',
+                'timestamp' => now()->toIso8601String(),
+                'hidden' => false,
+                'batch' => 4,
+            ],
+        ]),
+    ]);
+
+    app(DeploymentFailureAgentDispatcher::class)->dispatch(
+        application: $this->application,
+        deploymentUuid: 'perm-denied-failure',
+        deploymentQueue: $deployment,
+    );
+
+    Queue::assertPushed(RunAgentJob::class, function (RunAgentJob $job): bool {
+        $messages = collect($job->context['failure_excerpt'] ?? [])->pluck('message')->implode("\n");
+
+        return str_contains($messages, 'Permission denied')
+            && str_contains($messages, 'docker-compose.yaml')
+            && ! str_contains($messages, 'npm warn')
+            && ! str_contains($messages, 'No such container');
+    });
+});
+
 it('redacts application secrets from the failure excerpt before LLM context', function () {
     Queue::fake();
 

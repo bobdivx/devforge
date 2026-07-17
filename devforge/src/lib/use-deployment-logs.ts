@@ -25,6 +25,7 @@ export function useDeploymentLogs(
     const cursorRef = useRef(0);
     const completeRef = useRef(false);
     const inFlightRef = useRef(false);
+    const generationRef = useRef(0);
     const deploymentRef = useRef(deploymentUuid);
     deploymentRef.current = deploymentUuid;
 
@@ -39,8 +40,10 @@ export function useDeploymentLogs(
         }
 
         if (reset) {
+            generationRef.current += 1;
             cursorRef.current = 0;
             completeRef.current = false;
+            inFlightRef.current = false;
             setLines([]);
             setComplete(false);
             setLoading(true);
@@ -49,11 +52,19 @@ export function useDeploymentLogs(
             return;
         }
 
+        const generation = generationRef.current;
+        const requestUuid = uuid;
         inFlightRef.current = true;
 
         try {
             const after = reset ? 0 : cursorRef.current;
-            const response = await domainApi.deploymentLogs(uuid, after);
+            const response = await domainApi.deploymentLogs(requestUuid, after);
+
+            // Ignore stale responses from a previous deployment / reset.
+            if (generation !== generationRef.current || deploymentRef.current !== requestUuid) {
+                return;
+            }
+
             const payload = response.data;
 
             setLines((current) => {
@@ -73,15 +84,21 @@ export function useDeploymentLogs(
             setComplete(payload.complete);
             setError(null);
         } catch (requestError) {
+            if (generation !== generationRef.current || deploymentRef.current !== requestUuid) {
+                return;
+            }
+
             if (reset) {
                 setLines([]);
             }
             setError(requestError);
         } finally {
-            inFlightRef.current = false;
+            if (generation === generationRef.current) {
+                inFlightRef.current = false;
 
-            if (reset) {
-                setLoading(false);
+                if (reset) {
+                    setLoading(false);
+                }
             }
         }
     }, []);
@@ -92,6 +109,7 @@ export function useDeploymentLogs(
 
     useEffect(() => {
         if (!enabled || !deploymentUuid) {
+            generationRef.current += 1;
             setLines([]);
             setComplete(false);
             setLoading(false);

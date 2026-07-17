@@ -108,6 +108,8 @@ class CoreResourcePresenter
      */
     private function application(Application $application): array
     {
+        $application->loadMissing('settings');
+
         return [
             ...$this->resourceBase($application, 'application'),
             'configuration' => [
@@ -117,6 +119,18 @@ class CoreResourcePresenter
                 'domains' => $this->domains($application->fqdn),
                 'redirect' => (string) ($application->redirect ?: 'both'),
                 'base_directory' => $application->base_directory ?: '',
+                'publish_directory' => $application->publish_directory ?: '',
+                'ports_exposes' => (string) ($application->ports_exposes ?? ''),
+                'start_command' => $application->start_command,
+                'install_command' => $application->install_command,
+                'build_command' => $application->build_command,
+                'is_static' => (bool) ($application->settings?->is_static ?? false),
+                'health_check_enabled' => (bool) $application->health_check_enabled,
+                'health_check_type' => $application->health_check_type ?: 'http',
+                'health_check_path' => $application->health_check_path ?: '/',
+                'health_check_port' => filled($application->health_check_port)
+                    ? (string) $application->health_check_port
+                    : null,
                 'project' => $this->project($application),
                 'environment' => $this->environment($application),
                 'destination' => $this->destinationReference($application),

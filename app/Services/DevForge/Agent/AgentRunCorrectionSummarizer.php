@@ -47,6 +47,30 @@ class AgentRunCorrectionSummarizer
      */
     public function finalize(AiAgentRun $run): void
     {
+        $existing = is_array($run->metadata['correction'] ?? null) ? $run->metadata['correction'] : [];
+
+        // Le harness peut poser un outcome needs_user (secret manquant, etc.) —
+        // ne pas l’écraser par un no_action recalculé depuis les tool_calls.
+        if (($existing['outcome'] ?? '') === 'needs_user') {
+            $headline = trim((string) ($existing['headline'] ?? ''));
+            if ($headline === '') {
+                $headline = 'Action humaine requise.';
+            }
+
+            $current = trim((string) ($run->summary ?? ''));
+            if (
+                $this->shouldReplaceSummary($current, $headline)
+                || str_contains(mb_strtolower($current), 'réparation exécutée')
+                || str_contains(mb_strtolower($current), 'diagnostic automatique')
+            ) {
+                $run->update([
+                    'summary' => mb_substr($headline, 0, 500),
+                ]);
+            }
+
+            return;
+        }
+
         $correction = $this->summarize($run);
         $run->mergeMetadata(['correction' => $correction]);
 
@@ -141,6 +165,100 @@ class AgentRunCorrectionSummarizer
                 'ok' => true,
                 'at' => now()->toISOString(),
             ]],
+            'update_application_runtime_settings' => array_values(array_filter([
+                [
+                    'kind' => 'runtime_settings',
+                    'label' => 'Build Coolify',
+                    'detail' => implode(', ', array_map(
+                        static fn ($key): string => (string) $key,
+                        is_array($result['updated_keys'] ?? null)
+                            ? $result['updated_keys']
+                            : array_keys(array_filter(
+                                $arguments,
+                                static fn ($value, $key): bool => ! in_array($key, ['application_uuid', 'redeploy', 'reason'], true)
+                                    && $value !== null,
+                                ARRAY_FILTER_USE_BOTH,
+                            )),
+                    )),
+                    'ok' => true,
+                    'at' => now()->toISOString(),
+                ],
+                isset($result['redeploy']) && is_array($result['redeploy']) && ! isset($result['redeploy']['error'])
+                    ? [
+                        'kind' => 'redeploy',
+                        'label' => 'Redéploiement',
+                        'detail' => (string) ($arguments['reason'] ?? ''),
+                        'deployment_uuid' => is_string($result['redeploy']['deployment_uuid'] ?? null)
+                            ? $result['redeploy']['deployment_uuid']
+                            : null,
+                        'ok' => true,
+                        'at' => now()->toISOString(),
+                    ]
+                    : null,
+            ])),
+            'fix_application_host_permissions' => array_values(array_filter([
+                [
+                    'kind' => 'host_permissions',
+                    'label' => 'Permissions host',
+                    'detail' => (string) ($result['path'] ?? $arguments['path'] ?? ''),
+                    'ok' => true,
+                    'at' => now()->toISOString(),
+                ],
+                isset($result['redeploy']) && is_array($result['redeploy']) && ! isset($result['redeploy']['error'])
+                    ? [
+                        'kind' => 'redeploy',
+                        'label' => 'Redéploiement',
+                        'detail' => (string) ($arguments['reason'] ?? ''),
+                        'deployment_uuid' => is_string($result['redeploy']['deployment_uuid'] ?? null)
+                            ? $result['redeploy']['deployment_uuid']
+                            : null,
+                        'ok' => true,
+                        'at' => now()->toISOString(),
+                    ]
+                    : null,
+            ])),
+            'fix_coolify_base_config_path' => array_values(array_filter([
+                [
+                    'kind' => 'coolify_base_config',
+                    'label' => 'Config Coolify',
+                    'detail' => (string) ($result['container'] ?? $arguments['container'] ?? 'coolify'),
+                    'ok' => true,
+                    'at' => now()->toISOString(),
+                ],
+                isset($result['redeploy']) && is_array($result['redeploy']) && ! isset($result['redeploy']['error'])
+                    ? [
+                        'kind' => 'redeploy',
+                        'label' => 'Redéploiement',
+                        'detail' => (string) ($arguments['reason'] ?? ''),
+                        'deployment_uuid' => is_string($result['redeploy']['deployment_uuid'] ?? null)
+                            ? $result['redeploy']['deployment_uuid']
+                            : null,
+                        'ok' => true,
+                        'at' => now()->toISOString(),
+                    ]
+                    : null,
+            ])),
+            'update_application_git_branch' => array_values(array_filter([
+                [
+                    'kind' => 'git_branch',
+                    'label' => 'Branche Coolify',
+                    'detail' => (string) ($arguments['git_branch'] ?? $result['git_branch'] ?? ''),
+                    'ok' => true,
+                    'at' => now()->toISOString(),
+                ],
+                isset($result['redeploy']) && is_array($result['redeploy']) && ! isset($result['redeploy']['error'])
+                    ? [
+                        'kind' => 'redeploy',
+                        'label' => 'Redéploiement',
+                        'detail' => (string) ($arguments['reason'] ?? ''),
+                        'deployment_uuid' => is_string($result['redeploy']['deployment_uuid'] ?? null)
+                            ? $result['redeploy']['deployment_uuid']
+                            : null,
+                        'ok' => true,
+                        'at' => now()->toISOString(),
+                    ]
+                    : null,
+            ])),
             'write_application_source' => $this->gitActionsFromWriteResult($arguments, $result),
             'control_resource' => ($arguments['action'] ?? '') === 'deploy' ? [[
                 'kind' => 'redeploy',
@@ -401,7 +519,23 @@ class AgentRunCorrectionSummarizer
         }
 
         $kinds = collect($actions)->pluck('kind')->filter()->values()->all();
-        $hasFix = (bool) array_intersect($kinds, ['env_coolify', 'git_commit', 'pull_request', 'remote_write', 'exec', 'control']);
+
+        if (in_array('needs_user', $kinds, true)) {
+            return 'needs_user';
+        }
+
+        $hasFix = (bool) array_intersect($kinds, [
+            'env_coolify',
+            'runtime_settings',
+            'host_permissions',
+            'coolify_base_config',
+            'git_commit',
+            'git_branch',
+            'pull_request',
+            'remote_write',
+            'exec',
+            'control',
+        ]);
         $hasRedeploy = in_array('redeploy', $kinds, true);
 
         if ($hasRedeploy && ! $hasFix) {
@@ -434,6 +568,22 @@ class AgentRunCorrectionSummarizer
             return 'git_committed';
         }
 
+        if (in_array('git_branch', $kinds, true)) {
+            return 'git_branch';
+        }
+
+        if (in_array('host_permissions', $kinds, true)) {
+            return 'host_permissions';
+        }
+
+        if (in_array('coolify_base_config', $kinds, true)) {
+            return 'coolify_base_config';
+        }
+
+        if (in_array('runtime_settings', $kinds, true)) {
+            return 'runtime_settings';
+        }
+
         if (in_array('env_coolify', $kinds, true)) {
             return 'coolify_only';
         }
@@ -460,16 +610,43 @@ class AgentRunCorrectionSummarizer
             ->filter()
             ->unique()
             ->values();
+        $runtimeDetail = collect($actions)
+            ->where('kind', 'runtime_settings')
+            ->pluck('detail')
+            ->filter()
+            ->first();
+        $hostPath = collect($actions)
+            ->where('kind', 'host_permissions')
+            ->pluck('detail')
+            ->filter()
+            ->first();
+
+        $needsUserDetail = collect($actions)
+            ->where('kind', 'needs_user')
+            ->pluck('detail')
+            ->filter()
+            ->first();
 
         return match ($outcome) {
             'running' => 'Intervention agent en cours…',
             'failed' => 'Échec de l’intervention agent.',
+            'needs_user' => is_string($needsUserDetail) && $needsUserDetail !== ''
+                ? $needsUserDetail
+                : 'Action humaine requise (secret / config manquante).',
             'no_action' => 'Aucune action corrective (diagnostic seulement).',
             'redeploy_only' => 'Redéploiement lancé sans modification de code ni de variables.',
             'fixed' => match ($sourceScope) {
                 'coolify_only' => $envKeys->isNotEmpty()
                     ? 'Variables Coolify mises à jour ('.$envKeys->implode(', ').') et redéploiement lancé.'
                     : 'Variables Coolify mises à jour et redéploiement lancé.',
+                'runtime_settings' => $runtimeDetail
+                    ? 'Config build Coolify mise à jour ('.$runtimeDetail.') et redéploiement lancé.'
+                    : 'Config build Coolify mise à jour et redéploiement lancé.',
+                'host_permissions' => $hostPath
+                    ? 'Permissions host corrigées ('.$hostPath.') et redéploiement lancé.'
+                    : 'Permissions host corrigées et redéploiement lancé.',
+                'coolify_base_config' => 'Config Coolify (BASE_CONFIG_PATH) rechargée et redéploiement lancé.',
+                'git_branch' => 'Branche Coolify corrigée et redéploiement lancé.',
                 'git_committed' => 'Correction commitée sur Git et redéploiement lancé.',
                 'pull_request' => 'Correction proposée via pull request.',
                 default => 'Correction appliquée et redéploiement lancé.',
@@ -478,6 +655,14 @@ class AgentRunCorrectionSummarizer
                 'coolify_only' => $envKeys->isNotEmpty()
                     ? 'Variables Coolify mises à jour ('.$envKeys->implode(', ').') — redéploiement non confirmé.'
                     : 'Variables Coolify mises à jour — redéploiement non confirmé.',
+                'runtime_settings' => $runtimeDetail
+                    ? 'Config build Coolify mise à jour ('.$runtimeDetail.') — redéploiement non confirmé.'
+                    : 'Config build Coolify mise à jour — redéploiement non confirmé.',
+                'host_permissions' => $hostPath
+                    ? 'Permissions host corrigées ('.$hostPath.') — redéploiement non confirmé.'
+                    : 'Permissions host corrigées — redéploiement non confirmé.',
+                'coolify_base_config' => 'Config Coolify (BASE_CONFIG_PATH) rechargée — redéploiement non confirmé.',
+                'git_branch' => 'Branche Coolify mise à jour — vérifier le redéploiement.',
                 'git_committed' => 'Commit Git effectué — vérifier le redéploiement.',
                 'pull_request' => 'Pull request ouverte — pas de redéploiement automatique.',
                 'server_side' => 'Actions serveur effectuées — résultat à vérifier.',
@@ -534,6 +719,10 @@ class AgentRunCorrectionSummarizer
 
         return [
             $pill('env', 'Env Coolify', 'env_coolify'),
+            $pill('build', 'Build', 'runtime_settings'),
+            $pill('perms', 'Permissions', 'host_permissions'),
+            $pill('basecfg', 'Config Coolify', 'coolify_base_config'),
+            $pill('branch', 'Branche', 'git_branch'),
             $pill('commit', 'Commit Git', 'git_commit'),
             $pill('pr', 'PR', 'pull_request'),
             $pill('redeploy', 'Redeploy', 'redeploy'),

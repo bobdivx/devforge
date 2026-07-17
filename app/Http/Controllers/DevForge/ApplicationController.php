@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\DevForge;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\DeleteResourceJob;
 use App\Models\Application;
 use App\Models\User;
 use App\Services\DevForge\Application\ApplicationContainerLogs;
@@ -10,11 +11,13 @@ use App\Services\DevForge\Application\ApplicationDatabaseConnector;
 use App\Services\DevForge\Application\ApplicationDomainService;
 use App\Services\DevForge\Application\ApplicationEnvironmentVariableCatalog;
 use App\Services\DevForge\Application\ApplicationFromGithubCreator;
+use App\Services\DevForge\Application\ApplicationRuntimeSettingsService;
 use App\Services\DevForge\Application\ApplicationSourceService;
 use App\Services\DevForge\Core\CoreResourcePresenter;
 use App\Services\DevForge\CurrentTeamContext;
 use App\Services\DevForge\CurrentTeamResources;
 use App\Services\DevForge\DeploymentTargetData;
+use App\Services\DevForge\Readiness\ApplicationReadinessService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -30,6 +33,8 @@ class ApplicationController extends Controller
         private readonly ApplicationEnvironmentVariableCatalog $applicationEnvironmentVariableCatalog,
         private readonly ApplicationDomainService $applicationDomainService,
         private readonly ApplicationSourceService $applicationSourceService,
+        private readonly ApplicationRuntimeSettingsService $applicationRuntimeSettingsService,
+        private readonly ApplicationReadinessService $applicationReadinessService,
         private readonly CoreResourcePresenter $presenter,
     ) {}
 
@@ -88,6 +93,41 @@ class ApplicationController extends Controller
 
         return response()->json([
             'data' => $this->applicationDatabaseConnector->connect($user, $team, $application, $request->all()),
+        ]);
+    }
+
+    public function resetLinkedDatabase(
+        Request $request,
+        string $applicationUuid,
+        string $databaseUuid,
+    ): JsonResponse {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        $validated = $request->validate([
+            'redeploy' => ['nullable', 'boolean'],
+        ]);
+
+        $team = $this->currentTeamContext->resolve($user);
+        $result = $this->applicationDatabaseConnector->resetLinkedDatabase(
+            $application,
+            $team,
+            $databaseUuid,
+            redeployApplication: (bool) ($validated['redeploy'] ?? true),
+        );
+
+        auditLog('devforge.application.database_reset', [
+            'team_id' => $team->id,
+            'application_uuid' => $application->uuid,
+            'database_uuid' => $databaseUuid,
+            'user_id' => $user->id,
+        ]);
+
+        return response()->json([
+            'data' => $result,
         ]);
     }
 
@@ -316,6 +356,153 @@ class ApplicationController extends Controller
                 $validated['sha'] ?? null,
                 $options,
             ),
+        ]);
+    }
+
+    public function destroy(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('delete', $application);
+
+        $validated = validator($request->all(), [
+            'delete_volumes' => ['nullable', 'boolean'],
+            'delete_connected_networks' => ['nullable', 'boolean'],
+            'delete_configurations' => ['nullable', 'boolean'],
+            'docker_cleanup' => ['nullable', 'boolean'],
+        ])->validate();
+
+        DeleteResourceJob::dispatch(
+            resource: $application,
+            deleteVolumes: (bool) ($validated['delete_volumes'] ?? true),
+            deleteConnectedNetworks: (bool) ($validated['delete_connected_networks'] ?? true),
+            deleteConfigurations: (bool) ($validated['delete_configurations'] ?? true),
+            dockerCleanup: (bool) ($validated['docker_cleanup'] ?? true),
+        );
+
+        auditLog('devforge.application.deleted', [
+            'team_id' => $this->currentTeamContext->resolve($user)->id,
+            'application_uuid' => $application->uuid,
+            'application_name' => $application->name,
+            'user_id' => $user->id,
+        ]);
+
+        return response()->json([
+            'data' => [
+                'queued' => true,
+                'message' => 'Suppression de l’application planifiée.',
+            ],
+        ]);
+    }
+
+    public function runtimeSettings(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('view', $application);
+
+        return response()->json([
+            'data' => $this->applicationRuntimeSettingsService->show($application),
+        ]);
+    }
+
+    public function updateRuntimeSettings(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        $result = $this->applicationRuntimeSettingsService->update($application, $request->all());
+
+        return response()->json([
+            'data' => $result['settings'],
+            'meta' => [
+                'redeploy' => $result['redeploy'],
+            ],
+        ]);
+    }
+
+    public function readiness(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('view', $application);
+
+        return response()->json([
+            'data' => $this->applicationReadinessService->present($application),
+        ]);
+    }
+
+    public function updateReadiness(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        $validated = $request->validate([
+            'autonomous_enabled' => ['required', 'boolean'],
+        ]);
+
+        return response()->json([
+            'data' => $this->applicationReadinessService->updateAutonomous(
+                $application,
+                (bool) $validated['autonomous_enabled'],
+            ),
+        ]);
+    }
+
+    public function probeReadiness(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        $result = $this->applicationReadinessService->runProbe($application, dispatchAgentOnFailure: true);
+
+        return response()->json([
+            'data' => $this->applicationReadinessService->present($application),
+            'meta' => [
+                'probe_ok' => $result['ok'],
+                'probe_url' => $result['url'],
+                'probe_status' => $result['status'],
+                'probe_error' => $result['error'],
+            ],
+        ]);
+    }
+
+    public function acknowledgeReadinessIntervention(
+        Request $request,
+        string $applicationUuid,
+        string $interventionUuid,
+    ): JsonResponse {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        $result = $this->applicationReadinessService->acknowledgeInterventionDone(
+            $application,
+            $interventionUuid,
+        );
+
+        return response()->json([
+            'data' => $result['readiness'],
+            'meta' => [
+                'restart' => $result['restart'],
+            ],
         ]);
     }
 }

@@ -79,12 +79,21 @@ it('enables env var and spawn_task tools from the core package', function () {
     $names = collect($toolkit->definitions())->pluck('name');
 
     expect($names)->toContain('list_application_env_vars')
-        ->and($names)->toContain('upsert_application_env_var');
+        ->and($names)->toContain('upsert_application_env_var')
+        ->and($names)->toContain('update_application_git_branch')
+        ->and($names)->toContain('get_application_runtime_settings')
+        ->and($names)->toContain('update_application_runtime_settings')
+        ->and($names)->toContain('fix_application_host_permissions')
+        ->and($names)->toContain('fix_coolify_base_config_path');
 
     // spawn_task est conditionnel dans definitions() (canSpawnEphemeral), mais doit rester activable via PACKAGE_CORE.
-    expect(AgentToolPackage::toolNames(AgentToolPackage::PACKAGE_CORE))->toContain('spawn_task');
+    expect(AgentToolPackage::toolNames(AgentToolPackage::PACKAGE_CORE))->toContain('spawn_task')
+        ->and(AgentToolPackage::toolNames(AgentToolPackage::PACKAGE_CORE))->toContain('update_application_git_branch')
+        ->and(AgentToolPackage::toolNames(AgentToolPackage::PACKAGE_CORE))->toContain('update_application_runtime_settings')
+        ->and(AgentToolPackage::toolNames(AgentToolPackage::PACKAGE_CORE))->toContain('fix_application_host_permissions')
+        ->and(AgentToolPackage::toolNames(AgentToolPackage::PACKAGE_CORE))->toContain('fix_coolify_base_config_path');
 
-    foreach (['list_application_env_vars', 'upsert_application_env_var', 'spawn_task'] as $toolName) {
+    foreach (['list_application_env_vars', 'upsert_application_env_var', 'update_application_git_branch', 'update_application_runtime_settings', 'fix_application_host_permissions', 'fix_coolify_base_config_path', 'spawn_task'] as $toolName) {
         $result = $toolkit->execute($toolName, []);
 
         expect($result['error'] ?? '')->not->toContain('non activé');
@@ -119,6 +128,19 @@ it('rejects write_application_source for .env paths and hints upsert_application
             ->and($result['error'])->toContain('upsert_application_env_var')
             ->and($result['hint'] ?? null)->toBe('upsert_application_env_var');
     }
+});
+
+it('rejects cosmetic dummy env vars used to force redeploy', function () {
+    $agent = AiAgent::factory()->create(['team_id' => $this->team->id, 'type' => 'debug']);
+    $toolkit = makeToolkit($this->team, $agent, $this->run);
+
+    $result = $toolkit->execute('upsert_application_env_var', [
+        'key' => 'DUMMY_REDEPLOY_TRIGGER',
+        'value' => '1',
+    ]);
+
+    expect($result)->toHaveKey('error')
+        ->and($result['error'])->toContain('factice');
 });
 
 it('enables github package on demand and persists to agent metadata', function () {

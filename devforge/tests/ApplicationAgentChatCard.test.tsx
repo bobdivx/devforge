@@ -115,9 +115,10 @@ describe('ApplicationAgentChatCard', () => {
 
         render(<ApplicationAgentChatCard application={application} />);
 
-        expect(await screen.findByText('Assistant IA · macompta')).toBeInTheDocument();
+        expect(await screen.findByText('Chat')).toBeInTheDocument();
         expect(await screen.findByText('Bonjour')).toBeInTheDocument();
-        expect(screen.getByPlaceholderText(/@astrojs\/node/)).toBeInTheDocument();
+        expect(screen.getByPlaceholderText('Écrire un message…')).toBeInTheDocument();
+        expect(screen.queryByText('Suggestions')).not.toBeInTheDocument();
         expect(screen.getByRole('link', { name: /Ouvrir/ })).toHaveAttribute(
             'href',
             expect.stringContaining('/agents/agent-1'),

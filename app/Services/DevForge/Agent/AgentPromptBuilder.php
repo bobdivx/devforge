@@ -18,13 +18,34 @@ class AgentPromptBuilder
 
             Contexte : échec de déploiement détecté.
             - Analyse les logs fournis puis get_deployment_logs si besoin.
-            - Pour une variable de build (PUPPETEER_SKIP_DOWNLOAD, NODE_ENV, etc.) : upsert_application_env_var (Coolify), jamais un fichier .env Git.
-            - write_application_source seulement pour du code (package.json, Dockerfile, etc.). Jamais .env / .env.*.
-            - Si write_application_source échoue (GitHub « Resource not accessible », permissions) : bascule immédiatement sur upsert_application_env_var pour les variables, ou documente le besoin d'accès Git — ne redéploie pas sans correction.
-            - « Permission denied » sur /data/coolify/applications/... ou data/applications/... = problème d’ownership host (chown / ops), PAS Puppeteer ni code app.
-            - Après control_resource deploy mis en file : résume les prochaines étapes et ARRÊTE — ne poll pas les logs en boucle.
-            - Un seul redeploy automatique maximum via control_resource.
-            - Si config utilisateur en cause, documente sans boucler.
+            - INTERDIT de terminer en diagnostic seul si une correction outil est possible.
+            - Si clone Git échoue (Remote branch not found / Could not find remote branch) : get_application_git_info + list_github_branches puis update_application_git_branch (redeploy=true).
+            - Échec de BUILD (nixpacks/npm/yarn/pnpm/tsc/vite/dockerfile) :
+              1) get_application_runtime_settings + read_application_source (package.json, Dockerfile, nixpacks.toml…)
+              2) Corrige côté Coolify via update_application_runtime_settings (install_command, build_command, start_command, ports_exposes, base_directory, publish_directory, build_pack) si la config Coolify est en cause
+              3) Ou upsert_application_env_var pour variables de build (PUPPETEER_SKIP_DOWNLOAD, NODE_OPTIONS, NODE_ENV…)
+              4) Ou write_application_source pour un fix code évident (package.json scripts, Dockerfile) — jamais .env
+              5) Puis redeploy (1 fois) via l’outil qui a corrigé ou control_resource deploy
+            - Si write_application_source échoue (GitHub permissions) : bascule sur update_application_runtime_settings / upsert_application_env_var — ne redéploie pas sans correction.
+            - « Permission denied » / « tee: … Permission denied » lors de l’écriture .env / applications/* :
+              CORRIGE en autonomie avec fix_application_host_permissions (chown/chmod ciblé + redeploy).
+              INTERDIT d’inventer une variable env factice (DUMMY_*, *_TRIGGER, FORCE_REDEPLOY…).
+              INTERDIT de s’arrêter sur « intervention manuelle ops » sans avoir tenté fix_application_host_permissions.
+            - « Read-only file system » pendant un mkdir Coolify (chemin hôte incorrect ou config cache) :
+              CORRIGE avec fix_coolify_base_config_path (recharge BASE_CONFIG_PATH via config:clear + horizon:terminate + redeploy).
+              Ne suppose pas un chemin NAS particulier — l’outil lit la config réelle.
+            - Site statique qui sert la page nginx par défaut / publish_directory vide :
+              Déduis le dossier de build depuis les logs (directory: /app/…, astro/vite/next) puis
+              update_application_runtime_settings(publish_directory=…, redeploy=true).
+            - npm E401 / unauthenticated sur npm.pkg.github.com :
+              Coolify injecte NODE_AUTH_TOKEN au build via le token GitHub App SI packages:read est accordé.
+              Si la GitHub App n’a pas packages:read → needs_user (activer Packages Read-only + accepter l’installation).
+              Sinon → control_resource deploy (1×). Ne invente PAS de PAT.
+            - Crash post-deploy « Class ApplicationReadiness not found » (rollback du conteneur) :
+              control_resource deploy après diagnostic — la plateforme ne doit pas détruire un conteneur sain.
+            - INTERDIT d’inventer des corrections cosmétiques (variables dummy, redeploy à l’aveugle) pour « faire une action ».
+            - Après deploy mis en file : résume et ARRÊTE — ne poll pas les logs en boucle.
+            - Un seul redeploy automatique maximum.
             RULES,
             'deployment_build_started' => <<<'RULES'
 
@@ -39,6 +60,24 @@ class AgentPromptBuilder
             - docker_logs si anomalie ou conteneur instable.
             - Rapport concis : OK ou points d'attention.
             - Pas de redeploy sauf anomalie critique détectée.
+            RULES,
+            'application_readiness_failed' => <<<'RULES'
+
+            Contexte : le déploiement a réussi mais la probe HTTP du domaine public a échoué.
+            - get_resource_status puis docker_logs sur l'application.
+            - http_request vers le FQDN fourni pour confirmer l'erreur.
+            - Si page nginx par défaut / publish_directory vide sur site statique :
+              déduis le dossier depuis get_deployment_logs / get_application_runtime_settings puis
+              update_application_runtime_settings(publish_directory=…, is_static=true, redeploy=true) IMMÉDIATEMENT.
+            - Cherche env manquantes (ex. ASTRO_DB_*, DATABASE_URL, secrets).
+            - Corrige via outils autorisés : update_application_runtime_settings, upsert_application_env_var, control_resource restart/redeploy (1 fois max).
+            - Si correction automatique possible : applique puis termine avec outcome auto_fixed.
+            - Si une action humaine est nécessaire : outcome needs_user avec :
+              - title = action concrète attendue (ex. « Ajouter ASTRO_DB_REMOTE_URL »), JAMAIS « Intervention requise »
+              - summary = erreur observée (HTTP/status + cause) en 1-2 phrases, sans secrets
+              - steps = 2 à 5 actions utilisateur précises et ordonnées
+            - Termine TOUJOURS par un bloc JSON unique :
+              {"outcome":"auto_fixed|needs_user|failed","title":"...","summary":"...","steps":["..."]}
             RULES,
             'delegated' => <<<'RULES'
 
@@ -79,6 +118,10 @@ class AgentPromptBuilder
 
         if (($context['event'] ?? null) === 'deployment_build_completed') {
             return $this->deploymentBuildCompletedContext($agent, $context);
+        }
+
+        if (($context['event'] ?? null) === 'application_readiness_failed') {
+            return $this->applicationReadinessFailedContext($agent, $context);
         }
 
         if (($context['event'] ?? null) === 'delegated') {
@@ -188,14 +231,23 @@ class AgentPromptBuilder
         $applicationUuid = (string) ($context['application_uuid'] ?? '');
         $deploymentUuid = (string) ($context['deployment_uuid'] ?? '');
         $commit = (string) ($context['commit'] ?? 'inconnu');
+        $gitBranch = (string) ($context['git_branch'] ?? 'inconnu');
+        $buildPack = (string) ($context['build_pack'] ?? 'inconnu');
+        $installCommand = (string) ($context['install_command'] ?? 'défaut');
+        $buildCommand = (string) ($context['build_command'] ?? 'défaut');
+        $startCommand = (string) ($context['start_command'] ?? 'défaut');
+        $portsExposes = (string) ($context['ports_exposes'] ?? 'inconnu');
+        $baseDirectory = (string) ($context['base_directory'] ?? '/');
         $failureExcerpt = json_encode($context['failure_excerpt'] ?? [], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 
         return trim(<<<CONTEXT
-        ALERTE : déploiement en échec — agis immédiatement.
+        ALERTE : déploiement en échec — agis immédiatement. Ne te contente PAS d’un diagnostic.
 
         Application : {$applicationName} ({$applicationUuid})
         Déploiement : {$deploymentUuid}
+        Branche Coolify actuelle : {$gitBranch}
         Commit : {$commit}
+        Build Coolify : pack={$buildPack} · install={$installCommand} · build={$buildCommand} · start={$startCommand} · ports={$portsExposes} · base={$baseDirectory}
 
         Logs d'échec :
         {$failureExcerpt}
@@ -203,12 +255,22 @@ class AgentPromptBuilder
         Étapes :
         1. get_deployment_logs avec deployment_uuid
         2. get_resource_status sur l'application
-        3. Si l'erreur cite une variable d'env (PUPPETEER_SKIP_DOWNLOAD, NODE_OPTIONS, etc.) : upsert_application_env_var puis control_resource deploy — JAMAIS write_application_source sur .env
-        4. Si « Permission denied » sur le répertoire Coolify data/applications : diagnostiquer ownership (ops/chown), ne pas chercher Puppeteer
-        5. Sinon read_application_source sur les fichiers liés (package.json, Dockerfile, etc.)
-        6. write_application_source si correction code évidente (jamais .env) ; en cas d'erreur GitHub permissions → upsert_application_env_var ou résumé bloquant
-        7. control_resource deploy UNE FOIS si correction appliquée, puis STOP (pas de polling interminable des logs)
-        8. Résumé actionnable
+        3. Si logs « Remote branch … not found » / « Could not find remote branch » / branche introuvable :
+           get_application_git_info + list_github_branches → update_application_git_branch (git_branch exacte) avec redeploy=true → STOP
+        4. Si échec BUILD (npm/yarn/pnpm/nixpacks/tsc/vite/docker build) :
+           get_application_runtime_settings → read_application_source des fichiers cités dans les logs →
+           update_application_runtime_settings (commandes/ports/répertoires/build_pack) et/ou upsert_application_env_var et/ou write_application_source → redeploy → STOP
+        5. Si l'erreur cite une variable d'env (PUPPETEER_SKIP_DOWNLOAD, NODE_OPTIONS, etc.) : upsert_application_env_var puis control_resource deploy — JAMAIS write_application_source sur .env
+        6. Si « Permission denied » / tee Permission denied sur .env ou applications/* :
+           fix_application_host_permissions (redeploy=true) IMMÉDIATEMENT — autonomie totale, pas d’attente ops
+           INTERDIT : variables factices (DUMMY_*, *_TRIGGER), upsert cosmétique, s’arrêter sans tenter le fix
+        7. Si « Read-only file system » pendant mkdir Coolify (config path incorrecte / cache) :
+           fix_coolify_base_config_path (redeploy=true) IMMÉDIATEMENT — recharge BASE_CONFIG_PATH réelle
+        8. Si site statique / page nginx par défaut / publish_directory vide :
+           déduis le dossier depuis les logs de build puis update_application_runtime_settings(publish_directory=…, redeploy=true)
+        9. write_application_source seulement pour un fix code évident (jamais .env) ; permissions GitHub → bascule runtime/env Coolify
+        10. control_resource deploy UNE FOIS si correction appliquée (sauf si un autre outil a déjà redeployé), puis STOP
+        11. Résumé actionnable (constats → actions outils → suite)
 
         Première action : appel d'outil obligatoire.
         CONTEXT);
@@ -271,6 +333,47 @@ class AgentPromptBuilder
         4. Rapport concis : OK ou points d'attention
 
         Commence par get_resource_status.
+        CONTEXT);
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function applicationReadinessFailedContext(AiAgent $agent, array $context): string
+    {
+        $applicationName = (string) ($context['application_name'] ?? 'Application');
+        $applicationUuid = (string) ($context['application_uuid'] ?? '');
+        $deploymentUuid = (string) ($context['deployment_uuid'] ?? 'inconnu');
+        $fqdn = (string) ($context['fqdn'] ?? 'aucun');
+        $probeUrl = (string) ($context['probe_url'] ?? $fqdn);
+        $probeStatus = $context['probe_status'] ?? 'n/a';
+        $probeError = (string) ($context['probe_error'] ?? 'erreur inconnue');
+        $round = (string) ($context['readiness_round'] ?? '1');
+        $maxRounds = (string) ($context['readiness_max_rounds'] ?? '5');
+
+        return trim(<<<CONTEXT
+        ALERTE READINESS — le domaine public ne répond pas correctement (tour {$round}/{$maxRounds}).
+
+        Application : {$applicationName} ({$applicationUuid})
+        Déploiement : {$deploymentUuid}
+        FQDN : {$fqdn}
+        Probe URL : {$probeUrl}
+        HTTP status : {$probeStatus}
+        Erreur probe : {$probeError}
+
+        Étapes :
+        1. get_resource_status sur l'application
+        2. docker_logs pour diagnostiquer le runtime
+        3. http_request vers la probe URL
+        4. Si page nginx par défaut / publish_directory incorrect (site statique) :
+           déduis le dossier depuis les logs puis update_application_runtime_settings(publish_directory=…, is_static=true, redeploy=true)
+           → STOP avec outcome auto_fixed
+        5. Si env manquante (ASTRO_DB_*, tokens, DATABASE_URL…) : upsert_application_env_var
+        6. control_resource restart OU deploy UNE FOIS si correction appliquée
+        7. Termine avec un JSON outcome (auto_fixed | needs_user | failed).
+           Pour needs_user : title = action à faire, summary = erreur + cause, steps = checklist utilisateur.
+
+        Première action : appel d'outil obligatoire.
         CONTEXT);
     }
 

@@ -5,12 +5,14 @@ describe('application-tabs', () => {
     it('expose les onglets de détail application', () => {
         expect(applicationTabs.map(({ id }) => id)).toEqual([
             'overview',
+            'settings',
             'domains',
             'deployments',
             'databases',
             'logs',
             'variables',
             'files',
+            'danger',
         ]);
     });
 });

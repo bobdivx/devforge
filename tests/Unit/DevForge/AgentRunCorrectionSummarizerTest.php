@@ -129,6 +129,100 @@ it('records tool results into correction_actions metadata', function () {
         ->and($run->metadata['correction_actions'][0]['detail'])->toBe('NODE_ENV');
 });
 
+it('records git branch update and redeploy as fixed', function () {
+    $run = AiAgentRun::factory()->create([
+        'agent_id' => $this->agent->id,
+        'status' => 'completed',
+        'summary' => 'Diagnostic branche.',
+        'metadata' => [],
+    ]);
+
+    $this->summarizer->recordToolResult($run, 'update_application_git_branch', [
+        'git_branch' => 'feat/website',
+        'reason' => 'main introuvable',
+    ], [
+        'ok' => true,
+        'git_branch' => 'feat/website',
+        'previous_git_branch' => 'main',
+        'redeploy' => [
+            'deployment_uuid' => 'redeploy-branch-1',
+            'queued' => true,
+        ],
+    ]);
+
+    $run->refresh();
+    $summary = $this->summarizer->summarize($run);
+    $pills = collect($summary['pills'])->keyBy('id');
+
+    expect($summary['outcome'])->toBe('fixed')
+        ->and($pills['branch']['active'])->toBeTrue()
+        ->and($pills['branch']['detail'])->toBe('feat/website')
+        ->and($pills['redeploy']['active'])->toBeTrue();
+});
+
+it('records runtime settings update and redeploy as fixed build correction', function () {
+    $run = AiAgentRun::factory()->create([
+        'agent_id' => $this->agent->id,
+        'status' => 'completed',
+        'summary' => 'Build cassé.',
+        'metadata' => [],
+    ]);
+
+    $this->summarizer->recordToolResult($run, 'update_application_runtime_settings', [
+        'build_command' => 'npm run build',
+        'ports_exposes' => '3000',
+        'reason' => 'fix build',
+    ], [
+        'ok' => true,
+        'updated_keys' => ['build_command', 'ports_exposes'],
+        'redeploy' => [
+            'deployment_uuid' => 'redeploy-build-1',
+            'queued' => true,
+        ],
+    ]);
+
+    $run->refresh();
+    $summary = $this->summarizer->summarize($run);
+    $pills = collect($summary['pills'])->keyBy('id');
+
+    expect($summary['outcome'])->toBe('fixed')
+        ->and($summary['source_scope'])->toBe('runtime_settings')
+        ->and($summary['headline'])->toContain('build_command')
+        ->and($pills['build']['active'])->toBeTrue()
+        ->and($pills['redeploy']['active'])->toBeTrue();
+});
+
+it('records host permission fix and redeploy as fixed', function () {
+    $run = AiAgentRun::factory()->create([
+        'agent_id' => $this->agent->id,
+        'status' => 'completed',
+        'summary' => 'Permission denied.',
+        'metadata' => [],
+    ]);
+
+    $this->summarizer->recordToolResult($run, 'fix_application_host_permissions', [
+        'path' => '/media/Docker/AppData/coolify/data/applications/app-1',
+        'reason' => 'tee permission denied',
+    ], [
+        'ok' => true,
+        'path' => '/media/Docker/AppData/coolify/data/applications/app-1',
+        'redeploy' => [
+            'deployment_uuid' => 'redeploy-perms-1',
+            'queued' => true,
+        ],
+    ]);
+
+    $run->refresh();
+    $summary = $this->summarizer->summarize($run);
+    $pills = collect($summary['pills'])->keyBy('id');
+
+    expect($summary['outcome'])->toBe('fixed')
+        ->and($summary['source_scope'])->toBe('host_permissions')
+        ->and($summary['headline'])->toContain('Permissions host')
+        ->and($pills['perms']['active'])->toBeTrue()
+        ->and($pills['redeploy']['active'])->toBeTrue();
+});
+
 it('replaces noisy llm summaries', function () {
     expect($this->summarizer->shouldReplaceSummary('', 'ok'))->toBeTrue()
         ->and($this->summarizer->shouldReplaceSummary(str_repeat('x', 400), 'ok'))->toBeTrue()

@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/preact';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { domainApi } from '../src/lib/domain-api';
+import { domainApi, type ApiResponse, type DeploymentLogs } from '../src/lib/domain-api';
 import { useDeploymentLogs } from '../src/lib/use-deployment-logs';
 
 describe('useDeploymentLogs', () => {
@@ -65,5 +65,51 @@ describe('useDeploymentLogs', () => {
 
         expect(deploymentLogs).toHaveBeenCalledTimes(1);
         expect(result.current.complete).toBe(true);
+    });
+
+    it('ignore une réponse stale quand on change de déploiement', async () => {
+        let resolveOld: ((value: ApiResponse<DeploymentLogs>) => void) | null = null;
+
+        const deploymentLogs = vi.spyOn(domainApi, 'deploymentLogs')
+            .mockImplementationOnce(() => new Promise<ApiResponse<DeploymentLogs>>((resolve) => {
+                resolveOld = resolve;
+            }))
+            .mockResolvedValueOnce({
+                data: {
+                    items: [{ cursor: 1, stream: 'stdout', message: 'Nouveau déploiement', timestamp: null, command: false, hidden: false }],
+                    next_cursor: 1,
+                    complete: false,
+                },
+            });
+
+        const { result, rerender } = renderHook(
+            ({ uuid }) => useDeploymentLogs(uuid, { intervalMs: 2000 }),
+            { initialProps: { uuid: 'deployment-old' } },
+        );
+
+        await act(async () => {
+            await Promise.resolve();
+        });
+
+        rerender({ uuid: 'deployment-new' });
+
+        await waitFor(() => {
+            expect(result.current.lines.map((line) => line.message)).toEqual(['Nouveau déploiement']);
+        });
+
+        await act(async () => {
+            resolveOld?.({
+                data: {
+                    items: [{ cursor: 9, stream: 'stdout', message: 'Ancien déploiement', timestamp: null, command: false, hidden: false }],
+                    next_cursor: 9,
+                    complete: true,
+                },
+            });
+            await Promise.resolve();
+        });
+
+        expect(result.current.lines.map((line) => line.message)).toEqual(['Nouveau déploiement']);
+        expect(result.current.complete).toBe(false);
+        expect(deploymentLogs).toHaveBeenCalledWith('deployment-new', 0);
     });
 });

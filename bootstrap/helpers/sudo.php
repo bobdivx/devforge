@@ -8,6 +8,16 @@ function shouldChangeOwnership(string $path): bool
 {
     $path = trim($path);
 
+    // Coolify data dirs (incl. NAS mounts like /media/.../coolify/data/applications).
+    $isCoolifyPath = Str::startsWith($path, '/data/coolify')
+        || Str::startsWith($path, '/tmp/coolify')
+        || (bool) preg_match('#/(?:data/)?coolify/(?:data/)?applications(?:/|$)#', $path)
+        || (bool) preg_match('#/coolify/data(?:/|$)#', $path);
+
+    if ($isCoolifyPath) {
+        return true;
+    }
+
     $systemPaths = ['/var', '/etc', '/usr', '/opt', '/sys', '/proc', '/dev', '/bin', '/sbin', '/lib', '/lib64', '/boot', '/root', '/home', '/media', '/mnt', '/srv', '/run'];
 
     foreach ($systemPaths as $systemPath) {
@@ -16,9 +26,7 @@ function shouldChangeOwnership(string $path): bool
         }
     }
 
-    $isCoolifyPath = Str::startsWith($path, '/data/coolify') || Str::startsWith($path, '/tmp/coolify');
-
-    return $isCoolifyPath;
+    return false;
 }
 function parseCommandsByLineForSudo(Collection $commands, Server $server): array
 {
@@ -79,7 +87,11 @@ function parseCommandsByLineForSudo(Collection $commands, Server $server): array
         if (Str::startsWith($line, 'sudo mkdir -p')) {
             $path = trim(Str::after($line, 'sudo mkdir -p'));
             if (shouldChangeOwnership($path)) {
-                return "$line && sudo chown -R $server->user:$server->user $path && sudo chmod -R o-rwx $path";
+                // Do not prefix chown/chmod with sudo here: the next pass injects
+                // `&& sudo` and would otherwise produce `sudo sudo chown`.
+                // Trailing colon: use the user's primary group (avoids invalid
+                // `user:user` when no matching group exists, e.g. CasaOS samba).
+                return "$line && chown -R {$server->user}: $path && chmod -R o-rwx $path";
             }
 
             return $line;
@@ -129,24 +141,9 @@ function parseCommandsByLineForSudo(Collection $commands, Server $server): array
 }
 function parseLineForSudo(string $command, Server $server): string
 {
-    if (! str($command)->startSwith('cd') && ! str($command)->startSwith('command')) {
-        $command = "sudo $command";
-    }
-    if (Str::startsWith($command, 'sudo mkdir -p')) {
-        $path = trim(Str::after($command, 'sudo mkdir -p'));
-        if (shouldChangeOwnership($path)) {
-            $command = "$command && sudo chown -R $server->user:$server->user $path && sudo chmod -R o-rwx $path";
-        }
-    }
-    if (str($command)->contains('$(') || str($command)->contains('`')) {
-        $command = str($command)->replace('$(', '$(sudo ')->replace('`', '`sudo ')->value();
-    }
-    if (str($command)->contains('||')) {
-        $command = str($command)->replace('||', '|| sudo ')->value();
-    }
-    if (str($command)->contains('&&')) {
-        $command = str($command)->replace('&&', '&& sudo ')->value();
-    }
+    // Same pipe/keyword rules as multi-line parsing — critical for
+    // `echo … | base64 -d | tee path` (sudo must reach tee, not only echo).
+    $parsed = parseCommandsByLineForSudo(collect([$command]), $server);
 
-    return $command;
+    return (string) ($parsed[0] ?? $command);
 }

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
     applicationAgentSessionTitle,
-    applicationChatSuggestions,
     pickApplicationChatAgent,
 } from '../src/lib/application-agent-chat';
 import type { Agent } from '../src/lib/domain-api';
@@ -64,11 +63,5 @@ describe('application-agent-chat', () => {
         ], 'app-1');
 
         expect(selected?.uuid).toBe('a2');
-    });
-
-    it('propose des suggestions orientées application', () => {
-        const suggestions = applicationChatSuggestions('macompta');
-        expect(suggestions[0]).toContain('@astrojs/node');
-        expect(suggestions[0]).toContain('macompta');
     });
 });

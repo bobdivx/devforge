@@ -8,6 +8,7 @@ use App\Models\Team;
 use App\Models\User;
 use App\Models\StandaloneLibsql;
 use App\Services\DevForge\Database\LibsqlConnectionEnvSync;
+use App\Services\DevForge\Database\LibsqlDatabaseTransferService;
 use App\Services\DevForge\Database\LibsqlTursoMigrationService;
 use Illuminate\Database\Eloquent\Model;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -18,6 +19,7 @@ class ApplicationDatabaseConnector
     public function __construct(
         private readonly LibsqlConnectionEnvSync $libsqlConnectionEnvSync,
         private readonly LibsqlTursoMigrationService $libsqlTursoMigrationService,
+        private readonly LibsqlDatabaseTransferService $libsqlDatabaseTransferService,
     ) {}
 
     /**
@@ -75,6 +77,67 @@ class ApplicationDatabaseConnector
             })
             ->values()
             ->all();
+    }
+
+    /**
+     * Reset a libSQL database linked to this application (wipe data + restart).
+     *
+     * @return array{
+     *     database_uuid: string,
+     *     database_name: string,
+     *     reset: bool,
+     *     restarted: bool,
+     *     message: string,
+     *     redeploy: array{queued: bool, deployment_uuid: string|null, message: string}|null
+     * }
+     */
+    public function resetLinkedDatabase(
+        Application $application,
+        Team $team,
+        string $databaseUuid,
+        bool $redeployApplication = true,
+    ): array {
+        $connection = collect($this->connections($application))
+            ->first(fn (array $item): bool => ($item['database_uuid'] ?? null) === $databaseUuid);
+
+        abort_unless($connection !== null, 422, 'Cette base n’est pas rattachée à l’application.');
+
+        $database = getResourceByUuid($databaseUuid, $team->id);
+        abort_unless($database instanceof StandaloneLibsql, 422, 'La réinitialisation n’est disponible que pour les bases libSQL.');
+
+        $result = $this->libsqlDatabaseTransferService->resetEmpty($database);
+
+        $redeploy = null;
+        if ($redeployApplication) {
+            $deploymentUuid = new Cuid2;
+            $queueResult = queue_application_deployment(
+                application: $application,
+                deployment_uuid: $deploymentUuid,
+                force_rebuild: false,
+                restart_only: false,
+                is_api: true,
+                no_questions_asked: true,
+            );
+
+            if ($queueResult['status'] === 'queue_full') {
+                throw new HttpException(429, (string) $queueResult['message']);
+            }
+
+            $redeploy = [
+                'queued' => $queueResult['status'] !== 'skipped',
+                'deployment_uuid' => $queueResult['status'] !== 'skipped' ? $deploymentUuid->toString() : null,
+                'message' => (string) ($queueResult['message'] ?? 'Deployment queued.'),
+            ];
+        }
+
+        return [
+            'database_uuid' => $database->uuid,
+            'database_name' => $database->name,
+            'reset' => (bool) ($result['reset'] ?? true),
+            'restarted' => (bool) ($result['restarted'] ?? true),
+            'message' => (string) ($result['message'] ?? 'Base réinitialisée.'),
+            'redeploy' => $redeploy,
+        ];
     }
 
     /**

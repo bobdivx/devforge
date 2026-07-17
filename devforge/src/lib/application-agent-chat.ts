@@ -42,12 +42,3 @@ export function pickApplicationChatAgent(agents: Agent[], applicationUuid: strin
 
     return scored[0]?.agent ?? null;
 }
-
-export function applicationChatSuggestions(applicationName: string): string[] {
-    return [
-        `Remplacer l’adapter Vercel par Node (@astrojs/node en mode standalone) pour ${applicationName}`,
-        `Diagnostiquer pourquoi ${applicationName} affiche la page nginx par défaut`,
-        `Analyser le dernier déploiement de ${applicationName}`,
-        `Vérifier le build pack et le Dockerfile / package.json de ${applicationName}`,
-    ];
-}

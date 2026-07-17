@@ -1,16 +1,19 @@
 import {
     ArrowLeft,
     ChevronDown,
+    CircleAlert,
     ExternalLink,
     FileText,
     GitBranch,
     Globe,
+    Loader2,
     Play,
     RefreshCw,
     Rocket,
     RotateCw,
     Server,
     Square,
+    XCircle,
 } from 'lucide-preact';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
@@ -22,7 +25,11 @@ import { ResourceStatusIcon } from '../ui/ResourceStatusIcon';
 import { Tabs } from '../ui/Tabs';
 import { ApplicationAgentChatCard } from './ApplicationAgentChatCard';
 import { ApplicationDomainsPanel } from './ApplicationDomainsPanel';
+import { ApplicationDangerPanel } from './ApplicationDangerPanel';
+import { ApplicationReadinessCard } from './ApplicationReadinessCard';
+import { ApplicationRuntimeSettingsPanel } from './ApplicationRuntimeSettingsPanel';
 import { ApplicationEnvironmentVariablesPanel } from './ApplicationEnvironmentVariablesPanel';
+import { ApplicationStatusBadges } from './ApplicationStatusBadges';
 import { ConnectDatabasePanel } from './ConnectDatabasePanel';
 import { ApplicationLogsPanel } from './ApplicationLogsPanel';
 import { DeploymentMonitorPanel } from './DeploymentMonitorPanel';
@@ -34,13 +41,15 @@ import {
     primaryDomain,
     relativeUpdatedAt,
     repositoryLabel,
+    resolvePreviewAvailability,
     shortCommit,
+    shouldPollApplicationReadiness,
     visitUrl,
     websiteScreenshotUrl,
 } from '../../lib/application-config';
 import { applicationTabs, type ApplicationTabId } from '../../lib/application-tabs';
 import { canVisitApplication, resolveCoreResourceActions } from '../../lib/core-resource-actions';
-import { domainApi, type CoreAction } from '../../lib/domain-api';
+import { domainApi, type ApplicationReadiness, type CoreAction } from '../../lib/domain-api';
 import { isDeploymentActive } from '../../lib/deployment-status';
 import { pickFocusedDeployment } from '../../lib/pick-focused-deployment';
 import { partitionDeploymentAttempts } from '../../lib/partition-deployment-attempts';
@@ -73,15 +82,6 @@ function DetailRow({ label, children }: DetailRowProps) {
             <dt class="text-xs font-medium uppercase tracking-wide text-base-content/45">{label}</dt>
             <dd class="min-w-0 text-sm">{children}</dd>
         </div>
-    );
-}
-
-function MetricCard({ title, children }: { title: string; children: ComponentChildren }) {
-    return (
-        <section class="min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 p-4 shadow-sm">
-            <h3 class="mb-3 text-sm font-semibold">{title}</h3>
-            <div class="grid min-w-0 gap-2 break-words text-sm">{children}</div>
-        </section>
     );
 }
 
@@ -168,7 +168,7 @@ function DeploymentAttemptGroup({
                                 >
                                     <span class="flex min-w-0 flex-1 flex-col gap-1 overflow-hidden">
                                         <span class="flex min-w-0 flex-wrap items-center gap-2">
-                                            <DeploymentStatusIcon status={deployment.status} showLabel />
+                                            <DeploymentStatusIcon status={deployment.status} showLabel={selected || tone !== 'history'} />
                                             <span class="font-mono text-[11px] text-base-content/45">
                                                 {shortCommit(deployment.commit) ?? '—'}
                                             </span>
@@ -182,7 +182,7 @@ function DeploymentAttemptGroup({
                                     </span>
                                     <span class={`btn btn-ghost btn-xs shrink-0 ${selected ? 'text-primary' : ''}`}>
                                         <FileText class="size-3.5" aria-hidden />
-                                        {selected ? 'Suivi actif' : 'Voir logs'}
+                                        {selected ? 'Actif' : 'Logs'}
                                     </span>
                                 </button>
                             </li>
@@ -194,7 +194,21 @@ function DeploymentAttemptGroup({
     );
 }
 
-function PreviewPanel({ name, domain, status, canVisit }: { name: string; domain: string | null; status: string; canVisit: boolean }) {
+function PreviewPanel({
+    name,
+    domain,
+    status,
+    canVisit,
+    readiness,
+    readinessLoading,
+}: {
+    name: string;
+    domain: string | null;
+    status: string;
+    canVisit: boolean;
+    readiness: ApplicationReadiness | null;
+    readinessLoading: boolean;
+}) {
     const href = canVisit ? visitUrl(domain) : null;
     const screenshotUrl = websiteScreenshotUrl(domain);
     const [screenshotState, setScreenshotState] = useState<'loading' | 'loaded' | 'error'>(
@@ -207,6 +221,18 @@ function PreviewPanel({ name, domain, status, canVisit }: { name: string; domain
         .join('')
         .toUpperCase();
     const showPlaceholder = !screenshotUrl || screenshotState === 'error';
+    const availability = resolvePreviewAvailability(status, readiness, readinessLoading);
+    const OverlayIcon = availability.tone === 'error'
+        ? XCircle
+        : availability.label?.includes('Vérification') || availability.label?.includes('Récupération') || availability.label?.includes('Démarrage')
+            ? Loader2
+            : CircleAlert;
+    const overlaySpin = OverlayIcon === Loader2;
+    const overlayToneClass = availability.tone === 'error'
+        ? 'border-error/40 bg-error/15 text-error'
+        : availability.tone === 'warning'
+            ? 'border-warning/40 bg-warning/15 text-warning'
+            : 'border-base-300/70 bg-base-100/90 text-base-content/70';
 
     useEffect(() => {
         setScreenshotState(screenshotUrl ? 'loading' : 'error');
@@ -223,7 +249,17 @@ function PreviewPanel({ name, domain, status, canVisit }: { name: string; domain
                         <p class="text-sm font-semibold">{name}</p>
                         <p class="text-xs text-base-content/50">{domain ?? 'Aucun domaine configuré'}</p>
                     </div>
-                    <ResourceStatusIcon status={status} showLabel />
+                    {!availability.ready && availability.label ? (
+                        <div
+                            class={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold ${overlayToneClass}`}
+                            role="status"
+                        >
+                            <OverlayIcon class={`size-3.5 ${overlaySpin ? 'animate-spin' : ''}`} aria-hidden />
+                            {availability.label}
+                        </div>
+                    ) : (
+                        <ResourceStatusIcon status={status} />
+                    )}
                 </div>
             ) : (
                 <div class="relative aspect-[4/3] bg-base-300/40">
@@ -234,16 +270,24 @@ function PreviewPanel({ name, domain, status, canVisit }: { name: string; domain
                         alt={`Capture d’écran de ${name}`}
                         class={`size-full object-cover object-top transition-opacity duration-300 ${
                             screenshotState === 'loaded' ? 'opacity-100' : 'opacity-0'
-                        }`}
+                        } ${!availability.ready ? 'brightness-75 saturate-75' : ''}`}
                         decoding="async"
                         loading="lazy"
                         src={screenshotUrl}
                         onError={() => setScreenshotState('error')}
                         onLoad={() => setScreenshotState('loaded')}
                     />
-                    <div class="pointer-events-none absolute inset-x-0 top-0 flex justify-end p-3">
-                        <ResourceStatusIcon status={status} showLabel />
-                    </div>
+                    {!availability.ready && availability.label && (
+                        <div class="pointer-events-none absolute inset-0 flex items-center justify-center bg-base-300/35 p-4">
+                            <div
+                                class={`inline-flex max-w-[90%] items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-semibold shadow-sm backdrop-blur-sm ${overlayToneClass}`}
+                                role="status"
+                            >
+                                <OverlayIcon class={`size-4 shrink-0 ${overlaySpin ? 'animate-spin' : ''}`} aria-hidden />
+                                {availability.label}
+                            </div>
+                        </div>
+                    )}
                     <div class="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-base-300/95 via-base-300/55 to-transparent px-4 pb-14 pt-12">
                         <p class="text-sm font-semibold text-base-content">{name}</p>
                         <p class="truncate text-xs text-base-content/70">{domain}</p>
@@ -275,11 +319,13 @@ type ApplicationDetailPanelProps = {
 export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: ApplicationDetailPanelProps) {
     const resourceQuery = useApiQuery(`core:applications:${uuid}`, () => domainApi.coreResource('applications', uuid));
     const deploymentsQuery = useApiQuery(`deployments:${uuid}`, () => domainApi.deployments(1, uuid, 8));
+    const readinessQuery = useApiQuery(`readiness:${uuid}`, () => domainApi.applicationReadiness(uuid));
     const [activeTab, setActiveTab] = useState<ApplicationTabId>('overview');
     const [acting, setActing] = useState<CoreAction | null>(null);
     const [pendingAction, setPendingAction] = useState<CoreAction | null>(null);
     const [actionError, setActionError] = useState<string | null>(null);
     const [focusedDeploymentUuid, setFocusedDeploymentUuid] = useState<string | null>(null);
+    const [focusPinned, setFocusPinned] = useState(false);
 
     const resource = resourceQuery.data?.data;
     const status = resource?.status ?? 'unknown';
@@ -294,9 +340,16 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
     const selectedDeployment = deployments.find((deployment) => deployment.uuid === focusedDeploymentUuid) ?? null;
     const attemptBuckets = partitionDeploymentAttempts(deployments, focusedDeploymentUuid);
     const hasActiveDeployment = deployments.some((deployment) => isDeploymentActive(deployment.status));
+    const readiness = readinessQuery.data?.data ?? null;
+
+    const focusDeployment = (deploymentUuid: string, pinned = false) => {
+        setFocusedDeploymentUuid(deploymentUuid);
+        setFocusPinned(pinned);
+    };
 
     useEffect(() => {
         setFocusedDeploymentUuid(null);
+        setFocusPinned(false);
         setActiveTab('overview');
         setActing(null);
         setPendingAction(null);
@@ -304,9 +357,8 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
     }, [uuid]);
 
     useEffect(() => {
-        setFocusedDeploymentUuid((current) => pickFocusedDeployment(deployments, current));
-    }, [deployments]);
-
+        setFocusedDeploymentUuid((current) => pickFocusedDeployment(deployments, current, { pinned: focusPinned }));
+    }, [deployments, focusPinned]);
     useEffect(() => {
         if (!hasActiveDeployment) {
             return;
@@ -319,8 +371,25 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
         return () => window.clearInterval(interval);
     }, [hasActiveDeployment, uuid, deploymentsQuery.reload]);
 
+    useEffect(() => {
+        if (!readiness || !shouldPollApplicationReadiness(readiness.status)) {
+            return;
+        }
+
+        const interval = window.setInterval(() => {
+            void readinessQuery.reload({ silent: true });
+        }, 4000);
+
+        return () => window.clearInterval(interval);
+    }, [readiness?.status, uuid, readinessQuery.reload]);
+
+    const openDeploymentsTab = () => {
+        setFocusPinned(false);
+        setActiveTab('deployments');
+    };
+
     const reload = async () => {
-        await Promise.all([resourceQuery.reload(), deploymentsQuery.reload()]);
+        await Promise.all([resourceQuery.reload(), deploymentsQuery.reload(), readinessQuery.reload()]);
     };
 
     const runAction = async (action: CoreAction) => {
@@ -337,8 +406,8 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                 : null;
 
             if (deploymentUuid) {
-                setFocusedDeploymentUuid(deploymentUuid);
-                setActiveTab('deployments');
+                focusDeployment(deploymentUuid, false);
+                openDeploymentsTab();
             }
 
             await reload();
@@ -366,6 +435,22 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                                 <p class="break-words text-sm text-base-content/55">
                                     {[config.project?.name, config.environment?.name].filter(Boolean).join(' · ') || 'Application sans projet'}
                                 </p>
+                                <div class="mt-3">
+                                    <ApplicationStatusBadges
+                                        applicationUuid={uuid}
+                                        resourceStatus={status}
+                                        latestDeployment={latest}
+                                        readiness={readiness}
+                                        readinessLoading={readinessQuery.loading}
+                                        onOpenTab={(tab) => {
+                                            if (tab === 'deployments') {
+                                                openDeploymentsTab();
+                                                return;
+                                            }
+                                            setActiveTab(tab);
+                                        }}
+                                    />
+                                </div>
                             </div>
                         </div>
                         <ActionToolbar class="w-full min-w-0 sm:w-auto">
@@ -408,7 +493,14 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                     <Tabs
                         items={applicationTabs}
                         active={activeTab}
-                        onChange={(tabId) => setActiveTab(tabId as ApplicationTabId)}
+                        onChange={(tabId) => {
+                            const next = tabId as ApplicationTabId;
+                            if (next === 'deployments') {
+                                openDeploymentsTab();
+                                return;
+                            }
+                            setActiveTab(next);
+                        }}
                     />
 
                     {activeTab === 'overview' && (
@@ -416,14 +508,14 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                             <section class="min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
                                 <div class="toolbar-row border-b border-base-300/70 px-4 py-4 sm:px-5">
                                     <div class="min-w-0">
-                                        <p class="text-sm font-semibold">Déploiement de production</p>
-                                        <p class="text-xs text-base-content/50">État actuel et source de déploiement</p>
-                                    </div>
-                                    {latest && (
-                                        <p class="shrink-0 text-xs text-base-content/45">
-                                            Dernier déploiement {relativeUpdatedAt(latest.finished_at ?? latest.created_at)}
+                                        <p class="text-sm font-semibold">Production</p>
+                                        <p class="text-xs text-base-content/50">
+                                            Aperçu, domaines et source
+                                            {latest
+                                                ? ` · dernier déploiement ${relativeUpdatedAt(latest.finished_at ?? latest.created_at)}`
+                                                : ''}
                                         </p>
-                                    )}
+                                    </div>
                                 </div>
 
                                 <div class="grid min-w-0 gap-5 p-4 sm:p-5 lg:grid-cols-[minmax(0,280px)_1fr]">
@@ -432,12 +524,11 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                                         domain={domain}
                                         status={typeof status === 'string' ? status : 'running:healthy'}
                                         canVisit={visit !== null}
+                                        readiness={readiness}
+                                        readinessLoading={readinessQuery.loading}
                                     />
 
                                     <dl class="min-w-0 overflow-hidden">
-                                        <DetailRow label="Déploiement">
-                                            <span class="break-all font-mono text-xs text-base-content/70">{resource.uuid}</span>
-                                        </DetailRow>
                                         <DetailRow label="Domaines">
                                             {config.domains.length === 0 ? (
                                                 <span class="text-base-content/45">Aucun domaine</span>
@@ -463,17 +554,16 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                                                 </ul>
                                             )}
                                         </DetailRow>
-                                        <DetailRow label="Statut">
-                                            <ResourceStatusIcon status={status} showLabel size="md" />
-                                        </DetailRow>
-                                        <DetailRow label="Mis à jour">
-                                            <span>{formatDateTime(resource.updated_at)}</span>
-                                        </DetailRow>
                                         <DetailRow label="Source">
                                             <div class="grid gap-1">
                                                 <span class="inline-flex items-center gap-2">
                                                     <GitBranch class="size-3.5 text-base-content/45" aria-hidden />
                                                     <span class="font-medium">{config.git_branch ?? 'branche inconnue'}</span>
+                                                    {config.git_repository && (
+                                                        <span class="truncate text-xs text-base-content/50">
+                                                            {repositoryLabel(config.git_repository)}
+                                                        </span>
+                                                    )}
                                                 </span>
                                                 {latest?.commit && (
                                                     <span class="break-words font-mono text-xs text-base-content/55">
@@ -481,42 +571,56 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                                                         {latest.commit_message ? ` · ${latest.commit_message}` : ''}
                                                     </span>
                                                 )}
-                                                {!latest?.commit && config.git_repository && (
-                                                    <span class="text-xs text-base-content/55">{repositoryLabel(config.git_repository)}</span>
-                                                )}
                                             </div>
+                                        </DetailRow>
+                                        <DetailRow label="Build">
+                                            <span>
+                                                {config.build_pack ?? '—'}
+                                                {config.is_static ? ' · statique' : ''}
+                                                {config.ports_exposes ? ` · port ${config.ports_exposes}` : ''}
+                                            </span>
+                                        </DetailRow>
+                                        <DetailRow label="Infra">
+                                            <span>
+                                                {[config.server?.name, config.environment?.name].filter(Boolean).join(' · ') || '—'}
+                                            </span>
+                                        </DetailRow>
+                                        <DetailRow label="Mis à jour">
+                                            <span>{formatDateTime(resource.updated_at)}</span>
                                         </DetailRow>
                                     </dl>
                                 </div>
                             </section>
 
-                            <div class="grid gap-4 md:grid-cols-3">
-                                <MetricCard title="Build">
-                                    <p><span class="text-base-content/45">Pack </span><span class="font-medium">{config.build_pack ?? '—'}</span></p>
-                                    <p><span class="text-base-content/45">Branche </span><span class="font-medium">{config.git_branch ?? '—'}</span></p>
-                                </MetricCard>
-                                <MetricCard title="Git">
-                                    <p class="truncate">
-                                        <span class="text-base-content/45">Dépôt </span>
-                                        <span class="font-medium">{repositoryLabel(config.git_repository) ?? '—'}</span>
-                                    </p>
-                                    <p><span class="text-base-content/45">Dernier commit </span><span class="font-mono text-xs">{shortCommit(latest?.commit ?? null) ?? '—'}</span></p>
-                                </MetricCard>
-                                <MetricCard title="Infrastructure">
-                                    <p><span class="text-base-content/45">Serveur </span><span class="font-medium">{config.server?.name ?? '—'}</span></p>
-                                    <p><span class="text-base-content/45">Environnement </span><span class="font-medium">{config.environment?.name ?? '—'}</span></p>
-                                    {config.server?.uuid && (
-                                        <button
-                                            class="btn btn-ghost btn-xs mt-2 w-fit"
-                                            type="button"
-                                            onClick={() => setActiveTab('files')}
-                                        >
-                                            <FileText class="size-3.5" aria-hidden />
-                                            Code source Git
-                                        </button>
-                                    )}
-                                </MetricCard>
+                            <div class="flex flex-wrap gap-2">
+                                <button
+                                    class="btn btn-ghost btn-sm rounded-full border border-base-300/80"
+                                    type="button"
+                                    onClick={() => setActiveTab('settings')}
+                                >
+                                    Paramètres runtime
+                                </button>
+                                <button
+                                    class="btn btn-ghost btn-sm rounded-full border border-base-300/80"
+                                    type="button"
+                                    onClick={openDeploymentsTab}
+                                >
+                                    <Rocket class="size-3.5" aria-hidden />
+                                    Voir les déploiements
+                                </button>
+                                {config.server?.uuid && (
+                                    <button
+                                        class="btn btn-ghost btn-sm rounded-full border border-base-300/80"
+                                        type="button"
+                                        onClick={() => setActiveTab('files')}
+                                    >
+                                        <FileText class="size-3.5" aria-hidden />
+                                        Code source
+                                    </button>
+                                )}
                             </div>
+
+                            <ApplicationReadinessCard applicationUuid={uuid} canAct={canAct} />
 
                             <ApplicationAgentChatCard application={resource} />
 
@@ -530,98 +634,145 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
 
                     {activeTab === 'deployments' && (
                         <>
-                            <section class="min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-                                <div class="toolbar-row border-b border-base-300/70 px-4 py-4 sm:px-5">
-                                    <div class="min-w-0">
-                                        <p class="text-sm font-semibold">Tentatives de déploiement</p>
-                                        <p class="text-xs text-base-content/50">
-                                            Chronologie pour cette application — échecs, relances et historique
-                                        </p>
-                                    </div>
-                                    <Server class="size-4 shrink-0 text-base-content/35" aria-hidden />
+                            <DataState
+                                loading={deploymentsQuery.loading}
+                                error={deploymentsQuery.error}
+                                empty={deployments.length === 0}
+                                emptyMessage="Aucun déploiement enregistré pour cette application."
+                                onRetry={() => void deploymentsQuery.reload()}
+                            >
+                                <div class="grid min-w-0 gap-5">
+                                    {(attemptBuckets.current || attemptBuckets.active.length > 0) && (
+                                        <section class="min-w-0 overflow-hidden rounded-2xl border border-primary/25 bg-base-100 shadow-sm">
+                                            <div class="toolbar-row border-b border-base-300/70 px-4 py-4 sm:px-5">
+                                                <div class="min-w-0">
+                                                    <p class="text-sm font-semibold">
+                                                        {hasActiveDeployment ? 'Déploiement en cours' : 'Déploiement suivi'}
+                                                    </p>
+                                                    <p class="text-xs text-base-content/50">
+                                                        Logs et agent pour la tentative sélectionnée
+                                                    </p>
+                                                </div>
+                                                {selectedDeployment && (
+                                                    <DeploymentStatusIcon status={selectedDeployment.status} showLabel />
+                                                )}
+                                            </div>
+
+                                            <div class="grid min-w-0 gap-4 p-4 sm:p-5">
+                                                {attemptBuckets.current && (
+                                                    <DeploymentAttemptGroup
+                                                        title="Sélection"
+                                                        hint="Cette tentative alimente les logs ci-dessous"
+                                                        tone="current"
+                                                        deployments={[attemptBuckets.current]}
+                                                        focusedUuid={focusedDeploymentUuid}
+                                                        onSelect={(deploymentUuid) => focusDeployment(deploymentUuid, true)}
+                                                    />
+                                                )}
+                                                {attemptBuckets.active.length > 0 && (
+                                                    <DeploymentAttemptGroup
+                                                        title="En file / en cours"
+                                                        hint="Autres déploiements actifs"
+                                                        tone="active"
+                                                        deployments={attemptBuckets.active}
+                                                        focusedUuid={focusedDeploymentUuid}
+                                                        onSelect={(deploymentUuid) => focusDeployment(deploymentUuid, true)}
+                                                    />
+                                                )}
+
+                                                {focusedDeploymentUuid && (selectedDeployment || deployments.length === 0) && (
+                                                    <DeploymentMonitorPanel
+                                                        deploymentUuid={focusedDeploymentUuid}
+                                                        deployment={selectedDeployment}
+                                                        onSelectDeployment={(deploymentUuid) => {
+                                                            focusDeployment(deploymentUuid, true);
+                                                            void deploymentsQuery.reload({ silent: true });
+                                                        }}
+                                                    />
+                                                )}
+                                            </div>
+                                        </section>
+                                    )}
+
+                                    {!attemptBuckets.current && attemptBuckets.active.length === 0 && focusedDeploymentUuid && (
+                                        <section class="grid min-w-0 gap-3 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 p-4 shadow-sm sm:p-5">
+                                            <div class="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                                                <div class="min-w-0">
+                                                    <p class="text-sm font-semibold">Suivi du déploiement</p>
+                                                    <p class="text-xs text-base-content/50">
+                                                        Logs et agent liés à cette tentative
+                                                    </p>
+                                                </div>
+                                                {selectedDeployment && (
+                                                    <DeploymentStatusIcon status={selectedDeployment.status} showLabel />
+                                                )}
+                                            </div>
+                                            <DeploymentMonitorPanel
+                                                deploymentUuid={focusedDeploymentUuid}
+                                                deployment={selectedDeployment}
+                                                onSelectDeployment={(deploymentUuid) => {
+                                                    focusDeployment(deploymentUuid, true);
+                                                    void deploymentsQuery.reload({ silent: true });
+                                                }}
+                                            />
+                                        </section>
+                                    )}
+
+                                    {(attemptBuckets.failed.length > 0 || attemptBuckets.history.length > 0) && (
+                                        <section class="min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
+                                            <div class="toolbar-row border-b border-base-300/70 px-4 py-4 sm:px-5">
+                                                <div class="min-w-0">
+                                                    <p class="text-sm font-semibold">Historique</p>
+                                                    <p class="text-xs text-base-content/50">
+                                                        Échecs précédents et déploiements terminés
+                                                    </p>
+                                                </div>
+                                                <Server class="size-4 shrink-0 text-base-content/35" aria-hidden />
+                                            </div>
+
+                                            <div class="grid min-w-0 gap-4 p-4 sm:p-5">
+                                                {attemptBuckets.failed.length > 0 && (
+                                                    <DeploymentAttemptGroup
+                                                        title="Échecs précédents"
+                                                        hint="Tentatives en échec (hors sélection)"
+                                                        tone="failed"
+                                                        deployments={attemptBuckets.failed}
+                                                        focusedUuid={focusedDeploymentUuid}
+                                                        onSelect={(deploymentUuid) => focusDeployment(deploymentUuid, true)}
+                                                        collapsible
+                                                        defaultCollapsed={shouldCollapsePreviousFailures(attemptBuckets.failed.length)}
+                                                    />
+                                                )}
+                                                {attemptBuckets.history.length > 0 && (
+                                                    <DeploymentAttemptGroup
+                                                        title="Terminés"
+                                                        hint="Déploiements réussis ou annulés"
+                                                        tone="history"
+                                                        deployments={attemptBuckets.history}
+                                                        focusedUuid={focusedDeploymentUuid}
+                                                        onSelect={(deploymentUuid) => focusDeployment(deploymentUuid, true)}
+                                                        collapsible
+                                                        defaultCollapsed={attemptBuckets.history.length > 2}
+                                                    />
+                                                )}
+                                            </div>
+                                        </section>
+                                    )}
                                 </div>
-
-                                <DataState
-                                    loading={deploymentsQuery.loading}
-                                    error={deploymentsQuery.error}
-                                    empty={deployments.length === 0}
-                                    emptyMessage="Aucun déploiement enregistré pour cette application."
-                                    onRetry={() => void deploymentsQuery.reload()}
-                                >
-                                    <div class="grid min-w-0 gap-4 p-4 sm:p-5">
-                                        {attemptBuckets.current && (
-                                            <DeploymentAttemptGroup
-                                                title="Tentative suivie"
-                                                hint="Logs et agent ci-dessous portent sur cette tentative uniquement"
-                                                tone="current"
-                                                deployments={[attemptBuckets.current]}
-                                                focusedUuid={focusedDeploymentUuid}
-                                                onSelect={setFocusedDeploymentUuid}
-                                            />
-                                        )}
-                                        {attemptBuckets.active.length > 0 && (
-                                            <DeploymentAttemptGroup
-                                                title="En cours / en file"
-                                                hint="Relances ou déploiements actifs (souvent déclenchés après l’agent)"
-                                                tone="active"
-                                                deployments={attemptBuckets.active}
-                                                focusedUuid={focusedDeploymentUuid}
-                                                onSelect={setFocusedDeploymentUuid}
-                                            />
-                                        )}
-                                        {attemptBuckets.failed.length > 0 && (
-                                            <DeploymentAttemptGroup
-                                                title="Échecs précédents"
-                                                hint="Autres tentatives en échec pour cette app"
-                                                tone="failed"
-                                                deployments={attemptBuckets.failed}
-                                                focusedUuid={focusedDeploymentUuid}
-                                                onSelect={setFocusedDeploymentUuid}
-                                                collapsible
-                                                defaultCollapsed={shouldCollapsePreviousFailures(attemptBuckets.failed.length)}
-                                            />
-                                        )}
-                                        {attemptBuckets.history.length > 0 && (
-                                            <DeploymentAttemptGroup
-                                                title="Historique"
-                                                hint="Déploiements terminés ou annulés"
-                                                tone="history"
-                                                deployments={attemptBuckets.history}
-                                                focusedUuid={focusedDeploymentUuid}
-                                                onSelect={setFocusedDeploymentUuid}
-                                            />
-                                        )}
-                                    </div>
-                                </DataState>
-                            </section>
-
-                            {focusedDeploymentUuid && (selectedDeployment || deployments.length === 0) && (
-                                <section class="grid min-w-0 gap-3 overflow-hidden">
-                                    <div class="flex min-w-0 flex-wrap items-center justify-between gap-3">
-                                        <div class="min-w-0">
-                                            <p class="text-sm font-semibold">Suivi du déploiement</p>
-                                            <p class="break-all font-mono text-[11px] text-base-content/45">
-                                                {focusedDeploymentUuid}
-                                            </p>
-                                            <p class="text-xs text-base-content/50">
-                                                Logs et agent liés à cette tentative uniquement
-                                            </p>
-                                        </div>
-                                        {selectedDeployment && (
-                                            <DeploymentStatusIcon status={selectedDeployment.status} showLabel />
-                                        )}
-                                    </div>
-                                    <DeploymentMonitorPanel
-                                        deploymentUuid={focusedDeploymentUuid}
-                                        deployment={selectedDeployment}
-                                        onSelectDeployment={(deploymentUuid) => {
-                                            setFocusedDeploymentUuid(deploymentUuid);
-                                            void deploymentsQuery.reload({ silent: true });
-                                        }}
-                                    />
-                                </section>
-                            )}
+                            </DataState>
                         </>
+                    )}
+
+                    {activeTab === 'settings' && (
+                        <ApplicationRuntimeSettingsPanel
+                            applicationUuid={resource.uuid}
+                            canAct={canAct}
+                            onChanged={reload}
+                            onRedeployQueued={(deploymentUuid) => {
+                                focusDeployment(deploymentUuid, false);
+                                openDeploymentsTab();
+                            }}
+                        />
                     )}
 
                     {activeTab === 'domains' && (
@@ -653,6 +804,26 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
 
                     {activeTab === 'files' && (
                         <ApplicationSourceExplorer applicationUuid={resource.uuid} />
+                    )}
+
+                    {activeTab === 'danger' && (
+                        <ApplicationDangerPanel
+                            applicationUuid={resource.uuid}
+                            applicationName={resource.name}
+                            canAct={canAct}
+                            onDeleted={async () => {
+                                await onChanged();
+                                onClose();
+                            }}
+                            onDatabaseReset={(deploymentUuid) => {
+                                if (deploymentUuid) {
+                                    focusDeployment(deploymentUuid, false);
+                                    openDeploymentsTab();
+                                }
+                                void reload();
+                                void onChanged();
+                            }}
+                        />
                     )}
 
                     {actionError && <p class="text-sm text-error" role="alert">{actionError}</p>}

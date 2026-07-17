@@ -14,6 +14,7 @@ use App\Traits\HasSafeStringAttribute;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
@@ -962,6 +963,16 @@ class Application extends BaseModel
         }
 
         return null;
+    }
+
+    public function readiness(): HasOne
+    {
+        return $this->hasOne(ApplicationReadiness::class);
+    }
+
+    public function readinessInterventions(): HasMany
+    {
+        return $this->hasMany(ApplicationReadinessIntervention::class);
     }
 
     public function environment_variables()

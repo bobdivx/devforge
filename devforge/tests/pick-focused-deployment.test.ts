@@ -26,13 +26,40 @@ describe('pickFocusedDeployment', () => {
         expect(pickFocusedDeployment([], 'agent-redeploy-uuid')).toBe('agent-redeploy-uuid');
     });
 
-    it('conserve un UUID présent dans la liste récente', () => {
+    it('conserve un UUID terminé présent dans la liste quand aucun déploiement n’est actif', () => {
+        const deployments = [
+            deployment('older-deploy', 'finished'),
+            deployment('failed-deploy', 'failed'),
+        ];
+
+        expect(pickFocusedDeployment(deployments, 'older-deploy')).toBe('older-deploy');
+    });
+
+    it('passe au déploiement actif quand le focus précédent est terminé', () => {
+        const deployments = [
+            deployment('active-deploy', 'in_progress'),
+            deployment('older-deploy', 'failed'),
+        ];
+
+        expect(pickFocusedDeployment(deployments, 'older-deploy')).toBe('active-deploy');
+    });
+
+    it('conserve un UUID historique épinglé même si un déploiement est actif', () => {
         const deployments = [
             deployment('active-deploy', 'in_progress'),
             deployment('older-deploy', 'finished'),
         ];
 
-        expect(pickFocusedDeployment(deployments, 'older-deploy')).toBe('older-deploy');
+        expect(pickFocusedDeployment(deployments, 'older-deploy', { pinned: true })).toBe('older-deploy');
+    });
+
+    it('conserve un UUID actif présent dans la liste récente', () => {
+        const deployments = [
+            deployment('active-deploy', 'in_progress'),
+            deployment('older-deploy', 'finished'),
+        ];
+
+        expect(pickFocusedDeployment(deployments, 'active-deploy')).toBe('active-deploy');
     });
 
     it('abandonne un UUID stale d’une autre app dès que la liste de cette app est connue', () => {

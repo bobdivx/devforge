@@ -427,11 +427,24 @@ export type AgentStatus = 'idle' | 'running' | 'error' | 'paused';
 export type AgentRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'awaiting_approval';
 export type AgentTrigger = 'scheduled' | 'manual' | 'event' | 'chat' | 'ephemeral' | 'delegation';
 
+export type AgentChatStep = {
+    type: 'tool' | 'thinking';
+    name: string;
+    args_summary?: string;
+    result_summary?: string;
+    status?: 'done' | 'error' | 'skipped' | 'awaiting_approval' | 'running';
+};
+
 export type AgentChatMessage = {
     uuid: string;
     role: 'user' | 'assistant';
     content: string;
-    metadata: Record<string, unknown> | null;
+    metadata: (Record<string, unknown> & {
+        steps?: AgentChatStep[];
+        pending_approval?: Record<string, unknown>;
+        tokens_used?: number;
+        iterations?: number;
+    }) | null;
     run_uuid: string | null;
     session_uuid?: string | null;
     created_at: string;
@@ -698,6 +711,77 @@ export type ApplicationDomains = {
     build_pack: string | null;
     sslip_warning: boolean;
 };
+
+export type ApplicationReadinessStatus =
+    | 'idle'
+    | 'probing'
+    | 'healthy'
+    | 'recovering'
+    | 'awaiting_user'
+    | 'failed';
+
+export type ApplicationReadinessStep = {
+    rank: number;
+    text: string;
+    done?: boolean;
+};
+
+export type ApplicationReadinessIntervention = {
+    uuid: string;
+    title: string;
+    summary: string | null;
+    steps: ApplicationReadinessStep[];
+    status: 'open' | 'acknowledged' | 'resolved' | 'cancelled';
+    user_acknowledged_at: string | null;
+    resolved_at: string | null;
+};
+
+export type ApplicationReadiness = {
+    uuid: string | null;
+    status: ApplicationReadinessStatus;
+    autonomous_enabled: boolean;
+    last_probe_at: string | null;
+    last_probe_ok: boolean | null;
+    last_probe_error: string | null;
+    last_http_status: number | null;
+    round: number;
+    max_rounds: number;
+    last_deployment_uuid: string | null;
+    probe_url: string | null;
+    intervention: ApplicationReadinessIntervention | null;
+    degraded?: boolean;
+};
+
+export type ApplicationRuntimeSettings = {
+    build_pack: string;
+    is_static: boolean;
+    start_command: string | null;
+    install_command: string | null;
+    build_command: string | null;
+    ports_exposes: string;
+    base_directory: string;
+    publish_directory: string;
+    health_check_enabled: boolean;
+    health_check_type: string;
+    health_check_path: string;
+    health_check_port: string | null;
+    supports_static_toggle: boolean;
+};
+
+export type ApplicationRuntimeSettingsUpdateInput = Partial<{
+    build_pack: string;
+    is_static: boolean;
+    start_command: string | null;
+    install_command: string | null;
+    build_command: string | null;
+    ports_exposes: string;
+    base_directory: string;
+    publish_directory: string;
+    health_check_enabled: boolean;
+    health_check_type: string;
+    health_check_path: string;
+    health_check_port: string | null;
+}>;
 
 export type ApplicationDomainsUpdateInput = {
     domains?: string | null;
@@ -1325,6 +1409,21 @@ export const domainApi = {
         method: 'POST',
         body: JSON.stringify(input),
     }),
+    deleteApplication: (
+        applicationUuid: string,
+        input: {
+            delete_volumes?: boolean;
+            delete_connected_networks?: boolean;
+            delete_configurations?: boolean;
+            docker_cleanup?: boolean;
+        } = {},
+    ) => mutate<ApiResponse<{ queued: boolean; message: string }>>(
+        `/applications/${encodeURIComponent(applicationUuid)}`,
+        {
+            method: 'DELETE',
+            body: JSON.stringify(input),
+        },
+    ),
     applicationDomains: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationDomains>>(
         `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/domains`,
     ),
@@ -1368,6 +1467,28 @@ export const domainApi = {
         {
             method: 'POST',
             body: JSON.stringify(input),
+        },
+    ),
+    resetApplicationDatabase: (
+        applicationUuid: string,
+        databaseUuid: string,
+        redeploy = true,
+    ) => mutate<ApiResponse<{
+        database_uuid: string;
+        database_name: string;
+        reset: boolean;
+        restarted: boolean;
+        message: string;
+        redeploy: {
+            queued: boolean;
+            deployment_uuid: string | null;
+            message: string;
+        } | null;
+    }>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/databases/${encodeURIComponent(databaseUuid)}/reset`,
+        {
+            method: 'POST',
+            body: JSON.stringify({ redeploy }),
         },
     ),
     applicationLogs: (applicationUuid: string, lines = 200) => apiFetch<ApiResponse<ApplicationLogs>>(
@@ -1435,6 +1556,58 @@ export const domainApi = {
         value: string | null;
     }>>(
         `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/environment-variables/${encodeURIComponent(envUuid)}/reveal`,
+    ),
+    applicationRuntimeSettings: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationRuntimeSettings>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/runtime-settings`,
+    ),
+    updateApplicationRuntimeSettings: (
+        applicationUuid: string,
+        input: ApplicationRuntimeSettingsUpdateInput & { redeploy?: boolean },
+    ) => mutate<ApiResponse<ApplicationRuntimeSettings> & {
+        meta?: {
+            redeploy?: {
+                queued: boolean;
+                deployment_uuid: string | null;
+                message: string;
+            } | null;
+        };
+    }>(
+        `/applications/${encodeURIComponent(applicationUuid)}/runtime-settings`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    applicationReadiness: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationReadiness>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/readiness`,
+    ),
+    updateApplicationReadiness: (
+        applicationUuid: string,
+        input: { autonomous_enabled: boolean },
+    ) => mutate<ApiResponse<ApplicationReadiness>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/readiness`,
+        {
+            method: 'PATCH',
+            body: JSON.stringify(input),
+        },
+    ),
+    probeApplicationReadiness: (applicationUuid: string) => mutate<ApiResponse<ApplicationReadiness> & {
+        meta?: {
+            probe_ok?: boolean;
+            probe_url?: string | null;
+            probe_status?: number | null;
+            probe_error?: string | null;
+        };
+    }>(
+        `/applications/${encodeURIComponent(applicationUuid)}/readiness/probe`,
+        { method: 'POST' },
+    ),
+    acknowledgeApplicationReadinessIntervention: (
+        applicationUuid: string,
+        interventionUuid: string,
+    ) => mutate<ApiResponse<ApplicationReadiness>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/readiness/interventions/${encodeURIComponent(interventionUuid)}/done`,
+        { method: 'POST' },
     ),
     createDatabase: (input: CreateDatabaseInput) => mutate<ApiResponse<CoreResource>>('/databases', {
         method: 'POST',

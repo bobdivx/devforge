@@ -12,6 +12,7 @@ use App\Services\DevForge\Agent\Tool\IterationBudget;
 use App\Services\DevForge\Core\CoreResourceAction;
 use App\Services\DevForge\Core\CoreResourceCatalog;
 use App\Services\DevForge\DeploymentData;
+use App\Services\DevForge\Readiness\ApplicationReadinessService;
 
 class AgentRunner
 {
@@ -19,6 +20,10 @@ class AgentRunner
     private array $messages = [];
 
     private bool $toolNudgeUsed = false;
+
+    private bool $correctionNudgeUsed = false;
+
+    private bool $anyToolUsed = false;
 
     public function __construct(
         private readonly LlmProviderFactory $providerFactory,
@@ -32,6 +37,8 @@ class AgentRunner
     public function run(AiAgent $agent, AiAgentRun $run, array $context = []): void
     {
         $this->toolNudgeUsed = false;
+        $this->correctionNudgeUsed = false;
+        $this->anyToolUsed = false;
         $providerConfig = $agent->effectiveProviderConfig();
 
         if (! $providerConfig) {
@@ -98,6 +105,24 @@ class AgentRunner
         $summary = '';
 
         try {
+            $this->maybeAutoFixDeploymentInfrastructure($toolkit, $run, $context);
+
+            $earlyHarness = $this->maybeRunEarlyDeterministicHarness($toolkit, $agent, $run, $context);
+            if ($earlyHarness !== null) {
+                $summary = $earlyHarness['text'];
+                $run->update([
+                    'status' => 'completed',
+                    'summary' => mb_substr($summary, 0, 1000),
+                    'finished_at' => now(),
+                ]);
+                app(AgentRunCorrectionSummarizer::class)->finalize($run->fresh() ?? $run);
+                app(ApplicationReadinessService::class)->handleAgentOutcome($run->fresh() ?? $run);
+                $agent->update(['status' => 'idle', 'last_run_at' => now()]);
+                broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'completed'));
+
+                return;
+            }
+
             while ($budget->consume()) {
                 $iterations = $budget->getUsed();
                 $run->appendLog("Itération #{$iterations}...");
@@ -118,7 +143,7 @@ class AgentRunner
                 }
 
                 if (! $response->hasToolCalls()) {
-                    if ($iterations === 1 && ! $this->toolNudgeUsed) {
+                    if (! $this->anyToolUsed && ! $this->toolNudgeUsed) {
                         $this->toolNudgeUsed = true;
                         $this->messages[] = ['role' => 'assistant', 'content' => $response->text ?: 'En attente d\'action.'];
                         $this->messages[] = ['role' => 'user', 'content' => AgentDirectives::toolNudgeMessage()];
@@ -127,10 +152,57 @@ class AgentRunner
                         continue;
                     }
 
+                    $correctionActions = $run->metadata['correction_actions'] ?? [];
+                    $assistantText = (string) ($response->text ?? '');
+                    if (
+                        ($context['event'] ?? null) === 'deployment_failed'
+                        && ! $this->correctionNudgeUsed
+                        && (! is_array($correctionActions) || $correctionActions === [])
+                        && ! AgentDirectives::isHostPermissionDiagnosis($assistantText)
+                    ) {
+                        $this->correctionNudgeUsed = true;
+                        $this->messages[] = ['role' => 'assistant', 'content' => $assistantText !== '' ? $assistantText : 'Diagnostic terminé.'];
+                        $this->messages[] = ['role' => 'user', 'content' => AgentDirectives::deploymentFailureCorrectionNudgeMessage($assistantText)];
+                        $run->appendLog('Relance autonome : échec déploiement sans correction — consigne corrective envoyée.');
+
+                        continue;
+                    }
+
+                    if (
+                        ($context['event'] ?? null) === 'deployment_failed'
+                        && ! $this->correctionNudgeUsed
+                        && AgentDirectives::isHostPermissionDiagnosis($assistantText)
+                    ) {
+                        $this->correctionNudgeUsed = true;
+                        $this->messages[] = ['role' => 'assistant', 'content' => $assistantText];
+                        $this->messages[] = ['role' => 'user', 'content' => AgentDirectives::deploymentFailureHostPermissionNudgeMessage()];
+                        $run->appendLog('Relance autonome : Permission denied hôte — consigne ops (pas de variable factice).');
+
+                        continue;
+                    }
+
+                    if (
+                        ! $this->anyToolUsed
+                        && ($context['event'] ?? null) === 'deployment_failed'
+                        && config('devforge.agents_auto_fallback', true)
+                    ) {
+                        $harness = app(AgentRepairHarness::class)->execute(
+                            $toolkit,
+                            $agent,
+                            $run,
+                            $context,
+                            'Corriger le déploiement en échec',
+                        );
+                        $summary = $harness['text'];
+                        $run->appendLog('Harness autonome : réparation déterministe après absence de tool_calls.');
+                        break;
+                    }
+
                     $run->appendLog('Agent terminé — aucun appel d\'outil supplémentaire.');
                     break;
                 }
 
+                $this->anyToolUsed = true;
                 $toolResults = [];
                 $hadToolFailure = false;
                 foreach ($response->toolCalls as $toolCall) {
@@ -163,6 +235,7 @@ class AgentRunner
             ]);
 
             app(AgentRunCorrectionSummarizer::class)->finalize($run->fresh() ?? $run);
+            app(ApplicationReadinessService::class)->handleAgentOutcome($run->fresh() ?? $run);
 
             $agent->update(['status' => 'idle', 'last_run_at' => now()]);
             broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'completed'));
@@ -175,8 +248,370 @@ class AgentRunner
                 'finished_at' => now(),
             ]);
             app(AgentRunCorrectionSummarizer::class)->finalize($run->fresh() ?? $run);
+            app(ApplicationReadinessService::class)->handleAgentOutcome($run->fresh() ?? $run);
             $agent->update(['status' => 'error', 'last_run_at' => now()]);
             broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'failed'));
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function maybeAutoFixDeploymentInfrastructure(AgentToolkit $toolkit, AiAgentRun $run, array $context): void
+    {
+        $event = $context['event'] ?? null;
+        if (! in_array($event, ['deployment_failed', 'application_readiness_failed'], true)) {
+            return;
+        }
+
+        $excerpt = is_array($context['failure_excerpt'] ?? null) ? $context['failure_excerpt'] : [];
+        if ($excerpt === [] && is_string($context['probe_error'] ?? null) && $context['probe_error'] !== '') {
+            $excerpt = [['message' => (string) $context['probe_error']]];
+        }
+
+        $applicationUuid = is_string($context['application_uuid'] ?? null) ? $context['application_uuid'] : null;
+        if ($applicationUuid === null || $applicationUuid === '') {
+            return;
+        }
+
+        if (AgentDirectives::failureExcerptHasCoolifyBaseConfigPathIssue($excerpt)) {
+            $run->appendLog('Read-only /data Coolify détecté — correction automatique (fix_coolify_base_config_path).');
+
+            $result = $toolkit->execute('fix_coolify_base_config_path', [
+                'application_uuid' => $applicationUuid,
+                'redeploy' => true,
+                'reason' => 'Auto-fix: Read-only /data Coolify path',
+            ]);
+
+            $this->recordAutoFixOutcome(
+                $run,
+                'fix_coolify_base_config_path',
+                $result,
+                'Auto-fix BASE_CONFIG_PATH OK',
+            );
+
+            return;
+        }
+
+        if (AgentDirectives::failureExcerptHasHostPermissionIssue($excerpt)) {
+            $run->appendLog('Permission denied hôte détecté dans les logs — correction automatique (fix_application_host_permissions).');
+
+            $result = $toolkit->execute('fix_application_host_permissions', [
+                'application_uuid' => $applicationUuid,
+                'redeploy' => true,
+                'reason' => 'Auto-fix: Permission denied host (tee/.env)',
+            ]);
+
+            $this->recordAutoFixOutcome(
+                $run,
+                'fix_application_host_permissions',
+                $result,
+                'Auto-fix permissions OK',
+            );
+
+            return;
+        }
+
+        if (AgentDirectives::failureExcerptHasInvalidChownGroupIssue($excerpt)) {
+            $run->appendLog('chown invalid group détecté — redéploiement automatique (groupe primaire).');
+
+            $result = $toolkit->execute('control_resource', [
+                'uuid' => $applicationUuid,
+                'type' => 'applications',
+                'action' => 'deploy',
+                'reason' => 'Auto-fix: chown invalid group (user:primary group)',
+            ]);
+
+            $this->recordAutoFixOutcome(
+                $run,
+                'control_resource',
+                $result,
+                'Auto-fix chown group — redeploy lancé',
+            );
+
+            return;
+        }
+
+        if (AgentDirectives::failureExcerptHasReadinessPlatformCrash($excerpt)) {
+            $run->appendLog('Crash plateforme readiness (ApplicationReadiness) — redéploiement automatique.');
+
+            $result = $toolkit->execute('control_resource', [
+                'uuid' => $applicationUuid,
+                'type' => 'applications',
+                'action' => 'deploy',
+                'reason' => 'Auto-fix: rollback post-deploy dû à ApplicationReadiness manquant',
+            ]);
+
+            $this->recordAutoFixOutcome(
+                $run,
+                'control_resource',
+                $result,
+                'Auto-fix readiness crash — redeploy lancé',
+            );
+
+            return;
+        }
+
+        if ($this->shouldAutoFixStaticPublishDirectory($context, $excerpt, $applicationUuid)) {
+            $publishDirectory = $this->resolveStaticPublishDirectory($toolkit, $run, $applicationUuid, $context, $excerpt);
+
+            if ($publishDirectory === null || $publishDirectory === '') {
+                $run->appendLog('Page nginx / publish_directory suspect — impossible de déduire le dossier (logs + source) ; laisse l’agent LLM investiguer.');
+
+                return;
+            }
+
+            $currentPublish = AgentDirectives::normalizePublishDirectory(
+                is_string($context['publish_directory'] ?? null) ? (string) $context['publish_directory'] : null,
+            );
+            if ($currentPublish === $publishDirectory) {
+                $run->appendLog("publish_directory déjà à {$publishDirectory} malgré page nginx — pas d’auto-fix (cause probablement ailleurs).");
+
+                return;
+            }
+
+            $run->appendLog("publish_directory manquant/incorrect pour site statique — correction automatique ({$publishDirectory}).");
+
+            $result = $toolkit->execute('update_application_runtime_settings', [
+                'application_uuid' => $applicationUuid,
+                'publish_directory' => $publishDirectory,
+                'is_static' => true,
+                'redeploy' => true,
+                'reason' => "Auto-fix: publish_directory={$publishDirectory} (déduit logs/source)",
+            ]);
+
+            $this->recordAutoFixOutcome(
+                $run,
+                'update_application_runtime_settings',
+                $result,
+                "Auto-fix publish_directory={$publishDirectory} OK",
+            );
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     * @param  array<int, mixed>  $excerpt
+     */
+    private function resolveStaticPublishDirectory(
+        AgentToolkit $toolkit,
+        AiAgentRun $run,
+        string $applicationUuid,
+        array $context,
+        array $excerpt,
+    ): ?string {
+        $publishDirectory = AgentDirectives::inferStaticPublishDirectory(
+            $excerpt,
+            is_string($context['probe_error'] ?? null) ? (string) $context['probe_error'] : null,
+        );
+        if ($publishDirectory !== null) {
+            return $publishDirectory;
+        }
+
+        $run->appendLog('publish_directory : lecture des logs de déploiement pour déduire le dossier…');
+        $logsResult = $toolkit->execute('get_deployment_logs', [
+            'application_uuid' => $applicationUuid,
+            'limit' => 2,
+            'log_lines' => 200,
+        ]);
+        $logsExcerpt = [['message' => json_encode($logsResult, JSON_UNESCAPED_UNICODE) ?: '']];
+        $publishDirectory = AgentDirectives::inferStaticPublishDirectory($logsExcerpt);
+        if ($publishDirectory !== null) {
+            $run->appendLog("publish_directory déduit des logs : {$publishDirectory}");
+
+            return $publishDirectory;
+        }
+
+        $run->appendLog('publish_directory : inspection du dépôt source (dist/build/out/…)…');
+        $sourceResult = $toolkit->execute('list_application_source', [
+            'application_uuid' => $applicationUuid,
+            'path' => '/',
+        ]);
+        $publishDirectory = AgentDirectives::pickStaticPublishDirectoryFromSourceEntries(
+            is_array($sourceResult['entries'] ?? null) ? $sourceResult['entries'] : [],
+        );
+        if ($publishDirectory !== null) {
+            $run->appendLog("publish_directory déduit du dépôt : {$publishDirectory}");
+
+            return $publishDirectory;
+        }
+
+        // Nested Next/Nuxt style outputs
+        foreach (['.output', 'dist'] as $nestedRoot) {
+            $nested = $toolkit->execute('list_application_source', [
+                'application_uuid' => $applicationUuid,
+                'path' => '/'.$nestedRoot,
+            ]);
+            if (isset($nested['error'])) {
+                continue;
+            }
+            $names = collect(is_array($nested['entries'] ?? null) ? $nested['entries'] : [])
+                ->filter(fn ($entry): bool => is_array($entry) && in_array(($entry['type'] ?? ''), ['directory', 'dir'], true))
+                ->map(fn (array $entry): string => strtolower((string) ($entry['name'] ?? '')))
+                ->filter()
+                ->values();
+            if ($nestedRoot === '.output' && $names->contains('public')) {
+                return '/.output/public';
+            }
+            if ($nestedRoot === 'dist' && $names->contains('client')) {
+                return '/dist/client';
+            }
+        }
+
+        // Dernier recours : exemple cité dans le message probe (« ex. /dist manquant »).
+        $probeHint = is_string($context['probe_error'] ?? null) ? (string) $context['probe_error'] : '';
+        if (
+            $probeHint !== ''
+            && preg_match('/publish_directory probablement incorrect[^\n]*\b(\/[A-Za-z0-9._-]+)\b/iu', $probeHint, $m) === 1
+        ) {
+            $fallback = AgentDirectives::normalizePublishDirectory($m[1]);
+            if ($fallback !== null) {
+                $run->appendLog("publish_directory fallback depuis message probe : {$fallback}");
+
+                return $fallback;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     * @param  array<int, mixed>  $excerpt
+     */
+    private function shouldAutoFixStaticPublishDirectory(array $context, array $excerpt, string $applicationUuid): bool
+    {
+        if (AgentDirectives::failureExcerptHasMissingStaticPublishDirectoryIssue($excerpt)) {
+            return true;
+        }
+
+        $publishDirectory = trim((string) ($context['publish_directory'] ?? ''));
+        $isEmptyPublish = $publishDirectory === '' || $publishDirectory === '/' || strtolower($publishDirectory) === 'null';
+        $isStatic = filter_var($context['is_static'] ?? false, FILTER_VALIDATE_BOOLEAN)
+            || in_array(strtolower((string) ($context['build_pack'] ?? '')), ['static', 'nixpacks'], true);
+
+        if (($context['event'] ?? null) === 'application_readiness_failed' && $isEmptyPublish) {
+            $application = \App\Models\Application::query()->where('uuid', $applicationUuid)->first();
+            if ($application && (bool) ($application->settings?->is_static ?? false)) {
+                return true;
+            }
+        }
+
+        $probeError = is_string($context['probe_error'] ?? null) ? (string) $context['probe_error'] : '';
+        if (
+            ($context['event'] ?? null) === 'application_readiness_failed'
+            && AgentDirectives::isMissingStaticPublishDirectoryIssue($probeError)
+        ) {
+            return true;
+        }
+
+        if ($isStatic && $isEmptyPublish && AgentDirectives::failureExcerptHasMissingStaticPublishDirectoryIssue([
+            ...$excerpt,
+            ['message' => (string) ($context['probe_error'] ?? '')],
+        ])) {
+            return true;
+        }
+
+        // Build logs mention a publishable output dir while publish_directory is empty.
+        if ($isEmptyPublish && AgentDirectives::inferStaticPublishDirectory($excerpt) !== null) {
+            $application = \App\Models\Application::query()->where('uuid', $applicationUuid)->first();
+
+            return (bool) ($application?->settings?->is_static ?? false);
+        }
+
+        return false;
+    }
+
+    /**
+     * Issues où le LLM n’apporte rien (secret manquant, etc.) — harness immédiat.
+     *
+     * @param  array<string, mixed>  $context
+     * @return array{text: string, steps: list<array<string, mixed>>, pending_approval?: array<string, mixed>}|null
+     */
+    private function maybeRunEarlyDeterministicHarness(
+        AgentToolkit $toolkit,
+        AiAgent $agent,
+        AiAgentRun $run,
+        array $context,
+    ): ?array {
+        $event = $context['event'] ?? null;
+        if (! in_array($event, ['deployment_failed', 'application_readiness_failed'], true)) {
+            return null;
+        }
+
+        $excerpt = is_array($context['failure_excerpt'] ?? null) ? $context['failure_excerpt'] : [];
+        if ($excerpt === [] && is_string($context['probe_error'] ?? null) && $context['probe_error'] !== '') {
+            $excerpt = [['message' => (string) $context['probe_error']]];
+        }
+
+        if (
+            $event === 'deployment_failed'
+            && AgentDirectives::failureExcerptHasNpmPrivateRegistryAuthIssue($excerpt)
+        ) {
+            $run->appendLog('npm E401 registry privé détecté — harness déterministe avant LLM (GitHub App / needs_user).');
+
+            $this->anyToolUsed = true;
+            $this->correctionNudgeUsed = true;
+
+            return app(AgentRepairHarness::class)->execute(
+                $toolkit,
+                $agent,
+                $run,
+                $context,
+                'Auth npm registry privé manquante',
+            );
+        }
+
+        if (
+            AgentDirectives::failureExcerptHasMissingStaticPublishDirectoryIssue($excerpt)
+            || AgentDirectives::isMissingStaticPublishDirectoryIssue(
+                is_string($context['probe_error'] ?? null) ? (string) $context['probe_error'] : null,
+            )
+        ) {
+            // maybeAutoFix a déjà tenté ; si on arrive ici sans correction, le harness nginx sert de filet.
+            if ($this->anyToolUsed) {
+                return null;
+            }
+
+            $run->appendLog('Page nginx / publish_directory — harness déterministe avant LLM.');
+
+            $this->anyToolUsed = true;
+            $this->correctionNudgeUsed = true;
+
+            return app(AgentRepairHarness::class)->execute(
+                $toolkit,
+                $agent,
+                $run,
+                $context,
+                'Corriger publish_directory (page nginx)',
+            );
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    private function recordAutoFixOutcome(AiAgentRun $run, string $tool, array $result, string $successLog): void
+    {
+        $this->anyToolUsed = true;
+        $this->correctionNudgeUsed = true;
+
+        $payload = json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+        $this->messages[] = [
+            'role' => 'user',
+            'content' => "Correction automatique déjà exécutée ({$tool}). "
+                ."Résultat: {$payload}. "
+                .'Ne recrée PAS de variable factice. Si ok+redeploy, résume brièvement ; sinon diagnostique l’échec du fix.',
+        ];
+
+        if (isset($result['error'])) {
+            $run->appendLog('Auto-fix échoué: '.mb_substr((string) $result['error'], 0, 300));
+
+            return;
+        }
+
+        $run->appendLog($successLog.(isset($result['redeploy']) ? ' + redeploy lancé' : ''));
     }
 }

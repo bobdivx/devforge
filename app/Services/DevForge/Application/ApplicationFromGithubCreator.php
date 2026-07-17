@@ -14,6 +14,7 @@ use App\Rules\ValidGitBranch;
 use App\Services\DevForge\CurrentTeamResources;
 use App\Services\DevForge\DeploymentTargetData;
 use App\Services\DevForge\Github\GithubAppCatalog;
+use App\Services\DevForge\Readiness\ApplicationReadinessService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\Rule;
 use Visus\Cuid2\Cuid2;
@@ -77,10 +78,6 @@ class ApplicationFromGithubCreator
             'source_type' => $githubApp->getMorphClass(),
         ]);
 
-        if (in_array($buildPack, [BuildPackTypes::DOCKERFILE->value, 'dockerimage'], true)) {
-            $application->health_check_enabled = false;
-        }
-
         $server = $destination->server;
         abort_unless($server !== null, 422, 'Destination server not found.');
         $server->loadMissing('settings');
@@ -91,6 +88,8 @@ class ApplicationFromGithubCreator
             $application->uuid,
         );
         $application->save();
+
+        app(ApplicationReadinessService::class)->ensureFor($application, autonomousEnabled: true);
 
         if ($buildPack === BuildPackTypes::DOCKERCOMPOSE->value) {
             LoadComposeFile::dispatch($application);

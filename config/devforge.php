@@ -11,6 +11,25 @@ return [
 
     'agents_auto_fallback' => env('DEVFORGE_AGENTS_AUTO_FALLBACK', true),
 
+    /*
+    |--------------------------------------------------------------------------
+    | MCP DevForge (/mcp/devforge) — outils de réparation (writes)
+    |--------------------------------------------------------------------------
+    |
+    | Distinct du MCP Coolify lecture seule (/mcp). Défaut false jusqu'à
+    | activation explicite sur le NAS. Requiert aussi is_mcp_server_enabled.
+    |
+    | Checklist NAS :
+    | 1. Déployer Coolify + rebuild UI DevForge si besoin
+    | 2. DEVFORGE_AGENTS_ENABLED=true, DEVFORGE_AGENTS_AUTO_FALLBACK=true
+    | 3. DEVFORGE_MCP_ENABLED=true + activer MCP instance (UI / API)
+    | 4. Token Sanctum team avec abilities read+write
+    | 5. Smoke chat « corrige le déploiement maintenant » → carte Actions
+    | 6. Smoke MCP get_deployment_logs puis fix_application_host_permissions
+    |
+    */
+    'mcp_enabled' => env('DEVFORGE_MCP_ENABLED', false),
+
     'agents_monitor_build_enabled' => env(
         'DEVFORGE_AGENTS_MONITOR_BUILD_ENABLED',
         env('DEVFORGE_AGENTS_WEBHOOK_BUILD_ENABLED', true),
@@ -69,6 +88,23 @@ return [
     |
     */
     'agents_per_deployment_max_runs' => (int) env('DEVFORGE_AGENTS_PER_DEPLOYMENT_MAX_RUNS', 1),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Surveillance autonome post-deploy (readiness)
+    |--------------------------------------------------------------------------
+    */
+    'readiness_enabled' => env('DEVFORGE_READINESS_ENABLED', true),
+
+    'readiness_probe_delay_seconds' => (int) env('DEVFORGE_READINESS_PROBE_DELAY_SECONDS', 90),
+
+    'readiness_probe_timeout_seconds' => (int) env('DEVFORGE_READINESS_PROBE_TIMEOUT_SECONDS', 10),
+
+    'readiness_max_rounds' => (int) env('DEVFORGE_READINESS_MAX_ROUNDS', 5),
+
+    'readiness_accept_insecure_tls' => env('DEVFORGE_READINESS_ACCEPT_INSECURE_TLS', true),
+
+    'readiness_watchdog_minutes' => (int) env('DEVFORGE_READINESS_WATCHDOG_MINUTES', 3),
 
     /*
     |--------------------------------------------------------------------------

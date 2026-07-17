@@ -55,7 +55,10 @@ class AgentRunLauncher
             'deployment_uuid' => is_string($context['deployment_uuid'] ?? null) ? $context['deployment_uuid'] : null,
             'application_uuid' => is_string($context['application_uuid'] ?? null) ? $context['application_uuid'] : null,
             'event' => is_string($context['event'] ?? null) ? $context['event'] : null,
-        ], fn (?string $value): bool => $value !== null && $value !== '');
+            'readiness_round' => isset($context['readiness_round']) && is_numeric($context['readiness_round'])
+                ? (int) $context['readiness_round']
+                : null,
+        ], fn (mixed $value): bool => $value !== null && $value !== '');
 
         return $metadata === [] ? null : $metadata;
     }

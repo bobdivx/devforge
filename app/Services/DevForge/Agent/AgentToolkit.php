@@ -5,7 +5,6 @@ namespace App\Services\DevForge\Agent;
 use App\Models\AiAgent;
 use App\Models\AiAgentRun;
 use App\Models\Application;
-use App\Models\ApplicationDeploymentQueue;
 use App\Models\Team;
 use App\Services\DevForge\Agent\Tool\AgentCustomTools;
 use App\Services\DevForge\Agent\Tool\AgentGithubTools;
@@ -17,6 +16,8 @@ use App\Services\DevForge\Agent\Tool\AgentToolInstaller;
 use App\Services\DevForge\Agent\Tool\AgentToolkitSession;
 use App\Services\DevForge\Agent\Tool\AgentToolPackage;
 use App\Services\DevForge\Application\ApplicationEnvironmentVariableCatalog;
+use App\Services\DevForge\Application\ApplicationRepairActions;
+use App\Services\DevForge\Application\ApplicationRuntimeSettingsService;
 use App\Services\DevForge\Application\ApplicationSourceService;
 use App\Services\DevForge\Core\CoreResourceAction;
 use App\Services\DevForge\Core\CoreResourceCatalog;
@@ -32,9 +33,9 @@ class AgentToolkit
 {
     private const MAX_DEPLOY_ACTIONS_PER_RUN = 1;
 
-    private int $deployActionsTaken = 0;
-
     private readonly AgentServerExecutor $serverExecutor;
+
+    private readonly ApplicationRepairActions $repairActions;
 
     private readonly AgentToolkitSession $session;
 
@@ -65,6 +66,17 @@ class AgentToolkit
             team: $this->team,
             catalog: $this->catalog,
             assignedResourceUuid: $this->assignedResourceUuid,
+        );
+        $this->repairActions = new ApplicationRepairActions(
+            team: $this->team,
+            catalog: $this->catalog,
+            resourceAction: $this->resourceAction,
+            deploymentData: $this->deploymentData,
+            serverExecutor: $this->serverExecutor,
+            run: $this->run,
+            assignedResourceUuid: $this->assignedResourceUuid,
+            runContext: $this->runContext,
+            maxDeployActions: self::MAX_DEPLOY_ACTIONS_PER_RUN,
         );
         $this->session = new AgentToolkitSession($this->agent);
         $this->githubTools = new AgentGithubTools(
@@ -429,6 +441,130 @@ class AgentToolkit
                         ],
                     ],
                     'required' => ['key', 'value'],
+                ],
+            ],
+            [
+                'name' => 'update_application_git_branch',
+                'description' => 'Change la branche Git déployée par Coolify (Application.git_branch), puis redéploie par défaut. À utiliser quand le clone échoue (branche introuvable / Remote branch not found).',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID de l\'application. Omis si contexte déploiement ou agent lié à l\'app.',
+                        ],
+                        'git_branch' => [
+                            'type' => 'string',
+                            'description' => 'Nom exact de la branche Git à déployer (ex: feat/my-feature)',
+                        ],
+                        'redeploy' => [
+                            'type' => 'boolean',
+                            'description' => 'Queue un redéploiement après la mise à jour (défaut: true)',
+                        ],
+                        'reason' => [
+                            'type' => 'string',
+                            'description' => 'Raison courte pour les logs',
+                        ],
+                    ],
+                    'required' => ['git_branch'],
+                ],
+            ],
+            [
+                'name' => 'get_application_runtime_settings',
+                'description' => 'Lit la config build/runtime Coolify (build_pack, install/build/start_command, ports_exposes, base/publish_directory, healthcheck). Utile avant de corriger un échec de build.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID de l\'application. Omis si contexte déploiement ou agent lié à l\'app.',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'update_application_runtime_settings',
+                'description' => 'Met à jour la config build Coolify (commandes, ports, répertoires, build_pack, static). À préférer à un commit Git quand l’échec vient de la config Coolify. Redéploie par défaut.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID de l\'application. Omis si contexte déploiement ou agent lié à l\'app.',
+                        ],
+                        'build_pack' => [
+                            'type' => 'string',
+                            'enum' => ['nixpacks', 'railpack', 'static', 'dockerfile', 'dockercompose', 'dockerimage'],
+                        ],
+                        'is_static' => ['type' => 'boolean'],
+                        'install_command' => ['type' => 'string', 'description' => 'Commande install (nullable via chaîne vide)'],
+                        'build_command' => ['type' => 'string'],
+                        'start_command' => ['type' => 'string'],
+                        'ports_exposes' => ['type' => 'string', 'description' => 'Ports exposés, ex: 3000 ou 80,443'],
+                        'base_directory' => ['type' => 'string'],
+                        'publish_directory' => ['type' => 'string'],
+                        'health_check_enabled' => ['type' => 'boolean'],
+                        'health_check_path' => ['type' => 'string'],
+                        'health_check_port' => ['type' => 'string'],
+                        'redeploy' => [
+                            'type' => 'boolean',
+                            'description' => 'Queue un redéploiement après la mise à jour (défaut: true)',
+                        ],
+                        'reason' => [
+                            'type' => 'string',
+                            'description' => 'Raison courte pour les logs',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'fix_application_host_permissions',
+                'description' => 'Corrige de façon autonome les Permission denied sur le répertoire Coolify de l’application (chown/chmod ciblé via SSH), puis redéploie par défaut. À utiliser dès que tee/.env/docker-compose.yaml échoue en écriture sur le host.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID de l\'application. Omis si contexte déploiement ou agent lié à l\'app.',
+                        ],
+                        'path' => [
+                            'type' => 'string',
+                            'description' => 'Chemin host du répertoire applications/<uuid> (extrait des logs si omis). Fichier (.env) accepté → répertoire parent.',
+                        ],
+                        'redeploy' => [
+                            'type' => 'boolean',
+                            'description' => 'Queue un redéploiement après correction (défaut: true)',
+                        ],
+                        'reason' => [
+                            'type' => 'string',
+                            'description' => 'Raison courte pour les logs',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'fix_coolify_base_config_path',
+                'description' => 'Recharge BASE_CONFIG_PATH dans Coolify (php artisan config:clear + horizon:terminate via docker exec), puis redéploie. À utiliser si mkdir des dossiers applications Coolify échoue avec Read-only file system (chemin hôte incorrect ou config cache) — sans présumer le chemin NAS.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID de l\'application. Omis si contexte déploiement ou agent lié à l\'app.',
+                        ],
+                        'container' => [
+                            'type' => 'string',
+                            'description' => 'Nom du conteneur Coolify (défaut: coolify)',
+                        ],
+                        'redeploy' => [
+                            'type' => 'boolean',
+                            'description' => 'Queue un redéploiement après correction (défaut: true)',
+                        ],
+                        'reason' => [
+                            'type' => 'string',
+                            'description' => 'Raison courte pour les logs',
+                        ],
+                    ],
                 ],
             ],
             [
@@ -877,6 +1013,31 @@ class AgentToolkit
                 array_key_exists('is_runtime', $arguments) ? (bool) $arguments['is_runtime'] : true,
                 array_key_exists('is_literal', $arguments) ? (bool) $arguments['is_literal'] : true,
             ),
+            'update_application_git_branch' => $this->updateApplicationGitBranch(
+                isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
+                (string) ($arguments['git_branch'] ?? ''),
+                array_key_exists('redeploy', $arguments) ? (bool) $arguments['redeploy'] : true,
+                (string) ($arguments['reason'] ?? ''),
+            ),
+            'get_application_runtime_settings' => $this->getApplicationRuntimeSettings(
+                isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
+            ),
+            'update_application_runtime_settings' => $this->updateApplicationRuntimeSettings(
+                isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
+                is_array($arguments) ? $arguments : [],
+            ),
+            'fix_application_host_permissions' => $this->fixApplicationHostPermissions(
+                isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
+                isset($arguments['path']) ? (string) $arguments['path'] : null,
+                array_key_exists('redeploy', $arguments) ? (bool) $arguments['redeploy'] : true,
+                (string) ($arguments['reason'] ?? ''),
+            ),
+            'fix_coolify_base_config_path' => $this->fixCoolifyBaseConfigPath(
+                isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
+                array_key_exists('redeploy', $arguments) ? (bool) $arguments['redeploy'] : true,
+                (string) ($arguments['reason'] ?? ''),
+                isset($arguments['container']) ? (string) $arguments['container'] : null,
+            ),
             'delegate_task' => $this->delegateTask(
                 $arguments['goal'] ?? '',
                 $arguments['child_agent_uuid'] ?? null,
@@ -1002,118 +1163,13 @@ class AgentToolkit
     /** @return array<mixed> */
     private function getDeploymentLogs(?string $applicationUuid, int $limit, ?string $deploymentUuid = null, int $logLines = 80): array
     {
-        $contextApplicationUuid = is_string($this->runContext['application_uuid'] ?? null)
-            ? $this->runContext['application_uuid']
-            : null;
-        $contextDeploymentUuid = is_string($this->runContext['deployment_uuid'] ?? null)
-            ? $this->runContext['deployment_uuid']
-            : null;
-
-        $applicationUuid = $applicationUuid ?: $contextApplicationUuid;
-        $deploymentUuid = $deploymentUuid ?: $contextDeploymentUuid;
-
-        $paginator = $this->deploymentData->paginate($this->team, 1, $limit, $applicationUuid, null);
-
-        $deployments = array_map(function ($deployment) use ($deploymentUuid, $logLines): array {
-            $entry = [
-                'uuid' => $deployment->deployment_uuid ?? null,
-                'application_uuid' => $deployment->application?->uuid ?? null,
-                'application_name' => $deployment->application?->name ?? null,
-                'status' => $deployment->status ?? null,
-                'started_at' => optional($deployment->created_at)->toDateTimeString(),
-            ];
-
-            if ($deploymentUuid !== null && $deployment->deployment_uuid === $deploymentUuid) {
-                $entry['logs'] = $this->recentDeploymentLogLines($deployment, $logLines);
-            }
-
-            return $entry;
-        }, $paginator->items());
-
-        if ($deploymentUuid !== null && ! collect($deployments)->contains(fn (array $item): bool => ($item['uuid'] ?? null) === $deploymentUuid)) {
-            try {
-                $deployment = $this->deploymentData->find($this->team, $deploymentUuid);
-
-                $deployments[] = [
-                    'uuid' => $deployment->deployment_uuid,
-                    'application_uuid' => $deployment->application?->uuid,
-                    'application_name' => $deployment->application?->name,
-                    'status' => $deployment->status,
-                    'started_at' => optional($deployment->created_at)->toDateTimeString(),
-                    'logs' => $this->recentDeploymentLogLines($deployment, $logLines),
-                ];
-            } catch (\Throwable) {
-                // Ignore missing deployment in catalog lookup.
-            }
-        }
-
-        return ['deployments' => $deployments];
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    private function recentDeploymentLogLines(ApplicationDeploymentQueue $deployment, int $logLines): array
-    {
-        $logs = $this->deploymentData->logs($deployment, 0);
-
-        return collect($logs['items'] ?? [])
-            ->take(-max(1, min($logLines, 120)))
-            ->values()
-            ->all();
+        return $this->repairActions->getDeploymentLogs($applicationUuid, $limit, $deploymentUuid, $logLines);
     }
 
     /** @return array<mixed> */
     private function controlResource(string $uuid, string $type, string $action, string $reason): array
     {
-        if ($uuid === '' || $type === '' || $action === '') {
-            return ['error' => 'Paramètres uuid, type et action requis pour control_resource.'];
-        }
-
-        if ($action === 'deploy' && $this->deployActionsTaken >= self::MAX_DEPLOY_ACTIONS_PER_RUN) {
-            return ['error' => 'Limite de redéploiements automatiques atteinte pour ce run (max '.self::MAX_DEPLOY_ACTIONS_PER_RUN.').'];
-        }
-
-        $resource = $this->catalog->find($this->team, $type, $uuid);
-
-        if (! $resource || ! $this->matchesAssignedResource($resource)) {
-            return ['error' => "Ressource {$uuid} introuvable."];
-        }
-
-        try {
-            $result = $this->resourceAction->execute($resource, $type, $action, ['is_api' => true]);
-            $this->run->appendLog("  ✓ Action {$action} sur {$uuid} : {$reason}");
-
-            $actionsTaken = $this->run->actions_taken ?? [];
-            $actionEntry = [
-                'tool' => 'control_resource',
-                'uuid' => $uuid,
-                'type' => $type,
-                'action' => $action,
-                'reason' => $reason,
-                'at' => now()->toISOString(),
-            ];
-
-            if (is_string($result['deployment_uuid'] ?? null)) {
-                $actionEntry['deployment_uuid'] = $result['deployment_uuid'];
-            }
-
-            if (array_key_exists('queued', $result)) {
-                $actionEntry['queued'] = (bool) $result['queued'];
-            }
-
-            $actionsTaken[] = $actionEntry;
-            $this->run->actions_taken = $actionsTaken;
-            $this->run->saveQuietly();
-
-            if ($action === 'deploy') {
-                $this->deployActionsTaken++;
-            }
-
-            return $result;
-        } catch (\Throwable $e) {
-            return ['error' => $e->getMessage()];
-        }
+        return $this->repairActions->controlResource($uuid, $type, $action, $reason);
     }
 
     /** @return array<mixed> */
@@ -1454,6 +1510,14 @@ class AgentToolkit
             return ['error' => 'Paramètre key requis pour upsert_application_env_var.'];
         }
 
+        if (preg_match('/^(DUMMY_|FORCE_REDEPLOY|REDEPLOY_TRIGGER)|(_TRIGGER|_DUMMY)$/i', $key) === 1
+            || strcasecmp($key, 'DUMMY_REDEPLOY_TRIGGER') === 0) {
+            return [
+                'error' => 'Variable factice refusée. Ne crée pas de DUMMY_*/_TRIGGER pour forcer un redeploy — corrige la vraie cause (permissions hôte, branche, build, env citée dans les logs).',
+                'hint' => 'host_permission_or_real_fix',
+            ];
+        }
+
         $application = $this->resolveApplication($applicationUuid);
         if (is_array($application)) {
             return $application;
@@ -1480,6 +1544,155 @@ class AgentToolkit
         } catch (\Throwable $exception) {
             return ['error' => mb_substr($exception->getMessage(), 0, 300)];
         }
+    }
+
+    /** @return array<string, mixed> */
+    private function updateApplicationGitBranch(
+        ?string $applicationUuid,
+        string $gitBranch,
+        bool $redeploy = true,
+        string $reason = '',
+    ): array {
+        return $this->repairActions->updateApplicationGitBranch($applicationUuid, $gitBranch, $redeploy, $reason);
+    }
+
+    /** @return array<string, mixed> */
+    private function getApplicationRuntimeSettings(?string $applicationUuid): array
+    {
+        $application = $this->resolveApplication($applicationUuid);
+        if (is_array($application)) {
+            return $application;
+        }
+
+        return [
+            'ok' => true,
+            'application_uuid' => $application->uuid,
+            'settings' => app(ApplicationRuntimeSettingsService::class)->show($application),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function updateApplicationRuntimeSettings(?string $applicationUuid, array $arguments): array
+    {
+        $application = $this->resolveApplication($applicationUuid);
+        if (is_array($application)) {
+            return $application;
+        }
+
+        $allowed = [
+            'build_pack',
+            'is_static',
+            'install_command',
+            'build_command',
+            'start_command',
+            'ports_exposes',
+            'base_directory',
+            'publish_directory',
+            'health_check_enabled',
+            'health_check_type',
+            'health_check_path',
+            'health_check_port',
+        ];
+
+        $input = [];
+        foreach ($allowed as $key) {
+            if (! array_key_exists($key, $arguments)) {
+                continue;
+            }
+
+            $value = $arguments[$key];
+            if (is_string($value) && $value === '' && in_array($key, ['install_command', 'build_command', 'start_command', 'health_check_port'], true)) {
+                $input[$key] = null;
+            } else {
+                $input[$key] = $value;
+            }
+        }
+
+        if ($input === []) {
+            return ['error' => 'Aucun réglage runtime/build fourni pour update_application_runtime_settings.'];
+        }
+
+        $redeploy = array_key_exists('redeploy', $arguments) ? (bool) $arguments['redeploy'] : true;
+        $reason = trim((string) ($arguments['reason'] ?? ''));
+        $input['redeploy'] = false;
+
+        try {
+            $result = app(ApplicationRuntimeSettingsService::class)->update($application, $input);
+        } catch (ValidationException $exception) {
+            return ['error' => collect($exception->errors())->flatten()->first() ?? 'Réglages invalides.'];
+        } catch (\Throwable $exception) {
+            return ['error' => mb_substr($exception->getMessage(), 0, 300)];
+        }
+
+        $changedKeys = array_keys(array_diff_key($input, ['redeploy' => true]));
+        $this->run->appendLog('  ✓ Runtime/build Coolify mis à jour ('.implode(', ', $changedKeys).") sur {$application->uuid}");
+
+        $actionsTaken = $this->run->actions_taken ?? [];
+        $actionsTaken[] = [
+            'tool' => 'update_application_runtime_settings',
+            'uuid' => $application->uuid,
+            'type' => 'applications',
+            'action' => 'update_runtime_settings',
+            'reason' => $reason !== '' ? $reason : 'Correction config build Coolify',
+            'keys' => $changedKeys,
+            'at' => now()->toISOString(),
+        ];
+        $this->run->actions_taken = $actionsTaken;
+        $this->run->saveQuietly();
+
+        $payload = [
+            'ok' => true,
+            'application_uuid' => $application->uuid,
+            'settings' => $result['settings'] ?? null,
+            'updated_keys' => $changedKeys,
+        ];
+
+        if (! $redeploy) {
+            return [
+                ...$payload,
+                'hint' => 'Réglages enregistrés. Utilise control_resource deploy pour reconstruire.',
+            ];
+        }
+
+        $deploy = $this->controlResource(
+            $application->uuid,
+            'applications',
+            'deploy',
+            $reason !== '' ? $reason : 'Redeploy après correction runtime/build Coolify',
+        );
+
+        if (isset($deploy['error'])) {
+            return [
+                ...$payload,
+                'redeploy' => $deploy,
+                'hint' => 'Réglages mis à jour, mais le redeploy a échoué — réessaie control_resource deploy.',
+            ];
+        }
+
+        return [...$payload, 'redeploy' => $deploy];
+    }
+
+    /** @return array<string, mixed> */
+    private function fixApplicationHostPermissions(
+        ?string $applicationUuid,
+        ?string $pathHint,
+        bool $redeploy = true,
+        string $reason = '',
+    ): array {
+        return $this->repairActions->fixApplicationHostPermissions($applicationUuid, $pathHint, $redeploy, $reason);
+    }
+
+    /** @return array<string, mixed> */
+    private function fixCoolifyBaseConfigPath(
+        ?string $applicationUuid,
+        bool $redeploy = true,
+        string $reason = '',
+        ?string $container = null,
+    ): array {
+        return $this->repairActions->fixCoolifyBaseConfigPath($applicationUuid, $redeploy, $reason, $container);
     }
 
     /** @return array<string, mixed> */

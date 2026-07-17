@@ -1,6 +1,7 @@
 import { Eye, Play, Plus, RefreshCw, RotateCw, Rocket, Square } from 'lucide-preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { ApplicationDetailPanel } from '../components/applications/ApplicationDetailPanel';
+import { ApplicationLogo } from '../components/applications/ApplicationLogo';
 import { CreateApplicationModal } from '../components/applications/CreateApplicationModal';
 import { CreateDatabaseModal } from '../components/databases/CreateDatabaseModal';
 import { DatabaseDetailPanel } from '../components/databases/DatabaseDetailPanel';
@@ -352,18 +353,26 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                                     onClick={() => setSelectedUuid(resource.uuid)}
                                 >
                                     <div class="mb-2 flex items-start justify-between gap-2">
-                                        <div class="min-w-0">
-                                            {type === 'databases' ? (
-                                                <>
-                                                    <p class="truncate text-sm font-semibold">{databaseCardTitle(resource)}</p>
-                                                    <p class="text-[11px] text-base-content/55">{databaseCardSubtitle(resource)}</p>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <p class="truncate text-sm font-semibold">{resource.name}</p>
-                                                    <p class="text-[11px] uppercase tracking-wide text-base-content/45">{resource.type}</p>
-                                                </>
+                                        <div class="flex min-w-0 items-start gap-3">
+                                            {type === 'applications' && (
+                                                <ApplicationLogo
+                                                    name={resource.name}
+                                                    configuration={resource.configuration}
+                                                />
                                             )}
+                                            <div class="min-w-0">
+                                                {type === 'databases' ? (
+                                                    <>
+                                                        <p class="truncate text-sm font-semibold">{databaseCardTitle(resource)}</p>
+                                                        <p class="text-[11px] text-base-content/55">{databaseCardSubtitle(resource)}</p>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <p class="truncate text-sm font-semibold">{resource.name}</p>
+                                                        <p class="text-[11px] uppercase tracking-wide text-base-content/45">{resource.type}</p>
+                                                    </>
+                                                )}
+                                            </div>
                                         </div>
                                         <ResourceStatusIcon status={resourceStatusInput(resource)} />
                                     </div>
