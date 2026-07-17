@@ -114,12 +114,52 @@ class AgentPermissionEngine
     }
 
     /**
+     * Seul le chat peut (plus tard) offrir une boucle d’approbation UI.
+     * Les runs event / scheduled / manual / délégation n’en ont pas.
+     */
+    public static function triggerSupportsApproval(string $trigger): bool
+    {
+        return $trigger === 'chat';
+    }
+
+    /**
+     * Convertit un `ask` en `deny` actionnable quand aucune UI d’approbation n’existe.
+     *
+     * @param  array{decision: string, reason: string, rule_id: string}  $decision
+     * @return array{decision: string, reason: string, rule_id: string, approval_unavailable?: bool}
+     */
+    public function resolveForTrigger(array $decision, string $trigger, string $toolName = ''): array
+    {
+        if (($decision['decision'] ?? '') !== self::DECISION_ASK) {
+            return $decision;
+        }
+
+        if (self::triggerSupportsApproval($trigger)) {
+            return $decision;
+        }
+
+        $toolLabel = $toolName !== '' ? " « {$toolName} »" : '';
+        $reason = "Approbation requise{$toolLabel} ({$decision['reason']}) "
+            ."mais aucune boucle d’approbation n’est disponible pour les runs « {$trigger} ». "
+            .'Passez l’agent en mode autonome, autorisez explicitement l’outil dans les permissions, '
+            .'ou relancez l’action depuis le chat.';
+
+        return [
+            'decision' => self::DECISION_DENY,
+            'reason' => $reason,
+            'rule_id' => $decision['rule_id'],
+            'approval_unavailable' => true,
+        ];
+    }
+
+    /**
      * @param  array<string, mixed>  $args
      * @return array{id: string, reason: string}|null
      */
     private function matchHardDeny(string $toolName, array $args): ?array
     {
-        $haystack = $toolName.' '.json_encode($args, JSON_UNESCAPED_UNICODE);
+        // JSON_UNESCAPED_SLASHES: sinon "rm -rf /" devient "rm -rf \/" et rate les patterns hard-deny.
+        $haystack = $toolName.' '.json_encode($args, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
         foreach (self::HARD_DENY_PATTERNS as $rule) {
             if (preg_match($rule['pattern'], $haystack)) {

@@ -1,9 +1,19 @@
 <?php
 
 use App\Models\AiAgent;
+use App\Models\AiAgentRun;
 use App\Models\Team;
+use App\Services\DevForge\Agent\AgentDelegator;
+use App\Services\DevForge\Agent\AgentRunner;
+use App\Services\DevForge\Agent\AgentToolkit;
+use App\Services\DevForge\Agent\TaskModelRouter;
 use App\Services\DevForge\Agent\Tool\AgentPermissionEngine;
+use App\Services\DevForge\Agent\Tool\AgentSubagentRegistry;
 use App\Services\DevForge\Agent\Tool\AgentToolClassification;
+use App\Services\DevForge\Agent\Tool\IterationBudget;
+use App\Services\DevForge\Core\CoreResourceAction;
+use App\Services\DevForge\Core\CoreResourceCatalog;
+use App\Services\DevForge\DeploymentData;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -42,6 +52,44 @@ it('asks approval for destructive tools in tiered mode', function () {
         ->and($result['rule_id'])->toBe('mode:tiered:destructive');
 });
 
+it('auto-denies ask decisions for event triggers without approval UI', function () {
+    config()->set('devforge.agents_permission_mode', 'tiered');
+
+    $ask = $this->engine->decide($this->agent, 'control_resource', ['action' => 'deploy']);
+    $resolved = $this->engine->resolveForTrigger($ask, 'event', 'control_resource');
+
+    expect($ask['decision'])->toBe(AgentPermissionEngine::DECISION_ASK)
+        ->and($resolved['decision'])->toBe(AgentPermissionEngine::DECISION_DENY)
+        ->and($resolved['approval_unavailable'])->toBeTrue()
+        ->and($resolved['reason'])->toContain('aucune boucle d’approbation')
+        ->and($resolved['reason'])->toContain('mode autonome');
+});
+
+it('keeps ask decisions for chat triggers that can approve', function () {
+    config()->set('devforge.agents_permission_mode', 'plan_first');
+
+    $ask = $this->engine->decide($this->agent, 'exec_command', ['command' => 'uptime']);
+    $resolved = $this->engine->resolveForTrigger($ask, 'chat', 'exec_command');
+
+    expect(AgentPermissionEngine::triggerSupportsApproval('chat'))->toBeTrue()
+        ->and(AgentPermissionEngine::triggerSupportsApproval('event'))->toBeFalse()
+        ->and($resolved['decision'])->toBe(AgentPermissionEngine::DECISION_ASK)
+        ->and($resolved)->not->toHaveKey('approval_unavailable');
+});
+
+it('exposes a stable ask payload shape for chat UI', function () {
+    config()->set('devforge.agents_permission_mode', 'plan_first');
+
+    $ask = $this->engine->decide($this->agent, 'exec_command', ['command' => 'uptime']);
+    $resolved = $this->engine->resolveForTrigger($ask, 'chat', 'exec_command');
+
+    expect($resolved)->toMatchArray([
+        'decision' => 'ask',
+        'reason' => 'Mode plan-first — chaque outil demande validation.',
+        'rule_id' => 'mode:plan_first',
+    ]);
+});
+
 it('allows read-only tools in tiered mode', function () {
     config()->set('devforge.agents_permission_mode', 'tiered');
 
@@ -67,7 +115,7 @@ it('respects per-agent denied tools override', function () {
 });
 
 it('refunds iteration budget after successful tool round', function () {
-    $budget = new \App\Services\DevForge\Agent\Tool\IterationBudget(5);
+    $budget = new IterationBudget(5);
 
     expect($budget->consume())->toBeTrue();
     expect($budget->getUsed())->toBe(1);
@@ -79,7 +127,7 @@ it('refunds iteration budget after successful tool round', function () {
 });
 
 it('stops consuming when budget is exhausted', function () {
-    $budget = new \App\Services\DevForge\Agent\Tool\IterationBudget(2);
+    $budget = new IterationBudget(2);
 
     expect($budget->consume())->toBeTrue();
     expect($budget->consume())->toBeTrue();
@@ -91,7 +139,7 @@ it('registers subagent runs', function () {
     $parent = AiAgent::factory()->create(['team_id' => $this->team->id]);
     $child = AiAgent::factory()->subAgent($parent, 'res-uuid')->create();
 
-    $registry = new \App\Services\DevForge\Agent\Tool\AgentSubagentRegistry;
+    $registry = new AgentSubagentRegistry;
     $record = $registry->start($parent, $child, null, 'Diagnostiquer les logs');
 
     expect($record->status)->toBe('pending')
@@ -106,30 +154,31 @@ it('registers subagent runs', function () {
 it('exposes delegate_task only for parent agents', function () {
     $parent = AiAgent::factory()->create(['team_id' => $this->team->id]);
     $child = AiAgent::factory()->subAgent($parent, 'res-uuid')->create();
-    $run = \App\Models\AiAgentRun::factory()->create(['agent_id' => $parent->id]);
+    $run = AiAgentRun::factory()->create(['agent_id' => $parent->id]);
 
-    $delegator = new \App\Services\DevForge\Agent\AgentDelegator(
-        app(\App\Services\DevForge\Agent\AgentRunner::class),
-        new \App\Services\DevForge\Agent\Tool\AgentSubagentRegistry,
+    $delegator = new AgentDelegator(
+        app(AgentRunner::class),
+        new AgentSubagentRegistry,
+        app(TaskModelRouter::class),
     );
 
-    $parentToolkit = new \App\Services\DevForge\Agent\AgentToolkit(
+    $parentToolkit = new AgentToolkit(
         team: $this->team,
         run: $run,
-        catalog: app(\App\Services\DevForge\Core\CoreResourceCatalog::class),
-        resourceAction: app(\App\Services\DevForge\Core\CoreResourceAction::class),
-        deploymentData: app(\App\Services\DevForge\DeploymentData::class),
+        catalog: app(CoreResourceCatalog::class),
+        resourceAction: app(CoreResourceAction::class),
+        deploymentData: app(DeploymentData::class),
         agent: $parent,
         delegator: $delegator,
     );
 
-    $childRun = \App\Models\AiAgentRun::factory()->create(['agent_id' => $child->id]);
-    $childToolkit = new \App\Services\DevForge\Agent\AgentToolkit(
+    $childRun = AiAgentRun::factory()->create(['agent_id' => $child->id]);
+    $childToolkit = new AgentToolkit(
         team: $this->team,
         run: $childRun,
-        catalog: app(\App\Services\DevForge\Core\CoreResourceCatalog::class),
-        resourceAction: app(\App\Services\DevForge\Core\CoreResourceAction::class),
-        deploymentData: app(\App\Services\DevForge\DeploymentData::class),
+        catalog: app(CoreResourceCatalog::class),
+        resourceAction: app(CoreResourceAction::class),
+        deploymentData: app(DeploymentData::class),
         agent: $child,
         delegator: $delegator,
     );

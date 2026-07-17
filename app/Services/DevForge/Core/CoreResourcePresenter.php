@@ -93,6 +93,9 @@ class CoreResourcePresenter
                 'swarm_worker' => (bool) $server->settings?->is_swarm_worker,
                 'metrics_enabled' => (bool) $server->settings?->is_metrics_enabled,
                 'terminal_enabled' => (bool) $server->settings?->is_terminal_enabled,
+                'wildcard_domain' => filled($server->settings?->wildcard_domain)
+                    ? (string) $server->settings->wildcard_domain
+                    : null,
             ],
             'actions' => [],
             'created_at' => $server->created_at?->toISOString(),
@@ -112,6 +115,7 @@ class CoreResourcePresenter
                 'git_repository' => $this->safeUrl($application->git_repository),
                 'git_branch' => $application->git_branch,
                 'domains' => $this->domains($application->fqdn),
+                'redirect' => (string) ($application->redirect ?: 'both'),
                 'base_directory' => $application->base_directory ?: '',
                 'project' => $this->project($application),
                 'environment' => $this->environment($application),

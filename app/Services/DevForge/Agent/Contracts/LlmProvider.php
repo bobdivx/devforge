@@ -7,7 +7,6 @@ interface LlmProvider
     /**
      * @param  array<array{role: string, content: string|array<mixed>}>  $messages
      * @param  array<array{name: string, description: string, parameters: array<mixed>}>  $tools
-     * @return LlmResponse
      */
     public function chat(array $messages, array $tools = []): LlmResponse;
 

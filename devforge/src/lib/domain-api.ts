@@ -149,6 +149,32 @@ export type DeploymentSubagentRun = {
     } | null;
 };
 
+export type DeploymentAgentCorrection = {
+    outcome: string;
+    diagnosis?: string | null;
+    headline: string;
+    source_scope: string;
+    actions: Array<{
+        kind: string;
+        label?: string;
+        detail?: string | null;
+        commit_sha?: string | null;
+        commit_url?: string | null;
+        pr_url?: string | null;
+        pr_number?: number | null;
+        deployment_uuid?: string | null;
+        ok?: boolean;
+    }>;
+    pills: Array<{
+        id: string;
+        label: string;
+        active: boolean;
+        href?: string | null;
+        detail?: string | null;
+    }>;
+    belongs_to_deployment_uuid?: string | null;
+};
+
 export type DeploymentAgentRun = {
     uuid: string;
     status: AgentRunStatus;
@@ -172,8 +198,10 @@ export type DeploymentAgentRun = {
     created_at: string;
     event_context: Record<string, unknown> | null;
     metadata?: Record<string, unknown>;
+    correction?: DeploymentAgentCorrection | null;
+    historical_for_other_attempt?: boolean;
     subagent_runs?: DeploymentSubagentRun[];
-    linkage?: 'direct' | 'context';
+    linkage?: 'metadata' | 'logs' | 'direct' | 'context';
     logs?: string | null;
     agent: {
         uuid: string;
@@ -193,6 +221,16 @@ export type DeploymentMonitoringDiagnostics = {
     eligible_agents?: Array<{ uuid: string; name: string; type: AgentType }>;
 };
 
+export type DeploymentDispatchPolicy = {
+    max_runs_per_deployment: number;
+    monitor_build_enabled: boolean;
+    auto_fix_deployments: boolean;
+    allowed_events: string[];
+    skipped_events: Array<{ event: string; reason: string; detail?: string }>;
+    build_monitoring_effective: boolean;
+    summary: string | null;
+};
+
 export type DeploymentMonitoring = {
     deployment: Deployment;
     agent_runs: DeploymentAgentRun[];
@@ -203,6 +241,7 @@ export type DeploymentMonitoring = {
         monitor_build: boolean;
         webhook_build: boolean;
     };
+    dispatch_policy?: DeploymentDispatchPolicy;
     diagnostics: DeploymentMonitoringDiagnostics;
     catch_up_triggered?: boolean;
 };
@@ -385,7 +424,7 @@ export type SharedVariables = Record<'team' | 'project' | 'environment' | 'serve
 
 export type AgentType = 'debug' | 'tech-watch' | 'github' | 'devforge' | 'deployment' | 'security';
 export type AgentStatus = 'idle' | 'running' | 'error' | 'paused';
-export type AgentRunStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type AgentRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'awaiting_approval';
 export type AgentTrigger = 'scheduled' | 'manual' | 'event' | 'chat' | 'ephemeral' | 'delegation';
 
 export type AgentChatMessage = {
@@ -647,6 +686,36 @@ export type CreateApplicationInput = {
     ports_exposes?: number;
     name?: string;
     instant_deploy?: boolean;
+};
+
+export type ApplicationDomainRedirect = 'both' | 'www' | 'non-www';
+
+export type ApplicationDomains = {
+    domains: string[];
+    fqdn: string | null;
+    redirect: ApplicationDomainRedirect;
+    wildcard_domain: string | null;
+    build_pack: string | null;
+    sslip_warning: boolean;
+};
+
+export type ApplicationDomainsUpdateInput = {
+    domains?: string | null;
+    redirect?: ApplicationDomainRedirect;
+    force_domain_override?: boolean;
+};
+
+export type DomainConflict = {
+    domain?: string;
+    resource_name?: string;
+    resource_type?: string;
+    message?: string;
+};
+
+export type ServerSettings = {
+    uuid: string;
+    name: string;
+    wildcard_domain: string | null;
 };
 
 export type DatabaseEngine = 'postgresql' | 'redis' | 'mongodb' | 'mysql' | 'mariadb' | 'keydb' | 'dragonfly' | 'clickhouse' | 'libsql';
@@ -972,6 +1041,12 @@ export type DatabaseImportSqlResult = {
     linked_applications?: Array<{ uuid: string; name: string }>;
     env_variables_synced?: number;
     redeployments_queued?: number;
+    downtime_required?: boolean;
+    downtime_note?: string;
+    payload_bytes?: number;
+    estimated_transfer_chunks?: number;
+    large_payload?: boolean;
+    transfer_hint?: string;
 };
 
 export type DatabaseExplorerTable = {
@@ -1250,6 +1325,36 @@ export const domainApi = {
         method: 'POST',
         body: JSON.stringify(input),
     }),
+    applicationDomains: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationDomains>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/domains`,
+    ),
+    updateApplicationDomains: (
+        applicationUuid: string,
+        input: ApplicationDomainsUpdateInput,
+    ) => mutate<ApiResponse<ApplicationDomains>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/domains`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    generateApplicationDomain: (applicationUuid: string) => mutate<ApiResponse<ApplicationDomains>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/domains/generate`,
+        { method: 'POST' },
+    ),
+    serverSettings: (serverUuid: string) => apiFetch<ApiResponse<ServerSettings>>(
+        `${API_BASE}/servers/${encodeURIComponent(serverUuid)}/settings`,
+    ),
+    updateServerSettings: (
+        serverUuid: string,
+        input: { wildcard_domain?: string | null },
+    ) => mutate<ApiResponse<ServerSettings>>(
+        `/servers/${encodeURIComponent(serverUuid)}/settings`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
     linkableDatabases: (applicationUuid: string) => apiFetch<ApiResponse<LinkableDatabase[]> & {
         meta: {
             connections: ApplicationDatabaseConnection[];
@@ -1542,9 +1647,18 @@ export const domainApi = {
         const query = sessionUuid ? `?session_uuid=${encodeURIComponent(sessionUuid)}` : '';
         return apiFetch<ApiListResponse<AgentChatMessage>>(`${API_BASE}/agents/${encodeURIComponent(uuid)}/messages${query}`);
     },
-    sendAgentMessage: (uuid: string, content: string, sessionUuid?: string) => mutate<ApiResponse<{ user: AgentChatMessage; run_uuid: string; session_uuid: string; status: 'pending' }>>(`/agents/${encodeURIComponent(uuid)}/messages`, {
+    sendAgentMessage: (
+        uuid: string,
+        content: string,
+        sessionUuid?: string,
+        options?: { application_uuid?: string },
+    ) => mutate<ApiResponse<{ user: AgentChatMessage; run_uuid: string; session_uuid: string; status: 'pending' }>>(`/agents/${encodeURIComponent(uuid)}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ content, session_uuid: sessionUuid }),
+        body: JSON.stringify({
+            content,
+            session_uuid: sessionUuid,
+            ...(options?.application_uuid ? { application_uuid: options.application_uuid } : {}),
+        }),
     }),
     agentSessions: (uuid: string) => apiFetch<ApiListResponse<AgentChatSession>>(`${API_BASE}/agents/${encodeURIComponent(uuid)}/sessions`),
     createAgentSession: (uuid: string, title?: string) => mutate<ApiResponse<AgentChatSession>>(`/agents/${encodeURIComponent(uuid)}/sessions`, {
@@ -1559,9 +1673,27 @@ export const domainApi = {
         body: JSON.stringify({ title }),
     }),
     agentSessionMessages: (uuid: string, sessionUuid: string) => apiFetch<ApiListResponse<AgentChatMessage>>(`${API_BASE}/agents/${encodeURIComponent(uuid)}/sessions/${encodeURIComponent(sessionUuid)}/messages`),
-    sendAgentSessionMessage: (uuid: string, sessionUuid: string, content: string) => mutate<ApiResponse<{ user: AgentChatMessage; run_uuid: string; session_uuid: string; status: 'pending' }>>(`/agents/${encodeURIComponent(uuid)}/sessions/${encodeURIComponent(sessionUuid)}/messages`, {
+    sendAgentSessionMessage: (
+        uuid: string,
+        sessionUuid: string,
+        content: string,
+        options?: { application_uuid?: string },
+    ) => mutate<ApiResponse<{ user: AgentChatMessage; run_uuid: string; session_uuid: string; status: 'pending' }>>(`/agents/${encodeURIComponent(uuid)}/sessions/${encodeURIComponent(sessionUuid)}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({
+            content,
+            ...(options?.application_uuid ? { application_uuid: options.application_uuid } : {}),
+        }),
+    }),
+    resolveAgentToolApproval: (uuid: string, messageUuid: string, decision: 'approve' | 'deny') => mutate<ApiResponse<{
+        user: AgentChatMessage;
+        run_uuid: string;
+        session_uuid: string | null;
+        decision: 'approve' | 'deny';
+        status: 'pending';
+    }>>(`/agents/${encodeURIComponent(uuid)}/messages/${encodeURIComponent(messageUuid)}/approval`, {
+        method: 'POST',
+        body: JSON.stringify({ decision }),
     }),
     agentRuns: (agentUuid: string, page = 1) => apiFetch<ApiListResponse<AgentRun>>(`${API_BASE}/agents/${encodeURIComponent(agentUuid)}/runs?page=${page}`),
     agentRun: (agentUuid: string, runUuid: string) => apiFetch<ApiResponse<AgentRun>>(`${API_BASE}/agents/${encodeURIComponent(agentUuid)}/runs/${encodeURIComponent(runUuid)}`),

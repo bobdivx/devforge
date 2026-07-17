@@ -33,6 +33,7 @@ class LlmModelCatalog
             'Authorization' => 'Bearer '.$apiKey,
             'Accept' => 'application/json',
         ])
+            ->connectTimeout(5)
             ->timeout(15)
             ->get("{$resolvedBaseUrl}/models");
 

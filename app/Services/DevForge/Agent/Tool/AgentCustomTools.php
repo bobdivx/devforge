@@ -84,7 +84,6 @@ class AgentCustomTools
     }
 
     /**
-     * @param  mixed  $raw
      * @return array<string, mixed>
      */
     private function normalizeParameters(mixed $raw): array

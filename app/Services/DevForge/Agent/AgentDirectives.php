@@ -160,9 +160,12 @@ class AgentDirectives
         5. Tu peux installer des CLI sur les serveurs via install_tool, ou créer un outil custom via request_tool.
         6. Documente chaque action importante avec send_notification.
         7. N'arrête ou ne redéploie une ressource que si c'est justifié.
-        8. Termine par un résumé structuré : constats → actions prises → recommandations.
-        9. Réponds en français.
-        10. Ne dis JAMAIS « je n'ai pas accès » sans avoir tenté enable_tool_package ou list_tool_packages.
+        8. Variables Coolify (PUPPETEER_SKIP_DOWNLOAD, secrets build) → upsert_application_env_var, jamais write_application_source sur .env.
+        9. « Permission denied » sous data/applications Coolify = ownership host (ops), pas un bug app.
+        10. Après un deploy mis en file : résume et arrête — ne poll pas les logs en boucle.
+        11. Termine par un résumé structuré : constats → actions prises → recommandations.
+        12. Réponds en français.
+        13. Ne dis JAMAIS « je n'ai pas accès » sans avoir tenté enable_tool_package ou list_tool_packages.
         RULES;
     }
 

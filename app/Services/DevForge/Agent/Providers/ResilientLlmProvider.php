@@ -3,8 +3,8 @@
 namespace App\Services\DevForge\Agent\Providers;
 
 use App\Services\DevForge\Agent\Contracts\LlmProvider;
+use App\Services\DevForge\Agent\Contracts\LlmResponse;
 use App\Services\DevForge\Agent\OllamaMessageNormalizer;
-use App\Services\DevForge\Agent\Providers\OllamaProvider;
 
 class ResilientLlmProvider implements LlmProvider
 {

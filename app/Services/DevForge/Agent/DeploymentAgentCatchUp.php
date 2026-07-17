@@ -3,6 +3,7 @@
 namespace App\Services\DevForge\Agent;
 
 use App\Enums\ApplicationDeploymentStatus;
+use App\Models\Application;
 use App\Models\ApplicationDeploymentQueue;
 
 class DeploymentAgentCatchUp
@@ -59,7 +60,7 @@ class DeploymentAgentCatchUp
         return $reference->greaterThan(now()->subHours(6));
     }
 
-    private function dispatchFailure(\App\Models\Application $application, ApplicationDeploymentQueue $deployment): bool
+    private function dispatchFailure(Application $application, ApplicationDeploymentQueue $deployment): bool
     {
         return $this->failureDispatcher->dispatch(
             application: $application,
@@ -68,7 +69,7 @@ class DeploymentAgentCatchUp
         ) !== null;
     }
 
-    private function dispatchBuildStart(\App\Models\Application $application, ApplicationDeploymentQueue $deployment): bool
+    private function dispatchBuildStart(Application $application, ApplicationDeploymentQueue $deployment): bool
     {
         return $this->buildDispatcher->dispatch(
             application: $application,

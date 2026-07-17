@@ -12,9 +12,34 @@ import { useApiQuery } from '../lib/use-api-query';
 export function DeploymentsPage() {
     const [page, setPage] = useState(1);
     const [selected, setSelected] = useState<Deployment | null>(null);
+    const [selectError, setSelectError] = useState<string | null>(null);
+    const [selecting, setSelecting] = useState(false);
     const query = useApiQuery(`deployments:${page}`, () => domainApi.deployments(page));
     const deployments = query.data?.data ?? [];
     const lastPage = Number(query.data?.meta?.last_page ?? 1);
+
+    const selectDeploymentByUuid = async (deploymentUuid: string) => {
+        const fromList = deployments.find((deployment) => deployment.uuid === deploymentUuid);
+
+        if (fromList) {
+            setSelectError(null);
+            setSelected(fromList);
+            return;
+        }
+
+        setSelecting(true);
+        setSelectError(null);
+
+        try {
+            const response = await domainApi.deployment(deploymentUuid);
+            setSelected(response.data);
+            void query.reload({ silent: true });
+        } catch {
+            setSelectError('Impossible d’ouvrir ce redéploiement. Actualisez la liste puis réessayez.');
+        } finally {
+            setSelecting(false);
+        }
+    };
 
     return (
         <>
@@ -28,20 +53,26 @@ export function DeploymentsPage() {
                     </button>
                 )}
             />
+            {selectError && (
+                <p class="mb-4 rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-xs text-error" role="alert">
+                    {selectError}
+                </p>
+            )}
             {selected && (
                 <div class="mb-5 grid gap-4 xl:grid-cols-2">
                     <DeploymentLogsPanel deploymentUuid={selected.uuid} deployment={selected} />
                     <DeploymentAgentCard
                         deploymentUuid={selected.uuid}
                         onSelectDeployment={(deploymentUuid) => {
-                            const redeployment = deployments.find((deployment) => deployment.uuid === deploymentUuid);
-
-                            if (redeployment) {
-                                setSelected(redeployment);
-                            }
+                            void selectDeploymentByUuid(deploymentUuid);
                         }}
                     />
                 </div>
+            )}
+            {selecting && (
+                <p class="mb-4 text-xs text-base-content/55" role="status">
+                    Ouverture du redéploiement…
+                </p>
             )}
             <DataState
                 loading={query.loading}

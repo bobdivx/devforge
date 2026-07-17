@@ -35,9 +35,9 @@ describe('resolveCoreResourceActions', () => {
 });
 
 describe('canVisitApplication', () => {
-    it('masque la visite sans domaine ou si l’application n’est pas en ligne', () => {
+    it('autorise la visite dès qu’un domaine provisoire existe', () => {
         expect(canVisitApplication('running:healthy', null)).toBe(false);
-        expect(canVisitApplication('exited:unknown', 'https://demo.test')).toBe(false);
+        expect(canVisitApplication('exited:unknown', 'https://demo.test')).toBe(true);
         expect(canVisitApplication('running:healthy', 'https://demo.test')).toBe(true);
     });
 });

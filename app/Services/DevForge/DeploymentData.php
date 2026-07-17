@@ -15,14 +15,20 @@ class DeploymentData
     public function paginate(Team $team, int $page, int $perPage, ?string $applicationUuid, ?string $status): LengthAwarePaginator
     {
         return $this->queryFor($team)
-            ->when($applicationUuid, fn (Builder $query, string $uuid): Builder => $query->whereIn(
-                'application_id',
-                Application::query()
-                    ->where('uuid', $uuid)
+            ->when($applicationUuid, function (Builder $query) use ($applicationUuid, $team): Builder {
+                // application_id is stored as varchar; compare via string IDs (not whereHas → bigint).
+                $applicationIds = Application::query()
+                    ->where('uuid', $applicationUuid)
+                    ->whereHas(
+                        'environment.project',
+                        fn (Builder $projectQuery): Builder => $projectQuery->where('team_id', $team->id),
+                    )
                     ->pluck('id')
                     ->map(static fn (mixed $id): string => (string) $id)
-                    ->all(),
-            ))
+                    ->all();
+
+                return $query->whereIn('application_id', $applicationIds);
+            })
             ->when($status, fn (Builder $query, string $deploymentStatus): Builder => $query->where('status', $deploymentStatus))
             ->latest('id')
             ->paginate(perPage: $perPage, page: $page);

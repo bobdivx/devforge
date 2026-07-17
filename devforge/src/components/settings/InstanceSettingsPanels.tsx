@@ -46,7 +46,10 @@ export function InstanceSettingsPanels({ section, permissions, legacyBaseUrl }: 
             const instance = data.instance;
             return [
                 { label: 'Nom', value: formatOptional(instance.instance_name) },
-                { label: 'URL', value: formatOptional(instance.fqdn) },
+                {
+                    label: 'URL instance',
+                    value: formatOptional(instance.fqdn),
+                },
                 { label: 'Fuseau', value: formatOptional(instance.instance_timezone) },
                 { label: 'IPv4 publique', value: formatOptional(instance.public_ipv4) },
                 { label: 'IPv6 publique', value: formatOptional(instance.public_ipv6) },
@@ -109,7 +112,18 @@ export function InstanceSettingsPanels({ section, permissions, legacyBaseUrl }: 
                     </button>
                 </div>
                 <DataState loading={settings.loading} error={settings.error} onRetry={() => void settings.reload()}>
-                    {data && <SettingsDetailList items={sectionItems} />}
+                    {data && (
+                        <div class="grid gap-3">
+                            <SettingsDetailList items={sectionItems} />
+                            {section === 'instance' && (
+                                <p class="text-xs text-base-content/55">
+                                    L’URL instance est celle de Coolify/DevForge. Le domaine des apps déployées se configure
+                                    via le <span class="font-medium">Wildcard Domain</span> sur chaque serveur
+                                    (Settings → Serveurs → Vue d’ensemble).
+                                </p>
+                            )}
+                        </div>
+                    )}
                 </DataState>
             </Card>
         </div>

@@ -222,6 +222,42 @@ it('does not dispatch twice for the same webhook build', function () {
     Queue::assertNothingPushed();
 });
 
+it('does not dispatch twice when prior run is linked only via metadata', function () {
+    Queue::fake();
+
+    $agent = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'type' => 'devforge',
+        'provider_config_id' => $this->provider->id,
+    ]);
+
+    AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'trigger' => 'event',
+        'logs' => null,
+        'metadata' => [
+            'event' => 'deployment_build_started',
+            'deployment_uuid' => 'duplicate-meta-build',
+        ],
+    ]);
+
+    $deployment = ApplicationDeploymentQueue::create([
+        'application_id' => $this->application->id,
+        'deployment_uuid' => 'duplicate-meta-build',
+        'status' => 'in_progress',
+        'pull_request_id' => 0,
+        'is_webhook' => true,
+    ]);
+
+    app(DeploymentBuildAgentDispatcher::class)->dispatch(
+        application: $this->application,
+        deploymentUuid: 'duplicate-meta-build',
+        deploymentQueue: $deployment,
+    );
+
+    Queue::assertNothingPushed();
+});
+
 it('dispatches a devforge agent when a build completes successfully', function () {
     Queue::fake();
 

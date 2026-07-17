@@ -32,7 +32,7 @@ class CoreResourceAction
         };
 
         auditLog('devforge.core.action', [
-            'team_id' => currentTeam()->id,
+            'team_id' => $this->resolveTeamId($resource) ?? currentTeam()?->id,
             'resource_type' => $type,
             'resource_uuid' => $resource->uuid,
             'action' => $action,
@@ -144,5 +144,25 @@ class CoreResourceAction
             'queued' => true,
             'message' => "Service {$action} request queued.",
         ];
+    }
+
+    private function resolveTeamId(Model $resource): ?int
+    {
+        if ($resource instanceof Application) {
+            $teamId = $resource->environment?->project?->team_id;
+
+            return is_numeric($teamId) ? (int) $teamId : null;
+        }
+
+        if ($resource instanceof Service) {
+            $teamId = $resource->environment?->project?->team_id;
+
+            return is_numeric($teamId) ? (int) $teamId : null;
+        }
+
+        $teamId = data_get($resource, 'environment.project.team_id')
+            ?? data_get($resource, 'destination.server.team_id');
+
+        return is_numeric($teamId) ? (int) $teamId : null;
     }
 }

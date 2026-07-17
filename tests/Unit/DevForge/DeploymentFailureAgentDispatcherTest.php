@@ -7,6 +7,7 @@ use App\Models\AiProviderConfig;
 use App\Models\Application;
 use App\Models\ApplicationDeploymentQueue;
 use App\Models\Environment;
+use App\Models\EnvironmentVariable;
 use App\Models\Project;
 use App\Models\Server;
 use App\Models\StandaloneDocker;
@@ -238,4 +239,140 @@ it('still dispatches failure agent when per deployment limit is one', function (
     );
 
     Queue::assertPushed(RunAgentJob::class, fn (RunAgentJob $job): bool => $job->agent->is($agent));
+});
+
+it('redispatches when the previous failure run aborted with zero iterations', function () {
+    Queue::fake();
+
+    $agent = AiAgent::factory()->deployment()->create([
+        'team_id' => $this->team->id,
+        'provider_config_id' => $this->provider->id,
+        'status' => 'idle',
+    ]);
+
+    AiAgentRun::factory()->failed()->create([
+        'agent_id' => $agent->id,
+        'trigger' => 'event',
+        'iterations' => 0,
+        'summary' => 'Job échoué: App\Jobs\Agent\RunAgentJob has been attempted too many times.',
+        'logs' => '[07:00:00] Contexte événement: {"event":"deployment_failed","deployment_uuid":"aborted-failure"}',
+        'metadata' => [
+            'event' => 'deployment_failed',
+            'deployment_uuid' => 'aborted-failure',
+        ],
+    ]);
+
+    $deployment = ApplicationDeploymentQueue::create([
+        'application_id' => $this->application->id,
+        'deployment_uuid' => 'aborted-failure',
+        'status' => 'failed',
+        'pull_request_id' => 0,
+    ]);
+
+    app(DeploymentFailureAgentDispatcher::class)->dispatch(
+        application: $this->application,
+        deploymentUuid: 'aborted-failure',
+        deploymentQueue: $deployment,
+    );
+
+    Queue::assertPushed(RunAgentJob::class, fn (RunAgentJob $job): bool => $job->agent->is($agent));
+});
+
+it('keeps actionable npm errors in the failure excerpt instead of docker secret warnings', function () {
+    Queue::fake();
+
+    AiAgent::factory()->deployment()->create([
+        'team_id' => $this->team->id,
+        'provider_config_id' => $this->provider->id,
+    ]);
+
+    $noise = collect(range(1, 25))->map(fn (int $i): array => [
+        'command' => null,
+        'output' => ' - SecretsUsedInArgOrEnv: Do not use ARG or ENV instructions for sensitive data (ENV "SECRET_'.$i.'")',
+        'type' => 'stderr',
+        'timestamp' => now()->toIso8601String(),
+        'hidden' => false,
+        'batch' => 1,
+    ])->all();
+
+    $deployment = ApplicationDeploymentQueue::create([
+        'application_id' => $this->application->id,
+        'deployment_uuid' => 'npm-ci-failure',
+        'status' => 'failed',
+        'pull_request_id' => 0,
+        'logs' => json_encode([
+            ...$noise,
+            [
+                'command' => null,
+                'output' => "Dockerfile:20\n>>> RUN --mount=type=cache npm ci\nERROR: failed to build: failed to solve: process \"/bin/bash -ol pipefail -c npm ci\" did not complete successfully: exit code: 1\nexit status 1",
+                'type' => 'stderr',
+                'timestamp' => now()->toIso8601String(),
+                'hidden' => false,
+                'batch' => 2,
+            ],
+        ]),
+    ]);
+
+    app(DeploymentFailureAgentDispatcher::class)->dispatch(
+        application: $this->application,
+        deploymentUuid: 'npm-ci-failure',
+        deploymentQueue: $deployment,
+    );
+
+    Queue::assertPushed(RunAgentJob::class, function (RunAgentJob $job): bool {
+        $excerpt = collect($job->context['failure_excerpt'] ?? []);
+        $messages = $excerpt->pluck('message')->implode("\n");
+
+        return str_contains($messages, 'npm ci')
+            && str_contains($messages, 'ERROR: failed to build')
+            && ! str_contains($messages, 'SecretsUsedInArgOrEnv');
+    });
+});
+
+it('redacts application secrets from the failure excerpt before LLM context', function () {
+    Queue::fake();
+
+    EnvironmentVariable::create([
+        'key' => 'API_TOKEN',
+        'value' => 'super-secret-token',
+        'is_preview' => false,
+        'resourceable_type' => Application::class,
+        'resourceable_id' => $this->application->id,
+    ]);
+
+    AiAgent::factory()->deployment()->create([
+        'team_id' => $this->team->id,
+        'provider_config_id' => $this->provider->id,
+    ]);
+
+    $deployment = ApplicationDeploymentQueue::create([
+        'application_id' => $this->application->id,
+        'deployment_uuid' => 'secret-in-logs',
+        'status' => 'failed',
+        'pull_request_id' => 0,
+        'logs' => json_encode([
+            [
+                'command' => null,
+                'output' => 'ERROR: auth failed with token=super-secret-token exit code: 1',
+                'type' => 'stderr',
+                'timestamp' => now()->toIso8601String(),
+                'hidden' => false,
+                'batch' => 1,
+            ],
+        ]),
+    ]);
+
+    app(DeploymentFailureAgentDispatcher::class)->dispatch(
+        application: $this->application,
+        deploymentUuid: 'secret-in-logs',
+        deploymentQueue: $deployment,
+    );
+
+    Queue::assertPushed(RunAgentJob::class, function (RunAgentJob $job): bool {
+        $messages = collect($job->context['failure_excerpt'] ?? [])->pluck('message')->implode("\n");
+
+        return str_contains($messages, REDACTED)
+            && ! str_contains($messages, 'super-secret-token')
+            && str_contains($messages, 'ERROR: auth failed');
+    });
 });

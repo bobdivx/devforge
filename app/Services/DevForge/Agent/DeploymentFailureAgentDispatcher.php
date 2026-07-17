@@ -8,6 +8,8 @@ use App\Models\Application;
 use App\Models\ApplicationDeploymentQueue;
 use App\Models\Team;
 use App\Services\DevForge\DeploymentData;
+use App\Services\DevForge\SecretRedactor;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 
 class DeploymentFailureAgentDispatcher
@@ -19,6 +21,7 @@ class DeploymentFailureAgentDispatcher
         private readonly AgentRunLauncher $agentRunLauncher,
         private readonly DeploymentAgentResolver $agentResolver,
         private readonly DeploymentAgentDispatchLimiter $dispatchLimiter,
+        private readonly SecretRedactor $secretRedactor,
     ) {}
 
     public function dispatch(
@@ -91,12 +94,20 @@ class DeploymentFailureAgentDispatcher
             ->where('trigger', 'event')
             ->where('created_at', '>=', now()->subHour())
             ->where(function ($query) use ($deploymentUuid): void {
-                $query->where('logs', 'like', '%"'.self::CONTEXT_MARKER.'":"'.$deploymentUuid.'"%')
-                    ->orWhere('metadata->deployment_uuid', $deploymentUuid);
+                $query->where('metadata->deployment_uuid', $deploymentUuid)
+                    ->orWhere('logs', 'like', '%"'.self::CONTEXT_MARKER.'":"'.$deploymentUuid.'"%');
             })
             ->where(function ($query): void {
-                $query->where('logs', 'like', '%"event":"deployment_failed"%')
-                    ->orWhere('metadata->event', 'deployment_failed');
+                $query->where('metadata->event', 'deployment_failed')
+                    ->orWhere('logs', 'like', '%"event":"deployment_failed"%');
+            })
+            // Un run avorté (0 itération / job mort) ne doit pas bloquer une relance.
+            ->where(function ($query): void {
+                $query->whereIn('status', ['pending', 'running', 'completed'])
+                    ->orWhere(function ($failed): void {
+                        $failed->where('status', 'failed')
+                            ->where('iterations', '>', 0);
+                    });
             })
             ->whereHas('agent', fn ($query) => $query->where('team_id', $team->id))
             ->exists();
@@ -110,7 +121,7 @@ class DeploymentFailureAgentDispatcher
         string $deploymentUuid,
         ApplicationDeploymentQueue $deploymentQueue,
     ): array {
-        $logExcerpt = $this->extractFailureLogExcerpt($deploymentQueue);
+        $logExcerpt = $this->extractFailureLogExcerpt($application, $deploymentQueue);
 
         return [
             'event' => 'deployment_failed',
@@ -125,28 +136,148 @@ class DeploymentFailureAgentDispatcher
     }
 
     /**
+     * Extrait léger pour éviter de bloquer le dispatch sur des builds Nixpacks
+     * avec des milliers de lignes de warnings. Les messages sont redactés
+     * (SecretRedactor) avant injection dans le contexte LLM.
+     *
      * @return array<int, array{stream: string, message: string, timestamp: string|null}>
      */
-    private function extractFailureLogExcerpt(ApplicationDeploymentQueue $deploymentQueue, int $maxLines = 40): array
-    {
-        $payload = $this->deploymentData->logs($deploymentQueue, 0);
-        $lines = collect($payload['items'] ?? []);
+    private function extractFailureLogExcerpt(
+        Application $application,
+        ApplicationDeploymentQueue $deploymentQueue,
+        int $maxLines = 40,
+    ): array {
+        $lines = $this->rawDeploymentLogLines($deploymentQueue);
+
+        if ($lines->isEmpty()) {
+            $payload = $this->deploymentData->logs($deploymentQueue, 0);
+            $lines = collect($payload['items'] ?? [])->map(fn (array $line): array => [
+                'stream' => (string) ($line['stream'] ?? 'stdout'),
+                'message' => (string) ($line['message'] ?? ''),
+                'timestamp' => isset($line['timestamp']) ? (string) $line['timestamp'] : null,
+            ]);
+        }
 
         $stderrLines = $lines
             ->filter(fn (array $line): bool => ($line['stream'] ?? '') === 'stderr')
             ->values();
 
-        $selected = $stderrLines->isNotEmpty()
-            ? $stderrLines->take(-$maxLines)
-            : $lines->take(-$maxLines);
+        $candidatePool = $stderrLines->isNotEmpty() ? $stderrLines : $lines;
+
+        $signalLines = $candidatePool
+            ->filter(fn (array $line): bool => $this->isFailureSignal((string) ($line['message'] ?? '')))
+            ->values();
+
+        $usefulLines = $candidatePool
+            ->reject(fn (array $line): bool => $this->isBuildNoise((string) ($line['message'] ?? '')))
+            ->values();
+
+        if ($signalLines->isNotEmpty()) {
+            $selected = $usefulLines
+                ->filter(fn (array $line): bool => $this->isFailureSignal((string) ($line['message'] ?? ''))
+                    || $this->isFailureContext((string) ($line['message'] ?? '')))
+                ->take(-$maxLines);
+        } else {
+            $selected = $usefulLines->isNotEmpty()
+                ? $usefulLines->take(-$maxLines)
+                : $candidatePool->take(-$maxLines);
+        }
+
+        if ($selected->isEmpty()) {
+            $selected = $lines->take(-$maxLines);
+        }
 
         return $selected
             ->map(fn (array $line): array => [
                 'stream' => (string) ($line['stream'] ?? 'stdout'),
-                'message' => (string) ($line['message'] ?? ''),
+                'message' => mb_substr(
+                    $this->secretRedactor->redact((string) ($line['message'] ?? ''), $application),
+                    0,
+                    2000,
+                ),
                 'timestamp' => isset($line['timestamp']) ? (string) $line['timestamp'] : null,
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * Parse le format brut Coolify ({command,output,type,...}).
+     *
+     * @return Collection<int, array{stream: string, message: string, timestamp: string|null}>
+     */
+    private function rawDeploymentLogLines(ApplicationDeploymentQueue $deploymentQueue): Collection
+    {
+        $raw = $deploymentQueue->logs;
+
+        if (is_string($raw) && $raw !== '') {
+            $decoded = json_decode($raw, true);
+        } elseif (is_array($raw)) {
+            $decoded = $raw;
+        } else {
+            $decoded = null;
+        }
+
+        if (! is_array($decoded)) {
+            return collect();
+        }
+
+        return collect($decoded)
+            ->filter(fn (mixed $item): bool => is_array($item))
+            ->flatMap(function (array $item): array {
+                $stream = (($item['type'] ?? '') === 'stderr' || ! empty($item['stderr']))
+                    ? 'stderr'
+                    : 'stdout';
+                $timestamp = isset($item['timestamp']) ? (string) $item['timestamp'] : null;
+                $rows = [];
+
+                $command = $item['command'] ?? null;
+                if (is_string($command) && $command !== '') {
+                    $rows[] = [
+                        'stream' => $stream,
+                        'message' => $command,
+                        'timestamp' => $timestamp,
+                    ];
+                }
+
+                $output = (string) ($item['output'] ?? $item['line'] ?? $item['message'] ?? '');
+                foreach (preg_split("/\r\n|\n|\r/", $output) ?: [] as $line) {
+                    if ($line === '') {
+                        continue;
+                    }
+                    $rows[] = [
+                        'stream' => $stream,
+                        'message' => $line,
+                        'timestamp' => $timestamp,
+                    ];
+                }
+
+                return $rows;
+            })
+            ->values();
+    }
+
+    private function isBuildNoise(string $message): bool
+    {
+        return (bool) preg_match(
+            '/SecretsUsedInArgOrEnv|UndefinedVar|warnings found \(use docker|Do not use ARG or ENV instructions/i',
+            $message,
+        );
+    }
+
+    private function isFailureSignal(string $message): bool
+    {
+        return (bool) preg_match(
+            '/\bERROR\b|npm ERR!|ELIFECYCLE|ERESOLVE|ENOENT|failed to (build|solve)|did not complete successfully|exit code:\s*[1-9]|exit status [1-9]/i',
+            $message,
+        );
+    }
+
+    private function isFailureContext(string $message): bool
+    {
+        return (bool) preg_match(
+            '/^Dockerfile:|^\s*-{3,}\s*$|^\s*\d+\s*\||>>>\s*RUN|npm ci|package-lock|npm warn|npm error/i',
+            $message,
+        );
     }
 }

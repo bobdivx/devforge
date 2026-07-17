@@ -82,15 +82,15 @@ export function DeploymentLogsPanel({
     return (
         <section class={`min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm ${className}`}>
             {showHeader && (
-                <div class="flex flex-wrap items-center justify-between gap-3 border-b border-base-300/70 px-5 py-4">
-                    <div>
+                <div class="toolbar-row border-b border-base-300/70 px-4 py-4 sm:px-5">
+                    <div class="min-w-0">
                         <p class="text-sm font-semibold">Logs de déploiement</p>
                         <p class="text-xs text-base-content/50">
                             {logs.complete ? 'Déploiement terminé' : 'Suivi en direct'}
                             {debugEnabled ? ' · logs détaillés activés' : ''}
                         </p>
                     </div>
-                    <ActionToolbar>
+                    <ActionToolbar class="w-full min-w-0 sm:w-auto">
                         {resolvedDeployment && (
                             <DeploymentStatusIcon status={resolvedDeployment.status} showLabel />
                         )}
@@ -122,18 +122,18 @@ export function DeploymentLogsPanel({
                 </div>
             )}
 
-            <div class="min-w-0 overflow-hidden p-5">
+            <div class="min-w-0 overflow-hidden p-4 sm:p-5">
                 {debugError && (
-                    <p class="mb-3 text-xs text-error">{debugError}</p>
+                    <p class="mb-3 break-words text-xs text-error">{debugError}</p>
                 )}
                 {copyError && (
-                    <p class="mb-3 text-xs text-error">{copyError}</p>
+                    <p class="mb-3 break-words text-xs text-error">{copyError}</p>
                 )}
 
                 {!deployment && (
                     <DataState loading={detailQuery.loading} error={detailQuery.error} onRetry={() => void detailQuery.reload()}>
                         {resolvedDeployment && (
-                            <p class="mb-3 font-mono text-[11px] text-base-content/45">{resolvedDeployment.uuid}</p>
+                            <p class="mb-3 break-all font-mono text-[11px] text-base-content/45">{resolvedDeployment.uuid}</p>
                         )}
                     </DataState>
                 )}
@@ -141,7 +141,7 @@ export function DeploymentLogsPanel({
                 <DataState loading={logs.loading} error={logs.error} onRetry={() => void logs.reload()}>
                     <div
                         ref={containerRef}
-                        class="max-h-[28rem] min-w-0 overflow-auto rounded-xl border border-base-300 bg-black p-3 font-mono text-[11px] leading-5 text-zinc-200"
+                        class="max-h-[28rem] min-w-0 overflow-x-auto overflow-y-auto rounded-xl border border-base-300 bg-black p-3 font-mono text-[11px] leading-5 break-words text-zinc-200"
                     >
                         {logs.lines.length === 0 ? (
                             <p class="text-zinc-500">

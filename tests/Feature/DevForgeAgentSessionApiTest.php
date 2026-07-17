@@ -117,6 +117,53 @@ it('queues chat messages inside a session', function () {
     \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\Agent\RunAgentChatJob::class);
 });
 
+it('stores application context on queued chat messages', function () {
+    \Illuminate\Support\Facades\Queue::fake();
+
+    $user = User::factory()->create();
+    $team = $user->teams()->firstOrFail();
+    $provider = AiProviderConfig::factory()->create(['team_id' => $team->id]);
+    $agent = AiAgent::factory()->create([
+        'team_id' => $team->id,
+        'provider_config_id' => $provider->id,
+    ]);
+    $session = AiAgentSession::factory()->create([
+        'agent_id' => $agent->id,
+        'user_id' => $user->id,
+        'title' => 'App · Domain app',
+    ]);
+
+    $server = \App\Models\Server::factory()->create(['team_id' => $team->id]);
+    $destination = $server->standaloneDockers()->firstOrFail();
+    $project = \App\Models\Project::factory()->create(['team_id' => $team->id]);
+    $environment = \App\Models\Environment::factory()->create(['project_id' => $project->id]);
+    $application = \App\Models\Application::factory()->create([
+        'name' => 'Domain app',
+        'environment_id' => $environment->id,
+        'destination_id' => $destination->id,
+        'destination_type' => \App\Models\StandaloneDocker::class,
+        'git_repository' => 'acme/demo-app',
+        'git_branch' => 'main',
+        'build_pack' => 'nixpacks',
+        'fqdn' => 'https://demo.example.com',
+    ]);
+
+    $this->actingAs($user)
+        ->withSession(['currentTeam' => $team])
+        ->postJson("/api/devforge/v1/agents/{$agent->uuid}/sessions/{$session->uuid}/messages", [
+            'content' => 'Remplacer l’adapter Vercel par @astrojs/node en mode standalone',
+            'application_uuid' => $application->uuid,
+        ])
+        ->assertAccepted();
+
+    $run = \App\Models\AiAgentRun::query()->where('agent_id', $agent->id)->latest('id')->first();
+    expect($run)->not->toBeNull()
+        ->and($run->metadata['application_uuid'])->toBe($application->uuid)
+        ->and($run->metadata['application_name'])->toBe('Domain app')
+        ->and($run->metadata['git_repository'])->toBe('acme/demo-app')
+        ->and($session->fresh()->title)->toBe('App · Domain app');
+});
+
 it('remembers the active session per user and agent in the database', function () {
     $user = User::factory()->create();
     $team = $user->teams()->firstOrFail();

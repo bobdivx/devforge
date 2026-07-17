@@ -1,5 +1,6 @@
 export type ApplicationTabId =
     | 'overview'
+    | 'domains'
     | 'deployments'
     | 'databases'
     | 'logs'
@@ -13,6 +14,7 @@ export type ApplicationTab = {
 
 export const applicationTabs: ApplicationTab[] = [
     { id: 'overview', label: 'Vue d’ensemble' },
+    { id: 'domains', label: 'Domaines' },
     { id: 'deployments', label: 'Déploiements' },
     { id: 'databases', label: 'Bases de données' },
     { id: 'logs', label: 'Logs' },

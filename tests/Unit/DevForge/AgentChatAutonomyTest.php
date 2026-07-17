@@ -40,3 +40,28 @@ it('includes chat autonomy rules and action hint in chat system prompt', functio
         ->and($prompt)->toContain('enable_tool_package')
         ->and($prompt)->toContain('bp68rd8g7pka4g9h0m8nl275');
 });
+
+it('includes application scope in chat system prompt when provided', function () {
+    $agent = AiAgent::factory()->deployment()->make([
+        'name' => 'Deploy Test',
+    ]);
+    $agent->setRelation('team', \App\Models\Team::factory()->make(['name' => 'Equipe Test']));
+
+    $prompt = app(AgentPromptBuilder::class)->chatSystemPrompt(
+        $agent,
+        'Remplacer l’adapter Vercel par @astrojs/node',
+        [
+            'application_uuid' => 'app-uuid-macompta',
+            'application_name' => 'macompta',
+            'git_repository' => 'acme/macompta',
+            'git_branch' => 'main',
+            'build_pack' => 'nixpacks',
+            'fqdn' => 'https://macompta.example.com',
+        ],
+    );
+
+    expect($prompt)->toContain('Champ d\'application')
+        ->and($prompt)->toContain('app-uuid-macompta')
+        ->and($prompt)->toContain('macompta')
+        ->and($prompt)->toContain('application_uuid=app-uuid-macompta');
+});

@@ -8,6 +8,15 @@ Route::get('/deployment-targets', [ApplicationController::class, 'deploymentTarg
     ->name('deployment-targets.index');
 Route::post('/applications', [ApplicationController::class, 'store'])
     ->name('applications.store');
+Route::get('/applications/{applicationUuid}/domains', [ApplicationController::class, 'domains'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.domains.show');
+Route::put('/applications/{applicationUuid}/domains', [ApplicationController::class, 'updateDomains'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.domains.update');
+Route::post('/applications/{applicationUuid}/domains/generate', [ApplicationController::class, 'generateDomain'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.domains.generate');
 Route::get('/applications/{applicationUuid}/linkable-databases', [ApplicationController::class, 'linkableDatabases'])
     ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
     ->name('applications.linkable-databases');

@@ -32,8 +32,6 @@ class StartLibsql
         $persistent_file_volumes = $this->database->fileStorages()->get();
         $volume_names = $this->generate_local_persistent_volumes_only_volume_names();
         $environment_variables = $this->generate_environment_variables();
-        $authUser = $this->database->libsql_auth_user ?: 'libsql';
-        $authPassword = (string) $this->database->libsql_auth_token;
 
         $docker_compose = [
             'services' => [
@@ -46,9 +44,10 @@ class StartLibsql
                         $this->database->destination->network,
                     ],
                     'labels' => defaultDatabaseLabels($this->database)->toArray(),
+                    // libsql-server image has neither wget nor curl; probe the HTTP port with bash /dev/tcp.
                     'healthcheck' => $this->database->healthCheckConfiguration([
                         'CMD-SHELL',
-                        "wget --spider -q --http-user={$authUser} --http-password={$authPassword} http://127.0.0.1:8080/ || exit 1",
+                        'bash -c "exec 3<>/dev/tcp/127.0.0.1/8080" || exit 1',
                     ]),
                     'mem_limit' => $this->database->limits_memory,
                     'memswap_limit' => $this->database->limits_memory_swap,

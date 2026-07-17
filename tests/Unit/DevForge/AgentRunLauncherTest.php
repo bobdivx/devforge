@@ -6,7 +6,10 @@ use App\Models\AiAgentRun;
 use App\Models\AiProviderConfig;
 use App\Models\Team;
 use App\Services\DevForge\Agent\AgentRunLauncher;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+
+uses(RefreshDatabase::class);
 
 beforeEach(function () {
     Queue::fake();
@@ -48,6 +51,30 @@ it('returns null when the agent is already running', function () {
 
     expect($run)->toBeNull();
     Queue::assertNothingPushed();
+});
+
+it('stores deployment_uuid and event in run metadata for event triggers', function () {
+    $team = Team::factory()->create();
+    $provider = AiProviderConfig::factory()->create(['team_id' => $team->id]);
+    $agent = AiAgent::factory()->create([
+        'team_id' => $team->id,
+        'provider_config_id' => $provider->id,
+        'status' => 'idle',
+    ]);
+
+    $run = app(AgentRunLauncher::class)->queue($agent, 'event', [
+        'event' => 'deployment_failed',
+        'deployment_uuid' => 'deploy-meta-uuid',
+        'application_uuid' => 'app-meta-uuid',
+        'failure_excerpt' => [['stream' => 'stderr', 'message' => 'boom']],
+    ]);
+
+    expect($run)->toBeInstanceOf(AiAgentRun::class)
+        ->and($run->metadata)->toMatchArray([
+            'event' => 'deployment_failed',
+            'deployment_uuid' => 'deploy-meta-uuid',
+            'application_uuid' => 'app-meta-uuid',
+        ]);
 });
 
 it('recovers a stale pending event run before queueing a deployment agent', function () {

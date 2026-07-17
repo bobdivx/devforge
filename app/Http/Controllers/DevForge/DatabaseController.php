@@ -153,7 +153,7 @@ class DatabaseController extends Controller
             'file' => [
                 'required',
                 'file',
-                'max:524288',
+                'max:'.LibsqlDatabaseTransferService::MAX_UPLOAD_KILOBYTES,
                 function (string $attribute, mixed $value, \Closure $fail): void {
                     if (! $value instanceof \Illuminate\Http\UploadedFile) {
                         $fail('Fichier invalide.');

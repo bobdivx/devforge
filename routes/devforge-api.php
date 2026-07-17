@@ -20,3 +20,4 @@ require __DIR__.'/devforge-tags.php';
 require __DIR__.'/devforge-team.php';
 require __DIR__.'/devforge-server-storage.php';
 require __DIR__.'/devforge-server-files.php';
+require __DIR__.'/devforge-server-settings.php';

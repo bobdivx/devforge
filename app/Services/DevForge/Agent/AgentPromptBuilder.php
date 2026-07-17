@@ -18,7 +18,12 @@ class AgentPromptBuilder
 
             Contexte : échec de déploiement détecté.
             - Analyse les logs fournis puis get_deployment_logs si besoin.
-            - Un seul redeploy automatique maximum.
+            - Pour une variable de build (PUPPETEER_SKIP_DOWNLOAD, NODE_ENV, etc.) : upsert_application_env_var (Coolify), jamais un fichier .env Git.
+            - write_application_source seulement pour du code (package.json, Dockerfile, etc.). Jamais .env / .env.*.
+            - Si write_application_source échoue (GitHub « Resource not accessible », permissions) : bascule immédiatement sur upsert_application_env_var pour les variables, ou documente le besoin d'accès Git — ne redéploie pas sans correction.
+            - « Permission denied » sur /data/coolify/applications/... ou data/applications/... = problème d’ownership host (chown / ops), PAS Puppeteer ni code app.
+            - Après control_resource deploy mis en file : résume les prochaines étapes et ARRÊTE — ne poll pas les logs en boucle.
+            - Un seul redeploy automatique maximum via control_resource.
             - Si config utilisateur en cause, documente sans boucler.
             RULES,
             'deployment_build_started' => <<<'RULES'
@@ -112,7 +117,10 @@ class AgentPromptBuilder
         CONTEXT);
     }
 
-    public function chatSystemPrompt(AiAgent $agent, ?string $latestUserMessage = null): string
+    /**
+     * @param  array<string, mixed>  $applicationContext
+     */
+    public function chatSystemPrompt(AiAgent $agent, ?string $latestUserMessage = null, array $applicationContext = []): string
     {
         $basePrompt = trim($agent->system_prompt ?: AgentDirectives::defaultSystemPrompt($agent->type));
         $teamName = $agent->team->name;
@@ -126,6 +134,7 @@ class AgentPromptBuilder
         $scopeBlock = $agent->resource_uuid
             ? "\nScope agent : ressource UUID {$agent->resource_uuid} uniquement (sauf demande explicite de l'équipe entière)."
             : '';
+        $applicationBlock = $this->chatApplicationContextBlock($applicationContext);
 
         return trim(<<<PROMPT
         {$basePrompt}
@@ -133,10 +142,41 @@ class AgentPromptBuilder
         Tu es un agent IA intégré dans DevForge (PaaS auto-hébergé).
         Tu converses avec un membre de l'équipe « {$teamName} » dans une interface de chat.
         {$scopeBlock}
+        {$applicationBlock}
 
         {$autonomyRules}
         {$hintBlock}
         PROMPT);
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function chatApplicationContextBlock(array $context): string
+    {
+        $applicationUuid = trim((string) ($context['application_uuid'] ?? ''));
+        if ($applicationUuid === '') {
+            return '';
+        }
+
+        $applicationName = (string) ($context['application_name'] ?? 'Application');
+        $gitRepository = (string) ($context['git_repository'] ?? 'inconnu');
+        $gitBranch = (string) ($context['git_branch'] ?? 'inconnu');
+        $buildPack = (string) ($context['build_pack'] ?? 'inconnu');
+        $fqdn = (string) ($context['fqdn'] ?? 'aucun');
+
+        return trim(<<<CONTEXT
+
+        Champ d'application (scope obligatoire pour ce chat) :
+        - Application : {$applicationName} ({$applicationUuid})
+        - Dépôt : {$gitRepository}
+        - Branche : {$gitBranch}
+        - Build pack : {$buildPack}
+        - Domaines : {$fqdn}
+
+        Traite chaque demande comme portant sur CETTE application.
+        Pour les outils (read_application_source, write_application_source, upsert_application_env_var, control_resource, get_deployment_logs, get_resource_status, etc.), utilise application_uuid={$applicationUuid} sans redemander l'UUID.
+        CONTEXT);
     }
 
     /**
@@ -163,11 +203,12 @@ class AgentPromptBuilder
         Étapes :
         1. get_deployment_logs avec deployment_uuid
         2. get_resource_status sur l'application
-        3. read_application_source sur les fichiers liés à l'erreur (Dockerfile, package.json, etc.)
-        4. write_application_source si correction évidente (redeploy=true en mode direct, ou mode pull_request si risqué)
-        5. docker_logs si conteneur identifiable
-        6. control_resource deploy UNE FOIS si correction transitoire possible
-        7. Résumé actionnable
+        3. Si l'erreur cite une variable d'env (PUPPETEER_SKIP_DOWNLOAD, NODE_OPTIONS, etc.) : upsert_application_env_var puis control_resource deploy — JAMAIS write_application_source sur .env
+        4. Si « Permission denied » sur le répertoire Coolify data/applications : diagnostiquer ownership (ops/chown), ne pas chercher Puppeteer
+        5. Sinon read_application_source sur les fichiers liés (package.json, Dockerfile, etc.)
+        6. write_application_source si correction code évidente (jamais .env) ; en cas d'erreur GitHub permissions → upsert_application_env_var ou résumé bloquant
+        7. control_resource deploy UNE FOIS si correction appliquée, puis STOP (pas de polling interminable des logs)
+        8. Résumé actionnable
 
         Première action : appel d'outil obligatoire.
         CONTEXT);

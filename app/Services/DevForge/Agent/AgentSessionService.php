@@ -7,6 +7,7 @@ use App\Models\AiAgentSession;
 use App\Models\AiAgentSessionPreference;
 use App\Models\User;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class AgentSessionService
@@ -50,7 +51,7 @@ class AgentSessionService
 
     public function activeForUser(AiAgent $agent, User $user): ?AiAgentSession
     {
-        if (! \Illuminate\Support\Facades\Schema::hasTable('ai_agent_session_preferences')) {
+        if (! Schema::hasTable('ai_agent_session_preferences')) {
             return $this->latestForUser($agent, $user);
         }
 
@@ -166,6 +167,10 @@ class AgentSessionService
         }
 
         if ($session->messages()->exists()) {
+            return;
+        }
+
+        if (trim((string) $session->title) !== 'Nouvelle conversation') {
             return;
         }
 

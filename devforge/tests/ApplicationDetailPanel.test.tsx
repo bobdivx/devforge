@@ -114,6 +114,9 @@ describe('ApplicationDetailPanel', () => {
                     },
                 });
             }
+            if (url.includes('/api/devforge/v1/agents')) {
+                return jsonResponse({ data: [] });
+            }
             throw new Error(`URL inattendue : ${url}`);
         });
 
@@ -127,6 +130,7 @@ describe('ApplicationDetailPanel', () => {
         );
 
         expect(await screen.findByRole('heading', { name: 'popcorn-web' })).toBeInTheDocument();
+        expect(await screen.findByText('Assistant IA · popcorn-web')).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'Vue d’ensemble' })).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'Déploiements' })).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'Bases de données' })).toBeInTheDocument();
@@ -148,7 +152,7 @@ describe('ApplicationDetailPanel', () => {
         expect(screen.getByRole('tab', { name: 'Bases de données' })).toBeInTheDocument();
     });
 
-    it('masque visiter et n’affiche que déployer quand l’application est arrêtée', async () => {
+    it('garde visiter et n’affiche que déployer quand l’application est arrêtée', async () => {
         vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
             const url = String(input);
             if (url.includes('/api/devforge/v1/core/applications/app-uuid-1234')) {
@@ -181,6 +185,9 @@ describe('ApplicationDetailPanel', () => {
                     },
                 });
             }
+            if (url.includes('/api/devforge/v1/agents')) {
+                return jsonResponse({ data: [] });
+            }
             throw new Error(`URL inattendue : ${url}`);
         });
 
@@ -194,7 +201,7 @@ describe('ApplicationDetailPanel', () => {
         );
 
         expect(await screen.findByRole('heading', { name: 'popcorn-web' })).toBeInTheDocument();
-        expect(screen.queryByRole('link', { name: 'Visiter' })).not.toBeInTheDocument();
+        expect(screen.getByRole('link', { name: 'Visiter' })).toHaveAttribute('href', 'https://popcornn.app');
         expect(screen.getByRole('button', { name: 'Déployer' })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Démarrer' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Arrêter' })).not.toBeInTheDocument();

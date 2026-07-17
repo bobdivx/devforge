@@ -32,9 +32,32 @@
         {
             "path": "config/devforge.php",
             "must_contain": [
-                "agents_enabled"
+                "agents_enabled",
+                "agents_job_timeout"
             ],
             "description": "Configuration agents DevForge"
+        },
+        {
+            "path": "app/Jobs/Agent/RunAgentJob.php",
+            "must_contain": [
+                "agents_job_timeout",
+                "failOnTimeout"
+            ],
+            "description": "Job agent avec timeout configurable et echec propre"
+        },
+        {
+            "path": "app/Services/DevForge/Agent/Providers/ResilientLlmProvider.php",
+            "must_contain": [
+                "use App\\Services\\DevForge\\Agent\\Contracts\\LlmResponse"
+            ],
+            "description": "ResilientLlmProvider doit importer Contracts\\LlmResponse"
+        },
+        {
+            "path": "app/Services/DevForge/Agent/AgentToolkit.php",
+            "must_contain": [
+                "use App\\Services\\DevForge\\DeploymentData"
+            ],
+            "description": "AgentToolkit doit importer DevForge\\DeploymentData"
         }
     ]
 }

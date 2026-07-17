@@ -7,6 +7,7 @@ use App\Services\DevForge\Agent\Contracts\LlmProvider;
 use App\Services\DevForge\Agent\Contracts\LlmResponse;
 use App\Services\DevForge\Agent\GeminiThoughtSignature;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
 
@@ -52,7 +53,7 @@ class GeminiProvider implements LlmProvider
     /**
      * @param  array<string, mixed>  $payload
      */
-    private function sendWithRetries(array $payload): \Illuminate\Http\Client\Response
+    private function sendWithRetries(array $payload): Response
     {
         $lastResponse = null;
 

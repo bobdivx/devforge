@@ -49,10 +49,8 @@ export function resolveCoreResourceActions(resource: CoreResource): CoreAction[]
     return resolved.filter((action) => allowed.has(action));
 }
 
-export function canVisitApplication(status: CoreResource['status'], domain: string | null): boolean {
-    if (!domain || typeof status !== 'string') {
-        return false;
-    }
-
-    return isResourceRunning(status);
+export function canVisitApplication(_status: CoreResource['status'], domain: string | null): boolean {
+    // L’adresse provisoire (wildcard / FQDN) doit rester ouvrable dès qu’elle existe,
+    // même si le conteneur n’est pas encore « running » (déploiement, restart, etc.).
+    return typeof domain === 'string' && domain.trim() !== '';
 }

@@ -1,6 +1,12 @@
 import { ArrowLeft, Copy, Download, Eye, EyeOff, Link2, Play, Plus, RefreshCw, Trash2, Upload } from 'lucide-preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { domainApi, type CoreAction, type DatabaseApplicationConnection, type DatabaseBackup, type DatabaseBackupInput } from '../../lib/domain-api';
+import {
+    formatLibsqlImportBytes,
+    isLibsqlImportLarge,
+    libsqlImportLargeWarning,
+    libsqlImportSizeError,
+} from '../../lib/libsql-import-limits';
 import { parseResourceStatus, resourceStatusInput } from '../../lib/resource-status';
 import { useApiQuery } from '../../lib/use-api-query';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -188,6 +194,7 @@ export function DatabaseDetailPanel({ uuid, canAct, onClose, onChanged, initialT
     const [deletingDatabase, setDeletingDatabase] = useState(false);
     const [transferring, setTransferring] = useState<'export' | 'import' | null>(null);
     const [importProgress, setImportProgress] = useState<DatabaseImportProgress | null>(null);
+    const [pendingLargeImport, setPendingLargeImport] = useState<File | null>(null);
     const importAnimationRef = useRef<{
         timer: ReturnType<typeof setInterval> | null;
         phase: DatabaseImportPhase;
@@ -445,9 +452,26 @@ export function DatabaseDetailPanel({ uuid, canAct, onClose, onChanged, initialT
         }
     };
 
-    const importSql = async (file: File) => {
+    const requestImportSql = (file: File) => {
+        const sizeError = libsqlImportSizeError(file.size);
+        if (sizeError) {
+            setTransferError(sizeError);
+            setTransferMessage(null);
+            return;
+        }
+
+        if (isLibsqlImportLarge(file.size)) {
+            setPendingLargeImport(file);
+            return;
+        }
+
+        void runImportSql(file);
+    };
+
+    const runImportSql = async (file: File) => {
         const isDbFile = file.name.toLowerCase().endsWith('.db') || file.name.toLowerCase().endsWith('.sqlite');
 
+        setPendingLargeImport(null);
         setTransferring('import');
         setTransferError(null);
         setTransferMessage(null);
@@ -491,7 +515,15 @@ export function DatabaseDetailPanel({ uuid, canAct, onClose, onChanged, initialT
                 percent: 100,
                 format: response.data.format ?? current.format,
             } : current);
-            setTransferMessage(response.data.message);
+
+            const parts = [response.data.message];
+            if (response.data.downtime_note) {
+                parts.push(response.data.downtime_note);
+            }
+            if (response.data.transfer_hint) {
+                parts.push(response.data.transfer_hint);
+            }
+            setTransferMessage(parts.filter(Boolean).join(' '));
             await resourceQuery.reload();
             await onChanged();
         } catch (importError: unknown) {
@@ -699,7 +731,9 @@ export function DatabaseDetailPanel({ uuid, canAct, onClose, onChanged, initialT
                             <article class="rounded-xl border border-base-300/70 bg-base-200/20 p-4">
                                 <h3 class="text-sm font-semibold">Importer</h3>
                                 <p class="mt-1 text-xs text-base-content/55">
-                                    Remplace le contenu actuel. Formats acceptés : fichier <span class="font-mono">.db</span> (Turso) ou <span class="font-mono">.sql</span>.
+                                    Remplace le contenu actuel (<span class="font-medium text-warning">arrête temporairement la base</span>).
+                                    Formats : <span class="font-mono">.db</span> (Turso) ou <span class="font-mono">.sql</span>.
+                                    Limite 512&nbsp;Mo — au-delà de 20&nbsp;Mo, le transfert SSH peut être long.
                                 </p>
                                 {canAct && (
                                     <label class="btn btn-sm btn-outline mt-3 cursor-pointer">
@@ -713,7 +747,7 @@ export function DatabaseDetailPanel({ uuid, canAct, onClose, onChanged, initialT
                                             onChange={(event) => {
                                                 const file = (event.target as HTMLInputElement).files?.[0];
                                                 if (file) {
-                                                    void importSql(file);
+                                                    requestImportSql(file);
                                                 }
                                                 (event.target as HTMLInputElement).value = '';
                                             }}
@@ -957,6 +991,25 @@ export function DatabaseDetailPanel({ uuid, canAct, onClose, onChanged, initialT
                     loading={accessSubmitting}
                     onCancel={() => setPendingRegenerateToken(false)}
                     onConfirm={() => void regenerateToken()}
+                />
+            )}
+
+            {pendingLargeImport && (
+                <ConfirmDialog
+                    open
+                    title="Importer un gros fichier ?"
+                    message={libsqlImportLargeWarning(pendingLargeImport.size)
+                        + ` Fichier : ${pendingLargeImport.name} (${formatLibsqlImportBytes(pendingLargeImport.size)}).`}
+                    tone="danger"
+                    confirmLabel="Importer quand même"
+                    loading={transferring === 'import'}
+                    onCancel={() => setPendingLargeImport(null)}
+                    onConfirm={() => {
+                        const file = pendingLargeImport;
+                        if (file) {
+                            void runImportSql(file);
+                        }
+                    }}
                 />
             )}
         </>

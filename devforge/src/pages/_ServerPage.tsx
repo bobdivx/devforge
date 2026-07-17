@@ -1,4 +1,5 @@
-import { RefreshCw } from 'lucide-preact';
+import { LoaderCircle, RefreshCw } from 'lucide-preact';
+import { useEffect, useState } from 'preact/hooks';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
 import { DataState } from '../components/ui/DataState';
@@ -32,7 +33,42 @@ export function ServerPage({ path, legacyBaseUrl = '' }: ServerPageProps) {
         serverUuid ? `core:servers:${serverUuid}` : null,
         () => domainApi.coreResource('servers', serverUuid!),
     );
+    const settingsQuery = useApiQuery(
+        serverUuid && activeSection === 'overview' ? `server-settings:${serverUuid}` : null,
+        () => domainApi.serverSettings(serverUuid!),
+    );
     const resource = server.data?.data;
+    const [wildcardDomain, setWildcardDomain] = useState('');
+    const [savingWildcard, setSavingWildcard] = useState(false);
+    const [wildcardError, setWildcardError] = useState<string | null>(null);
+    const [wildcardSuccess, setWildcardSuccess] = useState<string | null>(null);
+
+    useEffect(() => {
+        setWildcardDomain(settingsQuery.data?.data.wildcard_domain ?? '');
+    }, [settingsQuery.data?.data.wildcard_domain]);
+
+    const saveWildcard = async () => {
+        if (!serverUuid) {
+            return;
+        }
+
+        setSavingWildcard(true);
+        setWildcardError(null);
+        setWildcardSuccess(null);
+
+        try {
+            const response = await domainApi.updateServerSettings(serverUuid, {
+                wildcard_domain: wildcardDomain.trim() || null,
+            });
+            setWildcardDomain(response.data.wildcard_domain ?? '');
+            setWildcardSuccess('Wildcard domain enregistré.');
+            await Promise.all([server.reload({ silent: true }), settingsQuery.reload({ silent: true })]);
+        } catch (error) {
+            setWildcardError(error instanceof Error ? error.message : 'Impossible d’enregistrer le wildcard.');
+        } finally {
+            setSavingWildcard(false);
+        }
+    };
 
     if (!serverUuid) {
         return (
@@ -82,8 +118,58 @@ export function ServerPage({ path, legacyBaseUrl = '' }: ServerPageProps) {
                                     { label: 'Swarm manager', value: resource.configuration.swarm_manager ? 'Oui' : 'Non' },
                                     { label: 'Métriques', value: resource.configuration.metrics_enabled ? 'Activées' : 'Désactivées' },
                                     { label: 'Terminal', value: resource.configuration.terminal_enabled ? 'Activé' : 'Désactivé' },
+                                    {
+                                        label: 'Wildcard domain',
+                                        value: typeof resource.configuration.wildcard_domain === 'string'
+                                            ? resource.configuration.wildcard_domain
+                                            : 'Non configuré',
+                                    },
                                 ]}
                                 />
+
+                                <div class="grid gap-3 rounded-xl border border-base-300/60 bg-base-200/20 p-4">
+                                    <div>
+                                        <p class="text-sm font-semibold">Wildcard Domain</p>
+                                        <p class="text-xs text-base-content/55">
+                                            Utilisé pour générer les URLs des nouvelles applications
+                                            (ex. <span class="font-mono">https://apps.example.com</span>
+                                            → <span class="font-mono">https://&#123;uuid&#125;.apps.example.com</span>).
+                                            Ce n’est pas l’URL de l’instance DevForge.
+                                        </p>
+                                    </div>
+                                    <DataState
+                                        loading={settingsQuery.loading}
+                                        error={settingsQuery.error}
+                                        onRetry={() => void settingsQuery.reload()}
+                                    >
+                                        <label class="grid gap-2">
+                                            <span class="text-xs font-medium uppercase tracking-wide text-base-content/45">
+                                                URL wildcard
+                                            </span>
+                                            <input
+                                                class="input input-bordered input-sm w-full font-mono"
+                                                type="url"
+                                                placeholder="https://apps.example.com"
+                                                value={wildcardDomain}
+                                                disabled={savingWildcard}
+                                                onInput={(event) => setWildcardDomain((event.target as HTMLInputElement).value)}
+                                            />
+                                        </label>
+                                        <button
+                                            class="btn btn-primary btn-sm w-fit rounded-full"
+                                            type="button"
+                                            disabled={savingWildcard}
+                                            onClick={() => void saveWildcard()}
+                                        >
+                                            {savingWildcard
+                                                ? <LoaderCircle class="size-3.5 animate-spin" aria-hidden />
+                                                : null}
+                                            Enregistrer le wildcard
+                                        </button>
+                                        {wildcardSuccess && <p class="text-sm text-success">{wildcardSuccess}</p>}
+                                        {wildcardError && <p class="text-sm text-error" role="alert">{wildcardError}</p>}
+                                    </DataState>
+                                </div>
                             </div>
                         )}
                     </DataState>

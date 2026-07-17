@@ -3,6 +3,7 @@
 use App\Enums\ApplicationDeploymentStatus;
 use App\Jobs\Agent\RunAgentJob;
 use App\Models\AiAgent;
+use App\Models\AiAgentRun;
 use App\Models\AiProviderConfig;
 use App\Models\Application;
 use App\Models\ApplicationDeploymentQueue;
@@ -75,17 +76,30 @@ it('does not report catch up when the eligible agent is already running', functi
     $failedDeployment->load('application');
 
     $provider = AiProviderConfig::factory()->create(['team_id' => $this->team->id]);
-    AiAgent::factory()->deployment()->create([
+    $agent = AiAgent::factory()->deployment()->create([
         'team_id' => $this->team->id,
         'provider_config_id' => $provider->id,
         'status' => 'running',
     ]);
 
+    // Run actif récent : prepareForEventDispatch ne doit pas le considérer stale.
+    AiAgentRun::factory()->running()->create([
+        'agent_id' => $agent->id,
+        'trigger' => 'manual',
+        'started_at' => now(),
+        'created_at' => now(),
+    ]);
+
     $payload = app(DeploymentMonitoringData::class)->forDeployment($this->team, $failedDeployment);
 
     expect($payload['catch_up_triggered'])->toBeFalse()
-        ->and($payload['agent_runs'])->toBeEmpty()
         ->and($payload['diagnostics']['blockers'])->not->toBeEmpty();
+
+    // Un run manuel actif peut apparaître via linkage contextuel, sans nouveau dispatch.
+    foreach ($payload['agent_runs'] as $run) {
+        expect($run['linkage'])->toBe('context')
+            ->and($run['trigger'])->toBe('manual');
+    }
 
     Queue::assertNothingPushed();
 });
@@ -111,4 +125,38 @@ it('does not catch up twice for the same failed deployment', function () {
 
     expect($secondPayload['catch_up_triggered'])->toBeFalse();
     Queue::assertPushed(RunAgentJob::class, 1);
+});
+
+it('skips catch up when an agent run already exists via metadata only', function () {
+    Queue::fake();
+    config()->set('devforge.agents_enabled', true);
+    config()->set('devforge.agents_auto_fix_deployments', true);
+
+    $failedDeployment = catchUpDeployment($this->application, 'catch-up-meta-uuid');
+    $failedDeployment->load('application');
+
+    $provider = AiProviderConfig::factory()->create(['team_id' => $this->team->id]);
+    $agent = AiAgent::factory()->deployment()->create([
+        'team_id' => $this->team->id,
+        'provider_config_id' => $provider->id,
+    ]);
+
+    AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'status' => 'completed',
+        'trigger' => 'event',
+        'logs' => null,
+        'metadata' => [
+            'event' => 'deployment_failed',
+            'deployment_uuid' => 'catch-up-meta-uuid',
+        ],
+    ]);
+
+    $payload = app(DeploymentMonitoringData::class)->forDeployment($this->team, $failedDeployment);
+
+    expect($payload['catch_up_triggered'])->toBeFalse()
+        ->and($payload['agent_runs'])->toHaveCount(1)
+        ->and($payload['agent_runs'][0]['linkage'])->toBe('metadata');
+
+    Queue::assertNothingPushed();
 });

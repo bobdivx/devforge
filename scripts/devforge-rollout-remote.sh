@@ -61,6 +61,7 @@ docker exec "${CONTAINER}" sh -c '
         routes/devforge-s3-storages.php \
         routes/devforge-server-storage.php \
         routes/devforge-server-files.php \
+        routes/devforge-server-settings.php \
         routes/devforge-agents.php \
         routes/devforge-core.php \
         routes/devforge-realtime.php \

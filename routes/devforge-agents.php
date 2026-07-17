@@ -33,6 +33,11 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
             ->middleware('throttle:devforge-agent-run')
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->name('messages.store');
+        Route::post('/{uuid}/messages/{messageUuid}/approval', [AgentMessageController::class, 'resolveApproval'])
+            ->middleware('throttle:devforge-agent-run')
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->where('messageUuid', '[A-Za-z0-9-]{8,64}')
+            ->name('messages.approval');
 
         Route::get('/{uuid}/sessions', [AgentSessionController::class, 'index'])
             ->where('uuid', '[A-Za-z0-9-]{8,64}')

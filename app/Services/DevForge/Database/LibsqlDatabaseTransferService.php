@@ -15,13 +15,108 @@ class LibsqlDatabaseTransferService
 
     private const SQLITE_RUNNER_IMAGE = 'alpine:3.20';
 
-    private const DB_RELATIVE_PATH = '/var/lib/sqld/data.db';
+    /**
+     * Legacy flat file path used by older imports (incompatible with modern sqld).
+     */
+    private const DB_PATH_LEGACY_FILE = '/var/lib/sqld/data.db';
+
+    /**
+     * Modern libsql-server layout (SQLD_DB_PATH=data.db is a directory).
+     */
+    private const DB_PATH_MODERN = '/var/lib/sqld/data.db/dbs/default/data';
 
     private const SQLITE_MAGIC_HEADER = "SQLite format 3\x00";
+
+    /** Laravel `file` max rule unit (kilobytes) — 512 MiB. */
+    public const MAX_UPLOAD_KILOBYTES = 524288;
+
+    public const MAX_PAYLOAD_BYTES = self::MAX_UPLOAD_KILOBYTES * 1024;
+
+    /** Soft threshold: warn UI / estimate longer SSH transfer. */
+    public const WARN_PAYLOAD_BYTES = 20 * 1024 * 1024;
+
+    /**
+     * Base64 chunk size for remote printf|base64 append (SSH argv-safe fallback).
+     * Preferred path is SCP (single round-trip via instant_scp).
+     */
+    public const REMOTE_CHUNK_CHARS = 72000;
+
+    /** Retries per chunk when falling back to base64-in-shell transfer. */
+    public const CHUNK_MAX_ATTEMPTS = 3;
+
+    public const TRANSFER_METHOD_SCP = 'scp';
+
+    public const TRANSFER_METHOD_CHUNKED = 'chunked_base64';
 
     public static function isSqliteDatabaseFile(string $payload): bool
     {
         return str_starts_with($payload, self::SQLITE_MAGIC_HEADER);
+    }
+
+    public static function estimateRemoteChunks(int $payloadBytes): int
+    {
+        if ($payloadBytes <= 0) {
+            return 0;
+        }
+
+        $encodedLength = (int) ceil($payloadBytes / 3) * 4;
+
+        return (int) max(1, (int) ceil($encodedLength / self::REMOTE_CHUNK_CHARS));
+    }
+
+    public static function isLargePayload(int $payloadBytes): bool
+    {
+        return $payloadBytes >= self::WARN_PAYLOAD_BYTES;
+    }
+
+    /**
+     * @throws HttpException
+     */
+    public static function assertPayloadWithinLimits(string $payload): void
+    {
+        $bytes = strlen($payload);
+
+        if ($bytes === 0) {
+            throw new HttpException(422, 'Le fichier d’import est vide.');
+        }
+
+        if ($bytes > self::MAX_PAYLOAD_BYTES) {
+            $maxMb = (int) (self::MAX_PAYLOAD_BYTES / 1024 / 1024);
+            $actualMb = round($bytes / 1024 / 1024, 1);
+
+            throw new HttpException(
+                422,
+                "Fichier trop volumineux ({$actualMb} Mo). Limite d’import : {$maxMb} Mo. "
+                .'Pour les très grosses bases, préférez un dump SQL plus compact ou un transfert hors bande.',
+            );
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     * @return array<string, mixed>
+     */
+    public static function enrichImportResult(array $result, int $payloadBytes, string $format, ?string $transferMethod = null): array
+    {
+        $chunks = self::estimateRemoteChunks($payloadBytes);
+        $large = self::isLargePayload($payloadBytes);
+        $method = $transferMethod ?? ($result['transfer_method'] ?? self::TRANSFER_METHOD_SCP);
+
+        $result['downtime_required'] = true;
+        $result['downtime_note'] = 'La base a été arrêtée pendant l’import puis redémarrée. Les applications connectées ont subi une coupure.';
+        $result['payload_bytes'] = $payloadBytes;
+        $result['estimated_transfer_chunks'] = $method === self::TRANSFER_METHOD_SCP ? 1 : $chunks;
+        $result['large_payload'] = $large;
+        $result['format'] = $format;
+        $result['transfer_method'] = $method;
+
+        if ($large) {
+            $result['transfer_hint'] = $method === self::TRANSFER_METHOD_SCP
+                ? 'Import volumineux : transfert SCP direct (un aller-retour). La coupure DB reste requise pour l’import.'
+                : 'Import volumineux : repli SSH chunké (base64) — peut prendre plusieurs minutes et est sensible aux timeouts réseau.';
+        }
+
+        return $result;
     }
 
     public function export(StandaloneLibsql $database): string
@@ -64,13 +159,12 @@ class LibsqlDatabaseTransferService
         try {
             $volume = escapeshellarg($this->volumeName($database));
             $remoteSql = escapeshellarg($remoteSqlPath);
+            $resolve = $this->resolveSqliteFileShellSnippet('/tmp/read/data.db');
             $command = "docker run --rm -v {$volume}:/var/lib/sqld:ro -v {$remoteSql}:/query.sql:ro "
                 .escapeshellarg(self::SQLITE_RUNNER_IMAGE)
                 ." sh -c 'apk add --no-cache sqlite >/dev/null 2>&1; "
-                ."mkdir -p /tmp/read; "
-                ."cp /var/lib/sqld/data.db /tmp/read/data.db; "
-                ."cp /var/lib/sqld/data.db-wal /tmp/read/data.db-wal 2>/dev/null || true; "
-                ."cp /var/lib/sqld/data.db-shm /tmp/read/data.db-shm 2>/dev/null || true; "
+                .'mkdir -p /tmp/read; '
+                ."{$resolve}"
                 ."sqlite3 /tmp/read/data.db < /query.sql'";
 
             $output = trim((string) $this->runRemoteProcess($server, [$command], 'Impossible d’exécuter la requête SQLite'));
@@ -133,7 +227,7 @@ class LibsqlDatabaseTransferService
         $volume = escapeshellarg($this->volumeName($database));
         $checkCommand = "docker run --rm -v {$volume}:/var/lib/sqld:ro "
             .escapeshellarg(self::SQLITE_RUNNER_IMAGE)
-            ." sh -c 'test -f /var/lib/sqld/data.db'";
+            ." sh -c 'test -f ".self::DB_PATH_MODERN.' || test -f '.self::DB_PATH_LEGACY_FILE."'";
 
         try {
             $this->runOnServer($server, [$checkCommand]);
@@ -145,10 +239,12 @@ class LibsqlDatabaseTransferService
     }
 
     /**
-     * @return array{restarted: bool, message: string, format: string}
+     * @return array<string, mixed>
      */
     public function importPayload(StandaloneLibsql $database, string $payload): array
     {
+        self::assertPayloadWithinLimits($payload);
+
         if (self::isSqliteDatabaseFile($payload)) {
             return $this->importDatabaseFile($database, $payload);
         }
@@ -157,7 +253,7 @@ class LibsqlDatabaseTransferService
     }
 
     /**
-     * @return array{restarted: bool, message: string, format: string}
+     * @return array<string, mixed>
      */
     public function import(StandaloneLibsql $database, string $sql): array
     {
@@ -165,7 +261,7 @@ class LibsqlDatabaseTransferService
     }
 
     /**
-     * @return array{restarted: bool, message: string, format: string}
+     * @return array<string, mixed>
      */
     public function importSql(StandaloneLibsql $database, string $sql): array
     {
@@ -181,32 +277,43 @@ class LibsqlDatabaseTransferService
             throw new HttpException(422, 'Le fichier ne ressemble pas à un export SQLite valide.');
         }
 
+        self::assertPayloadWithinLimits($normalizedSql);
+        $payloadBytes = strlen($normalizedSql."\n");
+
         $remoteSqlPath = '/tmp/devforge-libsql-import-'.$database->uuid.'-'.time().'.sql';
-        $this->writeRemoteFile($server, $remoteSqlPath, $normalizedSql."\n");
+        $transferMethod = $this->writeRemoteFile($server, $remoteSqlPath, $normalizedSql."\n");
 
         $this->runtimeGuard->stopForMaintenance($database);
 
         try {
             $volume = escapeshellarg($this->volumeName($database));
             $remoteSql = escapeshellarg($remoteSqlPath);
+            $prepare = $this->prepareModernLayoutShellSnippet();
             $importCommand = "docker run --rm -v {$volume}:/var/lib/sqld -v {$remoteSql}:/import.sql:ro "
                 .escapeshellarg(self::SQLITE_RUNNER_IMAGE)
-                ." sh -c 'apk add --no-cache sqlite >/dev/null 2>&1; rm -f /var/lib/sqld/data.db /var/lib/sqld/data.db-wal /var/lib/sqld/data.db-shm; sqlite3 /var/lib/sqld/data.db < /import.sql'";
+                ." sh -c 'apk add --no-cache sqlite >/dev/null 2>&1; {$prepare}"
+                .'sqlite3 '.self::DB_PATH_MODERN." < /import.sql'";
 
-            $this->runRemoteProcess($server, [$importCommand], 'L’import SQL sur le serveur a échoué');
+            $this->runRemoteProcess(
+                $server,
+                [$importCommand],
+                'L’import SQL sur le serveur a échoué (timeout possible sur les gros dumps)',
+            );
         } finally {
             $this->runOnServer($server, ['rm -f '.escapeshellarg($remoteSqlPath)], throwError: false);
         }
 
-        return $this->importFinalizer->finalize(
+        $result = $this->importFinalizer->finalize(
             $database,
             'sql',
-            'Import SQL terminé. La base est active.',
+            'Import SQL terminé. La base a été arrêtée puis redémarrée et est à nouveau active.',
         );
+
+        return self::enrichImportResult($result, $payloadBytes, 'sql', $transferMethod);
     }
 
     /**
-     * @return array{restarted: bool, message: string, format: string}
+     * @return array<string, mixed>
      */
     public function importDatabaseFile(StandaloneLibsql $database, string $dbContents): array
     {
@@ -217,28 +324,38 @@ class LibsqlDatabaseTransferService
             throw new HttpException(422, 'Le fichier .db n’est pas une base SQLite valide.');
         }
 
+        self::assertPayloadWithinLimits($dbContents);
+        $payloadBytes = strlen($dbContents);
+
         $remoteDbPath = '/tmp/devforge-libsql-import-'.$database->uuid.'-'.time().'.db';
-        $this->writeRemoteFile($server, $remoteDbPath, $dbContents);
+        $transferMethod = $this->writeRemoteFile($server, $remoteDbPath, $dbContents);
 
         $this->runtimeGuard->stopForMaintenance($database);
 
         try {
             $volume = escapeshellarg($this->volumeName($database));
             $remoteDb = escapeshellarg($remoteDbPath);
+            $prepare = $this->prepareModernLayoutShellSnippet();
             $importCommand = "docker run --rm -v {$volume}:/var/lib/sqld -v {$remoteDb}:/import.db:ro "
                 .escapeshellarg(self::SQLITE_RUNNER_IMAGE)
-                ." sh -c 'rm -f /var/lib/sqld/data.db /var/lib/sqld/data.db-wal /var/lib/sqld/data.db-shm; cp /import.db /var/lib/sqld/data.db'";
+                ." sh -c '{$prepare}cp /import.db ".self::DB_PATH_MODERN."'";
 
-            $this->runRemoteProcess($server, [$importCommand], 'L’import du fichier .db sur le serveur a échoué');
+            $this->runRemoteProcess(
+                $server,
+                [$importCommand],
+                'L’import du fichier .db sur le serveur a échoué (timeout possible sur les gros fichiers)',
+            );
         } finally {
             $this->runOnServer($server, ['rm -f '.escapeshellarg($remoteDbPath)], throwError: false);
         }
 
-        return $this->importFinalizer->finalize(
+        $result = $this->importFinalizer->finalize(
             $database,
             'db',
-            'Import du fichier .db terminé. La base est active.',
+            'Import du fichier .db terminé. La base a été arrêtée puis redémarrée et est à nouveau active.',
         );
+
+        return self::enrichImportResult($result, $payloadBytes, 'db', $transferMethod);
     }
 
     private function assertDatabaseFileExists(StandaloneLibsql $database): void
@@ -252,11 +369,45 @@ class LibsqlDatabaseTransferService
     {
         $volume = escapeshellarg($volumeName);
         $mount = $readOnly ? "{$volume}:/var/lib/sqld:ro" : "{$volume}:/var/lib/sqld";
-        $dbPath = self::DB_RELATIVE_PATH;
+        $resolve = $this->resolveSqliteFileShellSnippet('/tmp/export.db');
 
         return "docker run --rm -v {$mount} "
             .escapeshellarg(self::SQLITE_RUNNER_IMAGE)
-            ." sh -c 'apk add --no-cache sqlite >/dev/null 2>&1; sqlite3 {$dbPath} {$sqliteArgs}'";
+            ." sh -c 'apk add --no-cache sqlite >/dev/null 2>&1; {$resolve}sqlite3 /tmp/export.db {$sqliteArgs}'";
+    }
+
+    /**
+     * Prepare the modern sqld directory layout and clear previous namespace data.
+     */
+    private function prepareModernLayoutShellSnippet(): string
+    {
+        $modern = self::DB_PATH_MODERN;
+        $legacy = self::DB_PATH_LEGACY_FILE;
+
+        // If a legacy flat file exists at data.db, remove it so we can create the directory layout.
+        // Then ensure dbs/default exists and wipe previous sqlite files for a clean import.
+        return "if [ -f {$legacy} ]; then rm -f {$legacy} {$legacy}-wal {$legacy}-shm; fi; "
+            .'mkdir -p /var/lib/sqld/data.db/dbs/default; '
+            ."rm -f {$modern} {$modern}-wal {$modern}-shm; ";
+    }
+
+    /**
+     * Copy the live sqlite file (modern layout preferred, legacy flat file fallback) to $target.
+     */
+    private function resolveSqliteFileShellSnippet(string $target): string
+    {
+        $modern = self::DB_PATH_MODERN;
+        $legacy = self::DB_PATH_LEGACY_FILE;
+
+        return "if [ -f {$modern} ]; then "
+            ."cp {$modern} {$target}; "
+            ."cp {$modern}-wal {$target}-wal 2>/dev/null || true; "
+            ."cp {$modern}-shm {$target}-shm 2>/dev/null || true; "
+            ."elif [ -f {$legacy} ]; then "
+            ."cp {$legacy} {$target}; "
+            ."cp {$legacy}-wal {$target}-wal 2>/dev/null || true; "
+            ."cp {$legacy}-shm {$target}-shm 2>/dev/null || true; "
+            .'else echo "sqlite database file not found" >&2; exit 1; fi; ';
     }
 
     private function volumeName(StandaloneLibsql $database): string
@@ -264,19 +415,89 @@ class LibsqlDatabaseTransferService
         return 'libsql-data-'.$database->uuid;
     }
 
-    private function writeRemoteFile($server, string $remotePath, string $contents): void
+    /**
+     * Prefer Coolify's instant_scp (single round-trip). Fall back to chunked base64 with retries.
+     *
+     * @param  (callable(int $done, int $total, string $method): void)|null  $onProgress
+     * @return self::TRANSFER_METHOD_*
+     */
+    private function writeRemoteFile($server, string $remotePath, string $contents, ?callable $onProgress = null): string
     {
         $escapedPath = escapeshellarg($remotePath);
         $this->runOnServer($server, ["rm -f {$escapedPath}"], throwError: false);
 
-        foreach (str_split(base64_encode($contents), 48000) as $chunk) {
-            $encodedChunk = escapeshellarg($chunk);
-            $this->runRemoteProcess(
-                $server,
-                ["printf %s {$encodedChunk} | base64 -d >> {$escapedPath}"],
-                'Impossible de transférer le dump SQL vers le serveur',
-            );
+        $localPath = tempnam(sys_get_temp_dir(), 'devforge-libsql-');
+        if ($localPath === false) {
+            return $this->writeRemoteFileChunked($server, $remotePath, $contents, $onProgress);
         }
+
+        try {
+            if (file_put_contents($localPath, $contents) === false) {
+                throw new RuntimeException('Impossible d’écrire le fichier temporaire local pour le transfert SCP.');
+            }
+
+            try {
+                instant_scp($localPath, $remotePath, $server);
+                if ($onProgress !== null) {
+                    $onProgress(1, 1, self::TRANSFER_METHOD_SCP);
+                }
+
+                return self::TRANSFER_METHOD_SCP;
+            } catch (\Throwable) {
+                // Non-root / tunnel / scp path issues → known Coolify fallback.
+                return $this->writeRemoteFileChunked($server, $remotePath, $contents, $onProgress);
+            }
+        } finally {
+            @unlink($localPath);
+        }
+    }
+
+    /**
+     * @param  (callable(int $done, int $total, string $method): void)|null  $onProgress
+     * @return self::TRANSFER_METHOD_CHUNKED
+     */
+    private function writeRemoteFileChunked($server, string $remotePath, string $contents, ?callable $onProgress = null): string
+    {
+        $escapedPath = escapeshellarg($remotePath);
+        $this->runOnServer($server, ["rm -f {$escapedPath}"], throwError: false);
+
+        $chunks = str_split(base64_encode($contents), self::REMOTE_CHUNK_CHARS);
+        $totalChunks = count($chunks);
+
+        foreach ($chunks as $index => $chunk) {
+            $encodedChunk = escapeshellarg($chunk);
+            $chunkLabel = $totalChunks > 1
+                ? ' (chunk '.($index + 1)."/{$totalChunks} — timeout possible sur gros fichiers)"
+                : '';
+            $lastException = null;
+
+            for ($attempt = 1; $attempt <= self::CHUNK_MAX_ATTEMPTS; $attempt++) {
+                try {
+                    $this->runRemoteProcess(
+                        $server,
+                        ["printf %s {$encodedChunk} | base64 -d >> {$escapedPath}"],
+                        'Impossible de transférer le dump vers le serveur'.$chunkLabel,
+                    );
+                    $lastException = null;
+                    break;
+                } catch (HttpException $exception) {
+                    $lastException = $exception;
+                    if ($attempt >= self::CHUNK_MAX_ATTEMPTS) {
+                        throw $exception;
+                    }
+                }
+            }
+
+            if ($lastException !== null) {
+                throw $lastException;
+            }
+
+            if ($onProgress !== null) {
+                $onProgress($index + 1, $totalChunks, self::TRANSFER_METHOD_CHUNKED);
+            }
+        }
+
+        return self::TRANSFER_METHOD_CHUNKED;
     }
 
     /**

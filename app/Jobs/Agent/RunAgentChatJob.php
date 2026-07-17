@@ -16,15 +16,18 @@ class RunAgentChatJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $timeout = 300;
+    public int $timeout;
 
     public int $tries = 1;
+
+    public bool $failOnTimeout = true;
 
     public function __construct(
         public readonly AiAgent $agent,
         public readonly AiAgentRun $run,
         public readonly AiAgentMessage $userMessage,
     ) {
+        $this->timeout = max(120, (int) config('devforge.agents_job_timeout', 1800));
         $this->onQueue('default');
     }
 
@@ -43,14 +46,18 @@ class RunAgentChatJob implements ShouldQueue
 
     public function failed(\Throwable $exception): void
     {
-        if ($this->run->status === 'running') {
-            $this->run->appendLog('Job échoué: '.mb_substr($exception->getMessage(), 0, 500));
-            $this->run->update([
-                'status' => 'failed',
-                'summary' => 'Job échoué: '.mb_substr($exception->getMessage(), 0, 500),
-                'finished_at' => now(),
-            ]);
+        $this->run->refresh();
+
+        if (! in_array($this->run->status, ['pending', 'running'], true)) {
+            return;
         }
+
+        $this->run->appendLog('Job échoué: '.mb_substr($exception->getMessage(), 0, 500));
+        $this->run->update([
+            'status' => 'failed',
+            'summary' => 'Job échoué: '.mb_substr($exception->getMessage(), 0, 500),
+            'finished_at' => now(),
+        ]);
 
         $this->agent->update(['status' => 'error', 'last_run_at' => now()]);
     }

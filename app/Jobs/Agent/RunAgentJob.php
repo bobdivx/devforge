@@ -15,9 +15,11 @@ class RunAgentJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $timeout = 300;
+    public int $timeout;
 
     public int $tries = 1;
+
+    public bool $failOnTimeout = true;
 
     public function __construct(
         public readonly AiAgent $agent,
@@ -26,6 +28,7 @@ class RunAgentJob implements ShouldQueue
         public readonly array $context = [],
         public readonly ?int $runId = null,
     ) {
+        $this->timeout = max(120, (int) config('devforge.agents_job_timeout', 1800));
         $this->onQueue('default');
     }
 
@@ -41,7 +44,13 @@ class RunAgentJob implements ShouldQueue
             return;
         }
 
-        $runner->run($this->agent->fresh(), $run, $this->context);
+        try {
+            $run->appendLog('Job queue: démarrage RunAgentJob (timeout '.$this->timeout.'s)');
+            $runner->run($this->agent->fresh(), $run, $this->context);
+        } catch (\Throwable $exception) {
+            $this->markRunFailed($run, $exception);
+            throw $exception;
+        }
     }
 
     private function recoverAgentAfterMissingRun(): void
@@ -68,8 +77,33 @@ class RunAgentJob implements ShouldQueue
 
     public function failed(\Throwable $exception): void
     {
-        $this->agent->update(['status' => 'error', 'last_run_at' => now()]);
+        $updated = $this->failActiveRuns($exception);
 
+        if ($updated > 0) {
+            $this->agent->update(['status' => 'error', 'last_run_at' => now()]);
+        }
+    }
+
+    private function markRunFailed(AiAgentRun $run, \Throwable $exception): void
+    {
+        $run->refresh();
+
+        if (! in_array($run->status, ['pending', 'running'], true)) {
+            return;
+        }
+
+        $message = mb_substr($exception->getMessage(), 0, 500);
+        $run->appendLog('Erreur fatale job: '.$message);
+        $run->update([
+            'status' => 'failed',
+            'summary' => 'Erreur: '.$message,
+            'finished_at' => now(),
+        ]);
+        $this->agent->update(['status' => 'error', 'last_run_at' => now()]);
+    }
+
+    private function failActiveRuns(\Throwable $exception): int
+    {
         $query = AiAgentRun::where('agent_id', $this->agent->id)
             ->whereIn('status', ['pending', 'running']);
 
@@ -77,9 +111,11 @@ class RunAgentJob implements ShouldQueue
             $query->whereKey($this->runId);
         }
 
-        $query->update([
+        $summary = 'Job échoué: '.mb_substr($exception->getMessage(), 0, 500);
+
+        return $query->update([
             'status' => 'failed',
-            'summary' => 'Job échoué: '.mb_substr($exception->getMessage(), 0, 500),
+            'summary' => $summary,
             'finished_at' => now(),
         ]);
     }

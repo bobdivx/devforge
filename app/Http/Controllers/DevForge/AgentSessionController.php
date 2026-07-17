@@ -6,11 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\AiAgent;
 use App\Models\AiAgentMessage;
 use App\Models\AiAgentSession;
+use App\Models\Application;
 use App\Models\Team;
 use App\Models\User;
 use App\Services\DevForge\Agent\AgentChatService;
 use App\Services\DevForge\Agent\AgentSessionService;
 use App\Services\DevForge\Core\CurrentTeamContext;
+use App\Services\DevForge\CurrentTeamResources;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -19,6 +22,7 @@ class AgentSessionController extends Controller
 {
     public function __construct(
         private readonly CurrentTeamContext $currentTeamContext,
+        private readonly CurrentTeamResources $currentTeamResources,
         private readonly AgentSessionService $sessionService,
         private readonly AgentChatService $chatService,
     ) {}
@@ -172,6 +176,7 @@ class AgentSessionController extends Controller
 
         $validated = $request->validate([
             'content' => ['required', 'string', 'max:10000'],
+            'application_uuid' => ['nullable', 'string', 'max:64'],
         ]);
 
         if (! Schema::hasTable('ai_agent_messages') || ! Schema::hasTable('ai_agent_sessions')) {
@@ -184,7 +189,12 @@ class AgentSessionController extends Controller
                 $this->currentUser($request),
                 $sessionUuid,
             );
-            $result = $this->chatService->queueMessage($agent, $session, $validated['content']);
+            $context = $this->resolveApplicationChatContext(
+                $request,
+                $agent,
+                $validated['application_uuid'] ?? null,
+            );
+            $result = $this->chatService->queueMessage($agent, $session, $validated['content'], $context);
         } catch (\InvalidArgumentException $exception) {
             abort(422, $exception->getMessage());
         } catch (\Throwable $exception) {
@@ -236,6 +246,47 @@ class AgentSessionController extends Controller
         abort_unless($agent, 404, 'Agent introuvable.');
 
         return $agent;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function resolveApplicationChatContext(Request $request, AiAgent $agent, ?string $applicationUuid): array
+    {
+        if ($applicationUuid === null || trim($applicationUuid) === '') {
+            return [];
+        }
+
+        try {
+            $application = $this->currentTeamResources->application($this->currentUser($request), $applicationUuid);
+        } catch (ModelNotFoundException) {
+            abort(404, 'Application introuvable.');
+        }
+
+        if (
+            is_string($agent->resource_uuid)
+            && $agent->resource_uuid !== ''
+            && $agent->resource_uuid !== $application->uuid
+        ) {
+            abort(422, 'Cet agent est lié à une autre application.');
+        }
+
+        return $this->applicationChatContext($application);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function applicationChatContext(Application $application): array
+    {
+        return array_filter([
+            'application_uuid' => $application->uuid,
+            'application_name' => (string) $application->name,
+            'git_repository' => is_string($application->git_repository) ? $application->git_repository : null,
+            'git_branch' => is_string($application->git_branch) ? $application->git_branch : null,
+            'build_pack' => is_string($application->build_pack) ? $application->build_pack : null,
+            'fqdn' => is_string($application->fqdn) ? $application->fqdn : null,
+        ], fn (?string $value): bool => $value !== null && $value !== '');
     }
 
     /** @return array<string, mixed> */

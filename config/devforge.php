@@ -40,6 +40,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Timeout queue des jobs agent (secondes)
+    |--------------------------------------------------------------------------
+    |
+    | Doit rester inférieur à redis.retry_after (86400). Un timeout trop bas
+    | (ex: 300s) tue le run avant la 1re itération LLM utile, puis le job
+    | reste réservé jusqu'à retry_after → "attempted too many times" 24h plus tard.
+    |
+    */
+    'agents_job_timeout' => (int) env('DEVFORGE_AGENTS_JOB_TIMEOUT', 1800),
+
+    /*
+    |--------------------------------------------------------------------------
     | Smart model routing (Auto → tier → modèle adapté)
     |--------------------------------------------------------------------------
     */

@@ -6,7 +6,9 @@ use App\Models\AiAgentRun;
 use App\Models\AiAgentSubagentRun;
 use App\Models\ApplicationDeploymentQueue;
 use App\Models\Team;
+use App\Services\DevForge\Agent\AgentRunCorrectionSummarizer;
 use App\Services\DevForge\Agent\DeploymentAgentCatchUp;
+use App\Services\DevForge\Agent\DeploymentAgentDispatchLimiter;
 use App\Services\DevForge\Agent\DeploymentAgentResolver;
 use Illuminate\Support\Collection;
 
@@ -21,6 +23,8 @@ class DeploymentMonitoringData
         private readonly DeploymentData $deploymentData,
         private readonly DeploymentAgentResolver $agentResolver,
         private readonly DeploymentAgentCatchUp $agentCatchUp,
+        private readonly DeploymentAgentDispatchLimiter $dispatchLimiter,
+        private readonly AgentRunCorrectionSummarizer $correctionSummarizer,
     ) {}
 
     /**
@@ -46,7 +50,7 @@ class DeploymentMonitoringData
         return [
             'deployment' => $this->deploymentData->deployment($deployment),
             'agent_runs' => $runs
-                ->map(fn (AiAgentRun $run): array => $this->presentAgentRun($run))
+                ->map(fn (AiAgentRun $run): array => $this->presentAgentRun($run, $deploymentUuid, (string) $deployment->status))
                 ->values()
                 ->all(),
             'redeployments' => $this->resolveRedeployments($team, $runs),
@@ -56,6 +60,7 @@ class DeploymentMonitoringData
                 'monitor_build' => (bool) config('devforge.agents_monitor_build_enabled'),
                 'webhook_build' => (bool) config('devforge.agents_monitor_build_enabled'),
             ],
+            'dispatch_policy' => $this->dispatchLimiter->policy(),
             'diagnostics' => $diagnostics,
             'catch_up_triggered' => $catchUpTriggered,
         ];
@@ -66,14 +71,16 @@ class DeploymentMonitoringData
      */
     private function findRunsForDeployment(Team $team, string $deploymentUuid, ApplicationDeploymentQueue $deployment): Collection
     {
+        // queryDirectDeploymentRuns renseigne déjà linkage (metadata | logs).
         $direct = $this->queryDirectDeploymentRuns($team, $deploymentUuid);
-
-        foreach ($direct as $run) {
-            $this->runLinkage[$run->id] = 'direct';
-        }
 
         if ($direct->isNotEmpty()) {
             return $direct;
+        }
+
+        // Déploiement réussi / terminé : ne pas rattacher un run d'échec précédent via la fenêtre temporelle.
+        if ($this->deploymentLooksSuccessful((string) $deployment->status)) {
+            return collect();
         }
 
         $contextual = $this->findContextualRunsForDeployment($team, $deployment);
@@ -90,19 +97,41 @@ class DeploymentMonitoringData
      */
     private function queryDirectDeploymentRuns(Team $team, string $deploymentUuid): Collection
     {
-        return AiAgentRun::query()
+        $byMetadata = AiAgentRun::query()
+            ->with('agent')
+            ->where('metadata->deployment_uuid', $deploymentUuid)
+            ->whereHas('agent', fn ($query) => $query->where('team_id', $team->id))
+            ->latest()
+            ->limit(10)
+            ->get();
+
+        if ($byMetadata->isNotEmpty()) {
+            foreach ($byMetadata as $run) {
+                $this->runLinkage[$run->id] = 'metadata';
+            }
+
+            return $byMetadata;
+        }
+
+        $byLogs = AiAgentRun::query()
             ->with('agent')
             ->where(function ($query) use ($deploymentUuid): void {
+                // Anciens runs : contexte dans les logs / actions (fallback).
                 $query->where('logs', 'like', '%"deployment_uuid":"'.$deploymentUuid.'"%')
                     ->orWhere('logs', 'like', '%"deployment_uuid": "'.$deploymentUuid.'"%')
-                    ->orWhere('logs', 'like', '%'.$deploymentUuid.'%')
-                    ->orWhere('metadata->deployment_uuid', $deploymentUuid)
-                    ->orWhere('actions_taken', 'like', '%'.$deploymentUuid.'%');
+                    ->orWhere('actions_taken', 'like', '%'.$deploymentUuid.'%')
+                    ->orWhere('logs', 'like', '%'.$deploymentUuid.'%');
             })
             ->whereHas('agent', fn ($query) => $query->where('team_id', $team->id))
             ->latest()
             ->limit(10)
             ->get();
+
+        foreach ($byLogs as $run) {
+            $this->runLinkage[$run->id] = 'logs';
+        }
+
+        return $byLogs;
     }
 
     /**
@@ -116,6 +145,7 @@ class DeploymentMonitoringData
             return collect();
         }
 
+        $deploymentUuid = (string) $deployment->deployment_uuid;
         $windowStart = ($deployment->created_at ?? now())->copy()->subMinutes(10);
         $windowEnd = ($deployment->finished_at ?? $deployment->updated_at ?? now())->copy()->addHour();
 
@@ -131,6 +161,14 @@ class DeploymentMonitoringData
                             ->orWhere('resource_uuid', $applicationUuid);
                     });
             })
+            // Empêche d'afficher le run d'une autre app (agent équipe) dans la même fenêtre temporelle.
+            ->where(function ($query) use ($applicationUuid, $deploymentUuid): void {
+                $query->where('metadata->application_uuid', $applicationUuid)
+                    ->orWhere('metadata->deployment_uuid', $deploymentUuid)
+                    ->orWhere('logs', 'like', '%'.$applicationUuid.'%')
+                    ->orWhere('logs', 'like', '%'.$deploymentUuid.'%')
+                    ->orWhereHas('agent', fn ($agentQuery) => $agentQuery->where('resource_uuid', $applicationUuid));
+            })
             ->latest()
             ->limit(5)
             ->get();
@@ -139,9 +177,20 @@ class DeploymentMonitoringData
     /**
      * @return array<string, mixed>
      */
-    private function presentAgentRun(AiAgentRun $run): array
+    private function presentAgentRun(AiAgentRun $run, string $focusedDeploymentUuid, string $deploymentStatus): array
     {
         $agent = $run->agent;
+        $metadata = $run->metadata ?? [];
+        $correction = is_array($metadata['correction'] ?? null)
+            ? $metadata['correction']
+            : $this->correctionSummarizer->summarize($run);
+
+        $belongsTo = is_string($correction['belongs_to_deployment_uuid'] ?? null)
+            ? $correction['belongs_to_deployment_uuid']
+            : null;
+        $historicalForOtherAttempt = is_string($belongsTo)
+            && $belongsTo !== ''
+            && $belongsTo !== $focusedDeploymentUuid;
 
         return [
             'uuid' => $run->uuid,
@@ -156,17 +205,31 @@ class DeploymentMonitoringData
             'finished_at' => $run->finished_at?->toISOString(),
             'created_at' => $run->created_at->toISOString(),
             'event_context' => $this->parseEventContext($run->logs) ?? $this->metadataEventContext($run),
-            'metadata' => $run->metadata ?? [],
+            'metadata' => $metadata,
+            'correction' => $correction,
+            'historical_for_other_attempt' => $historicalForOtherAttempt,
             'subagent_runs' => $this->presentSubagentRuns($run),
+            // Logs bruts toujours disponibles ; l'UI les plie par défaut.
             'logs' => $run->logs,
-            'linkage' => $this->runLinkage[$run->id] ?? 'direct',
+            'linkage' => $this->runLinkage[$run->id] ?? 'metadata',
             'agent' => $agent ? [
                 'uuid' => $agent->uuid,
                 'name' => $agent->name,
                 'type' => $agent->type,
                 'avatar_color' => $agent->avatar_color,
             ] : null,
+            'focused_deployment_status' => $deploymentStatus,
         ];
+    }
+
+    private function deploymentLooksSuccessful(string $status): bool
+    {
+        $normalized = strtolower(trim($status));
+
+        return str_contains($normalized, 'finish')
+            || str_contains($normalized, 'success')
+            || $normalized === 'completed'
+            || $normalized === 'done';
     }
 
     /**

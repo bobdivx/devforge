@@ -25,9 +25,10 @@ function makeRun(overrides: Partial<AgentRun> = {}): AgentRun {
 }
 
 describe('isTerminalAgentRunStatus', () => {
-    it('returns true for completed and failed', () => {
+    it('returns true for completed, failed and awaiting_approval', () => {
         expect(isTerminalAgentRunStatus('completed')).toBe(true);
         expect(isTerminalAgentRunStatus('failed')).toBe(true);
+        expect(isTerminalAgentRunStatus('awaiting_approval')).toBe(true);
     });
 
     it('returns false for in-flight statuses', () => {

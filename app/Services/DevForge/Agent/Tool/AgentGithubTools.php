@@ -6,7 +6,6 @@ use App\Models\Application;
 use App\Models\Team;
 use App\Services\DevForge\Core\CoreResourceCatalog;
 use App\Services\DevForge\Github\GithubAppCatalog;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Http;
 
 class AgentGithubTools

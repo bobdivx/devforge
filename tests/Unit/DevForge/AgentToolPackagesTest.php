@@ -5,6 +5,9 @@ use App\Models\AiAgentRun;
 use App\Models\Team;
 use App\Services\DevForge\Agent\AgentToolkit;
 use App\Services\DevForge\Agent\Tool\AgentToolPackage;
+use App\Services\DevForge\Core\CoreResourceAction;
+use App\Services\DevForge\Core\CoreResourceCatalog;
+use App\Services\DevForge\DeploymentData;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -19,9 +22,9 @@ function makeToolkit(Team $team, AiAgent $agent, AiAgentRun $run): AgentToolkit
     return new AgentToolkit(
         team: $team,
         run: $run,
-        catalog: app(\App\Services\DevForge\Core\CoreResourceCatalog::class),
-        resourceAction: app(\App\Services\DevForge\Core\CoreResourceAction::class),
-        deploymentData: app(\App\Services\DevForge\DeploymentData::class),
+        catalog: app(CoreResourceCatalog::class),
+        resourceAction: app(CoreResourceAction::class),
+        deploymentData: app(DeploymentData::class),
         agent: $agent,
     );
 }
@@ -70,6 +73,24 @@ it('exposes application source tools in core package', function () {
         ->and($names)->toContain('write_application_source');
 });
 
+it('enables env var and spawn_task tools from the core package', function () {
+    $agent = AiAgent::factory()->create(['team_id' => $this->team->id, 'type' => 'debug']);
+    $toolkit = makeToolkit($this->team, $agent, $this->run);
+    $names = collect($toolkit->definitions())->pluck('name');
+
+    expect($names)->toContain('list_application_env_vars')
+        ->and($names)->toContain('upsert_application_env_var');
+
+    // spawn_task est conditionnel dans definitions() (canSpawnEphemeral), mais doit rester activable via PACKAGE_CORE.
+    expect(AgentToolPackage::toolNames(AgentToolPackage::PACKAGE_CORE))->toContain('spawn_task');
+
+    foreach (['list_application_env_vars', 'upsert_application_env_var', 'spawn_task'] as $toolName) {
+        $result = $toolkit->execute($toolName, []);
+
+        expect($result['error'] ?? '')->not->toContain('non activé');
+    }
+});
+
 it('returns a clear error when write_application_source is missing commit_message', function () {
     $agent = AiAgent::factory()->create(['team_id' => $this->team->id, 'type' => 'debug']);
     $toolkit = makeToolkit($this->team, $agent, $this->run);
@@ -81,6 +102,23 @@ it('returns a clear error when write_application_source is missing commit_messag
 
     expect($result)->toHaveKey('error')
         ->and($result['error'])->toContain('commit_message');
+});
+
+it('rejects write_application_source for .env paths and hints upsert_application_env_var', function () {
+    $agent = AiAgent::factory()->create(['team_id' => $this->team->id, 'type' => 'debug']);
+    $toolkit = makeToolkit($this->team, $agent, $this->run);
+
+    foreach (['.env', '.env.local', 'config/.env.production'] as $path) {
+        $result = $toolkit->execute('write_application_source', [
+            'path' => $path,
+            'content' => 'PUPPETEER_SKIP_DOWNLOAD=true',
+            'commit_message' => 'skip puppeteer',
+        ]);
+
+        expect($result)->toHaveKey('error')
+            ->and($result['error'])->toContain('upsert_application_env_var')
+            ->and($result['hint'] ?? null)->toBe('upsert_application_env_var');
+    }
 });
 
 it('enables github package on demand and persists to agent metadata', function () {
@@ -140,7 +178,8 @@ it('returns a clear error when get_resource_status is missing uuid', function ()
         'reason' => 'test',
     ]);
 
-    expect($result['enabled'] ?? false)->toBeTrue();
+    // PACKAGE_CORE is always enabled by default; accept already_enabled or a fresh enable.
+    expect(($result['enabled'] ?? false) || ($result['already_enabled'] ?? false))->toBeTrue();
 
     $status = $toolkit->execute('get_resource_status', []);
 

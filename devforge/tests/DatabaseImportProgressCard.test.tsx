@@ -25,6 +25,24 @@ describe('DatabaseImportProgressCard', () => {
         expect(screen.getByText('backup.db')).toBeInTheDocument();
         expect(screen.getAllByText('Import des données').length).toBeGreaterThan(0);
         expect(screen.getByText('62%')).toBeInTheDocument();
+        expect(screen.getByText(/Downtime : la base est indisponible/)).toBeInTheDocument();
+    });
+
+    it('signale un gros fichier pendant le transfert', () => {
+        render(
+            <DatabaseImportProgressCard
+                progress={{
+                    fileName: 'huge.db',
+                    fileSize: 25 * 1024 * 1024,
+                    phase: 'transfer',
+                    percent: 40,
+                    format: 'db',
+                }}
+            />,
+        );
+
+        expect(screen.getByText(/gros fichier \(timeout possible\)/)).toBeInTheDocument();
+        expect(screen.getByText(/Transfert SSH chunké/)).toBeInTheDocument();
     });
 
     it('affiche l’état terminé', () => {

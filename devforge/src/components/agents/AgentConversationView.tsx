@@ -28,6 +28,7 @@ export function AgentConversationView({
     const [loadingMessages, setLoadingMessages] = useState(false);
     const [creating, setCreating] = useState(false);
     const [sending, setSending] = useState(false);
+    const [approvingMessageUuid, setApprovingMessageUuid] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [draft, setDraft] = useState('');
 
@@ -196,6 +197,56 @@ export function AgentConversationView({
         }
     };
 
+    const resolveApproval = async (messageUuid: string, decision: 'approve' | 'deny') => {
+        if (!activeSession || sending || approvingMessageUuid) {
+            return;
+        }
+
+        setApprovingMessageUuid(messageUuid);
+        setSending(true);
+        setError(null);
+
+        try {
+            const response = await domainApi.resolveAgentToolApproval(agent.uuid, messageUuid, decision);
+            setMessages((current) => [
+                ...current.map((message) => {
+                    if (message.uuid !== messageUuid || !message.metadata) {
+                        return message;
+                    }
+
+                    return {
+                        ...message,
+                        metadata: {
+                            ...message.metadata,
+                            pending_approval: {
+                                ...(message.metadata.pending_approval as Record<string, unknown> | undefined),
+                                resolved: decision === 'approve' ? 'approved' : 'denied',
+                            },
+                        },
+                    };
+                }),
+                response.data.user,
+            ]);
+
+            await waitForChatReply(
+                agent.uuid,
+                response.data.run_uuid,
+                activeSession.uuid,
+                (nextMessages) => {
+                    setMessages(nextMessages);
+                    void refreshSessions();
+                },
+                (routing) => onRoutingChange?.(routing),
+            );
+            onAgentUpdated();
+        } catch (err) {
+            setError(err instanceof ApiError ? err.message : 'Impossible d\'enregistrer la décision.');
+        } finally {
+            setApprovingMessageUuid(null);
+            setSending(false);
+        }
+    };
+
     return (
         <div class="flex min-h-0 flex-1 flex-col">
             <div class="flex shrink-0 items-center justify-between gap-2 border-b border-base-300 bg-base-100 px-4 py-2.5">
@@ -253,6 +304,8 @@ export function AgentConversationView({
                         draft={draft}
                         onDraftChange={setDraft}
                         onSend={(content) => void sendMessage(content)}
+                        onResolveApproval={(messageUuid, decision) => void resolveApproval(messageUuid, decision)}
+                        approvingMessageUuid={approvingMessageUuid}
                     />
                 </div>
             </div>

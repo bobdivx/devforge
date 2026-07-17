@@ -66,6 +66,11 @@ it('returns deployment monitoring with linked agent runs and redeployments', fun
         'trigger' => 'event',
         'summary' => 'Build corrigé et redéployé.',
         'logs' => '[12:00:00] Contexte événement: {"event":"deployment_failed","deployment_uuid":"failed-deploy-uuid","application_uuid":"'.$this->application->uuid.'"}'."\n",
+        'metadata' => [
+            'event' => 'deployment_failed',
+            'deployment_uuid' => 'failed-deploy-uuid',
+            'application_uuid' => $this->application->uuid,
+        ],
         'actions_taken' => [[
             'tool' => 'control_resource',
             'uuid' => $this->application->uuid,
@@ -86,11 +91,112 @@ it('returns deployment monitoring with linked agent runs and redeployments', fun
         ->assertSuccessful()
         ->assertJsonPath('data.deployment.uuid', 'failed-deploy-uuid')
         ->assertJsonPath('data.agents.enabled', true)
+        ->assertJsonPath('data.dispatch_policy.build_monitoring_effective', false)
+        ->assertJsonPath('data.dispatch_policy.allowed_events.0', 'deployment_failed')
         ->assertJsonPath('data.diagnostics.eligible_agents_count', 1)
         ->assertJsonPath('data.agent_runs.0.summary', 'Build corrigé et redéployé.')
+        ->assertJsonPath('data.agent_runs.0.linkage', 'metadata')
         ->assertJsonPath('data.agent_runs.0.event_context.event', 'deployment_failed')
         ->assertJsonPath('data.agent_runs.0.actions_taken.0.deployment_uuid', $redeployUuid)
+        ->assertJsonPath('data.agent_runs.0.correction.outcome', 'redeploy_only')
         ->assertJsonPath('data.redeployments.0.uuid', $redeployUuid);
+});
+
+it('does not attach contextual failure agent runs to a finished deployment', function () {
+    monitoringDeployment($this->application, 'success-deploy-uuid', [
+        'status' => ApplicationDeploymentStatus::FINISHED->value,
+        'created_at' => now()->subMinutes(2),
+        'finished_at' => now()->subMinute(),
+    ]);
+
+    $provider = AiProviderConfig::factory()->create(['team_id' => $this->team->id]);
+    $agent = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'type' => 'deployment',
+        'provider_config_id' => $provider->id,
+        'resource_uuid' => $this->application->uuid,
+    ]);
+
+    AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'status' => 'completed',
+        'trigger' => 'event',
+        'summary' => str_repeat('Long Ollama dump about previous failure. ', 20),
+        'created_at' => now()->subMinutes(3),
+        'metadata' => [
+            'event' => 'deployment_failed',
+            'deployment_uuid' => 'older-fail-uuid',
+            'application_uuid' => $this->application->uuid,
+        ],
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson('/api/devforge/v1/deployments/success-deploy-uuid/monitoring')
+        ->assertSuccessful()
+        ->assertJsonPath('data.deployment.uuid', 'success-deploy-uuid')
+        ->assertJsonCount(0, 'data.agent_runs');
+});
+
+it('links agent runs via metadata.deployment_uuid without relying on logs LIKE', function () {
+    monitoringDeployment($this->application, 'meta-link-deploy');
+
+    $provider = AiProviderConfig::factory()->create(['team_id' => $this->team->id]);
+    $agent = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'type' => 'deployment',
+        'provider_config_id' => $provider->id,
+        'resource_uuid' => $this->application->uuid,
+    ]);
+
+    AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'status' => 'completed',
+        'trigger' => 'event',
+        'summary' => 'Lié uniquement par metadata.',
+        'logs' => null,
+        'metadata' => [
+            'event' => 'deployment_failed',
+            'deployment_uuid' => 'meta-link-deploy',
+            'application_uuid' => $this->application->uuid,
+        ],
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson('/api/devforge/v1/deployments/meta-link-deploy/monitoring')
+        ->assertSuccessful()
+        ->assertJsonPath('data.agent_runs.0.summary', 'Lié uniquement par metadata.')
+        ->assertJsonPath('data.agent_runs.0.linkage', 'metadata')
+        ->assertJsonPath('data.agent_runs.0.event_context.event', 'deployment_failed');
+});
+
+it('falls back to logs linkage for legacy agent runs without metadata', function () {
+    monitoringDeployment($this->application, 'legacy-logs-deploy');
+
+    $provider = AiProviderConfig::factory()->create(['team_id' => $this->team->id]);
+    $agent = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'type' => 'deployment',
+        'provider_config_id' => $provider->id,
+        'resource_uuid' => $this->application->uuid,
+    ]);
+
+    AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'status' => 'completed',
+        'trigger' => 'event',
+        'summary' => 'Ancien run via logs.',
+        'logs' => '[12:00:00] Contexte événement: {"event":"deployment_failed","deployment_uuid":"legacy-logs-deploy"}'."\n",
+        'metadata' => null,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson('/api/devforge/v1/deployments/legacy-logs-deploy/monitoring')
+        ->assertSuccessful()
+        ->assertJsonPath('data.agent_runs.0.summary', 'Ancien run via logs.')
+        ->assertJsonPath('data.agent_runs.0.linkage', 'logs');
 });
 
 it('links a manual agent run to a deployment by application and time window', function () {

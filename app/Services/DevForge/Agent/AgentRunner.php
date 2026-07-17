@@ -7,10 +7,11 @@ use App\Events\AgentRunUpdated;
 use App\Models\AiAgent;
 use App\Models\AiAgentRun;
 use App\Services\DevForge\Agent\Contracts\LlmResponse;
+use App\Services\DevForge\Agent\Tool\AgentSubagentRegistry;
+use App\Services\DevForge\Agent\Tool\IterationBudget;
 use App\Services\DevForge\Core\CoreResourceAction;
 use App\Services\DevForge\Core\CoreResourceCatalog;
 use App\Services\DevForge\DeploymentData;
-use App\Services\DevForge\Agent\Tool\IterationBudget;
 
 class AgentRunner
 {
@@ -58,6 +59,13 @@ class AgentRunner
             'parent_run_uuid' => $context['parent_run_uuid'] ?? null,
         ]);
 
+        // Marquer running avant l'init provider (peut être lent : healthcheck Ollama, etc.)
+        $run->update(['status' => 'running', 'started_at' => now()]);
+        $run->appendLog('Agent démarré — '.$routing['display'].' ('.$routing['tier_label'].')');
+        $run->appendLog('Modèle LLM : '.$this->providerFactory->describeResolvedModel($providerConfig));
+        $run->appendLog('Routage : '.$reason);
+        $run->appendLog('Initialisation du provider LLM...');
+
         $provider = $this->providerFactory->makeForAgent(
             $agent,
             function (\Throwable $exception, string $primaryLabel, string $fallbackLabel) use ($run): void {
@@ -66,7 +74,9 @@ class AgentRunner
             },
             config('devforge.agents_smart_routing', true) ? $tier : null,
         );
-        $delegator = new AgentDelegator($this, new \App\Services\DevForge\Agent\Tool\AgentSubagentRegistry, $this->taskModelRouter);
+        $run->appendLog('Provider LLM prêt.');
+
+        $delegator = new AgentDelegator($this, new AgentSubagentRegistry, $this->taskModelRouter);
         $toolkit = new AgentToolkit(
             team: $agent->team,
             run: $run,
@@ -83,11 +93,6 @@ class AgentRunner
             ['role' => 'system', 'content' => $this->promptBuilder->autonomousSystemPrompt($agent, $context)],
             ['role' => 'user', 'content' => $this->promptBuilder->autonomousInitialMessage($agent, $context, $run->trigger)],
         ];
-
-        $run->update(['status' => 'running', 'started_at' => now()]);
-        $run->appendLog('Agent démarré — '.$routing['display'].' ('.$routing['tier_label'].')');
-        $run->appendLog('Modèle LLM : '.$this->providerFactory->describeResolvedModel($providerConfig));
-        $run->appendLog('Routage : '.$reason);
 
         $budget = new IterationBudget((int) config('devforge.agents_max_iterations', 30));
         $summary = '';
@@ -118,6 +123,7 @@ class AgentRunner
                         $this->messages[] = ['role' => 'assistant', 'content' => $response->text ?: 'En attente d\'action.'];
                         $this->messages[] = ['role' => 'user', 'content' => AgentDirectives::toolNudgeMessage()];
                         $run->appendLog('Relance autonome : premier tour sans outil — nouvelle consigne envoyée.');
+
                         continue;
                     }
 
@@ -156,8 +162,10 @@ class AgentRunner
                 'finished_at' => now(),
             ]);
 
+            app(AgentRunCorrectionSummarizer::class)->finalize($run->fresh() ?? $run);
+
             $agent->update(['status' => 'idle', 'last_run_at' => now()]);
-            broadcast(new AgentRunUpdated($agent, $run, 'completed'));
+            broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'completed'));
 
         } catch (\Throwable $e) {
             $run->appendLog('Erreur: '.$e->getMessage());
@@ -166,8 +174,9 @@ class AgentRunner
                 'summary' => 'Erreur: '.mb_substr($e->getMessage(), 0, 500),
                 'finished_at' => now(),
             ]);
+            app(AgentRunCorrectionSummarizer::class)->finalize($run->fresh() ?? $run);
             $agent->update(['status' => 'error', 'last_run_at' => now()]);
-            broadcast(new AgentRunUpdated($agent, $run, 'failed'));
+            broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'failed'));
         }
     }
 }

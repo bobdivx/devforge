@@ -76,7 +76,7 @@ class OllamaFallbackResolver
     private function listModels(string $baseUrl): ?array
     {
         try {
-            $response = Http::timeout(3)->get(rtrim($baseUrl, '/').'/api/tags');
+            $response = Http::connectTimeout(1)->timeout(2)->get(rtrim($baseUrl, '/').'/api/tags');
 
             if (! $response->successful()) {
                 return null;

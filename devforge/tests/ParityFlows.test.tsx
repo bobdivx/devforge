@@ -140,6 +140,11 @@ describe('déploiements DevForge', () => {
                             monitor_build: false,
                             webhook_build: false,
                         },
+                        diagnostics: {
+                            blockers: [],
+                            eligible_agents_count: 0,
+                            eligible_agents: [],
+                        },
                     },
                 });
             }
@@ -156,5 +161,122 @@ describe('déploiements DevForge', () => {
             `/api/devforge/v1/deployments/${deployment.uuid}/logs?after=0`,
             `/api/devforge/v1/deployments/${deployment.uuid}/monitoring`,
         ]));
+    });
+
+    it('ouvre un redéploiement agent même s’il n’est pas dans la page courante', async () => {
+        const failedDeployment = {
+            uuid: 'failed-deploy-uuid',
+            status: 'failed',
+            pull_request_id: 0,
+            commit: 'abc123',
+            commit_message: 'Build failed',
+            force_rebuild: false,
+            rollback: false,
+            created_at: '2026-07-16T18:40:00.000Z',
+            updated_at: '2026-07-16T18:40:55.000Z',
+            finished_at: '2026-07-16T18:40:55.000Z',
+            application: { uuid: 'application-uuid-1234', name: 'starbasefr' },
+            is_debug_enabled: false,
+        };
+        const redeployment = {
+            ...failedDeployment,
+            uuid: 'aja1s6cs5uy6lgy1m34agwu1',
+            status: 'queued',
+            commit_message: 'Nouveau déploiement',
+            finished_at: null,
+        };
+
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+            const url = String(input);
+            if (url === '/api/devforge/v1/deployments?page=1&per_page=25') {
+                return jsonResponse({ data: [failedDeployment], meta: { last_page: 1 } });
+            }
+            if (url === `/api/devforge/v1/deployments/${failedDeployment.uuid}`) {
+                return jsonResponse({ data: failedDeployment });
+            }
+            if (url === `/api/devforge/v1/deployments/${redeployment.uuid}`) {
+                return jsonResponse({ data: redeployment });
+            }
+            if (url.includes('/logs')) {
+                return jsonResponse({
+                    data: {
+                        items: [],
+                        next_cursor: 0,
+                        complete: false,
+                    },
+                });
+            }
+            if (url === `/api/devforge/v1/deployments/${failedDeployment.uuid}/monitoring`) {
+                return jsonResponse({
+                    data: {
+                        deployment: failedDeployment,
+                        agent_runs: [{
+                            uuid: 'run-1',
+                            status: 'completed',
+                            trigger: 'event',
+                            summary: 'Redeploy queued',
+                            actions_taken: [{
+                                action: 'deploy',
+                                reason: 'Puppeteer fix',
+                                at: '2026-07-16T18:41:17.000Z',
+                                deployment_uuid: redeployment.uuid,
+                            }],
+                            iterations: 3,
+                            tokens_used: 0,
+                            duration_seconds: 30,
+                            started_at: '2026-07-16T18:40:58.000Z',
+                            finished_at: '2026-07-16T18:41:34.000Z',
+                            created_at: '2026-07-16T18:40:58.000Z',
+                            event_context: { event: 'deployment_failed' },
+                            metadata: {},
+                            subagent_runs: [],
+                            logs: '',
+                            linkage: 'direct',
+                            agent: { uuid: 'agent-1', name: 'Build', type: 'build', avatar_color: null },
+                        }],
+                        redeployments: [redeployment],
+                        agents: {
+                            enabled: true,
+                            auto_fix_deployments: true,
+                            monitor_build: true,
+                            webhook_build: true,
+                        },
+                        diagnostics: { blockers: [], eligible_agents_count: 1 },
+                    },
+                });
+            }
+            if (url === `/api/devforge/v1/deployments/${redeployment.uuid}/monitoring`) {
+                return jsonResponse({
+                    data: {
+                        deployment: redeployment,
+                        agent_runs: [],
+                        redeployments: [],
+                        agents: {
+                            enabled: true,
+                            auto_fix_deployments: true,
+                            monitor_build: true,
+                            webhook_build: true,
+                        },
+                        diagnostics: { blockers: [], eligible_agents_count: 0 },
+                    },
+                });
+            }
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(withTeam(<DeploymentsPage />));
+
+        fireEvent.click(await screen.findByRole('button', { name: 'Suivre' }));
+        expect(await screen.findByText('Redéploiements déclenchés par l’agent')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: /aja1s6cs5uy6lgy1m34agwu1/i }));
+
+        await waitFor(() => {
+            expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(expect.arrayContaining([
+                `/api/devforge/v1/deployments/${redeployment.uuid}`,
+                `/api/devforge/v1/deployments/${redeployment.uuid}/logs?after=0`,
+                `/api/devforge/v1/deployments/${redeployment.uuid}/monitoring`,
+            ]));
+        });
     });
 });

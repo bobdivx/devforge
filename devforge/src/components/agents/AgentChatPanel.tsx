@@ -1,11 +1,13 @@
-import { Bot, Send, Square } from 'lucide-preact';
+import { Bot, Check, Send, Square, X } from 'lucide-preact';
 import { useEffect, useRef } from 'preact/hooks';
 import type { Agent, AgentChatMessage, AgentChatSession, AgentModelRouting } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
 import { ApiError } from '../../lib/api-client';
+import { isPendingToolApproval, parsePendingToolApproval } from '../../lib/agent-pending-approval';
+import { isTerminalAgentRunStatus } from '../../lib/agent-run-tracker';
 import { AgentErrorAlert } from './AgentErrorAlert';
 
-const suggestions = [
+const defaultSuggestions = [
     'Quel est l\'état de mes ressources ?',
     'Y a-t-il des déploiements en échec ?',
     'Analyse les logs du dernier déploiement',
@@ -32,7 +34,12 @@ type Props = {
     draft: string;
     onDraftChange: (value: string) => void;
     onSend: (content: string) => void;
+    onResolveApproval?: (messageUuid: string, decision: 'approve' | 'deny') => void;
+    approvingMessageUuid?: string | null;
     onRoutingChange?: (routing: AgentModelRouting | null) => void;
+    suggestions?: string[];
+    placeholder?: string;
+    hideSessionHeader?: boolean;
 };
 
 export function AgentChatPanel({
@@ -45,6 +52,11 @@ export function AgentChatPanel({
     draft,
     onDraftChange,
     onSend,
+    onResolveApproval,
+    approvingMessageUuid = null,
+    suggestions = defaultSuggestions,
+    placeholder = 'Posez une question à l\'agent… (Entrée pour envoyer, Maj+Entrée pour nouvelle ligne)',
+    hideSessionHeader = false,
 }: Props) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -86,13 +98,15 @@ export function AgentChatPanel({
 
     return (
         <div class="flex min-h-0 flex-1 flex-col">
-            <div class="shrink-0 border-b border-base-300 bg-base-100 px-4 py-2.5">
-                <p class="truncate text-sm font-semibold text-base-content">{session.title}</p>
-                <p class="mt-0.5 text-[11px] text-base-content/50">
-                    {session.is_legacy ? 'Session partagée · ' : ''}
-                    {messages.length} message{messages.length > 1 ? 's' : ''}
-                </p>
-            </div>
+            {!hideSessionHeader && (
+                <div class="shrink-0 border-b border-base-300 bg-base-100 px-4 py-2.5">
+                    <p class="truncate text-sm font-semibold text-base-content">{session.title}</p>
+                    <p class="mt-0.5 text-[11px] text-base-content/50">
+                        {session.is_legacy ? 'Session partagée · ' : ''}
+                        {messages.length} message{messages.length > 1 ? 's' : ''}
+                    </p>
+                </div>
+            )}
 
             <AgentErrorAlert agent={agent} compact />
 
@@ -104,35 +118,76 @@ export function AgentChatPanel({
                     </div>
                 ) : (
                     <div class="mx-auto flex max-w-3xl flex-col gap-4">
-                        {messages.map((message) => (
-                            <article
-                                key={message.uuid}
-                                class={`flex gap-3 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}
-                            >
-                                <div class={`mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg ${message.role === 'user' ? 'bg-primary/15 text-primary' : 'bg-base-300 text-base-content/70'}`}>
-                                    {message.role === 'user'
-                                        ? <span class="text-[10px] font-bold">Vous</span>
-                                        : <Bot class="size-3.5" aria-hidden />}
-                                </div>
-                                <div class={`max-w-[85%] ${message.role === 'user' ? 'text-end' : ''}`}>
-                                    <div
-                                        class={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
-                                            message.role === 'user'
-                                                ? 'bg-primary text-primary-content'
-                                                : 'border border-base-300 bg-base-200/60 text-base-content'
-                                        }`}
-                                    >
-                                        <div
-                                            class="prose prose-sm max-w-none text-inherit [&_strong]:font-semibold"
-                                            dangerouslySetInnerHTML={{ __html: renderContent(message.content) }}
-                                        />
+                        {messages.map((message) => {
+                            const pending = parsePendingToolApproval(message.metadata);
+                            const needsApproval = isPendingToolApproval(message.metadata);
+                            const resolving = approvingMessageUuid === message.uuid;
+
+                            return (
+                                <article
+                                    key={message.uuid}
+                                    class={`flex gap-3 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}
+                                >
+                                    <div class={`mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg ${message.role === 'user' ? 'bg-primary/15 text-primary' : 'bg-base-300 text-base-content/70'}`}>
+                                        {message.role === 'user'
+                                            ? <span class="text-[10px] font-bold">Vous</span>
+                                            : <Bot class="size-3.5" aria-hidden />}
                                     </div>
-                                    <time class="mt-1 block text-[10px] text-base-content/40" datetime={message.created_at}>
-                                        {formatTime(message.created_at)}
-                                    </time>
-                                </div>
-                            </article>
-                        ))}
+                                    <div class={`max-w-[85%] ${message.role === 'user' ? 'text-end' : ''}`}>
+                                        <div
+                                            class={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
+                                                message.role === 'user'
+                                                    ? 'bg-primary text-primary-content'
+                                                    : needsApproval
+                                                        ? 'border border-warning/40 bg-warning/10 text-base-content'
+                                                        : 'border border-base-300 bg-base-200/60 text-base-content'
+                                            }`}
+                                        >
+                                            <div
+                                                class="prose prose-sm max-w-none text-inherit [&_strong]:font-semibold"
+                                                dangerouslySetInnerHTML={{ __html: renderContent(message.content) }}
+                                            />
+                                            {pending && needsApproval && onResolveApproval && (
+                                                <div class="mt-3 flex flex-wrap items-center gap-2 border-t border-warning/25 pt-3 text-start">
+                                                    <p class="w-full text-[11px] text-base-content/65">
+                                                        Outil <span class="font-semibold text-base-content">{pending.tool}</span>
+                                                        {pending.reason ? ` — ${pending.reason}` : ''}
+                                                    </p>
+                                                    <button
+                                                        type="button"
+                                                        class="btn btn-success btn-xs gap-1"
+                                                        disabled={sending || resolving}
+                                                        onClick={() => onResolveApproval(message.uuid, 'approve')}
+                                                    >
+                                                        {resolving
+                                                            ? <span class="loading loading-spinner loading-xs" aria-hidden />
+                                                            : <Check class="size-3.5" aria-hidden />}
+                                                        Approuver
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class="btn btn-ghost btn-xs gap-1 border border-base-300"
+                                                        disabled={sending || resolving}
+                                                        onClick={() => onResolveApproval(message.uuid, 'deny')}
+                                                    >
+                                                        <X class="size-3.5" aria-hidden />
+                                                        Refuser
+                                                    </button>
+                                                </div>
+                                            )}
+                                            {pending?.resolved && (
+                                                <p class="mt-2 text-start text-[11px] text-base-content/50">
+                                                    {pending.resolved === 'approved' ? 'Approuvé' : 'Refusé'}
+                                                </p>
+                                            )}
+                                        </div>
+                                        <time class="mt-1 block text-[10px] text-base-content/40" datetime={message.created_at}>
+                                            {formatTime(message.created_at)}
+                                        </time>
+                                    </div>
+                                </article>
+                            );
+                        })}
 
                         {sending && (
                             <article class="flex gap-3">
@@ -182,7 +237,7 @@ export function AgentChatPanel({
                     <textarea
                         ref={textareaRef}
                         class="max-h-40 min-h-[2.5rem] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-base-content/40"
-                        placeholder="Posez une question à l'agent… (Entrée pour envoyer, Maj+Entrée pour nouvelle ligne)"
+                        placeholder={placeholder}
                         rows={1}
                         disabled={sending || !agent.provider}
                         value={draft}
@@ -224,7 +279,7 @@ export async function waitForChatReply(
             throw new ApiError(502, { message: run.data.summary ?? 'La réponse de l\'agent a échoué.' });
         }
 
-        if (run.data.status !== 'completed') {
+        if (!isTerminalAgentRunStatus(run.data.status)) {
             continue;
         }
 

@@ -19,13 +19,18 @@ export function useApiQuery<T>(
     const [data, setData] = useState<T | null>(null);
     const [loading, setLoading] = useState(cacheKey !== null);
     const [error, setError] = useState<unknown>(null);
+    const requestIdRef = useRef(0);
 
     const reload = useCallback(async (options?: { silent?: boolean }) => {
         if (cacheKey === null) {
+            requestIdRef.current += 1;
             setData(null);
             setLoading(false);
+            setError(null);
             return;
         }
+
+        const requestId = ++requestIdRef.current;
 
         if (!options?.silent) {
             setLoading(true);
@@ -33,16 +38,26 @@ export function useApiQuery<T>(
         }
 
         try {
-            setData(await requestRef.current());
+            const nextData = await requestRef.current();
+            if (requestId !== requestIdRef.current) {
+                return;
+            }
+            setData(nextData);
             if (options?.silent) {
                 setError(null);
             }
         } catch (requestError) {
+            if (requestId !== requestIdRef.current) {
+                return;
+            }
             if (!options?.silent) {
                 setData(null);
             }
             setError(requestError);
         } finally {
+            if (requestId !== requestIdRef.current) {
+                return;
+            }
             if (!options?.silent) {
                 setLoading(false);
             }

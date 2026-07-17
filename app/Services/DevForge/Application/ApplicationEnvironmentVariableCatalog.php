@@ -73,6 +73,30 @@ class ApplicationEnvironmentVariableCatalog
     }
 
     /**
+     * Crée ou met à jour une variable Coolify (préféré à un fichier .env Git).
+     *
+     * @param  array<string, mixed>  $input
+     * @return array<string, mixed>
+     */
+    public function upsert(Application $application, array $input): array
+    {
+        $validated = $this->validateInput($input, creating: true);
+        $isPreview = (bool) ($validated['is_preview'] ?? false);
+        $key = $validated['key'];
+
+        $existing = ($isPreview
+            ? $application->environment_variables_preview()
+            : $application->environment_variables()
+        )->where('key', $key)->first();
+
+        if ($existing instanceof EnvironmentVariable) {
+            return $this->update($application, $existing->uuid, $validated);
+        }
+
+        return $this->store($application, $validated);
+    }
+
+    /**
      * @param  array<string, mixed>  $input
      * @return array<string, mixed>
      */

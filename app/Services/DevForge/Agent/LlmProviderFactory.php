@@ -62,6 +62,9 @@ class LlmProviderFactory
     }
 
     /**
+     * Résout un fallback sans health-check bloquant à l'init.
+     * ResilientLlmProvider bascule au premier échec réel du primaire.
+     *
      * @return array{provider: LlmProvider, label: string}|null
      */
     private function resolveFallbackProvider(AiAgent $agent, AiProviderConfig $primaryConfig, ?TaskModelTier $tier): ?array
@@ -72,7 +75,7 @@ class LlmProviderFactory
                 ->whereKey($agent->fallback_provider_config_id)
                 ->first();
 
-            if ($config && $config->id !== $primaryConfig->id && $this->providerIsReachable($config, $tier)) {
+            if ($config && $config->id !== $primaryConfig->id) {
                 return [
                     'provider' => $this->make($config, $tier),
                     'label' => $this->label($config),
@@ -84,16 +87,23 @@ class LlmProviderFactory
             return null;
         }
 
+        // Préférer la découverte réseau (DEVFORGE_OLLAMA_URL) — rapide et fiable depuis Docker.
+        $discovered = $this->ollamaFallbackResolver->discover();
+
+        if ($discovered !== null) {
+            return [
+                'provider' => new OllamaProvider($discovered['base_url'], $discovered['model']),
+                'label' => 'ollama/'.$discovered['model'].' (auto)',
+            ];
+        }
+
         $dbFallback = AiProviderConfig::query()
             ->where('team_id', $agent->team_id)
             ->where('provider', 'ollama')
             ->whereKeyNot($agent->provider_config_id)
             ->orderByDesc('is_default')
             ->orderBy('id')
-            ->get()
-            ->first(function (AiProviderConfig $config) use ($tier): bool {
-                return $this->providerIsReachable($config, $tier);
-            });
+            ->first();
 
         if ($dbFallback) {
             return [
@@ -102,25 +112,7 @@ class LlmProviderFactory
             ];
         }
 
-        $discovered = $this->ollamaFallbackResolver->discover();
-
-        if ($discovered === null) {
-            return null;
-        }
-
-        return [
-            'provider' => new OllamaProvider($discovered['base_url'], $discovered['model']),
-            'label' => 'ollama/'.$discovered['model'].' (auto)',
-        ];
-    }
-
-    private function providerIsReachable(AiProviderConfig $config, ?TaskModelTier $tier): bool
-    {
-        try {
-            return $this->make($config, $tier)->testConnection();
-        } catch (\Throwable) {
-            return false;
-        }
+        return null;
     }
 
     public function describeResolvedModel(AiProviderConfig $config): string
@@ -139,11 +131,16 @@ class LlmProviderFactory
     /** @return array<int, string> */
     private function resolveAutoGeminiModels(AiProviderConfig $config, ?TaskModelTier $tier = null): array
     {
-        $available = $this->availableGeminiModels($config);
-
+        // Pour les runs agents (tier fourni), éviter un listModels Gemini synchrone
+        // qui peut bloquer l'init plusieurs dizaines de secondes depuis le NAS.
         if ($tier !== null && config('devforge.agents_smart_routing', true)) {
-            return $this->taskModelRouter->prioritizeModelsForTier($tier, $available);
+            return $this->taskModelRouter->prioritizeModelsForTier(
+                $tier,
+                LlmModelResolver::defaultAutoGeminiModels(),
+            );
         }
+
+        $available = $this->availableGeminiModels($config);
 
         return LlmModelResolver::prioritizeGeminiModels($available);
     }

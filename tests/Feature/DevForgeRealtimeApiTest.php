@@ -80,6 +80,44 @@ it('lists and shows only deployments from the current session team', function ()
         ->assertNotFound();
 });
 
+it('filters deployments by application_uuid within the current team', function () {
+    $starbaseDeployment = devForgeDeployment($this->application, 'starbase-deployment', [
+        'commit' => '3d299c07e2b47b62947eb9e846c065f3d1df40d1',
+        'commit_message' => 'fix: support libSQL Coolify self-hosted',
+        'status' => ApplicationDeploymentStatus::FINISHED->value,
+    ]);
+
+    $tesla = Application::factory()->create([
+        'name' => 'TeslaSphere',
+        'environment_id' => $this->environment->id,
+        'destination_id' => $this->destination->id,
+        'destination_type' => StandaloneDocker::class,
+        'status' => 'running',
+    ]);
+    $teslaDeployment = devForgeDeployment($tesla, 'tesla-deployment', [
+        'commit' => 'cb9759c8fdd36811f806bf861e4e7244fb6a6a5a',
+        'commit_message' => 'chore: add nixpacks.toml to enforce node SSR',
+        'status' => ApplicationDeploymentStatus::FINISHED->value,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson('/api/devforge/v1/deployments?application_uuid='.$this->application->uuid)
+        ->assertSuccessful()
+        ->assertJsonPath('meta.total', 1)
+        ->assertJsonPath('data.0.uuid', $starbaseDeployment->deployment_uuid)
+        ->assertJsonPath('data.0.application.uuid', $this->application->uuid)
+        ->assertJsonMissing(['uuid' => $teslaDeployment->deployment_uuid]);
+
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson('/api/devforge/v1/deployments?application_uuid='.$tesla->uuid)
+        ->assertSuccessful()
+        ->assertJsonPath('meta.total', 1)
+        ->assertJsonPath('data.0.uuid', $teslaDeployment->deployment_uuid)
+        ->assertJsonPath('data.0.commit', 'cb9759c8fdd36811f806bf861e4e7244fb6a6a5a');
+});
+
 it('polls deployment logs with a cursor and redacts application secrets', function () {
     EnvironmentVariable::create([
         'key' => 'API_TOKEN',

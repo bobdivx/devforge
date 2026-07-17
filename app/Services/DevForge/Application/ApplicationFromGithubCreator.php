@@ -81,7 +81,10 @@ class ApplicationFromGithubCreator
             $application->health_check_enabled = false;
         }
 
-        $application->fqdn = generateUrl(server: $destination->server, random: $application->uuid);
+        $server = $destination->server;
+        abort_unless($server !== null, 422, 'Destination server not found.');
+        $server->loadMissing('settings');
+        $application->fqdn = generateUrl(server: $server, random: $application->uuid);
         $application->name = generate_application_name(
             $validated['git_repository'],
             $validated['git_branch'],

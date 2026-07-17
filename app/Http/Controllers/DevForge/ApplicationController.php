@@ -7,6 +7,7 @@ use App\Models\Application;
 use App\Models\User;
 use App\Services\DevForge\Application\ApplicationContainerLogs;
 use App\Services\DevForge\Application\ApplicationDatabaseConnector;
+use App\Services\DevForge\Application\ApplicationDomainService;
 use App\Services\DevForge\Application\ApplicationEnvironmentVariableCatalog;
 use App\Services\DevForge\Application\ApplicationFromGithubCreator;
 use App\Services\DevForge\Application\ApplicationSourceService;
@@ -27,6 +28,7 @@ class ApplicationController extends Controller
         private readonly ApplicationDatabaseConnector $applicationDatabaseConnector,
         private readonly ApplicationContainerLogs $applicationContainerLogs,
         private readonly ApplicationEnvironmentVariableCatalog $applicationEnvironmentVariableCatalog,
+        private readonly ApplicationDomainService $applicationDomainService,
         private readonly ApplicationSourceService $applicationSourceService,
         private readonly CoreResourcePresenter $presenter,
     ) {}
@@ -86,6 +88,45 @@ class ApplicationController extends Controller
 
         return response()->json([
             'data' => $this->applicationDatabaseConnector->connect($user, $team, $application, $request->all()),
+        ]);
+    }
+
+    public function domains(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('view', $application);
+
+        return response()->json([
+            'data' => $this->applicationDomainService->show($application),
+        ]);
+    }
+
+    public function updateDomains(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        return response()->json([
+            'data' => $this->applicationDomainService->update($application, $request->all()),
+        ]);
+    }
+
+    public function generateDomain(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        return response()->json([
+            'data' => $this->applicationDomainService->generate($application),
         ]);
     }
 

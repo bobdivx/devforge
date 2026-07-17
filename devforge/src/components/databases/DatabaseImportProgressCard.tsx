@@ -1,4 +1,5 @@
 import { Check, Database, LoaderCircle } from 'lucide-preact';
+import { formatLibsqlImportBytes, isLibsqlImportLarge } from '../../lib/libsql-import-limits';
 import { ProgressBar } from '../ui/ProgressBar';
 
 export type DatabaseImportPhase =
@@ -27,22 +28,13 @@ const steps: Array<{ id: DatabaseImportPhase; label: string }> = [
 
 const phaseOrder: DatabaseImportPhase[] = ['upload', 'transfer', 'stopping', 'importing', 'restarting', 'done'];
 
-function formatBytes(size: number): string {
-    if (size <= 0) {
-        return '—';
-    }
-
-    const units = ['o', 'Ko', 'Mo', 'Go'];
-    let value = size;
-    let unit = 0;
-
-    while (value >= 1024 && unit < units.length - 1) {
-        value /= 1024;
-        unit += 1;
-    }
-
-    return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
-}
+const phaseHints: Partial<Record<DatabaseImportPhase, string>> = {
+    upload: 'Envoi vers Coolify…',
+    transfer: 'Transfert SSH chunké vers le volume — peut être long sur les gros fichiers.',
+    stopping: 'Coupure de service : la base est arrêtée pour l’import.',
+    importing: 'Écriture des données sur le volume — ne fermez pas cet onglet.',
+    restarting: 'Redémarrage de la base et resynchronisation éventuelle des apps.',
+};
 
 function stepState(stepId: DatabaseImportPhase, currentPhase: DatabaseImportPhase): 'done' | 'current' | 'pending' {
     const stepIndex = phaseOrder.indexOf(stepId);
@@ -66,6 +58,13 @@ type DatabaseImportProgressCardProps = {
 export function DatabaseImportProgressCard({ progress }: DatabaseImportProgressCardProps) {
     const currentStep = steps.find((step) => step.id === progress.phase);
     const tone = progress.phase === 'done' ? 'success' : 'primary';
+    const large = isLibsqlImportLarge(progress.fileSize);
+    const hint = progress.phase === 'done'
+        ? 'Import terminé. La base a été redémarrée.'
+        : (phaseHints[progress.phase] ?? currentStep?.label ?? 'Progression');
+    const downtimeActive = progress.phase === 'stopping'
+        || progress.phase === 'importing'
+        || progress.phase === 'restarting';
 
     return (
         <article
@@ -86,9 +85,12 @@ export function DatabaseImportProgressCard({ progress }: DatabaseImportProgressC
                     </p>
                     <p class="truncate font-mono text-xs text-base-content/55">{progress.fileName}</p>
                     <p class="text-[11px] text-base-content/45">
-                        {formatBytes(progress.fileSize)}
+                        {formatLibsqlImportBytes(progress.fileSize)}
                         {progress.format && (
                             <> · format {progress.format === 'db' ? '.db' : '.sql'}</>
+                        )}
+                        {large && progress.phase !== 'done' && (
+                            <> · gros fichier (timeout possible)</>
                         )}
                     </p>
                 </div>
@@ -99,6 +101,14 @@ export function DatabaseImportProgressCard({ progress }: DatabaseImportProgressC
                 label={currentStep?.label ?? 'Progression'}
                 tone={tone}
             />
+
+            <p class="mt-2 text-[11px] text-base-content/60">{hint}</p>
+
+            {downtimeActive && (
+                <p class="mt-1 text-[11px] font-medium text-warning" role="note">
+                    Downtime : la base est indisponible jusqu’au redémarrage.
+                </p>
+            )}
 
             <ol class="mt-4 grid gap-2">
                 {steps.map((step) => {

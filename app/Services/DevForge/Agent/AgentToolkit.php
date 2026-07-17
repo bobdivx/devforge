@@ -5,22 +5,28 @@ namespace App\Services\DevForge\Agent;
 use App\Models\AiAgent;
 use App\Models\AiAgentRun;
 use App\Models\Application;
+use App\Models\ApplicationDeploymentQueue;
 use App\Models\Team;
 use App\Services\DevForge\Agent\Tool\AgentCustomTools;
 use App\Services\DevForge\Agent\Tool\AgentGithubTools;
 use App\Services\DevForge\Agent\Tool\AgentPermissionEngine;
 use App\Services\DevForge\Agent\Tool\AgentServerExecutor;
+use App\Services\DevForge\Agent\Tool\AgentToolApprovalGrant;
 use App\Services\DevForge\Agent\Tool\AgentToolClassification;
 use App\Services\DevForge\Agent\Tool\AgentToolInstaller;
-use App\Services\DevForge\Agent\Tool\AgentToolPackage;
 use App\Services\DevForge\Agent\Tool\AgentToolkitSession;
+use App\Services\DevForge\Agent\Tool\AgentToolPackage;
+use App\Services\DevForge\Application\ApplicationEnvironmentVariableCatalog;
+use App\Services\DevForge\Application\ApplicationSourceService;
 use App\Services\DevForge\Core\CoreResourceAction;
 use App\Services\DevForge\Core\CoreResourceCatalog;
-use App\Services\DevForge\Application\ApplicationSourceService;
+use App\Services\DevForge\DeploymentData;
 use App\Services\DevForge\Github\GithubAppCatalog;
 use App\Services\DevForge\Server\ServerPathValidator;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Validation\ValidationException;
 
 class AgentToolkit
 {
@@ -38,6 +44,8 @@ class AgentToolkit
 
     private readonly AgentCustomTools $customTools;
 
+    private readonly ApplicationEnvironmentVariableCatalog $envCatalog;
+
     public function __construct(
         private readonly Team $team,
         private readonly AiAgentRun $run,
@@ -51,6 +59,7 @@ class AgentToolkit
         private readonly ?AgentPermissionEngine $permissionEngine = null,
         private readonly ?AgentDelegator $delegator = null,
         ?GithubAppCatalog $githubAppCatalog = null,
+        ?ApplicationEnvironmentVariableCatalog $envCatalog = null,
     ) {
         $this->serverExecutor = new AgentServerExecutor(
             team: $this->team,
@@ -65,6 +74,7 @@ class AgentToolkit
         );
         $this->toolInstaller = new AgentToolInstaller($this->serverExecutor);
         $this->customTools = new AgentCustomTools($this->serverExecutor);
+        $this->envCatalog = $envCatalog ?? app(ApplicationEnvironmentVariableCatalog::class);
     }
 
     /**
@@ -375,8 +385,55 @@ class AgentToolkit
                 ],
             ],
             [
+                'name' => 'list_application_env_vars',
+                'description' => 'Liste les variables d\'environnement Coolify d\'une application (pas le .env Git).',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID de l\'application. Omis si contexte déploiement ou agent lié à l\'app.',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'upsert_application_env_var',
+                'description' => 'Crée ou met à jour une variable Coolify (build/runtime). Préférer ceci à write_application_source pour .env / PUPPETEER_SKIP_DOWNLOAD / secrets de build.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID de l\'application. Omis si contexte déploiement ou agent lié à l\'app.',
+                        ],
+                        'key' => [
+                            'type' => 'string',
+                            'description' => 'Nom de la variable (ex: PUPPETEER_SKIP_DOWNLOAD)',
+                        ],
+                        'value' => [
+                            'type' => 'string',
+                            'description' => 'Valeur',
+                        ],
+                        'is_buildtime' => [
+                            'type' => 'boolean',
+                            'description' => 'Disponible au build (défaut: true)',
+                        ],
+                        'is_runtime' => [
+                            'type' => 'boolean',
+                            'description' => 'Disponible au runtime (défaut: true)',
+                        ],
+                        'is_literal' => [
+                            'type' => 'boolean',
+                            'description' => 'Valeur littérale non interpolée (défaut: true)',
+                        ],
+                    ],
+                    'required' => ['key', 'value'],
+                ],
+            ],
+            [
                 'name' => 'write_application_source',
-                'description' => 'Modifie un fichier Git (commit direct sur la branche déployée ou PR). mode=direct redéploie par défaut ; mode=pull_request ouvre une PR sans redeploy.',
+                'description' => 'Modifie un fichier Git (commit direct sur la branche déployée ou PR). mode=direct redéploie par défaut ; mode=pull_request ouvre une PR sans redeploy. Ne pas utiliser pour créer un .env — utiliser upsert_application_env_var.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -809,6 +866,17 @@ class AgentToolkit
                 isset($arguments['pr_title']) ? (string) $arguments['pr_title'] : null,
                 isset($arguments['pr_body']) ? (string) $arguments['pr_body'] : null,
             ),
+            'list_application_env_vars' => $this->listApplicationEnvVars(
+                isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
+            ),
+            'upsert_application_env_var' => $this->upsertApplicationEnvVar(
+                isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
+                (string) ($arguments['key'] ?? ''),
+                (string) ($arguments['value'] ?? ''),
+                array_key_exists('is_buildtime', $arguments) ? (bool) $arguments['is_buildtime'] : true,
+                array_key_exists('is_runtime', $arguments) ? (bool) $arguments['is_runtime'] : true,
+                array_key_exists('is_literal', $arguments) ? (bool) $arguments['is_literal'] : true,
+            ),
             'delegate_task' => $this->delegateTask(
                 $arguments['goal'] ?? '',
                 $arguments['child_agent_uuid'] ?? null,
@@ -821,6 +889,13 @@ class AgentToolkit
         };
 
         $this->run->appendLog('  ← Résultat: '.mb_substr(json_encode($result), 0, 200));
+
+        app(AgentRunCorrectionSummarizer::class)->recordToolResult(
+            $this->run,
+            $toolName,
+            is_array($arguments) ? $arguments : [],
+            is_array($result) ? $result : [],
+        );
 
         return $result;
     }
@@ -838,27 +913,45 @@ class AgentToolkit
         $engine = $this->permissionEngine ?? new AgentPermissionEngine;
         $classification = AgentToolClassification::forTool($toolName);
         $decision = $engine->decide($this->agent, $toolName, $arguments, $classification);
+        $decision = $engine->resolveForTrigger($decision, (string) ($this->run->trigger ?? 'manual'), $toolName);
 
         if ($decision['decision'] === AgentPermissionEngine::DECISION_ALLOW) {
             return null;
         }
 
         if ($decision['decision'] === AgentPermissionEngine::DECISION_ASK) {
-            $this->run->appendLog("  ⏸ Approbation requise [{$decision['rule_id']}]: {$decision['reason']}");
+            $approvalKey = AgentToolApprovalGrant::fingerprint($toolName, $arguments);
+            $sessionId = $this->run->session_id;
+
+            if ($sessionId !== null && AgentToolApprovalGrant::consume((int) $sessionId, $approvalKey)) {
+                $this->run->appendLog("  ✓ Approbation chat consommée [{$decision['rule_id']}] pour « {$toolName} »");
+
+                return null;
+            }
+
+            $message = "Approbation requise pour « {$toolName} » : {$decision['reason']} "
+                .'Validez ou refusez dans l’UI chat, puis réessayez.';
+            $this->run->appendLog("  ⏸ Approbation requise [{$decision['rule_id']}]: {$message}");
 
             return [
-                'error' => $decision['reason'],
+                'status' => AgentPermissionEngine::DECISION_ASK,
                 'pending_approval' => true,
+                'tool' => $toolName,
+                'reason' => $decision['reason'],
                 'rule_id' => $decision['rule_id'],
+                'approval_key' => $approvalKey,
+                'error' => $message,
             ];
         }
 
-        $this->run->appendLog("  ✗ Refusé [{$decision['rule_id']}]: {$decision['reason']}");
+        $suffix = ! empty($decision['approval_unavailable']) ? ' (pas d’UI d’approbation)' : '';
+        $this->run->appendLog("  ✗ Refusé{$suffix} [{$decision['rule_id']}]: {$decision['reason']}");
 
         return [
             'error' => $decision['reason'],
             'denied' => true,
             'rule_id' => $decision['rule_id'],
+            'approval_unavailable' => (bool) ($decision['approval_unavailable'] ?? false),
         ];
     }
 
@@ -875,11 +968,11 @@ class AgentToolkit
             $resources[$t] = $items
                 ->filter(fn (Model $resource): bool => $this->matchesAssignedResource($resource))
                 ->map(fn (Model $r) => [
-                'uuid' => $r->getAttribute('uuid'),
-                'name' => $r->getAttribute('name'),
-                'status' => AgentResourceStatusResolver::resolve($r, $t),
-                'type' => $t,
-            ])->values()->all();
+                    'uuid' => $r->getAttribute('uuid'),
+                    'name' => $r->getAttribute('name'),
+                    'status' => AgentResourceStatusResolver::resolve($r, $t),
+                    'type' => $t,
+                ])->values()->all();
         }
 
         return ['resources' => $resources, 'total' => array_sum(array_map('count', $resources))];
@@ -931,11 +1024,7 @@ class AgentToolkit
             ];
 
             if ($deploymentUuid !== null && $deployment->deployment_uuid === $deploymentUuid) {
-                $logs = $this->deploymentData->logs($deployment, 0);
-                $entry['logs'] = collect($logs['items'] ?? [])
-                    ->take(-$logLines)
-                    ->values()
-                    ->all();
+                $entry['logs'] = $this->recentDeploymentLogLines($deployment, $logLines);
             }
 
             return $entry;
@@ -944,7 +1033,6 @@ class AgentToolkit
         if ($deploymentUuid !== null && ! collect($deployments)->contains(fn (array $item): bool => ($item['uuid'] ?? null) === $deploymentUuid)) {
             try {
                 $deployment = $this->deploymentData->find($this->team, $deploymentUuid);
-                $logs = $this->deploymentData->logs($deployment, 0);
 
                 $deployments[] = [
                     'uuid' => $deployment->deployment_uuid,
@@ -952,10 +1040,7 @@ class AgentToolkit
                     'application_name' => $deployment->application?->name,
                     'status' => $deployment->status,
                     'started_at' => optional($deployment->created_at)->toDateTimeString(),
-                    'logs' => collect($logs['items'] ?? [])
-                        ->take(-$logLines)
-                        ->values()
-                        ->all(),
+                    'logs' => $this->recentDeploymentLogLines($deployment, $logLines),
                 ];
             } catch (\Throwable) {
                 // Ignore missing deployment in catalog lookup.
@@ -963,6 +1048,19 @@ class AgentToolkit
         }
 
         return ['deployments' => $deployments];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function recentDeploymentLogLines(ApplicationDeploymentQueue $deployment, int $logLines): array
+    {
+        $logs = $this->deploymentData->logs($deployment, 0);
+
+        return collect($logs['items'] ?? [])
+            ->take(-max(1, min($logLines, 120)))
+            ->values()
+            ->all();
     }
 
     /** @return array<mixed> */
@@ -1310,7 +1408,7 @@ class AgentToolkit
 
         try {
             $application = $this->applicationSourceService()->applicationForTeam($this->team, $uuid);
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+        } catch (ModelNotFoundException) {
             return ['error' => "Application {$uuid} introuvable."];
         }
 
@@ -1333,6 +1431,58 @@ class AgentToolkit
     }
 
     /** @return array<string, mixed> */
+    private function listApplicationEnvVars(?string $applicationUuid): array
+    {
+        $application = $this->resolveApplication($applicationUuid);
+        if (is_array($application)) {
+            return $application;
+        }
+
+        return $this->envCatalog->list($application);
+    }
+
+    /** @return array<string, mixed> */
+    private function upsertApplicationEnvVar(
+        ?string $applicationUuid,
+        string $key,
+        string $value,
+        bool $isBuildtime = true,
+        bool $isRuntime = true,
+        bool $isLiteral = true,
+    ): array {
+        if ($key === '') {
+            return ['error' => 'Paramètre key requis pour upsert_application_env_var.'];
+        }
+
+        $application = $this->resolveApplication($applicationUuid);
+        if (is_array($application)) {
+            return $application;
+        }
+
+        try {
+            $variable = $this->envCatalog->upsert($application, [
+                'key' => $key,
+                'value' => $value,
+                'is_buildtime' => $isBuildtime,
+                'is_runtime' => $isRuntime,
+                'is_literal' => $isLiteral,
+            ]);
+
+            $this->run->appendLog("  ✓ Variable Coolify {$key} mise à jour sur {$application->uuid}");
+
+            return [
+                'ok' => true,
+                'variable' => $variable,
+                'hint' => 'Variable Coolify enregistrée. Utilise control_resource deploy pour reconstruire.',
+            ];
+        } catch (ValidationException $exception) {
+            return ['error' => collect($exception->errors())->flatten()->first() ?? 'Variable invalide.'];
+        } catch (\Throwable $exception) {
+            return ['error' => mb_substr($exception->getMessage(), 0, 300)];
+        }
+    }
+
+    /** @return array<string, mixed> */
     private function listApplicationSource(?string $applicationUuid, ?string $path): array
     {
         $application = $this->resolveApplication($applicationUuid);
@@ -1342,7 +1492,7 @@ class AgentToolkit
 
         try {
             return $this->applicationSourceService()->listDirectory($this->team, $application, $path);
-        } catch (\Illuminate\Validation\ValidationException $exception) {
+        } catch (ValidationException $exception) {
             return ['error' => collect($exception->errors())->flatten()->first() ?? 'Source indisponible.'];
         }
     }
@@ -1361,7 +1511,7 @@ class AgentToolkit
 
         try {
             return $this->applicationSourceService()->readFile($this->team, $application, $path);
-        } catch (\Illuminate\Validation\ValidationException $exception) {
+        } catch (ValidationException $exception) {
             return ['error' => collect($exception->errors())->flatten()->first() ?? 'Fichier source indisponible.'];
         }
     }
@@ -1385,6 +1535,13 @@ class AgentToolkit
 
         if (trim($commitMessage) === '') {
             return ['error' => 'Paramètre commit_message requis pour write_application_source.'];
+        }
+
+        if ($this->isEnvFilePath($path)) {
+            return [
+                'error' => 'Interdit d’écrire un fichier .env via Git. Utilise upsert_application_env_var (variables Coolify build/runtime), puis control_resource deploy.',
+                'hint' => 'upsert_application_env_var',
+            ];
         }
 
         $application = $this->resolveApplication($applicationUuid);
@@ -1419,9 +1576,35 @@ class AgentToolkit
                 $sha,
                 $options,
             );
-        } catch (\Illuminate\Validation\ValidationException $exception) {
-            return ['error' => collect($exception->errors())->flatten()->first() ?? 'Écriture source impossible.'];
+        } catch (ValidationException $exception) {
+            $error = collect($exception->errors())->flatten()->first() ?? 'Écriture source impossible.';
+            $payload = ['error' => $error];
+
+            if ($this->isGithubPermissionError((string) $error)) {
+                $payload['hint'] = 'Si tu voulais une variable Coolify (ex. PUPPETEER_SKIP_DOWNLOAD), utilise upsert_application_env_var puis control_resource deploy. Ne redéploie pas sans correction.';
+            }
+
+            return $payload;
         }
+    }
+
+    private function isEnvFilePath(string $path): bool
+    {
+        $normalized = strtolower(str_replace('\\', '/', trim($path)));
+        $basename = basename($normalized);
+
+        return $basename === '.env' || str_starts_with($basename, '.env.');
+    }
+
+    private function isGithubPermissionError(string $error): bool
+    {
+        $normalized = strtolower($error);
+
+        return str_contains($normalized, 'resource not accessible')
+            || str_contains($normalized, 'permission')
+            || str_contains($normalized, 'not accessible by integration')
+            || str_contains($normalized, '403')
+            || str_contains($normalized, 'forbidden');
     }
 
     /**
@@ -1435,6 +1618,7 @@ class AgentToolkit
         foreach ($arguments as $key => $value) {
             if (is_string($key) && preg_match('/(password|secret|token|key|api_key)/i', $key)) {
                 $redacted[$key] = '********';
+
                 continue;
             }
 
