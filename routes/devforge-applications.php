@@ -86,6 +86,9 @@ Route::post('/applications/{applicationUuid}/readiness/interventions/{interventi
 
 Route::prefix('github')->name('github.')->group(function () {
     Route::get('/apps', [GithubController::class, 'apps'])->name('apps.index');
+    Route::put('/apps/{githubAppUuid}/packages-token', [GithubController::class, 'updatePackagesToken'])
+        ->where('githubAppUuid', '[A-Za-z0-9-]{8,64}')
+        ->name('apps.packages-token.update');
     Route::get('/apps/{githubAppUuid}/repositories', [GithubController::class, 'repositories'])
         ->where('githubAppUuid', '[A-Za-z0-9-]{8,64}')
         ->name('apps.repositories');

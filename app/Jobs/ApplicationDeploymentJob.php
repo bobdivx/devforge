@@ -1702,12 +1702,16 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
         // 3.5 Inject GitHub App installation token as NODE_AUTH_TOKEN for private packages
         // (fresh token each deploy — never persisted). User-defined vars below can override.
         try {
-            $githubPackagesAuth = app(GithubPackagesBuildAuthInjector::class)
-                ->buildTimeAdditions($this->application, array_keys($envs_dict));
+            $injector = app(GithubPackagesBuildAuthInjector::class);
+            $githubPackagesAuth = $injector->buildTimeAdditions($this->application, array_keys($envs_dict));
             foreach ($githubPackagesAuth as $key => $value) {
                 $envs_dict[$key] = escapeBashEnvValue($value);
+                $source = $injector->resolveGithubApp($this->application);
+                $fromPat = $source !== null && $injector->storedPackagesToken($source) !== null;
                 $this->application_deployment_queue->addLogEntry(
-                    "Injected build-time {$key} from GitHub App installation token (npm.pkg.github.com).",
+                    $fromPat
+                        ? "Injected build-time {$key} from registered GitHub Packages PAT."
+                        : "Injected build-time {$key} from GitHub App installation token (npm.pkg.github.com).",
                     hidden: true,
                 );
             }

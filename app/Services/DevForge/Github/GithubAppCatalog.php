@@ -6,6 +6,7 @@ use App\Models\GithubApp;
 use App\Models\Team;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
 class GithubAppCatalog
@@ -133,12 +134,86 @@ class GithubAppCatalog
      */
     public function presentApp(GithubApp $githubApp): array
     {
+        $account = $this->installationAccount($githubApp);
+        $accountLogin = is_string($account['login'] ?? null) ? (string) $account['login'] : null;
+        $displayName = $accountLogin
+            ?? (filled($githubApp->organization) ? (string) $githubApp->organization : null)
+            ?? (string) $githubApp->name;
+
         return [
             'uuid' => $githubApp->uuid,
             'name' => $githubApp->name,
+            'display_name' => $displayName,
+            'account_login' => $accountLogin,
+            'account_type' => is_string($account['type'] ?? null) ? (string) $account['type'] : null,
+            'account_avatar_url' => is_string($account['avatar_url'] ?? null) ? (string) $account['avatar_url'] : null,
+            'account_html_url' => is_string($account['html_url'] ?? null) ? (string) $account['html_url'] : null,
             'organization' => $githubApp->organization,
             'html_url' => $githubApp->html_url,
             'is_system_wide' => (bool) $githubApp->is_system_wide,
+            'has_packages_token' => filled($githubApp->packages_token),
+        ];
+    }
+
+    /**
+     * @return array{login?: string, type?: string, avatar_url?: string, html_url?: string}
+     */
+    public function installationAccount(GithubApp $githubApp): array
+    {
+        if (blank($githubApp->installation_id)) {
+            return [];
+        }
+
+        $cacheKey = 'devforge.github_app.installation_account.'.$githubApp->uuid;
+
+        try {
+            /** @var array{login?: string, type?: string, avatar_url?: string, html_url?: string} $cached */
+            $cached = Cache::remember($cacheKey, now()->addHour(), function () use ($githubApp): array {
+                $jwt = generateGithubJwt($githubApp);
+                $response = Http::withToken($jwt)
+                    ->withHeaders([
+                        'Accept' => 'application/vnd.github+json',
+                        'X-GitHub-Api-Version' => '2022-11-28',
+                    ])
+                    ->timeout(15)
+                    ->get(rtrim((string) $githubApp->api_url, '/').'/app/installations/'.$githubApp->installation_id);
+
+                if (! $response->successful()) {
+                    return [];
+                }
+
+                $account = data_get($response->json(), 'account', []);
+                if (! is_array($account)) {
+                    return [];
+                }
+
+                return array_filter([
+                    'login' => is_string($account['login'] ?? null) ? (string) $account['login'] : null,
+                    'type' => is_string($account['type'] ?? null) ? (string) $account['type'] : null,
+                    'avatar_url' => is_string($account['avatar_url'] ?? null) ? (string) $account['avatar_url'] : null,
+                    'html_url' => is_string($account['html_url'] ?? null) ? (string) $account['html_url'] : null,
+                ], static fn ($value): bool => $value !== null && $value !== '');
+            });
+
+            return is_array($cached) ? $cached : [];
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * @return array{uuid: string, name: string, has_packages_token: bool}
+     */
+    public function updatePackagesToken(GithubApp $githubApp, ?string $token): array
+    {
+        $normalized = is_string($token) ? trim($token) : '';
+        $githubApp->packages_token = $normalized !== '' ? $normalized : null;
+        $githubApp->save();
+
+        return [
+            'uuid' => $githubApp->uuid,
+            'name' => $githubApp->name,
+            'has_packages_token' => filled($githubApp->packages_token),
         ];
     }
 

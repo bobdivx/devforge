@@ -170,8 +170,9 @@ export function CreateApplicationModal({ open, legacyBaseUrl, onClose, onCreated
     }, [open, form.github_app_uuid, selectedRepository?.id]);
 
     const legacySourcesUrl = useMemo(() => {
+        // DevForge GitHub page (sidebar) — Coolify legacy for creating the app itself.
         if (!legacyBaseUrl) {
-            return '/sources?legacy=1';
+            return '/github';
         }
 
         const url = new URL('/sources', `${legacyBaseUrl.replace(/\/$/, '')}/`);
@@ -241,13 +242,13 @@ export function CreateApplicationModal({ open, legacyBaseUrl, onClose, onCreated
 
                 {githubApps.length === 0 ? (
                     <div class="rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm">
-                        <p class="font-medium text-warning">Aucune application GitHub configurée</p>
+                        <p class="font-medium text-warning">Aucun compte GitHub connecté</p>
                         <p class="mt-1 text-xs text-base-content/70">
-                            Connectez une GitHub App dans Coolify pour lister vos dépôts privés.
+                            Connectez GitHub (compte bobdivx / org) pour lister vos dépôts privés.
                         </p>
                         <a class="btn btn-warning btn-sm mt-3" href={legacySourcesUrl}>
                             <FolderGit2 class="size-3.5" aria-hidden />
-                            Configurer GitHub
+                            Ouvrir GitHub
                         </a>
                     </div>
                 ) : (
@@ -318,7 +319,7 @@ export function CreateApplicationModal({ open, legacyBaseUrl, onClose, onCreated
 
                         {githubApps.length > 1 && (
                             <div class="grid gap-1.5">
-                                <label class="text-xs font-medium" for="app-github">Application GitHub</label>
+                                <label class="text-xs font-medium" for="app-github">Compte GitHub</label>
                                 <select
                                     id="app-github"
                                     class="select select-bordered select-sm w-full"
@@ -329,7 +330,9 @@ export function CreateApplicationModal({ open, legacyBaseUrl, onClose, onCreated
                                     }))}
                                 >
                                     {githubApps.map((app) => (
-                                        <option key={app.uuid} value={app.uuid}>{app.name}</option>
+                                        <option key={app.uuid} value={app.uuid}>
+                                            {app.account_login ? `@${app.account_login}` : (app.display_name ?? app.name)}
+                                        </option>
                                     ))}
                                 </select>
                             </div>

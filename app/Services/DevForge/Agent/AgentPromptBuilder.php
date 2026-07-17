@@ -38,8 +38,9 @@ class AgentPromptBuilder
               Déduis le dossier de build depuis les logs (directory: /app/…, astro/vite/next) puis
               update_application_runtime_settings(publish_directory=…, redeploy=true).
             - npm E401 / unauthenticated sur npm.pkg.github.com :
-              Coolify injecte NODE_AUTH_TOKEN au build via le token GitHub App SI packages:read est accordé.
-              Si la GitHub App n’a pas packages:read → needs_user (activer Packages Read-only + accepter l’installation).
+              Coolify injecte NODE_AUTH_TOKEN au build via PAT enregistré (Sources → token Packages)
+              ou token GitHub App si packages:read est accordé.
+              Si aucun des deux → needs_user (enregistrer un PAT read:packages dans DevForge → GitHub).
               Sinon → control_resource deploy (1×). Ne invente PAS de PAT.
             - Crash post-deploy « Class ApplicationReadiness not found » (rollback du conteneur) :
               control_resource deploy après diagnostic — la plateforme ne doit pas détruire un conteneur sain.

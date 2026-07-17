@@ -62,4 +62,34 @@ class GithubController extends Controller
             'data' => $this->githubAppCatalog->branches($githubApp, $owner, $repo),
         ]);
     }
+
+    public function updatePackagesToken(Request $request, string $githubAppUuid): JsonResponse
+    {
+        $team = $this->currentTeamContext->resolve($request->user());
+
+        try {
+            $githubApp = $this->githubAppCatalog->appForTeam($team, $githubAppUuid);
+        } catch (ModelNotFoundException) {
+            return response()->json(['message' => 'GitHub app not found.'], 404);
+        }
+
+        if ((bool) $githubApp->is_system_wide && (int) $githubApp->team_id !== (int) $team->id) {
+            return response()->json(['message' => 'Impossible de modifier une GitHub App système.'], 403);
+        }
+
+        $validated = $request->validate([
+            'packages_token' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $token = array_key_exists('packages_token', $validated)
+            ? $validated['packages_token']
+            : null;
+
+        return response()->json([
+            'data' => $this->githubAppCatalog->updatePackagesToken($githubApp, $token),
+            'message' => filled($token)
+                ? 'Token Packages enregistré. Les prochains builds injecteront NODE_AUTH_TOKEN automatiquement.'
+                : 'Token Packages supprimé.',
+        ]);
+    }
 }

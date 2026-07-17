@@ -20,6 +20,7 @@ class GithubApp extends BaseModel
         'client_id',
         'client_secret',
         'webhook_secret',
+        'packages_token',
         'is_system_wide',
         'is_public',
         'contents',
@@ -34,11 +35,13 @@ class GithubApp extends BaseModel
         'is_public' => 'boolean',
         'is_system_wide' => 'boolean',
         'type' => 'string',
+        'packages_token' => 'encrypted',
     ];
 
     protected $hidden = [
         'client_secret',
         'webhook_secret',
+        'packages_token',
     ];
 
     protected static function booted(): void

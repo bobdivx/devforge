@@ -1,35 +1,20 @@
 import {
-
     Activity,
-
     Bot,
-
     Boxes,
-
     Braces,
-
     Database,
-
     Gauge,
-
+    GitBranch,
     Rocket,
-
     Settings,
-
     Tag,
-
     HardDrive,
-
     MapPin,
-
     CreditCard,
-
     Cloud,
-
     Wrench,
-
     type LucideIcon,
-
 } from 'lucide-preact';
 
 import { settingsTabPaths } from './settings-tabs';
@@ -62,6 +47,8 @@ export type PageKey =
     | 'profile'
 
     | 'terminal'
+
+    | 'github'
 
     | 'sources'
 
@@ -109,6 +96,8 @@ export const appRoutes: AppRoute[] = [
 
     { path: '/applications', label: 'Applications', description: 'Configuration et déploiements.', icon: Boxes, page: 'applications' },
 
+    { path: '/github', label: 'GitHub', description: 'Compte GitHub, apps et token Packages.', icon: GitBranch, page: 'github' },
+
     { path: '/databases', label: 'Bases de données', description: 'Instances, sauvegardes et métriques.', icon: Database, page: 'databases' },
 
     { path: '/services', label: 'Services', description: 'Stacks et services gérés.', icon: Wrench, page: 'services' },
@@ -148,6 +137,8 @@ export const staticRoutePaths = [
     '/profile/appearance',
 
     '/terminal',
+
+    '/github',
 
     '/sources',
 
@@ -291,13 +282,7 @@ const terminalRoute: AppRoute = {
     page: 'terminal',
 };
 
-const sourcesRoute: AppRoute = {
-    path: '/sources',
-    label: 'Sources',
-    description: 'Sources Git et intégrations.',
-    icon: Boxes,
-    page: 'sources',
-};
+const githubRoute = appRouteByPage('github');
 
 const destinationsRoute: AppRoute = {
     path: '/destinations',
@@ -395,9 +380,11 @@ const dynamicRoutes: Array<{ pattern: RegExp; route: AppRoute }> = [
 
     { pattern: /^\/terminal(?:\/.*)?$/, route: terminalRoute },
 
-    { pattern: /^\/sources(?:\/.*)?$/, route: sourcesRoute },
+    { pattern: /^\/github(?:\/.*)?$/, route: githubRoute },
 
-    { pattern: /^\/source\/github\/[^/]+(?:\/.*)?$/, route: sourcesRoute },
+    { pattern: /^\/sources(?:\/.*)?$/, route: githubRoute },
+
+    { pattern: /^\/source\/github\/[^/]+(?:\/.*)?$/, route: githubRoute },
 
     { pattern: /^\/storages\/[^/]+(?:\/.*)?$/, route: storagesRoute },
 
@@ -488,7 +475,7 @@ export function findRoute(pathname: string): AppRoute {
 
 
 
-        if (['profile', 'terminal', 'sources', 'storages', 'storage', 'destinations', 'tags', 'subscription', 'onboarding', 'server-detail'].includes(dynamicRoute.route.page)) {
+        if (['profile', 'terminal', 'github', 'sources', 'storages', 'storage', 'destinations', 'tags', 'subscription', 'onboarding', 'server-detail'].includes(dynamicRoute.route.page)) {
 
             return {
 

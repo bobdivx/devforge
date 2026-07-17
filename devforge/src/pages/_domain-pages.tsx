@@ -87,6 +87,7 @@ export function DomainPage({ bootstrap, route, onSwitchTeam }: DomainPageProps) 
                     canAccess={bootstrap.permissions.access_terminal}
                 />
             );
+        case 'github':
         case 'sources':
             return (
                 <SourcesPage

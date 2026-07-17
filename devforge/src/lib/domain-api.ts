@@ -572,9 +572,15 @@ export type SecurityKey = {
 export type GithubAppSummary = {
     uuid: string;
     name: string;
+    display_name?: string;
+    account_login?: string | null;
+    account_type?: string | null;
+    account_avatar_url?: string | null;
+    account_html_url?: string | null;
     organization: string | null;
     html_url: string | null;
     is_system_wide: boolean;
+    has_packages_token?: boolean;
 };
 
 export type GithubRepository = {
@@ -1403,6 +1409,17 @@ export const domainApi = {
         },
     ),
     githubApps: () => apiFetch<ApiResponse<GithubAppSummary[]>>(`${API_BASE}/github/apps`),
+    updateGithubPackagesToken: (githubAppUuid: string, packagesToken: string | null) => mutate<ApiResponse<{
+        uuid: string;
+        name: string;
+        has_packages_token: boolean;
+    }> & { message?: string }>(
+        `/github/apps/${encodeURIComponent(githubAppUuid)}/packages-token`,
+        {
+            method: 'PUT',
+            body: JSON.stringify({ packages_token: packagesToken }),
+        },
+    ),
     githubRepositories: (githubAppUuid: string) => apiFetch<ApiResponse<GithubRepository[]>>(`${API_BASE}/github/apps/${encodeURIComponent(githubAppUuid)}/repositories`),
     githubBranches: (githubAppUuid: string, owner: string, repo: string) => apiFetch<ApiResponse<GithubBranch[]>>(`${API_BASE}/github/apps/${encodeURIComponent(githubAppUuid)}/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`),
     createApplication: (input: CreateApplicationInput) => mutate<ApiResponse<CoreResource>>('/applications', {

@@ -55,8 +55,34 @@ it('diagnoses github app without packages permission', function () {
 
     expect($diagnosis['has_github_app'])->toBeTrue()
         ->and($diagnosis['has_packages_permission'])->toBeFalse()
+        ->and($diagnosis['has_packages_token'])->toBeFalse()
         ->and($diagnosis['can_auto_redeploy'])->toBeFalse()
-        ->and($diagnosis['error'])->toContain('packages:read');
+        ->and($diagnosis['error'])->toContain('Aucun token Packages');
+});
+
+it('allows auto redeploy when a packages PAT is registered', function () {
+    $githubApp = new GithubApp([
+        'name' => 'coolify-test',
+        'is_public' => false,
+        'installation_id' => 123,
+        'api_url' => 'https://api.github.com',
+    ]);
+    $githubApp->packages_token = 'ghp_test_pat';
+
+    $application = Mockery::mock(Application::class)->makePartial();
+    $application->shouldReceive('loadMissing')->with('source')->andReturnSelf();
+    $application->source = $githubApp;
+
+    $injector = Mockery::mock(GithubPackagesBuildAuthInjector::class)->makePartial();
+    $injector->shouldReceive('installationPermissions')->andReturn(['contents' => 'read']);
+    $injector->shouldReceive('permissionsUrl')->andReturn(null);
+
+    $diagnosis = $injector->diagnose($application);
+
+    expect($diagnosis['ok'])->toBeTrue()
+        ->and($diagnosis['can_auto_redeploy'])->toBeTrue()
+        ->and($diagnosis['has_packages_token'])->toBeTrue()
+        ->and($injector->resolveBuildToken($githubApp))->toBe('ghp_test_pat');
 });
 
 it('allows auto redeploy when packages permission is present', function () {

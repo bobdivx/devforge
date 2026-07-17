@@ -170,7 +170,7 @@ it('mentions github app packages injection in deployment failure prompts', funct
         'event' => 'deployment_failed',
     ]);
 
-    expect($system)->toContain('packages:read')
+    expect($system)->toContain('GitHub')
         ->and($system)->toContain('NODE_AUTH_TOKEN');
 });
 

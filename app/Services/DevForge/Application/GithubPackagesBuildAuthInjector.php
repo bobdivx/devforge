@@ -8,8 +8,8 @@ use Illuminate\Support\Facades\Http;
 use Throwable;
 
 /**
- * Injecte un token GitHub App frais dans le build (NODE_AUTH_TOKEN) pour npm.pkg.github.com.
- * Ne persiste pas le token en base (expire ~1h) — injection à chaque déploiement.
+ * Auth npm.pkg.github.com au build.
+ * Priorité : NODE_AUTH_TOKEN app → packages_token (PAT) sur la GitHub App → token d’installation (si packages:read).
  */
 class GithubPackagesBuildAuthInjector
 {
@@ -30,7 +30,7 @@ class GithubPackagesBuildAuthInjector
             return [];
         }
 
-        $token = $this->installationToken($githubApp);
+        $token = $this->resolveBuildToken($githubApp);
         if ($token === null || $token === '') {
             return [];
         }
@@ -46,6 +46,7 @@ class GithubPackagesBuildAuthInjector
      *     can_auto_redeploy: bool,
      *     has_github_app: bool,
      *     has_packages_permission: bool,
+     *     has_packages_token: bool,
      *     npm_probe_ok: bool|null,
      *     error: string|null,
      *     permissions_url: string|null,
@@ -61,12 +62,13 @@ class GithubPackagesBuildAuthInjector
                 'can_auto_redeploy' => false,
                 'has_github_app' => false,
                 'has_packages_permission' => false,
+                'has_packages_token' => false,
                 'npm_probe_ok' => null,
                 'error' => 'Application sans GitHub App privée — un PAT packages:read est requis.',
                 'permissions_url' => null,
                 'steps' => [
-                    'Créer un PAT GitHub (classic) avec scope packages:read (et repo si besoin).',
-                    'Ajouter NODE_AUTH_TOKEN dans Variables Coolify (build).',
+                    'Créer un PAT GitHub (classic) avec scope read:packages.',
+                    'DevForge → GitHub → enregistrer le token Packages sur le compte, ou NODE_AUTH_TOKEN (build) sur l’app.',
                     'Vérifier .npmrc (//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}).',
                     'Relancer le déploiement.',
                 ],
@@ -79,19 +81,38 @@ class GithubPackagesBuildAuthInjector
                 'can_auto_redeploy' => false,
                 'has_github_app' => true,
                 'has_packages_permission' => false,
+                'has_packages_token' => false,
                 'npm_probe_ok' => null,
                 'error' => 'GitHub App publique — pas de token d’installation pour les packages privés.',
                 'permissions_url' => null,
                 'steps' => [
-                    'Utiliser une GitHub App privée liée au dépôt, ou un PAT packages:read.',
-                    'Ajouter NODE_AUTH_TOKEN (build) puis redéployer.',
+                    'Utiliser une GitHub App privée liée au dépôt, ou enregistrer un PAT packages:read.',
+                    'DevForge → GitHub → token Packages, ou NODE_AUTH_TOKEN (build).',
                 ],
             ];
         }
 
+        $hasStoredPat = $this->storedPackagesToken($githubApp) !== null;
         $permissions = $this->installationPermissions($githubApp);
         $hasPackages = $this->hasPackagesRead($permissions);
         $permissionsUrl = $this->permissionsUrl($githubApp);
+
+        if ($hasStoredPat) {
+            return [
+                'ok' => true,
+                'can_auto_redeploy' => true,
+                'has_github_app' => true,
+                'has_packages_permission' => $hasPackages,
+                'has_packages_token' => true,
+                'npm_probe_ok' => true,
+                'error' => null,
+                'permissions_url' => $permissionsUrl,
+                'steps' => [
+                    'PAT packages enregistré sur la GitHub App.',
+                    'Redéploiement : NODE_AUTH_TOKEN sera injecté au build automatiquement.',
+                ],
+            ];
+        }
 
         if (! $hasPackages) {
             return [
@@ -99,15 +120,17 @@ class GithubPackagesBuildAuthInjector
                 'can_auto_redeploy' => false,
                 'has_github_app' => true,
                 'has_packages_permission' => false,
+                'has_packages_token' => false,
                 'npm_probe_ok' => false,
-                'error' => 'La GitHub App n’a pas la permission packages:read — npm.pkg.github.com refuse le token.',
+                'error' => 'Aucun token Packages enregistré — npm.pkg.github.com refuse le token d’installation (pas de packages:read).',
                 'permissions_url' => $permissionsUrl,
                 'steps' => array_values(array_filter([
-                    'Sur GitHub → Settings → Developer settings → GitHub Apps → « '.$githubApp->name.' ».',
-                    'Permissions → Repository permissions → Packages : Read-only → Save.',
-                    'Accepter les nouvelles permissions sur l’installation de l’app (org/compte).',
-                    $permissionsUrl ? 'Lien permissions Coolify : '.$permissionsUrl : null,
-                    'Relancer le déploiement — Coolify injectera NODE_AUTH_TOKEN au build automatiquement.',
+                    'Créer un PAT GitHub (classic) avec scope read:packages (et repo si besoin).',
+                    'Dans DevForge → GitHub → compte lié → enregistrer le token Packages.',
+                    'Alternative : variable NODE_AUTH_TOKEN (build) sur l’application.',
+                    'Ou activer Packages: Read-only sur la GitHub App puis accepter l’installation.',
+                    $permissionsUrl ? 'Lien permissions GitHub App : '.$permissionsUrl : null,
+                    'Relancer le déploiement.',
                 ])),
             ];
         }
@@ -119,12 +142,13 @@ class GithubPackagesBuildAuthInjector
                 'can_auto_redeploy' => false,
                 'has_github_app' => true,
                 'has_packages_permission' => true,
+                'has_packages_token' => false,
                 'npm_probe_ok' => null,
                 'error' => 'Impossible de générer le token d’installation GitHub App.',
                 'permissions_url' => $permissionsUrl,
                 'steps' => [
                     'Vérifier que la GitHub App est installée (installation_id).',
-                    'Sinon ajouter un PAT packages:read en NODE_AUTH_TOKEN (build).',
+                    'Ou enregistrer un PAT packages:read dans DevForge → GitHub.',
                 ],
             ];
         }
@@ -134,6 +158,7 @@ class GithubPackagesBuildAuthInjector
             'can_auto_redeploy' => true,
             'has_github_app' => true,
             'has_packages_permission' => true,
+            'has_packages_token' => false,
             'npm_probe_ok' => true,
             'error' => null,
             'permissions_url' => $permissionsUrl,
@@ -154,6 +179,28 @@ class GithubPackagesBuildAuthInjector
         }
 
         return $source;
+    }
+
+    public function resolveBuildToken(GithubApp $githubApp): ?string
+    {
+        $stored = $this->storedPackagesToken($githubApp);
+        if ($stored !== null) {
+            return $stored;
+        }
+
+        $permissions = $this->installationPermissions($githubApp);
+        if (! $this->hasPackagesRead($permissions)) {
+            return null;
+        }
+
+        return $this->installationToken($githubApp);
+    }
+
+    public function storedPackagesToken(GithubApp $githubApp): ?string
+    {
+        $token = $githubApp->packages_token;
+
+        return is_string($token) && trim($token) !== '' ? trim($token) : null;
     }
 
     public function installationToken(GithubApp $githubApp): ?string

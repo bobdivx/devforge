@@ -202,14 +202,16 @@ class AgentRepairHarness
                 'correction' => [
                     'outcome' => 'needs_user',
                     'headline' => $headline,
-                    'diagnosis' => 'npm E401 sur registry privé. '.(($diagnosis['has_github_app'] ?? false)
-                        ? 'Activer packages:read sur la GitHub App, puis Coolify injectera NODE_AUTH_TOKEN au build.'
-                        : 'Un secret d’auth est requis — l’agent ne peut pas l’inventer.'),
+                    'diagnosis' => 'npm E401 sur registry privé. '.(($diagnosis['has_packages_token'] ?? false)
+                        ? 'PAT Packages déjà enregistré — redeploy devrait injecter NODE_AUTH_TOKEN.'
+                        : (($diagnosis['has_github_app'] ?? false)
+                            ? 'Enregistrer un PAT read:packages dans DevForge → GitHub (token Packages), puis Coolify l’injecte au build.'
+                            : 'Un secret d’auth est requis — l’agent ne peut pas l’inventer.')),
                     'source_scope' => 'env',
                     'actions' => [$needsUserAction],
                     'steps' => $stepsText,
                     'pills' => [
-                        ['id' => 'env', 'label' => 'Env Coolify', 'active' => true, 'href' => null, 'detail' => ($diagnosis['has_packages_permission'] ?? false) ? 'token OK' : 'packages:read manquant'],
+                        ['id' => 'env', 'label' => 'Env Coolify', 'active' => true, 'href' => null, 'detail' => ($diagnosis['has_packages_token'] ?? false) || ($diagnosis['has_packages_permission'] ?? false) ? 'token OK' : 'token Packages manquant'],
                         ['id' => 'build', 'label' => 'Build', 'active' => true, 'href' => null, 'detail' => 'npm E401'],
                     ],
                     'belongs_to_deployment_uuid' => is_string($runContext['deployment_uuid'] ?? null)

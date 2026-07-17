@@ -27,6 +27,7 @@ app/Http/Kernel.php
 app/Console/Kernel.php
 config/devforge.php
 glob:database/migrations/*application_readiness*
+glob:database/migrations/*packages_token*
 bootstrap/helpers/sudo.php
 bootstrap/helpers/shared.php
 routes/devforge-api.php
