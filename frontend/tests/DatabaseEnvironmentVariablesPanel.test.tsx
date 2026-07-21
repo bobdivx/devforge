@@ -50,7 +50,7 @@ describe('DatabaseEnvironmentVariablesPanel', () => {
             throw new Error(`URL inattendue : ${url}`);
         });
 
-        render(<DatabaseEnvironmentVariablesPanel databaseUuid="db-uuid-1" canAct />);
+        render(<DatabaseEnvironmentVariablesPanel resourceUuid="db-uuid-1" canAct />);
 
         expect(await screen.findByText('Variables d’environnement')).toBeInTheDocument();
         expect(await screen.findByText('POSTGRES_DB')).toBeInTheDocument();

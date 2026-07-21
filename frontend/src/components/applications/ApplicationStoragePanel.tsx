@@ -18,8 +18,6 @@ type StorageResourceType = 'applications' | 'databases';
 type Props = {
     resourceType?: StorageResourceType;
     resourceUuid?: string;
-    /** @deprecated utiliser resourceUuid */
-    applicationUuid?: string;
     canAct: boolean;
 };
 
@@ -65,11 +63,10 @@ function shortPersistentName(name: string | null | undefined, applicationUuid: s
 
 export function ApplicationStoragePanel({
     resourceType = 'applications',
-    resourceUuid,
-    applicationUuid,
+    resourceUuid = '',
     canAct,
 }: Props) {
-    const uuid = resourceUuid ?? applicationUuid ?? '';
+    const uuid = resourceUuid;
     const resourceLabel = resourceType === 'databases' ? 'cette base de données' : 'cette application';
 
     const query = useApiQuery(

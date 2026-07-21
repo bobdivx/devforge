@@ -10,8 +10,6 @@ type WebhookResourceType = 'databases' | 'services';
 type Props = {
     resourceType?: WebhookResourceType;
     resourceUuid?: string;
-    /** @deprecated utiliser resourceUuid */
-    databaseUuid?: string;
 };
 
 async function copyText(value: string): Promise<boolean> {
@@ -25,10 +23,9 @@ async function copyText(value: string): Promise<boolean> {
 
 export function DatabaseWebhooksPanel({
     resourceType = 'databases',
-    resourceUuid,
-    databaseUuid,
+    resourceUuid = '',
 }: Props) {
-    const uuid = resourceUuid ?? databaseUuid ?? '';
+    const uuid = resourceUuid;
     const resourceLabel = resourceType === 'services' ? 'ce service' : 'cette base de données';
 
     const query = useApiQuery(

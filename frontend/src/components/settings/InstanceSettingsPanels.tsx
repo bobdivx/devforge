@@ -3,6 +3,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { Card } from '../ui/Card';
 import { DataState } from '../ui/DataState';
 import { StatusBadge } from '../ui/StatusBadge';
+import { CronInput } from '../ui/CronInput';
 import type { BootstrapPermissions } from '../../lib/bootstrap';
 import {
     domainApi,
@@ -552,22 +553,20 @@ function UpdatesForm({
                 disabled={!canEdit || saving}
                 onChange={(value) => setForm((current) => ({ ...current, is_auto_update_enabled: value }))}
             />
-            <Field label="Fréquence auto (cron)">
-                <input
-                    class="input input-bordered input-sm w-full rounded-xl"
+            <div class="mb-4">
+                <CronInput
+                    label="Fréquence auto"
                     value={form.auto_update_frequency ?? ''}
-                    disabled={!canEdit || saving}
-                    onInput={(event) => setForm((current) => ({ ...current, auto_update_frequency: event.currentTarget.value || null }))}
+                    onChange={(val) => setForm((current) => ({ ...current, auto_update_frequency: val || null }))}
                 />
-            </Field>
-            <Field label="Fréquence de vérification (cron)">
-                <input
-                    class="input input-bordered input-sm w-full rounded-xl"
+            </div>
+            <div class="mb-4">
+                <CronInput
+                    label="Fréquence de vérification"
                     value={form.update_check_frequency ?? ''}
-                    disabled={!canEdit || saving}
-                    onInput={(event) => setForm((current) => ({ ...current, update_check_frequency: event.currentTarget.value || null }))}
+                    onChange={(val) => setForm((current) => ({ ...current, update_check_frequency: val || null }))}
                 />
-            </Field>
+            </div>
             {error && <p class="text-sm text-error">{error}</p>}
             {message && <p class="text-sm text-base-content/60" role="status">{message}</p>}
             {canEdit && (
@@ -771,36 +770,6 @@ export function OauthSettingsPanel({ permissions }: { permissions: BootstrapPerm
                         </div>
                     )}
                 </DataState>
-            </Card>
-        </div>
-    );
-}
-
-export function LegacyOnlySettingsPanel({
-    title,
-    description,
-    legacyPath,
-    legacyBaseUrl,
-}: {
-    title: string;
-    description: string;
-    legacyPath: string;
-    legacyBaseUrl: string;
-}) {
-    const { LegacyEditBanner } = require('../migration/LegacyEditBanner') as typeof import('../migration/LegacyEditBanner');
-
-    return (
-        <div class="grid gap-4">
-            <LegacyEditBanner
-                legacyBaseUrl={legacyBaseUrl}
-                legacyPath={legacyPath}
-                title={title}
-                description={description}
-            />
-            <Card title={title}>
-                <p class="text-sm text-base-content/65">
-                    Cette section n’est pas encore entièrement disponible dans DevForge. Utilisez Coolify pour la configuration complète.
-                </p>
             </Card>
         </div>
     );

@@ -2421,6 +2421,82 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
                 ['commit_message' => $commit_message->value()]
             );
         }
+
+        $this->parse_and_import_vercel_crons();
+    }
+
+    private function parse_and_import_vercel_crons()
+    {
+        $this->application_deployment_queue->addLogEntry("Checking for vercel.json at {$this->workdir}/vercel.json...");
+        $this->execute_remote_command(
+            [
+                executeInDocker($this->deployment_uuid, "cat {$this->workdir}/vercel.json"),
+                'save' => 'vercel_json',
+                'hidden' => true,
+                'ignore_errors' => true,
+            ]
+        );
+
+        $vercelJsonRaw = $this->saved_outputs->get('vercel_json');
+        if (empty($vercelJsonRaw) || str_contains($vercelJsonRaw, 'No such file or directory') || str_contains($vercelJsonRaw, 'can\'t open')) {
+            $this->application_deployment_queue->addLogEntry("No vercel.json found or file is unreadable.");
+            return;
+        }
+
+        try {
+            $vercelJson = json_decode($vercelJsonRaw, true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                $this->application_deployment_queue->addLogEntry("Found vercel.json but failed to parse JSON: " . json_last_error_msg());
+                return;
+            }
+
+            $crons = data_get($vercelJson, 'crons', []);
+
+            if (is_array($crons) && count($crons) > 0) {
+                $this->application_deployment_queue->addLogEntry("Found " . count($crons) . " crons in vercel.json. Importing...");
+
+                $port = !empty($this->application->ports_exposes_array) ? $this->application->ports_exposes_array[0] : 3000;
+
+                foreach ($crons as $cron) {
+                    $path = data_get($cron, 'path');
+                    $schedule = data_get($cron, 'schedule');
+
+                    if ($path && $schedule) {
+                        $name = "Vercel Cron: {$path}";
+                        
+                        $cronSecretEnv = $this->application->environment_variables()->where('key', 'CRON_SECRET')->first();
+                        if (!$cronSecretEnv) {
+                            $cronSecretEnv = $this->application->environment_variables()->create([
+                                'key' => 'CRON_SECRET',
+                                'value' => \Illuminate\Support\Str::random(32),
+                                'is_buildtime' => true,
+                                'is_runtime' => true,
+                            ]);
+                        }
+                        
+                        $command = "wget -qO- --header=\"Authorization: Bearer {$cronSecretEnv->value}\" http://127.0.0.1:{$port}{$path}";
+
+                        \App\Models\ScheduledTask::updateOrCreate(
+                            [
+                                'application_id' => $this->application->id,
+                                'name' => $name,
+                            ],
+                            [
+                                'command' => $command,
+                                'frequency' => $schedule,
+                                'enabled' => true,
+                                'team_id' => data_get($this->application, 'environment.project.team_id'),
+                            ]
+                        );
+                        $this->application_deployment_queue->addLogEntry("Imported cron: {$name} ({$schedule})");
+                    }
+                }
+            } else {
+                $this->application_deployment_queue->addLogEntry("vercel.json found, but no 'crons' array is defined.");
+            }
+        } catch (\Throwable $e) {
+            $this->application_deployment_queue->addLogEntry("Failed to parse vercel.json for crons: " . $e->getMessage());
+        }
     }
 
     private function generate_git_import_commands()

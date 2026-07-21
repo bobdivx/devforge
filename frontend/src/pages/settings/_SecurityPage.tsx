@@ -32,11 +32,9 @@ const sectionMeta = {
 export function SecurityPage({
     embedded = false,
     path = '/settings/security',
-    legacyBaseUrl = '',
 }: {
     embedded?: boolean;
     path?: string;
-    legacyBaseUrl?: string;
 }) {
     const section = parseSecuritySection(path);
     const meta = sectionMeta[section];
@@ -82,21 +80,19 @@ export function SecurityPage({
             {!embedded && (
                 <PageHeader title={meta.title} description={meta.description} />
             )}
-            <LegacyOnlySecuritySection meta={meta} legacyBaseUrl={legacyBaseUrl} />
+            <LegacyOnlySecuritySection meta={meta} />
         </>
     );
 }
 
 function LegacyOnlySecuritySection({
     meta,
-    legacyBaseUrl,
 }: {
     meta: (typeof sectionMeta)[keyof typeof sectionMeta];
-    legacyBaseUrl: string;
 }) {
     return (
         <div class="grid gap-4">
-            <LegacyEditBanner legacyBaseUrl={legacyBaseUrl} legacyPath={meta.legacyPath} description={meta.description} />
+            <LegacyEditBanner title={meta.title} description={meta.description} />
             <Card title={meta.title}>
                 <p class="text-sm text-base-content/65">
                     Cette section de sécurité est encore gérée dans Coolify.

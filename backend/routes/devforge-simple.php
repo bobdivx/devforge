@@ -8,7 +8,10 @@ use App\Http\Controllers\DevForge\ProfileController;
 use App\Http\Controllers\DevForge\ProjectController;
 use App\Http\Controllers\DevForge\SecurityController;
 use App\Http\Controllers\DevForge\SettingsController;
+use App\Http\Controllers\DevForge\InstanceBackupController;
+use App\Http\Controllers\DevForge\ScheduledJobsController;
 use App\Http\Controllers\DevForge\SharedVariableController;
+use App\Http\Controllers\DevForge\AgentKeyRequestController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/overview', OverviewController::class)->name('overview');
@@ -39,6 +42,11 @@ Route::put('/settings/advanced', [SettingsController::class, 'updateAdvanced'])-
 Route::put('/settings/email', [SettingsController::class, 'updateEmail'])->name('settings.email.update');
 Route::put('/settings/updates', [SettingsController::class, 'updateUpdates'])->name('settings.updates.update');
 Route::post('/settings/updates/check', [SettingsController::class, 'checkUpdates'])->name('settings.updates.check');
+Route::get('/settings/scheduled-jobs', [ScheduledJobsController::class, 'index'])->name('settings.scheduled-jobs.index');
+Route::get('/settings/scheduled-jobs/definitions', [ScheduledJobsController::class, 'definitions'])->name('settings.scheduled-jobs.definitions');
+Route::get('/settings/backup', [InstanceBackupController::class, 'show'])->name('settings.backup.show');
+Route::post('/settings/backup/init', [InstanceBackupController::class, 'init'])->name('settings.backup.init');
+Route::put('/settings/backup/database', [InstanceBackupController::class, 'updateDatabase'])->name('settings.backup.database.update');
 Route::get('/settings/oauth', [OauthSettingsController::class, 'index'])->name('settings.oauth');
 Route::put('/settings/oauth/{provider}', [OauthSettingsController::class, 'update'])->name('settings.oauth.update');
 Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
@@ -72,3 +80,6 @@ Route::delete('/security/cloud-tokens/{tokenUuid}', [SecurityController::class, 
 Route::post('/security/cloud-tokens/{tokenUuid}/validate', [SecurityController::class, 'validateCloudToken'])
     ->where('tokenUuid', '[A-Za-z0-9-]{8,64}')
     ->name('security.cloud-tokens.validate');
+
+Route::get('/agent-key-requests', [AgentKeyRequestController::class, 'index'])->name('agent-key-requests.index');
+Route::post('/agent-key-requests/{uuid}/fulfill', [AgentKeyRequestController::class, 'fulfill'])->name('agent-key-requests.fulfill');

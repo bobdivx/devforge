@@ -205,10 +205,15 @@ class AgentRunner
                 $this->anyToolUsed = true;
                 $toolResults = [];
                 $hadToolFailure = false;
+                $waitingForInput = false;
+
                 foreach ($response->toolCalls as $toolCall) {
                     $result = $toolkit->execute($toolCall['name'], $toolCall['arguments']);
                     if (isset($result['error'])) {
                         $hadToolFailure = true;
+                    }
+                    if (($result['status'] ?? '') === 'waiting_for_input') {
+                        $waitingForInput = true;
                     }
                     $toolResults[] = [
                         'name' => $toolCall['name'],
@@ -221,6 +226,17 @@ class AgentRunner
                 }
 
                 AgentToolTurnBuilder::append($this->messages, $response, $toolResults);
+
+                if ($waitingForInput) {
+                    $run->update([
+                        'status' => 'waiting_for_input',
+                        'summary' => 'En attente de saisie utilisateur.',
+                        'finished_at' => now(), // Technically paused, but finished for this job execution
+                    ]);
+                    $agent->update(['status' => 'idle', 'last_run_at' => now()]);
+                    broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'waiting_for_input'));
+                    return;
+                }
             }
 
             if ($budget->getRemaining() === 0) {

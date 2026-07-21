@@ -11,7 +11,6 @@ export type SettingsTabId =
     | 'oauth'
     | 'updates'
     | 'backup'
-    | 'scheduled-jobs'
     | 'notifications'
     | 'variables'
     | 'security'
@@ -37,7 +36,6 @@ export const settingsTabs: SettingsTab[] = [
     { id: 'oauth', label: 'OAuth', path: '/settings/oauth', requiresInstanceAdmin: true },
     { id: 'updates', label: 'Mises à jour', path: '/settings/updates', requiresInstanceAdmin: true },
     { id: 'backup', label: 'Sauvegarde', path: '/settings/backup', requiresInstanceAdmin: true },
-    { id: 'scheduled-jobs', label: 'Tâches planifiées', path: '/settings/scheduled-jobs', requiresInstanceAdmin: true },
     { id: 'notifications', label: 'Notifications', path: '/settings/notifications' },
     { id: 'variables', label: 'Variables', path: '/settings/variables' },
     { id: 'security', label: 'Sécurité', path: '/settings/security' },
@@ -97,7 +95,6 @@ const tabGroupById: Record<SettingsTabId, SettingsTabGroupId> = {
     oauth: 'instance',
     updates: 'instance',
     backup: 'instance',
-    'scheduled-jobs': 'instance',
     ai: 'ai',
 };
 

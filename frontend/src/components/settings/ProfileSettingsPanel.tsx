@@ -1,4 +1,4 @@
-import { ExternalLink, Save, Shield } from 'lucide-preact';
+import { Save } from 'lucide-preact';
 import { useState } from 'preact/hooks';
 import { Card } from '../ui/Card';
 import { DataState } from '../ui/DataState';
@@ -107,22 +107,12 @@ export function ProfileSettingsPanel({
                             tone={twoFactorEnabled || profile?.two_factor_enabled ? 'success' : 'neutral'}
                         />
                     </div>
-                    <LegacyEditBanner
-                        legacyBaseUrl={legacyBaseUrl}
-                        legacyPath="/profile"
-                        title="Mot de passe et configuration 2FA"
-                        description="La modification du mot de passe et l’activation TOTP passent encore par Fortify dans Coolify."
-                    />
-                    <a
-                        class="btn btn-ghost btn-sm w-fit"
-                        href={legacyCoolifyUrl(legacyBaseUrl, '/user/profile')}
-                        rel="noreferrer"
-                        target="_blank"
-                    >
-                        <Shield class="size-3.5" aria-hidden />
-                        Ouvrir la sécurité Fortify
-                        <ExternalLink class="size-3.5 opacity-60" aria-hidden />
-                    </a>
+                    <div class="col-span-full">
+                        <LegacyEditBanner
+                            title="Mot de passe et configuration 2FA"
+                            description="La modification du mot de passe et l’activation TOTP seront bientôt ajoutées dans DevForge."
+                        />
+                    </div>
                 </div>
             </Card>
         </div>

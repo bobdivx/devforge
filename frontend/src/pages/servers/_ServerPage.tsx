@@ -228,10 +228,8 @@ export function ServerPage({
                 />
             ) : !nativeSections.has(activeSection) ? (
                 <LegacyEditBanner
-                    legacyBaseUrl={legacyBaseUrl}
-                    legacyPath={serverLegacyPath(serverUuid, activeSection)}
                     title={sectionMeta.label}
-                    description={`La section « ${sectionMeta.label} » est encore gérée dans Coolify.`}
+                    description={`La section « ${sectionMeta.label} » est en cours d'intégration dans DevForge.`}
                 />
             ) : null}
         </div>

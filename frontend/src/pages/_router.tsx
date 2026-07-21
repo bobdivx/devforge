@@ -11,6 +11,7 @@ import { MonitoringPage } from './monitoring/_MonitoringPage';
 import { OnboardingPage } from './onboarding/_OnboardingPage';
 import { OverviewPage } from './dashboard/_OverviewPage';
 import { ProfilePage } from './profile/_ProfilePage';
+import { ScheduledTasksPage } from './scheduled-tasks/_ScheduledTasksPage';
 import { SettingsPage } from './settings/_SettingsPage';
 import { SharedVariablesPage } from './shared-variables/_SharedVariablesPage';
 import { ConnexionsPage } from './sources/_SourcesPage';
@@ -94,6 +95,7 @@ export function DomainPage({ bootstrap, route, onSwitchTeam }: DomainPageProps) 
                 <ConnexionsPage
                     legacyBaseUrl={bootstrap.migration.legacy_base_url}
                     githubAppUuid={extractGithubAppUuid(route.path)}
+                    permissions={bootstrap.permissions}
                 />
             );
         case 'destinations':
@@ -165,6 +167,8 @@ export function DomainPage({ bootstrap, route, onSwitchTeam }: DomainPageProps) 
                         </Card>
                     </>
                 );
+        case 'scheduled-tasks':
+            return <ScheduledTasksPage />;
         case 'not-found':
             return (
                 <>

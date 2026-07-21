@@ -29,7 +29,7 @@ describe('DatabaseWebhooksPanel', () => {
             return jsonResponse({ message: 'not found' }, 404);
         });
 
-        render(<DatabaseWebhooksPanel databaseUuid="db-1" />);
+        render(<DatabaseWebhooksPanel resourceUuid="db-1" />);
 
         await waitFor(() => {
             expect(screen.getByDisplayValue('https://example.test/api/v1/deploy?uuid=db-1&force=false')).toBeTruthy();

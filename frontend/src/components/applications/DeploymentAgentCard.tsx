@@ -6,7 +6,6 @@ import { AgentRunStatusBadge } from '../agents/AgentRunStatusBadge';
 import { DataState } from '../ui/DataState';
 import { DeploymentStatusIcon } from '../ui/DeploymentStatusIcon';
 import { domainApi, type DeploymentAgentCorrection, type DeploymentAgentRun } from '../../lib/domain-api';
-import { buildMonitoringQuotaNotice } from '../../lib/dispatch-policy-notice';
 import { formatDateTime } from '../../lib/application-config';
 import { agentDetailPath } from '../../lib/agent-routes';
 import { routeHref } from '../../lib/routes';
@@ -42,7 +41,6 @@ export function DeploymentAgentCard({ deploymentUuid, onSelectDeployment, pollWh
     );
     const monitoring = query.data?.data ?? null;
     const blockers = monitoring?.diagnostics?.blockers ?? [];
-    const quotaNotice = buildMonitoringQuotaNotice(monitoring?.agents, monitoring?.dispatch_policy);
     const hasActiveRun = monitoring?.agent_runs.some((run) => run.status === 'pending' || run.status === 'running') ?? false;
     const hasActiveSubagent = monitoring?.agent_runs.some((run) =>
         (run.subagent_runs ?? []).some((sub) => sub.status === 'pending' || sub.status === 'running'),
@@ -98,12 +96,6 @@ export function DeploymentAgentCard({ deploymentUuid, onSelectDeployment, pollWh
                             {monitoring.agents.enabled && !monitoring.agents.monitor_build && (
                                 <p class="rounded-xl border border-base-300 bg-base-200/60 px-3 py-2 text-xs text-base-content/65">
                                     Surveillance des builds désactivée.
-                                </p>
-                            )}
-
-                            {quotaNotice && (
-                                <p class="rounded-xl border border-info/30 bg-info/10 px-3 py-2 text-xs text-info">
-                                    {quotaNotice}
                                 </p>
                             )}
 

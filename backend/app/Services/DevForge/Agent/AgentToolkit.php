@@ -4,6 +4,7 @@ namespace App\Services\DevForge\Agent;
 
 use App\Models\AiAgent;
 use App\Models\AiAgentRun;
+use App\Models\AiAgentKeyRequest;
 use App\Models\Application;
 use App\Models\Team;
 use App\Services\DevForge\Agent\Tool\AgentCustomTools;
@@ -169,6 +170,18 @@ class AgentToolkit
                         'parameters' => ['type' => 'string', 'description' => 'JSON Schema des paramètres (optionnel)'],
                     ],
                     'required' => ['name', 'command_template'],
+                ],
+            ],
+            [
+                'name' => 'request_api_key',
+                'description' => 'Demande une clé API ou un token (ex: OPENAI_API_KEY, GITHUB_TOKEN) à l\'utilisateur. L\'agent sera suspendu jusqu\'à ce que la clé soit fournie.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'key_name' => ['type' => 'string', 'description' => 'Le nom de la variable d\'environnement (en MAJUSCULES)'],
+                        'reason' => ['type' => 'string', 'description' => 'Raison claire pour laquelle cette clé est nécessaire'],
+                    ],
+                    'required' => ['key_name', 'reason'],
                 ],
             ],
         ];
@@ -902,6 +915,10 @@ class AgentToolkit
                 (string) ($arguments['manager'] ?? 'auto'),
             ),
             'request_tool' => $this->requestTool($arguments),
+            'request_api_key' => $this->requestApiKey(
+                (string) ($arguments['key_name'] ?? ''),
+                (string) ($arguments['reason'] ?? '')
+            ),
             'list_github_apps' => $this->githubTools->listApps(),
             'list_github_repos' => $this->githubTools->listRepos((string) ($arguments['github_app_uuid'] ?? '')),
             'list_github_branches' => $this->githubTools->listBranches(
@@ -1608,6 +1625,30 @@ class AgentToolkit
             'registered' => true,
             'name' => $tool['name'],
             'message' => "Outil « {$tool['name']} » disponible immédiatement.",
+        ];
+    }
+
+    private function requestApiKey(string $keyName, string $reason): array
+    {
+        if ($keyName === '') {
+            return ['error' => 'Le paramètre key_name est obligatoire.'];
+        }
+
+        $request = AiAgentKeyRequest::create([
+            'team_id' => $this->team->id,
+            'agent_id' => $this->agent?->id,
+            'run_id' => $this->run->id,
+            'key_name' => $keyName,
+            'reason' => $reason,
+            'status' => 'pending',
+        ]);
+
+        $this->run->appendLog("Demande de clé API ({$keyName}) enregistrée en attente.");
+
+        return [
+            'status' => 'waiting_for_input',
+            'message' => "Demande pour la clé {$keyName} soumise à l'utilisateur. Le run va se mettre en pause jusqu'à ce qu'elle soit fournie.",
+            'request_uuid' => $request->uuid,
         ];
     }
 

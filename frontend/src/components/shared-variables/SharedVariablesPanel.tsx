@@ -34,6 +34,9 @@ type SharedVariablesPanelProps = {
     path: string;
     embedded?: boolean;
     canManage?: boolean;
+    forceScope?: Exclude<SharedVariableScopeTab, 'overview'>;
+    extraVariables?: SharedVariable[];
+    renderExtraActions?: (variable: SharedVariable) => preact.JSX.Element;
 };
 
 function variableFlags(variable: SharedVariable) {
@@ -116,11 +119,13 @@ function VariablesTable({
     canManage,
     onEdit,
     onDelete,
+    renderExtraActions,
 }: {
     variables: SharedVariable[];
     canManage: boolean;
     onEdit: (variable: SharedVariable) => void;
     onDelete: (variable: SharedVariable) => void;
+    renderExtraActions?: (variable: SharedVariable) => preact.JSX.Element;
 }) {
     return (
         <Table
@@ -156,14 +161,18 @@ function VariablesTable({
                         </td>
                         {canManage && (
                             <td>
-                                <div class="action-toolbar">
-                                    <button class="btn btn-ghost btn-xs" type="button" aria-label={`Modifier ${variable.key}`} onClick={() => onEdit(variable)}>
-                                        <Pencil class="size-3.5" aria-hidden />
-                                    </button>
-                                    <button class="btn btn-ghost btn-xs text-error" type="button" aria-label={`Supprimer ${variable.key}`} onClick={() => onDelete(variable)}>
-                                        <Trash2 class="size-3.5" aria-hidden />
-                                    </button>
-                                </div>
+                                {(variable as any).isExtra && renderExtraActions ? (
+                                    renderExtraActions(variable)
+                                ) : (
+                                    <div class="action-toolbar">
+                                        <button class="btn btn-ghost btn-xs" type="button" aria-label={`Modifier ${variable.key}`} onClick={() => onEdit(variable)}>
+                                            <Pencil class="size-3.5" aria-hidden />
+                                        </button>
+                                        <button class="btn btn-ghost btn-xs text-error" type="button" aria-label={`Supprimer ${variable.key}`} onClick={() => onDelete(variable)}>
+                                            <Trash2 class="size-3.5" aria-hidden />
+                                        </button>
+                                    </div>
+                                )}
                             </td>
                         )}
                     </tr>
@@ -173,8 +182,8 @@ function VariablesTable({
     );
 }
 
-export function SharedVariablesPanel({ path, embedded = false, canManage = false }: SharedVariablesPanelProps) {
-    const activeScope = parseSharedVariableScope(path);
+export function SharedVariablesPanel({ path, embedded = false, canManage = false, forceScope, extraVariables = [], renderExtraActions }: SharedVariablesPanelProps) {
+    const activeScope = forceScope || parseSharedVariableScope(path);
     const query = useApiQuery('shared-variables', () => domainApi.sharedVariables());
     const [search, setSearch] = useState('');
     const [createOpen, setCreateOpen] = useState(false);
@@ -206,8 +215,12 @@ export function SharedVariablesPanel({ path, embedded = false, canManage = false
             ];
         }
 
-        return grouped[activeScope] ?? [];
-    }, [activeScope, grouped]);
+        const base = grouped[activeScope] ?? [];
+        if (activeScope === 'team' && extraVariables.length > 0) {
+            return [...base, ...extraVariables];
+        }
+        return base;
+    }, [activeScope, grouped, extraVariables]);
 
     const filteredVariables = useMemo(() => {
         const normalized = search.trim().toLowerCase();
@@ -249,9 +262,11 @@ export function SharedVariablesPanel({ path, embedded = false, canManage = false
     return (
         <div class="grid gap-4">
             <div class="toolbar-row">
-                <p class="text-xs text-base-content/55">
-                    Variables d’équipe, de projet, d’environnement et de serveur pour l’équipe active.
-                </p>
+                {!forceScope && (
+                    <p class="text-xs text-base-content/55">
+                        Variables d’équipe, de projet, d’environnement et de serveur pour l’équipe active.
+                    </p>
+                )}
                 <ActionToolbar>
                     <button class="btn btn-ghost btn-sm" type="button" onClick={() => void reload()}>
                         <RefreshCw class="size-3.5" aria-hidden />
@@ -268,11 +283,13 @@ export function SharedVariablesPanel({ path, embedded = false, canManage = false
 
             {mutationError && <div class="alert alert-error min-h-8 py-1 text-xs" role="alert">{mutationError}</div>}
 
-            <Tabs
-                items={tabItems}
-                active={embedded && activeScope === 'overview' ? 'team' : activeScope}
-                onChange={(tabId) => navigateTo(sharedVariableScopePath(tabId as SharedVariableScopeTab))}
-            />
+            {!forceScope && (
+                <Tabs
+                    items={tabItems}
+                    active={embedded && activeScope === 'overview' ? 'team' : activeScope}
+                    onChange={(tabId) => navigateTo(sharedVariableScopePath(tabId as SharedVariableScopeTab))}
+                />
+            )}
 
             <DataState loading={query.loading} error={query.error} onRetry={() => void reload()}>
                 {activeScope === 'overview' && !embedded ? (
@@ -299,6 +316,7 @@ export function SharedVariablesPanel({ path, embedded = false, canManage = false
                                 canManage={canManage}
                                 onEdit={setEditVariable}
                                 onDelete={setDeleteVariable}
+                                renderExtraActions={renderExtraActions}
                             />
                         </DataState>
                     </>

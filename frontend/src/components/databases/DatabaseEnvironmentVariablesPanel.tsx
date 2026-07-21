@@ -54,8 +54,6 @@ function variableFlags(variable: ApplicationEnvironmentVariable): string[] {
 type Props = {
     resourceType?: EnvResourceType;
     resourceUuid?: string;
-    /** @deprecated utiliser resourceUuid */
-    databaseUuid?: string;
     canAct: boolean;
 };
 
@@ -151,11 +149,10 @@ function VariableValueCell({
 
 export function DatabaseEnvironmentVariablesPanel({
     resourceType = 'databases',
-    resourceUuid,
-    databaseUuid,
+    resourceUuid = '',
     canAct,
 }: Props) {
-    const uuid = resourceUuid ?? databaseUuid ?? '';
+    const uuid = resourceUuid;
     const resourceLabel = resourceType === 'services' ? 'ce service' : 'cette base de données';
     const caption = resourceType === 'services' ? 'Variables du service' : 'Variables de la base';
 

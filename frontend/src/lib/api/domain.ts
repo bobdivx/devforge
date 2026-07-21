@@ -385,6 +385,30 @@ export type InstanceUpdatesUpdateInput = {
     update_check_frequency?: string | null;
 };
 
+export type InstanceBackupSettings = {
+    database: {
+        uuid: string;
+        name: string;
+        description: string | null;
+        postgres_user: string;
+        postgres_password?: string;
+        status: string;
+    } | null;
+    backup: {
+        uuid: string;
+        enabled: boolean;
+        frequency: string;
+    } | null;
+    is_server_functional: boolean;
+};
+
+export type InstanceBackupDatabaseUpdateInput = {
+    name: string;
+    description?: string | null;
+    postgres_user: string;
+    postgres_password?: string;
+};
+
 export type OauthProviderSettings = {
     id: number;
     provider: string;
@@ -442,6 +466,67 @@ export type NotificationChannelUpdateInput = {
     events?: Record<string, boolean>;
     enabled?: boolean;
     credentials?: NotificationChannelCredentials;
+};
+
+export type ScheduledJobExecutionLog = {
+    id: number;
+    type: 'task' | 'backup' | 'cleanup';
+    status: string;
+    resource_name: string;
+    resource_type: string | null;
+    server_name: string;
+    server_id: number;
+    team_id: number | null;
+    created_at: string;
+    finished_at: string | null;
+    message: string | null;
+    size: number | null;
+};
+
+export type ScheduledJobSkipLog = {
+    timestamp: string;
+    type: string;
+    reason: string;
+    team_id: number | null;
+    context: Record<string, any>;
+    link: string | null;
+    resource_name: string | null;
+};
+
+export type ScheduledJobManagerRun = {
+    timestamp: string;
+    message: string;
+    duration_ms: number | null;
+    dispatched: number | null;
+    skipped: number | null;
+};
+
+export type ScheduledJobDefinition = {
+    id: number;
+    uuid: string;
+    type: 'task' | 'backup';
+    name: string;
+    command: string | null;
+    frequency: string;
+    enabled: boolean;
+    resource_name: string;
+    resource_type: string;
+    resource_uuid?: string;
+    project_name?: string;
+    environment_name?: string;
+    link: string | null;
+};
+
+export type ScheduledJobsData = {
+    executions: ScheduledJobExecutionLog[];
+    skips: {
+        logs: ScheduledJobSkipLog[];
+        totalCount: number;
+        hasPrev: boolean;
+        hasNext: boolean;
+        currentPage: number;
+    };
+    managerRuns: ScheduledJobManagerRun[];
 };
 
 export type SharedVariable = {
@@ -1622,7 +1707,22 @@ async function mutate<T>(path: string, init: RequestInit, timeoutMs = 20_000): P
 /** SSH disk / Docker cleanup calls can exceed the default 20 s client timeout. */
 const STORAGE_API_TIMEOUT_MS = 120_000;
 
+export interface AgentKeyRequest {
+    uuid: string;
+    key_name: string;
+    reason: string | null;
+    status: string;
+    agent?: {
+        name: string;
+    };
+}
+
 export const domainApi = {
+    agentKeyRequests: () => apiFetch<AgentKeyRequest[]>(`${API_BASE}/agent-key-requests`),
+    fulfillAgentKeyRequest: (uuid: string, value: string) => mutate<{message: string}>(`/agent-key-requests/${encodeURIComponent(uuid)}/fulfill`, {
+        method: 'POST',
+        body: JSON.stringify({ value }),
+    }),
     overview: () => apiFetch<ApiResponse<Overview>>(`${API_BASE}/overview`),
     projects: () => apiFetch<ApiResponse<Project[]>>(`${API_BASE}/projects`),
     project: (uuid: string) => apiFetch<ApiResponse<Project>>(`${API_BASE}/projects/${encodeURIComponent(uuid)}`),
@@ -1647,9 +1747,9 @@ export const domainApi = {
     deleteEnvironment: (projectUuid: string, uuid: string) => mutate<void>(`/projects/${encodeURIComponent(projectUuid)}/environments/${encodeURIComponent(uuid)}`, { method: 'DELETE' }),
     coreResources: (type?: CoreResourceType) => apiFetch<ApiListResponse<CoreResource>>(`${API_BASE}/core/${type ?? 'resources'}`),
     coreResource: (type: CoreResourceType, uuid: string) => apiFetch<ApiResponse<CoreResource>>(`${API_BASE}/core/${type}/${encodeURIComponent(uuid)}`),
-    coreAction: (type: Exclude<CoreResourceType, 'servers'>, uuid: string, action: CoreAction) => mutate<ApiResponse<CoreActionResult>>(`/core/${type}/${encodeURIComponent(uuid)}/${action}`, {
+    coreAction: (type: Exclude<CoreResourceType, 'servers'>, uuid: string, action: CoreAction, payload?: { force?: boolean }) => mutate<ApiResponse<CoreActionResult>>(`/core/${type}/${encodeURIComponent(uuid)}/${action}`, {
         method: 'POST',
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, ...payload }),
     }),
     deployments: (page = 1, applicationUuid?: string, perPage = 25) => {
         const params = new URLSearchParams({
@@ -1727,8 +1827,17 @@ export const domainApi = {
     ),
     checkUpdatesSettings: () => mutate<ApiResponse<InstanceSettings>>('/settings/updates/check', {
         method: 'POST',
-        body: JSON.stringify({}),
     }),
+    instanceBackupSettings: () => apiFetch<ApiResponse<InstanceBackupSettings>>(`${API_BASE}/settings/backup`),
+    initInstanceBackupSettings: () => mutate<ApiResponse<InstanceBackupSettings>>('/settings/backup/init', {
+        method: 'POST',
+    }),
+    updateInstanceBackupDatabase: (input: InstanceBackupDatabaseUpdateInput) => mutate<ApiResponse<InstanceBackupSettings>>(
+        '/settings/backup/database',
+        { method: 'PUT', body: JSON.stringify(input) },
+    ),
+    scheduledJobs: (type = 'all', date = 'last_24h', skip = 0) => apiFetch<ApiResponse<ScheduledJobsData>>(`${API_BASE}/settings/scheduled-jobs?type=${type}&date=${date}&skip=${skip}`),
+    scheduledJobsDefinitions: () => apiFetch<ApiResponse<{ definitions: ScheduledJobDefinition[] }>>(`${API_BASE}/settings/scheduled-jobs/definitions`),
     oauthSettings: () => apiFetch<ApiResponse<OauthProviderSettings[]>>(`${API_BASE}/settings/oauth`),
     updateOauthSettings: (provider: string, input: OauthProviderUpdateInput) => mutate<ApiResponse<OauthProviderSettings>>(
         `/settings/oauth/${encodeURIComponent(provider)}`,

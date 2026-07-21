@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
+import { CronInput } from '../ui/CronInput';
 import { RefreshCw, Trash2 } from 'lucide-preact';
 import { Card } from '../ui/Card';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -320,15 +321,12 @@ export function ServerStorageCard({ server, canManage, onUpdated }: Props) {
             {expanded && (
                 <div class="mt-4 grid gap-4 border-t border-base-300/70 pt-4">
                     <div class="grid gap-3 md:grid-cols-2">
-                        <label class="form-control">
-                            <span class="label-text text-xs font-medium">Fréquence nettoyage Docker (cron)</span>
-                            <input
-                                class="input input-bordered input-sm"
-                                disabled={!canManage}
-                                value={form.docker_cleanup_frequency}
-                                onInput={(event) => setForm({ ...form, docker_cleanup_frequency: event.currentTarget.value })}
-                            />
-                        </label>
+                        <CronInput
+                            id={`docker-cleanup-${server.uuid}`}
+                            label="Fréquence nettoyage Docker"
+                            value={form.docker_cleanup_frequency}
+                            onChange={(val) => setForm({ ...form, docker_cleanup_frequency: val })}
+                        />
                         <label class="form-control">
                             <span class="label-text text-xs font-medium">Seuil nettoyage (%)</span>
                             <input
@@ -353,15 +351,12 @@ export function ServerStorageCard({ server, canManage, onUpdated }: Props) {
                                 onInput={(event) => setForm({ ...form, server_disk_usage_notification_threshold: Number(event.currentTarget.value) })}
                             />
                         </label>
-                        <label class="form-control">
-                            <span class="label-text text-xs font-medium">Fréquence surveillance disque (cron)</span>
-                            <input
-                                class="input input-bordered input-sm"
-                                disabled={!canManage}
-                                value={form.server_disk_usage_check_frequency}
-                                onInput={(event) => setForm({ ...form, server_disk_usage_check_frequency: event.currentTarget.value })}
-                            />
-                        </label>
+                        <CronInput
+                            id={`disk-check-${server.uuid}`}
+                            label="Fréquence surveillance disque"
+                            value={form.server_disk_usage_check_frequency}
+                            onChange={(val) => setForm({ ...form, server_disk_usage_check_frequency: val })}
+                        />
                     </div>
 
                     <div class="grid gap-2 sm:grid-cols-2">

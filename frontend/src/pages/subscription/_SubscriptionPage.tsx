@@ -57,10 +57,8 @@ export function SubscriptionPage({ bootstrap }: SubscriptionPageProps) {
                 </dl>
             </Card>
             <LegacyEditBanner
-                legacyBaseUrl={bootstrap.migration.legacy_base_url}
-                legacyPath="/subscription"
-                title="Facturation Stripe"
-                description="Le changement de plan, la quantité de serveurs et les moyens de paiement restent gérés via le portail Stripe Coolify Cloud."
+                title="Abonnement"
+                description="La gestion des abonnements Cloud est en cours d'intégration dans DevForge."
             />
         </div>
     );

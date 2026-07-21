@@ -1,8 +1,10 @@
 import { AiProvidersSettings } from '../../components/agents/AiProvidersSettings';
-import { InstanceSettingsPanels, LegacyOnlySettingsPanel, OauthSettingsPanel } from '../../components/settings/InstanceSettingsPanels';
+import { InstanceSettingsPanels, OauthSettingsPanel } from '../../components/settings/InstanceSettingsPanels';
 import { NotificationsSettingsPanel } from '../../components/settings/NotificationsSettingsPanel';
+import { InstanceBackupSettingsPanel } from '../../components/settings/InstanceBackupSettingsPanel';
 import { ProfileSettingsPanel } from '../../components/settings/ProfileSettingsPanel';
 import { SettingsNav } from '../../components/settings/SettingsNav';
+
 import { TeamSettingsPanel } from '../../components/settings/TeamSettingsPanel';
 import { SharedVariablesPanel } from '../../components/shared-variables/SharedVariablesPanel';
 import { S3StoragesSettings } from '../../components/storages/S3StoragesSettings';
@@ -66,23 +68,7 @@ export function SettingsPage({
             case 'updates':
                 return <InstanceSettingsPanels section="updates" permissions={permissions} legacyBaseUrl={legacyBaseUrl} />;
             case 'backup':
-                return (
-                    <LegacyOnlySettingsPanel
-                        title="Sauvegarde de l’instance"
-                        description="Configurez les sauvegardes PostgreSQL de l’instance Coolify."
-                        legacyPath="/settings/backup"
-                        legacyBaseUrl={legacyBaseUrl}
-                    />
-                );
-            case 'scheduled-jobs':
-                return (
-                    <LegacyOnlySettingsPanel
-                        title="Tâches planifiées"
-                        description="Consultez l’historique des sauvegardes, nettoyages Docker et tâches planifiées."
-                        legacyPath="/settings/scheduled-jobs"
-                        legacyBaseUrl={legacyBaseUrl}
-                    />
-                );
+                return <InstanceBackupSettingsPanel />;
             case 'notifications':
                 return (
                     <NotificationsSettingsPanel
@@ -94,7 +80,7 @@ export function SettingsPage({
             case 'variables':
                 return <SharedVariablesPanel path="/settings/variables" embedded canManage={permissions.manage_team} />;
             case 'security':
-                return <SecurityPage embedded path={path} legacyBaseUrl={legacyBaseUrl} />;
+                return <SecurityPage embedded path={path} />;
             case 'storages':
                 return (
                     <div class="grid gap-4">

@@ -17,7 +17,6 @@ describe('onglets paramètres DevForge', () => {
 
         const adminTabs = visibleSettingsTabs(true, true);
         expect(adminTabs.some(({ id }) => id === 'instance')).toBe(true);
-        expect(adminTabs.some(({ id }) => id === 'scheduled-jobs')).toBe(true);
         expect(adminTabs.some(({ id }) => id === 'ai')).toBe(true);
     });
 

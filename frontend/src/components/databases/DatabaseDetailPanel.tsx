@@ -1,5 +1,6 @@
 import { ArrowLeft, Copy, Download, Eye, EyeOff, Link2, Play, Plus, RefreshCw, Trash2, Upload } from 'lucide-preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { CronInput } from '../ui/CronInput';
 import { domainApi, type CoreAction, type DatabaseApplicationConnection, type DatabaseBackup, type DatabaseBackupInput } from '../../lib/domain-api';
 import {
     formatLibsqlImportBytes,
@@ -37,12 +38,7 @@ const actionLabels: Record<CoreAction, string> = {
     deploy: 'Déployer',
 };
 
-const frequencyPresets = [
-    { label: 'Quotidien', value: '0 0 * * *' },
-    { label: 'Hebdomadaire', value: '0 0 * * 0' },
-    { label: 'Mensuel', value: '0 0 1 * *' },
-    { label: 'Horaire', value: '0 * * * *' },
-];
+import { formatCron } from '../../lib/cron-utils';
 
 const importUploadWeight = 30;
 const importProcessingPhases: DatabaseImportPhase[] = ['transfer', 'stopping', 'importing', 'restarting'];
@@ -580,12 +576,18 @@ export function DatabaseDetailPanel({
                     <ArrowLeft class="size-3.5" aria-hidden />
                     Retour à la liste
                 </button>
-                <Tabs
-                    active={activeTab}
-                    items={tabItems}
-                    onChange={(tabId) => selectTab(tabId as DatabaseDetailTabId)}
-                />
             </div>
+
+            <div class="flex flex-col lg:flex-row gap-4 lg:gap-6 mt-4">
+                <div class="lg:w-56 shrink-0">
+                    <Tabs
+                        active={activeTab}
+                        items={tabItems}
+                        variant="sidebar"
+                        onChange={(tabId) => selectTab(tabId as DatabaseDetailTabId)}
+                    />
+                </div>
+                <div class="min-w-0 flex-1 grid gap-4">
 
             <DataState loading={resourceQuery.loading} error={resourceQuery.error} onRetry={() => void resourceQuery.reload()}>
                 {resource && activeTab === 'overview' && (
@@ -809,7 +811,7 @@ export function DatabaseDetailPanel({
 
                 {resource && activeTab === 'variables' && (
                     <DatabaseEnvironmentVariablesPanel
-                        databaseUuid={resource.uuid}
+                        resourceUuid={resource.uuid}
                         canAct={canAct}
                     />
                 )}
@@ -830,7 +832,7 @@ export function DatabaseDetailPanel({
                 )}
 
                 {resource && activeTab === 'webhooks' && (
-                    <DatabaseWebhooksPanel databaseUuid={resource.uuid} />
+                    <DatabaseWebhooksPanel resourceUuid={resource.uuid} />
                 )}
 
                 {resource && activeTab === 'logs' && (
@@ -867,7 +869,7 @@ export function DatabaseDetailPanel({
                                                     <div class="flex flex-wrap items-start justify-between gap-3">
                                                         <div>
                                                             <div class="flex flex-wrap items-center gap-2">
-                                                                <h3 class="font-semibold">{backup.frequency}</h3>
+                                                                <h3 class="font-semibold">{formatCron(backup.frequency)}</h3>
                                                                 <StatusBadge label={backup.enabled ? 'Activée' : 'Désactivée'} tone={backup.enabled ? 'success' : 'neutral'} />
                                                                 {backup.save_s3 && <StatusBadge label="S3" tone="success" />}
                                                             </div>
@@ -942,6 +944,8 @@ export function DatabaseDetailPanel({
                     </section>
                 )}
             </DataState>
+            </div>
+            </div>
 
             {pendingAction && resource && (
                 <ConfirmDialog
@@ -967,26 +971,10 @@ export function DatabaseDetailPanel({
                         void submitBackup();
                     }}
                 >
-                    <label class="grid gap-1 text-sm">
-                        <span class="font-medium">Fréquence</span>
-                        <select
-                            class="select select-bordered rounded-xl"
-                            value={backupForm.frequency}
-                            onChange={(e) => setBackupForm({ ...backupForm, frequency: e.currentTarget.value })}
-                        >
-                            {frequencyPresets.map((preset) => (
-                                <option value={preset.value} key={preset.value}>{preset.label}</option>
-                            ))}
-                        </select>
-                    </label>
-                    <label class="grid gap-1 text-sm">
-                        <span class="font-medium">Expression cron personnalisée</span>
-                        <input
-                            class="input input-bordered rounded-xl font-mono text-xs"
-                            value={backupForm.frequency}
-                            onInput={(e) => setBackupForm({ ...backupForm, frequency: e.currentTarget.value })}
-                        />
-                    </label>
+                    <CronInput
+                        value={backupForm.frequency}
+                        onChange={(val) => setBackupForm({ ...backupForm, frequency: val })}
+                    />
                     <label class="flex items-center gap-2 text-sm">
                         <input type="checkbox" class="checkbox checkbox-sm" checked={backupForm.enabled} onChange={(e) => setBackupForm({ ...backupForm, enabled: e.currentTarget.checked })} />
                         Planification activée
@@ -1030,7 +1018,7 @@ export function DatabaseDetailPanel({
                 <ConfirmDialog
                     open
                     title="Supprimer la planification"
-                    message={`Supprimer la planification « ${pendingDeleteBackup.frequency} » et toutes ses exécutions ?`}
+                    message={`Supprimer la planification « ${pendingDeleteBackup ? formatCron(pendingDeleteBackup.frequency) : ''} » et toutes ses exécutions ?`}
                     tone="danger"
                     loading={backupSubmitting}
                     onCancel={() => setPendingDeleteBackup(null)}

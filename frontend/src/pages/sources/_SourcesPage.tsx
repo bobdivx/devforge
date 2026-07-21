@@ -1,9 +1,10 @@
-import { ExternalLink, KeyRound, Package, RefreshCw, Trash2 } from 'lucide-preact';
-import { useState } from 'preact/hooks';
+import { ExternalLink, KeyRound, Trash2, Pencil, Bot } from 'lucide-preact';
+import { useState, useMemo } from 'preact/hooks';
+import { Modal } from '../../components/ui/Modal';
 import { PageHeader } from '../../components/PageHeader';
 import { Card } from '../../components/ui/Card';
-import { DataState } from '../../components/ui/DataState';
-import { LegacyEditBanner } from '../../components/migration/LegacyEditBanner';
+import { SharedVariablesPanel } from '../../components/shared-variables/SharedVariablesPanel';
+import type { BootstrapPermissions } from '../../lib/bootstrap';
 import { domainApi, type GithubAppSummary } from '../../lib/domain-api';
 import { legacyCoolifyUrl } from '../../lib/migration';
 import { useApiQuery } from '../../lib/use-api-query';
@@ -11,6 +12,7 @@ import { useApiQuery } from '../../lib/use-api-query';
 type ConnexionsPageProps = {
     legacyBaseUrl?: string;
     githubAppUuid?: string | null;
+    permissions?: BootstrapPermissions;
 };
 
 function accountLabel(app: GithubAppSummary): string {
@@ -36,12 +38,16 @@ function accountSubtitle(app: GithubAppSummary): string {
     return parts.join(' · ');
 }
 
-export function ConnexionsPage({ legacyBaseUrl = '', githubAppUuid = null }: ConnexionsPageProps) {
+export function ConnexionsPage({ legacyBaseUrl = '', permissions }: ConnexionsPageProps) {
     const apps = useApiQuery('github-apps', () => domainApi.githubApps());
+    const agentRequests = useApiQuery('agent-key-requests', () => domainApi.agentKeyRequests());
+
     const [tokenDrafts, setTokenDrafts] = useState<Record<string, string>>({});
+    const [requestDrafts, setRequestDrafts] = useState<Record<string, string>>({});
     const [savingUuid, setSavingUuid] = useState<string | null>(null);
     const [feedback, setFeedback] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [editingGithubApp, setEditingGithubApp] = useState<GithubAppSummary | null>(null);
 
     async function savePackagesToken(app: GithubAppSummary, clear = false) {
         setSavingUuid(app.uuid);
@@ -57,6 +63,7 @@ export function ConnexionsPage({ legacyBaseUrl = '', githubAppUuid = null }: Con
             setFeedback(result.message ?? (clear ? 'Token supprimé.' : 'Token enregistré.'));
             setTokenDrafts((current) => ({ ...current, [app.uuid]: '' }));
             await apps.reload();
+            if (!clear) setEditingGithubApp(null);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Enregistrement impossible.');
         } finally {
@@ -64,149 +71,165 @@ export function ConnexionsPage({ legacyBaseUrl = '', githubAppUuid = null }: Con
         }
     }
 
+    async function fulfillAgentRequest(uuid: string) {
+        const value = (requestDrafts[uuid] ?? '').trim();
+        if (!value) return;
+
+        setSavingUuid(uuid);
+        setFeedback(null);
+        setError(null);
+        try {
+            const result = await domainApi.fulfillAgentKeyRequest(uuid, value);
+            setFeedback(result.message);
+            setRequestDrafts((current) => ({ ...current, [uuid]: '' }));
+            await agentRequests.reload();
+            // Also reload the shared variables since we just added one
+            window.dispatchEvent(new CustomEvent('coolify-reload-shared-variables'));
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Enregistrement impossible.');
+        } finally {
+            setSavingUuid(null);
+        }
+    }
+
+    const extraVariables = useMemo(() => {
+        return (apps.data?.data ?? []).map((app) => ({
+            id: -Math.floor(Math.random() * 1000000),
+            key: `github_pat_${app.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+            value: app.has_packages_token ? '***' : '',
+            comment: accountSubtitle(app),
+            scope: 'team',
+            is_multiline: false,
+            is_literal: true,
+            is_shown_once: false,
+            isExtra: true,
+            originalApp: app,
+        } as any));
+    }, [apps.data?.data]);
+
     return (
         <div class="grid gap-5">
             <PageHeader
-                title="Connexions"
-                description="Comptes liés, tokens et clés API utilisés au build et au déploiement (GitHub Packages, npm, etc.)."
-            />
-            <LegacyEditBanner
-                legacyBaseUrl={legacyBaseUrl}
-                legacyPath={githubAppUuid ? `/source/github/${githubAppUuid}` : '/sources'}
-                description="Créer ou modifier une GitHub App reste dans Coolify (connexion OAuth / permissions)."
+                title="Tokens & Clés API"
+                description="Gestion centralisée de vos tokens d'accès, clés API pour vos agents et identifiants de déploiement."
             />
             {(feedback || error) && (
                 <p class={`text-sm ${error ? 'text-error' : 'text-success'}`}>{error ?? feedback}</p>
             )}
 
-            <Card title="GitHub" eyebrow="Dépôts & Packages">
-                <p class="mb-3 text-xs text-base-content/55">
-                    Compte GitHub de l’équipe. Le token Packages (PAT <code class="font-mono">read:packages</code>)
-                    est injecté au build comme <code class="font-mono">NODE_AUTH_TOKEN</code> pour
-                    {' '}<code class="font-mono">npm.pkg.github.com</code>.
-                </p>
-                <div class="card-toolbar mb-3">
-                    <button class="btn btn-ghost btn-sm" type="button" onClick={() => void apps.reload()}>
-                        <RefreshCw class="size-3.5" aria-hidden />
-                        Actualiser
-                    </button>
-                </div>
-                <DataState loading={apps.loading} error={apps.error} empty={(apps.data?.data.length ?? 0) === 0} emptyMessage="Aucun compte GitHub connecté." onRetry={() => void apps.reload()}>
-                    <div class="grid gap-3">
-                        {(apps.data?.data ?? []).map((app) => (
-                            <div
-                                class={`rounded-2xl border p-4 shadow-sm ${
-                                    githubAppUuid === app.uuid ? 'border-primary/40 ring-1 ring-primary/15' : 'border-base-300/70'
-                                }`}
-                                key={app.uuid}
-                            >
-                                <div class="flex items-start justify-between gap-3">
-                                    <div class="flex min-w-0 items-start gap-3">
-                                        {app.account_avatar_url ? (
-                                            <img
-                                                src={app.account_avatar_url}
-                                                alt=""
-                                                class="size-10 shrink-0 rounded-full object-cover"
-                                                width={40}
-                                                height={40}
-                                            />
-                                        ) : (
-                                            <div class="flex size-10 shrink-0 items-center justify-center rounded-full bg-base-200 text-sm font-semibold">
-                                                {(accountLabel(app).replace('@', '').slice(0, 1) || 'G').toUpperCase()}
-                                            </div>
-                                        )}
-                                        <div class="min-w-0">
-                                            <p class="truncate text-sm font-semibold">{accountLabel(app)}</p>
-                                            <p class="truncate text-xs text-base-content/55">{accountSubtitle(app)}</p>
-                                            <p class="mt-1 text-xs text-base-content/60">
-                                                Token Packages : {app.has_packages_token ? 'enregistré' : 'absent'}
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <div class="flex shrink-0 gap-1">
-                                        {app.account_html_url && (
-                                            <a
-                                                class="btn btn-ghost btn-sm"
-                                                href={app.account_html_url}
-                                                rel="noreferrer"
-                                                target="_blank"
-                                                title="Ouvrir le profil GitHub"
-                                            >
-                                                <ExternalLink class="size-4" aria-hidden />
-                                            </a>
-                                        )}
-                                        <a
-                                            class="btn btn-ghost btn-sm"
-                                            href={legacyCoolifyUrl(legacyBaseUrl, `/source/github/${app.uuid}`)}
-                                            rel="noreferrer"
-                                            target="_blank"
-                                            title="Configurer dans DevForge"
-                                        >
-                                            DevForge
-                                        </a>
-                                    </div>
+            {agentRequests.data && agentRequests.data.length > 0 && (
+                <Card title="Demandes d'agents" eyebrow="Action Requise" class="border-warning bg-warning/5">
+                    <p class="mb-4 text-xs text-base-content/70">
+                        Certains agents IA sont en pause car ils ont besoin de variables ou clés API pour continuer leur travail.
+                    </p>
+                    <div class="grid gap-4">
+                        {agentRequests.data.map((req) => (
+                            <div key={req.uuid} class="flex flex-col gap-2 rounded-lg border border-base-300 bg-base-100 p-4">
+                                <div class="flex items-center gap-2">
+                                    <Bot class="size-4 text-primary" aria-hidden />
+                                    <span class="font-semibold">{req.agent?.name ?? 'Agent'}</span>
+                                    <span class="text-xs text-base-content/60">a besoin de</span>
+                                    <code class="font-mono text-sm">{req.key_name}</code>
                                 </div>
-                                <div class="mt-3 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+                                {req.reason && <p class="text-xs text-base-content/70">{req.reason}</p>}
+                                <div class="mt-2 flex gap-2">
                                     <input
-                                        class="input input-bordered input-sm w-full font-mono"
+                                        class="input input-sm input-bordered flex-1 font-mono"
                                         type="password"
-                                        autocomplete="off"
-                                        placeholder="ghp_… (PAT read:packages)"
-                                        value={tokenDrafts[app.uuid] ?? ''}
-                                        onInput={(event) => {
-                                            const value = (event.target as HTMLInputElement).value;
-                                            setTokenDrafts((current) => ({ ...current, [app.uuid]: value }));
-                                        }}
+                                        placeholder={`Valeur pour ${req.key_name}`}
+                                        value={requestDrafts[req.uuid] ?? ''}
+                                        onInput={(e) => setRequestDrafts(cur => ({ ...cur, [req.uuid]: (e.target as HTMLInputElement).value }))}
+                                        onKeyDown={(e) => e.key === 'Enter' && fulfillAgentRequest(req.uuid)}
                                     />
                                     <button
                                         class="btn btn-primary btn-sm"
-                                        type="button"
-                                        disabled={savingUuid === app.uuid}
-                                        onClick={() => void savePackagesToken(app)}
+                                        disabled={savingUuid === req.uuid || !(requestDrafts[req.uuid]?.trim())}
+                                        onClick={() => void fulfillAgentRequest(req.uuid)}
                                     >
                                         <KeyRound class="size-3.5" aria-hidden />
-                                        Enregistrer
-                                    </button>
-                                    <button
-                                        class="btn btn-ghost btn-sm"
-                                        type="button"
-                                        disabled={savingUuid === app.uuid || !app.has_packages_token}
-                                        onClick={() => void savePackagesToken(app, true)}
-                                    >
-                                        <Trash2 class="size-3.5" aria-hidden />
-                                        Effacer
+                                        Fournir
                                     </button>
                                 </div>
                             </div>
                         ))}
                     </div>
-                </DataState>
-            </Card>
+                </Card>
+            )}
 
-            <Card title="npm / registries privés" eyebrow="Build">
-                <div class="flex items-start gap-3 text-sm text-base-content/70">
-                    <Package class="mt-0.5 size-5 shrink-0 text-base-content/40" aria-hidden />
-                    <div class="grid gap-2">
-                        <p>
-                            Pour GitHub Packages, utilise le token ci-dessus (recommandé) : Coolify injecte
-                            {' '}<code class="font-mono text-xs">NODE_AUTH_TOKEN</code> au build.
-                        </p>
-                        <p>
-                            Alternative par application : variable d’environnement de build
-                            {' '}<code class="font-mono text-xs">NODE_AUTH_TOKEN</code> ou
-                            {' '}<code class="font-mono text-xs">NPM_TOKEN</code> sur l’app concernée.
-                        </p>
-                        <ol class="mt-1 list-decimal space-y-1 pl-4 text-xs text-base-content/60">
-                            <li>
-                                Créer un PAT GitHub (classic) avec scope{' '}
-                                <code class="font-mono">read:packages</code>.
-                            </li>
-                            <li>L’enregistrer dans la section GitHub de cette page.</li>
-                            <li>Relancer le déploiement de l’application.</li>
-                        </ol>
-                    </div>
+            <Card title="Clés API d'Équipe" eyebrow="Agents & Scripts">
+                <p class="mb-4 text-xs text-base-content/55">
+                    Variables et clés d'API (OpenAI, Stripe, etc.) accessibles par tous vos agents IA et partagées au sein de l'équipe.
+                </p>
+                <div class="-m-1">
+                    <SharedVariablesPanel
+                        path="team"
+                        forceScope="team"
+                        embedded={true}
+                        canManage={permissions?.manage_team ?? false}
+                        extraVariables={extraVariables}
+                        renderExtraActions={(variable: any) => (
+                            <div class="action-toolbar">
+                                {variable.originalApp.account_html_url && (
+                                    <a class="btn btn-ghost btn-xs" href={variable.originalApp.account_html_url} target="_blank" rel="noreferrer" title="Ouvrir le profil GitHub" aria-label="Ouvrir profil GitHub">
+                                        <ExternalLink class="size-3.5" aria-hidden />
+                                    </a>
+                                )}
+                                <a class="btn btn-ghost btn-xs" href={legacyCoolifyUrl(legacyBaseUrl, `/source/github/${variable.originalApp.uuid}`)} target="_blank" rel="noreferrer" title="Configurer l'App GitHub" aria-label="Configurer l'App GitHub">
+                                    <ExternalLink class="size-3.5" aria-hidden />
+                                </a>
+                                <button class="btn btn-ghost btn-xs" type="button" aria-label="Modifier le PAT GitHub" onClick={() => {
+                                    setEditingGithubApp(variable.originalApp);
+                                    setTokenDrafts((current) => ({ ...current, [variable.originalApp.uuid]: '' }));
+                                }}>
+                                    <Pencil class="size-3.5" aria-hidden />
+                                </button>
+                                <button class="btn btn-ghost btn-xs text-error" type="button" disabled={!variable.originalApp.has_packages_token} aria-label="Effacer le PAT GitHub" onClick={() => void savePackagesToken(variable.originalApp, true)}>
+                                    <Trash2 class="size-3.5" aria-hidden />
+                                </button>
+                            </div>
+                        )}
+                    />
                 </div>
             </Card>
+
+            <Modal title="Token GitHub (Packages)" open={!!editingGithubApp} onClose={() => setEditingGithubApp(null)}>
+                <div class="p-6">
+                    <h3 class="text-lg font-bold">Token GitHub (Packages)</h3>
+                    <p class="mt-2 text-sm text-base-content/70">
+                        Saisissez le Personal Access Token (PAT) avec la permission <code class="font-mono text-xs">read:packages</code> pour le compte {editingGithubApp ? accountLabel(editingGithubApp) : ''}.
+                    </p>
+                    <div class="mt-4">
+                        <input
+                            class="input input-bordered w-full font-mono text-sm"
+                            type="password"
+                            autocomplete="off"
+                            placeholder="ghp_… (PAT read:packages)"
+                            value={editingGithubApp ? (tokenDrafts[editingGithubApp.uuid] ?? '') : ''}
+                            onInput={(event) => {
+                                if (!editingGithubApp) return;
+                                const value = (event.target as HTMLInputElement).value;
+                                setTokenDrafts((current) => ({ ...current, [editingGithubApp.uuid]: value }));
+                            }}
+                        />
+                    </div>
+                    <div class="modal-action mt-6">
+                        <button class="btn btn-ghost" type="button" onClick={() => setEditingGithubApp(null)}>Annuler</button>
+                        <button
+                            class="btn btn-primary"
+                            type="button"
+                            disabled={!editingGithubApp || savingUuid === editingGithubApp?.uuid}
+                            onClick={() => {
+                                if (editingGithubApp) void savePackagesToken(editingGithubApp);
+                            }}
+                        >
+                            <KeyRound class="size-3.5" aria-hidden />
+                            Enregistrer
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+
+
         </div>
     );
 }

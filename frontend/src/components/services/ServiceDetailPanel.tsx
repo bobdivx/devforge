@@ -118,11 +118,16 @@ export function ServiceDetailPanel({
                 </button>
             </div>
 
-            <Tabs
-                active={activeTab}
-                items={serviceTabs}
-                onChange={(tabId) => selectTab(tabId as ServiceDetailTabId)}
-            />
+            <div class="flex flex-col lg:flex-row gap-4 lg:gap-6 mt-4">
+                <div class="lg:w-56 shrink-0">
+                    <Tabs
+                        active={activeTab}
+                        items={serviceTabs}
+                        variant="sidebar"
+                        onChange={(tabId) => selectTab(tabId as ServiceDetailTabId)}
+                    />
+                </div>
+                <div class="min-w-0 flex-1 grid gap-4">
 
             <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
                 {resource && activeTab === 'overview' && (
@@ -218,6 +223,8 @@ export function ServiceDetailPanel({
                     />
                 )}
             </DataState>
+            </div>
+            </div>
 
             {resource && pendingAction && (
                 <ConfirmDialog

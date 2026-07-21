@@ -14,6 +14,7 @@ import {
     CreditCard,
     Cloud,
     Wrench,
+    CalendarClock,
     type LucideIcon,
 } from 'lucide-preact';
 
@@ -79,6 +80,8 @@ export type PageKey =
 
     | 'agent-detail'
 
+    | 'scheduled-tasks'
+
     | 'not-found';
 
 
@@ -105,7 +108,7 @@ export const appRoutes: AppRoute[] = [
 
     { path: '/applications', label: 'Applications', description: 'Configuration et déploiements.', icon: Boxes, page: 'applications' },
 
-    { path: '/connexions', label: 'Connexions', description: 'GitHub, tokens Packages, clés API et secrets de build.', icon: Plug, page: 'connexions' },
+    { path: '/connexions', label: 'Tokens & Clés API', description: 'GitHub, tokens Packages, clés API et secrets de build.', icon: Plug, page: 'connexions' },
 
     { path: '/databases', label: 'Bases de données', description: 'Instances, sauvegardes et métriques.', icon: Database, page: 'databases' },
 
@@ -116,6 +119,8 @@ export const appRoutes: AppRoute[] = [
     { path: '/storage', label: 'Stockage', description: 'Espace disque, nettoyage Docker et surveillance.', icon: HardDrive, page: 'storage' },
 
     { path: '/monitoring', label: 'Supervision', description: 'État et métriques système.', icon: Activity, page: 'monitoring' },
+
+    { path: '/scheduled-tasks', label: 'Tâches planifiées', description: 'Historique des exécutions.', icon: CalendarClock, page: 'scheduled-tasks' },
 
     { path: '/settings', label: 'Paramètres', description: 'Projets, serveurs, équipe et configuration.', icon: Settings, page: 'settings' },
 

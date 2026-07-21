@@ -11,6 +11,8 @@ type ConfirmDialogProps = {
     loading?: boolean;
     onConfirm: () => void;
     onCancel: () => void;
+    secondaryConfirmLabel?: string;
+    onSecondaryConfirm?: () => void;
 };
 
 export function ConfirmDialog({
@@ -23,6 +25,8 @@ export function ConfirmDialog({
     loading = false,
     onConfirm,
     onCancel,
+    secondaryConfirmLabel,
+    onSecondaryConfirm,
 }: ConfirmDialogProps) {
     return (
         <Modal
@@ -32,6 +36,11 @@ export function ConfirmDialog({
             footer={(
                 <>
                     <Button variant="ghost" onClick={onCancel}>{cancelLabel}</Button>
+                    {secondaryConfirmLabel && onSecondaryConfirm && (
+                        <Button variant="ghost" disabled={loading} onClick={onSecondaryConfirm}>
+                            {loading ? 'En cours…' : secondaryConfirmLabel}
+                        </Button>
+                    )}
                     <Button variant={tone === 'danger' ? 'danger' : 'primary'} disabled={loading} onClick={onConfirm}>
                         {loading ? 'En cours…' : confirmLabel}
                     </Button>

@@ -334,9 +334,11 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
         return resources.some((resource) => resource.uuid === candidate) ? candidate : null;
     }, [resources, selectedUuid, type]);
 
+    const isFullPageDetail = Boolean(activeUuid && (type === 'applications' || type === 'databases' || type === 'services'));
+
     return (
         <>
-            {!embedded && (
+            {!embedded && !isFullPageDetail && (
                 <Breadcrumbs
                     items={[
                         { label: 'DevForge', href: '/' },
@@ -345,7 +347,7 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                     onNavigate={onNavigate}
                 />
             )}
-            {!embedded && (
+            {!embedded && !isFullPageDetail && (
                 <PageHeader
                     title={labels[type]}
                     description="Données et actions fournies par l’API core."
@@ -371,7 +373,7 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                     )}
                 />
             )}
-            {embedded && (
+            {embedded && !isFullPageDetail && (
                 <div class="toolbar-row">
                     <p class="text-xs text-base-content/55">Hôtes, connexions et proxy de l’équipe active.</p>
                     <div class="card-toolbar w-full sm:w-auto">
@@ -383,7 +385,7 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                 </div>
             )}
 
-            {!(activeUuid && (type === 'applications' || type === 'databases' || type === 'services')) && (
+            {!isFullPageDetail && (
                 <FilterBar query={search} onQueryChange={setSearch} placeholder={`Rechercher un ${labels[type].slice(0, -1).toLowerCase()}…`} />
             )}
 

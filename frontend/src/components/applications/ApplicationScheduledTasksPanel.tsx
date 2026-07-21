@@ -1,5 +1,6 @@
 import { Clock, LoaderCircle, Pencil, Play, Plus, RefreshCw, Trash2 } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
+import { CronInput } from '../ui/CronInput';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ActionToolbar } from '../ui/ActionToolbar';
 import { DataState } from '../ui/DataState';
@@ -18,19 +19,10 @@ type ScheduledTaskResourceType = 'applications' | 'services';
 type Props = {
     resourceType?: ScheduledTaskResourceType;
     resourceUuid?: string;
-    /** @deprecated utiliser resourceUuid */
-    applicationUuid?: string;
     canAct: boolean;
 };
 
-const frequencyPresets = [
-    { label: 'Chaque minute', value: 'every_minute' },
-    { label: 'Horaire', value: 'hourly' },
-    { label: 'Quotidien', value: 'daily' },
-    { label: 'Hebdomadaire', value: 'weekly' },
-    { label: 'Mensuel', value: 'monthly' },
-    { label: 'Cron personnalisé', value: 'custom' },
-];
+import { formatCron, normalizeCron } from '../../lib/cron-utils';
 
 const defaultForm = (): ApplicationScheduledTaskInput => ({
     name: '',
@@ -55,17 +47,13 @@ function executionTone(status: string | null | undefined): 'success' | 'warning'
     return 'neutral';
 }
 
-function frequencyLabel(frequency: string): string {
-    return frequencyPresets.find((preset) => preset.value === frequency)?.label ?? frequency;
-}
 
 export function ApplicationScheduledTasksPanel({
     resourceType = 'applications',
-    resourceUuid,
-    applicationUuid,
+    resourceUuid = '',
     canAct,
 }: Props) {
-    const uuid = resourceUuid ?? applicationUuid ?? '';
+    const uuid = resourceUuid;
     const query = useApiQuery(
         `scheduled-tasks:${resourceType}:${uuid}`,
         () => domainApi.resourceScheduledTasks(resourceType, uuid),
@@ -75,7 +63,6 @@ export function ApplicationScheduledTasksPanel({
     const [formOpen, setFormOpen] = useState(false);
     const [editing, setEditing] = useState<ApplicationScheduledTask | null>(null);
     const [form, setForm] = useState<ApplicationScheduledTaskInput>(defaultForm());
-    const [frequencyMode, setFrequencyMode] = useState('daily');
     const [submitting, setSubmitting] = useState(false);
     const [formError, setFormError] = useState<string | null>(null);
     const [pendingDelete, setPendingDelete] = useState<ApplicationScheduledTask | null>(null);
@@ -103,23 +90,19 @@ export function ApplicationScheduledTasksPanel({
     const openCreate = () => {
         setEditing(null);
         setForm(defaultForm());
-        setFrequencyMode('daily');
         setFormError(null);
         setFormOpen(true);
     };
 
     const openEdit = (task: ApplicationScheduledTask) => {
-        const preset = frequencyPresets.some((item) => item.value === task.frequency && item.value !== 'custom');
-        setEditing(task);
         setForm({
             name: task.name,
             command: task.command,
-            frequency: task.frequency,
+            frequency: normalizeCron(task.frequency),
             container: task.container ?? '',
             timeout: task.timeout,
             enabled: task.enabled,
         });
-        setFrequencyMode(preset ? task.frequency : 'custom');
         setFormError(null);
         setFormOpen(true);
     };
@@ -149,7 +132,7 @@ export function ApplicationScheduledTasksPanel({
                 ...form,
                 name,
                 command,
-                frequency,
+                frequency: normalizeCron(frequency),
                 container: form.container?.trim() || null,
             };
 
@@ -271,7 +254,7 @@ export function ApplicationScheduledTasksPanel({
                                         <p class="truncate text-xs font-medium">{task.name}</p>
                                         <p class="truncate font-mono text-[10px] text-base-content/45">{task.command}</p>
                                     </td>
-                                    <td class="text-xs text-base-content/65">{frequencyLabel(task.frequency)}</td>
+                                    <td class="text-xs text-base-content/65">{formatCron(task.frequency)}</td>
                                     <td>
                                         <StatusBadge
                                             label={task.enabled ? 'Activée' : 'Désactivée'}
@@ -415,40 +398,10 @@ export function ApplicationScheduledTasksPanel({
                                 />
                             </label>
 
-                            <label class="grid gap-1 text-sm">
-                                <span class="text-xs font-medium text-base-content/60">Fréquence</span>
-                                <select
-                                    class="select select-bordered select-sm"
-                                    value={frequencyMode}
-                                    onChange={(event) => {
-                                        const next = (event.target as HTMLSelectElement).value;
-                                        setFrequencyMode(next);
-                                        if (next !== 'custom') {
-                                            setForm((current) => ({ ...current, frequency: next }));
-                                        }
-                                    }}
-                                >
-                                    {frequencyPresets.map((preset) => (
-                                        <option key={preset.value} value={preset.value}>{preset.label}</option>
-                                    ))}
-                                </select>
-                            </label>
-
-                            {frequencyMode === 'custom' && (
-                                <label class="grid gap-1 text-sm">
-                                    <span class="text-xs font-medium text-base-content/60">Expression cron</span>
-                                    <input
-                                        class="input input-bordered input-sm font-mono"
-                                        placeholder="0 0 * * *"
-                                        required
-                                        value={form.frequency}
-                                        onInput={(event) => setForm((current) => ({
-                                            ...current,
-                                            frequency: (event.target as HTMLInputElement).value,
-                                        }))}
-                                    />
-                                </label>
-                            )}
+                            <CronInput
+                                value={form.frequency ?? ''}
+                                onChange={(val) => setForm({ ...form, frequency: val })}
+                            />
 
                             <label class="grid gap-1 text-sm">
                                 <span class="text-xs font-medium text-base-content/60">Conteneur (optionnel)</span>

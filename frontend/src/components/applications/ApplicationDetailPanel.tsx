@@ -423,7 +423,7 @@ export function ApplicationDetailPanel({
         await Promise.all([resourceQuery.reload(), deploymentsQuery.reload(), readinessQuery.reload()]);
     };
 
-    const runAction = async (action: CoreAction) => {
+    const runAction = async (action: CoreAction, payload?: { force?: boolean }) => {
         if (!resource) {
             return;
         }
@@ -431,7 +431,7 @@ export function ApplicationDetailPanel({
         setActing(action);
         setActionError(null);
         try {
-            const response = await domainApi.coreAction('applications', resource.uuid, action);
+            const response = await domainApi.coreAction('applications', resource.uuid, action, payload);
             const deploymentUuid = typeof response.data?.deployment_uuid === 'string'
                 ? response.data.deployment_uuid
                 : null;
@@ -521,19 +521,23 @@ export function ApplicationDetailPanel({
                         </ActionToolbar>
                     </div>
 
-                    <Tabs
-                        items={applicationTabs}
-                        active={activeTab}
-                        onChange={(tabId) => {
-                            const next = tabId as ApplicationTabId;
-                            if (next === 'deployments') {
-                                openDeploymentsTab();
-                                return;
-                            }
-                            selectTab(next);
-                        }}
-                    />
-
+                    <div class="flex flex-col lg:flex-row gap-4 lg:gap-6 mt-4">
+                        <div class="lg:w-56 shrink-0">
+                            <Tabs
+                                items={applicationTabs}
+                                active={activeTab}
+                                variant="sidebar"
+                                onChange={(tabId) => {
+                                    const next = tabId as ApplicationTabId;
+                                    if (next === 'deployments') {
+                                        openDeploymentsTab();
+                                        return;
+                                    }
+                                    selectTab(next);
+                                }}
+                            />
+                        </div>
+                        <div class="min-w-0 flex-1 grid gap-4">
                     {activeTab === 'overview' && (
                         <>
                             <section class="min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
@@ -904,6 +908,9 @@ export function ApplicationDetailPanel({
                         />
                     )}
 
+                        </div>
+                    </div>
+
                     {actionError && <p class="text-sm text-error" role="alert">{actionError}</p>}
 
                     {pendingAction && (
@@ -915,6 +922,9 @@ export function ApplicationDetailPanel({
                             loading={acting === pendingAction}
                             onCancel={() => setPendingAction(null)}
                             onConfirm={() => void runAction(pendingAction)}
+                            confirmLabel={pendingAction === 'deploy' ? 'Déployer (Cache)' : 'Confirmer'}
+                            secondaryConfirmLabel={pendingAction === 'deploy' ? 'Force Rebuild' : undefined}
+                            onSecondaryConfirm={pendingAction === 'deploy' ? () => void runAction(pendingAction, { force: true }) : undefined}
                         />
                     )}
                 </div>
