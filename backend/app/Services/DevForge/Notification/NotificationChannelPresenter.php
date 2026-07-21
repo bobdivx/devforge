@@ -7,6 +7,10 @@ use Illuminate\Support\Facades\Gate;
 
 class NotificationChannelPresenter
 {
+    public function __construct(
+        private NotificationChannelCredentials $credentials,
+    ) {}
+
     /**
      * @return array<string, mixed>
      */
@@ -23,6 +27,7 @@ class NotificationChannelPresenter
                 )
                 ->map(fn (mixed $value): bool => (bool) $value)
                 ->all(),
+            'credentials' => $this->credentials->present($settings, $channel),
         ];
     }
 }

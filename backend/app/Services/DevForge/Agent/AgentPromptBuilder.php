@@ -3,6 +3,7 @@
 namespace App\Services\DevForge\Agent;
 
 use App\Models\AiAgent;
+use App\Services\DevForge\Agent\Tool\AgentPermissionEngine;
 
 class AgentPromptBuilder
 {
@@ -38,9 +39,10 @@ class AgentPromptBuilder
               Déduis le dossier de build depuis les logs (directory: /app/…, astro/vite/next) puis
               update_application_runtime_settings(publish_directory=…, redeploy=true).
             - npm E401 / unauthenticated sur npm.pkg.github.com :
-              Coolify injecte NODE_AUTH_TOKEN au build via PAT enregistré (Sources → token Packages)
+              Coolify injecte NODE_AUTH_TOKEN au build via PAT enregistré (Connexions → token Packages)
               ou token GitHub App si packages:read est accordé.
-              Si aucun des deux → needs_user (enregistrer un PAT read:packages dans DevForge → GitHub).
+              Si aucun des deux → needs_user : guider vers DevForge → Connexions (PAT read:packages),
+              avec steps numérotées et pill href /connexions.
               Sinon → control_resource deploy (1×). Ne invente PAS de PAT.
             - Crash post-deploy « Class ApplicationReadiness not found » (rollback du conteneur) :
               control_resource deploy après diagnostic — la plateforme ne doit pas détruire un conteneur sain.
@@ -168,7 +170,10 @@ class AgentPromptBuilder
     {
         $basePrompt = trim($agent->system_prompt ?: AgentDirectives::defaultSystemPrompt($agent->type));
         $teamName = $agent->team->name;
-        $autonomyRules = AgentDirectives::chatAutonomyRules();
+        $permissionMode = app(AgentPermissionEngine::class)->effectiveMode($agent);
+        $autonomyRules = $permissionMode === AgentPermissionEngine::MODE_PLAN_FIRST
+            ? AgentDirectives::chatPlanFirstRules()
+            : AgentDirectives::chatAutonomyRules();
         $actionHint = $latestUserMessage !== null
             ? AgentDirectives::chatActionHint($latestUserMessage, $agent)
             : null;

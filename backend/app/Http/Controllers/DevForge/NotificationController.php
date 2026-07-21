@@ -33,7 +33,7 @@ class NotificationController extends Controller
         $team = $currentTeamContext->resolve($request->user());
         $payload = $request->payload();
 
-        abort_if($payload === [], 422, 'At least one of events or enabled must be provided.');
+        abort_if($payload === [], 422, 'At least one of events, enabled, or credentials must be provided.');
 
         return response()->json([
             'data' => $notificationChannelUpdater->update($team, $channel, $payload),

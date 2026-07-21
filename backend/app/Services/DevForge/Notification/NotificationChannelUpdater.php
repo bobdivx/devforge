@@ -3,7 +3,6 @@
 namespace App\Services\DevForge\Notification;
 
 use App\Models\Team;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Gate;
 
 class NotificationChannelUpdater
@@ -11,10 +10,11 @@ class NotificationChannelUpdater
     public function __construct(
         private NotificationChannelRegistry $registry,
         private NotificationChannelPresenter $presenter,
+        private NotificationChannelCredentials $credentials,
     ) {}
 
     /**
-     * @param  array{events?: array<string, bool>, enabled?: bool}  $payload
+     * @param  array{events?: array<string, bool>, enabled?: bool, credentials?: array<string, mixed>}  $payload
      * @return array<string, mixed>
      */
     public function update(Team $team, string $channel, array $payload): array
@@ -39,6 +39,13 @@ class NotificationChannelUpdater
             if ($enabledField !== null) {
                 $updates[$enabledField] = (bool) $payload['enabled'];
             }
+        }
+
+        if (array_key_exists('credentials', $payload)) {
+            $updates = [
+                ...$updates,
+                ...$this->credentials->resolveUpdates($settings, $channel, $payload['credentials']),
+            ];
         }
 
         if ($updates === []) {

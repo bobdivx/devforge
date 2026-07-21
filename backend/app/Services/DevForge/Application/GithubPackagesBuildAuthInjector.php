@@ -68,7 +68,7 @@ class GithubPackagesBuildAuthInjector
                 'permissions_url' => null,
                 'steps' => [
                     'Créer un PAT GitHub (classic) avec scope read:packages.',
-                    'DevForge → GitHub → enregistrer le token Packages sur le compte, ou NODE_AUTH_TOKEN (build) sur l’app.',
+                    'DevForge → Connexions → section GitHub → enregistrer le token Packages (ou NODE_AUTH_TOKEN en variable de build sur l’app).',
                     'Vérifier .npmrc (//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}).',
                     'Relancer le déploiement.',
                 ],
@@ -87,7 +87,7 @@ class GithubPackagesBuildAuthInjector
                 'permissions_url' => null,
                 'steps' => [
                     'Utiliser une GitHub App privée liée au dépôt, ou enregistrer un PAT packages:read.',
-                    'DevForge → GitHub → token Packages, ou NODE_AUTH_TOKEN (build).',
+                    'DevForge → Connexions → token Packages, ou NODE_AUTH_TOKEN (build) sur l’app.',
                 ],
             ];
         }
@@ -126,7 +126,7 @@ class GithubPackagesBuildAuthInjector
                 'permissions_url' => $permissionsUrl,
                 'steps' => array_values(array_filter([
                     'Créer un PAT GitHub (classic) avec scope read:packages (et repo si besoin).',
-                    'Dans DevForge → GitHub → compte lié → enregistrer le token Packages.',
+                    'Ouvrir DevForge → Connexions → compte GitHub lié → coller le token Packages → Enregistrer.',
                     'Alternative : variable NODE_AUTH_TOKEN (build) sur l’application.',
                     'Ou activer Packages: Read-only sur la GitHub App puis accepter l’installation.',
                     $permissionsUrl ? 'Lien permissions GitHub App : '.$permissionsUrl : null,

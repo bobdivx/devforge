@@ -73,17 +73,17 @@ class InstanceSettingsPresenter
     {
         return [
             'smtp_enabled' => (bool) $this->settings->smtp_enabled,
-            'smtp_from_address' => $this->masked($this->settings->getRawOriginal('smtp_from_address')),
-            'smtp_from_name' => $this->masked($this->settings->getRawOriginal('smtp_from_name')),
-            'smtp_recipients' => $this->masked($this->settings->getRawOriginal('smtp_recipients')),
-            'smtp_host' => $this->masked($this->settings->getRawOriginal('smtp_host')),
+            'smtp_from_address' => $this->settings->smtp_from_address,
+            'smtp_from_name' => $this->settings->smtp_from_name,
+            'smtp_recipients' => $this->settings->smtp_recipients,
+            'smtp_host' => $this->settings->smtp_host,
             'smtp_port' => $this->settings->smtp_port,
             'smtp_encryption' => $this->settings->smtp_encryption,
-            'smtp_username' => $this->masked($this->settings->getRawOriginal('smtp_username')),
-            'smtp_password' => $this->hasSecret($this->settings->getRawOriginal('smtp_password')),
+            'smtp_username' => $this->settings->smtp_username,
+            'smtp_password_set' => $this->hasSecret($this->settings->getRawOriginal('smtp_password')),
             'smtp_timeout' => $this->settings->smtp_timeout,
             'resend_enabled' => (bool) $this->settings->resend_enabled,
-            'resend_api_key' => $this->hasSecret($this->settings->getRawOriginal('resend_api_key')),
+            'resend_api_key_set' => $this->hasSecret($this->settings->getRawOriginal('resend_api_key')),
         ];
     }
 
@@ -98,15 +98,6 @@ class InstanceSettingsPresenter
             'update_check_frequency' => $this->settings->update_check_frequency,
             'new_version_available' => (bool) $this->settings->new_version_available,
         ];
-    }
-
-    private function masked(mixed $value): ?string
-    {
-        if (! filled($value)) {
-            return null;
-        }
-
-        return '********';
     }
 
     private function hasSecret(mixed $value): bool

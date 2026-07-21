@@ -42,7 +42,7 @@ return [
     |
     | autonomous : accès total (défaut)
     | tiered     : lecture seule auto, destructif → approbation
-    | plan_first : chaque outil demande validation
+    | plan_first : lectures + propose_plan libres ; mutations après approbation du plan
     |
     */
     'agents_permission_mode' => env('DEVFORGE_AGENTS_PERMISSION_MODE', 'autonomous'),
@@ -50,6 +50,17 @@ return [
     'agents_permission_allowed_tools' => env('DEVFORGE_AGENTS_PERMISSION_ALLOWED_TOOLS', ''),
 
     'agents_permission_denied_tools' => env('DEVFORGE_AGENTS_PERMISSION_DENIED_TOOLS', ''),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Aperçu diff avant write_application_source (chat)
+    |--------------------------------------------------------------------------
+    |
+    | En chat, bloque l'écriture Git jusqu'à approbation utilisateur avec diff.
+    | Les runs event / harness autonomes ne sont pas concernés.
+    |
+    */
+    'agents_chat_source_write_preview' => env('DEVFORGE_AGENTS_CHAT_SOURCE_WRITE_PREVIEW', true),
 
     'agents_max_iterations' => (int) env('DEVFORGE_AGENTS_MAX_ITERATIONS', 30),
 

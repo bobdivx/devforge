@@ -12,8 +12,8 @@ type LegacyEditBannerProps = {
 export function LegacyEditBanner({
     legacyBaseUrl,
     legacyPath,
-    title = 'Édition dans Coolify',
-    description = 'La modification de cette section est encore disponible dans l’interface Coolify d’origine.',
+    title = 'Édition dans DevForge',
+    description = 'La modification de cette section est encore disponible dans l’interface DevForge d’origine.',
 }: LegacyEditBannerProps) {
     return (
         <Card title={title} eyebrow="Migration en cours">
@@ -25,7 +25,7 @@ export function LegacyEditBanner({
                 rel="noreferrer"
             >
                 <ExternalLink class="size-3.5" aria-hidden />
-                Modifier dans Coolify
+                Modifier dans DevForge
             </a>
         </Card>
     );

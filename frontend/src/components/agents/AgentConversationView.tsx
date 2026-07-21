@@ -222,6 +222,12 @@ export function AgentConversationView({
                                 ...(message.metadata.pending_approval as Record<string, unknown> | undefined),
                                 resolved: decision === 'approve' ? 'approved' : 'denied',
                             },
+                            pending_plan: message.metadata.pending_plan
+                                ? {
+                                    ...(message.metadata.pending_plan as Record<string, unknown>),
+                                    resolved: decision === 'approve' ? 'approved' : 'denied',
+                                }
+                                : message.metadata.pending_plan,
                         },
                     };
                 }),

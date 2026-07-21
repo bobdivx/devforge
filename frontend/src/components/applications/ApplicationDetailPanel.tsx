@@ -28,10 +28,17 @@ import { ApplicationDomainsPanel } from './ApplicationDomainsPanel';
 import { ApplicationDangerPanel } from './ApplicationDangerPanel';
 import { ApplicationReadinessCard } from './ApplicationReadinessCard';
 import { ApplicationRuntimeSettingsPanel } from './ApplicationRuntimeSettingsPanel';
+import { ApplicationAdvancedSettingsPanel } from './ApplicationAdvancedSettingsPanel';
+import { ApplicationResourceOperationsPanel } from './ApplicationResourceOperationsPanel';
 import { ApplicationEnvironmentVariablesPanel } from './ApplicationEnvironmentVariablesPanel';
 import { ApplicationStatusBadges } from './ApplicationStatusBadges';
 import { ConnectDatabasePanel } from './ConnectDatabasePanel';
 import { ApplicationLogsPanel } from './ApplicationLogsPanel';
+import { ApplicationWebhooksPanel } from './ApplicationWebhooksPanel';
+import { ApplicationPreviewsPanel } from './ApplicationPreviewsPanel';
+import { ApplicationResourceLimitsPanel } from './ApplicationResourceLimitsPanel';
+import { ApplicationScheduledTasksPanel } from './ApplicationScheduledTasksPanel';
+import { ApplicationStoragePanel } from './ApplicationStoragePanel';
 import { DeploymentMonitorPanel } from './DeploymentMonitorPanel';
 import { ApplicationSourceExplorer } from './ApplicationSourceExplorer';
 import {
@@ -47,7 +54,7 @@ import {
     visitUrl,
     websiteScreenshotUrl,
 } from '../../lib/application-config';
-import { applicationTabs, type ApplicationTabId } from '../../lib/application-tabs';
+import { applicationTabs, parseApplicationTab, type ApplicationTabId } from '../../lib/application-tabs';
 import { canVisitApplication, resolveCoreResourceActions } from '../../lib/core-resource-actions';
 import { domainApi, type ApplicationReadiness, type CoreAction } from '../../lib/domain-api';
 import { isDeploymentActive } from '../../lib/deployment-status';
@@ -312,15 +319,24 @@ function PreviewPanel({
 type ApplicationDetailPanelProps = {
     uuid: string;
     canAct: boolean;
+    initialTab?: ApplicationTabId;
     onClose: () => void;
     onChanged: () => Promise<void>;
+    onTabChange?: (tab: ApplicationTabId) => void;
 };
 
-export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: ApplicationDetailPanelProps) {
+export function ApplicationDetailPanel({
+    uuid,
+    canAct,
+    initialTab = 'overview',
+    onClose,
+    onChanged,
+    onTabChange,
+}: ApplicationDetailPanelProps) {
     const resourceQuery = useApiQuery(`core:applications:${uuid}`, () => domainApi.coreResource('applications', uuid));
     const deploymentsQuery = useApiQuery(`deployments:${uuid}`, () => domainApi.deployments(1, uuid, 8));
     const readinessQuery = useApiQuery(`readiness:${uuid}`, () => domainApi.applicationReadiness(uuid));
-    const [activeTab, setActiveTab] = useState<ApplicationTabId>('overview');
+    const [activeTab, setActiveTab] = useState<ApplicationTabId>(initialTab);
     const [acting, setActing] = useState<CoreAction | null>(null);
     const [pendingAction, setPendingAction] = useState<CoreAction | null>(null);
     const [actionError, setActionError] = useState<string | null>(null);
@@ -350,11 +366,26 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
     useEffect(() => {
         setFocusedDeploymentUuid(null);
         setFocusPinned(false);
-        setActiveTab('overview');
+        setActiveTab(initialTab);
         setActing(null);
         setPendingAction(null);
         setActionError(null);
-    }, [uuid]);
+    }, [uuid, initialTab]);
+
+    useEffect(() => {
+        const syncTabFromUrl = () => {
+            setActiveTab(parseApplicationTab(new URLSearchParams(window.location.search).get('tab')));
+        };
+
+        window.addEventListener('popstate', syncTabFromUrl);
+
+        return () => window.removeEventListener('popstate', syncTabFromUrl);
+    }, []);
+
+    const selectTab = (tab: ApplicationTabId) => {
+        setActiveTab(tab);
+        onTabChange?.(tab);
+    };
 
     useEffect(() => {
         setFocusedDeploymentUuid((current) => pickFocusedDeployment(deployments, current, { pinned: focusPinned }));
@@ -385,7 +416,7 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
 
     const openDeploymentsTab = () => {
         setFocusPinned(false);
-        setActiveTab('deployments');
+        selectTab('deployments');
     };
 
     const reload = async () => {
@@ -447,7 +478,7 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                                                 openDeploymentsTab();
                                                 return;
                                             }
-                                            setActiveTab(tab);
+                                            selectTab(tab);
                                         }}
                                     />
                                 </div>
@@ -499,7 +530,7 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                                 openDeploymentsTab();
                                 return;
                             }
-                            setActiveTab(next);
+                            selectTab(next);
                         }}
                     />
 
@@ -764,15 +795,25 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
                     )}
 
                     {activeTab === 'settings' && (
-                        <ApplicationRuntimeSettingsPanel
-                            applicationUuid={resource.uuid}
-                            canAct={canAct}
-                            onChanged={reload}
-                            onRedeployQueued={(deploymentUuid) => {
-                                focusDeployment(deploymentUuid, false);
-                                openDeploymentsTab();
-                            }}
-                        />
+                        <div class="grid gap-4">
+                            <ApplicationRuntimeSettingsPanel
+                                applicationUuid={resource.uuid}
+                                canAct={canAct}
+                                onChanged={reload}
+                                onRedeployQueued={(deploymentUuid) => {
+                                    focusDeployment(deploymentUuid, false);
+                                    openDeploymentsTab();
+                                }}
+                            />
+                            <ApplicationAdvancedSettingsPanel
+                                applicationUuid={resource.uuid}
+                                canAct={canAct}
+                            />
+                            <ApplicationResourceOperationsPanel
+                                applicationUuid={resource.uuid}
+                                canAct={canAct}
+                            />
+                        </div>
                     )}
 
                     {activeTab === 'domains' && (
@@ -804,6 +845,43 @@ export function ApplicationDetailPanel({ uuid, canAct, onClose, onChanged }: App
 
                     {activeTab === 'files' && (
                         <ApplicationSourceExplorer applicationUuid={resource.uuid} />
+                    )}
+
+                    {activeTab === 'webhooks' && (
+                        <ApplicationWebhooksPanel
+                            applicationUuid={resource.uuid}
+                            canAct={canAct}
+                        />
+                    )}
+
+                    {activeTab === 'previews' && (
+                        <ApplicationPreviewsPanel
+                            applicationUuid={resource.uuid}
+                            canAct={canAct}
+                        />
+                    )}
+
+                    {activeTab === 'storage' && (
+                        <ApplicationStoragePanel
+                            resourceType="applications"
+                            resourceUuid={resource.uuid}
+                            canAct={canAct}
+                        />
+                    )}
+
+                    {activeTab === 'limits' && (
+                        <ApplicationResourceLimitsPanel
+                            applicationUuid={resource.uuid}
+                            canAct={canAct}
+                        />
+                    )}
+
+                    {activeTab === 'tasks' && (
+                        <ApplicationScheduledTasksPanel
+                            resourceType="applications"
+                            resourceUuid={resource.uuid}
+                            canAct={canAct}
+                        />
                     )}
 
                     {activeTab === 'danger' && (

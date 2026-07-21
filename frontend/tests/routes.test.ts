@@ -26,10 +26,16 @@ describe('routage DevForge', () => {
         expect(routeHref('/applications/app-uuid')).toBe('/devforge/applications/app-uuid/');
         expect(
             findRoute('/devforge/project/project-uuid/environment/environment-uuid/application/app-uuid/logs').page,
-        ).toBe('applications');
+        ).toBe('application-detail');
+        expect(
+            findRoute('/devforge/project/project-uuid/environment/environment-uuid/application/app-uuid/logs').path,
+        ).toBe('/applications/app-uuid');
         expect(
             findRoute('/devforge/project/project-uuid/environment/environment-uuid/database/db-uuid/backups').page,
         ).toBe('databases');
+        expect(
+            findRoute('/devforge/project/project-uuid/environment/environment-uuid/database/db-uuid/backups').path,
+        ).toBe('/databases');
         expect(findRoute('/devforge/project/project-uuid').page).toBe('settings');
         expect(findRoute('/devforge/project/project-uuid').path).toBe('/settings/projects');
     });
@@ -72,7 +78,7 @@ describe('routage DevForge', () => {
         expect(findRoute('/devforge/profile/appearance').path).toBe('/profile/appearance');
         expect(findRoute('/devforge/terminal').page).toBe('terminal');
         expect(findRoute('/devforge/sources').page).toBe('sources');
-        expect(findRoute('/devforge/source/github/app-uuid').page).toBe('sources');
+        expect(findRoute('/devforge/source/github/app-uuid').page).toBe('connexions');
         expect(findRoute('/devforge/source/github/app-uuid').path).toBe('/source/github/app-uuid');
         expect(findRoute('/devforge/notifications/slack').page).toBe('settings');
         expect(findRoute('/devforge/notifications/slack').path).toBe('/notifications/slack');

@@ -227,19 +227,24 @@ function CorrectionSummaryBlock({
                             ? 'border-base-300/50 bg-base-200/40 text-base-content/35'
                             : 'border-primary/25 bg-primary/10 text-primary';
                         const detail = shortSha(typeof pill.detail === 'string' ? pill.detail : null);
+                        const href = pill.href
+                            ? (pill.href.startsWith('/') ? routeHref(pill.href.replace(/^\/devforge/, '') || '/') : pill.href)
+                            : null;
+                        const isExternal = Boolean(href && /^https?:\/\//i.test(href));
 
-                        if (pill.active && pill.href) {
+                        if (pill.active && href) {
                             return (
                                 <a
                                     key={pill.id}
                                     class={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium ${className}`}
-                                    href={pill.href}
-                                    target="_blank"
-                                    rel="noreferrer"
+                                    href={href}
+                                    target={isExternal ? '_blank' : undefined}
+                                    rel={isExternal ? 'noreferrer' : undefined}
                                 >
                                     {pill.label}
                                     {detail && <span class="font-mono opacity-80">{detail}</span>}
-                                    <ExternalLink class="size-3" aria-hidden />
+                                    {isExternal && <ExternalLink class="size-3" aria-hidden />}
+                                    {!isExternal && <ArrowRight class="size-3" aria-hidden />}
                                 </a>
                             );
                         }
@@ -255,6 +260,14 @@ function CorrectionSummaryBlock({
                         );
                     })}
                 </div>
+            )}
+
+            {Array.isArray(correction.steps) && correction.steps.length > 0 && (
+                <ol class="grid list-decimal gap-1.5 pl-4 text-xs text-base-content/75">
+                    {correction.steps.map((step, index) => (
+                        <li key={`step-${index}`}>{step}</li>
+                    ))}
+                </ol>
             )}
 
             {correction.actions.length > 0 && (

@@ -1,6 +1,6 @@
 <div>
     <x-slot:title>
-        Settings | Coolify
+        Settings | DevForge
     </x-slot>
     <x-settings.navbar />
     <div class="flex flex-col">
@@ -12,7 +12,7 @@
                 </x-forms.button>
             @endif
         </div>
-        <div class="pb-4">Backup configuration for Coolify instance.</div>
+        <div class="pb-4">Backup configuration for DevForge instance.</div>
         <div>
             @if ($server->isFunctional())
                 @if (isset($database) && isset($backup))
@@ -32,9 +32,9 @@
                         <livewire:project.database.backup-executions :backup="$backup" />
                     </div>
                 @else
-                    To configure automatic backup for your Coolify instance, you first need to add a database resource
-                    into Coolify.
-                    <x-forms.button class="mt-2" wire:click="addCoolifyDatabase">Configure Backup</x-forms.button>
+                    To configure automatic backup for your DevForge instance, you first need to add a database resource
+                    into DevForge.
+                    <x-forms.button class="mt-2" wire:click="addDevForgeDatabase">Configure Backup</x-forms.button>
                 @endif
             @else
                 <div class="p-6 bg-red-500/10 rounded-lg border border-red-500/20">

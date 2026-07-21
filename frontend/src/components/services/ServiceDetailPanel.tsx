@@ -1,14 +1,20 @@
 import { Eye, Play, RefreshCw, Rocket, RotateCw, Square, Wrench } from 'lucide-preact';
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { domainApi, type CoreAction, type CoreResource } from '../../lib/domain-api';
 import { resolveCoreResourceActions } from '../../lib/core-resource-actions';
+import { parseServiceTab, type ServiceDetailTabId } from '../../lib/routes';
 import { resourceStatusInput } from '../../lib/resource-status';
 import { useApiQuery } from '../../lib/use-api-query';
+import { ApplicationScheduledTasksPanel } from '../applications/ApplicationScheduledTasksPanel';
+import { DatabaseEnvironmentVariablesPanel } from '../databases/DatabaseEnvironmentVariablesPanel';
+import { DatabaseWebhooksPanel } from '../databases/DatabaseWebhooksPanel';
+import { ServiceStoragePanel } from './ServiceStoragePanel';
 import { ActionToolbar } from '../ui/ActionToolbar';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { DataState } from '../ui/DataState';
 import { ResourceStatusIcon } from '../ui/ResourceStatusIcon';
 import { StatusBadge } from '../ui/StatusBadge';
+import { Tabs } from '../ui/Tabs';
 
 const actionLabels: Record<CoreAction, string> = {
     start: 'Démarrer',
@@ -24,11 +30,21 @@ const actionIcons = {
     deploy: Rocket,
 };
 
+const serviceTabs: Array<{ id: ServiceDetailTabId; label: string }> = [
+    { id: 'overview', label: 'Vue d’ensemble' },
+    { id: 'variables', label: 'Variables' },
+    { id: 'webhooks', label: 'Webhooks' },
+    { id: 'storage', label: 'Storages' },
+    { id: 'tasks', label: 'Tâches' },
+];
+
 type ServiceDetailPanelProps = {
     uuid: string;
     canAct: boolean;
+    initialTab?: ServiceDetailTabId;
     onClose: () => void;
     onChanged: () => Promise<void>;
+    onTabChange?: (tab: ServiceDetailTabId) => void;
 };
 
 function configurationEntries(resource: CoreResource): Array<[string, string]> {
@@ -37,12 +53,39 @@ function configurationEntries(resource: CoreResource): Array<[string, string]> {
         .map(([key, value]) => [key, typeof value === 'object' ? JSON.stringify(value) : String(value ?? '—')]);
 }
 
-export function ServiceDetailPanel({ uuid, canAct, onClose, onChanged }: ServiceDetailPanelProps) {
+export function ServiceDetailPanel({
+    uuid,
+    canAct,
+    initialTab = 'overview',
+    onClose,
+    onChanged,
+    onTabChange,
+}: ServiceDetailPanelProps) {
     const query = useApiQuery(`core:services:${uuid}`, () => domainApi.coreResource('services', uuid));
+    const [activeTab, setActiveTab] = useState<ServiceDetailTabId>(initialTab);
     const [acting, setActing] = useState<CoreAction | null>(null);
     const [pendingAction, setPendingAction] = useState<CoreAction | null>(null);
     const [actionError, setActionError] = useState<string | null>(null);
     const resource = query.data?.data;
+
+    useEffect(() => {
+        setActiveTab(initialTab);
+    }, [uuid, initialTab]);
+
+    useEffect(() => {
+        const syncTabFromUrl = () => {
+            setActiveTab(parseServiceTab(new URLSearchParams(window.location.search).get('tab')));
+        };
+
+        window.addEventListener('popstate', syncTabFromUrl);
+
+        return () => window.removeEventListener('popstate', syncTabFromUrl);
+    }, []);
+
+    const selectTab = (tab: ServiceDetailTabId) => {
+        setActiveTab(tab);
+        onTabChange?.(tab);
+    };
 
     const runAction = async (action: CoreAction) => {
         if (!resource) {
@@ -75,8 +118,14 @@ export function ServiceDetailPanel({ uuid, canAct, onClose, onChanged }: Service
                 </button>
             </div>
 
+            <Tabs
+                active={activeTab}
+                items={serviceTabs}
+                onChange={(tabId) => selectTab(tabId as ServiceDetailTabId)}
+            />
+
             <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
-                {resource && (
+                {resource && activeTab === 'overview' && (
                     <div class="grid gap-4 rounded-2xl border border-base-300/70 bg-base-100 p-4 shadow-sm">
                         <div class="flex flex-wrap items-start justify-between gap-3">
                             <div class="flex min-w-0 items-start gap-3">
@@ -140,6 +189,33 @@ export function ServiceDetailPanel({ uuid, canAct, onClose, onChanged }: Service
                             </span>
                         </ActionToolbar>
                     </div>
+                )}
+
+                {resource && activeTab === 'variables' && (
+                    <DatabaseEnvironmentVariablesPanel
+                        resourceType="services"
+                        resourceUuid={resource.uuid}
+                        canAct={canAct}
+                    />
+                )}
+
+                {resource && activeTab === 'webhooks' && (
+                    <DatabaseWebhooksPanel
+                        resourceType="services"
+                        resourceUuid={resource.uuid}
+                    />
+                )}
+
+                {resource && activeTab === 'storage' && (
+                    <ServiceStoragePanel serviceUuid={resource.uuid} />
+                )}
+
+                {resource && activeTab === 'tasks' && (
+                    <ApplicationScheduledTasksPanel
+                        resourceType="services"
+                        resourceUuid={resource.uuid}
+                        canAct={canAct}
+                    />
                 )}
             </DataState>
 

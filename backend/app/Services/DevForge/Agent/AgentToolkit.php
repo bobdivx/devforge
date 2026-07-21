@@ -12,6 +12,7 @@ use App\Services\DevForge\Agent\Tool\AgentPermissionEngine;
 use App\Services\DevForge\Agent\Tool\AgentServerExecutor;
 use App\Services\DevForge\Agent\Tool\AgentToolApprovalGrant;
 use App\Services\DevForge\Agent\Tool\AgentToolClassification;
+use App\Services\DevForge\Agent\Tool\ApplicationSourceWritePreview;
 use App\Services\DevForge\Agent\Tool\AgentToolInstaller;
 use App\Services\DevForge\Agent\Tool\AgentToolkitSession;
 use App\Services\DevForge\Agent\Tool\AgentToolPackage;
@@ -668,6 +669,32 @@ class AgentToolkit
             ];
         }
 
+        $tools[] = [
+            'name' => 'propose_plan',
+            'description' => 'Propose un plan d’actions structuré avant toute modification (mode plan-first). L’utilisateur doit approuver le plan dans le chat avant les outils mutateurs.',
+            'parameters' => [
+                'type' => 'object',
+                'properties' => [
+                    'title' => ['type' => 'string', 'description' => 'Titre court du plan'],
+                    'summary' => ['type' => 'string', 'description' => 'Résumé de l’approche (1-3 phrases)'],
+                    'steps' => [
+                        'type' => 'array',
+                        'description' => 'Étapes ordonnées à exécuter après approbation',
+                        'items' => [
+                            'type' => 'object',
+                            'properties' => [
+                                'action' => ['type' => 'string', 'description' => 'Description de l’étape'],
+                                'tool' => ['type' => 'string', 'description' => 'Outil prévu (optionnel)'],
+                                'risk' => ['type' => 'string', 'enum' => ['low', 'medium', 'high'], 'description' => 'Niveau de risque'],
+                            ],
+                            'required' => ['action'],
+                        ],
+                    ],
+                ],
+                'required' => ['title', 'summary', 'steps'],
+            ],
+        ];
+
         return $tools;
     }
 
@@ -853,7 +880,12 @@ class AgentToolkit
 
         $permissionResult = $this->checkPermission($toolName, $arguments);
         if ($permissionResult !== null) {
-            return $permissionResult;
+            return $this->enrichSourceWriteApproval($toolName, $arguments, $permissionResult);
+        }
+
+        $previewGate = $this->checkSourceWritePreviewGate($toolName, $arguments);
+        if ($previewGate !== null) {
+            return $previewGate;
         }
 
         $this->run->appendLog('  → Outil: '.$toolName.'('.json_encode($this->redactArguments($arguments)).')');
@@ -1046,6 +1078,7 @@ class AgentToolkit
                 $arguments['goal'] ?? '',
                 $arguments['difficulty'] ?? 'auto',
             ),
+            'propose_plan' => $this->proposePlan(is_array($arguments) ? $arguments : []),
             default => $this->executeCustomTool($toolName, $arguments),
         };
 
@@ -1073,7 +1106,8 @@ class AgentToolkit
 
         $engine = $this->permissionEngine ?? new AgentPermissionEngine;
         $classification = AgentToolClassification::forTool($toolName);
-        $decision = $engine->decide($this->agent, $toolName, $arguments, $classification);
+        $sessionId = $this->run->session_id !== null ? (int) $this->run->session_id : null;
+        $decision = $engine->decide($this->agent, $toolName, $arguments, $classification, $sessionId);
         $decision = $engine->resolveForTrigger($decision, (string) ($this->run->trigger ?? 'manual'), $toolName);
 
         if ($decision['decision'] === AgentPermissionEngine::DECISION_ALLOW) {
@@ -1114,6 +1148,121 @@ class AgentToolkit
             'rule_id' => $decision['rule_id'],
             'approval_unavailable' => (bool) ($decision['approval_unavailable'] ?? false),
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function enrichSourceWriteApproval(string $toolName, array $arguments, array $payload): array
+    {
+        if ($toolName !== 'write_application_source') {
+            return $payload;
+        }
+
+        if (($payload['status'] ?? null) !== AgentPermissionEngine::DECISION_ASK) {
+            return $payload;
+        }
+
+        $preview = $this->buildSourceWriteDiffPreview($arguments);
+        if ($preview !== null) {
+            $payload['diff_preview'] = $preview;
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>|null
+     */
+    private function checkSourceWritePreviewGate(string $toolName, array $arguments): ?array
+    {
+        if (! $this->shouldPreviewSourceWrite($toolName)) {
+            return null;
+        }
+
+        $path = (string) ($arguments['path'] ?? '');
+        if ($path === '' || $this->isEnvFilePath($path)) {
+            return null;
+        }
+
+        $sessionId = $this->run->session_id;
+        if ($sessionId === null) {
+            return null;
+        }
+
+        $approvalKey = AgentToolApprovalGrant::fingerprint($toolName, $arguments);
+        if (AgentToolApprovalGrant::consume((int) $sessionId, $approvalKey)) {
+            $this->run->appendLog('  ✓ Approbation diff source consommée pour « write_application_source »');
+
+            return null;
+        }
+
+        $preview = $this->buildSourceWriteDiffPreview($arguments);
+        $message = 'Modification de fichier source — vérifiez le diff puis approuvez dans le chat.';
+
+        $this->run->appendLog('  ⏸ Aperçu diff requis avant écriture Git.');
+
+        return [
+            'status' => AgentPermissionEngine::DECISION_ASK,
+            'pending_approval' => true,
+            'tool' => $toolName,
+            'reason' => $message,
+            'rule_id' => 'chat:source_write_preview',
+            'approval_key' => $approvalKey,
+            'diff_preview' => $preview,
+            'error' => $message,
+        ];
+    }
+
+    private function shouldPreviewSourceWrite(string $toolName): bool
+    {
+        if ($toolName !== 'write_application_source'
+            || (string) ($this->run->trigger ?? '') !== 'chat'
+            || ! config('devforge.agents_chat_source_write_preview', true)
+            || $this->agent === null) {
+            return false;
+        }
+
+        $engine = $this->permissionEngine ?? new AgentPermissionEngine;
+        $mode = $engine->effectiveMode($this->agent);
+
+        if ($mode === AgentPermissionEngine::MODE_TIERED) {
+            return false;
+        }
+
+        if ($mode === AgentPermissionEngine::MODE_PLAN_FIRST) {
+            $sessionId = $this->run->session_id !== null ? (int) $this->run->session_id : null;
+
+            return $sessionId !== null && AgentToolApprovalGrant::hasPlanExecution($sessionId);
+        }
+
+        return true;
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>|null
+     */
+    private function buildSourceWriteDiffPreview(array $arguments): ?array
+    {
+        $path = (string) ($arguments['path'] ?? '');
+        $content = (string) ($arguments['content'] ?? '');
+
+        if ($path === '' || $this->isEnvFilePath($path)) {
+            return null;
+        }
+
+        return app(ApplicationSourceWritePreview::class)->build(
+            $this->team,
+            $this->agent,
+            isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
+            $this->assignedResourceUuid,
+            $path,
+            $content,
+        );
     }
 
     /** @return array<mixed> */
@@ -1241,6 +1390,77 @@ class AgentToolkit
             $goal,
             $difficulty ?? 'auto',
         );
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function proposePlan(array $arguments): array
+    {
+        $title = trim((string) ($arguments['title'] ?? ''));
+        $summary = trim((string) ($arguments['summary'] ?? ''));
+        $steps = $arguments['steps'] ?? null;
+
+        if ($title === '' || $summary === '') {
+            return ['error' => 'Paramètres title et summary requis pour propose_plan.'];
+        }
+
+        if (! is_array($steps) || $steps === []) {
+            return ['error' => 'Paramètre steps (liste non vide) requis pour propose_plan.'];
+        }
+
+        $normalizedSteps = [];
+        foreach ($steps as $index => $step) {
+            if (! is_array($step)) {
+                continue;
+            }
+
+            $action = trim((string) ($step['action'] ?? ''));
+            if ($action === '') {
+                continue;
+            }
+
+            $risk = is_string($step['risk'] ?? null) ? strtolower((string) $step['risk']) : 'medium';
+            if (! in_array($risk, ['low', 'medium', 'high'], true)) {
+                $risk = 'medium';
+            }
+
+            $tool = isset($step['tool']) && is_string($step['tool']) && trim($step['tool']) !== ''
+                ? trim($step['tool'])
+                : null;
+
+            $normalizedSteps[] = [
+                'id' => is_string($step['id'] ?? null) && $step['id'] !== ''
+                    ? (string) $step['id']
+                    : (string) (count($normalizedSteps) + 1),
+                'action' => mb_substr($action, 0, 500),
+                'tool' => $tool,
+                'risk' => $risk,
+            ];
+        }
+
+        if ($normalizedSteps === []) {
+            return ['error' => 'Aucun step valide (chaque step doit avoir une action).'];
+        }
+
+        $plan = [
+            'status' => 'proposed',
+            'title' => mb_substr($title, 0, 200),
+            'summary' => mb_substr($summary, 0, 2000),
+            'steps' => $normalizedSteps,
+            'proposed_at' => now()->toISOString(),
+        ];
+
+        $this->run->mergeMetadata(['plan' => $plan]);
+        $this->run->appendLog('Plan proposé : '.$plan['title'].' ('.count($normalizedSteps).' étapes)');
+
+        return [
+            'ok' => true,
+            'pending_plan' => true,
+            'plan' => $plan,
+            'hint' => 'Plan proposé — en attente d’approbation utilisateur dans le chat.',
+        ];
     }
 
     /** @return array<mixed> */

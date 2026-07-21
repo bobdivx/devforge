@@ -11,6 +11,7 @@ import {
     type GithubRepository,
     type Project,
 } from '../../lib/domain-api';
+import { routeHref } from '../../lib/routes';
 
 const buildPacks: Array<{ value: CreateApplicationInput['build_pack']; label: string }> = [
     { value: 'nixpacks', label: 'Nixpacks (auto-détection)' },
@@ -170,9 +171,9 @@ export function CreateApplicationModal({ open, legacyBaseUrl, onClose, onCreated
     }, [open, form.github_app_uuid, selectedRepository?.id]);
 
     const legacySourcesUrl = useMemo(() => {
-        // DevForge GitHub page (sidebar) — Coolify legacy for creating the app itself.
+        // DevForge Connexions (sidebar) — Coolify legacy for creating the GitHub App itself.
         if (!legacyBaseUrl) {
-            return '/github';
+            return routeHref('/connexions');
         }
 
         const url = new URL('/sources', `${legacyBaseUrl.replace(/\/$/, '')}/`);

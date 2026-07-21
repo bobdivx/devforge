@@ -5,11 +5,17 @@ namespace App\Http\Controllers\DevForge;
 use App\Http\Controllers\Controller;
 use App\Models\InstanceSettings;
 use App\Models\OauthSetting;
+use App\Services\DevForge\InstanceSettingsUpdater;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class OauthSettingsController extends Controller
 {
-    public function __invoke(): JsonResponse
+    public function __construct(
+        private readonly InstanceSettingsUpdater $updater,
+    ) {}
+
+    public function index(): JsonResponse
     {
         $settings = InstanceSettings::get();
         $this->authorize('view', $settings);
@@ -18,18 +24,21 @@ class OauthSettingsController extends Controller
             'data' => OauthSetting::query()
                 ->orderBy('provider')
                 ->get()
-                ->map(fn (OauthSetting $oauthSetting): array => [
-                    'id' => $oauthSetting->id,
-                    'provider' => $oauthSetting->provider,
-                    'enabled' => (bool) $oauthSetting->enabled,
-                    'client_id' => filled($oauthSetting->client_id) ? '********' : null,
-                    'client_secret' => filled($oauthSetting->client_secret) ? '********' : null,
-                    'redirect_uri' => $oauthSetting->redirect_uri,
-                    'tenant' => $oauthSetting->tenant,
-                    'base_url' => $oauthSetting->base_url,
-                ])
+                ->map(fn (OauthSetting $oauthSetting): array => $this->updater->presentOauth($oauthSetting))
                 ->values()
                 ->all(),
+        ]);
+    }
+
+    public function update(Request $request, string $provider): JsonResponse
+    {
+        $settings = InstanceSettings::get();
+        $this->authorize('update', $settings);
+
+        $oauth = OauthSetting::query()->where('provider', $provider)->firstOrFail();
+
+        return response()->json([
+            'data' => $this->updater->updateOauth($oauth, $request->all()),
         ]);
     }
 }

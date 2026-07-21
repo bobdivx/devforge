@@ -10,6 +10,11 @@ import { SettingsDetailList } from '../../components/settings/SettingsPanels';
 import { ServerCleanupPanel } from '../../components/servers/ServerCleanupPanel';
 import { ServerDestinationsPanel } from '../../components/servers/ServerDestinationsPanel';
 import { ServerFileExplorer } from '../../components/servers/ServerFileExplorer';
+import {
+    ServerProxyPanel,
+    ServerSentinelPanel,
+    ServerSwarmPanel,
+} from '../../components/servers/ServerOpsPanels';
 import { ServerResourcesPanel } from '../../components/servers/ServerResourcesPanel';
 import { TerminalConsole } from '../../components/terminal/TerminalConsole';
 import { domainApi } from '../../lib/domain-api';
@@ -38,6 +43,9 @@ const nativeSections = new Set<ServerSectionId>([
     'destinations',
     'docker-cleanup',
     'terminal',
+    'proxy',
+    'swarm',
+    'sentinel',
 ]);
 
 export function ServerPage({
@@ -208,6 +216,16 @@ export function ServerPage({
                 <ServerCleanupPanel serverUuid={serverUuid} canManage={canManage} />
             ) : activeSection === 'terminal' ? (
                 <TerminalConsole canAccess={canAccessTerminal} initialServerUuid={serverUuid} />
+            ) : activeSection === 'proxy' ? (
+                <ServerProxyPanel serverUuid={serverUuid} legacyBaseUrl={legacyBaseUrl} />
+            ) : activeSection === 'swarm' ? (
+                <ServerSwarmPanel serverUuid={serverUuid} canManage={canManage} />
+            ) : activeSection === 'sentinel' ? (
+                <ServerSentinelPanel
+                    serverUuid={serverUuid}
+                    canManage={canManage}
+                    legacyBaseUrl={legacyBaseUrl}
+                />
             ) : !nativeSections.has(activeSection) ? (
                 <LegacyEditBanner
                     legacyBaseUrl={legacyBaseUrl}

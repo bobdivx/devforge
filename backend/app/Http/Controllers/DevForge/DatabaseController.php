@@ -11,6 +11,11 @@ use App\Services\DevForge\Application\ApplicationDatabaseConnector;
 use App\Services\DevForge\Core\CoreResourceCatalog;
 use App\Services\DevForge\Core\CoreResourcePresenter;
 use App\Services\DevForge\CurrentTeamContext;
+use App\Services\DevForge\Database\DatabaseContainerLogs;
+use App\Services\DevForge\Database\DatabaseEnvironmentVariableCatalog;
+use App\Services\DevForge\Database\DatabaseHealthcheckCatalog;
+use App\Services\DevForge\Database\DatabaseStorageCatalog;
+use App\Services\DevForge\Database\DatabaseWebhookService;
 use App\Services\DevForge\Database\LibsqlDatabaseAccessService;
 use App\Services\DevForge\Database\LibsqlDatabaseExplorerService;
 use App\Services\DevForge\Database\LibsqlDatabaseTransferService;
@@ -32,6 +37,11 @@ class DatabaseController extends Controller
         private readonly LibsqlDatabaseTransferService $libsqlDatabaseTransferService,
         private readonly LibsqlDatabaseAccessService $libsqlDatabaseAccessService,
         private readonly LibsqlDatabaseExplorerService $libsqlDatabaseExplorerService,
+        private readonly DatabaseContainerLogs $databaseContainerLogs,
+        private readonly DatabaseEnvironmentVariableCatalog $databaseEnvironmentVariableCatalog,
+        private readonly DatabaseStorageCatalog $databaseStorageCatalog,
+        private readonly DatabaseHealthcheckCatalog $databaseHealthcheckCatalog,
+        private readonly DatabaseWebhookService $databaseWebhookService,
         private readonly CoreResourcePresenter $presenter,
         private readonly StandaloneDatabaseRuntimeGuard $databaseRuntimeGuard,
     ) {}
@@ -215,6 +225,186 @@ class DatabaseController extends Controller
                 $table,
                 (int) ($validated['limit'] ?? 50),
             ),
+        ]);
+    }
+
+    public function logs(Request $request, string $databaseUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $database = $this->resolveDatabase($user, $databaseUuid);
+        $this->authorize('view', $database);
+
+        $validated = $request->validate([
+            'lines' => ['nullable', 'integer', 'min:10', 'max:1000'],
+        ]);
+
+        return response()->json([
+            'data' => $this->databaseContainerLogs->fetch(
+                $database->loadMissing('destination.server'),
+                (int) ($validated['lines'] ?? 200),
+            ),
+        ]);
+    }
+
+    public function webhooks(Request $request, string $databaseUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $database = $this->resolveDatabase($user, $databaseUuid);
+        $this->authorize('view', $database);
+
+        return response()->json([
+            'data' => $this->databaseWebhookService->show($database),
+        ]);
+    }
+
+    public function environmentVariables(Request $request, string $databaseUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $database = $this->resolveDatabase($user, $databaseUuid);
+        $this->authorize('view', $database);
+
+        return response()->json([
+            'data' => $this->databaseEnvironmentVariableCatalog->list($database),
+        ]);
+    }
+
+    public function storeEnvironmentVariable(Request $request, string $databaseUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $database = $this->resolveDatabase($user, $databaseUuid);
+        $this->authorize('manageEnvironment', $database);
+
+        return response()->json([
+            'data' => $this->databaseEnvironmentVariableCatalog->store($database, $request->all()),
+        ], 201);
+    }
+
+    public function updateEnvironmentVariable(Request $request, string $databaseUuid, string $envUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $database = $this->resolveDatabase($user, $databaseUuid);
+        $this->authorize('manageEnvironment', $database);
+
+        return response()->json([
+            'data' => $this->databaseEnvironmentVariableCatalog->update($database, $envUuid, $request->all()),
+        ]);
+    }
+
+    public function destroyEnvironmentVariable(Request $request, string $databaseUuid, string $envUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $database = $this->resolveDatabase($user, $databaseUuid);
+        $this->authorize('manageEnvironment', $database);
+
+        $this->databaseEnvironmentVariableCatalog->destroy($database, $envUuid);
+
+        return response()->json([
+            'message' => 'Variable d’environnement supprimée.',
+        ]);
+    }
+
+    public function revealEnvironmentVariable(Request $request, string $databaseUuid, string $envUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $database = $this->resolveDatabase($user, $databaseUuid);
+        $this->authorize('view', $database);
+
+        return response()->json([
+            'data' => $this->databaseEnvironmentVariableCatalog->reveal($database, $envUuid),
+        ]);
+    }
+
+    public function storages(Request $request, string $databaseUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $database = $this->resolveDatabase($user, $databaseUuid);
+        $this->authorize('view', $database);
+
+        return response()->json([
+            'data' => $this->databaseStorageCatalog->list($database),
+        ]);
+    }
+
+    public function storeStorage(Request $request, string $databaseUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $database = $this->resolveDatabase($user, $databaseUuid);
+        $this->authorize('update', $database);
+
+        return response()->json([
+            'data' => $this->databaseStorageCatalog->store($database, $request->all()),
+        ], 201);
+    }
+
+    public function updateStorage(Request $request, string $databaseUuid, string $storageUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $database = $this->resolveDatabase($user, $databaseUuid);
+        $this->authorize('update', $database);
+
+        return response()->json([
+            'data' => $this->databaseStorageCatalog->update($database, $storageUuid, $request->all()),
+        ]);
+    }
+
+    public function destroyStorage(Request $request, string $databaseUuid, string $storageUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $database = $this->resolveDatabase($user, $databaseUuid);
+        $this->authorize('update', $database);
+
+        $this->databaseStorageCatalog->destroy($database, $storageUuid);
+
+        return response()->json([
+            'message' => 'Storage supprimé.',
+        ]);
+    }
+
+    public function healthcheck(Request $request, string $databaseUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $database = $this->resolveDatabase($user, $databaseUuid);
+        $this->authorize('view', $database);
+
+        return response()->json([
+            'data' => $this->databaseHealthcheckCatalog->show($database),
+        ]);
+    }
+
+    public function updateHealthcheck(Request $request, string $databaseUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $database = $this->resolveDatabase($user, $databaseUuid);
+        $this->authorize('update', $database);
+
+        return response()->json([
+            'data' => $this->databaseHealthcheckCatalog->update($database, $request->all()),
         ]);
     }
 

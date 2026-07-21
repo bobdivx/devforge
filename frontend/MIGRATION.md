@@ -42,9 +42,9 @@ Chaque ligne du tableau doit être **cochée** avant de retirer l’UI Livewire 
 | Domaine | R | P | L | E | U | T | A | V | F | D | X | Notes |
 |---------|---|---|---|---|---|---|---|---|---|---|---|-------|
 | **dashboard** | ✅ | ✅ | ✅ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ✅ | ✅ | ❌ | Vue d’ensemble OK ; temps réel partiel |
-| **applications** | ⚠️ | ⚠️ | ✅ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ | ✅ | ✅ | ❌ | Liste + détail ; sous-pages `/project/.../application/.../*` encore génériques |
-| **databases** | ⚠️ | ⚠️ | ✅ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ | ✅ | ✅ | ❌ | Création + détail ; backups/import partiels |
-| **services** | ⚠️ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ⚠️ | ✅ | ✅ | ❌ | `ServiceDetailPanel` + actions core |
+| **applications** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ | ✅ | ✅ | ❌ | Deep-links `?tab=` + webhooks + tasks + previews + storages + resource-limits + advanced + clone/move ; metrics / GPU encore absents |
+| **databases** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ | ✅ | ✅ | ❌ | Deep-links + backups/import/explorer/logs/variables/webhooks/storages/healthcheck ; metrics encore absents |
+| **services** | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ⚠️ | ✅ | ✅ | ❌ | Détail + tâches + variables + webhooks + storages (lecture) ; deep-links Coolify `…/service/…` |
 | **deployments** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ | ✅ | ✅ | ❌ | File + logs ; pas toutes actions queue |
 | **monitoring** | ✅ | ✅ | ✅ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ⚠️ | ✅ | ❌ | Lecture supervision |
 | **settings** (compte) | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ➖ | ✅ | ✅ | ✅ | ✅ | ❌ | Profil éditable ; 2FA/apparence legacy |
@@ -52,22 +52,22 @@ Chaque ligne du tableau doit être **cochée** avant de retirer l’UI Livewire 
 | **settings** (serveurs liste) | ✅ | ✅ | ✅ | ❌ | ❌ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | Liste dans onglet paramètres |
 | **settings** (équipe) | ✅ | ✅ | ✅ | ✅ | ✅ | ➖ | ✅ | ✅ | ✅ | ✅ | ❌ | CRUD équipe + membres + invitations |
 | **settings** (instance) | ✅ | ✅ | ✅ | ❌ | ❌ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | Instance/avancé/email/oauth/updates lecture seule |
-| **settings** (notifications) | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | Événements éditables ; identifiants canal legacy |
+| **settings** (notifications) | ✅ | ✅ | ✅ | ✅ | ✅ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | Événements + credentials (secrets masqués) |
 | **settings** (variables) | ✅ | ✅ | ✅ | ✅ | ✅ | ➖ | ✅ | ✅ | ✅ | ✅ | ❌ | CRUD par portée ; secrets masqués |
-| **settings** (sécurité) | ✅ | ✅ | ⚠️ | ❌ | ❌ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | Clés privées ; cloud-tokens/api-tokens legacy |
+| **settings** (sécurité) | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | Clés + api-tokens + cloud-tokens natifs ; cloud-init encore legacy |
+| **security** | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | Clés + api-tokens + cloud-tokens ; cloud-init legacy |
 | **settings** (S3) | ✅ | ✅ | ✅ | ✅ | ✅ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | CRUD storages |
 | **settings** (IA) | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | Providers agents |
 | **settings** (backup, jobs) | ✅ | ✅ | ❌ | ❌ | ❌ | ➖ | ✅ | ❌ | ❌ | ✅ | ❌ | Panneau legacy only |
 | **profile** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ➖ | ✅ | ✅ | ✅ | ✅ | ❌ | Compte + apparence DevForge ; mot de passe/2FA via Fortify |
-| **notifications** (canaux) | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | `PUT` événements ; config canal legacy |
+| **notifications** (canaux) | ✅ | ✅ | ✅ | ✅ | ✅ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | `PUT` événements + credentials ; secrets masqués |
 | **shared-variables** | ✅ | ✅ | ✅ | ✅ | ✅ | ➖ | ✅ | ✅ | ✅ | ✅ | ❌ | CRUD par portée — UI sans bannière |
 | **team** | ✅ | ✅ | ✅ | ✅ | ✅ | ➖ | ✅ | ✅ | ✅ | ✅ | ❌ | CRUD équipe + membres + invitations |
-| **security** | ✅ | ✅ | ⚠️ | ❌ | ❌ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | Sous-routes `/security/*` |
 | **terminal** | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ❌ | ⚠️ | ✅ | ❌ | xterm interactif + `POST /terminal/session` |
 | **sources** | ✅ | ✅ | ✅ | ❌ | ❌ | ➖ | ✅ | ❌ | ✅ | ✅ | ❌ | Liste GitHub ; détail legacy |
 | **destinations** | ✅ | ✅ | ✅ | ✅ | ✅ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | CRUD + resources — UI sans bannière |
 | **tags** | ✅ | ✅ | ✅ | ✅ | ✅ | ➖ | ✅ | ✅ | ✅ | ✅ | ❌ | CRUD + redeploy massif |
-| **servers** (détail) | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | overview/files/resources/destinations/cleanup/terminal natifs ; proxy/swarm/sentinel legacy |
+| **servers** (détail) | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | overview/files/resources/destinations/cleanup/terminal/proxy/swarm/sentinel natifs ; logs proxy/sentinel + actions agent legacy |
 | **projects** (routes legacy) | ✅ | ✅ | ✅ | ✅ | ✅ | ➖ | ✅ | ✅ | ✅ | ✅ | ❌ | `/project/*` → settings projets DevForge |
 | **storage** (`/storages`) | ✅ | ✅ | ✅ | ✅ | ✅ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | Page standalone + CRUD S3 — UI sans bannière |
 | **subscription** | ✅ | ✅ | ⚠️ | ❌ | ❌ | ➖ | ✅ | ❌ | ❌ | ✅ | ❌ | Bootstrap cloud ; Stripe legacy |
@@ -318,7 +318,7 @@ Chaque vague vise le critère **E** (API écriture) + **U** (UI sans bannière) 
 
 | # | Domaine | Travail | Statut |
 |---|---------|---------|--------|
-| 4 | **notifications** | `PUT` événements + enabled ✅ ; identifiants canal (SMTP/webhook) legacy | Partiel |
+| 4 | **notifications** | `PUT` événements + enabled + credentials (secrets masqués) | ✅ Fait |
 | 5 | **shared-variables** | CRUD par scope — UI sans bannière | ✅ Fait |
 | 6 | **destinations** | CRUD + resources — UI sans bannière | ✅ Fait |
 | 7 | **tags** | CRUD + redeploy massif | ✅ Fait |
@@ -328,7 +328,7 @@ Chaque vague vise le critère **E** (API écriture) + **U** (UI sans bannière) 
 
 | # | Domaine | Travail | Statut |
 |---|---------|---------|--------|
-| 9 | **servers** | overview + files + resources + destinations + cleanup + terminal natifs ; proxy/swarm/sentinel legacy | Partiel |
+| 9 | **servers** | + proxy (lecture) + swarm/sentinel (édition settings) ; logs & actions agent encore legacy | Partiel |
 | 10 | **applications** | Sous-routes logs, env, webhooks, source, domains | Partiel (détail riche) |
 | 11 | **databases** | Backups UI + explorer + import | Partiel |
 | 12 | **services** | Panneau détail + deep-link `?uuid=` | ✅ |

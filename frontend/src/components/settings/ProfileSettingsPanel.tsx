@@ -29,7 +29,7 @@ export function ProfileSettingsPanel({
             {forcePasswordReset && (
                 <div class="alert alert-warning text-sm" role="alert">
                     Vous devez changer votre mot de passe avant de continuer.
-                    <a class="link ms-1" href={legacyCoolifyUrl(legacyBaseUrl, '/profile')}>Configurer dans Coolify</a>
+                    <a class="link ms-1" href={legacyCoolifyUrl(legacyBaseUrl, '/profile')}>Configurer dans DevForge</a>
                 </div>
             )}
 

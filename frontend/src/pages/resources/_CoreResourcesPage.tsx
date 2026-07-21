@@ -18,23 +18,60 @@ import { resourceStatusInput } from '../../lib/resource-status';
 import { resolveCoreResourceActions } from '../../lib/core-resource-actions';
 import type { BootstrapPermissions } from '../../lib/bootstrap';
 import { domainApi, type CoreAction, type CoreResource, type CoreResourceType } from '../../lib/domain-api';
+import { applicationPath, parseApplicationTab, type ApplicationTabId } from '../../lib/application-tabs';
+import {
+    databasePath,
+    parseDatabaseTab,
+    parseServiceTab,
+    servicePath,
+    type DatabaseDetailTabId,
+    type ServiceDetailTabId,
+} from '../../lib/routes';
 import { parseResourceStatus } from '../../lib/resource-status';
 import { useApiQuery } from '../../lib/use-api-query';
 import { navigateTo, useNavigate } from '../../lib/use-navigate';
 import { sanitizeResourceUuid } from '../../lib/route-path';
 
-function readResourceDeepLink(): { uuid: string | null; tab: 'overview' | 'data' | 'backups' } {
+function readUuidDeepLink(): string | null {
+    if (typeof window === 'undefined') {
+        return null;
+    }
+
+    return sanitizeResourceUuid(new URLSearchParams(window.location.search).get('uuid'));
+}
+
+function readDatabaseDeepLink(): { uuid: string | null; tab: DatabaseDetailTabId } {
     if (typeof window === 'undefined') {
         return { uuid: null, tab: 'overview' };
     }
 
     const params = new URLSearchParams(window.location.search);
-    const tab = params.get('tab');
 
     return {
         uuid: sanitizeResourceUuid(params.get('uuid')),
-        tab: tab === 'data' || tab === 'backups' ? tab : 'overview',
+        tab: parseDatabaseTab(params.get('tab')),
     };
+}
+
+function readServiceDeepLink(): { uuid: string | null; tab: ServiceDetailTabId } {
+    if (typeof window === 'undefined') {
+        return { uuid: null, tab: 'overview' };
+    }
+
+    const params = new URLSearchParams(window.location.search);
+
+    return {
+        uuid: sanitizeResourceUuid(params.get('uuid')),
+        tab: parseServiceTab(params.get('tab')),
+    };
+}
+
+function readApplicationTabDeepLink(): ApplicationTabId {
+    if (typeof window === 'undefined') {
+        return 'overview';
+    }
+
+    return parseApplicationTab(new URLSearchParams(window.location.search).get('tab'));
 }
 
 type CoreResourcesPageProps = {
@@ -201,22 +238,43 @@ function ResourceDetail({ type, uuid, canAct, onClose, onChanged }: {
 
 export function CoreResourcesPage({ type, permissions, embedded = false, legacyBaseUrl = '', initialResourceUuid = null }: CoreResourcesPageProps) {
     const onNavigate = useNavigate();
-    const deepLink = (type === 'databases' || type === 'services') ? readResourceDeepLink() : { uuid: null, tab: 'overview' as const };
+    const databaseDeepLink = type === 'databases' ? readDatabaseDeepLink() : { uuid: null, tab: 'overview' as DatabaseDetailTabId };
+    const serviceDeepLink = type === 'services' ? readServiceDeepLink() : { uuid: null, tab: 'overview' as ServiceDetailTabId };
     const query = useApiQuery(`core:${type}`, () => domainApi.coreResources(type));
-    const [selectedUuid, setSelectedUuid] = useState<string | null>(initialResourceUuid ?? deepLink.uuid);
-    const [databaseInitialTab, setDatabaseInitialTab] = useState<'overview' | 'data' | 'backups'>(deepLink.tab);
+    const [selectedUuid, setSelectedUuid] = useState<string | null>(
+        initialResourceUuid
+        ?? (type === 'databases' ? databaseDeepLink.uuid : null)
+        ?? (type === 'services' ? serviceDeepLink.uuid : null)
+        ?? readUuidDeepLink(),
+    );
+    const [databaseInitialTab, setDatabaseInitialTab] = useState<DatabaseDetailTabId>(databaseDeepLink.tab);
+    const [serviceInitialTab, setServiceInitialTab] = useState<ServiceDetailTabId>(serviceDeepLink.tab);
+    const [applicationInitialTab, setApplicationInitialTab] = useState<ApplicationTabId>(() => (
+        type === 'applications' ? readApplicationTabDeepLink() : 'overview'
+    ));
     const [search, setSearch] = useState('');
     const [createModalOpen, setCreateModalOpen] = useState(false);
     const resources = query.data?.data ?? [];
 
     useEffect(() => {
         setSearch('');
-        if (type === 'databases' || type === 'services') {
-            const link = readResourceDeepLink();
+        if (type === 'databases') {
+            const link = readDatabaseDeepLink();
             setSelectedUuid(initialResourceUuid ?? link.uuid);
-            if (type === 'databases') {
-                setDatabaseInitialTab(link.tab);
-            }
+            setDatabaseInitialTab(link.tab);
+            return;
+        }
+
+        if (type === 'services') {
+            const link = readServiceDeepLink();
+            setSelectedUuid(initialResourceUuid ?? link.uuid);
+            setServiceInitialTab(link.tab);
+            return;
+        }
+
+        if (type === 'applications') {
+            setSelectedUuid(initialResourceUuid);
+            setApplicationInitialTab(readApplicationTabDeepLink());
             return;
         }
 
@@ -227,9 +285,27 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
         setSelectedUuid(null);
     }, [type, initialResourceUuid]);
 
+    const openApplication = (uuid: string, tab: ApplicationTabId = 'overview') => {
+        setSelectedUuid(uuid);
+        setApplicationInitialTab(tab);
+        navigateTo(applicationPath(uuid, tab));
+    };
+
+    const openDatabase = (uuid: string, tab: DatabaseDetailTabId = 'overview') => {
+        setSelectedUuid(uuid);
+        setDatabaseInitialTab(tab);
+        navigateTo(databasePath(uuid, tab));
+    };
+
+    const openService = (uuid: string, tab: ServiceDetailTabId = 'overview') => {
+        setSelectedUuid(uuid);
+        setServiceInitialTab(tab);
+        navigateTo(servicePath(uuid, tab));
+    };
+
     const closeDetail = () => {
         setSelectedUuid(null);
-        if (initialResourceUuid && type === 'applications') {
+        if (type === 'applications') {
             navigateTo('/applications');
             return;
         }
@@ -315,8 +391,10 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                 <ApplicationDetailPanel
                     uuid={activeUuid}
                     canAct={permissions.create_resources}
+                    initialTab={applicationInitialTab}
                     onClose={closeDetail}
                     onChanged={query.reload}
+                    onTabChange={(tab) => navigateTo(applicationPath(activeUuid, tab))}
                 />
             ) : activeUuid && type === 'databases' ? (
                 <DatabaseDetailPanel
@@ -325,13 +403,16 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                     initialTab={databaseInitialTab}
                     onClose={closeDetail}
                     onChanged={query.reload}
+                    onTabChange={(tab) => navigateTo(databasePath(activeUuid, tab))}
                 />
             ) : activeUuid && type === 'services' ? (
                 <ServiceDetailPanel
                     uuid={activeUuid}
                     canAct={permissions.create_resources}
+                    initialTab={serviceInitialTab}
                     onClose={closeDetail}
                     onChanged={query.reload}
+                    onTabChange={(tab) => navigateTo(servicePath(activeUuid, tab))}
                 />
             ) : (
                 <>
@@ -360,7 +441,21 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                                     }`}
                                     type="button"
                                     key={resource.uuid}
-                                    onClick={() => setSelectedUuid(resource.uuid)}
+                                    onClick={() => {
+                                        if (type === 'applications') {
+                                            openApplication(resource.uuid);
+                                            return;
+                                        }
+                                        if (type === 'databases') {
+                                            openDatabase(resource.uuid);
+                                            return;
+                                        }
+                                        if (type === 'services') {
+                                            openService(resource.uuid);
+                                            return;
+                                        }
+                                        setSelectedUuid(resource.uuid);
+                                    }}
                                 >
                                     <div class="mb-2 flex items-start justify-between gap-2">
                                         <div class="flex min-w-0 items-start gap-3">
@@ -403,7 +498,7 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                     onClose={() => setCreateModalOpen(false)}
                     onCreated={(applicationUuid) => {
                         void query.reload();
-                        setSelectedUuid(applicationUuid);
+                        openApplication(applicationUuid);
                     }}
                 />
             )}
@@ -413,7 +508,7 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                     onClose={() => setCreateModalOpen(false)}
                     onCreated={(databaseUuid) => {
                         void query.reload();
-                        setSelectedUuid(databaseUuid);
+                        openDatabase(databaseUuid);
                     }}
                 />
             )}

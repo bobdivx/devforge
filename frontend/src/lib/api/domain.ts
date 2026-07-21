@@ -165,6 +165,7 @@ export type DeploymentAgentCorrection = {
         deployment_uuid?: string | null;
         ok?: boolean;
     }>;
+    steps?: string[];
     pills: Array<{
         id: string;
         label: string;
@@ -324,10 +325,10 @@ export type InstanceSettings = {
         smtp_port: number | null;
         smtp_encryption: string | null;
         smtp_username: string | null;
-        smtp_password: boolean;
+        smtp_password_set: boolean;
         smtp_timeout: number | null;
         resend_enabled: boolean;
-        resend_api_key: boolean;
+        resend_api_key_set: boolean;
     };
     updates: {
         is_auto_update_enabled: boolean;
@@ -337,15 +338,71 @@ export type InstanceSettings = {
     };
 };
 
+export type InstanceGeneralUpdateInput = {
+    fqdn?: string | null;
+    instance_name?: string | null;
+    instance_timezone?: string;
+    public_ipv4?: string | null;
+    public_ipv6?: string | null;
+    public_port_min?: number;
+    public_port_max?: number;
+    dev_helper_version?: string | null;
+    force_save_domains?: boolean;
+};
+
+export type InstanceAdvancedUpdateInput = {
+    is_registration_enabled?: boolean;
+    do_not_track?: boolean;
+    is_dns_validation_enabled?: boolean;
+    custom_dns_servers?: string | null;
+    is_api_enabled?: boolean;
+    allowed_ips?: string | null;
+    is_sponsorship_popup_enabled?: boolean;
+    disable_two_step_confirmation?: boolean;
+    is_wire_navigate_enabled?: boolean;
+    is_mcp_server_enabled?: boolean;
+    confirmation_password?: string;
+};
+
+export type InstanceEmailUpdateInput = {
+    smtp_enabled?: boolean;
+    smtp_from_address?: string | null;
+    smtp_from_name?: string | null;
+    smtp_recipients?: string | null;
+    smtp_host?: string | null;
+    smtp_port?: number | null;
+    smtp_encryption?: string | null;
+    smtp_username?: string | null;
+    smtp_password?: string | null;
+    smtp_timeout?: number | null;
+    resend_enabled?: boolean;
+    resend_api_key?: string | null;
+};
+
+export type InstanceUpdatesUpdateInput = {
+    is_auto_update_enabled?: boolean;
+    auto_update_frequency?: string | null;
+    update_check_frequency?: string | null;
+};
+
 export type OauthProviderSettings = {
     id: number;
     provider: string;
     enabled: boolean;
     client_id: string | null;
-    client_secret: string | null;
+    client_secret_set: boolean;
     redirect_uri: string | null;
     tenant: string | null;
     base_url: string | null;
+};
+
+export type OauthProviderUpdateInput = {
+    enabled?: boolean;
+    client_id?: string | null;
+    client_secret?: string | null;
+    redirect_uri?: string | null;
+    tenant?: string | null;
+    base_url?: string | null;
 };
 
 export type TerminalConfig = {
@@ -372,10 +429,19 @@ export type TerminalConfig = {
     targets: Array<{ uuid: string; name: string; type: string }>;
 };
 
+export type NotificationChannelCredentials = Record<string, string | number | boolean | null>;
+
 export type NotificationChannel = {
     channel: string;
     enabled: boolean;
     events: Record<string, boolean>;
+    credentials?: NotificationChannelCredentials;
+};
+
+export type NotificationChannelUpdateInput = {
+    events?: Record<string, boolean>;
+    enabled?: boolean;
+    credentials?: NotificationChannelCredentials;
 };
 
 export type SharedVariable = {
@@ -442,6 +508,7 @@ export type AgentChatMessage = {
     metadata: (Record<string, unknown> & {
         steps?: AgentChatStep[];
         pending_approval?: Record<string, unknown>;
+        pending_plan?: Record<string, unknown>;
         tokens_used?: number;
         iterations?: number;
     }) | null;
@@ -567,6 +634,67 @@ export type SecurityKey = {
     is_git_related: boolean;
     private_key: '********';
     created_at: string;
+    message?: string;
+};
+
+export type SecurityKeyInput = {
+    name?: string;
+    description?: string | null;
+    private_key: string;
+};
+
+export type SecurityKeyGenerateResult = {
+    name: string;
+    description: string;
+    private_key: string;
+    public_key: string;
+};
+
+export type ApiToken = {
+    id: number;
+    name: string;
+    abilities: string[];
+    team_id: number | null;
+    last_used_at: string | null;
+    expires_at: string | null;
+    created_at: string | null;
+    is_expired: boolean;
+    plain_text_token?: string;
+    message?: string;
+};
+
+export type ApiTokenMeta = {
+    is_api_enabled: boolean;
+    can_use_root: boolean;
+    can_use_write: boolean;
+};
+
+export type ApiTokenInput = {
+    name: string;
+    abilities?: string[];
+    expires_in_days?: number | null;
+};
+
+export type CloudProviderTokenSummary = {
+    uuid: string;
+    name: string;
+    provider: 'hetzner' | 'digitalocean' | string;
+    team_id: number;
+    servers_count: number;
+    created_at: string | null;
+    updated_at: string | null;
+    message?: string;
+};
+
+export type CloudProviderTokenInput = {
+    provider: 'hetzner' | 'digitalocean';
+    token: string;
+    name: string;
+};
+
+export type CloudProviderTokenValidation = {
+    valid: boolean;
+    message: string;
 };
 
 export type GithubAppSummary = {
@@ -806,6 +934,42 @@ export type ServerSettings = {
     uuid: string;
     name: string;
     wildcard_domain: string | null;
+    swarm?: {
+        is_swarm_manager: boolean;
+        is_swarm_worker: boolean;
+        deprecated?: boolean;
+    };
+    sentinel?: {
+        is_sentinel_enabled: boolean;
+        is_metrics_enabled: boolean;
+        is_live: boolean;
+        sentinel_token_set: boolean;
+        sentinel_custom_url: string | null;
+        sentinel_metrics_refresh_rate_seconds: number | null;
+        sentinel_metrics_history_days: number | null;
+        sentinel_push_interval_seconds: number | null;
+    };
+    proxy?: {
+        type: string | null;
+        status: string | null;
+        redirect_enabled: boolean;
+        redirect_url: string | null;
+        generate_exact_labels: boolean;
+        detected_traefik_version: string | null;
+        config_out_of_sync: boolean;
+    };
+};
+
+export type ServerSettingsUpdateInput = {
+    wildcard_domain?: string | null;
+    is_swarm_manager?: boolean;
+    is_swarm_worker?: boolean;
+    is_sentinel_enabled?: boolean;
+    is_metrics_enabled?: boolean;
+    sentinel_custom_url?: string | null;
+    sentinel_metrics_refresh_rate_seconds?: number | null;
+    sentinel_metrics_history_days?: number | null;
+    sentinel_push_interval_seconds?: number | null;
 };
 
 export type DatabaseEngine = 'postgresql' | 'redis' | 'mongodb' | 'mysql' | 'mariadb' | 'keydb' | 'dragonfly' | 'clickhouse' | 'libsql';
@@ -1174,6 +1338,206 @@ export type ApplicationLogs = {
     items: ApplicationLogLine[];
 };
 
+export type DatabaseLogs = ApplicationLogs;
+
+export type ApplicationWebhookProvider = {
+    url: string | null;
+    secret_set: boolean;
+    configuration_url?: string | null;
+};
+
+export type ApplicationWebhooks = {
+    deploy_webhook_url: string;
+    manual_webhooks_available: boolean;
+    uses_git_app: boolean;
+    manual: {
+        github: ApplicationWebhookProvider;
+        gitlab: ApplicationWebhookProvider;
+        bitbucket: ApplicationWebhookProvider;
+        gitea: ApplicationWebhookProvider;
+    } | null;
+};
+
+export type ApplicationScheduledTaskExecution = {
+    uuid: string;
+    status: string;
+    message: string | null;
+    started_at: string | null;
+    finished_at: string | null;
+    duration: number | string | null;
+    retry_count: number;
+    created_at: string | null;
+};
+
+export type ApplicationScheduledTask = {
+    uuid: string;
+    name: string;
+    command: string;
+    frequency: string;
+    container: string | null;
+    timeout: number;
+    enabled: boolean;
+    latest_execution: ApplicationScheduledTaskExecution | null;
+    created_at: string | null;
+    updated_at: string | null;
+};
+
+export type ApplicationScheduledTaskInput = {
+    name?: string;
+    command?: string;
+    frequency?: string;
+    container?: string | null;
+    timeout?: number;
+    enabled?: boolean;
+};
+
+export type ApplicationPreview = {
+    uuid: string;
+    pull_request_id: number;
+    pull_request_html_url: string | null;
+    fqdn: string | null;
+    status: string | null;
+    is_running: boolean;
+    git_type: string | null;
+    docker_registry_image_tag: string | null;
+    last_online_at: string | null;
+    created_at: string | null;
+    updated_at: string | null;
+};
+
+export type ApplicationPreviewSettings = {
+    is_preview_deployments_enabled: boolean;
+    preview_url_template: string;
+};
+
+export type ApplicationStorage = {
+    uuid: string;
+    type: 'persistent' | 'file';
+    name?: string | null;
+    fs_path?: string | null;
+    mount_path: string;
+    host_path?: string | null;
+    is_directory?: boolean;
+    is_preview_suffix_enabled: boolean;
+    has_content?: boolean;
+    is_binary?: boolean;
+    is_too_large?: boolean;
+    read_only: boolean;
+    created_at: string | null;
+    updated_at: string | null;
+};
+
+export type ApplicationStoragesPayload = {
+    compose_managed: boolean;
+    is_swarm: boolean;
+    storages: ApplicationStorage[];
+};
+
+export type ServiceStorage = ApplicationStorage;
+
+export type ServiceStorageGroup = {
+    child_uuid: string;
+    child_name: string;
+    child_type: 'application' | 'database';
+    storages: ServiceStorage[];
+};
+
+export type ServiceStoragesPayload = {
+    compose_managed: boolean;
+    is_swarm: boolean;
+    groups: ServiceStorageGroup[];
+};
+
+export type ApplicationStorageInput = {
+    type: 'persistent' | 'file';
+    name?: string;
+    mount_path: string;
+    host_path?: string | null;
+    content?: string | null;
+    is_directory?: boolean;
+    fs_path?: string;
+};
+
+export type ApplicationStorageUpdateInput = {
+    name?: string;
+    mount_path?: string;
+    host_path?: string | null;
+    content?: string | null;
+    is_preview_suffix_enabled?: boolean;
+};
+
+export type DatabaseHealthcheckSettings = {
+    health_check_enabled: boolean;
+    health_check_interval: number;
+    health_check_timeout: number;
+    health_check_retries: number;
+    health_check_start_period: number;
+    probe_label: string;
+    restart_required: boolean;
+    message?: string;
+};
+
+export type ApplicationResourceLimits = {
+    limits_cpus: string | null;
+    limits_cpuset: string | null;
+    limits_cpu_shares: number;
+    limits_memory: string;
+    limits_memory_swap: string;
+    limits_memory_reservation: string;
+    limits_memory_swappiness: number;
+    message?: string;
+};
+
+export type ApplicationAdvancedSettings = {
+    disable_build_cache: boolean;
+    inject_build_args_to_dockerfile: boolean;
+    include_source_commit_in_build: boolean;
+    is_consistent_container_name_enabled: boolean;
+    is_auto_deploy_enabled: boolean;
+    is_git_submodules_enabled: boolean;
+    is_git_lfs_enabled: boolean;
+    is_git_shallow_clone_enabled: boolean;
+    is_pr_deployments_public_enabled: boolean;
+    is_force_https_enabled: boolean;
+    is_gzip_enabled: boolean;
+    is_stripprefix_enabled: boolean;
+    is_log_drain_enabled: boolean;
+    connect_to_docker_network: boolean;
+    stop_grace_period: number | null;
+    max_restart_count: number;
+    capabilities: {
+        git_based: boolean;
+        dockercompose: boolean;
+        log_drain_server: boolean;
+    };
+    message?: string;
+};
+
+export type ApplicationResourceOperations = {
+    current_destination_uuid: string | null;
+    current_environment_uuid: string | null;
+    destinations: Array<{
+        uuid: string;
+        name: string;
+        type: string;
+        server: { uuid: string; name: string };
+    }>;
+    environments: Array<{
+        uuid: string;
+        name: string;
+        project_uuid: string;
+        project_name: string;
+    }>;
+};
+
+export type ApplicationResourceOperationResult = {
+    uuid: string;
+    name: string;
+    project_uuid: string | null;
+    environment_uuid: string | null;
+    message?: string;
+};
+
 export type ApplicationSourceInfo = {
     available: boolean;
     reason: string | null;
@@ -1345,7 +1709,31 @@ export const domainApi = {
         { method: 'DELETE' },
     ),
     settings: () => apiFetch<ApiResponse<InstanceSettings>>(`${API_BASE}/settings`),
+    updateInstanceSettings: (input: InstanceGeneralUpdateInput) => mutate<ApiResponse<InstanceSettings>>(
+        '/settings/instance',
+        { method: 'PUT', body: JSON.stringify(input) },
+    ),
+    updateAdvancedSettings: (input: InstanceAdvancedUpdateInput) => mutate<ApiResponse<InstanceSettings>>(
+        '/settings/advanced',
+        { method: 'PUT', body: JSON.stringify(input) },
+    ),
+    updateEmailSettings: (input: InstanceEmailUpdateInput) => mutate<ApiResponse<InstanceSettings>>(
+        '/settings/email',
+        { method: 'PUT', body: JSON.stringify(input) },
+    ),
+    updateUpdatesSettings: (input: InstanceUpdatesUpdateInput) => mutate<ApiResponse<InstanceSettings>>(
+        '/settings/updates',
+        { method: 'PUT', body: JSON.stringify(input) },
+    ),
+    checkUpdatesSettings: () => mutate<ApiResponse<InstanceSettings>>('/settings/updates/check', {
+        method: 'POST',
+        body: JSON.stringify({}),
+    }),
     oauthSettings: () => apiFetch<ApiResponse<OauthProviderSettings[]>>(`${API_BASE}/settings/oauth`),
+    updateOauthSettings: (provider: string, input: OauthProviderUpdateInput) => mutate<ApiResponse<OauthProviderSettings>>(
+        `/settings/oauth/${encodeURIComponent(provider)}`,
+        { method: 'PUT', body: JSON.stringify(input) },
+    ),
     terminalConfig: () => apiFetch<ApiResponse<TerminalConfig>>(`${API_BASE}/terminal/config`),
     createTerminalSession: (serverUuid: string) => mutate<ApiResponse<{ server_uuid: string; command: string }>>(
         '/terminal/session',
@@ -1355,7 +1743,7 @@ export const domainApi = {
         },
     ),
     notifications: () => apiFetch<ApiResponse<NotificationChannel[]>>(`${API_BASE}/notifications`),
-    updateNotificationChannel: (channel: string, input: { events: Record<string, boolean>; enabled?: boolean }) => mutate<ApiResponse<NotificationChannel>>(
+    updateNotificationChannel: (channel: string, input: NotificationChannelUpdateInput) => mutate<ApiResponse<NotificationChannel>>(
         `/notifications/${encodeURIComponent(channel)}`,
         {
             method: 'PUT',
@@ -1378,6 +1766,70 @@ export const domainApi = {
         method: 'DELETE',
     }),
     securityKeys: () => apiFetch<ApiResponse<SecurityKey[]>>(`${API_BASE}/security/keys`),
+    createSecurityKey: (input: SecurityKeyInput) => mutate<ApiResponse<SecurityKey>>(
+        '/security/keys',
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+    ),
+    updateSecurityKey: (keyUuid: string, input: Partial<SecurityKeyInput>) => mutate<ApiResponse<SecurityKey>>(
+        `/security/keys/${encodeURIComponent(keyUuid)}`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    deleteSecurityKey: (keyUuid: string) => mutate<{ message: string }>(
+        `/security/keys/${encodeURIComponent(keyUuid)}`,
+        { method: 'DELETE' },
+    ),
+    generateSecurityKey: (type: 'ed25519' | 'rsa' = 'ed25519') => mutate<ApiResponse<SecurityKeyGenerateResult>>(
+        '/security/keys/generate',
+        {
+            method: 'POST',
+            body: JSON.stringify({ type }),
+        },
+    ),
+    apiTokens: () => apiFetch<ApiResponse<ApiToken[]> & { meta: ApiTokenMeta }>(
+        `${API_BASE}/security/api-tokens`,
+    ),
+    createApiToken: (input: ApiTokenInput) => mutate<ApiResponse<ApiToken>>(
+        '/security/api-tokens',
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+    ),
+    deleteApiToken: (tokenId: number) => mutate<{ message: string }>(
+        `/security/api-tokens/${tokenId}`,
+        { method: 'DELETE' },
+    ),
+    cloudTokens: () => apiFetch<ApiResponse<CloudProviderTokenSummary[]>>(
+        `${API_BASE}/security/cloud-tokens`,
+    ),
+    createCloudToken: (input: CloudProviderTokenInput) => mutate<ApiResponse<CloudProviderTokenSummary>>(
+        '/security/cloud-tokens',
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+    ),
+    updateCloudToken: (tokenUuid: string, input: { name: string }) => mutate<ApiResponse<CloudProviderTokenSummary>>(
+        `/security/cloud-tokens/${encodeURIComponent(tokenUuid)}`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    deleteCloudToken: (tokenUuid: string) => mutate<{ message: string }>(
+        `/security/cloud-tokens/${encodeURIComponent(tokenUuid)}`,
+        { method: 'DELETE' },
+    ),
+    validateCloudToken: (tokenUuid: string) => mutate<ApiResponse<CloudProviderTokenValidation>>(
+        `/security/cloud-tokens/${encodeURIComponent(tokenUuid)}/validate`,
+        { method: 'POST' },
+    ),
 
     deploymentTargets: () => apiFetch<ApiResponse<DeploymentTarget[]>>(`${API_BASE}/deployment-targets`),
     destinations: () => apiFetch<ApiResponse<DestinationSummary[]>>(`${API_BASE}/destinations`),
@@ -1470,7 +1922,7 @@ export const domainApi = {
     ),
     updateServerSettings: (
         serverUuid: string,
-        input: { wildcard_domain?: string | null },
+        input: ServerSettingsUpdateInput,
     ) => mutate<ApiResponse<ServerSettings>>(
         `/servers/${encodeURIComponent(serverUuid)}/settings`,
         {
@@ -1517,6 +1969,369 @@ export const domainApi = {
     ),
     applicationLogs: (applicationUuid: string, lines = 200) => apiFetch<ApiResponse<ApplicationLogs>>(
         `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/logs?lines=${lines}`,
+    ),
+    applicationWebhooks: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationWebhooks>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/webhooks`,
+    ),
+    updateApplicationWebhooks: (
+        applicationUuid: string,
+        input: Partial<{
+            manual_webhook_secret_github: string | null;
+            manual_webhook_secret_gitlab: string | null;
+            manual_webhook_secret_bitbucket: string | null;
+            manual_webhook_secret_gitea: string | null;
+        }>,
+    ) => mutate<ApiResponse<ApplicationWebhooks>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/webhooks`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    applicationPreviews: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationPreview[]>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/previews`,
+    ),
+    applicationPreviewSettings: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationPreviewSettings>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/previews/settings`,
+    ),
+    updateApplicationPreviewSettings: (
+        applicationUuid: string,
+        input: Partial<ApplicationPreviewSettings>,
+    ) => mutate<ApiResponse<ApplicationPreviewSettings>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/previews/settings`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    deleteApplicationPreview: (applicationUuid: string, pullRequestId: number) => mutate<{
+        message: string;
+        pull_request_id: number;
+    }>(
+        `/applications/${encodeURIComponent(applicationUuid)}/previews/${encodeURIComponent(String(pullRequestId))}`,
+        { method: 'DELETE' },
+    ),
+    applicationStorages: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationStoragesPayload>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/storages`,
+    ),
+    createApplicationStorage: (
+        applicationUuid: string,
+        input: ApplicationStorageInput,
+    ) => mutate<ApiResponse<ApplicationStorage>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/storages`,
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+    ),
+    updateApplicationStorage: (
+        applicationUuid: string,
+        storageUuid: string,
+        input: ApplicationStorageUpdateInput,
+    ) => mutate<ApiResponse<ApplicationStorage>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/storages/${encodeURIComponent(storageUuid)}`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    deleteApplicationStorage: (applicationUuid: string, storageUuid: string) => mutate<{ message: string }>(
+        `/applications/${encodeURIComponent(applicationUuid)}/storages/${encodeURIComponent(storageUuid)}`,
+        { method: 'DELETE' },
+    ),
+    resourceStorages: (
+        resourceType: 'applications' | 'databases',
+        resourceUuid: string,
+    ) => apiFetch<ApiResponse<ApplicationStoragesPayload>>(
+        `${API_BASE}/${resourceType}/${encodeURIComponent(resourceUuid)}/storages`,
+    ),
+    serviceStorages: (serviceUuid: string) => apiFetch<ApiResponse<ServiceStoragesPayload>>(
+        `${API_BASE}/services/${encodeURIComponent(serviceUuid)}/storages`,
+    ),
+    createResourceStorage: (
+        resourceType: 'applications' | 'databases',
+        resourceUuid: string,
+        input: ApplicationStorageInput,
+    ) => mutate<ApiResponse<ApplicationStorage>>(
+        `/${resourceType}/${encodeURIComponent(resourceUuid)}/storages`,
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+    ),
+    updateResourceStorage: (
+        resourceType: 'applications' | 'databases',
+        resourceUuid: string,
+        storageUuid: string,
+        input: ApplicationStorageUpdateInput,
+    ) => mutate<ApiResponse<ApplicationStorage>>(
+        `/${resourceType}/${encodeURIComponent(resourceUuid)}/storages/${encodeURIComponent(storageUuid)}`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    deleteResourceStorage: (
+        resourceType: 'applications' | 'databases',
+        resourceUuid: string,
+        storageUuid: string,
+    ) => mutate<{ message: string }>(
+        `/${resourceType}/${encodeURIComponent(resourceUuid)}/storages/${encodeURIComponent(storageUuid)}`,
+        { method: 'DELETE' },
+    ),
+    databaseHealthcheck: (databaseUuid: string) => apiFetch<ApiResponse<DatabaseHealthcheckSettings>>(
+        `${API_BASE}/databases/${encodeURIComponent(databaseUuid)}/healthcheck`,
+    ),
+    updateDatabaseHealthcheck: (
+        databaseUuid: string,
+        input: Partial<Omit<DatabaseHealthcheckSettings, 'probe_label' | 'restart_required' | 'message'>>,
+    ) => mutate<ApiResponse<DatabaseHealthcheckSettings>>(
+        `/databases/${encodeURIComponent(databaseUuid)}/healthcheck`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    applicationResourceLimits: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationResourceLimits>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/resource-limits`,
+    ),
+    updateApplicationResourceLimits: (
+        applicationUuid: string,
+        input: Partial<Omit<ApplicationResourceLimits, 'message'>>,
+    ) => mutate<ApiResponse<ApplicationResourceLimits>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/resource-limits`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    applicationAdvancedSettings: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationAdvancedSettings>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/advanced`,
+    ),
+    updateApplicationAdvancedSettings: (
+        applicationUuid: string,
+        input: Partial<Omit<ApplicationAdvancedSettings, 'capabilities' | 'message'>>,
+    ) => mutate<ApiResponse<ApplicationAdvancedSettings>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/advanced`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    applicationResourceOperations: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationResourceOperations>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/resource-operations`,
+    ),
+    cloneApplication: (
+        applicationUuid: string,
+        input: { destination_uuid: string; clone_volume_data?: boolean },
+    ) => mutate<ApiResponse<ApplicationResourceOperationResult>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/clone`,
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+    ),
+    moveApplication: (
+        applicationUuid: string,
+        input: { environment_uuid: string },
+    ) => mutate<ApiResponse<ApplicationResourceOperationResult>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/move`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    resourceScheduledTasks: (
+        resourceType: 'applications' | 'services',
+        resourceUuid: string,
+    ) => apiFetch<ApiResponse<ApplicationScheduledTask[]>>(
+        `${API_BASE}/${resourceType}/${encodeURIComponent(resourceUuid)}/scheduled-tasks`,
+    ),
+    createResourceScheduledTask: (
+        resourceType: 'applications' | 'services',
+        resourceUuid: string,
+        input: ApplicationScheduledTaskInput,
+    ) => mutate<ApiResponse<ApplicationScheduledTask>>(
+        `/${resourceType}/${encodeURIComponent(resourceUuid)}/scheduled-tasks`,
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+    ),
+    updateResourceScheduledTask: (
+        resourceType: 'applications' | 'services',
+        resourceUuid: string,
+        taskUuid: string,
+        input: ApplicationScheduledTaskInput,
+    ) => mutate<ApiResponse<ApplicationScheduledTask>>(
+        `/${resourceType}/${encodeURIComponent(resourceUuid)}/scheduled-tasks/${encodeURIComponent(taskUuid)}`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    deleteResourceScheduledTask: (
+        resourceType: 'applications' | 'services',
+        resourceUuid: string,
+        taskUuid: string,
+    ) => mutate<{ message: string }>(
+        `/${resourceType}/${encodeURIComponent(resourceUuid)}/scheduled-tasks/${encodeURIComponent(taskUuid)}`,
+        { method: 'DELETE' },
+    ),
+    resourceScheduledTaskExecutions: (
+        resourceType: 'applications' | 'services',
+        resourceUuid: string,
+        taskUuid: string,
+        limit = 20,
+    ) => apiFetch<ApiResponse<ApplicationScheduledTaskExecution[]>>(
+        `${API_BASE}/${resourceType}/${encodeURIComponent(resourceUuid)}/scheduled-tasks/${encodeURIComponent(taskUuid)}/executions?limit=${limit}`,
+    ),
+    runResourceScheduledTask: (
+        resourceType: 'applications' | 'services',
+        resourceUuid: string,
+        taskUuid: string,
+    ) => mutate<ApiResponse<{
+        queued: boolean;
+        task_uuid: string;
+        message: string;
+    }>>(
+        `/${resourceType}/${encodeURIComponent(resourceUuid)}/scheduled-tasks/${encodeURIComponent(taskUuid)}/run`,
+        { method: 'POST', body: JSON.stringify({}) },
+    ),
+    applicationScheduledTasks: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationScheduledTask[]>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/scheduled-tasks`,
+    ),
+    createApplicationScheduledTask: (
+        applicationUuid: string,
+        input: ApplicationScheduledTaskInput,
+    ) => mutate<ApiResponse<ApplicationScheduledTask>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/scheduled-tasks`,
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+    ),
+    updateApplicationScheduledTask: (
+        applicationUuid: string,
+        taskUuid: string,
+        input: ApplicationScheduledTaskInput,
+    ) => mutate<ApiResponse<ApplicationScheduledTask>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/scheduled-tasks/${encodeURIComponent(taskUuid)}`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    deleteApplicationScheduledTask: (applicationUuid: string, taskUuid: string) => mutate<{ message: string }>(
+        `/applications/${encodeURIComponent(applicationUuid)}/scheduled-tasks/${encodeURIComponent(taskUuid)}`,
+        { method: 'DELETE' },
+    ),
+    applicationScheduledTaskExecutions: (
+        applicationUuid: string,
+        taskUuid: string,
+        limit = 20,
+    ) => apiFetch<ApiResponse<ApplicationScheduledTaskExecution[]>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/scheduled-tasks/${encodeURIComponent(taskUuid)}/executions?limit=${limit}`,
+    ),
+    runApplicationScheduledTask: (applicationUuid: string, taskUuid: string) => mutate<ApiResponse<{
+        queued: boolean;
+        task_uuid: string;
+        message: string;
+    }>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/scheduled-tasks/${encodeURIComponent(taskUuid)}/run`,
+        { method: 'POST', body: JSON.stringify({}) },
+    ),
+    databaseLogs: (databaseUuid: string, lines = 200) => apiFetch<ApiResponse<DatabaseLogs>>(
+        `${API_BASE}/databases/${encodeURIComponent(databaseUuid)}/logs?lines=${lines}`,
+    ),
+    resourceWebhooks: (resourceType: 'databases' | 'services', resourceUuid: string) => apiFetch<ApiResponse<{
+        deploy_webhook_url: string;
+    }>>(
+        `${API_BASE}/${resourceType}/${encodeURIComponent(resourceUuid)}/webhooks`,
+    ),
+    resourceEnvironmentVariables: (
+        resourceType: 'databases' | 'services',
+        resourceUuid: string,
+    ) => apiFetch<ApiResponse<ApplicationEnvironmentVariable[]>>(
+        `${API_BASE}/${resourceType}/${encodeURIComponent(resourceUuid)}/environment-variables`,
+    ),
+    createResourceEnvironmentVariable: (
+        resourceType: 'databases' | 'services',
+        resourceUuid: string,
+        input: ApplicationEnvironmentVariableInput,
+    ) => mutate<ApiResponse<ApplicationEnvironmentVariable>>(
+        `/${resourceType}/${encodeURIComponent(resourceUuid)}/environment-variables`,
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+    ),
+    updateResourceEnvironmentVariable: (
+        resourceType: 'databases' | 'services',
+        resourceUuid: string,
+        envUuid: string,
+        input: ApplicationEnvironmentVariableUpdateInput,
+    ) => mutate<ApiResponse<ApplicationEnvironmentVariable>>(
+        `/${resourceType}/${encodeURIComponent(resourceUuid)}/environment-variables/${encodeURIComponent(envUuid)}`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    deleteResourceEnvironmentVariable: (
+        resourceType: 'databases' | 'services',
+        resourceUuid: string,
+        envUuid: string,
+    ) => mutate<{ message: string }>(
+        `/${resourceType}/${encodeURIComponent(resourceUuid)}/environment-variables/${encodeURIComponent(envUuid)}`,
+        { method: 'DELETE' },
+    ),
+    revealResourceEnvironmentVariable: (
+        resourceType: 'databases' | 'services',
+        resourceUuid: string,
+        envUuid: string,
+    ) => apiFetch<ApiResponse<{
+        uuid: string;
+        value: string | null;
+    }>>(
+        `${API_BASE}/${resourceType}/${encodeURIComponent(resourceUuid)}/environment-variables/${encodeURIComponent(envUuid)}/reveal`,
+    ),
+    databaseWebhooks: (databaseUuid: string) => apiFetch<ApiResponse<{ deploy_webhook_url: string }>>(
+        `${API_BASE}/databases/${encodeURIComponent(databaseUuid)}/webhooks`,
+    ),
+    databaseEnvironmentVariables: (databaseUuid: string) => apiFetch<ApiResponse<ApplicationEnvironmentVariable[]>>(
+        `${API_BASE}/databases/${encodeURIComponent(databaseUuid)}/environment-variables`,
+    ),
+    createDatabaseEnvironmentVariable: (
+        databaseUuid: string,
+        input: ApplicationEnvironmentVariableInput,
+    ) => mutate<ApiResponse<ApplicationEnvironmentVariable>>(
+        `/databases/${encodeURIComponent(databaseUuid)}/environment-variables`,
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+    ),
+    updateDatabaseEnvironmentVariable: (
+        databaseUuid: string,
+        envUuid: string,
+        input: ApplicationEnvironmentVariableUpdateInput,
+    ) => mutate<ApiResponse<ApplicationEnvironmentVariable>>(
+        `/databases/${encodeURIComponent(databaseUuid)}/environment-variables/${encodeURIComponent(envUuid)}`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    deleteDatabaseEnvironmentVariable: (databaseUuid: string, envUuid: string) => mutate<{ message: string }>(
+        `/databases/${encodeURIComponent(databaseUuid)}/environment-variables/${encodeURIComponent(envUuid)}`,
+        { method: 'DELETE' },
+    ),
+    revealDatabaseEnvironmentVariable: (databaseUuid: string, envUuid: string) => apiFetch<ApiResponse<{
+        uuid: string;
+        value: string | null;
+    }>>(
+        `${API_BASE}/databases/${encodeURIComponent(databaseUuid)}/environment-variables/${encodeURIComponent(envUuid)}/reveal`,
     ),
     applicationSourceInfo: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationSourceInfo>>(
         `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/source`,

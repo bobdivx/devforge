@@ -25,7 +25,34 @@ describe('parsePendingToolApproval', () => {
             reason: 'Outil destructif',
             rule_id: 'mode:tiered:destructive',
             approval_key: 'abc',
+            diff_preview: undefined,
             resolved: undefined,
+        });
+    });
+
+    it('parses diff preview on write_application_source approval', () => {
+        const pending = parsePendingToolApproval({
+            pending_approval: {
+                status: 'ask',
+                tool: 'write_application_source',
+                reason: 'Vérifiez le diff',
+                diff_preview: {
+                    path: 'Dockerfile',
+                    is_new_file: false,
+                    lines_added: 1,
+                    lines_removed: 1,
+                    diff: '--- a/Dockerfile\n+RUN npm ci',
+                },
+            },
+        });
+
+        expect(pending?.diff_preview).toEqual({
+            path: 'Dockerfile',
+            is_new_file: false,
+            lines_added: 1,
+            lines_removed: 1,
+            diff: '--- a/Dockerfile\n+RUN npm ci',
+            read_error: undefined,
         });
     });
 

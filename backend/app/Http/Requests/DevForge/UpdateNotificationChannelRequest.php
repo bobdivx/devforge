@@ -22,6 +22,7 @@ class UpdateNotificationChannelRequest extends FormRequest
             'events' => ['sometimes', 'required', 'array'],
             'events.*' => ['boolean'],
             'enabled' => ['sometimes', 'boolean'],
+            'credentials' => ['sometimes', 'required', 'array'],
             'channel' => ['required', 'string', Rule::in(array_keys(NotificationChannelRegistry::CHANNEL_RELATIONS))],
         ];
     }
@@ -34,7 +35,7 @@ class UpdateNotificationChannelRequest extends FormRequest
     }
 
     /**
-     * @return array{events?: array<string, bool>, enabled?: bool}
+     * @return array{events?: array<string, bool>, enabled?: bool, credentials?: array<string, mixed>}
      */
     public function payload(): array
     {
@@ -48,6 +49,10 @@ class UpdateNotificationChannelRequest extends FormRequest
 
         if ($this->has('enabled')) {
             $payload['enabled'] = (bool) $this->validated('enabled');
+        }
+
+        if ($this->has('credentials')) {
+            $payload['credentials'] = $this->validated('credentials');
         }
 
         return $payload;

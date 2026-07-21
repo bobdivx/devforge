@@ -316,8 +316,10 @@ it('returns masked shared variables notifications and private keys for current t
         ->withSession($this->session)
         ->getJson('/api/devforge/v1/notifications')
         ->assertSuccessful();
-    expect($notifications->getContent())->not->toContain('private-hook')
-        ->not->toContain('webhook_url');
+    $discord = collect($notifications->json('data'))->firstWhere('channel', 'discord');
+    expect($discord['credentials']['discord_webhook_url_set'] ?? null)->toBeTrue()
+        ->and($discord['credentials'] ?? [])->not->toHaveKey('discord_webhook_url');
+    expect($notifications->getContent())->not->toContain('private-hook');
 
     $keys = $this->actingAs($this->user)
         ->withSession($this->session)
@@ -375,11 +377,12 @@ it('returns masked oauth settings to an instance admin', function () {
         ->getJson('/api/devforge/v1/settings/oauth')
         ->assertSuccessful()
         ->assertJsonPath('data.0.provider', 'github')
-        ->assertJsonPath('data.0.client_id', '********')
-        ->assertJsonPath('data.0.client_secret', '********')
+        ->assertJsonPath('data.0.client_id', 'github-client-id')
+        ->assertJsonPath('data.0.client_secret_set', true)
         ->assertJsonPath('data.0.redirect_uri', 'https://example.test/oauth/github/callback');
 
     expect($response->getContent())->not->toContain('github-client-secret');
+    expect($response->json('data.0'))->not->toHaveKey('client_secret');
 });
 
 it('updates notification channel events and enabled flag for the current team', function () {
@@ -420,6 +423,32 @@ it('rejects unknown notification event keys', function () {
         ])
         ->assertUnprocessable()
         ->assertJsonValidationErrors(['events']);
+});
+
+it('updates notification channel credentials without echoing secrets', function () {
+    $this->team->discordNotificationSettings()->update([
+        'discord_enabled' => true,
+        'discord_ping_enabled' => true,
+        'discord_webhook_url' => null,
+    ]);
+
+    $response = $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson('/api/devforge/v1/notifications/discord', [
+            'credentials' => [
+                'discord_ping_enabled' => false,
+                'discord_webhook_url' => 'https://discord.com/api/webhooks/99/secret-token',
+            ],
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.credentials.discord_ping_enabled', false)
+        ->assertJsonPath('data.credentials.discord_webhook_url_set', true)
+        ->assertJsonMissingPath('data.credentials.discord_webhook_url');
+
+    expect($response->getContent())->not->toContain('secret-token');
+    expect($this->team->discordNotificationSettings()->first())
+        ->discord_ping_enabled->toBeFalse()
+        ->discord_webhook_url->toBe('https://discord.com/api/webhooks/99/secret-token');
 });
 
 it('creates updates and deletes shared variables for the current team', function () {

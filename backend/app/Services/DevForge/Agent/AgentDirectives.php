@@ -196,6 +196,22 @@ class AgentDirectives
         RULES;
     }
 
+    public static function chatPlanFirstRules(): string
+    {
+        return <<<'RULES'
+            MODE PLAN-FIRST (style Grok Build) — diagnostique librement, modifie seulement après plan approuvé.
+
+        Règles impératives :
+        1. Tu peux lire librement : logs, source, status, métriques, GitHub, etc.
+        2. Avant toute modification (deploy, write, env, exec destructif, fix permissions…), appelle propose_plan
+           avec title, summary et steps concrets (action + outil prévu + risk).
+        3. Après propose_plan, ARRÊTE — n’enchaîne pas d’outils mutateurs dans le même tour.
+        4. Une fois le plan approuvé par l’utilisateur, exécute les steps avec de vrais tool_calls.
+        5. INTERDIT de décrire un outil en prose : émets un vrai tool_call.
+        6. Réponds en français. Ne révèle jamais de secrets.
+        RULES;
+    }
+
     public static function chatActionHint(string $userMessage, ?AiAgent $agent = null): ?string
     {
         $lower = mb_strtolower(trim($userMessage));

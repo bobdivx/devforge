@@ -67,6 +67,7 @@ class AgentToolClassification
             'write_remote_file' => $destructive,
             'delegate_task' => ['isReadOnly' => false, 'isDestructive' => false, 'runtimeProfile' => 'coordinator'],
             'spawn_task' => ['isReadOnly' => false, 'isDestructive' => false, 'runtimeProfile' => 'coordinator'],
+            'propose_plan' => ['isReadOnly' => true, 'isDestructive' => false, 'isConcurrencySafe' => true, 'runtimeProfile' => 'both'],
             'enable_tool_package' => $neutral,
             'list_tool_packages' => $readOnly,
             'install_tool' => $destructive,

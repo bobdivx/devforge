@@ -35,6 +35,78 @@ Route::post('/applications/{applicationUuid}/databases/{databaseUuid}/reset', [A
 Route::get('/applications/{applicationUuid}/logs', [ApplicationController::class, 'logs'])
     ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
     ->name('applications.logs');
+Route::get('/applications/{applicationUuid}/webhooks', [ApplicationController::class, 'webhooks'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.webhooks.show');
+Route::put('/applications/{applicationUuid}/webhooks', [ApplicationController::class, 'updateWebhooks'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.webhooks.update');
+Route::get('/applications/{applicationUuid}/scheduled-tasks', [ApplicationController::class, 'scheduledTasks'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.scheduled-tasks.index');
+Route::post('/applications/{applicationUuid}/scheduled-tasks', [ApplicationController::class, 'storeScheduledTask'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.scheduled-tasks.store');
+Route::put('/applications/{applicationUuid}/scheduled-tasks/{taskUuid}', [ApplicationController::class, 'updateScheduledTask'])
+    ->where(['applicationUuid' => '[A-Za-z0-9-]{8,64}', 'taskUuid' => '[A-Za-z0-9-]{8,64}'])
+    ->name('applications.scheduled-tasks.update');
+Route::delete('/applications/{applicationUuid}/scheduled-tasks/{taskUuid}', [ApplicationController::class, 'destroyScheduledTask'])
+    ->where(['applicationUuid' => '[A-Za-z0-9-]{8,64}', 'taskUuid' => '[A-Za-z0-9-]{8,64}'])
+    ->name('applications.scheduled-tasks.destroy');
+Route::get('/applications/{applicationUuid}/scheduled-tasks/{taskUuid}/executions', [ApplicationController::class, 'scheduledTaskExecutions'])
+    ->where(['applicationUuid' => '[A-Za-z0-9-]{8,64}', 'taskUuid' => '[A-Za-z0-9-]{8,64}'])
+    ->name('applications.scheduled-tasks.executions');
+Route::post('/applications/{applicationUuid}/scheduled-tasks/{taskUuid}/run', [ApplicationController::class, 'runScheduledTask'])
+    ->where(['applicationUuid' => '[A-Za-z0-9-]{8,64}', 'taskUuid' => '[A-Za-z0-9-]{8,64}'])
+    ->name('applications.scheduled-tasks.run');
+Route::get('/applications/{applicationUuid}/previews', [ApplicationController::class, 'previews'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.previews.index');
+Route::get('/applications/{applicationUuid}/previews/settings', [ApplicationController::class, 'previewSettings'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.previews.settings.show');
+Route::put('/applications/{applicationUuid}/previews/settings', [ApplicationController::class, 'updatePreviewSettings'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.previews.settings.update');
+Route::delete('/applications/{applicationUuid}/previews/{pullRequestId}', [ApplicationController::class, 'destroyPreview'])
+    ->where([
+        'applicationUuid' => '[A-Za-z0-9-]{8,64}',
+        'pullRequestId' => '[0-9]+',
+    ])
+    ->name('applications.previews.destroy');
+Route::get('/applications/{applicationUuid}/storages', [ApplicationController::class, 'storages'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.storages.index');
+Route::post('/applications/{applicationUuid}/storages', [ApplicationController::class, 'storeStorage'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.storages.store');
+Route::put('/applications/{applicationUuid}/storages/{storageUuid}', [ApplicationController::class, 'updateStorage'])
+    ->where(['applicationUuid' => '[A-Za-z0-9-]{8,64}', 'storageUuid' => '[A-Za-z0-9-]{8,64}'])
+    ->name('applications.storages.update');
+Route::delete('/applications/{applicationUuid}/storages/{storageUuid}', [ApplicationController::class, 'destroyStorage'])
+    ->where(['applicationUuid' => '[A-Za-z0-9-]{8,64}', 'storageUuid' => '[A-Za-z0-9-]{8,64}'])
+    ->name('applications.storages.destroy');
+Route::get('/applications/{applicationUuid}/resource-limits', [ApplicationController::class, 'resourceLimits'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.resource-limits.show');
+Route::put('/applications/{applicationUuid}/resource-limits', [ApplicationController::class, 'updateResourceLimits'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.resource-limits.update');
+Route::get('/applications/{applicationUuid}/advanced', [ApplicationController::class, 'advancedSettings'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.advanced.show');
+Route::put('/applications/{applicationUuid}/advanced', [ApplicationController::class, 'updateAdvancedSettings'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.advanced.update');
+Route::get('/applications/{applicationUuid}/resource-operations', [ApplicationController::class, 'resourceOperations'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.resource-operations.show');
+Route::post('/applications/{applicationUuid}/clone', [ApplicationController::class, 'cloneApplication'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.clone');
+Route::put('/applications/{applicationUuid}/move', [ApplicationController::class, 'moveApplication'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.move');
 Route::get('/applications/{applicationUuid}/environment-variables', [ApplicationController::class, 'environmentVariables'])
     ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
     ->name('applications.environment-variables.index');

@@ -142,6 +142,12 @@ class AgentChatService
 
             }
 
+            if (isset($reply['pending_plan']) && is_array($reply['pending_plan'])) {
+
+                $metadata['pending_plan'] = $reply['pending_plan'];
+
+            }
+
             if (isset($reply['steps']) && is_array($reply['steps']) && $reply['steps'] !== []) {
 
                 $metadata['steps'] = $reply['steps'];
@@ -164,7 +170,7 @@ class AgentChatService
 
             ]);
 
-            $runStatus = isset($reply['pending_approval']) ? 'awaiting_approval' : 'completed';
+            $runStatus = (isset($reply['pending_approval']) || isset($reply['pending_plan'])) ? 'awaiting_approval' : 'completed';
 
             $run->update([
 
@@ -251,6 +257,12 @@ class AgentChatService
         }
 
         $metadata = is_array($message->metadata) ? $message->metadata : [];
+        $pendingPlan = is_array($metadata['pending_plan'] ?? null) ? $metadata['pending_plan'] : null;
+
+        if ($pendingPlan !== null && ($pendingPlan['status'] ?? '') === 'ask' && empty($pendingPlan['resolved'])) {
+            return $this->resolvePlanApproval($agent, $message, $decision, $pendingPlan, $metadata);
+        }
+
         $pending = is_array($metadata['pending_approval'] ?? null) ? $metadata['pending_approval'] : null;
 
         if ($pending === null || ($pending['status'] ?? '') !== 'ask') {
@@ -287,6 +299,58 @@ class AgentChatService
             $prompt = "J'approuve l'exécution de l'outil « {$tool} ». Réessaie maintenant avec les mêmes paramètres.";
         } else {
             $prompt = "Je refuse l'exécution de l'outil « {$tool} ». Continues sans l'exécuter et propose une alternative si possible.";
+        }
+
+        $queued = $this->queueMessage($agent, $session, $prompt);
+
+        return [
+            'user' => $queued['user'],
+            'run' => $queued['run'],
+            'decision' => $decision,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $pendingPlan
+     * @param  array<string, mixed>  $metadata
+     * @return array{user: AiAgentMessage, run: AiAgentRun, decision: string}
+     */
+    private function resolvePlanApproval(
+        AiAgent $agent,
+        AiAgentMessage $message,
+        string $decision,
+        array $pendingPlan,
+        array $metadata,
+    ): array {
+        $session = $message->session;
+        if (! $session instanceof AiAgentSession) {
+            throw new \InvalidArgumentException('Message sans session associée.');
+        }
+
+        $title = (string) ($pendingPlan['title'] ?? 'Plan');
+
+        $pendingPlan['resolved'] = $decision === 'approve' ? 'approved' : 'denied';
+        $pendingPlan['resolved_at'] = now()->toISOString();
+        $metadata['pending_plan'] = $pendingPlan;
+        $message->update(['metadata' => $metadata]);
+
+        if ($message->run_id !== null) {
+            $run = AiAgentRun::query()->whereKey($message->run_id)->first();
+            if ($run instanceof AiAgentRun) {
+                $plan = is_array($run->metadata['plan'] ?? null) ? $run->metadata['plan'] : [];
+                $plan['status'] = $decision === 'approve' ? 'approved' : 'rejected';
+                $plan['resolved_at'] = now()->toISOString();
+                $run->mergeMetadata(['plan' => $plan]);
+                $run->update(['status' => 'completed']);
+            }
+        }
+
+        if ($decision === 'approve') {
+            AgentToolApprovalGrant::grantPlanExecution((int) $session->id);
+            $prompt = "J'approuve le plan « {$title} ». Exécute-le maintenant étape par étape avec les outils nécessaires.";
+        } else {
+            AgentToolApprovalGrant::revokePlanExecution((int) $session->id);
+            $prompt = "Je refuse le plan « {$title} ». Propose une alternative ou reformule l'approche.";
         }
 
         $queued = $this->queueMessage($agent, $session, $prompt);
@@ -508,9 +572,11 @@ class AgentChatService
 
             $pendingApproval = null;
 
+            $pendingPlan = null;
+
             foreach ($response->toolCalls as $toolCall) {
 
-                if ($pendingApproval !== null) {
+                if ($pendingApproval !== null || $pendingPlan !== null) {
 
                     $toolResults[] = [
 
@@ -518,7 +584,7 @@ class AgentChatService
 
                         'result' => [
 
-                            'error' => 'En attente d’approbation d’un outil précédent — exécution reportée.',
+                            'error' => 'En attente d’approbation — exécution reportée.',
 
                             'skipped' => true,
 
@@ -564,6 +630,30 @@ class AgentChatService
 
                     ];
 
+                    if (is_array($result['diff_preview'] ?? null)) {
+
+                        $pendingApproval['diff_preview'] = $result['diff_preview'];
+
+                    }
+
+                }
+
+                if (! empty($result['pending_plan']) && is_array($result['plan'] ?? null)) {
+
+                    $plan = $result['plan'];
+
+                    $pendingPlan = [
+
+                        'status' => 'ask',
+
+                        'title' => (string) ($plan['title'] ?? 'Plan'),
+
+                        'summary' => (string) ($plan['summary'] ?? ''),
+
+                        'steps' => is_array($plan['steps'] ?? null) ? $plan['steps'] : [],
+
+                    ];
+
                 }
 
                 $toolResults[] = [
@@ -581,7 +671,9 @@ class AgentChatService
                     'result_summary' => $this->summarizeToolResult($result),
                     'status' => isset($result['error'])
                         ? 'error'
-                        : (($result['status'] ?? null) === 'ask' || ! empty($result['pending_approval']) ? 'awaiting_approval' : 'done'),
+                        : (($result['status'] ?? null) === 'ask' || ! empty($result['pending_approval']) || ! empty($result['pending_plan'])
+                            ? 'awaiting_approval'
+                            : 'done'),
                 ];
 
             }
@@ -593,6 +685,32 @@ class AgentChatService
             }
 
             AgentToolTurnBuilder::append($messages, $response, $toolResults);
+
+            if ($pendingPlan !== null) {
+
+                $planTitle = $pendingPlan['title'];
+
+                $summary = "📋 Plan proposé : **{$planTitle}**\n\n"
+                    .$pendingPlan['summary']
+                    ."\n\nUtilisez Approuver le plan ou Refuser pour continuer.";
+
+                $run->appendLog("Chat en pause — plan « {$planTitle} » en attente d’approbation.");
+
+                return [
+
+                    'text' => $summary,
+
+                    'tokens_used' => $tokensUsed,
+
+                    'iterations' => $budget->getUsed(),
+
+                    'pending_plan' => $pendingPlan,
+
+                    'steps' => $steps,
+
+                ];
+
+            }
 
             if ($pendingApproval !== null) {
 

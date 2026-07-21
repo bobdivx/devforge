@@ -182,7 +182,7 @@ export function parseSecuritySection(pathname: string): 'keys' | 'cloud-tokens' 
 
 export function extractGithubAppUuid(pathname: string): string | null {
     const normalized = normalizeRoutePath(pathname);
-    const match = normalized.match(/^\/(?:source\/github|github|sources)\/([^/]+)/);
+    const match = normalized.match(/^\/(?:source\/github|connexions|github|sources)\/([^/]+)/);
 
     return match?.[1] ?? null;
 }

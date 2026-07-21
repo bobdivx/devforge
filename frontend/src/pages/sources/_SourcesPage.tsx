@@ -1,4 +1,4 @@
-import { ExternalLink, KeyRound, RefreshCw, Trash2 } from 'lucide-preact';
+import { ExternalLink, KeyRound, Package, RefreshCw, Trash2 } from 'lucide-preact';
 import { useState } from 'preact/hooks';
 import { PageHeader } from '../../components/PageHeader';
 import { Card } from '../../components/ui/Card';
@@ -8,7 +8,7 @@ import { domainApi, type GithubAppSummary } from '../../lib/domain-api';
 import { legacyCoolifyUrl } from '../../lib/migration';
 import { useApiQuery } from '../../lib/use-api-query';
 
-type GithubPageProps = {
+type ConnexionsPageProps = {
     legacyBaseUrl?: string;
     githubAppUuid?: string | null;
 };
@@ -36,7 +36,7 @@ function accountSubtitle(app: GithubAppSummary): string {
     return parts.join(' · ');
 }
 
-export function GithubPage({ legacyBaseUrl = '', githubAppUuid = null }: GithubPageProps) {
+export function ConnexionsPage({ legacyBaseUrl = '', githubAppUuid = null }: ConnexionsPageProps) {
     const apps = useApiQuery('github-apps', () => domainApi.githubApps());
     const [tokenDrafts, setTokenDrafts] = useState<Record<string, string>>({});
     const [savingUuid, setSavingUuid] = useState<string | null>(null);
@@ -67,8 +67,8 @@ export function GithubPage({ legacyBaseUrl = '', githubAppUuid = null }: GithubP
     return (
         <div class="grid gap-5">
             <PageHeader
-                title="GitHub"
-                description="Compte GitHub connecté à l’équipe : dépôts, déploiements et token Packages (npm.pkg.github.com)."
+                title="Connexions"
+                description="Comptes liés, tokens et clés API utilisés au build et au déploiement (GitHub Packages, npm, etc.)."
             />
             <LegacyEditBanner
                 legacyBaseUrl={legacyBaseUrl}
@@ -78,7 +78,13 @@ export function GithubPage({ legacyBaseUrl = '', githubAppUuid = null }: GithubP
             {(feedback || error) && (
                 <p class={`text-sm ${error ? 'text-error' : 'text-success'}`}>{error ?? feedback}</p>
             )}
-            <Card title="Comptes connectés">
+
+            <Card title="GitHub" eyebrow="Dépôts & Packages">
+                <p class="mb-3 text-xs text-base-content/55">
+                    Compte GitHub de l’équipe. Le token Packages (PAT <code class="font-mono">read:packages</code>)
+                    est injecté au build comme <code class="font-mono">NODE_AUTH_TOKEN</code> pour
+                    {' '}<code class="font-mono">npm.pkg.github.com</code>.
+                </p>
                 <div class="card-toolbar mb-3">
                     <button class="btn btn-ghost btn-sm" type="button" onClick={() => void apps.reload()}>
                         <RefreshCw class="size-3.5" aria-hidden />
@@ -134,9 +140,9 @@ export function GithubPage({ legacyBaseUrl = '', githubAppUuid = null }: GithubP
                                             href={legacyCoolifyUrl(legacyBaseUrl, `/source/github/${app.uuid}`)}
                                             rel="noreferrer"
                                             target="_blank"
-                                            title="Configurer dans Coolify"
+                                            title="Configurer dans DevForge"
                                         >
-                                            Coolify
+                                            DevForge
                                         </a>
                                     </div>
                                 </div>
@@ -176,9 +182,36 @@ export function GithubPage({ legacyBaseUrl = '', githubAppUuid = null }: GithubP
                     </div>
                 </DataState>
             </Card>
+
+            <Card title="npm / registries privés" eyebrow="Build">
+                <div class="flex items-start gap-3 text-sm text-base-content/70">
+                    <Package class="mt-0.5 size-5 shrink-0 text-base-content/40" aria-hidden />
+                    <div class="grid gap-2">
+                        <p>
+                            Pour GitHub Packages, utilise le token ci-dessus (recommandé) : Coolify injecte
+                            {' '}<code class="font-mono text-xs">NODE_AUTH_TOKEN</code> au build.
+                        </p>
+                        <p>
+                            Alternative par application : variable d’environnement de build
+                            {' '}<code class="font-mono text-xs">NODE_AUTH_TOKEN</code> ou
+                            {' '}<code class="font-mono text-xs">NPM_TOKEN</code> sur l’app concernée.
+                        </p>
+                        <ol class="mt-1 list-decimal space-y-1 pl-4 text-xs text-base-content/60">
+                            <li>
+                                Créer un PAT GitHub (classic) avec scope{' '}
+                                <code class="font-mono">read:packages</code>.
+                            </li>
+                            <li>L’enregistrer dans la section GitHub de cette page.</li>
+                            <li>Relancer le déploiement de l’application.</li>
+                        </ol>
+                    </div>
+                </div>
+            </Card>
         </div>
     );
 }
 
-/** @deprecated Prefer GithubPage — alias pour compatibilité imports. */
-export const SourcesPage = GithubPage;
+/** @deprecated Prefer ConnexionsPage — alias pour compatibilité imports. */
+export const GithubPage = ConnexionsPage;
+/** @deprecated Prefer ConnexionsPage — alias pour compatibilité imports. */
+export const SourcesPage = ConnexionsPage;

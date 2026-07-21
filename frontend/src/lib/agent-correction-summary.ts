@@ -40,6 +40,7 @@ export type AgentCorrectionSummary = {
     headline: string;
     source_scope: CorrectionSourceScope | string;
     actions: CorrectionAction[];
+    steps?: string[];
     pills: CorrectionPill[];
     belongs_to_deployment_uuid?: string | null;
 };
@@ -58,6 +59,8 @@ export function outcomeLabel(outcome: string): string {
             return 'Redeploy seul';
         case 'running':
             return 'En cours';
+        case 'needs_user':
+            return 'Action requise';
         default:
             return outcome;
     }
@@ -69,6 +72,7 @@ export function outcomeToneClass(outcome: string): string {
             return 'border-success/30 bg-success/10 text-success';
         case 'partial':
         case 'redeploy_only':
+        case 'needs_user':
             return 'border-warning/30 bg-warning/10 text-warning';
         case 'failed':
             return 'border-error/30 bg-error/10 text-error';

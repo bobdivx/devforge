@@ -16,6 +16,7 @@ import type { Agent, AgentChatMessage, AgentChatSession, AgentChatStep, AgentMod
 import { domainApi } from '../../lib/domain-api';
 import { ApiError } from '../../lib/api-client';
 import { isPendingToolApproval, parsePendingToolApproval } from '../../lib/agent-pending-approval';
+import { isPendingPlan, parsePendingPlan } from '../../lib/agent-pending-plan';
 import { isTerminalAgentRunStatus } from '../../lib/agent-run-tracker';
 import {
     sanitizeAssistantContent,
@@ -244,12 +245,15 @@ export function AgentChatPanel({
                         {messages.map((message) => {
                             const pending = parsePendingToolApproval(message.metadata);
                             const needsApproval = isPendingToolApproval(message.metadata);
+                            const pendingPlan = parsePendingPlan(message.metadata);
+                            const needsPlanApproval = isPendingPlan(message.metadata);
                             const resolving = approvingMessageUuid === message.uuid;
                             const isUser = message.role === 'user';
                             const steps = parseMessageSteps(message.metadata);
                             const displayContent = isUser
                                 ? message.content
                                 : sanitizeAssistantContent(message.content, steps);
+                            const showApprovalChrome = needsApproval || needsPlanApproval;
 
                             return (
                                 <article
@@ -279,10 +283,10 @@ export function AgentChatPanel({
                                                 {steps.length > 0 && (
                                                     <IdeActionsCard steps={steps} title="Actions" />
                                                 )}
-                                                {(displayContent !== '' || needsApproval) && (
+                                                {(displayContent !== '' || showApprovalChrome) && (
                                                     <div
                                                         class={`rounded-2xl px-3 py-2 text-sm leading-relaxed sm:px-3.5 sm:py-2.5 ${
-                                                            needsApproval
+                                                            showApprovalChrome
                                                                 ? 'border border-warning/40 bg-warning/10 text-base-content'
                                                                 : 'border border-base-300 bg-base-200/60 text-base-content'
                                                         }`}
@@ -293,12 +297,74 @@ export function AgentChatPanel({
                                                                 dangerouslySetInnerHTML={{ __html: renderContent(displayContent) }}
                                                             />
                                                         )}
+                                                        {pendingPlan && needsPlanApproval && onResolveApproval && (
+                                                            <div class={`grid gap-2 text-start ${displayContent !== '' ? 'mt-3 border-t border-warning/25 pt-3' : ''}`}>
+                                                                <p class="text-[11px] font-semibold text-base-content">
+                                                                    Plan : {pendingPlan.title}
+                                                                </p>
+                                                                {pendingPlan.summary && (
+                                                                    <p class="text-[11px] text-base-content/70">{pendingPlan.summary}</p>
+                                                                )}
+                                                                {pendingPlan.steps.length > 0 && (
+                                                                    <ol class="list-decimal space-y-1 ps-4 text-[11px] text-base-content/75">
+                                                                        {pendingPlan.steps.map((step, index) => (
+                                                                            <li key={step.id ?? `${index}-${step.action}`}>
+                                                                                {step.action}
+                                                                                {step.tool ? (
+                                                                                    <span class="text-base-content/45"> · {step.tool}</span>
+                                                                                ) : null}
+                                                                                {step.risk ? (
+                                                                                    <span class="text-base-content/45"> · {step.risk}</span>
+                                                                                ) : null}
+                                                                            </li>
+                                                                        ))}
+                                                                    </ol>
+                                                                )}
+                                                                <div class="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
+                                                                    <button
+                                                                        type="button"
+                                                                        class="btn btn-success btn-sm w-full gap-1 sm:btn-xs sm:w-auto"
+                                                                        disabled={sending || resolving}
+                                                                        onClick={() => onResolveApproval(message.uuid, 'approve')}
+                                                                    >
+                                                                        {resolving
+                                                                            ? <span class="loading loading-spinner loading-xs" aria-hidden />
+                                                                            : <Check class="size-3.5" aria-hidden />}
+                                                                        Approuver le plan
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        class="btn btn-ghost btn-sm w-full gap-1 border border-base-300 sm:btn-xs sm:w-auto"
+                                                                        disabled={sending || resolving}
+                                                                        onClick={() => onResolveApproval(message.uuid, 'deny')}
+                                                                    >
+                                                                        <X class="size-3.5" aria-hidden />
+                                                                        Refuser
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        )}
                                                         {pending && needsApproval && onResolveApproval && (
-                                                            <div class={`grid gap-2 text-start sm:flex sm:flex-wrap sm:items-center ${displayContent !== '' ? 'mt-3 border-t border-warning/25 pt-3' : ''}`}>
+                                                            <div class={`grid gap-2 text-start ${displayContent !== '' ? 'mt-3 border-t border-warning/25 pt-3' : ''}`}>
                                                                 <p class="text-[11px] text-base-content/65">
                                                                     Outil <span class="font-semibold text-base-content">{pending.tool}</span>
                                                                     {pending.reason ? ` — ${pending.reason}` : ''}
                                                                 </p>
+                                                                {pending.diff_preview && (
+                                                                    <div class="grid gap-1 rounded-lg border border-base-300 bg-base-100/80 p-2 text-start">
+                                                                        <p class="text-[10px] font-medium text-base-content/70">
+                                                                            {pending.diff_preview.path}
+                                                                            {pending.diff_preview.is_new_file
+                                                                                ? ' · nouveau fichier'
+                                                                                : ` · +${pending.diff_preview.lines_added} / -${pending.diff_preview.lines_removed}`}
+                                                                        </p>
+                                                                        {pending.diff_preview.read_error && (
+                                                                            <p class="text-[10px] text-warning">{pending.diff_preview.read_error}</p>
+                                                                        )}
+                                                                        <pre class="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-base-300/40 p-2 font-mono text-[10px] leading-relaxed text-base-content/85">{pending.diff_preview.diff}</pre>
+                                                                    </div>
+                                                                )}
+                                                                <div class="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
                                                                 <button
                                                                     type="button"
                                                                     class="btn btn-success btn-sm w-full gap-1 sm:btn-xs sm:w-auto"
@@ -319,6 +385,7 @@ export function AgentChatPanel({
                                                                     <X class="size-3.5" aria-hidden />
                                                                     Refuser
                                                                 </button>
+                                                                </div>
                                                             </div>
                                                         )}
                                                         {pending?.resolved && (
@@ -326,9 +393,14 @@ export function AgentChatPanel({
                                                                 {pending.resolved === 'approved' ? 'Approuvé' : 'Refusé'}
                                                             </p>
                                                         )}
+                                                        {pendingPlan?.resolved && (
+                                                            <p class="mt-2 text-start text-[11px] text-base-content/50">
+                                                                {pendingPlan.resolved === 'approved' ? 'Plan approuvé' : 'Plan refusé'}
+                                                            </p>
+                                                        )}
                                                     </div>
                                                 )}
-                                                {steps.length > 0 && displayContent === '' && !needsApproval && (
+                                                {steps.length > 0 && displayContent === '' && !showApprovalChrome && (
                                                     <p class="px-1 text-[11px] text-base-content/45">
                                                         {stepsCompletion(steps).done === steps.length
                                                             ? 'Terminé.'

@@ -85,9 +85,49 @@ it('exposes a stable ask payload shape for chat UI', function () {
 
     expect($resolved)->toMatchArray([
         'decision' => 'ask',
-        'reason' => 'Mode plan-first — chaque outil demande validation.',
-        'rule_id' => 'mode:plan_first',
+        'reason' => 'Mode plan-first — propose d’abord un plan (propose_plan), puis attends l’approbation avant toute modification.',
+        'rule_id' => 'mode:plan_first:mutate',
     ]);
+});
+
+it('allows read-only tools in plan_first mode without approval', function () {
+    config()->set('devforge.agents_permission_mode', 'plan_first');
+
+    $result = $this->engine->decide($this->agent, 'get_deployment_logs', ['limit' => 3]);
+
+    expect($result['decision'])->toBe(AgentPermissionEngine::DECISION_ALLOW)
+        ->and($result['rule_id'])->toBe('mode:plan_first:read');
+});
+
+it('allows propose_plan in plan_first mode', function () {
+    config()->set('devforge.agents_permission_mode', 'plan_first');
+
+    $result = $this->engine->decide($this->agent, 'propose_plan', [
+        'title' => 'Fix nginx',
+        'summary' => 'Corriger publish_directory',
+        'steps' => [['action' => 'update settings']],
+    ]);
+
+    expect($result['decision'])->toBe(AgentPermissionEngine::DECISION_ALLOW)
+        ->and($result['rule_id'])->toBe('mode:plan_first:propose');
+});
+
+it('allows mutating tools in plan_first after plan execution grant', function () {
+    config()->set('devforge.agents_permission_mode', 'plan_first');
+
+    $sessionId = 4242;
+    \App\Services\DevForge\Agent\Tool\AgentToolApprovalGrant::grantPlanExecution($sessionId);
+
+    $result = $this->engine->decide(
+        $this->agent,
+        'control_resource',
+        ['action' => 'deploy'],
+        null,
+        $sessionId,
+    );
+
+    expect($result['decision'])->toBe(AgentPermissionEngine::DECISION_ALLOW)
+        ->and($result['rule_id'])->toBe('mode:plan_first:executing');
 });
 
 it('allows read-only tools in tiered mode', function () {
@@ -149,6 +189,56 @@ it('registers subagent runs', function () {
     $registry->complete($record, 'Résumé OK');
     expect($record->fresh()->status)->toBe('completed')
         ->and($record->fresh()->output)->toBe('Résumé OK');
+});
+
+it('exposes propose_plan in toolkit definitions', function () {
+    $run = AiAgentRun::factory()->create(['agent_id' => $this->agent->id]);
+
+    $toolkit = new AgentToolkit(
+        team: $this->team,
+        run: $run,
+        catalog: app(CoreResourceCatalog::class),
+        resourceAction: app(CoreResourceAction::class),
+        deploymentData: app(DeploymentData::class),
+        agent: $this->agent,
+    );
+
+    $names = collect($toolkit->definitions())->pluck('name');
+
+    expect($names)->toContain('propose_plan');
+});
+
+it('stores a plan artefact via propose_plan', function () {
+    config()->set('devforge.agents_permission_mode', 'plan_first');
+
+    $run = AiAgentRun::factory()->create([
+        'agent_id' => $this->agent->id,
+        'trigger' => 'chat',
+    ]);
+
+    $toolkit = new AgentToolkit(
+        team: $this->team,
+        run: $run,
+        catalog: app(CoreResourceCatalog::class),
+        resourceAction: app(CoreResourceAction::class),
+        deploymentData: app(DeploymentData::class),
+        agent: $this->agent,
+    );
+
+    $result = $toolkit->execute('propose_plan', [
+        'title' => 'Corriger nginx',
+        'summary' => 'Mettre à jour publish_directory',
+        'steps' => [
+            ['action' => 'Lire settings', 'tool' => 'get_application_runtime_settings', 'risk' => 'low'],
+            ['action' => 'Update publish_directory', 'tool' => 'update_application_runtime_settings', 'risk' => 'medium'],
+        ],
+    ]);
+
+    expect($result['ok'])->toBeTrue()
+        ->and($result['pending_plan'])->toBeTrue()
+        ->and($result['plan']['title'])->toBe('Corriger nginx')
+        ->and($result['plan']['steps'])->toHaveCount(2)
+        ->and($run->fresh()->metadata['plan']['status'])->toBe('proposed');
 });
 
 it('exposes delegate_task only for parent agents', function () {

@@ -6,13 +6,20 @@ use App\Http\Controllers\Controller;
 use App\Jobs\DeleteResourceJob;
 use App\Models\Application;
 use App\Models\User;
+use App\Services\DevForge\Application\ApplicationAdvancedSettingsCatalog;
 use App\Services\DevForge\Application\ApplicationContainerLogs;
 use App\Services\DevForge\Application\ApplicationDatabaseConnector;
 use App\Services\DevForge\Application\ApplicationDomainService;
 use App\Services\DevForge\Application\ApplicationEnvironmentVariableCatalog;
 use App\Services\DevForge\Application\ApplicationFromGithubCreator;
+use App\Services\DevForge\Application\ApplicationPreviewCatalog;
+use App\Services\DevForge\Application\ApplicationResourceLimitsCatalog;
+use App\Services\DevForge\Application\ApplicationResourceOperationsCatalog;
 use App\Services\DevForge\Application\ApplicationRuntimeSettingsService;
+use App\Services\DevForge\Application\ApplicationScheduledTaskCatalog;
 use App\Services\DevForge\Application\ApplicationSourceService;
+use App\Services\DevForge\Application\ApplicationStorageCatalog;
+use App\Services\DevForge\Application\ApplicationWebhookService;
 use App\Services\DevForge\Core\CoreResourcePresenter;
 use App\Services\DevForge\CurrentTeamContext;
 use App\Services\DevForge\CurrentTeamResources;
@@ -30,6 +37,13 @@ class ApplicationController extends Controller
         private readonly ApplicationFromGithubCreator $applicationFromGithubCreator,
         private readonly ApplicationDatabaseConnector $applicationDatabaseConnector,
         private readonly ApplicationContainerLogs $applicationContainerLogs,
+        private readonly ApplicationWebhookService $applicationWebhookService,
+        private readonly ApplicationPreviewCatalog $applicationPreviewCatalog,
+        private readonly ApplicationStorageCatalog $applicationStorageCatalog,
+        private readonly ApplicationResourceLimitsCatalog $applicationResourceLimitsCatalog,
+        private readonly ApplicationAdvancedSettingsCatalog $applicationAdvancedSettingsCatalog,
+        private readonly ApplicationResourceOperationsCatalog $applicationResourceOperationsCatalog,
+        private readonly ApplicationScheduledTaskCatalog $applicationScheduledTaskCatalog,
         private readonly ApplicationEnvironmentVariableCatalog $applicationEnvironmentVariableCatalog,
         private readonly ApplicationDomainService $applicationDomainService,
         private readonly ApplicationSourceService $applicationSourceService,
@@ -187,6 +201,326 @@ class ApplicationController extends Controller
                 $application->loadMissing('destination.server'),
                 (int) ($validated['lines'] ?? 200),
             ),
+        ]);
+    }
+
+    public function webhooks(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('view', $application);
+
+        return response()->json([
+            'data' => $this->applicationWebhookService->show($application),
+        ]);
+    }
+
+    public function updateWebhooks(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        return response()->json([
+            'data' => $this->applicationWebhookService->update($application, $request->all()),
+        ]);
+    }
+
+    public function scheduledTasks(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('view', $application);
+
+        return response()->json([
+            'data' => $this->applicationScheduledTaskCatalog->list($application),
+        ]);
+    }
+
+    public function storeScheduledTask(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        return response()->json([
+            'data' => $this->applicationScheduledTaskCatalog->store($application, $request->all()),
+        ], 201);
+    }
+
+    public function updateScheduledTask(Request $request, string $applicationUuid, string $taskUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        return response()->json([
+            'data' => $this->applicationScheduledTaskCatalog->update($application, $taskUuid, $request->all()),
+        ]);
+    }
+
+    public function destroyScheduledTask(Request $request, string $applicationUuid, string $taskUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        $this->applicationScheduledTaskCatalog->destroy($application, $taskUuid);
+
+        return response()->json([
+            'message' => 'Tâche planifiée supprimée.',
+        ]);
+    }
+
+    public function scheduledTaskExecutions(Request $request, string $applicationUuid, string $taskUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('view', $application);
+
+        $validated = $request->validate([
+            'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        return response()->json([
+            'data' => $this->applicationScheduledTaskCatalog->executions(
+                $application,
+                $taskUuid,
+                (int) ($validated['limit'] ?? 20),
+            ),
+        ]);
+    }
+
+    public function runScheduledTask(Request $request, string $applicationUuid, string $taskUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        return response()->json([
+            'data' => $this->applicationScheduledTaskCatalog->run($application, $taskUuid),
+        ]);
+    }
+
+    public function previews(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('view', $application);
+
+        return response()->json([
+            'data' => $this->applicationPreviewCatalog->list($application),
+        ]);
+    }
+
+    public function previewSettings(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('view', $application);
+
+        return response()->json([
+            'data' => $this->applicationPreviewCatalog->settings($application),
+        ]);
+    }
+
+    public function updatePreviewSettings(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        return response()->json([
+            'data' => $this->applicationPreviewCatalog->updateSettings($application, $request->all()),
+        ]);
+    }
+
+    public function destroyPreview(Request $request, string $applicationUuid, string $pullRequestId): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('delete', $application);
+
+        if (! is_numeric($pullRequestId) || (int) $pullRequestId <= 0) {
+            return response()->json([
+                'message' => 'Identifiant de pull request invalide.',
+            ], 422);
+        }
+
+        return response()->json(
+            $this->applicationPreviewCatalog->destroy($application, (int) $pullRequestId),
+        );
+    }
+
+    public function storages(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('view', $application);
+
+        return response()->json([
+            'data' => $this->applicationStorageCatalog->list($application),
+        ]);
+    }
+
+    public function storeStorage(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        return response()->json([
+            'data' => $this->applicationStorageCatalog->store($application, $request->all()),
+        ], 201);
+    }
+
+    public function updateStorage(Request $request, string $applicationUuid, string $storageUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        return response()->json([
+            'data' => $this->applicationStorageCatalog->update($application, $storageUuid, $request->all()),
+        ]);
+    }
+
+    public function destroyStorage(Request $request, string $applicationUuid, string $storageUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        $this->applicationStorageCatalog->destroy($application, $storageUuid);
+
+        return response()->json([
+            'message' => 'Storage supprimé.',
+        ]);
+    }
+
+    public function resourceLimits(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('view', $application);
+
+        return response()->json([
+            'data' => $this->applicationResourceLimitsCatalog->show($application),
+        ]);
+    }
+
+    public function updateResourceLimits(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        return response()->json([
+            'data' => $this->applicationResourceLimitsCatalog->update($application, $request->all()),
+        ]);
+    }
+
+    public function advancedSettings(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('view', $application);
+
+        return response()->json([
+            'data' => $this->applicationAdvancedSettingsCatalog->show($application),
+        ]);
+    }
+
+    public function updateAdvancedSettings(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        return response()->json([
+            'data' => $this->applicationAdvancedSettingsCatalog->update($application, $request->all()),
+        ]);
+    }
+
+    public function resourceOperations(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $team = $this->currentTeamContext->resolve($user);
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('view', $application);
+
+        return response()->json([
+            'data' => $this->applicationResourceOperationsCatalog->options($team, $application),
+        ]);
+    }
+
+    public function cloneApplication(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $team = $this->currentTeamContext->resolve($user);
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        return response()->json([
+            'data' => $this->applicationResourceOperationsCatalog->clone($team, $application, $request->all()),
+        ], 201);
+    }
+
+    public function moveApplication(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $team = $this->currentTeamContext->resolve($user);
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        return response()->json([
+            'data' => $this->applicationResourceOperationsCatalog->move($team, $application, $request->all()),
         ]);
     }
 

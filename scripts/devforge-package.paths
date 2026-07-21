@@ -1,4 +1,4 @@
-﻿# DevForge rollout manifest
+# DevForge rollout manifest
 # - Lignes normales : fichier ou dossier (recursif dans tar)
 # - glob:pattern    : expansion automatique (ex: glob:app/Models/Ai*.php)
 # - Fichiers obligatoires supplementaires : scripts/devforge-package.required (fusion auto)
@@ -33,6 +33,7 @@ bootstrap/helpers/sudo.php
 bootstrap/helpers/shared.php
 routes/devforge-api.php
 routes/devforge-applications.php
+routes/devforge-services.php
 routes/devforge-databases.php
 routes/devforge-database-backups.php
 routes/devforge-s3-storages.php

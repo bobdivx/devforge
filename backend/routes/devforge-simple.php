@@ -33,8 +33,14 @@ Route::delete('/projects/{projectUuid}/environments/{environmentUuid}', [Environ
 
 Route::get('/profile', [ProfileController::class, 'show'])->name('profile.show');
 Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
-Route::get('/settings', SettingsController::class)->name('settings.show');
-Route::get('/settings/oauth', OauthSettingsController::class)->name('settings.oauth');
+Route::get('/settings', [SettingsController::class, 'show'])->name('settings.show');
+Route::put('/settings/instance', [SettingsController::class, 'updateInstance'])->name('settings.instance.update');
+Route::put('/settings/advanced', [SettingsController::class, 'updateAdvanced'])->name('settings.advanced.update');
+Route::put('/settings/email', [SettingsController::class, 'updateEmail'])->name('settings.email.update');
+Route::put('/settings/updates', [SettingsController::class, 'updateUpdates'])->name('settings.updates.update');
+Route::post('/settings/updates/check', [SettingsController::class, 'checkUpdates'])->name('settings.updates.check');
+Route::get('/settings/oauth', [OauthSettingsController::class, 'index'])->name('settings.oauth');
+Route::put('/settings/oauth/{provider}', [OauthSettingsController::class, 'update'])->name('settings.oauth.update');
 Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
 Route::put('/notifications/{channel}', [NotificationController::class, 'update'])->name('notifications.update');
 Route::get('/shared-variables', [SharedVariableController::class, 'index'])->name('shared-variables.index');
@@ -42,3 +48,27 @@ Route::post('/shared-variables', [SharedVariableController::class, 'store'])->na
 Route::put('/shared-variables/{sharedVariable}', [SharedVariableController::class, 'update'])->name('shared-variables.update');
 Route::delete('/shared-variables/{sharedVariable}', [SharedVariableController::class, 'destroy'])->name('shared-variables.destroy');
 Route::get('/security/keys', [SecurityController::class, 'keys'])->name('security.keys.index');
+Route::post('/security/keys', [SecurityController::class, 'storeKey'])->name('security.keys.store');
+Route::post('/security/keys/generate', [SecurityController::class, 'generateKey'])->name('security.keys.generate');
+Route::put('/security/keys/{keyUuid}', [SecurityController::class, 'updateKey'])
+    ->where('keyUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('security.keys.update');
+Route::delete('/security/keys/{keyUuid}', [SecurityController::class, 'destroyKey'])
+    ->where('keyUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('security.keys.destroy');
+Route::get('/security/api-tokens', [SecurityController::class, 'apiTokens'])->name('security.api-tokens.index');
+Route::post('/security/api-tokens', [SecurityController::class, 'storeApiToken'])->name('security.api-tokens.store');
+Route::delete('/security/api-tokens/{tokenId}', [SecurityController::class, 'destroyApiToken'])
+    ->whereNumber('tokenId')
+    ->name('security.api-tokens.destroy');
+Route::get('/security/cloud-tokens', [SecurityController::class, 'cloudTokens'])->name('security.cloud-tokens.index');
+Route::post('/security/cloud-tokens', [SecurityController::class, 'storeCloudToken'])->name('security.cloud-tokens.store');
+Route::put('/security/cloud-tokens/{tokenUuid}', [SecurityController::class, 'updateCloudToken'])
+    ->where('tokenUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('security.cloud-tokens.update');
+Route::delete('/security/cloud-tokens/{tokenUuid}', [SecurityController::class, 'destroyCloudToken'])
+    ->where('tokenUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('security.cloud-tokens.destroy');
+Route::post('/security/cloud-tokens/{tokenUuid}/validate', [SecurityController::class, 'validateCloudToken'])
+    ->where('tokenUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('security.cloud-tokens.validate');

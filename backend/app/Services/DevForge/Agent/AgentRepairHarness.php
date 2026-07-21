@@ -183,8 +183,15 @@ class AgentRepairHarness
                 ];
             }
 
-            $headline = (string) ($diagnosis['error'] ?? 'Token npm privé manquant (GitHub Packages / registry privé).');
+            $headline = ($diagnosis['has_packages_token'] ?? false)
+                ? 'Auth npm : token Packages présent — relancez le déploiement.'
+                : 'Action requise : enregistrer un token Packages (DevForge → Connexions)';
             $stepsText = is_array($diagnosis['steps'] ?? null) ? $diagnosis['steps'] : [];
+            $diagnosisText = 'npm E401 sur registry privé (npm.pkg.github.com). '.(($diagnosis['has_packages_token'] ?? false)
+                ? 'PAT Packages déjà enregistré — un redeploy devrait injecter NODE_AUTH_TOKEN.'
+                : (($diagnosis['has_github_app'] ?? false)
+                    ? 'Créez un PAT GitHub (read:packages), enregistrez-le dans Connexions, puis relancez le déploiement. Coolify injecte NODE_AUTH_TOKEN au build.'
+                    : 'Un secret d’auth est requis — l’agent ne peut pas l’inventer.'));
 
             $needsUserAction = [
                 'kind' => 'needs_user',
@@ -202,17 +209,25 @@ class AgentRepairHarness
                 'correction' => [
                     'outcome' => 'needs_user',
                     'headline' => $headline,
-                    'diagnosis' => 'npm E401 sur registry privé. '.(($diagnosis['has_packages_token'] ?? false)
-                        ? 'PAT Packages déjà enregistré — redeploy devrait injecter NODE_AUTH_TOKEN.'
-                        : (($diagnosis['has_github_app'] ?? false)
-                            ? 'Enregistrer un PAT read:packages dans DevForge → GitHub (token Packages), puis Coolify l’injecte au build.'
-                            : 'Un secret d’auth est requis — l’agent ne peut pas l’inventer.')),
+                    'diagnosis' => $diagnosisText,
                     'source_scope' => 'env',
                     'actions' => [$needsUserAction],
                     'steps' => $stepsText,
                     'pills' => [
-                        ['id' => 'env', 'label' => 'Env Coolify', 'active' => true, 'href' => null, 'detail' => ($diagnosis['has_packages_token'] ?? false) || ($diagnosis['has_packages_permission'] ?? false) ? 'token OK' : 'token Packages manquant'],
-                        ['id' => 'build', 'label' => 'Build', 'active' => true, 'href' => null, 'detail' => 'npm E401'],
+                        [
+                            'id' => 'connexions',
+                            'label' => 'Ouvrir Connexions',
+                            'active' => true,
+                            'href' => '/connexions',
+                            'detail' => 'token Packages',
+                        ],
+                        [
+                            'id' => 'build',
+                            'label' => 'Build',
+                            'active' => true,
+                            'href' => null,
+                            'detail' => 'npm E401',
+                        ],
                     ],
                     'belongs_to_deployment_uuid' => is_string($runContext['deployment_uuid'] ?? null)
                         ? $runContext['deployment_uuid']

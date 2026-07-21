@@ -74,7 +74,7 @@ class SettingsBackup extends Component
         $this->s3s = $s3s;
     }
 
-    public function addCoolifyDatabase()
+    public function addDevForgeDatabase()
     {
         try {
             $server = Server::findOrFail(0);

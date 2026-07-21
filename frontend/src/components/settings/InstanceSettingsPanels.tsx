@@ -1,29 +1,20 @@
-import { RefreshCw } from 'lucide-preact';
+import { RefreshCw, Save } from 'lucide-preact';
+import { useEffect, useState } from 'preact/hooks';
 import { Card } from '../ui/Card';
 import { DataState } from '../ui/DataState';
 import { StatusBadge } from '../ui/StatusBadge';
-import { LegacyEditBanner } from '../migration/LegacyEditBanner';
-import {
-    formatBoolean,
-    formatOptional,
-    formatSecretConfigured,
-    SettingsDetailList,
-} from './SettingsPanels';
 import type { BootstrapPermissions } from '../../lib/bootstrap';
-import { domainApi } from '../../lib/domain-api';
+import {
+    domainApi,
+    type InstanceSettings,
+    type OauthProviderSettings,
+} from '../../lib/domain-api';
 import { useApiQuery } from '../../lib/use-api-query';
 
 type InstanceSettingsPanelsProps = {
     section: 'instance' | 'advanced' | 'email' | 'updates';
     permissions: BootstrapPermissions;
     legacyBaseUrl: string;
-};
-
-const legacyPaths: Record<InstanceSettingsPanelsProps['section'], string> = {
-    instance: '/settings',
-    advanced: '/settings/advanced',
-    email: '/settings/email',
-    updates: '/settings/updates',
 };
 
 const titles: Record<InstanceSettingsPanelsProps['section'], string> = {
@@ -33,78 +24,576 @@ const titles: Record<InstanceSettingsPanelsProps['section'], string> = {
     updates: 'Mises à jour',
 };
 
-export function InstanceSettingsPanels({ section, permissions, legacyBaseUrl }: InstanceSettingsPanelsProps) {
+function Field({
+    label,
+    children,
+}: {
+    label: string;
+    children: preact.ComponentChildren;
+}) {
+    return (
+        <label class="grid gap-1.5 text-sm">
+            <span class="font-medium">{label}</span>
+            {children}
+        </label>
+    );
+}
+
+function ToggleField({
+    label,
+    checked,
+    disabled,
+    onChange,
+}: {
+    label: string;
+    checked: boolean;
+    disabled?: boolean;
+    onChange: (value: boolean) => void;
+}) {
+    return (
+        <label class="flex items-center justify-between gap-3 rounded-xl border border-base-300/70 px-3 py-2 text-sm">
+            <span>{label}</span>
+            <input
+                class="toggle toggle-sm"
+                type="checkbox"
+                checked={checked}
+                disabled={disabled}
+                onChange={(event) => onChange(event.currentTarget.checked)}
+            />
+        </label>
+    );
+}
+
+function InstanceForm({
+    data,
+    canEdit,
+    onSaved,
+}: {
+    data: InstanceSettings['instance'];
+    canEdit: boolean;
+    onSaved: () => Promise<void>;
+}) {
+    const [form, setForm] = useState(data);
+    const [saving, setSaving] = useState(false);
+    const [message, setMessage] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => setForm(data), [data]);
+
+    const save = async () => {
+        setSaving(true);
+        setMessage(null);
+        setError(null);
+        try {
+            await domainApi.updateInstanceSettings({
+                instance_name: form.instance_name,
+                fqdn: form.fqdn,
+                instance_timezone: form.instance_timezone,
+                public_ipv4: form.public_ipv4,
+                public_ipv6: form.public_ipv6,
+                public_port_min: form.public_port_min ?? undefined,
+                public_port_max: form.public_port_max ?? undefined,
+                dev_helper_version: form.dev_helper_version,
+            });
+            await onSaved();
+            setMessage('Paramètres enregistrés.');
+        } catch (caught) {
+            setError(caught instanceof Error ? caught.message : 'Échec de l’enregistrement.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div class="grid gap-3">
+            <div class="grid gap-3 md:grid-cols-2">
+                <Field label="Nom">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        value={form.instance_name ?? ''}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({ ...current, instance_name: event.currentTarget.value }))}
+                    />
+                </Field>
+                <Field label="URL instance">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        value={form.fqdn ?? ''}
+                        disabled={!canEdit || saving}
+                        placeholder="https://coolify.example.com"
+                        onInput={(event) => setForm((current) => ({ ...current, fqdn: event.currentTarget.value || null }))}
+                    />
+                </Field>
+                <Field label="Fuseau">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        value={form.instance_timezone ?? ''}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({ ...current, instance_timezone: event.currentTarget.value }))}
+                    />
+                </Field>
+                <Field label="IPv4 publique">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        value={form.public_ipv4 ?? ''}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({ ...current, public_ipv4: event.currentTarget.value || null }))}
+                    />
+                </Field>
+                <Field label="IPv6 publique">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        value={form.public_ipv6 ?? ''}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({ ...current, public_ipv6: event.currentTarget.value || null }))}
+                    />
+                </Field>
+                <Field label="Port public min">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        type="number"
+                        min={1025}
+                        max={65535}
+                        value={form.public_port_min ?? ''}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({
+                            ...current,
+                            public_port_min: event.currentTarget.value === '' ? null : Number(event.currentTarget.value),
+                        }))}
+                    />
+                </Field>
+                <Field label="Port public max">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        type="number"
+                        min={1025}
+                        max={65535}
+                        value={form.public_port_max ?? ''}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({
+                            ...current,
+                            public_port_max: event.currentTarget.value === '' ? null : Number(event.currentTarget.value),
+                        }))}
+                    />
+                </Field>
+            </div>
+            <p class="text-xs text-base-content/55">
+                Canal : {form.next_channel ?? '—'} · Helper : {form.helper_version ?? '—'}
+            </p>
+            {error && <p class="text-sm text-error">{error}</p>}
+            {message && <p class="text-sm text-base-content/60" role="status">{message}</p>}
+            {canEdit && (
+                <button class="btn btn-primary btn-sm w-fit rounded-xl" type="button" disabled={saving} onClick={() => void save()}>
+                    <Save class="size-3.5" aria-hidden />
+                    {saving ? 'Enregistrement…' : 'Enregistrer'}
+                </button>
+            )}
+        </div>
+    );
+}
+
+function AdvancedForm({
+    data,
+    canEdit,
+    onSaved,
+}: {
+    data: InstanceSettings['advanced'];
+    canEdit: boolean;
+    onSaved: () => Promise<void>;
+}) {
+    const [form, setForm] = useState(data);
+    const [confirmationPassword, setConfirmationPassword] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [message, setMessage] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        setForm(data);
+        setConfirmationPassword('');
+    }, [data]);
+
+    const needsPassword = (form.is_registration_enabled && !data.is_registration_enabled)
+        || (form.disable_two_step_confirmation && !data.disable_two_step_confirmation);
+
+    const save = async () => {
+        setSaving(true);
+        setMessage(null);
+        setError(null);
+        try {
+            await domainApi.updateAdvancedSettings({
+                ...form,
+                confirmation_password: needsPassword ? confirmationPassword : undefined,
+            });
+            await onSaved();
+            setMessage('Paramètres avancés enregistrés.');
+        } catch (caught) {
+            setError(caught instanceof Error ? caught.message : 'Échec de l’enregistrement.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div class="grid gap-3">
+            <ToggleField
+                label="Inscriptions"
+                checked={form.is_registration_enabled}
+                disabled={!canEdit || saving}
+                onChange={(value) => setForm((current) => ({ ...current, is_registration_enabled: value }))}
+            />
+            <ToggleField
+                label="Ne pas suivre"
+                checked={form.do_not_track}
+                disabled={!canEdit || saving}
+                onChange={(value) => setForm((current) => ({ ...current, do_not_track: value }))}
+            />
+            <ToggleField
+                label="Validation DNS"
+                checked={form.is_dns_validation_enabled}
+                disabled={!canEdit || saving}
+                onChange={(value) => setForm((current) => ({ ...current, is_dns_validation_enabled: value }))}
+            />
+            <Field label="Serveurs DNS">
+                <input
+                    class="input input-bordered input-sm w-full rounded-xl"
+                    value={form.custom_dns_servers ?? ''}
+                    disabled={!canEdit || saving}
+                    placeholder="1.1.1.1,8.8.8.8"
+                    onInput={(event) => setForm((current) => ({ ...current, custom_dns_servers: event.currentTarget.value || null }))}
+                />
+            </Field>
+            <ToggleField
+                label="API"
+                checked={form.is_api_enabled}
+                disabled={!canEdit || saving}
+                onChange={(value) => setForm((current) => ({ ...current, is_api_enabled: value }))}
+            />
+            <Field label="IP autorisées">
+                <input
+                    class="input input-bordered input-sm w-full rounded-xl"
+                    value={form.allowed_ips ?? ''}
+                    disabled={!canEdit || saving}
+                    placeholder="0.0.0.0 ou CIDR"
+                    onInput={(event) => setForm((current) => ({ ...current, allowed_ips: event.currentTarget.value || null }))}
+                />
+            </Field>
+            <ToggleField
+                label="Popup sponsoring"
+                checked={form.is_sponsorship_popup_enabled}
+                disabled={!canEdit || saving}
+                onChange={(value) => setForm((current) => ({ ...current, is_sponsorship_popup_enabled: value }))}
+            />
+            <ToggleField
+                label="Désactiver la confirmation en 2 étapes"
+                checked={form.disable_two_step_confirmation}
+                disabled={!canEdit || saving}
+                onChange={(value) => setForm((current) => ({ ...current, disable_two_step_confirmation: value }))}
+            />
+            <ToggleField
+                label="Navigation wire"
+                checked={form.is_wire_navigate_enabled}
+                disabled={!canEdit || saving}
+                onChange={(value) => setForm((current) => ({ ...current, is_wire_navigate_enabled: value }))}
+            />
+            <ToggleField
+                label="Serveur MCP"
+                checked={form.is_mcp_server_enabled}
+                disabled={!canEdit || saving}
+                onChange={(value) => setForm((current) => ({ ...current, is_mcp_server_enabled: value }))}
+            />
+            {needsPassword && (
+                <Field label="Mot de passe de confirmation">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        type="password"
+                        value={confirmationPassword}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setConfirmationPassword(event.currentTarget.value)}
+                    />
+                </Field>
+            )}
+            {error && <p class="text-sm text-error">{error}</p>}
+            {message && <p class="text-sm text-base-content/60" role="status">{message}</p>}
+            {canEdit && (
+                <button class="btn btn-primary btn-sm w-fit rounded-xl" type="button" disabled={saving} onClick={() => void save()}>
+                    <Save class="size-3.5" aria-hidden />
+                    {saving ? 'Enregistrement…' : 'Enregistrer'}
+                </button>
+            )}
+        </div>
+    );
+}
+
+function EmailForm({
+    data,
+    canEdit,
+    onSaved,
+}: {
+    data: InstanceSettings['email'];
+    canEdit: boolean;
+    onSaved: () => Promise<void>;
+}) {
+    const [form, setForm] = useState({
+        ...data,
+        smtp_password: '',
+        resend_api_key: '',
+    });
+    const [saving, setSaving] = useState(false);
+    const [message, setMessage] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        setForm({ ...data, smtp_password: '', resend_api_key: '' });
+    }, [data]);
+
+    const save = async () => {
+        setSaving(true);
+        setMessage(null);
+        setError(null);
+        try {
+            await domainApi.updateEmailSettings({
+                smtp_enabled: form.smtp_enabled,
+                smtp_from_address: form.smtp_from_address,
+                smtp_from_name: form.smtp_from_name,
+                smtp_recipients: form.smtp_recipients,
+                smtp_host: form.smtp_host,
+                smtp_port: form.smtp_port,
+                smtp_encryption: form.smtp_encryption,
+                smtp_username: form.smtp_username,
+                smtp_password: form.smtp_password || undefined,
+                smtp_timeout: form.smtp_timeout,
+                resend_enabled: form.resend_enabled,
+                resend_api_key: form.resend_api_key || undefined,
+            });
+            await onSaved();
+            setMessage('Paramètres e-mail enregistrés.');
+        } catch (caught) {
+            setError(caught instanceof Error ? caught.message : 'Échec de l’enregistrement.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div class="grid gap-3">
+            <ToggleField
+                label="SMTP"
+                checked={form.smtp_enabled}
+                disabled={!canEdit || saving}
+                onChange={(value) => setForm((current) => ({
+                    ...current,
+                    smtp_enabled: value,
+                    resend_enabled: value ? false : current.resend_enabled,
+                }))}
+            />
+            <div class="grid gap-3 md:grid-cols-2">
+                <Field label="Expéditeur">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        type="email"
+                        value={form.smtp_from_address ?? ''}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({ ...current, smtp_from_address: event.currentTarget.value || null }))}
+                    />
+                </Field>
+                <Field label="Nom expéditeur">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        value={form.smtp_from_name ?? ''}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({ ...current, smtp_from_name: event.currentTarget.value || null }))}
+                    />
+                </Field>
+                <Field label="Hôte SMTP">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        value={form.smtp_host ?? ''}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({ ...current, smtp_host: event.currentTarget.value || null }))}
+                    />
+                </Field>
+                <Field label="Port">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        type="number"
+                        value={form.smtp_port ?? ''}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({
+                            ...current,
+                            smtp_port: event.currentTarget.value === '' ? null : Number(event.currentTarget.value),
+                        }))}
+                    />
+                </Field>
+                <Field label="Chiffrement">
+                    <select
+                        class="select select-bordered select-sm w-full rounded-xl"
+                        value={form.smtp_encryption ?? 'starttls'}
+                        disabled={!canEdit || saving}
+                        onChange={(event) => setForm((current) => ({ ...current, smtp_encryption: event.currentTarget.value }))}
+                    >
+                        <option value="starttls">STARTTLS</option>
+                        <option value="tls">TLS</option>
+                        <option value="none">Aucun</option>
+                    </select>
+                </Field>
+                <Field label="Utilisateur">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        value={form.smtp_username ?? ''}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({ ...current, smtp_username: event.currentTarget.value || null }))}
+                    />
+                </Field>
+                <Field label={`Mot de passe${data.smtp_password_set ? ' (laisser vide pour conserver)' : ''}`}>
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        type="password"
+                        value={form.smtp_password}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({ ...current, smtp_password: event.currentTarget.value }))}
+                    />
+                </Field>
+            </div>
+            <ToggleField
+                label="Resend"
+                checked={form.resend_enabled}
+                disabled={!canEdit || saving}
+                onChange={(value) => setForm((current) => ({
+                    ...current,
+                    resend_enabled: value,
+                    smtp_enabled: value ? false : current.smtp_enabled,
+                }))}
+            />
+            <Field label={`Clé Resend${data.resend_api_key_set ? ' (laisser vide pour conserver)' : ''}`}>
+                <input
+                    class="input input-bordered input-sm w-full rounded-xl"
+                    type="password"
+                    value={form.resend_api_key}
+                    disabled={!canEdit || saving}
+                    onInput={(event) => setForm((current) => ({ ...current, resend_api_key: event.currentTarget.value }))}
+                />
+            </Field>
+            {error && <p class="text-sm text-error">{error}</p>}
+            {message && <p class="text-sm text-base-content/60" role="status">{message}</p>}
+            {canEdit && (
+                <button class="btn btn-primary btn-sm w-fit rounded-xl" type="button" disabled={saving} onClick={() => void save()}>
+                    <Save class="size-3.5" aria-hidden />
+                    {saving ? 'Enregistrement…' : 'Enregistrer'}
+                </button>
+            )}
+        </div>
+    );
+}
+
+function UpdatesForm({
+    data,
+    canEdit,
+    onSaved,
+}: {
+    data: InstanceSettings['updates'];
+    canEdit: boolean;
+    onSaved: () => Promise<void>;
+}) {
+    const [form, setForm] = useState(data);
+    const [saving, setSaving] = useState(false);
+    const [checking, setChecking] = useState(false);
+    const [message, setMessage] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => setForm(data), [data]);
+
+    const save = async () => {
+        setSaving(true);
+        setMessage(null);
+        setError(null);
+        try {
+            await domainApi.updateUpdatesSettings({
+                is_auto_update_enabled: form.is_auto_update_enabled,
+                auto_update_frequency: form.auto_update_frequency,
+                update_check_frequency: form.update_check_frequency,
+            });
+            await onSaved();
+            setMessage('Paramètres de mise à jour enregistrés.');
+        } catch (caught) {
+            setError(caught instanceof Error ? caught.message : 'Échec de l’enregistrement.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const check = async () => {
+        setChecking(true);
+        setMessage(null);
+        setError(null);
+        try {
+            const response = await domainApi.checkUpdatesSettings();
+            await onSaved();
+            setMessage(response.data.updates.new_version_available
+                ? 'Nouvelle version disponible.'
+                : 'Aucune nouvelle version.');
+        } catch (caught) {
+            setError(caught instanceof Error ? caught.message : 'Échec de la vérification.');
+        } finally {
+            setChecking(false);
+        }
+    };
+
+    return (
+        <div class="grid gap-3">
+            <div class="flex flex-wrap items-center gap-2">
+                <StatusBadge
+                    label={form.new_version_available ? 'Mise à jour disponible' : 'À jour'}
+                    tone={form.new_version_available ? 'warning' : 'success'}
+                />
+            </div>
+            <ToggleField
+                label="Mises à jour auto"
+                checked={form.is_auto_update_enabled}
+                disabled={!canEdit || saving}
+                onChange={(value) => setForm((current) => ({ ...current, is_auto_update_enabled: value }))}
+            />
+            <Field label="Fréquence auto (cron)">
+                <input
+                    class="input input-bordered input-sm w-full rounded-xl"
+                    value={form.auto_update_frequency ?? ''}
+                    disabled={!canEdit || saving}
+                    onInput={(event) => setForm((current) => ({ ...current, auto_update_frequency: event.currentTarget.value || null }))}
+                />
+            </Field>
+            <Field label="Fréquence de vérification (cron)">
+                <input
+                    class="input input-bordered input-sm w-full rounded-xl"
+                    value={form.update_check_frequency ?? ''}
+                    disabled={!canEdit || saving}
+                    onInput={(event) => setForm((current) => ({ ...current, update_check_frequency: event.currentTarget.value || null }))}
+                />
+            </Field>
+            {error && <p class="text-sm text-error">{error}</p>}
+            {message && <p class="text-sm text-base-content/60" role="status">{message}</p>}
+            {canEdit && (
+                <div class="flex flex-wrap gap-2">
+                    <button class="btn btn-primary btn-sm rounded-xl" type="button" disabled={saving || checking} onClick={() => void save()}>
+                        <Save class="size-3.5" aria-hidden />
+                        {saving ? 'Enregistrement…' : 'Enregistrer'}
+                    </button>
+                    <button class="btn btn-ghost btn-sm rounded-xl" type="button" disabled={saving || checking} onClick={() => void check()}>
+                        <RefreshCw class="size-3.5" aria-hidden />
+                        {checking ? 'Vérification…' : 'Vérifier maintenant'}
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
+export function InstanceSettingsPanels({ section, permissions }: InstanceSettingsPanelsProps) {
     const settings = useApiQuery('settings', () => domainApi.settings());
     const data = settings.data?.data;
-
-    const sectionItems = (() => {
-        if (!data) {
-            return [];
-        }
-
-        if (section === 'instance') {
-            const instance = data.instance;
-            return [
-                { label: 'Nom', value: formatOptional(instance.instance_name) },
-                {
-                    label: 'URL instance',
-                    value: formatOptional(instance.fqdn),
-                },
-                { label: 'Fuseau', value: formatOptional(instance.instance_timezone) },
-                { label: 'IPv4 publique', value: formatOptional(instance.public_ipv4) },
-                { label: 'IPv6 publique', value: formatOptional(instance.public_ipv6) },
-                { label: 'Ports publics', value: `${formatOptional(instance.public_port_min)} → ${formatOptional(instance.public_port_max)}` },
-                { label: 'Canal', value: formatOptional(instance.next_channel) },
-                { label: 'Version helper', value: formatOptional(instance.helper_version) },
-            ];
-        }
-
-        if (section === 'advanced') {
-            const advanced = data.advanced;
-            return [
-                { label: 'Inscriptions', value: formatBoolean(advanced.is_registration_enabled) },
-                { label: 'Ne pas suivre', value: formatBoolean(advanced.do_not_track) },
-                { label: 'Validation DNS', value: formatBoolean(advanced.is_dns_validation_enabled) },
-                { label: 'Serveurs DNS', value: formatOptional(advanced.custom_dns_servers) },
-                { label: 'API', value: formatBoolean(advanced.is_api_enabled) },
-                { label: 'IP autorisées', value: formatOptional(advanced.allowed_ips) },
-                { label: 'Popup sponsoring', value: formatBoolean(advanced.is_sponsorship_popup_enabled) },
-                { label: 'Confirmation en 2 étapes', value: advanced.disable_two_step_confirmation ? 'Désactivée' : 'Activée' },
-                { label: 'Navigation wire', value: formatBoolean(advanced.is_wire_navigate_enabled) },
-                { label: 'Serveur MCP', value: formatBoolean(advanced.is_mcp_server_enabled) },
-            ];
-        }
-
-        if (section === 'email') {
-            const email = data.email;
-            return [
-                { label: 'SMTP', value: <StatusBadge label={email.smtp_enabled ? 'Activé' : 'Désactivé'} tone={email.smtp_enabled ? 'success' : 'neutral'} /> },
-                { label: 'Expéditeur', value: formatSecretConfigured(email.smtp_from_address) },
-                { label: 'Nom expéditeur', value: formatSecretConfigured(email.smtp_from_name) },
-                { label: 'Destinataires', value: formatSecretConfigured(email.smtp_recipients) },
-                { label: 'Hôte SMTP', value: formatSecretConfigured(email.smtp_host) },
-                { label: 'Port', value: formatOptional(email.smtp_port) },
-                { label: 'Chiffrement', value: formatOptional(email.smtp_encryption) },
-                { label: 'Utilisateur', value: formatSecretConfigured(email.smtp_username) },
-                { label: 'Mot de passe', value: formatSecretConfigured(email.smtp_password) },
-                { label: 'Resend', value: formatBoolean(email.resend_enabled) },
-                { label: 'Clé Resend', value: formatSecretConfigured(email.resend_api_key) },
-            ];
-        }
-
-        const updates = data.updates;
-        return [
-            { label: 'Mises à jour auto', value: formatBoolean(updates.is_auto_update_enabled) },
-            { label: 'Fréquence auto', value: formatOptional(updates.auto_update_frequency) },
-            { label: 'Vérification', value: formatOptional(updates.update_check_frequency) },
-            { label: 'Nouvelle version', value: formatBoolean(updates.new_version_available) },
-        ];
-    })();
+    const canEdit = permissions.instance_admin;
 
     return (
         <div class="grid gap-4">
-            <LegacyEditBanner legacyBaseUrl={legacyBaseUrl} legacyPath={legacyPaths[section]} />
-            <Card title={titles[section]} eyebrow={permissions.instance_admin ? 'Administrateur' : 'Lecture seule'}>
+            <Card title={titles[section]} eyebrow={canEdit ? 'Administrateur' : 'Lecture seule'}>
                 <div class="card-toolbar mb-3">
                     <button class="btn btn-ghost btn-sm" type="button" onClick={() => void settings.reload()}>
                         <RefreshCw class="size-3.5" aria-hidden />
@@ -112,17 +601,17 @@ export function InstanceSettingsPanels({ section, permissions, legacyBaseUrl }: 
                     </button>
                 </div>
                 <DataState loading={settings.loading} error={settings.error} onRetry={() => void settings.reload()}>
-                    {data && (
-                        <div class="grid gap-3">
-                            <SettingsDetailList items={sectionItems} />
-                            {section === 'instance' && (
-                                <p class="text-xs text-base-content/55">
-                                    L’URL instance est celle de Coolify/DevForge. Le domaine des apps déployées se configure
-                                    via le <span class="font-medium">Wildcard Domain</span> sur chaque serveur
-                                    (Settings → Serveurs → Vue d’ensemble).
-                                </p>
-                            )}
-                        </div>
+                    {data && section === 'instance' && (
+                        <InstanceForm data={data.instance} canEdit={canEdit} onSaved={settings.reload} />
+                    )}
+                    {data && section === 'advanced' && (
+                        <AdvancedForm data={data.advanced} canEdit={canEdit} onSaved={settings.reload} />
+                    )}
+                    {data && section === 'email' && (
+                        <EmailForm data={data.email} canEdit={canEdit} onSaved={settings.reload} />
+                    )}
+                    {data && section === 'updates' && (
+                        <UpdatesForm data={data.updates} canEdit={canEdit} onSaved={settings.reload} />
                     )}
                 </DataState>
             </Card>
@@ -130,13 +619,140 @@ export function InstanceSettingsPanels({ section, permissions, legacyBaseUrl }: 
     );
 }
 
-export function OauthSettingsPanel({ permissions, legacyBaseUrl }: { permissions: BootstrapPermissions; legacyBaseUrl: string }) {
+function OauthProviderForm({
+    provider,
+    canEdit,
+    onSaved,
+}: {
+    provider: OauthProviderSettings;
+    canEdit: boolean;
+    onSaved: () => Promise<void>;
+}) {
+    const [form, setForm] = useState({
+        enabled: provider.enabled,
+        client_id: provider.client_id ?? '',
+        client_secret: '',
+        redirect_uri: provider.redirect_uri ?? '',
+        tenant: provider.tenant ?? '',
+        base_url: provider.base_url ?? '',
+    });
+    const [saving, setSaving] = useState(false);
+    const [message, setMessage] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        setForm({
+            enabled: provider.enabled,
+            client_id: provider.client_id ?? '',
+            client_secret: '',
+            redirect_uri: provider.redirect_uri ?? '',
+            tenant: provider.tenant ?? '',
+            base_url: provider.base_url ?? '',
+        });
+    }, [provider]);
+
+    const save = async () => {
+        setSaving(true);
+        setMessage(null);
+        setError(null);
+        try {
+            await domainApi.updateOauthSettings(provider.provider, {
+                enabled: form.enabled,
+                client_id: form.client_id || null,
+                client_secret: form.client_secret || undefined,
+                redirect_uri: form.redirect_uri || null,
+                tenant: form.tenant || null,
+                base_url: form.base_url || null,
+            });
+            await onSaved();
+            setMessage('Fournisseur enregistré.');
+        } catch (caught) {
+            setError(caught instanceof Error ? caught.message : 'Échec de l’enregistrement.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div class="rounded-xl border border-base-300/70 p-4">
+            <div class="mb-3 flex items-center justify-between gap-2">
+                <p class="text-sm font-semibold capitalize">{provider.provider}</p>
+                <StatusBadge label={form.enabled ? 'Activé' : 'Désactivé'} tone={form.enabled ? 'success' : 'neutral'} />
+            </div>
+            <div class="grid gap-3">
+                <ToggleField
+                    label="Activé"
+                    checked={form.enabled}
+                    disabled={!canEdit || saving}
+                    onChange={(value) => setForm((current) => ({ ...current, enabled: value }))}
+                />
+                <Field label="Client ID">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        value={form.client_id}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({ ...current, client_id: event.currentTarget.value }))}
+                    />
+                </Field>
+                <Field label={`Secret${provider.client_secret_set ? ' (laisser vide pour conserver)' : ''}`}>
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        type="password"
+                        value={form.client_secret}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({ ...current, client_secret: event.currentTarget.value }))}
+                    />
+                </Field>
+                <Field label="Redirect URI">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        value={form.redirect_uri}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({ ...current, redirect_uri: event.currentTarget.value }))}
+                    />
+                </Field>
+                <Field label="Tenant">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        value={form.tenant}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({ ...current, tenant: event.currentTarget.value }))}
+                    />
+                </Field>
+                <Field label="Base URL">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        value={form.base_url}
+                        disabled={!canEdit || saving}
+                        onInput={(event) => setForm((current) => ({ ...current, base_url: event.currentTarget.value }))}
+                    />
+                </Field>
+                {error && <p class="text-sm text-error">{error}</p>}
+                {message && <p class="text-sm text-base-content/60" role="status">{message}</p>}
+                {canEdit && (
+                    <button class="btn btn-primary btn-sm w-fit rounded-xl" type="button" disabled={saving} onClick={() => void save()}>
+                        <Save class="size-3.5" aria-hidden />
+                        {saving ? 'Enregistrement…' : 'Enregistrer'}
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+}
+
+export function OauthSettingsPanel({ permissions }: { permissions: BootstrapPermissions; legacyBaseUrl: string }) {
     const oauth = useApiQuery('settings-oauth', () => domainApi.oauthSettings());
+    const canEdit = permissions.instance_admin;
 
     return (
         <div class="grid gap-4">
-            <LegacyEditBanner legacyBaseUrl={legacyBaseUrl} legacyPath="/settings/oauth" />
-            <Card title="OAuth" eyebrow={permissions.instance_admin ? 'Administrateur' : 'Lecture seule'}>
+            <Card title="OAuth" eyebrow={canEdit ? 'Administrateur' : 'Lecture seule'}>
+                <div class="card-toolbar mb-3">
+                    <button class="btn btn-ghost btn-sm" type="button" onClick={() => void oauth.reload()}>
+                        <RefreshCw class="size-3.5" aria-hidden />
+                        Actualiser
+                    </button>
+                </div>
                 <DataState loading={oauth.loading} error={oauth.error} onRetry={() => void oauth.reload()}>
                     {oauth.data && (
                         <div class="grid gap-3">
@@ -144,20 +760,12 @@ export function OauthSettingsPanel({ permissions, legacyBaseUrl }: { permissions
                                 <p class="text-sm text-base-content/55">Aucun fournisseur OAuth configuré.</p>
                             ) : (
                                 oauth.data.data.map((provider) => (
-                                    <div class="rounded-xl border border-base-300/70 p-4" key={provider.id}>
-                                        <div class="mb-2 flex items-center justify-between gap-2">
-                                            <p class="text-sm font-semibold capitalize">{provider.provider}</p>
-                                            <StatusBadge label={provider.enabled ? 'Activé' : 'Désactivé'} tone={provider.enabled ? 'success' : 'neutral'} />
-                                        </div>
-                                        <SettingsDetailList items={[
-                                            { label: 'Client ID', value: formatSecretConfigured(provider.client_id) },
-                                            { label: 'Secret', value: formatSecretConfigured(provider.client_secret) },
-                                            { label: 'Redirect URI', value: formatOptional(provider.redirect_uri) },
-                                            { label: 'Tenant', value: formatOptional(provider.tenant) },
-                                            { label: 'Base URL', value: formatOptional(provider.base_url) },
-                                        ]}
-                                        />
-                                    </div>
+                                    <OauthProviderForm
+                                        key={provider.id}
+                                        provider={provider}
+                                        canEdit={canEdit}
+                                        onSaved={oauth.reload}
+                                    />
                                 ))
                             )}
                         </div>
@@ -179,6 +787,8 @@ export function LegacyOnlySettingsPanel({
     legacyPath: string;
     legacyBaseUrl: string;
 }) {
+    const { LegacyEditBanner } = require('../migration/LegacyEditBanner') as typeof import('../migration/LegacyEditBanner');
+
     return (
         <div class="grid gap-4">
             <LegacyEditBanner

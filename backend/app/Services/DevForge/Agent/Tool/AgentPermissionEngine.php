@@ -43,6 +43,7 @@ class AgentPermissionEngine
         string $toolName,
         array $args = [],
         ?AgentToolClassification $classification = null,
+        ?int $sessionId = null,
     ): array {
         $classification ??= AgentToolClassification::forTool($toolName);
 
@@ -100,17 +101,18 @@ class AgentPermissionEngine
                 'rule_id' => 'mode:autonomous',
             ],
             self::MODE_TIERED => $this->decideTiered($classification),
-            self::MODE_PLAN_FIRST => [
-                'decision' => self::DECISION_ASK,
-                'reason' => 'Mode plan-first — chaque outil demande validation.',
-                'rule_id' => 'mode:plan_first',
-            ],
+            self::MODE_PLAN_FIRST => $this->decidePlanFirst($toolName, $classification, $sessionId),
             default => [
                 'decision' => self::DECISION_ALLOW,
                 'reason' => 'Mode autonome — accès total.',
                 'rule_id' => 'mode:autonomous',
             ],
         };
+    }
+
+    public function effectiveMode(AiAgent $agent): string
+    {
+        return $this->agentPermissionConfig($agent)['mode'] ?? $this->globalMode();
     }
 
     /**
@@ -241,6 +243,48 @@ class AgentPermissionEngine
             'decision' => self::DECISION_ALLOW,
             'reason' => 'Outil neutre (mode tiered).',
             'rule_id' => 'mode:tiered:neutral',
+        ];
+    }
+
+    /**
+     * Plan-first (Grok-style): reads + propose_plan free; mutations ask until the
+     * session has an approved plan-execution grant.
+     *
+     * @return array{decision: string, reason: string, rule_id: string}
+     */
+    private function decidePlanFirst(
+        string $toolName,
+        AgentToolClassification $classification,
+        ?int $sessionId,
+    ): array {
+        if ($sessionId !== null && AgentToolApprovalGrant::hasPlanExecution($sessionId)) {
+            return [
+                'decision' => self::DECISION_ALLOW,
+                'reason' => 'Plan approuvé — exécution autorisée pour cette session.',
+                'rule_id' => 'mode:plan_first:executing',
+            ];
+        }
+
+        if ($toolName === 'propose_plan') {
+            return [
+                'decision' => self::DECISION_ALLOW,
+                'reason' => 'Mode plan-first — proposition de plan autorisée.',
+                'rule_id' => 'mode:plan_first:propose',
+            ];
+        }
+
+        if ($classification->isReadOnly) {
+            return [
+                'decision' => self::DECISION_ALLOW,
+                'reason' => 'Mode plan-first — lecture autorisée.',
+                'rule_id' => 'mode:plan_first:read',
+            ];
+        }
+
+        return [
+            'decision' => self::DECISION_ASK,
+            'reason' => 'Mode plan-first — propose d’abord un plan (propose_plan), puis attends l’approbation avant toute modification.',
+            'rule_id' => 'mode:plan_first:mutate',
         ];
     }
 }

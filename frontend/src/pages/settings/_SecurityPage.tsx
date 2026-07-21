@@ -1,12 +1,10 @@
-import { RefreshCw } from 'lucide-preact';
 import { PageHeader } from '../../components/PageHeader';
 import { Card } from '../../components/ui/Card';
-import { DataState } from '../../components/ui/DataState';
-import { StatusBadge } from '../../components/ui/StatusBadge';
 import { LegacyEditBanner } from '../../components/migration/LegacyEditBanner';
-import { domainApi } from '../../lib/domain-api';
+import { SecurityApiTokensPanel } from '../../components/security/SecurityApiTokensPanel';
+import { SecurityCloudTokensPanel } from '../../components/security/SecurityCloudTokensPanel';
+import { SecurityPrivateKeysPanel } from '../../components/security/SecurityPrivateKeysPanel';
 import { parseSecuritySection } from '../../lib/settings-tabs';
-import { useApiQuery } from '../../lib/use-api-query';
 
 const sectionMeta = {
     keys: {
@@ -42,16 +40,39 @@ export function SecurityPage({
 }) {
     const section = parseSecuritySection(path);
     const meta = sectionMeta[section];
-    const query = useApiQuery(section === 'keys' ? 'security-keys' : null, () => domainApi.securityKeys());
-    const keys = query.data?.data ?? [];
 
-    if (section !== 'keys') {
+    if (section === 'keys') {
+        return (
+            <>
+                {!embedded && (
+                    <PageHeader
+                        title="Sécurité"
+                        description="Clés privées accessibles à l’équipe active."
+                    />
+                )}
+                <SecurityPrivateKeysPanel />
+            </>
+        );
+    }
+
+    if (section === 'api-tokens') {
         return (
             <>
                 {!embedded && (
                     <PageHeader title={meta.title} description={meta.description} />
                 )}
-                <LegacyOnlySecuritySection meta={meta} legacyBaseUrl={legacyBaseUrl} />
+                <SecurityApiTokensPanel />
+            </>
+        );
+    }
+
+    if (section === 'cloud-tokens') {
+        return (
+            <>
+                {!embedded && (
+                    <PageHeader title={meta.title} description={meta.description} />
+                )}
+                <SecurityCloudTokensPanel />
             </>
         );
     }
@@ -59,42 +80,9 @@ export function SecurityPage({
     return (
         <>
             {!embedded && (
-                <PageHeader
-                    title="Sécurité"
-                    description="Clés privées accessibles à l’équipe active."
-                    actions={(
-                        <button class="btn btn-ghost btn-sm" type="button" onClick={() => void query.reload()}>
-                            <RefreshCw class="size-3.5" aria-hidden />
-                            Actualiser
-                        </button>
-                    )}
-                />
+                <PageHeader title={meta.title} description={meta.description} />
             )}
-            {embedded && (
-                <div class="toolbar-row">
-                    <p class="text-xs text-base-content/55">{meta.description}</p>
-                    <div class="card-toolbar w-full sm:w-auto">
-                        <button class="btn btn-ghost btn-sm w-full sm:w-auto" type="button" onClick={() => void query.reload()}>
-                        <RefreshCw class="size-3.5" aria-hidden />
-                        Actualiser
-                        </button>
-                    </div>
-                </div>
-            )}
-            <LegacyEditBanner legacyBaseUrl={legacyBaseUrl} legacyPath={meta.legacyPath} />
-            <DataState loading={query.loading} error={query.error} empty={keys.length === 0} emptyMessage="Aucune clé privée." onRetry={() => void query.reload()}>
-                <div class="grid gap-2 md:grid-cols-2">
-                    {keys.map((key) => (
-                        <Card title={key.name} eyebrow={key.is_git_related ? 'Git' : 'SSH'} key={key.uuid}>
-                            <p class="text-xs text-base-content/55">{key.description || 'Sans description'}</p>
-                            <div class="flex items-center justify-between gap-2">
-                                <code class="truncate text-[11px] text-base-content/45">{key.fingerprint || 'Empreinte indisponible'}</code>
-                                <StatusBadge label="Masquée" />
-                            </div>
-                        </Card>
-                    ))}
-                </div>
-            </DataState>
+            <LegacyOnlySecuritySection meta={meta} legacyBaseUrl={legacyBaseUrl} />
         </>
     );
 }

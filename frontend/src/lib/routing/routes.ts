@@ -5,7 +5,7 @@ import {
     Braces,
     Database,
     Gauge,
-    GitBranch,
+    Plug,
     Rocket,
     Settings,
     Tag,
@@ -17,10 +17,17 @@ import {
     type LucideIcon,
 } from 'lucide-preact';
 
+import {
+    applicationPath,
+    applicationTabFromLegacySegment,
+    parseApplicationTab,
+    type ApplicationTabId,
+} from '../application-tabs';
 import { settingsTabPaths } from './settings-tabs';
-import { DEVFORGE_BASE_PATH, normalizeRoutePath } from './route-path';
+import { DEVFORGE_BASE_PATH, normalizeRoutePath, sanitizeResourceUuid } from './route-path';
 
 export { DEVFORGE_BASE_PATH, normalizeRoutePath };
+export { applicationPath, parseApplicationTab };
 
 
 
@@ -47,6 +54,8 @@ export type PageKey =
     | 'profile'
 
     | 'terminal'
+
+    | 'connexions'
 
     | 'github'
 
@@ -96,7 +105,7 @@ export const appRoutes: AppRoute[] = [
 
     { path: '/applications', label: 'Applications', description: 'Configuration et déploiements.', icon: Boxes, page: 'applications' },
 
-    { path: '/github', label: 'GitHub', description: 'Compte GitHub, apps et token Packages.', icon: GitBranch, page: 'github' },
+    { path: '/connexions', label: 'Connexions', description: 'GitHub, tokens Packages, clés API et secrets de build.', icon: Plug, page: 'connexions' },
 
     { path: '/databases', label: 'Bases de données', description: 'Instances, sauvegardes et métriques.', icon: Database, page: 'databases' },
 
@@ -137,6 +146,8 @@ export const staticRoutePaths = [
     '/profile/appearance',
 
     '/terminal',
+
+    '/connexions',
 
     '/github',
 
@@ -202,22 +213,193 @@ export function routeHref(path: string): string {
 
 
 
-export function applicationPath(uuid: string): string {
+export function extractApplicationUuid(pathname: string): string | null {
+    const normalizedPath = normalizeRoutePath(pathname);
+    const native = normalizedPath.match(/^\/applications\/([^/]+)/);
 
-    return `/applications/${uuid}`;
+    if (native?.[1]) {
+        return sanitizeResourceUuid(native[1]);
+    }
 
+    const legacy = normalizedPath.match(
+        /^\/project\/[^/]+\/environment\/[^/]+\/application\/([^/]+)(?:\/.*)?$/,
+    );
+
+    return sanitizeResourceUuid(legacy?.[1] ?? null);
 }
 
+export function extractDatabaseUuid(pathname: string): string | null {
+    const normalizedPath = normalizeRoutePath(pathname);
+    const legacy = normalizedPath.match(
+        /^\/project\/[^/]+\/environment\/[^/]+\/database\/([^/]+)(?:\/.*)?$/,
+    );
 
+    return sanitizeResourceUuid(legacy?.[1] ?? null);
+}
 
-export function extractApplicationUuid(pathname: string): string | null {
+export type DatabaseDetailTabId = 'overview' | 'data' | 'backups' | 'logs' | 'variables' | 'webhooks' | 'storage' | 'healthcheck';
 
+const databaseTabIds = new Set<DatabaseDetailTabId>([
+    'overview',
+    'data',
+    'backups',
+    'logs',
+    'variables',
+    'webhooks',
+    'storage',
+    'healthcheck',
+]);
+
+export function parseDatabaseTab(value: string | null | undefined): DatabaseDetailTabId {
+    if (value && databaseTabIds.has(value as DatabaseDetailTabId)) {
+        return value as DatabaseDetailTabId;
+    }
+
+    return 'overview';
+}
+
+function databaseTabFromLegacySegment(segment: string | undefined): DatabaseDetailTabId {
+    if (segment === 'backups') {
+        return 'backups';
+    }
+
+    if (segment === 'logs') {
+        return 'logs';
+    }
+
+    if (segment === 'environment-variables' || segment === 'variables') {
+        return 'variables';
+    }
+
+    if (segment === 'webhooks') {
+        return 'webhooks';
+    }
+
+    if (segment === 'persistent-storage' || segment === 'storage' || segment === 'storages') {
+        return 'storage';
+    }
+
+    if (segment === 'healthcheck' || segment === 'health') {
+        return 'healthcheck';
+    }
+
+    if (segment === 'import-backup') {
+        return 'data';
+    }
+
+    return 'overview';
+}
+
+export function databasePath(uuid: string, tab: DatabaseDetailTabId = 'overview'): string {
+    const params = new URLSearchParams({ uuid });
+
+    if (tab !== 'overview') {
+        params.set('tab', tab);
+    }
+
+    return `/databases?${params.toString()}`;
+}
+
+export type ServiceDetailTabId = 'overview' | 'tasks' | 'variables' | 'webhooks' | 'storage';
+
+const serviceTabIds = new Set<ServiceDetailTabId>(['overview', 'tasks', 'variables', 'webhooks', 'storage']);
+
+export function parseServiceTab(value: string | null | undefined): ServiceDetailTabId {
+    if (value && serviceTabIds.has(value as ServiceDetailTabId)) {
+        return value as ServiceDetailTabId;
+    }
+
+    return 'overview';
+}
+
+function serviceTabFromLegacySegment(segment: string | undefined): ServiceDetailTabId {
+    if (segment === 'scheduled-tasks' || segment === 'tasks') {
+        return 'tasks';
+    }
+
+    if (segment === 'environment-variables' || segment === 'variables') {
+        return 'variables';
+    }
+
+    if (segment === 'webhooks') {
+        return 'webhooks';
+    }
+
+    if (segment === 'storages' || segment === 'storage' || segment === 'persistent-storage') {
+        return 'storage';
+    }
+
+    return 'overview';
+}
+
+export function servicePath(uuid: string, tab: ServiceDetailTabId = 'overview'): string {
+    const params = new URLSearchParams({ uuid });
+
+    if (tab !== 'overview') {
+        params.set('tab', tab);
+    }
+
+    return `/services?${params.toString()}`;
+}
+
+/**
+ * Réécrit les URLs Coolify `/project/.../application|database|service/...` vers les chemins DevForge canoniques.
+ * Retourne null si aucune réécriture n’est nécessaire.
+ */
+export function resolveResourceCanonicalLocation(pathname: string): string | null {
     const normalizedPath = normalizeRoutePath(pathname);
 
-    const match = normalizedPath.match(/^\/applications\/([^/]+)/);
+    const applicationMatch = normalizedPath.match(
+        /^\/project\/[^/]+\/environment\/[^/]+\/application\/([^/]+)(?:\/([^/]+))?/,
+    );
 
-    return match?.[1] ?? null;
+    if (applicationMatch) {
+        const uuid = sanitizeResourceUuid(applicationMatch[1]);
 
+        if (!uuid) {
+            return null;
+        }
+
+        const tab = applicationTabFromLegacySegment(applicationMatch[2]);
+
+        return applicationPath(uuid, tab);
+    }
+
+    const databaseMatch = normalizedPath.match(
+        /^\/project\/[^/]+\/environment\/[^/]+\/database\/([^/]+)(?:\/([^/]+))?/,
+    );
+
+    if (databaseMatch) {
+        const uuid = sanitizeResourceUuid(databaseMatch[1]);
+
+        if (!uuid) {
+            return null;
+        }
+
+        return databasePath(uuid, databaseTabFromLegacySegment(databaseMatch[2]));
+    }
+
+    const serviceMatch = normalizedPath.match(
+        /^\/project\/[^/]+\/environment\/[^/]+\/service\/([^/]+)(?:\/([^/]+))?/,
+    );
+
+    if (serviceMatch) {
+        const uuid = sanitizeResourceUuid(serviceMatch[1]);
+
+        if (!uuid) {
+            return null;
+        }
+
+        return servicePath(uuid, serviceTabFromLegacySegment(serviceMatch[2]));
+    }
+
+    return null;
+}
+
+export function readApplicationTabFromLocation(search = typeof window === 'undefined' ? '' : window.location.search): ApplicationTabId {
+    const params = new URLSearchParams(search.startsWith('?') || search === '' ? search : `?${search}`);
+
+    return parseApplicationTab(params.get('tab'));
 }
 
 
@@ -282,13 +464,11 @@ const terminalRoute: AppRoute = {
     page: 'terminal',
 };
 
-const githubRoute = appRouteByPage('github');
+const connexionsRoute = appRouteByPage('connexions');
 
 const sourcesRoute: AppRoute = {
+    ...connexionsRoute,
     path: '/sources',
-    label: 'Sources',
-    description: 'Dépôts et applications Git connectés.',
-    icon: GitBranch,
     page: 'sources',
 };
 
@@ -358,7 +538,7 @@ const dynamicRoutes: Array<{ pattern: RegExp; route: AppRoute }> = [
 
     { pattern: /^\/applications\/[^/]+(?:\/.*)?$/, route: { ...applicationsRoute, page: 'application-detail' } },
 
-    { pattern: /^\/project\/[^/]+\/environment\/[^/]+\/application\/[^/]+(?:\/.*)?$/, route: applicationsRoute },
+    { pattern: /^\/project\/[^/]+\/environment\/[^/]+\/application\/[^/]+(?:\/.*)?$/, route: { ...applicationsRoute, page: 'application-detail' } },
 
     { pattern: /^\/project\/[^/]+\/environment\/[^/]+\/database\/[^/]+(?:\/.*)?$/, route: databasesRoute },
 
@@ -388,11 +568,13 @@ const dynamicRoutes: Array<{ pattern: RegExp; route: AppRoute }> = [
 
     { pattern: /^\/terminal(?:\/.*)?$/, route: terminalRoute },
 
-    { pattern: /^\/github(?:\/.*)?$/, route: githubRoute },
+    { pattern: /^\/connexions(?:\/.*)?$/, route: connexionsRoute },
+
+    { pattern: /^\/github(?:\/.*)?$/, route: connexionsRoute },
 
     { pattern: /^\/sources(?:\/.*)?$/, route: sourcesRoute },
 
-    { pattern: /^\/source\/github\/[^/]+(?:\/.*)?$/, route: sourcesRoute },
+    { pattern: /^\/source\/github\/[^/]+(?:\/.*)?$/, route: connexionsRoute },
 
     { pattern: /^\/storages\/[^/]+(?:\/.*)?$/, route: storagesRoute },
 
@@ -483,7 +665,35 @@ export function findRoute(pathname: string): AppRoute {
 
 
 
-        if (['profile', 'terminal', 'github', 'sources', 'storages', 'storage', 'destinations', 'tags', 'subscription', 'onboarding', 'server-detail'].includes(dynamicRoute.route.page)) {
+        if (dynamicRoute.route.page === 'application-detail') {
+            const uuid = extractApplicationUuid(normalizedPath);
+
+            return {
+                ...dynamicRoute.route,
+                path: uuid ? `/applications/${uuid}` : normalizedPath,
+                label: `${applicationsRoute.label} · Détail`,
+            };
+        }
+
+        if (dynamicRoute.route.page === 'databases' && normalizedPath.startsWith('/project/')) {
+            return {
+                ...databasesRoute,
+                path: '/databases',
+                label: `${databasesRoute.label} · Détail`,
+            };
+        }
+
+        if (dynamicRoute.route.page === 'services' && normalizedPath.startsWith('/project/')) {
+            return {
+                ...servicesRoute,
+                path: '/services',
+                label: `${servicesRoute.label} · Détail`,
+            };
+        }
+
+
+
+        if (['profile', 'terminal', 'connexions', 'github', 'sources', 'storages', 'storage', 'destinations', 'tags', 'subscription', 'onboarding', 'server-detail'].includes(dynamicRoute.route.page)) {
 
             return {
 

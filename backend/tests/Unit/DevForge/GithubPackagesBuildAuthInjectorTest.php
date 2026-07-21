@@ -57,7 +57,8 @@ it('diagnoses github app without packages permission', function () {
         ->and($diagnosis['has_packages_permission'])->toBeFalse()
         ->and($diagnosis['has_packages_token'])->toBeFalse()
         ->and($diagnosis['can_auto_redeploy'])->toBeFalse()
-        ->and($diagnosis['error'])->toContain('Aucun token Packages');
+        ->and($diagnosis['error'])->toContain('Aucun token Packages')
+        ->and(implode(' ', $diagnosis['steps']))->toContain('Connexions');
 });
 
 it('allows auto redeploy when a packages PAT is registered', function () {

@@ -3,7 +3,7 @@ import { useState } from 'preact/hooks';
 import { Card } from '../ui/Card';
 import { DataState } from '../ui/DataState';
 import { StatusBadge } from '../ui/StatusBadge';
-import { LegacyEditBanner } from '../migration/LegacyEditBanner';
+import { ChannelCredentialsEditor } from './ChannelCredentialsEditor';
 import { domainApi, type NotificationChannel } from '../../lib/domain-api';
 import { notificationEventLabel, sortedNotificationEventKeys } from '../../lib/notification-events';
 import { useApiQuery } from '../../lib/use-api-query';
@@ -99,7 +99,7 @@ function ChannelEventsEditor({
     );
 }
 
-export function NotificationsSettingsPanel({ legacyBaseUrl, activeChannel = null, canManage = false }: NotificationsSettingsPanelProps) {
+export function NotificationsSettingsPanel({ activeChannel = null, canManage = false }: NotificationsSettingsPanelProps) {
     const notifications = useApiQuery('notifications', () => domainApi.notifications());
     const channels = notifications.data?.data ?? [];
     const filtered = activeChannel
@@ -109,14 +109,6 @@ export function NotificationsSettingsPanel({ legacyBaseUrl, activeChannel = null
 
     return (
         <div class="grid gap-4">
-            {activeChannel && (
-                <LegacyEditBanner
-                    legacyBaseUrl={legacyBaseUrl}
-                    legacyPath={`/notifications/${activeChannel}`}
-                    title="Identifiants du canal"
-                    description="Les événements ci-dessous se gèrent dans DevForge. SMTP, tokens et webhooks restent configurables dans Coolify."
-                />
-            )}
             <Card title={activeChannel ? `Notifications · ${channelLabels[activeChannel] ?? activeChannel}` : 'Notifications'}>
                 <div class="card-toolbar mb-3">
                     <button class="btn btn-ghost btn-sm" type="button" onClick={() => void notifications.reload()}>
@@ -132,12 +124,20 @@ export function NotificationsSettingsPanel({ legacyBaseUrl, activeChannel = null
                     onRetry={() => void notifications.reload()}
                 >
                     {focusedChannel ? (
-                        <ChannelEventsEditor
-                            key={focusedChannel.channel + JSON.stringify(focusedChannel.events)}
-                            channel={focusedChannel}
-                            canManage={canManage}
-                            onUpdated={notifications.reload}
-                        />
+                        <div class="grid gap-4">
+                            <ChannelCredentialsEditor
+                                key={`${focusedChannel.channel}-creds-${Boolean(focusedChannel.credentials?.discord_webhook_url_set)}-${Boolean(focusedChannel.credentials?.smtp_password_set)}`}
+                                channel={focusedChannel}
+                                canManage={canManage}
+                                onUpdated={notifications.reload}
+                            />
+                            <ChannelEventsEditor
+                                key={`${focusedChannel.channel}-events-${JSON.stringify(focusedChannel.events)}`}
+                                channel={focusedChannel}
+                                canManage={canManage}
+                                onUpdated={notifications.reload}
+                            />
+                        </div>
                     ) : (
                         <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                             {filtered.map((channel) => {

@@ -9,7 +9,9 @@ Route::post('/teams/switch', [TeamController::class, 'switch'])->name('teams.swi
 
 require __DIR__.'/devforge-simple.php';
 require __DIR__.'/devforge-applications.php';
+require __DIR__.'/devforge-services.php';
 require __DIR__.'/devforge-databases.php';
+
 require __DIR__.'/devforge-database-backups.php';
 require __DIR__.'/devforge-s3-storages.php';
 require __DIR__.'/devforge-core.php';

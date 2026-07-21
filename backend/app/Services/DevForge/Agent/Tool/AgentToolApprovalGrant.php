@@ -6,10 +6,13 @@ use Illuminate\Support\Facades\Cache;
 
 /**
  * One-shot grants so chat "Approve" can re-run a previously asked tool.
+ * Also holds session-scoped plan-execution grants (plan-first mode).
  */
 class AgentToolApprovalGrant
 {
     private const TTL_SECONDS = 1800;
+
+    private const PLAN_EXECUTION_KEY = '__plan_execution__';
 
     public static function fingerprint(string $toolName, array $arguments = []): string
     {
@@ -38,6 +41,25 @@ class AgentToolApprovalGrant
     public static function has(int $sessionId, string $approvalKey): bool
     {
         return (bool) Cache::get(self::cacheKey($sessionId, $approvalKey));
+    }
+
+    /**
+     * After the user approves a propose_plan artefact, mutating tools are allowed
+     * for this chat session until TTL expiry (hard-deny rules still apply).
+     */
+    public static function grantPlanExecution(int $sessionId): void
+    {
+        Cache::put(self::cacheKey($sessionId, self::PLAN_EXECUTION_KEY), true, self::TTL_SECONDS);
+    }
+
+    public static function hasPlanExecution(int $sessionId): bool
+    {
+        return self::has($sessionId, self::PLAN_EXECUTION_KEY);
+    }
+
+    public static function revokePlanExecution(int $sessionId): void
+    {
+        Cache::forget(self::cacheKey($sessionId, self::PLAN_EXECUTION_KEY));
     }
 
     private static function cacheKey(int $sessionId, string $approvalKey): string

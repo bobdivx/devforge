@@ -13,7 +13,7 @@ import { OverviewPage } from './dashboard/_OverviewPage';
 import { ProfilePage } from './profile/_ProfilePage';
 import { SettingsPage } from './settings/_SettingsPage';
 import { SharedVariablesPage } from './shared-variables/_SharedVariablesPage';
-import { SourcesPage } from './sources/_SourcesPage';
+import { ConnexionsPage } from './sources/_SourcesPage';
 import { ServerPage } from './servers/_ServerPage';
 import { StoragesPage } from './storages/_StoragesPage';
 import { StoragePage } from './storage/_StoragePage';
@@ -87,10 +87,11 @@ export function DomainPage({ bootstrap, route, onSwitchTeam }: DomainPageProps) 
                     canAccess={bootstrap.permissions.access_terminal}
                 />
             );
+        case 'connexions':
         case 'github':
         case 'sources':
             return (
-                <SourcesPage
+                <ConnexionsPage
                     legacyBaseUrl={bootstrap.migration.legacy_base_url}
                     githubAppUuid={extractGithubAppUuid(route.path)}
                 />

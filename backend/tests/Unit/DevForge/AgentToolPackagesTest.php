@@ -113,6 +113,31 @@ it('returns a clear error when write_application_source is missing commit_messag
         ->and($result['error'])->toContain('commit_message');
 });
 
+it('requires diff preview approval for write_application_source in chat', function () {
+    config()->set('devforge.agents_chat_source_write_preview', true);
+    config()->set('devforge.agents_permission_mode', 'autonomous');
+
+    $agent = AiAgent::factory()->create(['team_id' => $this->team->id, 'type' => 'debug']);
+    $session = \App\Models\AiAgentSession::factory()->create(['agent_id' => $agent->id]);
+    $run = AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'trigger' => 'chat',
+        'session_id' => $session->id,
+    ]);
+    $toolkit = makeToolkit($this->team, $agent, $run);
+
+    $result = $toolkit->execute('write_application_source', [
+        'path' => 'README.md',
+        'content' => "# changed\n",
+        'commit_message' => 'update readme',
+    ]);
+
+    expect($result['status'] ?? null)->toBe('ask')
+        ->and($result['rule_id'] ?? null)->toBe('chat:source_write_preview')
+        ->and($result)->toHaveKey('diff_preview')
+        ->and($result['diff_preview']['path'] ?? null)->toBe('README.md');
+});
+
 it('rejects write_application_source for .env paths and hints upsert_application_env_var', function () {
     $agent = AiAgent::factory()->create(['team_id' => $this->team->id, 'type' => 'debug']);
     $toolkit = makeToolkit($this->team, $agent, $this->run);

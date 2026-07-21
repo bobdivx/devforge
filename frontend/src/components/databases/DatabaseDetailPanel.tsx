@@ -23,6 +23,12 @@ import {
     type DatabaseImportProgress,
 } from './DatabaseImportProgressCard';
 import { DatabaseExplorerPanel } from './DatabaseExplorerPanel';
+import { DatabaseEnvironmentVariablesPanel } from './DatabaseEnvironmentVariablesPanel';
+import { DatabaseHealthcheckPanel } from './DatabaseHealthcheckPanel';
+import { DatabaseLogsPanel } from './DatabaseLogsPanel';
+import { DatabaseWebhooksPanel } from './DatabaseWebhooksPanel';
+import { ApplicationStoragePanel } from '../applications/ApplicationStoragePanel';
+import { parseDatabaseTab, type DatabaseDetailTabId } from '../../lib/routes';
 
 const actionLabels: Record<CoreAction, string> = {
     start: 'Démarrer',
@@ -172,13 +178,21 @@ type DatabaseDetailPanelProps = {
     canAct: boolean;
     onClose: () => void;
     onChanged: () => Promise<void>;
-    initialTab?: 'overview' | 'data' | 'backups';
+    initialTab?: DatabaseDetailTabId;
+    onTabChange?: (tab: DatabaseDetailTabId) => void;
 };
 
-export function DatabaseDetailPanel({ uuid, canAct, onClose, onChanged, initialTab = 'overview' }: DatabaseDetailPanelProps) {
+export function DatabaseDetailPanel({
+    uuid,
+    canAct,
+    onClose,
+    onChanged,
+    initialTab = 'overview',
+    onTabChange,
+}: DatabaseDetailPanelProps) {
     const resourceQuery = useApiQuery(`core:databases:${uuid}`, () => domainApi.coreResource('databases', uuid));
     const connectionsQuery = useApiQuery(`db-connections:${uuid}`, () => domainApi.databaseConnections(uuid));
-    const [activeTab, setActiveTab] = useState<'overview' | 'data' | 'backups'>(initialTab);
+    const [activeTab, setActiveTab] = useState<DatabaseDetailTabId>(initialTab);
     const backupsQuery = useApiQuery(
         activeTab === 'backups' ? `db-backups:${uuid}` : null,
         () => domainApi.databaseBackups(uuid),
@@ -224,9 +238,33 @@ export function DatabaseDetailPanel({ uuid, canAct, onClose, onChanged, initialT
         }
 
         items.push({ id: 'backups', label: 'Sauvegardes' });
+        items.push({ id: 'storage', label: 'Storages' });
+        items.push({ id: 'healthcheck', label: 'Healthcheck' });
+        items.push({ id: 'variables', label: 'Variables' });
+        items.push({ id: 'webhooks', label: 'Webhooks' });
+        items.push({ id: 'logs', label: 'Logs' });
 
         return items;
     }, [isLibsql]);
+
+    useEffect(() => {
+        setActiveTab(initialTab);
+    }, [uuid, initialTab]);
+
+    useEffect(() => {
+        const syncTabFromUrl = () => {
+            setActiveTab(parseDatabaseTab(new URLSearchParams(window.location.search).get('tab')));
+        };
+
+        window.addEventListener('popstate', syncTabFromUrl);
+
+        return () => window.removeEventListener('popstate', syncTabFromUrl);
+    }, []);
+
+    const selectTab = (tab: DatabaseDetailTabId) => {
+        setActiveTab(tab);
+        onTabChange?.(tab);
+    };
     const credentialsQuery = useApiQuery(
         isLibsql ? `db-credentials:${uuid}` : null,
         () => domainApi.libsqlCredentials(uuid),
@@ -545,7 +583,7 @@ export function DatabaseDetailPanel({ uuid, canAct, onClose, onChanged, initialT
                 <Tabs
                     active={activeTab}
                     items={tabItems}
-                    onChange={(tabId) => setActiveTab(tabId as 'overview' | 'data' | 'backups')}
+                    onChange={(tabId) => selectTab(tabId as DatabaseDetailTabId)}
                 />
             </div>
 
@@ -767,6 +805,36 @@ export function DatabaseDetailPanel({ uuid, canAct, onClose, onChanged, initialT
                         {transferError && <p class="mt-3 text-xs text-error" role="alert">{transferError}</p>}
                         </div>
                     </section>
+                )}
+
+                {resource && activeTab === 'variables' && (
+                    <DatabaseEnvironmentVariablesPanel
+                        databaseUuid={resource.uuid}
+                        canAct={canAct}
+                    />
+                )}
+
+                {resource && activeTab === 'storage' && (
+                    <ApplicationStoragePanel
+                        resourceType="databases"
+                        resourceUuid={resource.uuid}
+                        canAct={canAct}
+                    />
+                )}
+
+                {resource && activeTab === 'healthcheck' && (
+                    <DatabaseHealthcheckPanel
+                        databaseUuid={resource.uuid}
+                        canAct={canAct}
+                    />
+                )}
+
+                {resource && activeTab === 'webhooks' && (
+                    <DatabaseWebhooksPanel databaseUuid={resource.uuid} />
+                )}
+
+                {resource && activeTab === 'logs' && (
+                    <DatabaseLogsPanel databaseUuid={resource.uuid} />
                 )}
 
                 {resource && activeTab === 'backups' && (

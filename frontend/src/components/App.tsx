@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
 import { getBootstrap, switchTeam } from '../lib/api-client';
 import type { BootstrapData } from '../lib/bootstrap';
-import { findRoute, normalizeRoutePath, routeHref } from '../lib/routes';
+import { findRoute, normalizeRoutePath, resolveResourceCanonicalLocation, routeHref } from '../lib/routes';
 import {
     applyStoredAppearance,
     contentWidthClass,
@@ -53,10 +53,24 @@ export function App({ initialPath }: AppProps) {
         const resolvedTheme = applyStoredAppearance();
         setTheme(resolvedTheme);
         setAppearance(getAppearancePreferences());
-        setPathname(normalizeRoutePath(window.location.pathname));
+
+        const syncPathname = () => {
+            const current = normalizeRoutePath(window.location.pathname);
+            const canonical = resolveResourceCanonicalLocation(current);
+
+            if (canonical) {
+                window.history.replaceState({}, '', routeHref(canonical));
+                setPathname(normalizeRoutePath(canonical));
+                return;
+            }
+
+            setPathname(current);
+        };
+
+        syncPathname();
         void loadBootstrap();
 
-        const onPopState = () => setPathname(normalizeRoutePath(window.location.pathname));
+        const onPopState = () => syncPathname();
         window.addEventListener('popstate', onPopState);
         const onAppearanceChange = () => setAppearance(getAppearancePreferences());
         window.addEventListener('devforge-appearance-changed', onAppearanceChange);
