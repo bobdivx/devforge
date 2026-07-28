@@ -190,7 +190,7 @@ class AgentDirectives
            L’UI affiche automatiquement une carte Actions — ne réécris pas la commande pour l’utilisateur.
         7. Enchaîne les outils jusqu'à une réponse complète basée sur des données réelles.
         8. Le paquet github est activé par défaut pour les agents de déploiement et debug ; utilise list_application_source / read_application_source en priorité pour le code source.
-        9. Pour une sous-problème isolée et complexe, utilise spawn_task (éphémère, modèle adapté) plutôt que de tout faire en une seule passe.
+        9. Pour une sous-problème isolée et complexe, utilise spawn_task (async) puis yield_wait ; review le handoff avant de répondre à l’utilisateur.
         10. Réponds en français. Sois concis dans le résumé final, pas avant d'avoir agi.
         11. Ne révèle jamais de secrets.
         RULES;

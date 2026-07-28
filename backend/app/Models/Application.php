@@ -141,6 +141,7 @@ class Application extends BaseModel
         'ports_mappings',
         'base_directory',
         'publish_directory',
+        'detected_framework',
         'health_check_enabled',
         'health_check_path',
         'health_check_port',

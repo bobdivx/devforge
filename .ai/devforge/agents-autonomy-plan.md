@@ -124,4 +124,31 @@ frontend/src/pages/agents/
 | P2 Mission board | fait (`ai_agent_missions` + UI) |
 | P2 Tech-watch → missions | fait (`agents:watch-tech`) |
 | P2 Délégation parallèle / batch | fait (`tasks[]` spawn/delegate) |
-| P2 Cron libre / MCP client | backlog |
+| P2 Cron libre | fait (`schedule_cron` + `agents:run-scheduled`) |
+| P2 MCP client dans la boucle | backlog |
+| P3.1 Spawn async + yield_wait + handoff + rôles | fait |
+| P3.2 Pipeline deploy orchestrator → leafs | fait |
+| P3.3 Chat sous-agents parallèles + UI | fait |
+| P3.4 Standing orders + heartbeats | fait (`ai_agent_standing_orders`, `agents:heartbeat`) |
+
+## P3 — Patterns OpenClaw (natifs, sans runtime OpenClaw)
+
+### P3.1 Fondations
+- `spawn_task` async par défaut (`wait=true` pour sync)
+- `yield_wait` → `waiting_for_subagents` + dispatch leafs
+- Handoff `[Subagent Completion]` via `ResumeAgentAfterSubagentsJob`
+- Rôles `main` / `orchestrator` / `leaf` + `agents_max_spawn_depth`
+
+### P3.2 Deploy autonome
+- `DeploymentFailureAgentDispatcher` lance un orchestrateur
+- Pipeline diagnose → fix → redeploy (profils leaf) + review obligatoire
+
+### P3.3 Chat
+- Spawn parallèle async + indicateur sous-tâches UI
+- Reprise chat via `queueMessage` après handoff
+
+### P3.4 Ops
+- Table `ai_agent_standing_orders` + API `/ai/standing-orders`
+- Cron libre `schedule_cron` sur `ai_agents`
+- Heartbeats `heartbeat_enabled` + `agents:heartbeat` (HEARTBEAT_OK silencieux)
+

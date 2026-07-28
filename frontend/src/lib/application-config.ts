@@ -85,6 +85,7 @@ export type ApplicationConfiguration = {
     remote_workdir: string | null;
     base_directory: string | null;
     publish_directory: string | null;
+    detected_framework: string | null;
     ports_exposes: string | null;
     start_command: string | null;
     install_command: string | null;
@@ -94,6 +95,38 @@ export type ApplicationConfiguration = {
     health_check_path: string | null;
     health_check_port: string | null;
 };
+
+const FRAMEWORK_LABELS: Record<string, string> = {
+    'astro-static': 'Astro static',
+    'astro-ssr': 'Astro SSR',
+    vite: 'Vite',
+    next: 'Next.js',
+    nuxt: 'Nuxt',
+    node: 'Node',
+    static: 'Site statique',
+    dockerfile: 'Dockerfile',
+};
+
+export function deploymentSystemLabel(config: Pick<
+    ApplicationConfiguration,
+    'detected_framework' | 'build_pack' | 'is_static'
+>): string {
+    const framework = config.detected_framework?.trim();
+    if (framework && framework !== 'unknown') {
+        return FRAMEWORK_LABELS[framework] ?? framework;
+    }
+
+    const pack = config.build_pack?.trim();
+    if (!pack) {
+        return '—';
+    }
+
+    if (config.is_static) {
+        return `${pack} · statique`;
+    }
+
+    return pack;
+}
 
 export function parseApplicationConfiguration(configuration: Record<string, unknown>): ApplicationConfiguration {
     return {
@@ -109,6 +142,7 @@ export function parseApplicationConfiguration(configuration: Record<string, unkn
         remote_workdir: stringOrNull(configuration.remote_workdir),
         base_directory: stringOrNull(configuration.base_directory),
         publish_directory: stringOrNull(configuration.publish_directory),
+        detected_framework: stringOrNull(configuration.detected_framework),
         ports_exposes: stringOrNull(configuration.ports_exposes),
         start_command: stringOrNull(configuration.start_command),
         install_command: stringOrNull(configuration.install_command),

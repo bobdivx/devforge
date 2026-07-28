@@ -402,6 +402,8 @@ class AgentRepairHarness
                     .$excerptHint
                     .' — lire les logs, corriger via update_application_runtime_settings / upsert_application_env_var / write_application_source, puis redeploy 1×.',
                 'difficulty' => 'heavy',
+                'wait' => true,
+                'leaf_profile' => 'fix',
             ];
             $spawnResult = $toolkit->execute('spawn_task', $spawnArgs);
             $record('spawn_task', $spawnArgs, $spawnResult);

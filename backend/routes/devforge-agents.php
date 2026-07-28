@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\DevForge\AgentStandingOrderController;
 use App\Http\Controllers\DevForge\AgentController;
 use App\Http\Controllers\DevForge\AgentInstructionsController;
 use App\Http\Controllers\DevForge\AgentMemoryController;
@@ -113,5 +114,13 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
         Route::patch('/missions/{uuid}', [AgentMissionController::class, 'update'])
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->name('missions.update');
+        Route::get('/standing-orders', [AgentStandingOrderController::class, 'index'])->name('standing-orders.index');
+        Route::post('/standing-orders', [AgentStandingOrderController::class, 'store'])->name('standing-orders.store');
+        Route::put('/standing-orders/{id}', [AgentStandingOrderController::class, 'update'])
+            ->whereNumber('id')
+            ->name('standing-orders.update');
+        Route::delete('/standing-orders/{id}', [AgentStandingOrderController::class, 'destroy'])
+            ->whereNumber('id')
+            ->name('standing-orders.destroy');
     });
 });

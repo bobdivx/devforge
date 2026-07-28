@@ -3,7 +3,10 @@ import type { AgentRun, AgentRunStatus } from './domain-api';
 export const TERMINAL_AGENT_RUN_STATUSES: AgentRunStatus[] = ['completed', 'failed', 'awaiting_approval'];
 
 export function isTerminalAgentRunStatus(status: AgentRunStatus): boolean {
-    return status === 'completed' || status === 'failed' || status === 'awaiting_approval';
+    return status === 'completed'
+        || status === 'failed'
+        || status === 'awaiting_approval'
+        || status === 'waiting_for_input';
 }
 
 export function parseLastAgentLogLine(logs: string | null | undefined, maxLength = 140): string | null {
@@ -37,6 +40,10 @@ export function agentRunProgressLabel(run: AgentRun | null): string | null {
 
     if (run.status === 'awaiting_approval') {
         return run.summary?.trim() || 'Approbation requise.';
+    }
+
+    if (run.status === 'waiting_for_subagents') {
+        return run.summary?.trim() || 'En attente des sous-agents…';
     }
 
     if (run.status === 'failed') {

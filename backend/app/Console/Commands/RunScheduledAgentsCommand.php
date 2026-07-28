@@ -21,8 +21,15 @@ class RunScheduledAgentsCommand extends Command
     {
         $agents = AiAgent::query()
             ->where('is_active', true)
-            ->where('schedule_minutes', '>', 0)
             ->where('status', '!=', 'running')
+            ->where(function ($query) {
+                $query->where('schedule_minutes', '>', 0);
+                if (\Illuminate\Support\Facades\Schema::hasColumn('ai_agents', 'schedule_cron')) {
+                    $query->orWhere(function ($q) {
+                        $q->whereNotNull('schedule_cron')->where('schedule_cron', '!=', '');
+                    });
+                }
+            })
             ->with('providerConfig')
             ->get()
             ->filter(fn (AiAgent $agent) => $agent->isDueForScheduledRun());

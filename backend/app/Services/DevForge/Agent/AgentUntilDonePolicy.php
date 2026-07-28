@@ -20,6 +20,7 @@ class AgentUntilDonePolicy
         'control_resource',
         'exec_command',
         'spawn_task',
+        'yield_wait',
         'delegate_task',
         'memory_write',
     ];

@@ -65,6 +65,7 @@ class AgentToolPackage
                     'fix_coolify_base_config_path',
                     'delegate_task',
                     'spawn_task',
+                    'yield_wait',
                 ],
                 'default_for_types' => ['debug', 'deployment', 'tech-watch', 'devforge', 'security'],
             ],

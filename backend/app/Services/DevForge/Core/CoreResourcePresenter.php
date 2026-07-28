@@ -120,6 +120,7 @@ class CoreResourcePresenter
                 'redirect' => (string) ($application->redirect ?: 'both'),
                 'base_directory' => $application->base_directory ?: '',
                 'publish_directory' => $application->publish_directory ?: '',
+                'detected_framework' => $application->detected_framework ?: null,
                 'ports_exposes' => (string) ($application->ports_exposes ?? ''),
                 'start_command' => $application->start_command,
                 'install_command' => $application->install_command,

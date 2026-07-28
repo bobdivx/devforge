@@ -64,6 +64,14 @@ class AgentRunLauncher
             'readiness_round' => isset($context['readiness_round']) && is_numeric($context['readiness_round'])
                 ? (int) $context['readiness_round']
                 : null,
+            'subagent_role' => is_string($context['subagent_role'] ?? null) ? $context['subagent_role'] : null,
+            'spawn_depth' => isset($context['spawn_depth']) && is_numeric($context['spawn_depth'])
+                ? (int) $context['spawn_depth']
+                : null,
+            'deploy_pipeline' => is_array($context['deploy_pipeline'] ?? null) ? $context['deploy_pipeline'] : null,
+            'max_redeploy' => isset($context['max_redeploy']) && is_numeric($context['max_redeploy'])
+                ? (int) $context['max_redeploy']
+                : null,
         ], fn (mixed $value): bool => $value !== null && $value !== '');
 
         return $metadata === [] ? null : $metadata;

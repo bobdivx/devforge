@@ -196,21 +196,27 @@ class AgentChatService
 
             ]);
 
-            $runStatus = (isset($reply['pending_approval']) || isset($reply['pending_plan'])) ? 'awaiting_approval' : 'completed';
+            $runStatus = (isset($reply['pending_approval']) || isset($reply['pending_plan']))
+                ? 'awaiting_approval'
+                : (! empty($reply['waiting_for_subagents']) ? 'waiting_for_subagents' : 'completed');
 
-            $run->update([
-
-                'status' => $runStatus,
-
-                'summary' => mb_substr($reply['text'], 0, 500),
-
-                'tokens_used' => $reply['tokens_used'],
-
-                'iterations' => $reply['iterations'],
-
-                'finished_at' => now(),
-
-            ]);
+            $run->refresh();
+            if ($run->status === 'waiting_for_subagents' && ! empty($reply['waiting_for_subagents'])) {
+                // yield_wait a déjà posé le statut — ne pas écraser en completed
+                $run->update([
+                    'summary' => mb_substr($reply['text'], 0, 500),
+                    'tokens_used' => $reply['tokens_used'],
+                    'iterations' => $reply['iterations'],
+                ]);
+            } else {
+                $run->update([
+                    'status' => $runStatus,
+                    'summary' => mb_substr($reply['text'], 0, 500),
+                    'tokens_used' => $reply['tokens_used'],
+                    'iterations' => $reply['iterations'],
+                    'finished_at' => now(),
+                ]);
+            }
 
             if ($userMessage->session_id !== null) {
 
@@ -834,6 +840,33 @@ class AgentChatService
 
                 ];
 
+            }
+
+            $waitingForSubagents = collect($toolResults)->contains(
+                fn (array $row): bool => ($row['result']['status'] ?? null) === 'waiting_for_subagents',
+            );
+
+            if ($waitingForSubagents) {
+                $run->refresh();
+                $run->mergeMetadata(['resume_context' => array_merge($runContext, [
+                    'chat_mode' => $runContext['chat_mode'] ?? 'build',
+                ])]);
+                if ($run->status !== 'waiting_for_subagents') {
+                    $run->update([
+                        'status' => 'waiting_for_subagents',
+                        'summary' => 'En attente des sous-agents…',
+                        'finished_at' => now(),
+                    ]);
+                }
+                $run->appendLog('Chat en pause — waiting_for_subagents (yield_wait).');
+
+                return [
+                    'text' => 'Sous-tâches en cours — reprise automatique après handoff.',
+                    'tokens_used' => $tokensUsed,
+                    'iterations' => $budget->getUsed(),
+                    'waiting_for_subagents' => true,
+                    'steps' => $steps,
+                ];
             }
 
         }

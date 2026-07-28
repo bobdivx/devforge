@@ -18,6 +18,7 @@ const settingsFixture = {
     ports_exposes: '80',
     base_directory: '/',
     publish_directory: '/',
+    detected_framework: null,
     health_check_enabled: false,
     health_check_type: 'http',
     health_check_path: '/',

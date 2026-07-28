@@ -14,7 +14,7 @@ function run(partial: Partial<DeploymentAgentRun> & Pick<DeploymentAgentRun, 'uu
         finished_at: null,
         created_at: '2026-07-28T10:00:00.000Z',
         event_context: null,
-        agent: { uuid: 'agent-1', name: 'Build', type: 'build', avatar_color: '#000' },
+        agent: { uuid: 'agent-1', name: 'Build', type: 'deployment', avatar_color: '#000' },
         ...partial,
     };
 }
@@ -56,5 +56,14 @@ describe('selectVisibleAgentRuns', () => {
         ];
 
         expect(selectVisibleAgentRuns(runs, { historyMode: true }).map((item) => item.uuid)).toEqual(['latest']);
+    });
+
+    it('traite waiting_for_subagents comme run actif', () => {
+        const runs = [
+            run({ uuid: 'waiting', status: 'waiting_for_subagents' }),
+            run({ uuid: 'done', status: 'completed' }),
+        ];
+
+        expect(selectVisibleAgentRuns(runs).map((item) => item.uuid)).toEqual(['waiting']);
     });
 });

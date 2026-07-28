@@ -24,7 +24,9 @@ it('detects Astro SSR with node adapter as non-static', function () {
         ->and($result['suggestions']['is_static'])->toBeFalse()
         ->and($result['suggestions']['ports_exposes'])->toBe('4321')
         ->and($result['suggestions']['publish_directory'])->toBe('/')
-        ->and($result['suggestions']['start_command'])->toBe('node ./dist/server/entry.mjs');
+        ->and($result['suggestions']['start_command'])->toBe('node ./dist/server/entry.mjs')
+        ->and($result['suggestions']['framework'])->toBe('astro-ssr')
+        ->and($result['suggestions']['framework_label'])->toBe('Astro SSR');
 });
 
 it('detects Astro static output as nginx static site', function () {
@@ -42,7 +44,9 @@ it('detects Astro static output as nginx static site', function () {
         ->and($result['suggestions']['is_static'])->toBeTrue()
         ->and($result['suggestions']['ports_exposes'])->toBe('80')
         ->and($result['suggestions']['publish_directory'])->toBe('/dist')
-        ->and($result['suggestions']['start_command'])->toBeNull();
+        ->and($result['suggestions']['start_command'])->toBeNull()
+        ->and($result['suggestions']['framework'])->toBe('astro-static')
+        ->and($result['suggestions']['framework_label'])->toBe('Astro static');
 });
 
 it('detects Next.js as node runtime', function () {
@@ -61,5 +65,7 @@ it('detects Next.js as node runtime', function () {
     expect($result['available'])->toBeTrue()
         ->and($result['suggestions']['is_static'])->toBeFalse()
         ->and($result['suggestions']['ports_exposes'])->toBe('3000')
-        ->and($result['suggestions']['start_command'])->toBe('next start');
+        ->and($result['suggestions']['start_command'])->toBe('next start')
+        ->and($result['suggestions']['framework'])->toBe('next')
+        ->and($result['suggestions']['framework_label'])->toBe('Next.js');
 });

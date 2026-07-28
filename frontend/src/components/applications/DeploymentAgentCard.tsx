@@ -325,6 +325,9 @@ function AgentRunCard({ deploymentUuid, run, onSelectDeployment }: AgentRunCardP
     const ephemeralTasks = Array.isArray(run.metadata?.ephemeral_tasks)
         ? run.metadata.ephemeral_tasks as Array<{ goal?: string; status?: string; model_label?: string }>
         : [];
+    const activeLeafs = ephemeralTasks.filter((task) =>
+        ['pending', 'running', 'queued'].includes(String(task.status ?? '')),
+    ).length;
     const subagents = run.subagent_runs ?? [];
     const correction = run.correction ?? null;
     const otherAttemptUuid = correction?.belongs_to_deployment_uuid
@@ -376,6 +379,12 @@ function AgentRunCard({ deploymentUuid, run, onSelectDeployment }: AgentRunCardP
                     <AgentRunStatusBadge status={run.status} />
                 </div>
             </div>
+
+            {activeLeafs > 0 && (
+                <p class="mb-3 rounded-md border border-info/25 bg-info/5 px-2 py-1.5 text-[11px] text-info">
+                    {activeLeafs} sous-tâche{activeLeafs > 1 ? 's' : ''} leaf en cours
+                </p>
+            )}
 
             {correction ? (
                 <CorrectionSummaryBlock

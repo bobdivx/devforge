@@ -9,11 +9,21 @@ use App\Models\ApplicationDeploymentQueue;
 use App\Models\EnvironmentVariable;
 use App\Models\Server;
 use App\Models\StandaloneDocker;
+use App\Services\DevForge\Application\ApplicationDeploySettingsReconciler;
 use Spatie\Url\Url;
 use Visus\Cuid2\Cuid2;
 
 function queue_application_deployment(Application $application, string $deployment_uuid, ?int $pull_request_id = 0, ?string $commit = null, bool $force_rebuild = false, bool $is_webhook = false, bool $is_api = false, bool $restart_only = false, ?string $git_type = null, bool $no_questions_asked = false, ?Server $server = null, ?StandaloneDocker $destination = null, bool $only_this_server = false, bool $rollback = false, ?string $docker_registry_image_tag = null)
 {
+    if (! $restart_only && ! $rollback) {
+        try {
+            app(ApplicationDeploySettingsReconciler::class)->reconcile($application);
+            $application->refresh();
+        } catch (Throwable) {
+            // Detection must never block a deploy.
+        }
+    }
+
     $commit = $commit ?: ($application->git_commit_sha ?: 'HEAD');
     $application_id = $application->id;
     $deployment_link = Url::fromString($application->link()."/deployment/{$deployment_uuid}");

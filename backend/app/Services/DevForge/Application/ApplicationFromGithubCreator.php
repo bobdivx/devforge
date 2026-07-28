@@ -17,6 +17,7 @@ use App\Services\DevForge\Github\GithubAppCatalog;
 use App\Services\DevForge\Readiness\ApplicationReadinessService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\Rule;
+use Throwable;
 use Visus\Cuid2\Cuid2;
 
 class ApplicationFromGithubCreator
@@ -90,6 +91,13 @@ class ApplicationFromGithubCreator
         $application->save();
 
         app(ApplicationReadinessService::class)->ensureFor($application, autonomousEnabled: true);
+
+        try {
+            app(ApplicationDeploySettingsReconciler::class)->reconcile($application);
+            $application->refresh();
+        } catch (Throwable) {
+            // Detection must never block app creation.
+        }
 
         if ($buildPack === BuildPackTypes::DOCKERCOMPOSE->value) {
             LoadComposeFile::dispatch($application);

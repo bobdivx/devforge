@@ -156,6 +156,11 @@ class DeploymentFailureAgentDispatcher
             'commit_message' => $deploymentQueue->commit_message ?: null,
             'status' => $deploymentQueue->status,
             'failure_excerpt' => $logExcerpt,
+            'subagent_role' => \App\Services\DevForge\Agent\Tool\AgentSubagentCapabilities::ROLE_ORCHESTRATOR,
+            'spawn_depth' => 0,
+            'deploy_pipeline' => ['diagnose', 'fix', 'redeploy'],
+            'max_redeploy' => 1,
+            'standing_order_hint' => app(AgentStandingOrders::class)->defaultDeployFailureBody(),
         ];
     }
 

@@ -37,6 +37,7 @@ class AgentChatMode
         'comment_github_pull_request',
         'spawn_task',
         'delegate_task',
+        'yield_wait',
     ];
 
     public static function parse(mixed $raw): string

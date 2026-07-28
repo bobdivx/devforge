@@ -35,6 +35,7 @@ class ApplicationRuntimeSettingsService
             'ports_exposes' => ['sometimes', 'nullable', 'string', 'max:100', 'regex:/^(\d+)(,\d+)*$/'],
             'base_directory' => ['sometimes', 'nullable', 'string', 'max:255'],
             'publish_directory' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'detected_framework' => ['sometimes', 'nullable', 'string', 'max:64'],
             'health_check_enabled' => ['sometimes', 'boolean'],
             'health_check_type' => ['sometimes', 'nullable', 'string', Rule::in(['http', 'cmd'])],
             'health_check_path' => ['sometimes', 'nullable', 'string', 'max:255'],
@@ -74,6 +75,9 @@ class ApplicationRuntimeSettingsService
         if (array_key_exists('publish_directory', $validated)) {
             $application->publish_directory = $this->nullableTrim($validated['publish_directory']) ?? '/';
             $needsRebuild = true;
+        }
+        if (array_key_exists('detected_framework', $validated)) {
+            $application->detected_framework = $this->nullableTrim($validated['detected_framework']);
         }
         if (array_key_exists('health_check_enabled', $validated)) {
             $application->health_check_enabled = (bool) $validated['health_check_enabled'];
@@ -166,6 +170,7 @@ class ApplicationRuntimeSettingsService
             'ports_exposes' => (string) ($application->ports_exposes ?? ''),
             'base_directory' => $application->base_directory ?: '/',
             'publish_directory' => $application->publish_directory ?: '/',
+            'detected_framework' => $application->detected_framework ?: null,
             'health_check_enabled' => (bool) $application->health_check_enabled,
             'health_check_type' => $application->health_check_type ?: 'http',
             'health_check_path' => $application->health_check_path ?: '/',

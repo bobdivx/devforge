@@ -26,6 +26,14 @@ class AgentSubagentRegistry
         ]);
     }
 
+    public function markQueued(AiAgentSubagentRun $record, AiAgentRun $childRun): void
+    {
+        $record->update([
+            'status' => AiAgentSubagentRun::STATUS_QUEUED,
+            'child_run_id' => $childRun->id,
+        ]);
+    }
+
     public function markRunning(AiAgentSubagentRun $record, AiAgentRun $childRun): void
     {
         $record->update([
@@ -59,6 +67,19 @@ class AgentSubagentRegistry
             ->where('parent_agent_id', $parent->id)
             ->whereIn('status', [
                 AiAgentSubagentRun::STATUS_PENDING,
+                AiAgentSubagentRun::STATUS_QUEUED,
+                AiAgentSubagentRun::STATUS_RUNNING,
+            ])
+            ->count();
+    }
+
+    public function countActiveForParentRun(AiAgentRun $parentRun): int
+    {
+        return AiAgentSubagentRun::query()
+            ->where('parent_run_id', $parentRun->id)
+            ->whereIn('status', [
+                AiAgentSubagentRun::STATUS_PENDING,
+                AiAgentSubagentRun::STATUS_QUEUED,
                 AiAgentSubagentRun::STATUS_RUNNING,
             ])
             ->count();

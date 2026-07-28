@@ -23,6 +23,11 @@ const application = {
         project: { uuid: 'project-1', name: 'Popcorn' },
         environment: { uuid: 'env-1', name: 'production' },
         server: { uuid: 'server-1', name: 'Serveur principal' },
+        detected_framework: 'astro-static',
+        publish_directory: '/dist',
+        base_directory: '/',
+        is_static: true,
+        ports_exposes: '80',
     },
     actions: ['start', 'stop', 'restart', 'deploy'],
     created_at: '2026-04-27T10:00:00.000Z',
@@ -171,6 +176,8 @@ describe('ApplicationDetailPanel', () => {
         expect(screen.queryByRole('button', { name: 'Démarrer' })).not.toBeInTheDocument();
         expect(screen.getByText(/84f8e3e · fix\(auth\): allow registration/)).toBeInTheDocument();
         expect(screen.getByText(/Serveur principal/)).toBeInTheDocument();
+        expect(screen.getByText('Astro static')).toBeInTheDocument();
+        expect(screen.getByText('/dist')).toBeInTheDocument();
         expect(await screen.findByLabelText('État de l’application')).toBeInTheDocument();
         expect(screen.queryByText('Logs du conteneur')).not.toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'Bases de données' })).toBeInTheDocument();

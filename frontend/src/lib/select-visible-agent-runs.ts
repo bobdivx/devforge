@@ -1,12 +1,27 @@
 import type { DeploymentAgentRun } from './api/domain';
 
 function isAgentRunActive(status: string): boolean {
-    return status === 'pending' || status === 'running';
+    return status === 'pending'
+        || status === 'running'
+        || status === 'waiting_for_subagents';
+}
+
+export function countActiveSubagentTasks(
+    tasks: Array<{ status?: string }> | null | undefined,
+): number {
+    if (!Array.isArray(tasks)) {
+        return 0;
+    }
+
+    return tasks.filter((task) => {
+        const status = String(task.status ?? '');
+        return status === 'pending' || status === 'running' || status === 'queued';
+    }).length;
 }
 
 /**
  * Choisit le run à afficher dans la carte Agent IA (au plus un).
- * - Mode live : uniquement le run en cours (pending / running)
+ * - Mode live : uniquement le run en cours (pending / running / waiting_for_subagents)
  * - Mode historique : le run le plus récent de cette tentative
  * - Exclut toujours les runs d’une autre tentative
  */

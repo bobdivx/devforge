@@ -9,6 +9,8 @@ class AiAgentSubagentRun extends Model
 {
     public const STATUS_PENDING = 'pending';
 
+    public const STATUS_QUEUED = 'queued';
+
     public const STATUS_RUNNING = 'running';
 
     public const STATUS_COMPLETED = 'completed';

@@ -18,9 +18,13 @@ class AgentPromptBuilder
             'deployment_failed' => <<<'RULES'
 
             Contexte : échec de déploiement détecté.
-            - Analyse les logs fournis puis get_deployment_logs si besoin.
+            - Tu es ORCHESTRATEUR : pipeline obligé diagnose → fix → redeploy (1×).
+            - Étape 1 : spawn_task(goal=…, leaf_profile=diagnose) puis yield_wait. REVIEW le handoff.
+            - Étape 2 : spawn_task(goal=…, leaf_profile=fix) puis yield_wait. REVIEW le handoff.
+            - Étape 3 : spawn_task(goal=…, leaf_profile=redeploy) puis yield_wait — un seul redeploy max.
+            - INTERDIT de skipper la review entre étapes.
             - INTERDIT de terminer en diagnostic seul si une correction outil est possible.
-            - Si clone Git échoue (Remote branch not found / Could not find remote branch) : get_application_git_info + list_github_branches puis update_application_git_branch (redeploy=true).
+            - Si clone Git échoue (Remote branch not found / Could not find remote branch) : get_application_git_info + list_github_branches puis update_application_git_branch (redeploy=true) via leaf fix.
             - Échec de BUILD (nixpacks/npm/yarn/pnpm/tsc/vite/dockerfile) :
               1) get_application_runtime_settings + read_application_source (package.json, Dockerfile, nixpacks.toml…)
               2) Corrige côté Coolify via update_application_runtime_settings (install_command, build_command, start_command, ports_exposes, base_directory, publish_directory, build_pack) si la config Coolify est en cause
@@ -64,6 +68,13 @@ class AgentPromptBuilder
             - Rapport concis : OK ou points d'attention.
             - Pas de redeploy sauf anomalie critique détectée.
             RULES,
+            'heartbeat' => <<<'RULES'
+
+            Contexte : heartbeat idle.
+            - Vérifie rapidement les standing orders et la santé des ressources assignées.
+            - Si rien à faire : termine avec le résumé exact HEARTBEAT_OK (pas de spam chat).
+            - Si action nécessaire : agis, puis résume clairement.
+            RULES,
             'application_readiness_failed' => <<<'RULES'
 
             Contexte : le déploiement a réussi mais la probe HTTP du domaine public a échoué.
@@ -84,16 +95,40 @@ class AgentPromptBuilder
             RULES,
             'delegated' => <<<'RULES'
 
-            Contexte : sous-tâche déléguée par un agent parent.
+            Contexte : sous-tâche leaf déléguée par un agent parent.
             - Concentre-toi sur l'objectif fourni.
-            - Pas de delegate_task (tu es un worker).
+            - INTERDIT : spawn_task, delegate_task, yield_wait (tu es un leaf).
+            - Produis un résumé clair et actionnable pour le parent (preuves, erreurs, prochaines étapes suggérées).
             RULES,
             default => '',
+        };
+
+        $roleRules = match (\App\Services\DevForge\Agent\Tool\AgentSubagentCapabilities::resolveRole($context)) {
+            \App\Services\DevForge\Agent\Tool\AgentSubagentCapabilities::ROLE_ORCHESTRATOR => <<<'RULES'
+
+            Rôle : ORCHESTRATEUR.
+            - Décompose en leafs via spawn_task (async) + yield_wait.
+            - Pipeline deploy recommandé : leaf_profile=diagnose → fix → redeploy (1× max).
+            - Après chaque handoff [Subagent Completion] : REVIEW obligatoire avant l’étape suivante.
+            - Ne réponds à l’utilisateur / chat overview qu’après review des leafs.
+            RULES,
+            \App\Services\DevForge\Agent\Tool\AgentSubagentCapabilities::ROLE_LEAF => <<<'RULES'
+
+            Rôle : LEAF — pas d’orchestration.
+            RULES,
+            default => <<<'RULES'
+
+            Sous-tâches : préférer spawn_task (async) puis yield_wait plutôt que tout faire en une passe.
+            RULES,
         };
 
         $autonomyRules = AgentDirectives::autonomyRules();
         $memoryBlock = $this->memoryPromptBlock($agent, $context);
         $layeredBlock = $this->layeredInstructionsBlock($agent, $context);
+        $standingBlock = $this->standingOrdersBlock($agent, $context);
+        if (! empty($context['standing_order_hint']) && is_string($context['standing_order_hint'])) {
+            $standingBlock = trim($standingBlock."\n\nSTANDING ORDER DEPLOY (fallback) :\n".$context['standing_order_hint']);
+        }
 
         return trim(<<<PROMPT
         {$basePrompt}
@@ -104,9 +139,13 @@ class AgentPromptBuilder
 
         {$layeredBlock}
 
+        {$standingBlock}
+
         {$memoryBlock}
 
         {$eventRules}
+
+        {$roleRules}
 
         {$autonomyRules}
         PROMPT);
@@ -216,6 +255,20 @@ class AgentPromptBuilder
         - Quand le travail demandé est réellement terminé, termine ta réponse finale par [DEVFORGE_DONE].
         {$hintBlock}
         PROMPT);
+    }
+
+    /**
+     * @param  array<string, mixed>  $applicationContext
+     */
+    private function standingOrdersBlock(AiAgent $agent, array $applicationContext = []): string
+    {
+        try {
+            return app(AgentStandingOrders::class)->promptBlock($agent, $applicationContext);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return '';
+        }
     }
 
     /**

@@ -66,8 +66,15 @@ class AgentController extends Controller
             'parent_agent_id' => ['nullable', 'integer', Rule::exists('ai_agents', 'id')->where('team_id', $team->id)],
             'resource_uuid' => ['nullable', 'string', 'max:64'],
             'schedule_minutes' => ['nullable', 'integer', 'min:0'],
+            'schedule_cron' => ['nullable', 'string', 'max:120'],
+            'heartbeat_enabled' => ['nullable', 'boolean'],
             'is_active' => ['nullable', 'boolean'],
         ]);
+
+        if (! empty($validated['schedule_cron']) && function_exists('validate_cron_expression')
+            && ! validate_cron_expression($validated['schedule_cron'])) {
+            return response()->json(['message' => 'Expression cron invalide.', 'errors' => ['schedule_cron' => ['Expression cron invalide.']]], 422);
+        }
 
         if (empty($validated['provider_config_id'])) {
             $defaultProvider = AiProviderConfig::query()
@@ -120,9 +127,16 @@ class AgentController extends Controller
             'provider_config_id' => ['sometimes', 'nullable', 'integer', Rule::exists('ai_provider_configs', 'id')->where('team_id', $team->id)],
             'fallback_provider_config_id' => ['sometimes', 'nullable', 'integer', Rule::exists('ai_provider_configs', 'id')->where('team_id', $team->id)],
             'schedule_minutes' => ['sometimes', 'nullable', 'integer', 'min:0'],
+            'schedule_cron' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'heartbeat_enabled' => ['sometimes', 'boolean'],
             'is_active' => ['sometimes', 'boolean'],
             'status' => ['sometimes', 'string', Rule::in(['idle', 'paused'])],
         ]);
+
+        if (! empty($validated['schedule_cron']) && function_exists('validate_cron_expression')
+            && ! validate_cron_expression($validated['schedule_cron'])) {
+            return response()->json(['message' => 'Expression cron invalide.', 'errors' => ['schedule_cron' => ['Expression cron invalide.']]], 422);
+        }
 
         $agent->update($this->normalizeAgentInput($validated, $agent));
 
@@ -196,6 +210,15 @@ class AgentController extends Controller
             'avatar_color' => $agent->avatar_color,
             'system_prompt' => $agent->system_prompt,
             'schedule_minutes' => $agent->schedule_minutes,
+            'schedule_cron' => Schema::hasColumn('ai_agents', 'schedule_cron')
+                ? ($agent->schedule_cron ?? null)
+                : null,
+            'heartbeat_enabled' => Schema::hasColumn('ai_agents', 'heartbeat_enabled')
+                ? (bool) ($agent->heartbeat_enabled ?? false)
+                : false,
+            'last_heartbeat_at' => Schema::hasColumn('ai_agents', 'last_heartbeat_at')
+                ? $agent->last_heartbeat_at?->toISOString()
+                : null,
             'trigger_mode' => $agent->triggerMode(),
             'is_active' => $agent->is_active,
             'status' => $agent->status,
@@ -264,6 +287,7 @@ class AgentController extends Controller
 
         if ($type === 'devforge') {
             $validated['schedule_minutes'] = 0;
+            $validated['schedule_cron'] = null;
         }
 
         return $validated;

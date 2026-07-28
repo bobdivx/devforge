@@ -7,6 +7,7 @@ use App\Events\AgentRunUpdated;
 use App\Models\AiAgent;
 use App\Models\AiAgentRun;
 use App\Services\DevForge\Agent\Contracts\LlmResponse;
+use App\Services\DevForge\Agent\Tool\AgentSubagentCapabilities;
 use App\Services\DevForge\Agent\Tool\AgentSubagentRegistry;
 use App\Services\DevForge\Agent\Tool\AgentToolApprovalGrant;
 use App\Services\DevForge\Agent\Tool\IterationBudget;
@@ -64,15 +65,20 @@ class AgentRunner
 
         $reason = $this->taskModelRouter->reason($taskMessage, $run->trigger, $agent->type, $context, $tier);
         $routing = $this->taskModelRouter->routingPayload($tier, $reason);
+        $role = AgentSubagentCapabilities::resolveRole($context);
+        $depth = AgentSubagentCapabilities::resolveDepth($context);
         $run->mergeMetadata([
             'model_routing' => $routing,
             'ephemeral' => (bool) ($context['ephemeral'] ?? false),
             'parent_run_uuid' => $context['parent_run_uuid'] ?? null,
+            'subagent_role' => $role,
+            'spawn_depth' => $depth,
+            'leaf_profile' => $context['leaf_profile'] ?? null,
         ]);
 
         // Marquer running avant l'init provider (peut être lent : healthcheck Ollama, etc.)
         $run->update(['status' => 'running', 'started_at' => now()]);
-        $run->appendLog('Agent démarré — '.$routing['display'].' ('.$routing['tier_label'].')');
+        $run->appendLog('Agent démarré — '.$routing['display'].' ('.$routing['tier_label'].') ['.$role.' depth='.$depth.']');
         $run->appendLog('Modèle LLM : '.$this->providerFactory->describeResolvedModel($providerConfig));
         $run->appendLog('Routage : '.$reason);
         $run->appendLog('Initialisation du provider LLM...');
@@ -112,6 +118,11 @@ class AgentRunner
             ['role' => 'user', 'content' => $this->promptBuilder->autonomousInitialMessage($agent, $context, $run->trigger)],
         ];
 
+        if (! empty($context['subagent_handoff_message']) && is_string($context['subagent_handoff_message'])) {
+            $this->messages[] = ['role' => 'user', 'content' => $context['subagent_handoff_message']];
+            $run->appendLog('Handoff sous-agents injecté dans le contexte.');
+        }
+
         $budget = new IterationBudget((int) config('devforge.agents_max_iterations', 30));
         $summary = '';
 
@@ -131,6 +142,7 @@ class AgentRunner
                 $this->publishOverviewInterventionReport($agent, $run->fresh() ?? $run, $context);
                 $agent->update(['status' => 'idle', 'last_run_at' => now()]);
                 broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'completed'));
+                $this->notifyLeafFinished($agent, $run->fresh() ?? $run, $context);
 
                 return;
             }
@@ -217,6 +229,7 @@ class AgentRunner
                 $toolResults = [];
                 $hadToolFailure = false;
                 $waitingForInput = false;
+                $waitingForSubagents = false;
                 $pendingApproval = null;
 
                 foreach ($response->toolCalls as $toolCall) {
@@ -239,6 +252,9 @@ class AgentRunner
                     }
                     if (($result['status'] ?? '') === 'waiting_for_input') {
                         $waitingForInput = true;
+                    }
+                    if (($result['status'] ?? '') === 'waiting_for_subagents') {
+                        $waitingForSubagents = true;
                     }
                     if (($result['status'] ?? null) === 'ask' || ! empty($result['pending_approval'])) {
                         $pendingApproval = [
@@ -279,6 +295,23 @@ class AgentRunner
                     $this->publishOverviewInterventionReport($agent, $run->fresh() ?? $run, $context);
                     $agent->update(['status' => 'idle', 'last_run_at' => now()]);
                     broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'awaiting_approval'));
+
+                    return;
+                }
+
+                if ($waitingForSubagents) {
+                    $run->refresh();
+                    // yield_wait a déjà posé waiting_for_subagents
+                    if ($run->status !== 'waiting_for_subagents') {
+                        $run->update([
+                            'status' => 'waiting_for_subagents',
+                            'summary' => 'En attente des sous-agents…',
+                            'finished_at' => now(),
+                        ]);
+                    }
+                    $run->mergeMetadata(['resume_context' => $context]);
+                    $agent->update(['status' => 'idle', 'last_run_at' => now()]);
+                    broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'waiting_for_subagents'));
 
                     return;
                 }
@@ -348,6 +381,7 @@ class AgentRunner
 
             $agent->update(['status' => 'idle', 'last_run_at' => now()]);
             broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'completed'));
+            $this->notifyLeafFinished($agent, $run->fresh() ?? $run, $context);
 
         } catch (\Throwable $e) {
             $run->appendLog('Erreur: '.$e->getMessage());
@@ -361,6 +395,25 @@ class AgentRunner
             $this->publishOverviewInterventionReport($agent, $run->fresh() ?? $run, $context);
             $agent->update(['status' => 'error', 'last_run_at' => now()]);
             broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'failed'));
+            $this->notifyLeafFinished($agent, $run->fresh() ?? $run, $context);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function notifyLeafFinished(AiAgent $agent, AiAgentRun $run, array $context): void
+    {
+        $role = AgentSubagentCapabilities::resolveRole($context);
+        $parentUuid = $context['parent_run_uuid'] ?? $run->metadata['parent_run_uuid'] ?? null;
+        if ($role !== AgentSubagentCapabilities::ROLE_LEAF && empty($parentUuid)) {
+            return;
+        }
+
+        try {
+            app(AgentSubagentHandoff::class)->onLeafFinished($agent, $run);
+        } catch (\Throwable $e) {
+            $run->appendLog('Handoff leaf ignoré: '.mb_substr($e->getMessage(), 0, 200));
         }
     }
 

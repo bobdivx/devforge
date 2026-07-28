@@ -11,6 +11,7 @@ use App\Services\DevForge\Agent\Tool\AgentCustomTools;
 use App\Services\DevForge\Agent\Tool\AgentGithubTools;
 use App\Services\DevForge\Agent\Tool\AgentPermissionEngine;
 use App\Services\DevForge\Agent\Tool\AgentServerExecutor;
+use App\Services\DevForge\Agent\Tool\AgentSubagentCapabilities;
 use App\Services\DevForge\Agent\Tool\AgentToolApprovalGrant;
 use App\Services\DevForge\Agent\Tool\AgentToolClassification;
 use App\Services\DevForge\Agent\Tool\ApplicationSourceWritePreview;
@@ -113,10 +114,26 @@ class AgentToolkit
         }
 
         $chatMode = AgentChatMode::parse($this->runContext['chat_mode'] ?? 'build');
+        $leafAllowed = AgentSubagentCapabilities::leafAllowedTools($this->runContext);
+        $role = AgentSubagentCapabilities::resolveRole($this->runContext);
 
         return array_values(array_filter(
             $tools,
-            fn (array $tool): bool => AgentChatMode::isToolAllowed((string) ($tool['name'] ?? ''), $chatMode),
+            function (array $tool) use ($chatMode, $leafAllowed, $role): bool {
+                $name = (string) ($tool['name'] ?? '');
+                if (! AgentChatMode::isToolAllowed($name, $chatMode)) {
+                    return false;
+                }
+                if ($role === AgentSubagentCapabilities::ROLE_LEAF
+                    && AgentSubagentCapabilities::isOrchestrationTool($name)) {
+                    return false;
+                }
+                if ($leafAllowed !== null && ! in_array($name, $leafAllowed, true)) {
+                    return false;
+                }
+
+                return true;
+            },
         ));
     }
 
@@ -813,7 +830,7 @@ class AgentToolkit
         if ($this->canSpawnEphemeral()) {
             $tools[] = [
                 'name' => 'spawn_task',
-                'description' => 'Lance une sous-tâche éphémère (ou batch via tasks[]) avec modèle adapté. Batch = séquentiel imbriqué.',
+                'description' => 'Lance une sous-tâche leaf (async par défaut). Retourne run_uuid immédiatement ; appeler yield_wait pour attendre. wait=true pour sync. Batch via tasks[].',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -823,19 +840,41 @@ class AgentToolkit
                             'enum' => ['auto', 'light', 'standard', 'heavy'],
                             'description' => 'Difficulté : light (inspection), standard (diagnostic), heavy (analyse profonde). Défaut auto.',
                         ],
+                        'wait' => [
+                            'type' => 'boolean',
+                            'description' => 'Si true, bloque jusqu’à fin du leaf (sync). Défaut false (async).',
+                        ],
+                        'leaf_profile' => [
+                            'type' => 'string',
+                            'enum' => ['diagnose', 'fix', 'redeploy'],
+                            'description' => 'Profil d’outils leaf (pipeline deploy).',
+                        ],
                         'tasks' => [
                             'type' => 'array',
-                            'description' => 'Batch : [{goal, difficulty?}, ...]',
+                            'description' => 'Batch parallèle async : [{goal, difficulty?, leaf_profile?, wait?}, ...]',
                             'items' => [
                                 'type' => 'object',
                                 'properties' => [
                                     'goal' => ['type' => 'string'],
                                     'difficulty' => ['type' => 'string', 'enum' => ['auto', 'light', 'standard', 'heavy']],
+                                    'wait' => ['type' => 'boolean'],
+                                    'leaf_profile' => ['type' => 'string', 'enum' => ['diagnose', 'fix', 'redeploy']],
                                 ],
                                 'required' => ['goal'],
                             ],
                         ],
                     ],
+                ],
+            ];
+        }
+
+        if ($this->canYieldWait()) {
+            $tools[] = [
+                'name' => 'yield_wait',
+                'description' => 'Met le run parent en pause (waiting_for_subagents), dispatch les leafs async, et reprend automatiquement au handoff avec instruction de review.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => (object) [],
                 ],
             ];
         }
@@ -1116,13 +1155,22 @@ class AgentToolkit
 
     private function canDelegate(): bool
     {
-        return $this->delegator !== null
-            && $this->agent !== null
-            && $this->agent->parent_agent_id === null
-            && ! ($this->runContext['ephemeral'] ?? false);
+        if ($this->delegator === null || $this->agent === null) {
+            return false;
+        }
+
+        return AgentSubagentCapabilities::canSpawn(
+            $this->runContext,
+            $this->agent->parent_agent_id !== null,
+        );
     }
 
     private function canSpawnEphemeral(): bool
+    {
+        return $this->canDelegate();
+    }
+
+    private function canYieldWait(): bool
     {
         return $this->canDelegate();
     }
@@ -1150,6 +1198,25 @@ class AgentToolkit
                 'error' => "Outil « {$toolName} » interdit en mode ".AgentChatMode::label($chatMode).'. Passez en Build ou Debug.',
                 'denied' => true,
                 'chat_mode' => $chatMode,
+            ];
+        }
+
+        $role = AgentSubagentCapabilities::resolveRole($this->runContext);
+        if ($role === AgentSubagentCapabilities::ROLE_LEAF
+            && AgentSubagentCapabilities::isOrchestrationTool($toolName)) {
+            return [
+                'error' => 'Outil d’orchestration interdit pour un leaf.',
+                'denied' => true,
+                'subagent_role' => $role,
+            ];
+        }
+
+        $leafAllowed = AgentSubagentCapabilities::leafAllowedTools($this->runContext);
+        if ($leafAllowed !== null && ! in_array($toolName, $leafAllowed, true)) {
+            return [
+                'error' => "Outil « {$toolName} » hors profil leaf.",
+                'denied' => true,
+                'leaf_profile' => $this->runContext['leaf_profile'] ?? null,
             ];
         }
 
@@ -1409,6 +1476,7 @@ class AgentToolkit
             ),
             'delegate_task' => $this->delegateTask($arguments),
             'spawn_task' => $this->spawnTask($arguments),
+            'yield_wait' => $this->yieldWait($arguments),
             'propose_plan' => $this->proposePlan(is_array($arguments) ? $arguments : []),
             default => $this->executeCustomTool($toolName, $arguments),
         };
@@ -1716,6 +1784,7 @@ class AgentToolkit
             $this->run,
             $goal,
             isset($arguments['child_agent_uuid']) ? (string) $arguments['child_agent_uuid'] : null,
+            ($arguments['wait'] ?? true) !== false,
         );
     }
 
@@ -1736,12 +1805,31 @@ class AgentToolkit
             return ['error' => 'Objectif de sous-tâche vide (goal ou tasks[]).'];
         }
 
+        $wait = ($arguments['wait'] ?? false) === true
+            || ($arguments['wait'] ?? null) === 'true'
+            || ($arguments['wait'] ?? null) === 1;
+
         return $this->delegator->spawnEphemeral(
             $this->agent,
             $this->run,
             $goal,
             isset($arguments['difficulty']) ? (string) $arguments['difficulty'] : 'auto',
+            $wait,
+            isset($arguments['leaf_profile']) ? (string) $arguments['leaf_profile'] : null,
         );
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function yieldWait(array $arguments): array
+    {
+        if (! $this->canYieldWait()) {
+            return ['error' => 'yield_wait non disponible pour cet agent.'];
+        }
+
+        return $this->delegator->yieldWait($this->agent, $this->run, $this->runContext);
     }
 
     /**

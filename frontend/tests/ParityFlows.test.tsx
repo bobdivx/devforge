@@ -232,7 +232,7 @@ describe('déploiements DevForge', () => {
                             subagent_runs: [],
                             logs: '',
                             linkage: 'direct',
-                            agent: { uuid: 'agent-1', name: 'Build', type: 'build', avatar_color: null },
+                            agent: { uuid: 'agent-1', name: 'Build', type: 'deployment', avatar_color: null },
                         }],
                         redeployments: [redeployment],
                         agents: {

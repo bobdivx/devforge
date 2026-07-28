@@ -24,6 +24,9 @@ class AiAgent extends Model
         'avatar_color',
         'system_prompt',
         'schedule_minutes',
+        'schedule_cron',
+        'heartbeat_enabled',
+        'last_heartbeat_at',
         'is_active',
         'status',
         'last_run_at',
@@ -34,8 +37,10 @@ class AiAgent extends Model
     {
         return [
             'is_active' => 'boolean',
+            'heartbeat_enabled' => 'boolean',
             'metadata' => 'array',
             'last_run_at' => 'datetime',
+            'last_heartbeat_at' => 'datetime',
             'schedule_minutes' => 'integer',
         ];
     }
@@ -267,7 +272,22 @@ class AiAgent extends Model
             return false;
         }
 
-        if (! $this->is_active || $this->schedule_minutes === 0 || $this->status === 'running') {
+        if (! $this->is_active || $this->status === 'running') {
+            return false;
+        }
+
+        $cron = is_string($this->schedule_cron ?? null) ? trim((string) $this->schedule_cron) : '';
+        if ($cron !== '' && function_exists('validate_cron_expression') && validate_cron_expression($cron)) {
+            $timezone = config('app.timezone', 'UTC');
+
+            return shouldRunCronNow(
+                $cron,
+                $timezone,
+                'devforge-agent-cron:'.$this->id,
+            );
+        }
+
+        if ($this->schedule_minutes === 0 || $this->schedule_minutes === null) {
             return false;
         }
 
@@ -276,6 +296,24 @@ class AiAgent extends Model
         }
 
         return $this->last_run_at->addMinutes($this->schedule_minutes)->isPast();
+    }
+
+    public function isDueForHeartbeat(): bool
+    {
+        if (! $this->is_active || ! ($this->heartbeat_enabled ?? false) || $this->status === 'running') {
+            return false;
+        }
+
+        $interval = max(5, (int) config('devforge.agents_heartbeat_minutes', 30));
+        if ($interval <= 0) {
+            return false;
+        }
+
+        if (! $this->last_heartbeat_at) {
+            return true;
+        }
+
+        return $this->last_heartbeat_at->addMinutes($interval)->isPast();
     }
 
     public function isEventOnly(): bool
@@ -287,6 +325,11 @@ class AiAgent extends Model
     {
         if ($this->isEventOnly()) {
             return 'webhook';
+        }
+
+        $cron = is_string($this->schedule_cron ?? null) ? trim((string) $this->schedule_cron) : '';
+        if ($cron !== '') {
+            return 'cron';
         }
 
         return $this->schedule_minutes > 0 ? 'schedule' : 'manual';

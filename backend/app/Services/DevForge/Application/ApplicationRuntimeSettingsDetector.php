@@ -97,12 +97,16 @@ class ApplicationRuntimeSettingsDetector
         $startCommand = null;
         $buildCommand = null;
         $installCommand = null;
+        $framework = 'unknown';
+        $frameworkLabel = 'Inconnu';
 
         if ($hasAstro) {
             if ($astroOutputServer || $hasNodeAdapter) {
                 $isStatic = false;
                 $portsExposes = '4321';
                 $publishDirectory = '/';
+                $framework = 'astro-ssr';
+                $frameworkLabel = 'Astro SSR';
                 $reasons[] = 'Astro SSR détecté (adapter Node / output server|hybrid) → pas de site statique nginx.';
                 if (isset($scripts['start']) && is_string($scripts['start'])) {
                     $startCommand = $scripts['start'];
@@ -113,6 +117,8 @@ class ApplicationRuntimeSettingsDetector
                 $isStatic = true;
                 $portsExposes = '80';
                 $publishDirectory = '/dist';
+                $framework = 'astro-static';
+                $frameworkLabel = 'Astro static';
                 $reasons[] = 'Astro static détecté → nginx + publish_directory=/dist.';
             }
             if (isset($scripts['build']) && is_string($scripts['build'])) {
@@ -122,6 +128,8 @@ class ApplicationRuntimeSettingsDetector
             $isStatic = false;
             $portsExposes = '3000';
             $publishDirectory = '/';
+            $framework = 'next';
+            $frameworkLabel = 'Next.js';
             $reasons[] = 'Next.js détecté → runtime Node (pas static).';
             if (isset($scripts['start']) && is_string($scripts['start'])) {
                 $startCommand = $scripts['start'];
@@ -133,6 +141,8 @@ class ApplicationRuntimeSettingsDetector
             $isStatic = false;
             $portsExposes = '3000';
             $publishDirectory = '/';
+            $framework = 'nuxt';
+            $frameworkLabel = 'Nuxt';
             $reasons[] = 'Nuxt détecté → runtime Node.';
             if (isset($scripts['start']) && is_string($scripts['start'])) {
                 $startCommand = $scripts['start'];
@@ -141,6 +151,8 @@ class ApplicationRuntimeSettingsDetector
             $isStatic = false;
             $portsExposes = '3000';
             $publishDirectory = '/';
+            $framework = 'node';
+            $frameworkLabel = 'Node';
             $reasons[] = 'Serveur Node (express/fastify/…) détecté.';
             if (isset($scripts['start']) && is_string($scripts['start'])) {
                 $startCommand = $scripts['start'];
@@ -149,6 +161,8 @@ class ApplicationRuntimeSettingsDetector
             $isStatic = true;
             $portsExposes = '80';
             $publishDirectory = '/dist';
+            $framework = 'vite';
+            $frameworkLabel = 'Vite';
             $reasons[] = 'Vite (SPA/static) détecté → nginx + /dist.';
             if (isset($scripts['build']) && is_string($scripts['build'])) {
                 $buildCommand = $scripts['build'];
@@ -157,12 +171,16 @@ class ApplicationRuntimeSettingsDetector
             if (isset($scripts['start']) && is_string($scripts['start'])) {
                 $isStatic = false;
                 $startCommand = $scripts['start'];
+                $framework = 'node';
+                $frameworkLabel = 'Node';
                 $reasons[] = 'Script npm start présent → runtime Node.';
             } elseif (isset($scripts['build']) && is_string($scripts['build'])) {
                 $isStatic = true;
                 $portsExposes = '80';
                 $buildCommand = $scripts['build'];
                 $publishDirectory = '/dist';
+                $framework = 'static';
+                $frameworkLabel = 'Site statique';
                 $reasons[] = 'Build sans start → hypothèse site statique.';
             }
         }
@@ -202,6 +220,12 @@ class ApplicationRuntimeSettingsDetector
             $startCommand = null;
         }
 
+        if ($framework === 'unknown' && is_string($dockerfile) && $dockerfile !== '') {
+            $framework = 'dockerfile';
+            $frameworkLabel = 'Dockerfile';
+            $reasons[] = 'Dockerfile détecté.';
+        }
+
         $suggestions = [
             'is_static' => $isStatic,
             'ports_exposes' => $portsExposes,
@@ -211,6 +235,8 @@ class ApplicationRuntimeSettingsDetector
             'build_command' => $buildCommand,
             'install_command' => $installCommand,
             'health_check_port' => $isStatic ? '80' : $portsExposes,
+            'framework' => $framework,
+            'framework_label' => $frameworkLabel,
         ];
 
         if ($sources === [] && $reasons === []) {

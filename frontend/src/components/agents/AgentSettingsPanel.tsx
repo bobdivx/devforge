@@ -11,6 +11,7 @@ import { AgentRunLog } from './AgentRunLog';
 import { AgentModelRoutingBadge } from './AgentModelRoutingBadge';
 import { AgentRunProgress } from './AgentRunProgress';
 import { AgentMemoryPanel } from './AgentMemoryPanel';
+import { AgentStandingOrdersPanel } from './AgentStandingOrdersPanel';
 import { useAgentRunTracker } from '../../lib/use-agent-run-tracker';
 
 type Props = {
@@ -72,6 +73,8 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
             description: agent.description ?? '',
             system_prompt: agent.system_prompt ?? '',
             schedule_minutes: agent.schedule_minutes,
+            schedule_cron: agent.schedule_cron ?? '',
+            heartbeat_enabled: agent.heartbeat_enabled ?? false,
             provider_config_id: agent.provider?.id ?? null,
             fallback_provider_config_id: agent.fallback_provider?.id ?? null,
         });
@@ -164,6 +167,7 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
             </ActionToolbar>
 
             <AgentMemoryPanel agent={agent} />
+            <AgentStandingOrdersPanel agent={agent} />
 
             <div class="grid gap-3">
                 <label class="grid gap-1 text-xs">
@@ -198,10 +202,31 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
                         Cet agent DevForge se déclenche à chaque build webhook, pas via un minuteur.
                     </p>
                 ) : (
-                    <label class="grid gap-1 text-xs">
-                        <span class="font-medium">Planification (min, 0 = manuel)</span>
-                        <input class="input input-bordered input-sm" type="number" min="0" value={form.schedule_minutes ?? 0} onInput={(e) => setForm({ ...form, schedule_minutes: Number((e.target as HTMLInputElement).value) })} />
-                    </label>
+                    <>
+                        <label class="grid gap-1 text-xs">
+                            <span class="font-medium">Planification (min, 0 = manuel)</span>
+                            <input class="input input-bordered input-sm" type="number" min="0" value={form.schedule_minutes ?? 0} onInput={(e) => setForm({ ...form, schedule_minutes: Number((e.target as HTMLInputElement).value) })} />
+                        </label>
+                        <label class="grid gap-1 text-xs">
+                            <span class="font-medium">Cron libre (prioritaire si renseigné)</span>
+                            <input
+                                class="input input-bordered input-sm font-mono"
+                                type="text"
+                                placeholder="0 */6 * * *"
+                                value={form.schedule_cron ?? ''}
+                                onInput={(e) => setForm({ ...form, schedule_cron: (e.target as HTMLInputElement).value })}
+                            />
+                        </label>
+                        <label class="flex items-center gap-2 text-xs">
+                            <input
+                                class="checkbox checkbox-sm"
+                                type="checkbox"
+                                checked={Boolean(form.heartbeat_enabled)}
+                                onChange={(e) => setForm({ ...form, heartbeat_enabled: (e.target as HTMLInputElement).checked })}
+                            />
+                            <span class="font-medium">Heartbeats idle (santé / standing orders)</span>
+                        </label>
+                    </>
                 )}
                 <label class="grid gap-1 text-xs">
                     <span class="font-medium">Directives agent (prompt système)</span>

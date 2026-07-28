@@ -41,7 +41,7 @@ class AgentRunStreamController extends Controller
 
             $started = time();
             $lastFingerprint = '';
-            $terminal = ['completed', 'failed', 'awaiting_approval', 'waiting_for_input'];
+            $terminal = ['completed', 'failed', 'awaiting_approval', 'waiting_for_input', 'waiting_for_subagents'];
 
             $this->emit('ping', ['t' => time()]);
 

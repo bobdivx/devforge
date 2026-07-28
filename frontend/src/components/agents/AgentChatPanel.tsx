@@ -179,6 +179,8 @@ type Props = {
     suggestions?: string[];
     placeholder?: string;
     hideSessionHeader?: boolean;
+    /** Nombre de leafs async en cours (spawn + yield). */
+    activeSubagentCount?: number;
 };
 
 export function AgentChatPanel({
@@ -200,6 +202,7 @@ export function AgentChatPanel({
     suggestions = [],
     placeholder = 'Écrire un message…',
     hideSessionHeader = false,
+    activeSubagentCount = 0,
 }: Props) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -262,6 +265,12 @@ export function AgentChatPanel({
             )}
 
             <AgentErrorAlert agent={agent} compact />
+
+            {activeSubagentCount > 0 && (
+                <div class="shrink-0 border-b border-info/30 bg-info/10 px-3 py-2 text-xs text-info sm:px-4">
+                    {activeSubagentCount} sous-tâche{activeSubagentCount > 1 ? 's' : ''} en cours — reprise automatique après review.
+                </div>
+            )}
 
             <div ref={scrollRef} class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4 sm:py-4">
                 {loading ? (

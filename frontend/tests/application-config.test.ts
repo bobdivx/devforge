@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     applicationStatusLabel,
     applicationStatusTone,
+    deploymentSystemLabel,
     formatDateTime,
     parseApplicationConfiguration,
     primaryDomain,
@@ -29,6 +30,9 @@ describe('configuration application', () => {
             health_check_enabled: true,
             health_check_path: '/',
             health_check_port: '3000',
+            detected_framework: 'astro-static',
+            publish_directory: '/dist',
+            base_directory: '/',
         });
 
         expect(config.build_pack).toBe('nixpacks');
@@ -39,12 +43,34 @@ describe('configuration application', () => {
         expect(config.start_command).toBe('npm run start');
         expect(config.ports_exposes).toBe('3000');
         expect(config.health_check_enabled).toBe(true);
+        expect(config.detected_framework).toBe('astro-static');
+        expect(config.publish_directory).toBe('/dist');
         expect(primaryDomain(config.domains)).toBe('https://app.example.test');
         expect(visitUrl(primaryDomain(config.domains))).toBe('https://app.example.test');
         expect(repositoryLabel(config.git_repository)).toBe('github.com/example/app');
         expect(websiteScreenshotUrl(primaryDomain(config.domains))).toBe(
             'https://s.wordpress.com/mshots/v1/https%3A%2F%2Fapp.example.test?w=960',
         );
+    });
+
+    it('affiche un libellé de système de déploiement', () => {
+        expect(deploymentSystemLabel({
+            detected_framework: 'astro-static',
+            build_pack: 'nixpacks',
+            is_static: true,
+        })).toBe('Astro static');
+
+        expect(deploymentSystemLabel({
+            detected_framework: null,
+            build_pack: 'nixpacks',
+            is_static: true,
+        })).toBe('nixpacks · statique');
+
+        expect(deploymentSystemLabel({
+            detected_framework: null,
+            build_pack: 'dockerfile',
+            is_static: false,
+        })).toBe('dockerfile');
     });
 
     it('construit l’URL de capture d’écran à partir du domaine', () => {

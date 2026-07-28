@@ -48,6 +48,7 @@ import { DeploymentAgentCard } from './DeploymentAgentCard';
 import { DeploymentMonitorPanel } from './DeploymentMonitorPanel';
 import { ApplicationSourceExplorer } from './ApplicationSourceExplorer';
 import {
+    deploymentSystemLabel,
     formatDateTime,
     latestDeployment,
     parseApplicationConfiguration,
@@ -807,11 +808,24 @@ export function ApplicationDetailPanel({
                                                 )}
                                             </div>
                                         </DetailRow>
+                                        <DetailRow label="Système">
+                                            <span>{deploymentSystemLabel(config)}</span>
+                                        </DetailRow>
                                         <DetailRow label="Build">
                                             <span>
                                                 {config.build_pack ?? '—'}
                                                 {config.is_static ? ' · statique' : ''}
                                                 {config.ports_exposes ? ` · port ${config.ports_exposes}` : ''}
+                                            </span>
+                                        </DetailRow>
+                                        <DetailRow label="Sortie">
+                                            <span class="font-mono text-xs">
+                                                {config.publish_directory || '—'}
+                                            </span>
+                                        </DetailRow>
+                                        <DetailRow label="Base">
+                                            <span class="font-mono text-xs">
+                                                {config.base_directory || '—'}
                                             </span>
                                         </DetailRow>
                                         <DetailRow label="Infra">

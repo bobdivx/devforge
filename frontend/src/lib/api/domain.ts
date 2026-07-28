@@ -601,7 +601,7 @@ export type SharedVariables = Record<'team' | 'project' | 'environment' | 'serve
 
 export type AgentType = 'debug' | 'tech-watch' | 'github' | 'devforge' | 'deployment' | 'security';
 export type AgentStatus = 'idle' | 'running' | 'error' | 'paused';
-export type AgentRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'awaiting_approval';
+export type AgentRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'awaiting_approval' | 'waiting_for_input' | 'waiting_for_subagents';
 export type AgentTrigger = 'scheduled' | 'manual' | 'event' | 'chat' | 'ephemeral' | 'delegation';
 
 export type AgentChatStep = {
@@ -712,6 +712,8 @@ export type AgentEphemeralTask = {
     display: string;
     status: string;
     summary: string | null;
+    leaf_profile?: string | null;
+    async?: boolean;
 };
 
 export type AgentRunPendingApproval = {
@@ -729,6 +731,9 @@ export type AgentRunMetadata = {
     ephemeral?: boolean;
     parent_run_uuid?: string | null;
     ephemeral_tasks?: AgentEphemeralTask[];
+    pending_leaf_spawns?: Array<Record<string, unknown>>;
+    subagent_role?: 'main' | 'orchestrator' | 'leaf' | string;
+    spawn_depth?: number;
     pending_approval?: AgentRunPendingApproval;
     steps?: AgentChatStep[];
     todos?: Array<{ id: string; content: string; status: string }>;
@@ -750,7 +755,7 @@ export type AgentRun = {
     logs?: string | null;
 };
 
-export type AgentTriggerMode = 'manual' | 'schedule' | 'webhook';
+export type AgentTriggerMode = 'manual' | 'schedule' | 'webhook' | 'cron';
 
 export type Agent = {
     uuid: string;
@@ -760,6 +765,9 @@ export type Agent = {
     avatar_color: string;
     system_prompt: string | null;
     schedule_minutes: number;
+    schedule_cron?: string | null;
+    heartbeat_enabled?: boolean;
+    last_heartbeat_at?: string | null;
     trigger_mode: AgentTriggerMode;
     is_active: boolean;
     status: AgentStatus;
@@ -786,7 +794,25 @@ export type AgentInput = {
     parent_agent_id?: number | null;
     resource_uuid?: string | null;
     schedule_minutes?: number;
+    schedule_cron?: string | null;
+    heartbeat_enabled?: boolean;
     is_active?: boolean;
+};
+
+export type AgentStandingOrder = {
+    id: number;
+    title: string;
+    scope: string;
+    resource_uuid: string | null;
+    agent_id: number | null;
+    triggers: string[];
+    approval_gates: string | null;
+    escalation: string | null;
+    body: string;
+    priority: number;
+    is_active: boolean;
+    created_at: string | null;
+    updated_at: string | null;
 };
 
 export type SecurityKey = {
@@ -1074,6 +1100,7 @@ export type ApplicationRuntimeSettings = {
     ports_exposes: string;
     base_directory: string;
     publish_directory: string;
+    detected_framework: string | null;
     health_check_enabled: boolean;
     health_check_type: string;
     health_check_path: string;
@@ -1094,6 +1121,8 @@ export type ApplicationRuntimeSettingsDetection = {
         build_command: string | null;
         install_command: string | null;
         health_check_port: string;
+        framework: string;
+        framework_label: string;
     }>;
     reasons: string[];
 };
@@ -1107,6 +1136,7 @@ export type ApplicationRuntimeSettingsUpdateInput = Partial<{
     ports_exposes: string;
     base_directory: string;
     publish_directory: string;
+    detected_framework: string | null;
     health_check_enabled: boolean;
     health_check_type: string;
     health_check_path: string;
@@ -3082,6 +3112,47 @@ export const domainApi = {
     updateAgentInstructions: (input: { org?: string; personal?: string; project?: string; resource_uuid?: string }) => mutate<ApiResponse<{ org: string; personal: string; project: string }>>('/ai/instructions', {
         method: 'PUT',
         body: JSON.stringify(input),
+    }),
+    agentStandingOrders: (options?: { resource_uuid?: string; agent_uuid?: string }) => {
+        const params = new URLSearchParams();
+        if (options?.resource_uuid) params.set('resource_uuid', options.resource_uuid);
+        if (options?.agent_uuid) params.set('agent_uuid', options.agent_uuid);
+        const qs = params.toString();
+        return apiFetch<ApiListResponse<AgentStandingOrder>>(
+            `${API_BASE}/ai/standing-orders${qs ? `?${qs}` : ''}`,
+        );
+    },
+    createAgentStandingOrder: (input: {
+        title: string;
+        body: string;
+        scope?: string;
+        resource_uuid?: string;
+        agent_uuid?: string;
+        triggers?: string[];
+        approval_gates?: string;
+        escalation?: string;
+        priority?: number;
+        is_active?: boolean;
+    }) => mutate<ApiResponse<AgentStandingOrder>>('/ai/standing-orders', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    }),
+    updateAgentStandingOrder: (id: number, input: Partial<{
+        title: string;
+        body: string;
+        scope: string;
+        resource_uuid: string | null;
+        triggers: string[];
+        approval_gates: string | null;
+        escalation: string | null;
+        priority: number;
+        is_active: boolean;
+    }>) => mutate<ApiResponse<AgentStandingOrder>>(`/ai/standing-orders/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(input),
+    }),
+    deleteAgentStandingOrder: (id: number) => mutate<{ ok: boolean }>(`/ai/standing-orders/${id}`, {
+        method: 'DELETE',
     }),
     agentMissions: (options?: { status?: string; kind?: string; q?: string; limit?: number }) => {
         const params = new URLSearchParams();

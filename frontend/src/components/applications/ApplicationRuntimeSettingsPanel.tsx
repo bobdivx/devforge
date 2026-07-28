@@ -33,6 +33,7 @@ type Draft = {
     ports_exposes: string;
     base_directory: string;
     publish_directory: string;
+    detected_framework: string | null;
     health_check_enabled: boolean;
     health_check_path: string;
     health_check_port: string;
@@ -48,6 +49,7 @@ function toDraft(data: ApplicationRuntimeSettings): Draft {
         ports_exposes: data.ports_exposes ?? '',
         base_directory: data.base_directory ?? '/',
         publish_directory: data.publish_directory ?? '/',
+        detected_framework: data.detected_framework ?? null,
         health_check_enabled: data.health_check_enabled,
         health_check_path: data.health_check_path ?? '/',
         health_check_port: data.health_check_port ?? '',
@@ -64,6 +66,7 @@ function serverSyncKey(data: ApplicationRuntimeSettings): string {
         data.ports_exposes,
         data.base_directory,
         data.publish_directory,
+        data.detected_framework,
         data.health_check_enabled,
         data.health_check_path,
         data.health_check_port,
@@ -140,6 +143,7 @@ export function ApplicationRuntimeSettingsPanel({
                     build_command: suggestions.build_command ?? current.build_command,
                     install_command: suggestions.install_command ?? current.install_command,
                     health_check_port: suggestions.health_check_port ?? current.health_check_port,
+                    detected_framework: suggestions.framework ?? current.detected_framework,
                 };
             });
             setDetectHints(detection.reasons ?? []);
@@ -170,6 +174,7 @@ export function ApplicationRuntimeSettingsPanel({
                 ports_exposes: draft.ports_exposes.trim(),
                 base_directory: draft.base_directory.trim() || '/',
                 publish_directory: draft.publish_directory.trim() || '/',
+                detected_framework: draft.detected_framework,
                 health_check_enabled: draft.health_check_enabled,
                 health_check_path: draft.health_check_path.trim() || '/',
                 health_check_port: draft.health_check_port.trim() || null,

@@ -51,7 +51,7 @@ export function pickApplicationChatAgent(agents: Agent[], applicationUuid: strin
 export function pickApplicationChatAgentPreferringSession(
     agents: Agent[],
     applicationUuid: string,
-    sessionTitle: string,
+    _sessionTitle: string,
     agentsWithSessionTitle: Set<string>,
 ): Agent | null {
     const withSession = agents.filter((agent) => agentsWithSessionTitle.has(agent.uuid));
