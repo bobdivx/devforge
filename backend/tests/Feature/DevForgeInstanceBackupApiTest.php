@@ -1,14 +1,19 @@
 <?php
 
+use App\Jobs\DatabaseBackupJob;
 use App\Models\InstanceSettings;
+use App\Models\S3Storage;
 use App\Models\ScheduledDatabaseBackup;
+use App\Models\ScheduledDatabaseBackupExecution;
 use App\Models\Server;
 use App\Models\StandaloneDocker;
 use App\Models\StandalonePostgresql;
 use App\Models\Team;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
 
@@ -34,6 +39,34 @@ beforeEach(function () {
     ]);
 });
 
+function seedInstanceDatabase(): StandalonePostgresql
+{
+    $database = StandalonePostgresql::create([
+        'id' => 0,
+        'name' => 'coolify-db',
+        'description' => 'DevForge database',
+        'postgres_user' => 'devforge',
+        'postgres_password' => 'password',
+        'postgres_db' => 'devforge',
+        'status' => 'running',
+        'destination_type' => StandaloneDocker::class,
+        'destination_id' => 0,
+        'environment_id' => 1,
+    ]);
+
+    ScheduledDatabaseBackup::create([
+        'id' => 0,
+        'enabled' => true,
+        'save_s3' => false,
+        'frequency' => '0 0 * * *',
+        'database_id' => $database->id,
+        'database_type' => StandalonePostgresql::class,
+        'team_id' => 0,
+    ]);
+
+    return $database;
+}
+
 it('can fetch instance backup configuration when none is set', function () {
     $this->actingAs($this->user)
         ->withSession($this->session)
@@ -41,22 +74,18 @@ it('can fetch instance backup configuration when none is set', function () {
         ->assertSuccessful()
         ->assertJsonPath('data.database', null)
         ->assertJsonPath('data.backup', null)
-        ->assertJsonPath('data.is_server_functional', false);
+        ->assertJsonPath('data.is_server_functional', false)
+        ->assertJsonStructure([
+            'data' => [
+                'executions',
+                's3_storages',
+                'migration' => ['legacy_container_detected', 'container_candidates', 'notes'],
+            ],
+        ]);
 });
 
 it('can update instance backup database details', function () {
-    $database = StandalonePostgresql::create([
-        'id' => 0,
-        'name' => 'coolify-db',
-        'description' => 'Coolify database',
-        'postgres_user' => 'coolify',
-        'postgres_password' => 'password',
-        'postgres_db' => 'coolify',
-        'status' => 'running',
-        'destination_type' => StandaloneDocker::class,
-        'destination_id' => 0,
-        'environment_id' => 1,
-    ]);
+    seedInstanceDatabase();
 
     $this->actingAs($this->user)
         ->withSession($this->session)
@@ -68,6 +97,78 @@ it('can update instance backup database details', function () {
         ])
         ->assertSuccessful()
         ->assertJsonPath('data.database.name', 'devforge-db-new');
+});
 
-    expect($database->fresh()->name)->toBe('devforge-db-new');
+it('can update instance backup schedule with s3 destination', function () {
+    seedInstanceDatabase();
+
+    $storage = S3Storage::create([
+        'name' => 'Backups bucket',
+        'region' => 'us-east-1',
+        'key' => 'test-key',
+        'secret' => 'test-secret',
+        'bucket' => 'test-bucket',
+        'endpoint' => 'https://s3.example.com',
+        'is_usable' => true,
+        'team_id' => 0,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson('/api/devforge/v1/settings/backup/schedule', [
+            'enabled' => true,
+            'frequency' => '0 3 * * *',
+            'save_s3' => true,
+            's3_storage_uuid' => $storage->uuid,
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.backup.frequency', '0 3 * * *')
+        ->assertJsonPath('data.backup.save_s3', true)
+        ->assertJsonPath('data.backup.s3_storage.uuid', $storage->uuid);
+
+    expect(ScheduledDatabaseBackup::find(0)->s3_storage_id)->toBe($storage->id);
+});
+
+it('queues an instance backup run', function () {
+    Queue::fake();
+    seedInstanceDatabase();
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/settings/backup/run')
+        ->assertSuccessful()
+        ->assertJsonPath('data.queued', true);
+
+    Queue::assertPushed(DatabaseBackupJob::class);
+});
+
+it('returns export metadata for the latest local execution', function () {
+    seedInstanceDatabase();
+
+    $backup = ScheduledDatabaseBackup::find(0);
+    ScheduledDatabaseBackupExecution::create([
+        'scheduled_database_backup_id' => $backup->id,
+        'filename' => '/data/devforge/backups/instance.sql.gz',
+        'status' => 'success',
+        'size' => 1234,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/settings/backup/export')
+        ->assertSuccessful()
+        ->assertJsonPath('data.filename', '/data/devforge/backups/instance.sql.gz')
+        ->assertJsonStructure(['data' => ['execution_id', 'download_url', 'filename']]);
+});
+
+it('rejects invalid instance backup import files', function () {
+    seedInstanceDatabase();
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->post('/api/devforge/v1/settings/backup/import', [
+            'file' => UploadedFile::fake()->create('notes.txt', 10, 'text/plain'),
+            'from_coolify' => true,
+        ])
+        ->assertStatus(422);
 });

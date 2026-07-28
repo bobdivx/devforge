@@ -1,16 +1,20 @@
+# DevForge — Docker Desktop (Windows)
+# Usage: docker compose -f docker-compose.yml -f docker-compose.windows.yml --env-file .env up -d
+
 services:
-  coolify-testing-host:
+  testing-host:
     init: true
-    image: "ghcr.io/coollabsio/coolify-testing-host:latest"
+    image: ${DEVFORGE_TESTING_HOST_IMAGE:-bobdivx/devforge:testing-host}
     pull_policy: always
-    container_name: coolify-testing-host
+    container_name: devforge-testing-host
     volumes:
       - //var/run/docker.sock://var/run/docker.sock
-      - ./:/data/coolify
-  coolify:
-    image: "ghcr.io/coollabsio/coolify:latest"
+      - ./:/data/devforge
+
+  api:
+    image: ${DEVFORGE_API_IMAGE:-bobdivx/devforge:api}
     pull_policy: always
-    container_name: coolify
+    container_name: devforge-api
     restart: always
     working_dir: /var/www/html
     extra_hosts:
@@ -30,7 +34,7 @@ services:
     environment:
       - APP_ID
       - APP_ENV=production
-      - APP_NAME
+      - APP_NAME=${APP_NAME:-DevForge}
       - APP_KEY
       - DB_PASSWORD
       - REDIS_PASSWORD
@@ -46,6 +50,7 @@ services:
       - SELF_HOSTED=true
       - SSH_MUX_ENABLED=false
       - IS_WINDOWS_DOCKER_DESKTOP=true
+      - DEVFORGE_ENABLED=true
     ports:
       - "${APP_PORT:-8000}:8080"
     expose:
@@ -60,28 +65,30 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
   postgres:
     image: postgres:15-alpine
     pull_policy: always
-    container_name: coolify-db
+    container_name: devforge-db
     restart: always
     env_file:
       - .env
     volumes:
-      - coolify-db:/var/lib/postgresql/data
+      - devforge-db:/var/lib/postgresql/data
     environment:
-      POSTGRES_USER: "${DB_USERNAME}"
+      POSTGRES_USER: "${DB_USERNAME:-devforge}"
       POSTGRES_PASSWORD: "${DB_PASSWORD}"
-      POSTGRES_DB: "${DB_DATABASE:-coolify}"
+      POSTGRES_DB: "${DB_DATABASE:-devforge}"
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${DB_USERNAME}", "-d", "${DB_DATABASE:-coolify}" ]
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USERNAME:-devforge}", "-d", "${DB_DATABASE:-devforge}" ]
       interval: 5s
       retries: 10
       timeout: 2s
+
   redis:
     image: redis:7-alpine
     pull_policy: always
-    container_name: coolify-redis
+    container_name: devforge-redis
     restart: always
     command: redis-server --save 20 1 --loglevel warning --requirepass ${REDIS_PASSWORD}
     env_file:
@@ -89,16 +96,17 @@ services:
     environment:
       REDIS_PASSWORD: "${REDIS_PASSWORD}"
     volumes:
-      - coolify-redis:/data
+      - devforge-redis:/data
     healthcheck:
       test: redis-cli ping
       interval: 5s
       retries: 10
       timeout: 2s
-  soketi:
-    image: 'ghcr.io/coollabsio/coolify-realtime:1.0.16'
+
+  realtime:
+    image: ${DEVFORGE_REALTIME_IMAGE:-bobdivx/devforge:realtime}
     pull_policy: always
-    container_name: coolify-realtime
+    container_name: devforge-realtime
     restart: always
     env_file:
       - .env
@@ -108,7 +116,7 @@ services:
     volumes:
       - ./ssh:/var/www/html/storage/app/ssh
     environment:
-      APP_NAME: "${APP_NAME:-Coolify}"
+      APP_NAME: "${APP_NAME:-DevForge}"
       SOKETI_DEBUG: "${SOKETI_DEBUG:-false}"
       SOKETI_DEFAULT_APP_ID: "${PUSHER_APP_ID}"
       SOKETI_DEFAULT_APP_KEY: "${PUSHER_APP_KEY}"
@@ -121,7 +129,7 @@ services:
       timeout: 2s
 
 volumes:
-  coolify-db:
-    name: coolify-db
-  coolify-redis:
-    name: coolify-redis
+  devforge-db:
+    name: devforge-db
+  devforge-redis:
+    name: devforge-redis

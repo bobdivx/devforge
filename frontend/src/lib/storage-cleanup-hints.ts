@@ -28,6 +28,6 @@ export function criticalDiskHints(diskUsage: number | null): string[] {
         'Utilisez le bouton « Diagnostiquer l’espace » pour voir ce qui occupe le disque (Docker, /data/coolify, logs…).',
         'Utilisez le bouton « Nettoyage agressif » : volumes inutilisés + suppression des anciennes images d’applications.',
         'Supprimez les déploiements en échec, previews et applications inutilisées.',
-        'Vérifiez /data/coolify/backups et /var/log si le diagnostic montre peu d’espace récupérable dans Docker.',
+        'Vérifiez /data/devforge/backups et /var/log si le diagnostic montre peu d’espace récupérable dans Docker.',
     ];
 }

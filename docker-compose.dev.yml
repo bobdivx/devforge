@@ -49,9 +49,9 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      POSTGRES_USER: "${DB_USERNAME:-coolify}"
+      POSTGRES_USER: "${DB_USERNAME:-devforge}"
       POSTGRES_PASSWORD: "${DB_PASSWORD:-password}"
-      POSTGRES_DB: "${DB_DATABASE:-coolify}"
+      POSTGRES_DB: "${DB_DATABASE:-devforge}"
       POSTGRES_HOST_AUTH_METHOD: "trust"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
@@ -80,7 +80,7 @@ services:
     pull_policy: never
     build:
       context: .
-      dockerfile: ./docker/coolify-realtime/Dockerfile
+      dockerfile: ./docker/devforge-realtime/Dockerfile
     env_file:
       - ./backend/.env
     ports:
@@ -88,8 +88,8 @@ services:
       - "6002:6002"
     volumes:
       - ./backend/storage:/var/www/html/storage
-      - ./docker/coolify-realtime/terminal-server.js:/terminal/terminal-server.js
-      - ./docker/coolify-realtime/terminal-utils.js:/terminal/terminal-utils.js
+      - ./docker/devforge-realtime/terminal-server.js:/terminal/terminal-server.js
+      - ./docker/devforge-realtime/terminal-utils.js:/terminal/terminal-utils.js
     environment:
       SOKETI_DEBUG: "false"
       SOKETI_DEFAULT_APP_ID: "${PUSHER_APP_ID:-devforge}"
@@ -143,7 +143,6 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - dev_platform_data:/data/devforge
-      - dev_platform_data:/data/coolify
       - dev_backups_data:/data/devforge/backups
       - dev_postgres_data:/data/devforge/_volumes/database
       - dev_redis_data:/data/devforge/_volumes/redis

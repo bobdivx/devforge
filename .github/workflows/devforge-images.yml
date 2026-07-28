@@ -12,7 +12,7 @@ on:
       - frontend/**
       - docker/devforge-api/**
       - docker/devforge-web/**
-      - docker/coolify-realtime/**
+      - docker/devforge-realtime/**
       - docker/production/**
       - package.json
       - package-lock.json
@@ -39,7 +39,7 @@ jobs:
           - name: web
             file: docker/devforge-web/Dockerfile
           - name: realtime
-            file: docker/coolify-realtime/Dockerfile
+            file: docker/devforge-realtime/Dockerfile
     steps:
       - uses: actions/checkout@v5
         with:
@@ -66,8 +66,12 @@ jobs:
           SHORT_SHA="${GITHUB_SHA::7}"
           VERSION="unknown"
           if [ -f backend/bootstrap/getVersion.php ]; then
-            VERSION="$(docker run --rm -v "$(pwd):/app" -w /app php:8.4-cli-alpine php backend/bootstrap/getVersion.php 2>/dev/null || echo unknown)"
-            VERSION="${VERSION//\//-}"
+            RAW_VERSION="$(docker run --rm -v "$(pwd):/app" -w /app/backend php:8.4-cli-alpine \
+              php -d display_errors=0 -d display_startup_errors=0 bootstrap/getVersion.php 2>/dev/null || true)"
+            RAW_VERSION="$(printf '%s' "$RAW_VERSION" | tr -d '\r' | tail -n 1 | tr -d '[:space:]')"
+            if [ -n "$RAW_VERSION" ]; then
+              VERSION="${RAW_VERSION//\//-}"
+            fi
           fi
           OWNER_LC='${{ github.repository_owner }}'
           OWNER_LC="${OWNER_LC,,}"

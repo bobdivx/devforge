@@ -1,4 +1,5 @@
 import { PageHeader } from '../../components/PageHeader';
+import { InstanceBackupPanel } from '../../components/storages/InstanceBackupPanel';
 import { S3StoragesSettings } from '../../components/storages/S3StoragesSettings';
 import { Card } from '../../components/ui/Card';
 import { DataState } from '../../components/ui/DataState';
@@ -39,9 +40,18 @@ export function StoragesPage({ path, permissions }: StoragesPageProps) {
     return (
         <div class="grid gap-5">
             <PageHeader
-                title="Stockage S3"
-                description="Destinations de sauvegarde et stockage objet pour l’équipe active."
+                title="Stockage"
+                description="Sauvegarde de l’instance DevForge, destinations S3, et migration depuis Coolify."
             />
+            {permissions.instance_admin && (
+                <InstanceBackupPanel />
+            )}
+            <div class="grid gap-2">
+                <h2 class="text-lg font-semibold">Destinations S3</h2>
+                <p class="text-sm text-base-content/60">
+                    Buckets utilisés par les sauvegardes de bases et, optionnellement, par la sauvegarde d’instance.
+                </p>
+            </div>
             <S3StoragesSettings canManage={permissions.create_resources} />
         </div>
     );

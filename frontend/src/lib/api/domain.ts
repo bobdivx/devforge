@@ -411,6 +411,27 @@ export type InstanceUpdatesUpdateInput = {
     update_check_frequency?: string | null;
 };
 
+export type InstanceBackupExecution = {
+    id: number;
+    uuid: string;
+    status: string | null;
+    message: string | null;
+    size: number;
+    filename: string | null;
+    database_name: string | null;
+    s3_uploaded: boolean | null;
+    created_at: string | null;
+    finished_at: string | null;
+    download_url: string | null;
+};
+
+export type InstanceBackupS3Option = {
+    uuid: string;
+    name: string;
+    is_usable: boolean;
+    team_id: number;
+};
+
 export type InstanceBackupSettings = {
     database: {
         uuid: string;
@@ -418,14 +439,32 @@ export type InstanceBackupSettings = {
         description: string | null;
         postgres_user: string;
         postgres_password?: string;
+        postgres_db?: string | null;
         status: string;
     } | null;
     backup: {
         uuid: string;
         enabled: boolean;
         frequency: string;
+        save_s3: boolean;
+        disable_local_backup?: boolean;
+        s3_storage: { uuid: string; name: string } | null;
+        retention?: {
+            local: { amount: number; days: number; max_storage_gb: number };
+            s3: { amount: number; days: number; max_storage_gb: number };
+        };
+        latest_execution?: InstanceBackupExecution | null;
     } | null;
+    executions: InstanceBackupExecution[];
+    s3_storages: InstanceBackupS3Option[];
     is_server_functional: boolean;
+    migration: {
+        legacy_container_detected: boolean;
+        container_candidates: string[];
+        notes: string;
+    };
+    migrated?: boolean;
+    message?: string;
 };
 
 export type InstanceBackupDatabaseUpdateInput = {
@@ -433,6 +472,14 @@ export type InstanceBackupDatabaseUpdateInput = {
     description?: string | null;
     postgres_user: string;
     postgres_password?: string;
+};
+
+export type InstanceBackupScheduleUpdateInput = {
+    enabled?: boolean;
+    frequency?: string;
+    save_s3?: boolean;
+    s3_storage_uuid?: string | null;
+    disable_local_backup?: boolean;
 };
 
 export type OauthProviderSettings = {
@@ -2035,13 +2082,39 @@ export const domainApi = {
         method: 'POST',
     }),
     instanceBackupSettings: () => apiFetch<ApiResponse<InstanceBackupSettings>>(`${API_BASE}/settings/backup`),
-    initInstanceBackupSettings: () => mutate<ApiResponse<InstanceBackupSettings>>('/settings/backup/init', {
+    initInstanceBackupSettings: (container?: string) => mutate<ApiResponse<InstanceBackupSettings>>('/settings/backup/init', {
         method: 'POST',
+        body: JSON.stringify(container ? { container } : {}),
     }),
     updateInstanceBackupDatabase: (input: InstanceBackupDatabaseUpdateInput) => mutate<ApiResponse<InstanceBackupSettings>>(
         '/settings/backup/database',
         { method: 'PUT', body: JSON.stringify(input) },
     ),
+    updateInstanceBackupSchedule: (input: InstanceBackupScheduleUpdateInput) => mutate<ApiResponse<InstanceBackupSettings>>(
+        '/settings/backup/schedule',
+        { method: 'PUT', body: JSON.stringify(input) },
+    ),
+    runInstanceBackup: () => mutate<ApiResponse<{ queued: boolean; backup_uuid: string; message: string }>>(
+        '/settings/backup/run',
+        { method: 'POST' },
+    ),
+    exportInstanceBackup: () => apiFetch<ApiResponse<{ execution_id: number; download_url: string; filename: string | null; created_at: string | null }>>(
+        `${API_BASE}/settings/backup/export`,
+    ),
+    importInstanceBackup: async (file: File, fromCoolify = false, options?: { onUploadProgress?: UploadProgressHandler }) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('from_coolify', fromCoolify ? '1' : '0');
+
+        return apiUploadWithProgress<ApiResponse<{ imported: boolean; from_coolify: boolean; message: string }>>(
+            `${API_BASE}/settings/backup/import`,
+            formData,
+            options?.onUploadProgress,
+        );
+    },
+    migrateInstanceFromCoolify: () => mutate<ApiResponse<InstanceBackupSettings>>('/settings/backup/migrate-coolify', {
+        method: 'POST',
+    }),
     scheduledJobs: (type = 'all', date = 'last_24h', skip = 0) => apiFetch<ApiResponse<ScheduledJobsData>>(`${API_BASE}/settings/scheduled-jobs?type=${type}&date=${date}&skip=${skip}`),
     scheduledJobsDefinitions: () => apiFetch<ApiResponse<{ definitions: ScheduledJobDefinition[] }>>(`${API_BASE}/settings/scheduled-jobs/definitions`),
     oauthSettings: () => apiFetch<ApiResponse<OauthProviderSettings[]>>(`${API_BASE}/settings/oauth`),

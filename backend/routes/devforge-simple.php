@@ -54,6 +54,11 @@ Route::get('/settings/scheduled-jobs/definitions', [ScheduledJobsController::cla
 Route::get('/settings/backup', [InstanceBackupController::class, 'show'])->name('settings.backup.show');
 Route::post('/settings/backup/init', [InstanceBackupController::class, 'init'])->name('settings.backup.init');
 Route::put('/settings/backup/database', [InstanceBackupController::class, 'updateDatabase'])->name('settings.backup.database.update');
+Route::put('/settings/backup/schedule', [InstanceBackupController::class, 'updateSchedule'])->name('settings.backup.schedule.update');
+Route::post('/settings/backup/run', [InstanceBackupController::class, 'run'])->name('settings.backup.run');
+Route::get('/settings/backup/export', [InstanceBackupController::class, 'export'])->name('settings.backup.export');
+Route::post('/settings/backup/import', [InstanceBackupController::class, 'import'])->name('settings.backup.import');
+Route::post('/settings/backup/migrate-coolify', [InstanceBackupController::class, 'migrateFromCoolify'])->name('settings.backup.migrate-coolify');
 Route::get('/settings/oauth', [OauthSettingsController::class, 'index'])->name('settings.oauth');
 Route::put('/settings/oauth/{provider}', [OauthSettingsController::class, 'update'])->name('settings.oauth.update');
 Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');

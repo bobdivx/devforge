@@ -43,8 +43,8 @@ services:
       DB_CONNECTION: pgsql
       DB_HOST: ${DB_HOST:-postgres}
       DB_PORT: ${DB_PORT:-5432}
-      DB_DATABASE: ${DB_DATABASE:-coolify}
-      DB_USERNAME: ${DB_USERNAME:-coolify}
+      DB_DATABASE: ${DB_DATABASE:-devforge}
+      DB_USERNAME: ${DB_USERNAME:-devforge}
       DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
@@ -77,14 +77,13 @@ services:
 
   postgres:
     environment:
-      POSTGRES_USER: ${DB_USERNAME:-coolify}
+      POSTGRES_USER: ${DB_USERNAME:-devforge}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required}
-      POSTGRES_DB: ${DB_DATABASE:-coolify}
+      POSTGRES_DB: ${DB_DATABASE:-devforge}
     volumes:
-      # Cutover: DEVFORGE_POSTGRES_DATA=/media/Docker/AppData/coolify/postgress
       - ${DEVFORGE_POSTGRES_DATA:-/media/Docker/AppData/devforge/postgres}:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-coolify} -d ${DB_DATABASE:-coolify}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-devforge} -d ${DB_DATABASE:-devforge}"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -103,7 +102,7 @@ services:
     image: ${DEVFORGE_REALTIME_IMAGE:-bobdivx/devforge:realtime}
     build:
       context: .
-      dockerfile: docker/coolify-realtime/Dockerfile
+      dockerfile: docker/devforge-realtime/Dockerfile
     volumes:
       - ${DEVFORGE_DATA_ROOT:-/media/Docker/AppData/devforge}/ssh:/var/www/html/storage/app/ssh
     environment:

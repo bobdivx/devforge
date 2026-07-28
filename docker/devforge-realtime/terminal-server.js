@@ -12,11 +12,11 @@ import {
     isAuthorizedTargetHost,
 } from './terminal-utils.js';
 
-async function postToCoolify(path, headers) {
+async function postToApi(path, headers) {
     return new Promise((resolve, reject) => {
         const request = http.request({
-            hostname: 'coolify',
-            port: 8080,
+            hostname: process.env.DEVFORGE_API_HOST || 'api',
+            port: Number(process.env.DEVFORGE_API_PORT || 8080),
             path,
             method: 'POST',
             headers,
@@ -127,7 +127,7 @@ const verifyClient = async (info, callback) => {
 
     try {
         // Authenticate with Laravel backend
-        const response = await postToCoolify('/terminal/auth', {
+        const response = await postToApi('/terminal/auth', {
             'Cookie': `${sessionCookieName}=${laravelSession}`,
             'X-XSRF-TOKEN': xsrfToken
         });
@@ -211,7 +211,7 @@ wss.on('connection', async (ws, req) => {
     }
 
     try {
-        const response = await postToCoolify('/terminal/auth/ips', {
+        const response = await postToApi('/terminal/auth/ips', {
             'Cookie': `${sessionCookieName}=${laravelSession}`,
             'X-XSRF-TOKEN': xsrfToken
         });
@@ -393,7 +393,7 @@ async function handleCommand(ws, command, userId) {
     };
 
     // NOTE: - Initiates a process within the Terminal container
-    //         Establishes an SSH connection to root@coolify with RequestTTY enabled
+    //         Establishes an SSH connection to root@api with RequestTTY enabled
     //         Executes the 'docker exec' command to connect to a specific container
     logTerminal('log', 'Spawning PTY process for terminal session.', {
         userId,

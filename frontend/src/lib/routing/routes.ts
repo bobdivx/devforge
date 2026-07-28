@@ -511,8 +511,8 @@ const onboardingRoute: AppRoute = {
 
 const storagesRoute: AppRoute = {
     path: '/storages',
-    label: 'Stockage S3',
-    description: 'Stockage objet et sauvegardes.',
+    label: 'Sauvegarde & S3',
+    description: 'Sauvegarde DevForge, migration Coolify et destinations S3.',
     icon: Cloud,
     page: 'storages',
 };

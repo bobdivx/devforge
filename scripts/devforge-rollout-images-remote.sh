@@ -33,7 +33,7 @@ mkdir -p "${COMPOSE_DIR}/docker"
 cp -a "${CONTEXT_DIR}/docker/devforge-proxy" "${COMPOSE_DIR}/docker/" 2>/dev/null || true
 cp -a "${CONTEXT_DIR}/docker/devforge-web" "${COMPOSE_DIR}/docker/" 2>/dev/null || true
 cp -a "${CONTEXT_DIR}/docker/devforge-api" "${COMPOSE_DIR}/docker/" 2>/dev/null || true
-cp -a "${CONTEXT_DIR}/docker/coolify-realtime" "${COMPOSE_DIR}/docker/" 2>/dev/null || true
+cp -a "${CONTEXT_DIR}/docker/devforge-realtime" "${COMPOSE_DIR}/docker/" 2>/dev/null || true
 cp -a "${CONTEXT_DIR}/docker/production" "${COMPOSE_DIR}/docker/" 2>/dev/null || true
 
 ENV_FILE="${COMPOSE_DIR}/.env"
@@ -70,7 +70,7 @@ cd "${CONTEXT_DIR}"
 echo "==> Build images"
 docker build -f docker/devforge-api/Dockerfile -t "devforge-api:${TAG}" .
 docker build -f docker/devforge-web/Dockerfile -t "devforge-web:${TAG}" .
-docker build -f docker/coolify-realtime/Dockerfile -t "devforge-realtime:${TAG}" .
+docker build -f docker/devforge-realtime/Dockerfile -t "devforge-realtime:${TAG}" .
 
 cp -f docker-compose.yml docker-compose.prod.yml "${COMPOSE_DIR}/"
 

@@ -61,10 +61,10 @@ export function StoragePage({ permissions }: Props) {
         <div class="grid gap-5">
             <PageHeader
                 title="Stockage serveurs"
-                description="Surveillez l’espace disque, configurez le nettoyage Docker automatique et lancez un nettoyage manuel."
+                description="Surveillez l’espace disque, configurez le nettoyage Docker automatique et lancez un nettoyage manuel. La sauvegarde DevForge et les buckets S3 sont sur Stockage."
                 actions={(
                     <a class="btn btn-ghost btn-sm" href={routeHref('/storages')}>
-                        Stockage S3
+                        Sauvegarde & S3
                     </a>
                 )}
             />
