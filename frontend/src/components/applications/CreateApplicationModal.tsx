@@ -229,7 +229,7 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
         >
             <form id="create-application-form" class="grid gap-4" onSubmit={handleSubmit}>
                 <p class="text-xs text-base-content/60">
-                    Déployez une application depuis vos dépôts GitHub connectés à Coolify.
+                    Déployez une application depuis vos dépôts GitHub connectés à DevForge.
                 </p>
 
                 {githubApps.length === 0 ? (

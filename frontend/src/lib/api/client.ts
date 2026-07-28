@@ -94,7 +94,7 @@ export async function apiFetch<T>(
         }
 
         throw new ApiError(0, {
-            message: 'Impossible de joindre le serveur Coolify.',
+            message: 'Impossible de joindre le serveur DevForge.',
         });
     } finally {
         window.clearTimeout(timeoutId);

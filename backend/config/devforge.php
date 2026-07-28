@@ -41,6 +41,12 @@ return [
     */
     'mcp_enabled' => env('DEVFORGE_MCP_ENABLED', false),
 
+    /*
+    | Canonical platform data directory (NAS/container).
+    | Legacy installs may still use /data/coolify — bind-mount or symlink during cutover.
+    */
+    'data_dir' => env('DEVFORGE_DATA_DIR', env('COOLIFY_DATA_DIR', '/data/devforge')),
+
     'agents_monitor_build_enabled' => env(
         'DEVFORGE_AGENTS_MONITOR_BUILD_ENABLED',
         env('DEVFORGE_AGENTS_WEBHOOK_BUILD_ENABLED', true),

@@ -251,7 +251,7 @@ export function ApplicationDomainsPanel({
 
                             {dockerCompose ? (
                                 <p class="text-sm text-base-content/60">
-                                    Cette application utilise Docker Compose : les domaines se configurent par service dans Coolify.
+                                    Cette application utilise Docker Compose : les domaines se configurent par service dans DevForge.
                                 </p>
                             ) : !formReady ? (
                                 <p class="text-sm text-base-content/50">Chargement des domaines…</p>

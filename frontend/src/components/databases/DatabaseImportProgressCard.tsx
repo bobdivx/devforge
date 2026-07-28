@@ -29,7 +29,7 @@ const steps: Array<{ id: DatabaseImportPhase; label: string }> = [
 const phaseOrder: DatabaseImportPhase[] = ['upload', 'transfer', 'stopping', 'importing', 'restarting', 'done'];
 
 const phaseHints: Partial<Record<DatabaseImportPhase, string>> = {
-    upload: 'Envoi vers Coolify…',
+    upload: 'Envoi vers DevForge…',
     transfer: 'Transfert SSH chunké vers le volume — peut être long sur les gros fichiers.',
     stopping: 'Coupure de service : la base est arrêtée pour l’import.',
     importing: 'Écriture des données sur le volume — ne fermez pas cet onglet.',

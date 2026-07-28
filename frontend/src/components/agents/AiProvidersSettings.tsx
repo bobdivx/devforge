@@ -412,7 +412,7 @@ export function AiProvidersSettings() {
                                     onInput={(e) => setForm({ ...form, base_url: (e.target as HTMLInputElement).value })}
                                 />
                                 <span class="text-[11px] text-base-content/50">
-                                    Depuis le conteneur Coolify, utilisez l’IP de l’hôte ou{' '}
+                                    Depuis le conteneur DevForge, utilisez l’IP de l’hôte ou{' '}
                                     <code class="text-[10px]">host.docker.internal</code> — pas{' '}
                                     <code class="text-[10px]">localhost</code>.
                                 </span>

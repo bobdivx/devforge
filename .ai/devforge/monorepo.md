@@ -32,10 +32,14 @@
 
 ## Runtime
 
-Dans le conteneur, Laravel reste `/var/www/html` via le mount `./backend`.
-
-- URL produit / build : `/devforge` → `backend/public/devforge`
-- API / namespaces PHP : `/api/devforge/v1`, `App\…\DevForge` (inchangés)
+- **Standalone (prod NAS)** : `docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env up -d`
+  - Services : `proxy`, `api`, `web`, `postgres`, `redis`, `realtime` (conteneurs `devforge-*`)
+  - Déploiement : `.\scripts\nas-fix-devforge.ps1 -EnableAgents` (`DEPLOY_MODE=images`)
+  - Cutover : `docs/devforge-nas-cutover.md`
+- **Dev local** : `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`
+- **Overlay legacy** : `DEPLOY_MODE=overlay` patch encore le conteneur `coolify`
+- Dans le conteneur API, Laravel reste `/var/www/html`
+- SPA prod image : base `/` ; overlay : base `/devforge`
 
 ## Commandes
 
@@ -45,17 +49,11 @@ npm run test:frontend
 npm run build:frontend
 cd frontend && npm run dev
 
-# Assets Laravel (Vite)
-npm run dev:laravel
-npm run build:laravel
+# Stack DevForge prod
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env up -d --build
 
-# Laravel (host)
-cd backend && composer install
-cd backend && php artisan …
-
-# Laravel (Docker)
-docker compose -f docker-compose.dev.yml up -d
-docker exec coolify php artisan test --compact
+# Stack DevForge dev
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 ```
 
 ## Packaging DevForge

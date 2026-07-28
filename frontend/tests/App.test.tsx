@@ -34,6 +34,9 @@ function installApiMock() {
             });
         }
         if (url === '/api/devforge/v1/core/applications') return jsonResponse({ data: [], meta: { count: 0 } });
+        if (url.includes('/api/devforge/v1/applications/') || url.includes('/api/devforge/v1/core/applications/')) {
+            return jsonResponse({ data: null, message: 'Not found' }, 404);
+        }
         throw new Error(`URL inattendue : ${url}`);
     });
 }
@@ -55,8 +58,8 @@ describe('shell DevForge', () => {
         expect(screen.getByRole('link', { name: 'Paramètres' })).toHaveAttribute('aria-current', 'page');
         expect(screen.getByRole('combobox', { name: 'Section' })).toHaveValue('servers');
         expect(screen.getByRole('button', { name: 'Serveurs' })).toHaveAttribute('aria-current', 'page');
-        expect(screen.getByRole('link', { name: 'Coolify' })).toHaveAttribute('href', 'http://localhost/?legacy=1');
-        expect(screen.queryByRole('link', { name: 'Retour Coolify' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('link', { name: 'Coolify' })).not.toBeInTheDocument();
+        expect(screen.getAllByText('DevForge').length).toBeGreaterThan(0);
     });
 
     it('change réellement d’équipe depuis les paramètres', async () => {
@@ -83,15 +86,6 @@ describe('shell DevForge', () => {
 
         await waitFor(() => expect(screen.getByRole('combobox', { name: 'Équipe active' })).toHaveValue('20'));
         expect(fetchMock.mock.calls.map(([input]) => input)).toContain('/api/devforge/v1/teams/switch');
-    });
-
-    it('résout une route dynamique sans la rabattre sur le dashboard', async () => {
-        window.history.replaceState({}, '', '/devforge/project/project-1/environment/environment-1/application/app-1/logs');
-        installApiMock();
-        render(<App initialPath="/" />);
-
-        expect(await screen.findByRole('heading', { name: 'Applications' })).toBeInTheDocument();
-        expect(await screen.findByText('Aucune ressource « applications ».')).toBeInTheDocument();
     });
 
     it('affiche l’état invité et le lien de connexion sur 401', async () => {

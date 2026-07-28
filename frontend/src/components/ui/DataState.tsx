@@ -12,7 +12,7 @@ type DataStateProps = {
 };
 
 const statusMessages: Record<number, string> = {
-    401: 'Session requise. Connectez-vous à Coolify.',
+    401: 'Session requise. Connectez-vous à DevForge.',
     403: 'Accès refusé pour cette ressource ou cette équipe.',
     404: 'Ressource introuvable dans l’équipe active.',
     409: 'Équipe active indisponible. Sélectionnez une autre équipe.',

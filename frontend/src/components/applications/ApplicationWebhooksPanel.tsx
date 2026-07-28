@@ -128,7 +128,7 @@ export function ApplicationWebhooksPanel({ applicationUuid, canAct }: Props) {
                             <UrlField
                                 label="Deploy webhook (authentification API requise)"
                                 value={data.deploy_webhook_url}
-                                helper="Déclenche un déploiement via l’API Coolify / DevForge."
+                                helper="Déclenche un déploiement via l’API DevForge."
                             />
 
                             {data.uses_git_app && (

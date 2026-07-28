@@ -211,7 +211,7 @@ export function ApplicationAdvancedSettingsPanel({ applicationUuid, canAct }: Pr
         },
         {
             key: 'connect_to_docker_network',
-            label: 'Connecter au réseau Docker Coolify',
+            label: 'Connecter au réseau Docker DevForge',
             help: 'Utile pour Docker Compose.',
             visible: caps?.dockercompose === true,
         },

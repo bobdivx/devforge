@@ -112,7 +112,7 @@ export function ServerSwarmPanel({ serverUuid, canManage }: ServerSwarmPanelProp
             <DataState loading={settings.loading} error={settings.error} onRetry={() => void settings.reload()}>
                 <div class="grid gap-3">
                     <p class="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
-                        Swarm est déprécié dans Coolify. Réservé aux clusters existants.
+                        Swarm est déprécié dans DevForge. Réservé aux clusters existants.
                     </p>
                     <label class="flex items-center justify-between gap-3 text-sm">
                         <span>Swarm manager</span>

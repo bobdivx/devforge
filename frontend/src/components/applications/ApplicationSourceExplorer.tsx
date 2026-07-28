@@ -205,7 +205,7 @@ export function ApplicationSourceExplorer({ applicationUuid }: Props) {
         <Card title="Code source Git">
             <div class="grid gap-4">
                 <p class="text-sm text-base-content/60">
-                    Fichiers du dépôt Git déployé (comme dans Cursor/VS Code), pas la configuration Coolify
+                    Fichiers du dépôt Git déployé (comme dans Cursor/VS Code), pas la configuration DevForge
                     (<span class="font-mono text-xs">docker-compose.yaml</span>, <span class="font-mono text-xs">.env</span>).
                 </p>
 

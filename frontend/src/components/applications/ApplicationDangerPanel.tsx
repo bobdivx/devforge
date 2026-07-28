@@ -172,7 +172,7 @@ export function ApplicationDangerPanel({
                                 <div class="min-w-0">
                                     <p class="text-sm font-semibold">Supprimer l’application</p>
                                     <p class="text-xs text-base-content/55">
-                                        Supprime définitivement l’application, ses conteneurs, volumes et configuration Coolify.
+                                        Supprime définitivement l’application, ses conteneurs, volumes et configuration DevForge.
                                     </p>
                                 </div>
                             </div>

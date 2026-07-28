@@ -1,0 +1,232 @@
+# DevForge — compose ZimaOS / CasaOS (copie versionnée du fichier d'import)
+# Usage local Documents : C:\Users\auber\Documents\devforge.yaml
+# Import ZimaOS : Apps → Installer une app personnalisée
+#
+# Prérequis images :
+#   .\scripts\nas-fix-devforge.ps1 -EnableAgents
+#   → tags : devforge-api:local, devforge-realtime:local
+#
+# Cutover Coolify : pointer les volumes vers /media/Docker/AppData/coolify/...
+# (postgress, data, redis) et arrêter l'ancienne app coolify (network_mode: host).
+
+name: devforge
+services:
+  api:
+    cpu_shares: 90
+    command: []
+    container_name: devforge-api
+    depends_on:
+      realtime:
+        condition: service_started
+        required: true
+    deploy:
+      resources:
+        limits:
+          memory: 33487564800
+        reservations:
+          devices: []
+    environment:
+      - APP_ENV=production
+      - APP_ID=1
+      - APP_KEY=${APP_KEY}
+      - APP_NAME=DevForge
+      - APP_URL=${APP_URL:-http://10.1.0.58:8080}
+      - BASE_CONFIG_PATH=${DEVFORGE_PLATFORM_DATA:-/media/Docker/AppData/devforge/data}
+      - DB_CONNECTION=pgsql
+      - DB_DATABASE=${DB_DATABASE:-coolify}
+      - DB_HOST=127.0.0.1
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_PORT=5432
+      - DB_USERNAME=${DB_USERNAME:-coolify}
+      - DEVFORGE_AGENTS_ENABLED=true
+      - DEVFORGE_ENABLED=true
+      - DEVFORGE_MCP_ENABLED=${DEVFORGE_MCP_ENABLED:-true}
+      - DEVFORGE_DATA_DIR=${DEVFORGE_PLATFORM_DATA:-/media/Docker/AppData/devforge/data}
+      - PUSHER_APP_ID=${PUSHER_APP_ID:-devforge}
+      - PUSHER_APP_KEY=${PUSHER_APP_KEY:-devforge}
+      - PUSHER_APP_SECRET=${PUSHER_APP_SECRET:-devforge}
+      - PUSHER_BACKEND_HOST=127.0.0.1
+      - PUSHER_BACKEND_PORT=6001
+      - PUSHER_PORT=6001
+      - PUSHER_SCHEME=http
+      - REDIS_HOST=127.0.0.1
+      - SESSION_SECURE_COOKIE=true
+      - SSH_AUTH_SOCK=/ssh-agent
+    image: ${DEVFORGE_API_IMAGE:-bobdivx/devforge:api}
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/coolify.png
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: always
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ${DEVFORGE_PLATFORM_DATA:-/media/Docker/AppData/devforge/data}
+        target: /data
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ${DEVFORGE_DATA_ROOT:-/media/Docker/AppData/devforge}/ssh
+        target: /var/www/html/storage/app/ssh
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ${DEVFORGE_DATA_ROOT:-/media/Docker/AppData/devforge}/applications
+        target: /var/www/html/storage/app/applications
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ${DEVFORGE_DATA_ROOT:-/media/Docker/AppData/devforge}/databases
+        target: /var/www/html/storage/app/databases
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ${DEVFORGE_DATA_ROOT:-/media/Docker/AppData/devforge}/services
+        target: /var/www/html/storage/app/services
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ${DEVFORGE_DATA_ROOT:-/media/Docker/AppData/devforge}/backups
+        target: /var/www/html/storage/app/backups
+        bind:
+          create_host_path: true
+    ports: []
+    devices: []
+    cap_add: []
+    network_mode: host
+    privileged: false
+
+  db:
+    cpu_shares: 90
+    command: []
+    container_name: devforge-db
+    deploy:
+      resources:
+        limits:
+          memory: 33487564800
+        reservations:
+          devices: []
+    environment:
+      - POSTGRES_DB=${DB_DATABASE:-coolify}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_USER=${DB_USERNAME:-coolify}
+    image: postgres:15-alpine
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/coolify.png
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: always
+    user: 0:0
+    volumes:
+      - type: bind
+        source: ${DEVFORGE_POSTGRES_DATA:-/media/Docker/AppData/devforge/postgres}
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: true
+    ports: []
+    devices: []
+    cap_add: []
+    network_mode: host
+    privileged: false
+
+  realtime:
+    cpu_shares: 90
+    command: []
+    container_name: devforge-realtime
+    deploy:
+      resources:
+        limits:
+          memory: 33487564800
+        reservations:
+          devices: []
+    environment:
+      - APP_NAME=DevForge
+      - SOKETI_DEBUG=false
+      - SOKETI_DEFAULT_APP_ID=${PUSHER_APP_ID:-devforge}
+      - SOKETI_DEFAULT_APP_KEY=${PUSHER_APP_KEY:-devforge}
+      - SOKETI_DEFAULT_APP_SECRET=${PUSHER_APP_SECRET:-devforge}
+      - SOKETI_HOST=0.0.0.0
+    image: ${DEVFORGE_REALTIME_IMAGE:-bobdivx/devforge:realtime}
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/coolify.png
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: always
+    ports: []
+    volumes:
+      - type: bind
+        source: ${DEVFORGE_DATA_ROOT:-/media/Docker/AppData/devforge}/ssh
+        target: /var/www/html/storage/app/ssh
+        bind:
+          create_host_path: true
+    devices: []
+    cap_add: []
+    network_mode: host
+    privileged: false
+
+  redis:
+    cpu_shares: 90
+    command: []
+    container_name: devforge-redis
+    deploy:
+      resources:
+        limits:
+          memory: 33487564800
+        reservations:
+          devices: []
+    image: redis:alpine
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/coolify.png
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: always
+    volumes:
+      - type: bind
+        source: ${DEVFORGE_REDIS_DATA:-/media/Docker/AppData/devforge/redis}
+        target: /data
+        bind:
+          create_host_path: true
+    ports: []
+    devices: []
+    cap_add: []
+    environment: []
+    network_mode: host
+    privileged: false
+
+x-casaos:
+  author: self
+  category: Developer
+  hostname: ""
+  icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/coolify.png
+  index: /devforge/
+  is_uncontrolled: false
+  port_map: "8080"
+  scheme: http
+  store_app_id: devforge
+  title:
+    custom: DevForge
+    en_us: DevForge
+  description:
+    en_us: DevForge PaaS — deployments, agents, Docker ops
+    fr_fr: DevForge PaaS — déploiements, agents IA, ops Docker
+  developer: DevForge
+  tip: |
+    1. Arrêter l'ancienne app coolify avant de démarrer (même ports host).
+    2. Construire les images : .\scripts\nas-fix-devforge.ps1 -EnableAgents
+    3. Cutover DB : DEVFORGE_POSTGRES_DATA=/media/Docker/AppData/coolify/postgress

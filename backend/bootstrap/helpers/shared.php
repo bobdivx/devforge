@@ -2601,6 +2601,9 @@ function parseDockerComposeFile(Service|Application $resource, bool $isNew = fal
                 }
                 $parsedServiceVariables->put('COOLIFY_RESOURCE_UUID', "{$resource->uuid}");
                 $parsedServiceVariables->put('COOLIFY_CONTAINER_NAME', "$serviceName-{$resource->uuid}");
+                // DevForge aliases (Phase 5 — keep COOLIFY_* for one release of app-compat)
+                $parsedServiceVariables->put('DEVFORGE_RESOURCE_UUID', "{$resource->uuid}");
+                $parsedServiceVariables->put('DEVFORGE_CONTAINER_NAME', "$serviceName-{$resource->uuid}");
 
                 // TODO: move this in a shared function
                 if (! $parsedServiceVariables->has('COOLIFY_APP_NAME')) {
@@ -2615,6 +2618,7 @@ function parseDockerComposeFile(Service|Application $resource, bool $isNew = fal
                 if (! $parsedServiceVariables->has('COOLIFY_PROJECT_NAME')) {
                     $parsedServiceVariables->put('COOLIFY_PROJECT_NAME', "\"{$resource->project()->name}\"");
                 }
+                mirror_coolify_env_aliases_to_devforge($parsedServiceVariables);
 
                 $parsedServiceVariables = $parsedServiceVariables->map(function ($value, $key) use ($envs_from_coolify) {
                     if (! str($value)->startsWith('$')) {
@@ -3402,7 +3406,7 @@ function generate_fluentd_configuration(): array
             'fluentd-async' => 'true',
             'fluentd-sub-second-precision' => 'true',
             // env vars are used in the LogDrain configurations
-            'env' => 'COOLIFY_APP_NAME,COOLIFY_PROJECT_NAME,COOLIFY_SERVER_IP,COOLIFY_ENVIRONMENT_NAME',
+            'env' => 'COOLIFY_APP_NAME,COOLIFY_PROJECT_NAME,COOLIFY_SERVER_IP,COOLIFY_ENVIRONMENT_NAME,DEVFORGE_APP_NAME,DEVFORGE_PROJECT_NAME,DEVFORGE_SERVER_IP,DEVFORGE_ENVIRONMENT_NAME',
         ],
     ];
 }
@@ -3426,10 +3430,8 @@ function isAssociativeArray($array)
 
 /**
  * This method adds the default environment variables to the resource.
- * - COOLIFY_APP_NAME
- * - COOLIFY_PROJECT_NAME
- * - COOLIFY_SERVER_IP
- * - COOLIFY_ENVIRONMENT_NAME
+ * - COOLIFY_* (legacy, still injected for deployed app compat)
+ * - DEVFORGE_* (canonical aliases — same values)
  *
  *  Theses variables are added in place to the $where_to_add array.
  */
@@ -3473,6 +3475,50 @@ function add_coolify_default_environment_variables(StandaloneRedis|StandalonePos
             $where_to_add->put('COOLIFY_PROJECT_NAME', "\"{$resource->project()->name}\"");
         } else {
             $where_to_add->push("COOLIFY_PROJECT_NAME=\"{$resource->project()->name}\"");
+        }
+    }
+    mirror_coolify_env_aliases_to_devforge($where_to_add);
+}
+
+/**
+ * Mirror COOLIFY_* keys to DEVFORGE_* (same values) for platform rebrand.
+ * Existing apps that read COOLIFY_* keep working; new templates can use DEVFORGE_*.
+ *
+ * @param  Collection<string|int, mixed>  $vars
+ */
+function mirror_coolify_env_aliases_to_devforge(Collection &$vars): void
+{
+    $map = [
+        'COOLIFY_APP_NAME' => 'DEVFORGE_APP_NAME',
+        'COOLIFY_PROJECT_NAME' => 'DEVFORGE_PROJECT_NAME',
+        'COOLIFY_SERVER_IP' => 'DEVFORGE_SERVER_IP',
+        'COOLIFY_ENVIRONMENT_NAME' => 'DEVFORGE_ENVIRONMENT_NAME',
+        'COOLIFY_RESOURCE_UUID' => 'DEVFORGE_RESOURCE_UUID',
+        'COOLIFY_CONTAINER_NAME' => 'DEVFORGE_CONTAINER_NAME',
+        'COOLIFY_FQDN' => 'DEVFORGE_FQDN',
+        'COOLIFY_URL' => 'DEVFORGE_URL',
+        'COOLIFY_BRANCH' => 'DEVFORGE_BRANCH',
+    ];
+
+    $associative = isAssociativeArray($vars);
+
+    foreach ($map as $coolifyKey => $devforgeKey) {
+        if ($associative) {
+            if ($vars->has($coolifyKey) && ! $vars->has($devforgeKey)) {
+                $vars->put($devforgeKey, $vars->get($coolifyKey));
+            }
+
+            continue;
+        }
+
+        $coolifyEntry = $vars->first(function ($value) use ($coolifyKey) {
+            return is_string($value) && str_starts_with($value, $coolifyKey.'=');
+        });
+        $hasDevforge = $vars->contains(function ($value) use ($devforgeKey) {
+            return is_string($value) && str_starts_with($value, $devforgeKey.'=');
+        });
+        if (is_string($coolifyEntry) && ! $hasDevforge) {
+            $vars->push(str_replace($coolifyKey.'=', $devforgeKey.'=', $coolifyEntry));
         }
     }
 }

@@ -1,7 +1,6 @@
 import { PanelLeftClose, PanelLeftOpen, X } from 'lucide-preact';
 import type { BootstrapData } from '../lib/bootstrap';
 import { DEVFORGE_BRAND_NAME, DEVFORGE_LOGO_URL } from '../lib/brand';
-import { legacyCoolifyUrl } from '../lib/migration';
 import { routeHref, visibleRoutes, type AppRoute } from '../lib/routes';
 
 type SidebarProps = {
@@ -24,7 +23,6 @@ export function Sidebar({
     onToggleCollapsed,
 }: SidebarProps) {
     const navigationRoutes = visibleRoutes(bootstrap.features?.agents_enabled ?? false);
-    const coolifyLegacyUrl = legacyCoolifyUrl(bootstrap.migration.legacy_base_url);
 
     const panelClass = collapsed ? 'w-16' : 'w-64';
 
@@ -93,14 +91,7 @@ export function Sidebar({
             <div class="grid gap-1 border-t border-base-300/70 p-3">
                 {!collapsed && (
                     <p class="px-2 pb-1 text-[10px] leading-relaxed text-base-content/40">
-                        Interface DevForge · Basé sur{' '}
-                        <a
-                            class="link link-hover font-medium text-base-content/55"
-                            href={coolifyLegacyUrl}
-                            title="Ouvrir l'interface Coolify d'origine"
-                        >
-                            Coolify
-                        </a>
+                        {DEVFORGE_BRAND_NAME}
                     </p>
                 )}
                 <button

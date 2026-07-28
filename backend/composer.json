@@ -1,14 +1,15 @@
 {
-    "name": "coollabsio/coolify",
-    "description": "The Coolify project.",
+    "name": "devforge/devforge",
+    "description": "DevForge — self-hosted PaaS (Docker deployments, agents, ops).",
     "license": "Apache-2.0",
     "type": "project",
     "keywords": [
-        "coolify",
+        "devforge",
         "deployment",
         "docker",
         "self-hosted",
-        "server"
+        "server",
+        "agents"
     ],
     "require": {
         "php": "^8.4",

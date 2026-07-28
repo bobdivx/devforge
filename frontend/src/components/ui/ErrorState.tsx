@@ -1,5 +1,6 @@
 import { AlertTriangle, LogIn, RefreshCw } from 'lucide-preact';
 import { ApiError } from '../../lib/api-client';
+import { DEVFORGE_BASE_PATH } from '../../lib/routes';
 import { ActionToolbar } from './ActionToolbar';
 
 type ErrorStateProps = {
@@ -7,14 +8,17 @@ type ErrorStateProps = {
     onRetry: () => void;
 };
 
+const loginRedirect = `${DEVFORGE_BASE_PATH || ''}/` || '/';
+const loginHref = `/login?redirect=${loginRedirect}`;
+
 const messages: Record<number, { title: string; description: string }> = {
     0: {
         title: 'Connexion impossible',
-        description: 'Le serveur ne répond pas ou met trop de temps. Vérifiez que Coolify tourne, puis réessayez.',
+        description: 'Le serveur ne répond pas ou met trop de temps. Vérifiez que DevForge tourne, puis réessayez.',
     },
     401: {
         title: 'Session requise',
-        description: 'Connectez-vous à Coolify pour ouvrir votre espace DevForge.',
+        description: 'Connectez-vous pour ouvrir votre espace DevForge.',
     },
     403: {
         title: 'Accès refusé',
@@ -23,7 +27,7 @@ const messages: Record<number, { title: string; description: string }> = {
     419: {
         title: 'Session expirée',
         description:
-            'Le jeton de sécurité a expiré. Vérifiez que le FQDN Coolify correspond à l’URL utilisée, puis reconnectez-vous.',
+            'Le jeton de sécurité a expiré. Vérifiez que l’URL DevForge correspond au FQDN configuré, puis reconnectez-vous.',
     },
 };
 
@@ -31,7 +35,7 @@ export function ErrorState({ error, onRetry }: ErrorStateProps) {
     const status = error instanceof ApiError ? error.status : 0;
     const message = messages[status] ?? {
         title: 'DevForge est indisponible',
-        description: 'La connexion au backend Coolify a échoué.',
+        description: 'La connexion au backend a échoué.',
     };
 
     return (
@@ -42,7 +46,7 @@ export function ErrorState({ error, onRetry }: ErrorStateProps) {
                 <p class="mt-1 text-sm text-base-content/60">{message.description}</p>
                 <ActionToolbar class="mt-4 justify-center sm:justify-center">
                     {(status === 401 || status === 419) && (
-                        <a class="btn btn-primary btn-sm" href="/login?redirect=/devforge/">
+                        <a class="btn btn-primary btn-sm" href={loginHref}>
                             <LogIn class="size-4" aria-hidden />
                             Se connecter
                         </a>

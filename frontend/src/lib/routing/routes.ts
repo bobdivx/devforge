@@ -496,7 +496,7 @@ const tagsRoute: AppRoute = {
 const subscriptionRoute: AppRoute = {
     path: '/subscription',
     label: 'Abonnement',
-    description: 'Plan et facturation Coolify Cloud.',
+    description: 'Plan et facturation DevForge Cloud.',
     icon: CreditCard,
     page: 'subscription',
 };

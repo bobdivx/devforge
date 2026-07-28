@@ -249,7 +249,7 @@ export function CreateDatabaseModal({ open, onClose, onCreated }: Props) {
             )}
         >
             <form id="create-database-form" class="grid gap-4" onSubmit={handleSubmit}>
-                <p class="text-xs text-base-content/60">Déployez une instance gérée sur votre serveur Coolify.</p>
+                <p class="text-xs text-base-content/60">Déployez une instance gérée sur votre serveur DevForge.</p>
                 {error && <p class="text-xs text-error" role="alert">{error}</p>}
 
                 <label class="grid gap-1 text-sm">

@@ -40,7 +40,7 @@ export const serverSections: ServerSection[] = [
     { id: 'proxy', label: 'Proxy', legacySuffix: '/proxy', description: 'Configuration du reverse proxy Traefik/Caddy.' },
     { id: 'proxy-dynamic', label: 'Proxy dynamique', legacySuffix: '/proxy/dynamic', description: 'Configurations dynamiques du proxy.' },
     { id: 'proxy-logs', label: 'Logs proxy', legacySuffix: '/proxy/logs', description: 'Journaux du reverse proxy.' },
-    { id: 'sentinel', label: 'Sentinel', legacySuffix: '/sentinel', description: 'Agent de supervision Coolify.' },
+    { id: 'sentinel', label: 'Sentinel', legacySuffix: '/sentinel', description: 'Agent de supervision DevForge.' },
     { id: 'sentinel-logs', label: 'Logs Sentinel', legacySuffix: '/sentinel/logs', description: 'Journaux de l’agent Sentinel.' },
     { id: 'terminal', label: 'Terminal', legacySuffix: '/terminal', description: 'Terminal SSH du serveur.' },
     { id: 'advanced', label: 'Avancé', legacySuffix: '/advanced', description: 'Paramètres avancés du serveur.' },

@@ -292,7 +292,7 @@ export function ApplicationRuntimeSettingsPanel({
                             <span>
                                 <span class="font-medium">Site statique (nginx)</span>
                                 <span class="mt-0.5 block text-xs text-base-content/50">
-                                    Si activé, Coolify sert les fichiers via nginx au lieu de démarrer Node/SSR.
+                                    Si activé, DevForge sert les fichiers via nginx au lieu de démarrer Node/SSR.
                                     Désactivez pour les apps Astro/Node (ex. macompta).
                                 </span>
                             </span>
