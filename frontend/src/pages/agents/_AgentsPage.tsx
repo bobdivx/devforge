@@ -2,6 +2,7 @@ import { Bot, Plus, RefreshCw } from 'lucide-preact';
 import { useState } from 'preact/hooks';
 import { AgentCard } from '../../components/agents/AgentCard';
 import { CreateAgentModal } from '../../components/agents/CreateAgentModal';
+import { MissionBoardPanel } from '../../components/agents/MissionBoardPanel';
 import { PageHeader } from '../../components/PageHeader';
 import { DataState } from '../../components/ui/DataState';
 import { domainApi } from '../../lib/domain-api';
@@ -35,6 +36,10 @@ export function AgentsPage() {
                     </>
                 )}
             />
+
+            <div class="mb-5">
+                <MissionBoardPanel />
+            </div>
 
             <DataState
                 loading={query.loading}

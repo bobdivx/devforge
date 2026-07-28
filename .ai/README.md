@@ -21,6 +21,7 @@ Le cœur PaaS reste **Laravel** (models, jobs, SSH, Docker, policies).
 
 ### DevForge
 - **[Migration Livewire → DevForge](devforge/migration.md)** — phases, checklist domaines, monorepo
+- **[Agents autonomes — plan](devforge/agents-autonomy-plan.md)** — capacités, P0/P1/P2, cutover Forge → DevForge
 - **[Auth Fortify](devforge/authentication.md)** — login hors SPA
 - **[Cutover Livewire](devforge/cutover-livewire.md)** — retrait domaine par domaine
 - **[Monorepo backend/frontend](devforge/monorepo.md)** — layout `backend/` + `frontend/`
@@ -46,7 +47,7 @@ Preact uniquement pour les composants interactifs. Pas de React.
 
 1. **Une seule UI cible** : DevForge ; Livewire retiré domaine par domaine (colonne **X** dans `MIGRATION.md`).
 2. **Backend Laravel conservé** — pas de réécriture Node du PaaS.
-3. **Repo Forge/Ageton séparé** — hors périmètre.
+3. **Repo Forge/Ageton** — **suppression prévue** ; capacités agents portées dans Coolify/DevForge (voir [agents-autonomy-plan.md](devforge/agents-autonomy-plan.md)). Ne plus ajouter de features agents dans Forge.
 4. **Sources front** : dossier `frontend/` ; URL produit reste `/devforge` ; PHP `DevForge` inchangé.
 5. **Monorepo** : Laravel dans `backend/`, UI dans `frontend/` — voir [monorepo.md](devforge/monorepo.md).
 6. Branding utilisateur → DevForge ; namespaces PHP `App\` / images Docker Coolify inchangés pour l’instant.

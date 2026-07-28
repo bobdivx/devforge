@@ -5,15 +5,18 @@ namespace App\Http\Controllers\DevForge;
 use App\Http\Controllers\Controller;
 use App\Models\AiAgent;
 use App\Models\AiAgentRun;
-use App\Models\Team;
 use App\Models\User;
+use App\Services\DevForge\Agent\AgentRunLauncher;
 use App\Services\DevForge\Core\CurrentTeamContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class AgentRunController extends Controller
 {
-    public function __construct(private readonly CurrentTeamContext $currentTeamContext) {}
+    public function __construct(
+        private readonly CurrentTeamContext $currentTeamContext,
+        private readonly AgentRunLauncher $runLauncher,
+    ) {}
 
     public function index(Request $request, string $agentUuid): JsonResponse
     {
@@ -50,6 +53,74 @@ class AgentRunController extends Controller
         abort_unless($run, 404, 'Run introuvable.');
 
         return response()->json(['data' => $this->presentRun($run, withLogs: true)]);
+    }
+
+    public function resolveApproval(Request $request, string $agentUuid, string $runUuid): JsonResponse
+    {
+        $agent = $this->findAgent($request, $agentUuid);
+        $this->authorize('chat', $agent);
+
+        $validated = $request->validate([
+            'decision' => ['required', 'string', 'in:approve,deny'],
+        ]);
+
+        $run = AiAgentRun::query()
+            ->where('agent_id', $agent->id)
+            ->where('uuid', $runUuid)
+            ->first();
+
+        abort_unless($run, 404, 'Run introuvable.');
+        abort_unless($run->status === 'awaiting_approval', 422, 'Ce run n’attend pas d’approbation.');
+
+        $metadata = is_array($run->metadata) ? $run->metadata : [];
+        $pending = is_array($metadata['pending_approval'] ?? null) ? $metadata['pending_approval'] : null;
+        abort_unless($pending !== null && ($pending['status'] ?? '') === 'ask', 422, 'Aucune d’approbation absente.');
+        abort_unless(empty($pending['resolved']), 422, 'Approbation déjà traitée.');
+
+        $decision = $validated['decision'];
+        $pending['resolved'] = $decision === 'approve' ? 'approved' : 'denied';
+        $pending['resolved_at'] = now()->toISOString();
+        $metadata['pending_approval'] = $pending;
+        $run->update([
+            'metadata' => $metadata,
+            'status' => 'completed',
+            'summary' => $decision === 'approve'
+                ? 'Approbation accordée — relance en cours.'
+                : 'Approbation refusée.',
+            'finished_at' => now(),
+        ]);
+
+        if ($decision === 'deny') {
+            return response()->json([
+                'data' => [
+                    'decision' => $decision,
+                    'run' => $this->presentRun($run->fresh() ?? $run),
+                    'follow_up_run_uuid' => null,
+                ],
+            ]);
+        }
+
+        $approvalKey = (string) ($pending['approval_key'] ?? '');
+        abort_unless($approvalKey !== '', 422, 'Clé d’approbation manquante.');
+
+        $context = array_filter([
+            'event' => is_string($metadata['event'] ?? null) ? $metadata['event'] : null,
+            'application_uuid' => is_string($metadata['application_uuid'] ?? null) ? $metadata['application_uuid'] : null,
+            'deployment_uuid' => is_string($metadata['deployment_uuid'] ?? null) ? $metadata['deployment_uuid'] : null,
+            'approved_approval_keys' => [$approvalKey],
+            'resume_after_approval' => true,
+            'parent_run_uuid' => $run->uuid,
+        ], fn (mixed $value): bool => $value !== null && $value !== '' && $value !== []);
+
+        $followUp = $this->runLauncher->queue($agent, (string) ($run->trigger ?: 'manual'), $context);
+
+        return response()->json([
+            'data' => [
+                'decision' => $decision,
+                'run' => $this->presentRun($run->fresh() ?? $run),
+                'follow_up_run_uuid' => $followUp?->uuid,
+            ],
+        ]);
     }
 
     private function findAgent(Request $request, string $uuid): AiAgent

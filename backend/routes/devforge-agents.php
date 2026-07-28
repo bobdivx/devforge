@@ -1,8 +1,12 @@
 <?php
 
 use App\Http\Controllers\DevForge\AgentController;
+use App\Http\Controllers\DevForge\AgentInstructionsController;
+use App\Http\Controllers\DevForge\AgentMemoryController;
 use App\Http\Controllers\DevForge\AgentMessageController;
+use App\Http\Controllers\DevForge\AgentMissionController;
 use App\Http\Controllers\DevForge\AgentRunController;
+use App\Http\Controllers\DevForge\AgentRunStreamController;
 use App\Http\Controllers\DevForge\AgentSessionController;
 use App\Http\Controllers\DevForge\AiProviderController;
 use App\Http\Middleware\EnsureDevForgeAgentsEnabled;
@@ -63,6 +67,20 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
             ->where('sessionUuid', '[A-Za-z0-9-]{8,64}')
             ->name('sessions.messages.store');
 
+        Route::get('/{uuid}/memories', [AgentMemoryController::class, 'index'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->name('memories.index');
+        Route::post('/{uuid}/memories', [AgentMemoryController::class, 'store'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->name('memories.store');
+        Route::delete('/{uuid}/memories/{memoryId}', [AgentMemoryController::class, 'destroy'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->whereNumber('memoryId')
+            ->name('memories.destroy');
+        Route::post('/{uuid}/memories/clear', [AgentMemoryController::class, 'clear'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->name('memories.clear');
+
         Route::get('/{uuid}/runs', [AgentRunController::class, 'index'])
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->name('runs.index');
@@ -70,6 +88,15 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->where('runUuid', '[A-Za-z0-9-]{8,64}')
             ->name('runs.show');
+        Route::get('/{uuid}/runs/{runUuid}/stream', AgentRunStreamController::class)
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->where('runUuid', '[A-Za-z0-9-]{8,64}')
+            ->name('runs.stream');
+        Route::post('/{uuid}/runs/{runUuid}/approval', [AgentRunController::class, 'resolveApproval'])
+            ->middleware('throttle:devforge-agent-run')
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->where('runUuid', '[A-Za-z0-9-]{8,64}')
+            ->name('runs.approval');
     });
 
     Route::prefix('ai')->name('ai.')->group(function () {
@@ -79,5 +106,12 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
         Route::put('/providers/{id}', [AiProviderController::class, 'update'])->name('providers.update');
         Route::delete('/providers/{id}', [AiProviderController::class, 'destroy'])->name('providers.destroy');
         Route::post('/providers/{id}/test', [AiProviderController::class, 'test'])->name('providers.test');
+        Route::get('/instructions', [AgentInstructionsController::class, 'show'])->name('instructions.show');
+        Route::put('/instructions', [AgentInstructionsController::class, 'update'])->name('instructions.update');
+        Route::get('/missions', [AgentMissionController::class, 'index'])->name('missions.index');
+        Route::post('/missions', [AgentMissionController::class, 'store'])->name('missions.store');
+        Route::patch('/missions/{uuid}', [AgentMissionController::class, 'update'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->name('missions.update');
     });
 });

@@ -163,7 +163,7 @@
                                     },
                                     "is_force_https_enabled": {
                                         "type": "boolean",
-                                        "description": "The flag to indicate if HTTPS is forced. Defaults to true."
+                                        "description": "The flag to indicate if HTTPS is forced. Defaults to false."
                                     },
                                     "static_image": {
                                         "type": "string",
@@ -613,7 +613,7 @@
                                     },
                                     "is_force_https_enabled": {
                                         "type": "boolean",
-                                        "description": "The flag to indicate if HTTPS is forced. Defaults to true."
+                                        "description": "The flag to indicate if HTTPS is forced. Defaults to false."
                                     },
                                     "static_image": {
                                         "type": "string",
@@ -1063,7 +1063,7 @@
                                     },
                                     "is_force_https_enabled": {
                                         "type": "boolean",
-                                        "description": "The flag to indicate if HTTPS is forced. Defaults to true."
+                                        "description": "The flag to indicate if HTTPS is forced. Defaults to false."
                                     },
                                     "static_image": {
                                         "type": "string",
@@ -1624,7 +1624,7 @@
                                     },
                                     "is_force_https_enabled": {
                                         "type": "boolean",
-                                        "description": "The flag to indicate if HTTPS is forced. Defaults to true."
+                                        "description": "The flag to indicate if HTTPS is forced. Defaults to false."
                                     },
                                     "use_build_server": {
                                         "type": "boolean",
@@ -1959,7 +1959,7 @@
                                     },
                                     "is_force_https_enabled": {
                                         "type": "boolean",
-                                        "description": "The flag to indicate if HTTPS is forced. Defaults to true."
+                                        "description": "The flag to indicate if HTTPS is forced. Defaults to false."
                                     },
                                     "use_build_server": {
                                         "type": "boolean",
@@ -2331,7 +2331,7 @@
                                     },
                                     "is_force_https_enabled": {
                                         "type": "boolean",
-                                        "description": "The flag to indicate if HTTPS is forced. Defaults to true."
+                                        "description": "The flag to indicate if HTTPS is forced. Defaults to false."
                                     },
                                     "install_command": {
                                         "type": "string",

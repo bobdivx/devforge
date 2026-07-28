@@ -118,6 +118,33 @@ it('filters deployments by application_uuid within the current team', function (
         ->assertJsonPath('data.0.commit', 'cb9759c8fdd36811f806bf861e4e7244fb6a6a5a');
 });
 
+it('lists only queued and in-progress deployments when active=1', function () {
+    $queued = devForgeDeployment($this->application, 'active-queued', [
+        'status' => ApplicationDeploymentStatus::QUEUED->value,
+    ]);
+    $inProgress = devForgeDeployment($this->application, 'active-in-progress', [
+        'status' => ApplicationDeploymentStatus::IN_PROGRESS->value,
+    ]);
+    $finished = devForgeDeployment($this->application, 'inactive-finished', [
+        'status' => ApplicationDeploymentStatus::FINISHED->value,
+    ]);
+
+    $response = $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson('/api/devforge/v1/deployments?active=1&per_page=50');
+
+    $response
+        ->assertSuccessful()
+        ->assertJsonPath('meta.total', 2);
+
+    $uuids = collect($response->json('data'))->pluck('uuid')->all();
+
+    expect($uuids)
+        ->toContain($queued->deployment_uuid)
+        ->toContain($inProgress->deployment_uuid)
+        ->not->toContain($finished->deployment_uuid);
+});
+
 it('polls deployment logs with a cursor and redacts application secrets', function () {
     EnvironmentVariable::create([
         'key' => 'API_TOKEN',

@@ -1,0 +1,56 @@
+<?php
+
+use App\Models\AiAgent;
+use App\Models\AiAgentMission;
+use App\Models\Team;
+use App\Services\DevForge\Agent\AgentMissionBoard;
+use Illuminate\Support\Facades\Schema;
+
+beforeEach(function () {
+    if (! Schema::hasTable('ai_agent_missions')) {
+        $this->markTestSkipped('Migration ai_agent_missions non appliquée.');
+    }
+});
+
+it('creates and lists missions with dedupe', function () {
+    $team = Team::factory()->create();
+    $agent = AiAgent::factory()->create(['team_id' => $team->id]);
+    $board = app(AgentMissionBoard::class);
+
+    $first = $board->create($team, [
+        'title' => 'Coolify update',
+        'kind' => 'tech_watch',
+        'dedupe_key' => 'tech-watch:coolify-update:test',
+        'assignee_agent_uuid' => $agent->uuid,
+    ], $agent);
+
+    expect($first)->toBeInstanceOf(AiAgentMission::class);
+
+    $second = $board->create($team, [
+        'title' => 'Coolify update again',
+        'kind' => 'tech_watch',
+        'dedupe_key' => 'tech-watch:coolify-update:test',
+    ], $agent);
+
+    expect($second->id)->toBe($first->id)
+        ->and($board->list($team, ['kind' => 'tech_watch'])->count())->toBeGreaterThanOrEqual(1);
+});
+
+it('updates mission status to done', function () {
+    $team = Team::factory()->create();
+    $board = app(AgentMissionBoard::class);
+
+    $mission = $board->create($team, [
+        'title' => 'Fix nginx',
+        'kind' => 'bug',
+        'priority' => 'high',
+    ]);
+
+    expect($mission)->toBeInstanceOf(AiAgentMission::class);
+
+    $updated = $board->update($team, $mission->uuid, ['status' => 'done']);
+
+    expect($updated)->toBeInstanceOf(AiAgentMission::class)
+        ->and($updated->status)->toBe('done')
+        ->and($updated->completed_at)->not->toBeNull();
+});

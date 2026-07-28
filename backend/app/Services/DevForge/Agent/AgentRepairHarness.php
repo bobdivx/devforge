@@ -76,12 +76,45 @@ class AgentRepairHarness
         $record('get_deployment_logs', $logsArgs, $logsResult);
 
         $logsBlob = mb_strtolower(json_encode($logsResult, JSON_UNESCAPED_UNICODE) ?: '');
+        if ($logsBlob === '' || $logsBlob === '[]' || $logsBlob === 'null' || $logsBlob === '{}') {
+            $excerpt = is_array($runContext['failure_excerpt'] ?? null) ? $runContext['failure_excerpt'] : [];
+            $probe = is_string($runContext['probe_error'] ?? null) ? (string) $runContext['probe_error'] : '';
+            $logsBlob = mb_strtolower(json_encode([
+                'failure_excerpt' => $excerpt,
+                'probe_error' => $probe,
+            ], JSON_UNESCAPED_UNICODE) ?: '');
+        }
         $issue = AgentChatRepairStrategy::detectIssue($logsBlob);
 
-        if ($issue === AgentChatRepairStrategy::ISSUE_PERMISSIONS) {
+        if ($issue === AgentChatRepairStrategy::ISSUE_BASE_CONFIG) {
+            $fixArgs = [...$appArgs, 'redeploy' => true, 'reason' => 'Harness: Read-only Coolify BASE_CONFIG_PATH'];
+            $fixResult = $toolkit->execute('fix_coolify_base_config_path', $fixArgs);
+            $record('fix_coolify_base_config_path', $fixArgs, $fixResult);
+        } elseif ($issue === AgentChatRepairStrategy::ISSUE_PERMISSIONS) {
             $fixArgs = [...$appArgs, 'redeploy' => true, 'reason' => 'Harness: Permission denied host'];
             $fixResult = $toolkit->execute('fix_application_host_permissions', $fixArgs);
             $record('fix_application_host_permissions', $fixArgs, $fixResult);
+        } elseif ($issue === AgentChatRepairStrategy::ISSUE_PUPPETEER) {
+            $envArgs = [
+                ...$appArgs,
+                'key' => 'PUPPETEER_SKIP_DOWNLOAD',
+                'value' => 'true',
+                'is_buildtime' => true,
+                'is_runtime' => false,
+            ];
+            $envResult = $toolkit->execute('upsert_application_env_var', $envArgs);
+            $record('upsert_application_env_var', $envArgs, $envResult);
+
+            if (! isset($envResult['error']) && $applicationUuid !== null) {
+                $deployArgs = [
+                    'uuid' => $applicationUuid,
+                    'type' => 'applications',
+                    'action' => 'deploy',
+                    'reason' => 'Harness: Puppeteer/Chromium — redeploy après PUPPETEER_SKIP_DOWNLOAD',
+                ];
+                $deployResult = $toolkit->execute('control_resource', $deployArgs);
+                $record('control_resource', $deployArgs, $deployResult);
+            }
         } elseif ($issue === AgentChatRepairStrategy::ISSUE_BRANCH) {
             $gitResult = $toolkit->execute('get_application_git_info', $appArgs);
             $record('get_application_git_info', $appArgs, $gitResult);
@@ -266,10 +299,15 @@ class AgentRepairHarness
                 $settingsArgs = [
                     ...$appArgs,
                     'publish_directory' => $publishDirectory,
-                    'is_static' => true,
                     'redeploy' => true,
                     'reason' => "Harness: page nginx → publish_directory={$publishDirectory}",
                 ];
+                $application = \App\Models\Application::query()->where('uuid', $applicationUuid)->first();
+                $alreadyStatic = (bool) ($application?->settings?->is_static ?? false)
+                    || strtolower((string) ($application?->build_pack ?? '')) === 'static';
+                if ($alreadyStatic) {
+                    $settingsArgs['is_static'] = true;
+                }
                 $settingsResult = $toolkit->execute('update_application_runtime_settings', $settingsArgs);
                 $record('update_application_runtime_settings', $settingsArgs, $settingsResult);
 
@@ -347,10 +385,22 @@ class AgentRepairHarness
                 'steps' => $steps,
             ];
         } else {
+            $excerptHint = '';
+            $excerpt = is_array($runContext['failure_excerpt'] ?? null) ? $runContext['failure_excerpt'] : [];
+            if ($excerpt !== []) {
+                $excerptHint = ' Logs: '.mb_substr(collect($excerpt)
+                    ->map(fn ($line): string => is_array($line) ? (string) ($line['message'] ?? '') : (string) $line)
+                    ->filter()
+                    ->take(-8)
+                    ->implode(' | '), 0, 600);
+            }
+
             $spawnArgs = [
-                'goal' => trim($goal) !== ''
+                'goal' => (trim($goal) !== ''
                     ? $goal
-                    : 'Réparer le déploiement de l\'application'.($applicationUuid ? " {$applicationUuid}" : ''),
+                    : 'Réparer le déploiement de l\'application'.($applicationUuid ? " {$applicationUuid}" : ''))
+                    .$excerptHint
+                    .' — lire les logs, corriger via update_application_runtime_settings / upsert_application_env_var / write_application_source, puis redeploy 1×.',
                 'difficulty' => 'heavy',
             ];
             $spawnResult = $toolkit->execute('spawn_task', $spawnArgs);
@@ -369,12 +419,7 @@ class AgentRepairHarness
         }
 
         $hasError = collect($steps)->contains(fn (array $step): bool => ($step['status'] ?? '') === 'error');
-        $correctiveDone = collect($steps)->contains(function (array $step): bool {
-            $name = (string) ($step['name'] ?? '');
-
-            return ($step['status'] ?? '') === 'done'
-                && ! in_array($name, ['get_deployment_logs', 'spawn_task', 'list_application_env_vars', 'list_application_source', 'get_application_git_info', 'list_github_branches'], true);
-        });
+        $correctiveDone = AgentChatRepairStrategy::stepsIncludeCorrectiveAction($steps);
 
         $text = $pendingApproval !== null
             ? "⏸ Approbation requise pour l’outil **{$pendingApproval['tool']}**.\n\n{$pendingApproval['reason']}"

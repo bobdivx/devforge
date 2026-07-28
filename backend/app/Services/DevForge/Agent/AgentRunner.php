@@ -8,6 +8,7 @@ use App\Models\AiAgent;
 use App\Models\AiAgentRun;
 use App\Services\DevForge\Agent\Contracts\LlmResponse;
 use App\Services\DevForge\Agent\Tool\AgentSubagentRegistry;
+use App\Services\DevForge\Agent\Tool\AgentToolApprovalGrant;
 use App\Services\DevForge\Agent\Tool\IterationBudget;
 use App\Services\DevForge\Core\CoreResourceAction;
 use App\Services\DevForge\Core\CoreResourceCatalog;
@@ -25,6 +26,8 @@ class AgentRunner
 
     private bool $anyToolUsed = false;
 
+    private bool $harnessUsed = false;
+
     public function __construct(
         private readonly LlmProviderFactory $providerFactory,
         private readonly CoreResourceCatalog $catalog,
@@ -39,6 +42,7 @@ class AgentRunner
         $this->toolNudgeUsed = false;
         $this->correctionNudgeUsed = false;
         $this->anyToolUsed = false;
+        $this->harnessUsed = false;
         $providerConfig = $agent->effectiveProviderConfig();
 
         if (! $providerConfig) {
@@ -72,6 +76,13 @@ class AgentRunner
         $run->appendLog('Modèle LLM : '.$this->providerFactory->describeResolvedModel($providerConfig));
         $run->appendLog('Routage : '.$reason);
         $run->appendLog('Initialisation du provider LLM...');
+
+        foreach ($context['approved_approval_keys'] ?? [] as $approvalKey) {
+            if (is_string($approvalKey) && $approvalKey !== '') {
+                AgentToolApprovalGrant::grantForRun((int) $run->id, $approvalKey);
+                $run->appendLog('Approbation pré-accordée pour la clé '.mb_substr($approvalKey, 0, 12).'…');
+            }
+        }
 
         $provider = $this->providerFactory->makeForAgent(
             $agent,
@@ -117,6 +128,7 @@ class AgentRunner
                 ]);
                 app(AgentRunCorrectionSummarizer::class)->finalize($run->fresh() ?? $run);
                 app(ApplicationReadinessService::class)->handleAgentOutcome($run->fresh() ?? $run);
+                $this->publishOverviewInterventionReport($agent, $run->fresh() ?? $run, $context);
                 $agent->update(['status' => 'idle', 'last_run_at' => now()]);
                 broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'completed'));
 
@@ -181,20 +193,19 @@ class AgentRunner
                         continue;
                     }
 
-                    if (
-                        ! $this->anyToolUsed
-                        && ($context['event'] ?? null) === 'deployment_failed'
-                        && config('devforge.agents_auto_fallback', true)
-                    ) {
-                        $harness = app(AgentRepairHarness::class)->execute(
-                            $toolkit,
-                            $agent,
-                            $run,
-                            $context,
-                            'Corriger le déploiement en échec',
-                        );
-                        $summary = $harness['text'];
-                        $run->appendLog('Harness autonome : réparation déterministe après absence de tool_calls.');
+                    // Même après get_deployment_logs (anyToolUsed=true) : si aucune
+                    // correction enregistrée, forcer le harness déterministe.
+                    $run->refresh();
+                    $harnessText = $this->tryRepairHarnessFallback(
+                        $toolkit,
+                        $agent,
+                        $run,
+                        $context,
+                        'Corriger le déploiement en échec',
+                        'Harness autonome : réparation déterministe après diagnostic sans correction.',
+                    );
+                    if ($harnessText !== null) {
+                        $summary = $harnessText;
                         break;
                     }
 
@@ -206,14 +217,40 @@ class AgentRunner
                 $toolResults = [];
                 $hadToolFailure = false;
                 $waitingForInput = false;
+                $pendingApproval = null;
 
                 foreach ($response->toolCalls as $toolCall) {
+                    if ($pendingApproval !== null) {
+                        $toolResults[] = [
+                            'name' => $toolCall['name'],
+                            'result' => [
+                                'error' => 'En attente d’approbation — exécution reportée.',
+                                'skipped' => true,
+                            ],
+                        ];
+                        $hadToolFailure = true;
+
+                        continue;
+                    }
+
                     $result = $toolkit->execute($toolCall['name'], $toolCall['arguments']);
                     if (isset($result['error'])) {
                         $hadToolFailure = true;
                     }
                     if (($result['status'] ?? '') === 'waiting_for_input') {
                         $waitingForInput = true;
+                    }
+                    if (($result['status'] ?? null) === 'ask' || ! empty($result['pending_approval'])) {
+                        $pendingApproval = [
+                            'status' => 'ask',
+                            'tool' => (string) ($result['tool'] ?? $toolCall['name']),
+                            'reason' => (string) ($result['reason'] ?? 'Approbation requise.'),
+                            'rule_id' => (string) ($result['rule_id'] ?? ''),
+                            'approval_key' => (string) ($result['approval_key'] ?? ''),
+                        ];
+                        if (is_array($result['diff_preview'] ?? null)) {
+                            $pendingApproval['diff_preview'] = $result['diff_preview'];
+                        }
                     }
                     $toolResults[] = [
                         'name' => $toolCall['name'],
@@ -227,12 +264,32 @@ class AgentRunner
 
                 AgentToolTurnBuilder::append($this->messages, $response, $toolResults);
 
+                if ($pendingApproval !== null) {
+                    $toolLabel = $pendingApproval['tool'];
+                    $summary = "⏸ Approbation requise pour l’outil « {$toolLabel} ».\n"
+                        .$pendingApproval['reason'];
+                    $run->mergeMetadata(['pending_approval' => $pendingApproval]);
+                    $run->update([
+                        'status' => 'awaiting_approval',
+                        'summary' => mb_substr($summary, 0, 1000),
+                        'finished_at' => now(),
+                    ]);
+                    $run->appendLog("Run en pause — approbation requise pour « {$toolLabel} ».");
+                    app(AgentRunCorrectionSummarizer::class)->finalize($run->fresh() ?? $run);
+                    $this->publishOverviewInterventionReport($agent, $run->fresh() ?? $run, $context);
+                    $agent->update(['status' => 'idle', 'last_run_at' => now()]);
+                    broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'awaiting_approval'));
+
+                    return;
+                }
+
                 if ($waitingForInput) {
                     $run->update([
                         'status' => 'waiting_for_input',
                         'summary' => 'En attente de saisie utilisateur.',
                         'finished_at' => now(), // Technically paused, but finished for this job execution
                     ]);
+                    $this->publishOverviewInterventionReport($agent, $run->fresh() ?? $run, $context);
                     $agent->update(['status' => 'idle', 'last_run_at' => now()]);
                     broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'waiting_for_input'));
                     return;
@@ -241,7 +298,42 @@ class AgentRunner
 
             if ($budget->getRemaining() === 0) {
                 $run->appendLog('Limite d\'itérations atteinte.');
-                $summary = $summary ?: 'Limite d\'itérations atteinte sans conclusion.';
+                $run->refresh();
+                $harnessText = $this->tryRepairHarnessFallback(
+                    $toolkit,
+                    $agent,
+                    $run,
+                    $context,
+                    'Corriger le déploiement en échec (budget épuisé)',
+                    'Harness autonome : réparation déterministe après budget épuisé sans correction.',
+                );
+                if ($harnessText !== null) {
+                    $summary = $harnessText;
+                } else {
+                    $summary = $summary ?: 'Limite d\'itérations atteinte sans conclusion.';
+                }
+            }
+
+            $pendingApproval = is_array($run->metadata['pending_approval'] ?? null)
+                ? $run->metadata['pending_approval']
+                : null;
+
+            if ($pendingApproval !== null) {
+                $toolLabel = (string) ($pendingApproval['tool'] ?? 'outil');
+                $summary = "⏸ Approbation requise pour l’outil « {$toolLabel} ».\n"
+                    .(string) ($pendingApproval['reason'] ?? '');
+                $run->update([
+                    'status' => 'awaiting_approval',
+                    'summary' => mb_substr($summary, 0, 1000),
+                    'finished_at' => now(),
+                ]);
+                $run->appendLog("Run en pause — approbation requise pour « {$toolLabel} ».");
+                app(AgentRunCorrectionSummarizer::class)->finalize($run->fresh() ?? $run);
+                $this->publishOverviewInterventionReport($agent, $run->fresh() ?? $run, $context);
+                $agent->update(['status' => 'idle', 'last_run_at' => now()]);
+                broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'awaiting_approval'));
+
+                return;
             }
 
             $run->update([
@@ -252,6 +344,7 @@ class AgentRunner
 
             app(AgentRunCorrectionSummarizer::class)->finalize($run->fresh() ?? $run);
             app(ApplicationReadinessService::class)->handleAgentOutcome($run->fresh() ?? $run);
+            $this->publishOverviewInterventionReport($agent, $run->fresh() ?? $run, $context);
 
             $agent->update(['status' => 'idle', 'last_run_at' => now()]);
             broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'completed'));
@@ -265,9 +358,70 @@ class AgentRunner
             ]);
             app(AgentRunCorrectionSummarizer::class)->finalize($run->fresh() ?? $run);
             app(ApplicationReadinessService::class)->handleAgentOutcome($run->fresh() ?? $run);
+            $this->publishOverviewInterventionReport($agent, $run->fresh() ?? $run, $context);
             $agent->update(['status' => 'error', 'last_run_at' => now()]);
             broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'failed'));
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function publishOverviewInterventionReport(AiAgent $agent, AiAgentRun $run, array $context): void
+    {
+        $event = $context['event'] ?? ($run->metadata['event'] ?? null);
+        if (! in_array($event, ['deployment_failed', 'application_readiness_failed'], true)) {
+            return;
+        }
+
+        try {
+            app(ApplicationOverviewChatBridge::class)->postInterventionReport($agent, $run, $context);
+        } catch (\Throwable $e) {
+            $run->appendLog('Overview chat: publication rapport impossible — '.mb_substr($e->getMessage(), 0, 200));
+        }
+    }
+
+    /**
+     * Filet déterministe quand le LLM diagnostique sans corriger (logs lus, 0 correction_actions).
+     *
+     * @param  array<string, mixed>  $context
+     */
+    private function tryRepairHarnessFallback(
+        AgentToolkit $toolkit,
+        AiAgent $agent,
+        AiAgentRun $run,
+        array $context,
+        string $goal,
+        string $logMessage,
+    ): ?string {
+        if (! AgentChatRepairStrategy::shouldFallbackToHarness(
+            is_string($context['event'] ?? null) ? $context['event'] : null,
+            (bool) config('devforge.agents_auto_fallback', true),
+            $this->harnessUsed,
+            $run->metadata['correction_actions'] ?? null,
+        )) {
+            return null;
+        }
+
+        $this->harnessUsed = true;
+        $this->anyToolUsed = true;
+        $this->correctionNudgeUsed = true;
+
+        $harness = app(AgentRepairHarness::class)->execute(
+            $toolkit,
+            $agent,
+            $run,
+            $context,
+            $goal,
+        );
+
+        $run->appendLog($logMessage);
+
+        if (isset($harness['pending_approval']) && is_array($harness['pending_approval'])) {
+            $run->mergeMetadata(['pending_approval' => $harness['pending_approval']]);
+        }
+
+        return $harness['text'];
     }
 
     /**
@@ -388,13 +542,18 @@ class AgentRunner
 
             $run->appendLog("publish_directory manquant/incorrect pour site statique — correction automatique ({$publishDirectory}).");
 
-            $result = $toolkit->execute('update_application_runtime_settings', [
+            $settingsArgs = [
                 'application_uuid' => $applicationUuid,
                 'publish_directory' => $publishDirectory,
-                'is_static' => true,
                 'redeploy' => true,
                 'reason' => "Auto-fix: publish_directory={$publishDirectory} (déduit logs/source)",
-            ]);
+            ];
+            // Never flip a Node/SSR (nixpacks) app to static — only reinforce an already-static site.
+            if ($this->contextIndicatesStaticSite($context, $applicationUuid)) {
+                $settingsArgs['is_static'] = true;
+            }
+
+            $result = $toolkit->execute('update_application_runtime_settings', $settingsArgs);
 
             $this->recordAutoFixOutcome(
                 $run,
@@ -497,20 +656,20 @@ class AgentRunner
      */
     private function shouldAutoFixStaticPublishDirectory(array $context, array $excerpt, string $applicationUuid): bool
     {
-        if (AgentDirectives::failureExcerptHasMissingStaticPublishDirectoryIssue($excerpt)) {
-            return true;
+        // nixpacks/railpack ≠ static: only auto-fix publish_directory for genuine static sites.
+        if (! $this->contextIndicatesStaticSite($context, $applicationUuid)) {
+            return false;
         }
 
         $publishDirectory = trim((string) ($context['publish_directory'] ?? ''));
         $isEmptyPublish = $publishDirectory === '' || $publishDirectory === '/' || strtolower($publishDirectory) === 'null';
-        $isStatic = filter_var($context['is_static'] ?? false, FILTER_VALIDATE_BOOLEAN)
-            || in_array(strtolower((string) ($context['build_pack'] ?? '')), ['static', 'nixpacks'], true);
+
+        if (AgentDirectives::failureExcerptHasMissingStaticPublishDirectoryIssue($excerpt)) {
+            return true;
+        }
 
         if (($context['event'] ?? null) === 'application_readiness_failed' && $isEmptyPublish) {
-            $application = \App\Models\Application::query()->where('uuid', $applicationUuid)->first();
-            if ($application && (bool) ($application->settings?->is_static ?? false)) {
-                return true;
-            }
+            return true;
         }
 
         $probeError = is_string($context['probe_error'] ?? null) ? (string) $context['probe_error'] : '';
@@ -521,7 +680,7 @@ class AgentRunner
             return true;
         }
 
-        if ($isStatic && $isEmptyPublish && AgentDirectives::failureExcerptHasMissingStaticPublishDirectoryIssue([
+        if ($isEmptyPublish && AgentDirectives::failureExcerptHasMissingStaticPublishDirectoryIssue([
             ...$excerpt,
             ['message' => (string) ($context['probe_error'] ?? '')],
         ])) {
@@ -529,13 +688,37 @@ class AgentRunner
         }
 
         // Build logs mention a publishable output dir while publish_directory is empty.
-        if ($isEmptyPublish && AgentDirectives::inferStaticPublishDirectory($excerpt) !== null) {
-            $application = \App\Models\Application::query()->where('uuid', $applicationUuid)->first();
+        return $isEmptyPublish && AgentDirectives::inferStaticPublishDirectory($excerpt) !== null;
+    }
 
-            return (bool) ($application?->settings?->is_static ?? false);
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function contextIndicatesStaticSite(array $context, string $applicationUuid): bool
+    {
+        if (array_key_exists('is_static', $context)) {
+            if (filter_var($context['is_static'], FILTER_VALIDATE_BOOLEAN)) {
+                return true;
+            }
+
+            // Explicit non-static in context: never treat nixpacks/railpack as static.
+            return strtolower((string) ($context['build_pack'] ?? '')) === 'static';
         }
 
-        return false;
+        if (strtolower((string) ($context['build_pack'] ?? '')) === 'static') {
+            return true;
+        }
+
+        $application = \App\Models\Application::query()->where('uuid', $applicationUuid)->first();
+        if ($application === null) {
+            return false;
+        }
+
+        if ((bool) ($application->settings?->is_static ?? false)) {
+            return true;
+        }
+
+        return strtolower((string) $application->build_pack) === 'static';
     }
 
     /**

@@ -4,14 +4,18 @@ namespace App\Services\DevForge\Application;
 
 use App\Models\Application;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use Spatie\Url\Url;
+use Symfony\Component\HttpKernel\Exception\HttpException;
+use Visus\Cuid2\Cuid2;
 
 class ApplicationDomainService
 {
     /**
      * @return array{
      *     domains: array<int, string>,
+     *     managed_domain: string|null,
      *     fqdn: string|null,
      *     redirect: string,
      *     wildcard_domain: string|null,
@@ -30,11 +34,13 @@ class ApplicationDomainService
      * @param  array<string, mixed>  $input
      * @return array{
      *     domains: array<int, string>,
+     *     managed_domain: string|null,
      *     fqdn: string|null,
      *     redirect: string,
      *     wildcard_domain: string|null,
      *     build_pack: string|null,
-     *     sslip_warning: bool
+     *     sslip_warning: bool,
+     *     redeploy: array{queued: bool, deployment_uuid: string|null, message: string}|null
      * }
      */
     public function update(Application $application, array $input): array
@@ -49,13 +55,23 @@ class ApplicationDomainService
             'domains' => ['nullable', 'string', 'max:5000'],
             'redirect' => ['nullable', 'string', 'in:both,www,non-www'],
             'force_domain_override' => ['nullable', 'boolean'],
+            'redeploy' => ['sometimes', 'boolean'],
         ])->validate();
 
         $force = (bool) ($validated['force_domain_override'] ?? false);
+        $shouldRedeploy = (bool) ($validated['redeploy'] ?? true);
+        $previousFqdn = $application->fqdn;
+        $previousRedirect = (string) ($application->redirect ?: 'both');
+        $routingChanged = false;
 
         if (array_key_exists('domains', $validated)) {
             $fqdn = $this->normalizeDomains($validated['domains']);
+            $fqdn = $this->preserveManagedDomain($fqdn, $application);
             $application->fqdn = $fqdn;
+
+            if ($fqdn !== $previousFqdn) {
+                $routingChanged = true;
+            }
 
             if ($fqdn !== null) {
                 $this->assertNoConflicts($application, $force);
@@ -65,27 +81,42 @@ class ApplicationDomainService
         if (array_key_exists('redirect', $validated) && $validated['redirect'] !== null) {
             $this->assertRedirectCompatible($application, $validated['redirect']);
             $application->redirect = $validated['redirect'];
+
+            if ($validated['redirect'] !== $previousRedirect) {
+                $routingChanged = true;
+            }
         }
 
         $application->save();
-        $this->refreshLabels($application);
+        $this->refreshLabels($application, force: true);
         $application->refresh();
         $application->loadMissing(['destination.server.settings']);
 
-        return $this->present($application);
+        $redeploy = null;
+        if ($shouldRedeploy && $routingChanged) {
+            $redeploy = $this->queueRedeploy($application);
+        }
+
+        return [
+            ...$this->present($application),
+            'redeploy' => $redeploy,
+        ];
     }
 
     /**
+     * @param  array<string, mixed>  $input
      * @return array{
      *     domains: array<int, string>,
+     *     managed_domain: string|null,
      *     fqdn: string|null,
      *     redirect: string,
      *     wildcard_domain: string|null,
      *     build_pack: string|null,
-     *     sslip_warning: bool
+     *     sslip_warning: bool,
+     *     redeploy: array{queued: bool, deployment_uuid: string|null, message: string}|null
      * }
      */
-    public function generate(Application $application): array
+    public function generate(Application $application, array $input = []): array
     {
         if ($application->build_pack === 'dockercompose') {
             throw ValidationException::withMessages([
@@ -93,22 +124,43 @@ class ApplicationDomainService
             ]);
         }
 
+        $validated = validator($input, [
+            'redeploy' => ['sometimes', 'boolean'],
+        ])->validate();
+
+        $shouldRedeploy = (bool) ($validated['redeploy'] ?? true);
+        $previousFqdn = $application->fqdn;
+
         $application->loadMissing(['destination.server.settings']);
         $server = $application->destination?->server;
         abort_unless($server !== null, 422, 'Aucun serveur de destination trouvé pour cette application.');
 
-        $application->fqdn = generateUrl(server: $server, random: $application->uuid);
+        $managed = str(generateUrl(server: $server, random: $application->uuid))->lower()->toString();
+        $custom = $this->parseDomainList($application->fqdn)
+            ->reject(fn (string $domain): bool => $this->isManagedDomain($domain, $application))
+            ->values();
+
+        $application->fqdn = collect([$managed])->merge($custom)->unique()->implode(',');
         $application->save();
-        $this->refreshLabels($application);
+        $this->refreshLabels($application, force: true);
         $application->refresh();
         $application->loadMissing(['destination.server.settings']);
 
-        return $this->present($application);
+        $redeploy = null;
+        if ($shouldRedeploy && $application->fqdn !== $previousFqdn) {
+            $redeploy = $this->queueRedeploy($application);
+        }
+
+        return [
+            ...$this->present($application),
+            'redeploy' => $redeploy,
+        ];
     }
 
     /**
      * @return array{
      *     domains: array<int, string>,
+     *     managed_domain: string|null,
      *     fqdn: string|null,
      *     redirect: string,
      *     wildcard_domain: string|null,
@@ -119,17 +171,15 @@ class ApplicationDomainService
     private function present(Application $application): array
     {
         $fqdn = $application->fqdn;
-        $domains = str($fqdn ?? '')
-            ->explode(',')
-            ->map(fn (string $domain): string => trim($domain))
-            ->filter()
-            ->values()
-            ->all();
+        $domains = $this->parseDomainList($fqdn)->all();
+        $managedDomain = collect($domains)
+            ->first(fn (string $domain): bool => $this->isManagedDomain($domain, $application));
 
         $wildcard = data_get($application, 'destination.server.settings.wildcard_domain');
 
         return [
             'domains' => $domains,
+            'managed_domain' => $managedDomain,
             'fqdn' => $fqdn,
             'redirect' => (string) ($application->redirect ?: 'both'),
             'wildcard_domain' => filled($wildcard) ? (string) $wildcard : null,
@@ -176,6 +226,54 @@ class ApplicationDomainService
         return $urls->implode(',');
     }
 
+    /**
+     * Réinjecte le domaine DevForge (UUID) s’il existait déjà, pour qu’il ne puisse pas être retiré.
+     */
+    private function preserveManagedDomain(?string $incomingFqdn, Application $application): ?string
+    {
+        $existingManaged = $this->parseDomainList($application->fqdn)
+            ->first(fn (string $domain): bool => $this->isManagedDomain($domain, $application));
+
+        if ($existingManaged === null) {
+            return $incomingFqdn;
+        }
+
+        $preserved = str($existingManaged)->lower()->toString();
+        $custom = $this->parseDomainList($incomingFqdn)
+            ->reject(fn (string $domain): bool => $this->isManagedDomain($domain, $application))
+            ->values();
+
+        return collect([$preserved])->merge($custom)->unique()->implode(',');
+    }
+
+    /**
+     * @return Collection<int, string>
+     */
+    private function parseDomainList(?string $fqdn): Collection
+    {
+        return str($fqdn ?? '')
+            ->explode(',')
+            ->map(fn (string $domain): string => trim($domain))
+            ->filter()
+            ->values();
+    }
+
+    private function isManagedDomain(string $domain, Application $application): bool
+    {
+        $uuid = strtolower((string) $application->uuid);
+        if ($uuid === '') {
+            return false;
+        }
+
+        try {
+            $host = strtolower(Url::fromString($domain)->getHost());
+        } catch (\Throwable) {
+            return str_contains(strtolower($domain), $uuid);
+        }
+
+        return str_contains($host, $uuid);
+    }
+
     private function assertNoConflicts(Application $application, bool $force): void
     {
         if ($force) {
@@ -211,7 +309,7 @@ class ApplicationDomainService
         }
     }
 
-    private function refreshLabels(Application $application): void
+    private function refreshLabels(Application $application, bool $force = false): void
     {
         $application->loadMissing(['destination.server', 'settings']);
 
@@ -221,12 +319,38 @@ class ApplicationDomainService
         }
 
         $readonly = (bool) ($application->settings?->is_container_label_readonly_enabled ?? true);
-        if (! $readonly && filled($application->custom_labels)) {
+        if (! $force && ! $readonly && filled($application->custom_labels)) {
             return;
         }
 
         $customLabels = str(implode('|coolify|', generateLabelsApplication($application)))->replace('|coolify|', "\n");
         $application->custom_labels = base64_encode((string) $customLabels);
         $application->save();
+    }
+
+    /**
+     * @return array{queued: bool, deployment_uuid: string|null, message: string}
+     */
+    private function queueRedeploy(Application $application): array
+    {
+        $deploymentUuid = new Cuid2;
+        $result = queue_application_deployment(
+            application: $application,
+            deployment_uuid: $deploymentUuid,
+            force_rebuild: false,
+            restart_only: true,
+            is_api: true,
+            no_questions_asked: true,
+        );
+
+        if ($result['status'] === 'queue_full') {
+            throw new HttpException(429, (string) $result['message']);
+        }
+
+        return [
+            'queued' => $result['status'] !== 'skipped',
+            'deployment_uuid' => $result['status'] !== 'skipped' ? $deploymentUuid->toString() : null,
+            'message' => (string) ($result['message'] ?? 'Deployment queued.'),
+        ];
     }
 }

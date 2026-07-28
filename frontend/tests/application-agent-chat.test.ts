@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     applicationAgentSessionTitle,
     pickApplicationChatAgent,
+    pickApplicationChatAgentPreferringSession,
 } from '../src/lib/application-agent-chat';
 import type { Agent } from '../src/lib/domain-api';
 
@@ -49,6 +50,28 @@ describe('application-agent-chat', () => {
         ], 'app-1');
 
         expect(selected?.uuid).toBe('a3');
+    });
+
+    it('ignore les agents hors deployment/devforge/debug', () => {
+        const selected = pickApplicationChatAgent([
+            agent({ uuid: 'a1', type: 'tech-watch', name: 'Watch' }),
+        ], 'app-1');
+
+        expect(selected).toBeNull();
+    });
+
+    it('préfère l’agent qui a déjà la session App', () => {
+        const selected = pickApplicationChatAgentPreferringSession(
+            [
+                agent({ uuid: 'a1', type: 'deployment', name: 'Deploy A' }),
+                agent({ uuid: 'a2', type: 'devforge', name: 'Forge B' }),
+            ],
+            'app-1',
+            'App · demo',
+            new Set(['a2']),
+        );
+
+        expect(selected?.uuid).toBe('a2');
     });
 
     it('ignore les agents liés à une autre application', () => {

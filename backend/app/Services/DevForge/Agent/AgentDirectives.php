@@ -323,6 +323,8 @@ class AgentDirectives
             'delegate_task',
             'http_request',
             'docker_logs',
+            'memory_read',
+            'memory_write',
         ];
     }
 

@@ -116,12 +116,12 @@ class AgentPermissionEngine
     }
 
     /**
-     * Seul le chat peut (plus tard) offrir une boucle d’approbation UI.
-     * Les runs event / scheduled / manual / délégation n’en ont pas.
+     * Triggers qui peuvent pauser en awaiting_approval (chat UI ou runs list).
+     * Délégation / ephemeral restent en deny (pas d’opérateur humain dans la boucle).
      */
     public static function triggerSupportsApproval(string $trigger): bool
     {
-        return $trigger === 'chat';
+        return in_array($trigger, ['chat', 'chat_continue', 'scheduled', 'event', 'manual'], true);
     }
 
     /**
@@ -151,6 +151,39 @@ class AgentPermissionEngine
             'reason' => $reason,
             'rule_id' => $decision['rule_id'],
             'approval_unavailable' => true,
+        ];
+    }
+
+    /**
+     * Auto-correction déploiement / readiness : forcer ALLOW même si l’agent est en tiered/plan_first.
+     *
+     * @param  array{decision: string, reason: string, rule_id: string, approval_unavailable?: bool}  $decision
+     * @param  array<string, mixed>  $context
+     * @return array{decision: string, reason: string, rule_id: string, approval_unavailable?: bool}
+     */
+    public function resolveForAutoDeployFix(array $decision, string $trigger, array $context = []): array
+    {
+        if (($decision['decision'] ?? '') !== self::DECISION_ASK) {
+            return $decision;
+        }
+
+        if ($trigger !== 'event') {
+            return $decision;
+        }
+
+        if (! (bool) config('devforge.agents_auto_fix_deployments', true)) {
+            return $decision;
+        }
+
+        $event = is_string($context['event'] ?? null) ? $context['event'] : null;
+        if (! in_array($event, ['deployment_failed', 'application_readiness_failed'], true)) {
+            return $decision;
+        }
+
+        return [
+            'decision' => self::DECISION_ALLOW,
+            'reason' => 'Auto-correction déploiement — exécution autonome forcée.',
+            'rule_id' => 'auto_fix:deployment:allow',
         ];
     }
 

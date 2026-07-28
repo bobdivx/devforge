@@ -12,18 +12,16 @@ import {
     XCircle,
 } from 'lucide-preact';
 import { useEffect, useRef } from 'preact/hooks';
-import type { Agent, AgentChatMessage, AgentChatSession, AgentChatStep, AgentModelRouting } from '../../lib/domain-api';
-import { domainApi } from '../../lib/domain-api';
-import { ApiError } from '../../lib/api-client';
+import type { Agent, AgentChatAttachment, AgentChatMessage, AgentChatSession, AgentChatStep, AgentModelRouting } from '../../lib/domain-api';
 import { isPendingToolApproval, parsePendingToolApproval } from '../../lib/agent-pending-approval';
 import { isPendingPlan, parsePendingPlan } from '../../lib/agent-pending-plan';
-import { isTerminalAgentRunStatus } from '../../lib/agent-run-tracker';
 import {
     sanitizeAssistantContent,
     stepsCompletion,
     toolDisplayLabel,
 } from '../../lib/agent-chat-display';
 import { AgentErrorAlert } from './AgentErrorAlert';
+import { CaptureToolbar } from './CaptureToolbar';
 
 function formatTime(iso: string): string {
     return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
@@ -33,6 +31,34 @@ function renderContent(content: string) {
     return content
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
         .replace(/\n/g, '<br />');
+}
+
+function problemStatusBadge(metadata: AgentChatMessage['metadata']): { label: string; className: string } | null {
+    if (!metadata || typeof metadata !== 'object') {
+        return null;
+    }
+
+    const status = typeof metadata.problem_status === 'string' ? metadata.problem_status : null;
+    if (!status) {
+        return null;
+    }
+
+    switch (status) {
+        case 'error':
+            return { label: 'État : erreur', className: 'border-error/30 bg-error/10 text-error' };
+        case 'resolved':
+            return { label: 'État : résolu', className: 'border-success/30 bg-success/10 text-success' };
+        case 'partial':
+            return { label: 'État : partiel', className: 'border-warning/30 bg-warning/10 text-warning' };
+        case 'awaiting_user':
+            return { label: 'État : action requise', className: 'border-warning/30 bg-warning/10 text-warning' };
+        case 'investigating':
+            return { label: 'État : en cours', className: 'border-info/30 bg-info/10 text-info' };
+        case 'unresolved':
+            return { label: 'État : non résolu', className: 'border-error/30 bg-error/10 text-error' };
+        default:
+            return { label: `État : ${status}`, className: 'border-base-300 bg-base-200 text-base-content/70' };
+    }
 }
 
 function parseMessageSteps(metadata: AgentChatMessage['metadata']): AgentChatStep[] {
@@ -145,6 +171,10 @@ type Props = {
     onResolveApproval?: (messageUuid: string, decision: 'approve' | 'deny') => void;
     approvingMessageUuid?: string | null;
     onRoutingChange?: (routing: AgentModelRouting | null) => void;
+    chatMode?: 'plan' | 'build' | 'debug';
+    onChatModeChange?: (mode: 'plan' | 'build' | 'debug') => void;
+    attachments?: AgentChatAttachment[];
+    onAttachmentsChange?: (next: AgentChatAttachment[]) => void;
     /** Si fourni et non vide, affiche des suggestions au démarrage. */
     suggestions?: string[];
     placeholder?: string;
@@ -163,6 +193,10 @@ export function AgentChatPanel({
     onSend,
     onResolveApproval,
     approvingMessageUuid = null,
+    chatMode = 'build',
+    onChatModeChange,
+    attachments = [],
+    onAttachmentsChange,
     suggestions = [],
     placeholder = 'Écrire un message…',
     hideSessionHeader = false,
@@ -250,6 +284,7 @@ export function AgentChatPanel({
                             const resolving = approvingMessageUuid === message.uuid;
                             const isUser = message.role === 'user';
                             const steps = parseMessageSteps(message.metadata);
+                            const statusBadge = problemStatusBadge(message.metadata);
                             const displayContent = isUser
                                 ? message.content
                                 : sanitizeAssistantContent(message.content, steps);
@@ -280,6 +315,11 @@ export function AgentChatPanel({
                                             </div>
                                         ) : (
                                             <div class="grid gap-2 text-start">
+                                                {statusBadge && (
+                                                    <span class={`w-fit rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusBadge.className}`}>
+                                                        {statusBadge.label}
+                                                    </span>
+                                                )}
                                                 {steps.length > 0 && (
                                                     <IdeActionsCard steps={steps} title="Actions" />
                                                 )}
@@ -460,7 +500,34 @@ export function AgentChatPanel({
                         Configurez un provider LLM dans les paramètres pour discuter.
                     </p>
                 )}
-                <div class="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-base-300 bg-base-200/50 p-1.5 focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15 sm:p-2">
+                <div class="mx-auto flex max-w-3xl flex-col gap-2">
+                    {onChatModeChange && (
+                        <div class="flex flex-wrap gap-1 px-0.5" role="group" aria-label="Mode agent">
+                            {([
+                                ['plan', 'Planifier'],
+                                ['build', 'Construire'],
+                                ['debug', 'Déboguer'],
+                            ] as const).map(([value, label]) => (
+                                <button
+                                    key={value}
+                                    type="button"
+                                    class={`btn btn-xs ${chatMode === value ? 'btn-primary' : 'btn-ghost'}`}
+                                    disabled={sending}
+                                    onClick={() => onChatModeChange(value)}
+                                >
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                    {onAttachmentsChange && (
+                        <CaptureToolbar
+                            attachments={attachments}
+                            onChange={onAttachmentsChange}
+                            disabled={sending || !agent.provider}
+                        />
+                    )}
+                    <div class="flex items-end gap-2 rounded-2xl border border-base-300 bg-base-200/50 p-1.5 focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15 sm:p-2">
                     <textarea
                         ref={textareaRef}
                         class="max-h-40 min-h-[2.75rem] flex-1 resize-none bg-transparent px-2.5 py-2 text-base outline-none placeholder:text-base-content/40 sm:min-h-[2.5rem] sm:text-sm"
@@ -474,7 +541,7 @@ export function AgentChatPanel({
                     <button
                         type="button"
                         class="btn btn-primary btn-sm size-10 shrink-0 rounded-xl p-0"
-                        disabled={sending || !agent.provider || draft.trim() === ''}
+                        disabled={sending || !agent.provider || (draft.trim() === '' && attachments.length === 0)}
                         aria-label="Envoyer"
                         onClick={() => onSend(draft)}
                     >
@@ -482,39 +549,11 @@ export function AgentChatPanel({
                             ? <Square class="size-4" aria-hidden />
                             : <Send class="size-4" aria-hidden />}
                     </button>
+                    </div>
                 </div>
             </div>
         </div>
     );
 }
 
-export async function waitForChatReply(
-    agentUuid: string,
-    runUuid: string,
-    sessionUuid: string,
-    onMessages: (messages: AgentChatMessage[]) => void,
-    onRouting?: (routing: AgentModelRouting) => void,
-): Promise<void> {
-    for (let attempt = 0; attempt < 120; attempt += 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 1500));
-
-        const run = await domainApi.agentRun(agentUuid, runUuid);
-        if (run.data.metadata?.model_routing) {
-            onRouting?.(run.data.metadata.model_routing);
-        }
-        if (run.data.status === 'failed') {
-            throw new ApiError(502, { message: run.data.summary ?? 'La réponse de l\'agent a échoué.' });
-        }
-
-        if (!isTerminalAgentRunStatus(run.data.status)) {
-            continue;
-        }
-
-        const response = await domainApi.agentSessionMessages(agentUuid, sessionUuid);
-        onMessages(response.data);
-
-        return;
-    }
-
-    throw new ApiError(504, { message: 'Délai dépassé en attendant la réponse de l\'agent.' });
-}
+export { waitForChatReply } from '../../lib/agent-chat-stream';

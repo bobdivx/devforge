@@ -117,7 +117,7 @@ paths:
                   description: 'The flag to indicate if auto-deploy is enabled on git push. Defaults to true.'
                 is_force_https_enabled:
                   type: boolean
-                  description: 'The flag to indicate if HTTPS is forced. Defaults to true.'
+                  description: 'The flag to indicate if HTTPS is forced. Defaults to false.'
                 static_image:
                   type: string
                   enum: ['nginx:alpine']
@@ -404,7 +404,7 @@ paths:
                   description: 'The flag to indicate if auto-deploy is enabled on git push. Defaults to true.'
                 is_force_https_enabled:
                   type: boolean
-                  description: 'The flag to indicate if HTTPS is forced. Defaults to true.'
+                  description: 'The flag to indicate if HTTPS is forced. Defaults to false.'
                 static_image:
                   type: string
                   enum: ['nginx:alpine']
@@ -691,7 +691,7 @@ paths:
                   description: 'The flag to indicate if auto-deploy is enabled on git push. Defaults to true.'
                 is_force_https_enabled:
                   type: boolean
-                  description: 'The flag to indicate if HTTPS is forced. Defaults to true.'
+                  description: 'The flag to indicate if HTTPS is forced. Defaults to false.'
                 static_image:
                   type: string
                   enum: ['nginx:alpine']
@@ -1062,7 +1062,7 @@ paths:
                   description: 'The flag to indicate if the application should be deployed instantly.'
                 is_force_https_enabled:
                   type: boolean
-                  description: 'The flag to indicate if HTTPS is forced. Defaults to true.'
+                  description: 'The flag to indicate if HTTPS is forced. Defaults to false.'
                 use_build_server:
                   type: boolean
                   nullable: true
@@ -1276,7 +1276,7 @@ paths:
                   description: 'The flag to indicate if the application should be deployed instantly.'
                 is_force_https_enabled:
                   type: boolean
-                  description: 'The flag to indicate if HTTPS is forced. Defaults to true.'
+                  description: 'The flag to indicate if HTTPS is forced. Defaults to false.'
                 use_build_server:
                   type: boolean
                   nullable: true
@@ -1506,7 +1506,7 @@ paths:
                   description: 'The flag to indicate if auto-deploy is enabled on git push. Defaults to true.'
                 is_force_https_enabled:
                   type: boolean
-                  description: 'The flag to indicate if HTTPS is forced. Defaults to true.'
+                  description: 'The flag to indicate if HTTPS is forced. Defaults to false.'
                 install_command:
                   type: string
                   description: 'The install command.'

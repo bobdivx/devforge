@@ -7,9 +7,20 @@ return [
 
     'agents_enabled' => env('DEVFORGE_AGENTS_ENABLED', $devforgeEnabled),
 
+    /*
+    | Auto-correction sur échec de déploiement / readiness.
+    | Défaut true — l’agent deployment|devforge|debug est déclenché et
+    | les outils mutatifs passent en ALLOW (pas d’awaiting_approval).
+    */
     'agents_auto_fix_deployments' => env('DEVFORGE_AGENTS_AUTO_FIX_DEPLOYMENTS', true),
 
     'agents_auto_fallback' => env('DEVFORGE_AGENTS_AUTO_FALLBACK', true),
+
+    'agents_github_pr_watch' => env('DEVFORGE_AGENTS_GITHUB_PR_WATCH', true),
+
+    'agents_tech_watch' => env('DEVFORGE_AGENTS_TECH_WATCH', true),
+
+    'agents_parallel_delegate_timeout' => (int) env('DEVFORGE_AGENTS_PARALLEL_DELEGATE_TIMEOUT', 600),
 
     /*
     |--------------------------------------------------------------------------
@@ -62,9 +73,27 @@ return [
     */
     'agents_chat_source_write_preview' => env('DEVFORGE_AGENTS_CHAT_SOURCE_WRITE_PREVIEW', true),
 
-    'agents_max_iterations' => (int) env('DEVFORGE_AGENTS_MAX_ITERATIONS', 30),
+    'agents_max_iterations' => (int) env('DEVFORGE_AGENTS_MAX_ITERATIONS', 40),
 
-    'agents_chat_max_iterations' => (int) env('DEVFORGE_AGENTS_CHAT_MAX_ITERATIONS', 20),
+    'agents_chat_max_iterations' => (int) env('DEVFORGE_AGENTS_CHAT_MAX_ITERATIONS', 40),
+
+    /** Relances until-done (intention / explore-only) avant d'accepter une réponse texte. */
+    'agents_chat_max_continue_nudges' => (int) env('DEVFORGE_AGENTS_CHAT_MAX_CONTINUE_NUDGES', 4),
+
+    /** Si true : enqueue un run chat_continue quand une tâche actionnable reste inachevée. */
+    'agents_chat_enqueue_long_tasks' => filter_var(
+        env('DEVFORGE_AGENTS_CHAT_ENQUEUE_LONG_TASKS', true),
+        FILTER_VALIDATE_BOOLEAN,
+    ),
+
+    /** Budget caractères pour la compaction du contexte chat LLM. */
+    'agents_chat_context_max_chars' => (int) env('DEVFORGE_AGENTS_CHAT_CONTEXT_MAX_CHARS', 48000),
+
+    /** Instructions organisation par défaut (fallback si table layers vide). */
+    'agents_org_instructions' => (string) env('DEVFORGE_AGENTS_ORG_INSTRUCTIONS', ''),
+
+    /** Clé Brave Search (optionnelle). Sinon DuckDuckGo Instant Answer. */
+    'agents_web_search_brave_key' => (string) env('DEVFORGE_AGENTS_WEB_SEARCH_BRAVE_KEY', ''),
 
     'agents_max_concurrent_subagents' => (int) env('DEVFORGE_AGENTS_MAX_CONCURRENT_SUBAGENTS', 3),
 

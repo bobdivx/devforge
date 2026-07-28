@@ -1,10 +1,11 @@
 import { MessageSquarePlus, RefreshCw } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
-import type { Agent, AgentChatMessage, AgentChatSession, AgentModelRouting } from '../../lib/domain-api';
+import type { Agent, AgentChatAttachment, AgentChatMessage, AgentChatSession, AgentModelRouting } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
 import { ApiError } from '../../lib/api-client';
 import { agentDetailSessionUuid, shouldOpenAgentSettings, syncAgentDetailQuery } from '../../lib/agent-routes';
-import { AgentChatPanel, waitForChatReply } from './AgentChatPanel';
+import { waitForChatReply } from '../../lib/agent-chat-stream';
+import { AgentChatPanel } from './AgentChatPanel';
 import { SessionHistoryList } from './SessionHistoryList';
 
 type Props = {
@@ -31,6 +32,8 @@ export function AgentConversationView({
     const [approvingMessageUuid, setApprovingMessageUuid] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [draft, setDraft] = useState('');
+    const [chatMode, setChatMode] = useState<'plan' | 'build' | 'debug'>('build');
+    const [attachments, setAttachments] = useState<AgentChatAttachment[]>([]);
 
     const syncSessionQuery = (sessionUuid: string | null) => {
         syncAgentDetailQuery({
@@ -69,6 +72,7 @@ export function AgentConversationView({
     const selectSession = async (session: AgentChatSession) => {
         setSelectedSessionUuid(session.uuid);
         setActiveSession(session);
+        setChatMode(session.chat_mode ?? 'build');
         syncSessionQuery(session.uuid);
         setDraft('');
 
@@ -152,18 +156,20 @@ export function AgentConversationView({
 
     const sendMessage = async (content: string) => {
         const trimmed = content.trim();
-        if (!trimmed || sending || !agent.provider || !activeSession) {
+        if ((!trimmed && attachments.length === 0) || sending || !agent.provider || !activeSession) {
             return;
         }
 
         setSending(true);
         setError(null);
         setDraft('');
+        const pendingAttachments = attachments;
+        setAttachments([]);
 
         const optimisticUser: AgentChatMessage = {
             uuid: `pending-${Date.now()}`,
             role: 'user',
-            content: trimmed,
+            content: trimmed || '(captures jointes)',
             metadata: null,
             run_uuid: null,
             created_at: new Date().toISOString(),
@@ -171,11 +177,15 @@ export function AgentConversationView({
         setMessages((current) => [...current.filter((m) => m.uuid !== 'welcome'), optimisticUser]);
 
         try {
-            const response = await domainApi.sendAgentSessionMessage(agent.uuid, activeSession.uuid, trimmed);
+            const response = await domainApi.sendAgentSessionMessage(agent.uuid, activeSession.uuid, trimmed || 'Voir les captures jointes.', {
+                chat_mode: chatMode,
+                ...(pendingAttachments.length > 0 ? { attachments: pendingAttachments } : {}),
+            });
             setMessages((current) => [
                 ...current.filter((m) => m.uuid !== optimisticUser.uuid),
                 response.data.user,
             ]);
+            setActiveSession((current) => current ? { ...current, chat_mode: chatMode } : current);
 
             await waitForChatReply(
                 agent.uuid,
@@ -192,6 +202,7 @@ export function AgentConversationView({
             setMessages((current) => current.filter((m) => m.uuid !== optimisticUser.uuid));
             setError(err instanceof ApiError ? err.message : 'Échec de l\'envoi du message.');
             setDraft(trimmed);
+            setAttachments(pendingAttachments);
         } finally {
             setSending(false);
         }
@@ -312,6 +323,22 @@ export function AgentConversationView({
                         onSend={(content) => void sendMessage(content)}
                         onResolveApproval={(messageUuid, decision) => void resolveApproval(messageUuid, decision)}
                         approvingMessageUuid={approvingMessageUuid}
+                        chatMode={chatMode}
+                        onChatModeChange={(mode) => {
+                            setChatMode(mode);
+                            if (activeSession) {
+                                void domainApi.updateAgentSession(agent.uuid, activeSession.uuid, { chat_mode: mode })
+                                    .then((response) => {
+                                        setActiveSession(response.data);
+                                        setSessions((current) => current.map((item) => (
+                                            item.uuid === response.data.uuid ? response.data : item
+                                        )));
+                                    })
+                                    .catch(() => {});
+                            }
+                        }}
+                        attachments={attachments}
+                        onAttachmentsChange={setAttachments}
                     />
                 </div>
             </div>

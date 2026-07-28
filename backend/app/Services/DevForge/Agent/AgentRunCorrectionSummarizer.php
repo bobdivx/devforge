@@ -118,6 +118,35 @@ class AgentRunCorrectionSummarizer
     public function recordToolResult(AiAgentRun $run, string $toolName, array $arguments, array $result): void
     {
         if (isset($result['error'])) {
+            $corrective = in_array($toolName, [
+                'upsert_application_env_var',
+                'update_application_runtime_settings',
+                'update_application_git_branch',
+                'fix_application_host_permissions',
+                'fix_coolify_base_config_path',
+                'write_application_source',
+                'control_resource',
+                'exec_command',
+                'write_remote_file',
+            ], true);
+
+            if (! $corrective) {
+                return;
+            }
+
+            $run->mergeMetadata([
+                'correction_actions' => [
+                    ...((is_array($run->metadata['correction_actions'] ?? null)) ? $run->metadata['correction_actions'] : []),
+                    [
+                        'kind' => 'attempt_failed',
+                        'label' => $toolName,
+                        'detail' => mb_substr((string) $result['error'], 0, 200),
+                        'ok' => false,
+                        'at' => now()->toISOString(),
+                    ],
+                ],
+            ]);
+
             return;
         }
 
@@ -524,6 +553,9 @@ class AgentRunCorrectionSummarizer
             return 'needs_user';
         }
 
+        $failedAttempts = collect($actions)->contains(fn (array $action): bool => ($action['ok'] ?? true) === false
+            || ($action['kind'] ?? '') === 'attempt_failed');
+
         $hasFix = (bool) array_intersect($kinds, [
             'env_coolify',
             'runtime_settings',
@@ -538,19 +570,23 @@ class AgentRunCorrectionSummarizer
         ]);
         $hasRedeploy = in_array('redeploy', $kinds, true);
 
+        if ($failedAttempts && ! $hasFix && ! $hasRedeploy) {
+            return 'failed';
+        }
+
         if ($hasRedeploy && ! $hasFix) {
             return 'redeploy_only';
         }
 
         if ($hasFix && $hasRedeploy) {
-            return 'fixed';
+            return $failedAttempts ? 'partial' : 'fixed';
         }
 
         if ($hasFix) {
             return 'partial';
         }
 
-        return 'partial';
+        return $failedAttempts ? 'failed' : 'partial';
     }
 
     /**

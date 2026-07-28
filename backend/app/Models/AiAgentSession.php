@@ -16,6 +16,7 @@ class AiAgentSession extends Model
         'agent_id',
         'user_id',
         'title',
+        'chat_mode',
         'last_message_at',
     ];
 

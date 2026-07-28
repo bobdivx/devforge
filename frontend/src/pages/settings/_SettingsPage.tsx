@@ -1,4 +1,5 @@
 import { AiProvidersSettings } from '../../components/agents/AiProvidersSettings';
+import { LayeredInstructionsPanel } from '../../components/agents/LayeredInstructionsPanel';
 import { InstanceSettingsPanels, OauthSettingsPanel } from '../../components/settings/InstanceSettingsPanels';
 import { NotificationsSettingsPanel } from '../../components/settings/NotificationsSettingsPanel';
 import { InstanceBackupSettingsPanel } from '../../components/settings/InstanceBackupSettingsPanel';
@@ -93,9 +94,16 @@ export function SettingsPage({
                 );
             case 'ai':
                 return (
-                    <Card title="Intelligence Artificielle" eyebrow="Providers LLM">
-                        <AiProvidersSettings />
-                    </Card>
+                    <div class="grid gap-4">
+                        <Card title="Intelligence Artificielle" eyebrow="Providers LLM">
+                            <AiProvidersSettings />
+                        </Card>
+                        {agentsEnabled && (
+                            <Card title="Instructions agents" eyebrow="Couches org / perso / projet">
+                                <LayeredInstructionsPanel />
+                            </Card>
+                        )}
+                    </div>
                 );
             default:
                 return (

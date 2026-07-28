@@ -9,10 +9,9 @@ import { useApiQuery } from '../../lib/use-api-query';
 
 type ServerProxyPanelProps = {
     serverUuid: string;
-    legacyBaseUrl?: string;
 };
 
-export function ServerProxyPanel({ serverUuid, legacyBaseUrl = '' }: ServerProxyPanelProps) {
+export function ServerProxyPanel({ serverUuid }: ServerProxyPanelProps) {
     const settings = useApiQuery(
         `server-settings:${serverUuid}`,
         () => domainApi.serverSettings(serverUuid),
@@ -26,14 +25,6 @@ export function ServerProxyPanel({ serverUuid, legacyBaseUrl = '' }: ServerProxy
                     <RefreshCw class="size-3.5" aria-hidden />
                     Actualiser
                 </button>
-                {legacyBaseUrl && (
-                    <a
-                        class="btn btn-ghost btn-sm"
-                        href={`${legacyBaseUrl.replace(/\/$/, '')}/server/${serverUuid}/proxy`}
-                    >
-                        Édition avancée Coolify
-                    </a>
-                )}
             </div>
             <DataState loading={settings.loading} error={settings.error} onRetry={() => void settings.reload()}>
                 {proxy && (
@@ -61,7 +52,7 @@ export function ServerProxyPanel({ serverUuid, legacyBaseUrl = '' }: ServerProxy
                             ]}
                         />
                         <p class="text-xs text-base-content/55">
-                            Démarrage/arrêt, YAML et configs dynamiques restent dans Coolify pour l’instant.
+                            Lecture de l’état du proxy. Les actions démarrage/arrêt et YAML dynamique arriveront ensuite.
                         </p>
                     </div>
                 )}
@@ -160,10 +151,9 @@ export function ServerSwarmPanel({ serverUuid, canManage }: ServerSwarmPanelProp
 type ServerSentinelPanelProps = {
     serverUuid: string;
     canManage: boolean;
-    legacyBaseUrl?: string;
 };
 
-export function ServerSentinelPanel({ serverUuid, canManage, legacyBaseUrl = '' }: ServerSentinelPanelProps) {
+export function ServerSentinelPanel({ serverUuid, canManage }: ServerSentinelPanelProps) {
     const settings = useApiQuery(
         `server-settings:${serverUuid}`,
         () => domainApi.serverSettings(serverUuid),
@@ -230,14 +220,6 @@ export function ServerSentinelPanel({ serverUuid, canManage, legacyBaseUrl = '' 
                     <RefreshCw class="size-3.5" aria-hidden />
                     Actualiser
                 </button>
-                {legacyBaseUrl && (
-                    <a
-                        class="btn btn-ghost btn-sm"
-                        href={`${legacyBaseUrl.replace(/\/$/, '')}/server/${serverUuid}/sentinel`}
-                    >
-                        Actions agent Coolify
-                    </a>
-                )}
             </div>
             <DataState loading={settings.loading} error={settings.error} onRetry={() => void settings.reload()}>
                 {sentinel && (
@@ -328,9 +310,6 @@ export function ServerSentinelPanel({ serverUuid, canManage, legacyBaseUrl = '' 
                                 {saving ? 'Enregistrement…' : 'Enregistrer'}
                             </button>
                         )}
-                        <p class="text-xs text-base-content/55">
-                            Restart / sync / régénération du token restent dans Coolify.
-                        </p>
                     </div>
                 )}
             </DataState>

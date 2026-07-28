@@ -74,6 +74,21 @@ class AgentChatService
         }
 
         $trimmed = trim($content);
+        $attachments = $context['attachments'] ?? null;
+        if (is_array($attachments) && $attachments !== []) {
+            $trimmed = app(AgentChatAttachments::class)->appendToContent($trimmed, $attachments);
+        }
+
+        if ($trimmed === '') {
+            throw new \InvalidArgumentException('Message vide.');
+        }
+
+        if (isset($context['chat_mode'])) {
+            $session->update([
+                'chat_mode' => AgentChatMode::parse($context['chat_mode']),
+            ]);
+            $session->refresh();
+        }
 
         $this->sessionService->autoTitleFromMessage($session, $trimmed);
 
@@ -86,6 +101,11 @@ class AgentChatService
             'role' => 'user',
 
             'content' => $trimmed,
+
+            'metadata' => array_filter([
+                'attachments' => is_array($attachments) && $attachments !== [] ? array_slice($attachments, 0, 8) : null,
+                'chat_mode' => AgentChatMode::parse($session->chat_mode ?? ($context['chat_mode'] ?? 'build')),
+            ]),
 
         ]);
 
@@ -101,7 +121,7 @@ class AgentChatService
 
             'started_at' => now(),
 
-            'metadata' => $this->initialChatMetadata($context),
+            'metadata' => $this->initialChatMetadata($context, $session),
 
         ]);
 
@@ -151,6 +171,12 @@ class AgentChatService
             if (isset($reply['steps']) && is_array($reply['steps']) && $reply['steps'] !== []) {
 
                 $metadata['steps'] = $reply['steps'];
+
+            }
+
+            if (isset($reply['long_task_id'])) {
+
+                $metadata['long_task_id'] = $reply['long_task_id'];
 
             }
 
@@ -406,11 +432,28 @@ class AgentChatService
 
         $chatContext = is_array($run->metadata) ? $run->metadata : [];
 
+        $session = $userMessage->session;
+
+        if (! $session instanceof AiAgentSession) {
+
+            throw new \RuntimeException('Message de chat sans session associée.');
+        }
+
         $runContext = array_filter([
 
             'application_uuid' => is_string($chatContext['application_uuid'] ?? null)
 
                 ? $chatContext['application_uuid']
+
+                : null,
+
+            'chat_mode' => AgentChatMode::parse(
+                $chatContext['chat_mode'] ?? $session->chat_mode ?? 'build'
+            ),
+
+            'user_email' => is_string($chatContext['user_email'] ?? null)
+
+                ? $chatContext['user_email']
 
                 : null,
 
@@ -438,30 +481,40 @@ class AgentChatService
 
         );
 
-        $session = $userMessage->session;
-
-        if (! $session instanceof AiAgentSession) {
-
-            throw new \RuntimeException('Message de chat sans session associée.');
-        }
-
         $history = $this->history($agent, $session);
+
+        $compactor = app(AgentContextCompactor::class);
 
         $messages = [
 
-            ['role' => 'system', 'content' => $this->promptBuilder->chatSystemPrompt($agent, $userContent, $chatContext)],
+            ['role' => 'system', 'content' => $this->promptBuilder->chatSystemPrompt($agent, $userContent, [
+                ...$chatContext,
+                'chat_mode' => $runContext['chat_mode'] ?? 'build',
+            ])],
 
-            ...$history->map(fn (AiAgentMessage $message): array => [
+            ...$history->map(function (AiAgentMessage $message) use ($compactor): array {
+                $content = $message->content;
+                if ($message->role === 'assistant') {
+                    $content = $compactor->enrichAssistantContent(
+                        $content,
+                        is_array($message->metadata) ? $message->metadata : null,
+                    );
+                }
 
-                'role' => $message->role === 'assistant' ? 'assistant' : 'user',
-
-                'content' => $message->content,
-
-            ])->all(),
+                return [
+                    'role' => $message->role === 'assistant' ? 'assistant' : 'user',
+                    'content' => $content,
+                ];
+            })->all(),
 
         ];
 
-        $budget = new IterationBudget((int) config('devforge.agents_chat_max_iterations', 20));
+        $messages = $compactor->compact(
+            $messages,
+            (int) config('devforge.agents_chat_context_max_chars', 48000),
+        );
+
+        $budget = new IterationBudget((int) config('devforge.agents_chat_max_iterations', 40));
 
         $tokensUsed = 0;
 
@@ -474,6 +527,17 @@ class AgentChatService
         $proseToolNudgeUsed = false;
 
         $toolsUsedThisTurn = false;
+
+        /** @var list<string> $toolsUsedThisRun */
+        $toolsUsedThisRun = [];
+
+        $continueNudges = 0;
+
+        $maxContinueNudges = (int) config('devforge.agents_chat_max_continue_nudges', 4);
+
+        $reachedDone = false;
+
+        $untilDone = app(AgentUntilDonePolicy::class);
 
         /** @var list<array<string, mixed>> $steps */
         $steps = [];
@@ -497,9 +561,13 @@ class AgentChatService
 
             if (! $response->hasToolCalls()) {
 
-                // Intention réparation + aucun tool_call → exécution déterministe (ne dépend pas du LLM).
-                if ($steps === [] && AgentDirectives::isChatRepairIntent($userContent)) {
-                    $run->appendLog('Fallback chat : intention réparation sans tool_call — exécution autonome forcée.');
+                // Intention réparation + aucune correction (même si diagnostic logs lu) → harness.
+                if (
+                    AgentDirectives::isChatRepairIntent($userContent)
+                    && ! AgentChatRepairStrategy::stepsIncludeCorrectiveAction($steps)
+                    && ! AgentChatRepairStrategy::hasRecordedCorrection($run->metadata['correction_actions'] ?? null)
+                ) {
+                    $run->appendLog('Fallback chat : intention réparation sans correction — exécution autonome forcée.');
 
                     $harness = app(AgentRepairHarness::class)->execute(
                         $toolkit,
@@ -513,7 +581,7 @@ class AgentChatService
                         'text' => $harness['text'],
                         'tokens_used' => $tokensUsed,
                         'iterations' => $budget->getUsed(),
-                        'steps' => $harness['steps'],
+                        'steps' => [...$steps, ...$harness['steps']],
                         ...isset($harness['pending_approval']) ? ['pending_approval' => $harness['pending_approval']] : [],
                     ];
                 }
@@ -560,6 +628,28 @@ class AgentChatService
 
                 }
 
+                $decision = $untilDone->decide(
+                    $userContent,
+                    (string) ($response->text ?? ''),
+                    $toolsUsedThisRun,
+                    $continueNudges,
+                    $maxContinueNudges,
+                );
+
+                if ($decision['continue'] === true) {
+                    $continueNudges++;
+                    $messages[] = ['role' => 'assistant', 'content' => $response->text ?: '…'];
+                    $messages[] = ['role' => 'user', 'content' => $decision['nudge'] ?? AgentDirectives::chatToolNudgeMessage($userContent)];
+                    $run->appendLog('Until-done : '.$decision['reason']." (nudge {$continueNudges}/{$maxContinueNudges}).");
+
+                    continue;
+                }
+
+                if ($decision['reason'] === 'done') {
+                    $reachedDone = true;
+                    $summary = $untilDone->stripDoneMarker((string) ($response->text ?? $summary));
+                }
+
                 break;
 
             }
@@ -575,6 +665,8 @@ class AgentChatService
             $pendingPlan = null;
 
             foreach ($response->toolCalls as $toolCall) {
+
+                $toolsUsedThisRun[] = (string) $toolCall['name'];
 
                 if ($pendingApproval !== null || $pendingPlan !== null) {
 
@@ -678,6 +770,12 @@ class AgentChatService
 
             }
 
+            $run->mergeMetadata(['steps' => $steps]);
+            $run->update([
+                'iterations' => $budget->getUsed(),
+                'tokens_used' => $tokensUsed,
+            ]);
+
             if (! $hadToolFailure) {
 
                 $budget->refund();
@@ -746,10 +844,14 @@ class AgentChatService
             $summary = 'Je n\'ai pas pu générer de réponse.';
         }
 
-        $summary = $this->sanitizeAssistantReply($summary, $steps);
+        $summary = $untilDone->stripDoneMarker($this->sanitizeAssistantReply($summary, $steps));
 
-        if ($steps === [] && AgentDirectives::isChatRepairIntent($userContent)) {
-            $run->appendLog('Fallback chat : réponse sans outils après boucle — exécution autonome forcée.');
+        if (
+            AgentDirectives::isChatRepairIntent($userContent)
+            && ! AgentChatRepairStrategy::stepsIncludeCorrectiveAction($steps)
+            && ! AgentChatRepairStrategy::hasRecordedCorrection($run->metadata['correction_actions'] ?? null)
+        ) {
+            $run->appendLog('Fallback chat : réponse sans correction après boucle — exécution autonome forcée.');
 
             $harness = app(AgentRepairHarness::class)->execute(
                 $toolkit,
@@ -763,9 +865,36 @@ class AgentChatService
                 'text' => $harness['text'],
                 'tokens_used' => $tokensUsed,
                 'iterations' => $iterations,
-                'steps' => $harness['steps'],
+                'steps' => [...$steps, ...$harness['steps']],
                 ...isset($harness['pending_approval']) ? ['pending_approval' => $harness['pending_approval']] : [],
             ];
+        }
+
+        $longTaskId = null;
+        $incomplete = ! $reachedDone
+            && (
+                $budget->getRemaining() === 0
+                || $continueNudges >= $maxContinueNudges
+            )
+            && $untilDone->isActionOriented($userContent)
+            && (string) ($run->trigger ?? '') !== 'chat_continue'
+            && (bool) config('devforge.agents_chat_enqueue_long_tasks', true);
+
+        if ($incomplete && $session instanceof AiAgentSession) {
+            $enqueued = app(AgentChatLongTaskEnqueuer::class)->enqueue(
+                $agent,
+                $session,
+                $userContent,
+                mb_substr($summary, 0, 4000),
+                $toolsUsedThisRun,
+                is_array($chatContext) ? $chatContext : [],
+            );
+            if (($enqueued['ok'] ?? false) === true) {
+                $longTaskId = $enqueued['run']->id;
+                $run->appendLog("Tâche longue enqueued — run #{$longTaskId}.");
+                $summary .= "\n\n---\n⏳ Tâche longue relancée en arrière-plan (run #{$longTaskId}). "
+                    .'Le chat continue automatiquement dans cette session.';
+            }
         }
 
         return [
@@ -773,6 +902,7 @@ class AgentChatService
             'tokens_used' => $tokensUsed,
             'iterations' => $iterations,
             'steps' => $steps,
+            ...$longTaskId !== null ? ['long_task_id' => $longTaskId] : [],
         ];
     }
 
@@ -849,7 +979,7 @@ class AgentChatService
      * @param  array<string, mixed>  $context
      * @return array<string, string>|null
      */
-    private function initialChatMetadata(array $context): ?array
+    private function initialChatMetadata(array $context, ?AiAgentSession $session = null): ?array
     {
         $metadata = array_filter([
             'application_uuid' => is_string($context['application_uuid'] ?? null) ? $context['application_uuid'] : null,
@@ -858,6 +988,8 @@ class AgentChatService
             'git_branch' => is_string($context['git_branch'] ?? null) ? $context['git_branch'] : null,
             'build_pack' => is_string($context['build_pack'] ?? null) ? $context['build_pack'] : null,
             'fqdn' => is_string($context['fqdn'] ?? null) ? $context['fqdn'] : null,
+            'chat_mode' => AgentChatMode::parse($context['chat_mode'] ?? $session?->chat_mode ?? 'build'),
+            'user_email' => is_string($context['user_email'] ?? null) ? $context['user_email'] : null,
         ], fn (?string $value): bool => $value !== null && $value !== '');
 
         return $metadata === [] ? null : $metadata;

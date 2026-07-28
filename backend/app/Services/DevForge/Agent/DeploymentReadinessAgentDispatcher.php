@@ -83,6 +83,20 @@ class DeploymentReadinessAgentDispatcher
             return null;
         }
 
+        try {
+            app(ApplicationOverviewChatBridge::class)->postFailureAnnouncement(
+                $agent,
+                $run,
+                $application,
+                $context,
+            );
+        } catch (\Throwable $e) {
+            Log::warning('DevForge readiness: impossible de publier dans le chat overview.', [
+                'application_uuid' => $application->uuid,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         Log::info('DevForge readiness: agent déclenché après échec de probe.', [
             'agent_uuid' => $agent->uuid,
             'run_uuid' => $run->uuid,

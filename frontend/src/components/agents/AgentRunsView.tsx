@@ -173,7 +173,21 @@ export function AgentRunsView({ agent, initialRunUuid = null, onAgentUpdated }: 
 
                 <div class="min-h-0 min-w-0 flex-1 overflow-y-auto bg-base-100 p-3 sm:p-4">
                     {displayRun ? (
-                        <AgentRunDetail run={displayRun} tracking={isTracking && displayRun.uuid === activeRun?.uuid} />
+                        <AgentRunDetail
+                            run={displayRun}
+                            agentUuid={agent.uuid}
+                            tracking={isTracking && displayRun.uuid === activeRun?.uuid}
+                            onResolved={() => {
+                                void refreshRuns().then(async (list) => {
+                                    const current = list.find((item) => item.uuid === displayRun.uuid);
+                                    if (current) {
+                                        const detailed = await domainApi.agentRun(agent.uuid, current.uuid);
+                                        setSelectedRun(detailed.data);
+                                    }
+                                    onAgentUpdated();
+                                });
+                            }}
+                        />
                     ) : (
                         <div class="flex h-full min-h-[16rem] flex-col items-center justify-center gap-4 px-6 py-12 text-center">
                             <div class="grid size-14 place-items-center rounded-2xl border border-base-300 bg-base-200/60 text-base-content/40">

@@ -7,6 +7,7 @@ import { ResourceStatusIcon } from '../../components/ui/ResourceStatusIcon';
 import { Tabs } from '../../components/ui/Tabs';
 import { LegacyEditBanner } from '../../components/migration/LegacyEditBanner';
 import { SettingsDetailList } from '../../components/settings/SettingsPanels';
+import { ServerAdvancedPanel, ServerTerminalAccessPanel } from '../../components/servers/ServerAdvancedPanels';
 import { ServerCleanupPanel } from '../../components/servers/ServerCleanupPanel';
 import { ServerDestinationsPanel } from '../../components/servers/ServerDestinationsPanel';
 import { ServerFileExplorer } from '../../components/servers/ServerFileExplorer';
@@ -46,11 +47,13 @@ const nativeSections = new Set<ServerSectionId>([
     'proxy',
     'swarm',
     'sentinel',
+    'advanced',
+    'security-terminal-access',
 ]);
 
 export function ServerPage({
     path,
-    legacyBaseUrl = '',
+    legacyBaseUrl: _legacyBaseUrl = '',
     canManage = false,
     canAccessTerminal = false,
 }: ServerPageProps) {
@@ -217,15 +220,18 @@ export function ServerPage({
             ) : activeSection === 'terminal' ? (
                 <TerminalConsole canAccess={canAccessTerminal} initialServerUuid={serverUuid} />
             ) : activeSection === 'proxy' ? (
-                <ServerProxyPanel serverUuid={serverUuid} legacyBaseUrl={legacyBaseUrl} />
+                <ServerProxyPanel serverUuid={serverUuid} />
             ) : activeSection === 'swarm' ? (
                 <ServerSwarmPanel serverUuid={serverUuid} canManage={canManage} />
             ) : activeSection === 'sentinel' ? (
                 <ServerSentinelPanel
                     serverUuid={serverUuid}
                     canManage={canManage}
-                    legacyBaseUrl={legacyBaseUrl}
                 />
+            ) : activeSection === 'advanced' ? (
+                <ServerAdvancedPanel serverUuid={serverUuid} canManage={canManage} />
+            ) : activeSection === 'security-terminal-access' ? (
+                <ServerTerminalAccessPanel serverUuid={serverUuid} canManage={canManage} />
             ) : !nativeSections.has(activeSection) ? (
                 <LegacyEditBanner
                     title={sectionMeta.label}

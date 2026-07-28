@@ -15,11 +15,14 @@ import {
     outcomeToneClass,
     shortSha,
 } from '../../lib/agent-correction-summary';
+import { selectVisibleAgentRuns } from '../../lib/select-visible-agent-runs';
 
 type Props = {
     deploymentUuid: string;
     onSelectDeployment?: (deploymentUuid: string) => void;
     pollWhileActive?: boolean;
+    /** Affiche le dernier run terminé (ouvert depuis l’historique). */
+    historyMode?: boolean;
 };
 
 function eventLabel(event?: string | null): string {
@@ -34,20 +37,28 @@ function eventLabel(event?: string | null): string {
     return 'Intervention agent';
 }
 
-export function DeploymentAgentCard({ deploymentUuid, onSelectDeployment, pollWhileActive = true }: Props) {
+export function DeploymentAgentCard({
+    deploymentUuid,
+    onSelectDeployment,
+    pollWhileActive = true,
+    historyMode = false,
+}: Props) {
     const query = useApiQuery(
         `deployment-monitoring:${deploymentUuid}`,
         () => domainApi.deploymentMonitoring(deploymentUuid),
     );
     const monitoring = query.data?.data ?? null;
     const blockers = monitoring?.diagnostics?.blockers ?? [];
+    const visibleRuns = monitoring
+        ? selectVisibleAgentRuns(monitoring.agent_runs, { historyMode })
+        : [];
     const hasActiveRun = monitoring?.agent_runs.some((run) => run.status === 'pending' || run.status === 'running') ?? false;
     const hasActiveSubagent = monitoring?.agent_runs.some((run) =>
         (run.subagent_runs ?? []).some((sub) => sub.status === 'pending' || sub.status === 'running'),
     ) ?? false;
     const awaitingAgent = Boolean(
         monitoring
-        && monitoring.agent_runs.length === 0
+        && visibleRuns.length === 0
         && (monitoring.deployment.status.includes('fail') || monitoring.deployment.status.includes('progress'))
         && (monitoring.diagnostics?.eligible_agents_count ?? 0) > 0,
     );
@@ -105,14 +116,18 @@ export function DeploymentAgentCard({ deploymentUuid, onSelectDeployment, pollWh
                                 </p>
                             )}
 
-                            {monitoring.agent_runs.length === 0 ? (
+                            {visibleRuns.length === 0 ? (
                                 <div class="grid gap-3 rounded-xl border border-dashed border-base-300 px-3 py-4 text-sm text-base-content/55 sm:px-4 sm:py-5">
                                     <div class="flex items-start gap-3">
                                         <Bot class="mt-0.5 size-5 shrink-0 text-base-content/35" aria-hidden />
                                         <p>
-                                            {monitoring.deployment.status.includes('fail')
-                                                ? 'Aucun agent déclenché pour cet échec.'
-                                                : 'Aucune intervention agent pour ce déploiement.'}
+                                            {historyMode
+                                                ? 'Aucune intervention agent pour ce déploiement.'
+                                                : monitoring.deployment.status.includes('fail')
+                                                    ? 'Aucun agent en cours. Les interventions passées sont dans l’historique.'
+                                                    : monitoring.agent_runs.some((run) => !run.historical_for_other_attempt)
+                                                        ? 'Aucune intervention agent en cours. Les runs précédents sont dans l’historique.'
+                                                        : 'Aucune intervention agent pour ce déploiement.'}
                                         </p>
                                     </div>
                                     {blockers.length > 0 && (
@@ -124,7 +139,7 @@ export function DeploymentAgentCard({ deploymentUuid, onSelectDeployment, pollWh
                                             ))}
                                         </ul>
                                     )}
-                                    {(monitoring.catch_up_triggered || (shouldPoll && monitoring.agent_runs.length === 0)) && (
+                                    {(monitoring.catch_up_triggered || (shouldPoll && visibleRuns.length === 0)) && (
                                         <p class="border-t border-base-300/60 pt-3 text-xs text-primary">
                                             En attente de l’agent…
                                         </p>
@@ -140,7 +155,7 @@ export function DeploymentAgentCard({ deploymentUuid, onSelectDeployment, pollWh
                                         </p>
                                     )}
                                 </div>
-                            ) : monitoring.agent_runs.map((run) => (
+                            ) : visibleRuns.map((run) => (
                                 <AgentRunCard
                                     key={run.uuid}
                                     deploymentUuid={deploymentUuid}

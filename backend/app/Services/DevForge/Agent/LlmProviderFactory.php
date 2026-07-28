@@ -6,8 +6,10 @@ use App\Enums\TaskModelTier;
 use App\Models\AiAgent;
 use App\Models\AiProviderConfig;
 use App\Services\DevForge\Agent\Contracts\LlmProvider;
+use App\Services\DevForge\Agent\Providers\AnthropicProvider;
 use App\Services\DevForge\Agent\Providers\GeminiModelFailoverProvider;
 use App\Services\DevForge\Agent\Providers\OllamaProvider;
+use App\Services\DevForge\Agent\Providers\OpenAiCompatibleProvider;
 use App\Services\DevForge\Agent\Providers\ResilientLlmProvider;
 
 class LlmProviderFactory
@@ -32,6 +34,23 @@ class LlmProviderFactory
             'ollama' => new OllamaProvider(
                 baseUrl: LlmEndpointResolver::ollamaBaseUrl($config->base_url),
                 model: $this->resolveOllamaModel($config),
+            ),
+            'openai', 'openrouter' => new OpenAiCompatibleProvider(
+                apiKey: (string) $config->api_key,
+                model: $this->resolveOpenAiCompatibleModel($config),
+                baseUrl: LlmEndpointResolver::openAiCompatibleBaseUrl($config->provider, $config->base_url),
+                label: $config->provider,
+                extraHeaders: $config->provider === 'openrouter'
+                    ? [
+                        'HTTP-Referer' => (string) config('app.url', 'https://coolify.io'),
+                        'X-Title' => 'DevForge',
+                    ]
+                    : [],
+            ),
+            'anthropic' => new AnthropicProvider(
+                apiKey: (string) $config->api_key,
+                model: $this->resolveAnthropicModel($config),
+                baseUrl: LlmEndpointResolver::anthropicBaseUrl($config->base_url),
             ),
             default => throw new \InvalidArgumentException("Provider non supporté : {$config->provider}"),
         };
@@ -187,5 +206,31 @@ class LlmProviderFactory
         }
 
         return LlmModelResolver::defaultOllamaModel();
+    }
+
+    private function resolveOpenAiCompatibleModel(AiProviderConfig $config): string
+    {
+        if (! LlmModelResolver::isAuto($config->model)) {
+            $explicit = trim($config->model);
+
+            if ($explicit !== '') {
+                return $explicit;
+            }
+        }
+
+        return LlmProviderRegistry::defaultModel($config->provider);
+    }
+
+    private function resolveAnthropicModel(AiProviderConfig $config): string
+    {
+        if (! LlmModelResolver::isAuto($config->model)) {
+            $explicit = trim($config->model);
+
+            if ($explicit !== '') {
+                return $explicit;
+            }
+        }
+
+        return LlmProviderRegistry::defaultModel('anthropic');
     }
 }

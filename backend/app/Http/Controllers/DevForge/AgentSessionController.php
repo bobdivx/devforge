@@ -85,7 +85,8 @@ class AgentSessionController extends Controller
         $this->authorize('chat', $agent);
 
         $validated = $request->validate([
-            'title' => ['required', 'string', 'max:120'],
+            'title' => ['nullable', 'string', 'max:120'],
+            'chat_mode' => ['nullable', 'string', 'in:plan,build,debug'],
         ]);
 
         try {
@@ -94,11 +95,17 @@ class AgentSessionController extends Controller
                 $this->currentUser($request),
                 $sessionUuid,
             );
-            $session = $this->sessionService->updateTitle(
-                $session,
-                $this->currentUser($request),
-                $validated['title'],
-            );
+            if (isset($validated['title'])) {
+                $session = $this->sessionService->updateTitle(
+                    $session,
+                    $this->currentUser($request),
+                    $validated['title'],
+                );
+            }
+            if (isset($validated['chat_mode'])) {
+                $session->update(['chat_mode' => $validated['chat_mode']]);
+                $session->refresh();
+            }
         } catch (\InvalidArgumentException $exception) {
             abort(422, $exception->getMessage());
         }
@@ -177,6 +184,13 @@ class AgentSessionController extends Controller
         $validated = $request->validate([
             'content' => ['required', 'string', 'max:10000'],
             'application_uuid' => ['nullable', 'string', 'max:64'],
+            'chat_mode' => ['nullable', 'string', 'in:plan,build,debug'],
+            'attachments' => ['nullable', 'array', 'max:8'],
+            'attachments.*.type' => ['nullable', 'string', 'max:32'],
+            'attachments.*.label' => ['nullable', 'string', 'max:120'],
+            'attachments.*.url' => ['nullable', 'string', 'max:2500000'],
+            'attachments.*.text' => ['nullable', 'string', 'max:4000'],
+            'attachments.*.selector' => ['nullable', 'string', 'max:500'],
         ]);
 
         if (! Schema::hasTable('ai_agent_messages') || ! Schema::hasTable('ai_agent_sessions')) {
@@ -194,6 +208,16 @@ class AgentSessionController extends Controller
                 $agent,
                 $validated['application_uuid'] ?? null,
             );
+            if (isset($validated['chat_mode'])) {
+                $context['chat_mode'] = $validated['chat_mode'];
+            }
+            if (! empty($validated['attachments'])) {
+                $context['attachments'] = $validated['attachments'];
+            }
+            $user = $this->currentUser($request);
+            if (is_string($user->email) && $user->email !== '') {
+                $context['user_email'] = $user->email;
+            }
             $result = $this->chatService->queueMessage($agent, $session, $validated['content'], $context);
         } catch (\InvalidArgumentException $exception) {
             abort(422, $exception->getMessage());
@@ -295,6 +319,7 @@ class AgentSessionController extends Controller
         return [
             'uuid' => $session->uuid,
             'title' => $session->title,
+            'chat_mode' => $session->chat_mode ?? 'build',
             'is_legacy' => $session->isLegacyShared(),
             'last_message_at' => $session->last_message_at?->toISOString(),
             'created_at' => $session->created_at->toISOString(),

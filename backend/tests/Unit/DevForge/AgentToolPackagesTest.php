@@ -37,16 +37,43 @@ it('always exposes meta tools for self-provisioning', function () {
     expect($names)->toContain('enable_tool_package')
         ->and($names)->toContain('install_tool')
         ->and($names)->toContain('request_tool')
-        ->and($names)->toContain('list_tool_packages');
+        ->and($names)->toContain('list_tool_packages')
+        ->and($names)->toContain('memory_read')
+        ->and($names)->toContain('memory_write')
+        ->and($names)->toContain('todo_read')
+        ->and($names)->toContain('todo_write')
+        ->and($names)->toContain('web_search');
 });
 
-it('auto-enables github package for github agent type', function () {
+it('exposes github write tools when github package is enabled', function () {
     $agent = AiAgent::factory()->create(['team_id' => $this->team->id, 'type' => 'github']);
     $toolkit = makeToolkit($this->team, $agent, $this->run);
     $names = collect($toolkit->definitions())->pluck('name');
 
-    expect($names)->toContain('list_github_repos')
-        ->and($names)->toContain('read_github_file');
+    expect($names)->toContain('create_github_branch')
+        ->and($names)->toContain('write_github_file')
+        ->and($names)->toContain('create_github_pull_request')
+        ->and($names)->toContain('merge_github_pull_request')
+        ->and($names)->toContain('close_github_pull_request')
+        ->and($names)->toContain('comment_github_pull_request');
+});
+
+it('hides github write tools in plan chat mode', function () {
+    $agent = AiAgent::factory()->create(['team_id' => $this->team->id, 'type' => 'github']);
+    $toolkit = new AgentToolkit(
+        team: $this->team,
+        run: $this->run,
+        catalog: app(CoreResourceCatalog::class),
+        resourceAction: app(CoreResourceAction::class),
+        deploymentData: app(DeploymentData::class),
+        agent: $agent,
+        runContext: ['chat_mode' => 'plan'],
+    );
+    $names = collect($toolkit->definitions())->pluck('name');
+
+    expect($names)->toContain('read_github_file')
+        ->and($names)->not->toContain('write_github_file')
+        ->and($names)->not->toContain('control_resource');
 });
 
 it('auto-enables github package for deployment and debug agent types', function () {

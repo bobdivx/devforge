@@ -1,0 +1,341 @@
+<?php
+
+namespace App\Services\DevForge\Application;
+
+use App\Models\Application;
+use App\Models\Team;
+use App\Services\DevForge\Agent\AgentDirectives;
+use Illuminate\Validation\ValidationException;
+
+class ApplicationRuntimeSettingsDetector
+{
+    public function __construct(
+        private readonly ApplicationSourceService $sourceService,
+    ) {}
+
+    /**
+     * Suggest runtime settings from repo config files (read-only — does not persist).
+     *
+     * @return array{
+     *     available: bool,
+     *     reason: string|null,
+     *     sources: list<string>,
+     *     suggestions: array<string, mixed>,
+     *     reasons: list<string>
+     * }
+     */
+    public function detect(Team $team, Application $application): array
+    {
+        $info = $this->sourceService->info($application);
+        if (! ($info['available'] ?? false)) {
+            return [
+                'available' => false,
+                'reason' => is_string($info['reason'] ?? null) ? $info['reason'] : 'Source GitHub indisponible.',
+                'sources' => [],
+                'suggestions' => [],
+                'reasons' => [],
+            ];
+        }
+
+        $base = ApplicationGitRepositoryParser::normalizeSourcePath($application->base_directory ?: '');
+        $files = $this->readConfigFiles($team, $application, $base);
+
+        return $this->inferFromContents($files, $application);
+    }
+
+    /**
+     * Pure inference from file contents (unit-testable without GitHub).
+     *
+     * @param  array<string, string>  $files  relative path => content
+     * @return array{
+     *     available: bool,
+     *     reason: string|null,
+     *     sources: list<string>,
+     *     suggestions: array<string, mixed>,
+     *     reasons: list<string>
+     * }
+     */
+    public function inferFromContents(array $files, ?Application $application = null): array
+    {
+        $sources = array_keys($files);
+        $reasons = [];
+        $suggestions = [];
+
+        $package = $this->decodeJson($files['package.json'] ?? null);
+        $astroConfig = $files['astro.config.mjs']
+            ?? $files['astro.config.ts']
+            ?? $files['astro.config.js']
+            ?? $files['astro.config.mts']
+            ?? null;
+        $nixpacks = $files['nixpacks.toml'] ?? null;
+        $dockerfile = $files['Dockerfile'] ?? $files['dockerfile'] ?? null;
+        $envExample = $files['.env.example'] ?? $files['.env'] ?? null;
+
+        $deps = $this->dependencyNames($package);
+        $scripts = is_array($package['scripts'] ?? null) ? $package['scripts'] : [];
+
+        $hasAstro = isset($deps['astro']);
+        $hasNodeAdapter = $this->hasAnyDep($deps, [
+            '@astrojs/node',
+            '@astrojs/vercel',
+            '@astrojs/cloudflare',
+            '@astrojs/netlify',
+        ]);
+        $hasNext = isset($deps['next']);
+        $hasNuxt = isset($deps['nuxt']);
+        $hasVite = isset($deps['vite']) && ! $hasAstro && ! $hasNext;
+        $hasExpressOrFastify = $this->hasAnyDep($deps, ['express', 'fastify', 'hono', 'koa', '@nestjs/core']);
+
+        $astroOutputStatic = is_string($astroConfig)
+            && preg_match('/\boutput\s*:\s*[\'"]static[\'"]/', $astroConfig) === 1;
+        $astroOutputServer = is_string($astroConfig)
+            && preg_match('/\boutput\s*:\s*[\'"](server|hybrid)[\'"]/', $astroConfig) === 1;
+
+        $isStatic = false;
+        $publishDirectory = '/';
+        $portsExposes = '3000';
+        $startCommand = null;
+        $buildCommand = null;
+        $installCommand = null;
+
+        if ($hasAstro) {
+            if ($astroOutputServer || $hasNodeAdapter) {
+                $isStatic = false;
+                $portsExposes = '4321';
+                $publishDirectory = '/';
+                $reasons[] = 'Astro SSR détecté (adapter Node / output server|hybrid) → pas de site statique nginx.';
+                if (isset($scripts['start']) && is_string($scripts['start'])) {
+                    $startCommand = $scripts['start'];
+                } elseif (isset($scripts['preview']) && is_string($scripts['preview'])) {
+                    $startCommand = 'npm run preview';
+                }
+            } elseif ($astroOutputStatic || ! $hasNodeAdapter) {
+                $isStatic = true;
+                $portsExposes = '80';
+                $publishDirectory = '/dist';
+                $reasons[] = 'Astro static détecté → nginx + publish_directory=/dist.';
+            }
+            if (isset($scripts['build']) && is_string($scripts['build'])) {
+                $buildCommand = $scripts['build'];
+            }
+        } elseif ($hasNext) {
+            $isStatic = false;
+            $portsExposes = '3000';
+            $publishDirectory = '/';
+            $reasons[] = 'Next.js détecté → runtime Node (pas static).';
+            if (isset($scripts['start']) && is_string($scripts['start'])) {
+                $startCommand = $scripts['start'];
+            }
+            if (isset($scripts['build']) && is_string($scripts['build'])) {
+                $buildCommand = $scripts['build'];
+            }
+        } elseif ($hasNuxt) {
+            $isStatic = false;
+            $portsExposes = '3000';
+            $publishDirectory = '/';
+            $reasons[] = 'Nuxt détecté → runtime Node.';
+            if (isset($scripts['start']) && is_string($scripts['start'])) {
+                $startCommand = $scripts['start'];
+            }
+        } elseif ($hasExpressOrFastify) {
+            $isStatic = false;
+            $portsExposes = '3000';
+            $publishDirectory = '/';
+            $reasons[] = 'Serveur Node (express/fastify/…) détecté.';
+            if (isset($scripts['start']) && is_string($scripts['start'])) {
+                $startCommand = $scripts['start'];
+            }
+        } elseif ($hasVite || (isset($scripts['build']) && is_string($scripts['build']) && preg_match('/\bvite\b/', $scripts['build']) === 1)) {
+            $isStatic = true;
+            $portsExposes = '80';
+            $publishDirectory = '/dist';
+            $reasons[] = 'Vite (SPA/static) détecté → nginx + /dist.';
+            if (isset($scripts['build']) && is_string($scripts['build'])) {
+                $buildCommand = $scripts['build'];
+            }
+        } elseif ($package !== null) {
+            if (isset($scripts['start']) && is_string($scripts['start'])) {
+                $isStatic = false;
+                $startCommand = $scripts['start'];
+                $reasons[] = 'Script npm start présent → runtime Node.';
+            } elseif (isset($scripts['build']) && is_string($scripts['build'])) {
+                $isStatic = true;
+                $portsExposes = '80';
+                $buildCommand = $scripts['build'];
+                $publishDirectory = '/dist';
+                $reasons[] = 'Build sans start → hypothèse site statique.';
+            }
+        }
+
+        $portFromEnv = $this->extractPort($envExample)
+            ?? $this->extractPort($nixpacks)
+            ?? $this->extractPort($dockerfile)
+            ?? $this->extractPort($astroConfig);
+
+        if ($portFromEnv !== null && ! $isStatic) {
+            $portsExposes = (string) $portFromEnv;
+            $reasons[] = "Port {$portsExposes} déduit des fichiers de config.";
+        }
+
+        if (is_string($dockerfile) && preg_match('/\bEXPOSE\s+(\d+)/i', $dockerfile, $m) === 1 && ! $isStatic) {
+            $portsExposes = $m[1];
+            $reasons[] = "Port {$portsExposes} déduit du Dockerfile (EXPOSE).";
+        }
+
+        if (is_string($nixpacks) && preg_match('/^\s*cmd\s*=\s*[\'"]([^\'"]+)[\'"]/mi', $nixpacks, $m) === 1) {
+            $startCommand = $startCommand ?? $m[1];
+            $reasons[] = 'start_command déduit de nixpacks.toml.';
+        }
+
+        if (isset($scripts['ci']) && is_string($scripts['ci'])) {
+            $installCommand = $scripts['ci'];
+        } elseif (isset($files['package-lock.json']) || isset($files['npm-shrinkwrap.json'])) {
+            $installCommand = 'npm ci';
+        } elseif (isset($files['pnpm-lock.yaml'])) {
+            $installCommand = 'pnpm install --frozen-lockfile';
+        } elseif (isset($files['yarn.lock'])) {
+            $installCommand = 'yarn install --frozen-lockfile';
+        }
+
+        if ($isStatic) {
+            $portsExposes = '80';
+            $startCommand = null;
+        }
+
+        $suggestions = [
+            'is_static' => $isStatic,
+            'ports_exposes' => $portsExposes,
+            'publish_directory' => AgentDirectives::normalizePublishDirectory($publishDirectory) ?? '/',
+            'base_directory' => $application?->base_directory ?: '/',
+            'start_command' => $startCommand,
+            'build_command' => $buildCommand,
+            'install_command' => $installCommand,
+            'health_check_port' => $isStatic ? '80' : $portsExposes,
+        ];
+
+        if ($sources === [] && $reasons === []) {
+            return [
+                'available' => false,
+                'reason' => 'Aucun fichier de config reconnu (package.json, Dockerfile, nixpacks.toml…).',
+                'sources' => [],
+                'suggestions' => [],
+                'reasons' => [],
+            ];
+        }
+
+        return [
+            'available' => true,
+            'reason' => null,
+            'sources' => array_values($sources),
+            'suggestions' => $suggestions,
+            'reasons' => $reasons,
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function readConfigFiles(Team $team, Application $application, string $base): array
+    {
+        $candidates = [
+            'package.json',
+            'package-lock.json',
+            'pnpm-lock.yaml',
+            'yarn.lock',
+            'npm-shrinkwrap.json',
+            'astro.config.mjs',
+            'astro.config.ts',
+            'astro.config.js',
+            'astro.config.mts',
+            'nixpacks.toml',
+            'Dockerfile',
+            'dockerfile',
+            '.env.example',
+        ];
+
+        $files = [];
+        foreach ($candidates as $name) {
+            $path = ApplicationGitRepositoryParser::joinSourcePath($base, $name);
+            try {
+                $result = $this->sourceService->readFile($team, $application, $path);
+                $content = is_string($result['content'] ?? null) ? (string) $result['content'] : '';
+                if ($content !== '') {
+                    $files[$name] = $content;
+                }
+            } catch (ValidationException) {
+                continue;
+            }
+        }
+
+        return $files;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function decodeJson(?string $content): ?array
+    {
+        if ($content === null || trim($content) === '') {
+            return null;
+        }
+
+        $decoded = json_decode($content, true);
+
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $package
+     * @return array<string, true>
+     */
+    private function dependencyNames(?array $package): array
+    {
+        if ($package === null) {
+            return [];
+        }
+
+        $names = [];
+        foreach (['dependencies', 'devDependencies', 'peerDependencies'] as $key) {
+            if (! is_array($package[$key] ?? null)) {
+                continue;
+            }
+            foreach (array_keys($package[$key]) as $name) {
+                $names[strtolower((string) $name)] = true;
+            }
+        }
+
+        return $names;
+    }
+
+    /**
+     * @param  array<string, true>  $deps
+     * @param  list<string>  $needles
+     */
+    private function hasAnyDep(array $deps, array $needles): bool
+    {
+        foreach ($needles as $needle) {
+            if (isset($deps[strtolower($needle)])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function extractPort(?string $content): ?int
+    {
+        if ($content === null || $content === '') {
+            return null;
+        }
+
+        if (preg_match('/\bPORT\s*=\s*["\']?(\d{2,5})\b/', $content, $m) === 1) {
+            return (int) $m[1];
+        }
+
+        if (preg_match('/\bport\s*:\s*(\d{2,5})\b/i', $content, $m) === 1) {
+            return (int) $m[1];
+        }
+
+        return null;
+    }
+}

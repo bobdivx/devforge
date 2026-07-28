@@ -123,6 +123,43 @@ it('updates swarm and sentinel settings for the current team', function () {
         ->sentinel_push_interval_seconds->toBe(45);
 });
 
+it('updates advanced and terminal access settings', function () {
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson("/api/devforge/v1/servers/{$this->server->uuid}/settings", [
+            'concurrent_builds' => 3,
+            'dynamic_timeout' => 120,
+            'deployment_queue_limit' => 40,
+            'server_disk_usage_notification_threshold' => 80,
+            'server_disk_usage_check_frequency' => '0 */6 * * *',
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.advanced.concurrent_builds', 3)
+        ->assertJsonPath('data.advanced.dynamic_timeout', 120)
+        ->assertJsonPath('data.advanced.deployment_queue_limit', 40)
+        ->assertJsonPath('data.advanced.server_disk_usage_notification_threshold', 80)
+        ->assertJsonPath('data.advanced.server_disk_usage_check_frequency', '0 */6 * * *');
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson("/api/devforge/v1/servers/{$this->server->uuid}/settings", [
+            'is_terminal_enabled' => false,
+            'confirmation_password' => 'password',
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.security.is_terminal_enabled', false);
+});
+
+it('rejects terminal access toggle without confirmation password', function () {
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson("/api/devforge/v1/servers/{$this->server->uuid}/settings", [
+            'is_terminal_enabled' => false,
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['confirmation_password']);
+});
+
 it('rejects wildcard updates for servers from another team', function () {
     $otherTeam = Team::factory()->create();
     $otherUser = User::factory()->create();

@@ -62,11 +62,11 @@ class ApplicationRuntimeSettingsService
             $application->build_command = $this->nullableTrim($validated['build_command']);
             $needsRebuild = true;
         }
-        if (array_key_exists('ports_exposes', $validated)) {
-            $ports = $this->nullableTrim($validated['ports_exposes']);
-            $application->ports_exposes = $ports !== null && $ports !== '' ? $ports : $application->ports_exposes;
-            $needsRebuild = true;
-        }
+        $hasPortsDeferred = array_key_exists('ports_exposes', $validated);
+        $portsDeferred = $hasPortsDeferred
+            ? $this->nullableTrim($validated['ports_exposes'])
+            : null;
+
         if (array_key_exists('base_directory', $validated)) {
             $application->base_directory = $this->nullableTrim($validated['base_directory']) ?? '/';
             $needsRebuild = true;
@@ -118,12 +118,19 @@ class ApplicationRuntimeSettingsService
 
             if ($isStatic && ! $wasStatic) {
                 $application->custom_nginx_configuration = defaultNginxConfiguration('static');
-                if (! filled($application->ports_exposes)) {
+                if (! filled($application->ports_exposes) && ! $hasPortsDeferred) {
                     $application->ports_exposes = '80';
                 }
             }
 
             $settings->save();
+        }
+
+        if ($hasPortsDeferred) {
+            $application->ports_exposes = $portsDeferred !== null && $portsDeferred !== ''
+                ? $portsDeferred
+                : $application->ports_exposes;
+            $needsRebuild = true;
         }
 
         $application->save();

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/preact';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApplicationDetailPanel } from '../src/components/applications/ApplicationDetailPanel';
 
@@ -149,6 +149,7 @@ describe('ApplicationDetailPanel', () => {
         );
 
         expect(await screen.findByRole('heading', { name: 'popcorn-web' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Modifier le nom' })).toBeInTheDocument();
         expect(await screen.findByText('Chat')).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'Vue d’ensemble' })).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'Paramètres' })).toBeInTheDocument();
@@ -247,6 +248,100 @@ describe('ApplicationDetailPanel', () => {
         expect(screen.queryByRole('button', { name: 'Démarrer' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Arrêter' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Redémarrer' })).not.toBeInTheDocument();
+    });
+
+    it('permet de renommer l’application via l’icône crayon', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+            const url = String(input);
+            const method = String(init?.method ?? 'GET').toUpperCase();
+
+            if (url.includes('/sanctum/csrf-cookie')) {
+                return new Response(null, { status: 204 });
+            }
+
+            if (method === 'PATCH' && url.includes('/api/devforge/v1/applications/app-uuid-1234')) {
+                const body = JSON.parse(String(init?.body ?? '{}')) as { name?: string };
+                return jsonResponse({
+                    data: {
+                        ...application,
+                        name: body.name ?? application.name,
+                    },
+                });
+            }
+            if (url.includes('/api/devforge/v1/core/applications/app-uuid-1234')) {
+                return jsonResponse({ data: application });
+            }
+            if (url.includes('/api/devforge/v1/deployments')) {
+                return jsonResponse({ data: [], meta: { total: 0 } });
+            }
+            if (url.includes('/linkable-databases')) {
+                return jsonResponse({ data: [], meta: { connections: [] } });
+            }
+            if (url.includes('/environment-variables')) {
+                return jsonResponse({ data: { production: [], preview: [] } });
+            }
+            if (url.includes('/logs')) {
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        reason: null,
+                        message: null,
+                        container: 'popcorn-web-abc',
+                        container_status: 'running',
+                        line_count: 0,
+                        items: [],
+                    },
+                });
+            }
+            if (url.includes('/readiness')) {
+                return jsonResponse({
+                    data: {
+                        uuid: 'readiness-1',
+                        status: 'idle',
+                        autonomous_enabled: true,
+                        last_probe_at: null,
+                        last_probe_ok: null,
+                        last_probe_error: null,
+                        last_http_status: null,
+                        round: 0,
+                        max_rounds: 5,
+                        last_deployment_uuid: null,
+                        probe_url: null,
+                        intervention: null,
+                    },
+                });
+            }
+            if (url.includes('/api/devforge/v1/agents')) {
+                return jsonResponse({ data: [] });
+            }
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(
+            <ApplicationDetailPanel
+                uuid="app-uuid-1234"
+                canAct
+                onClose={() => undefined}
+                onChanged={async () => undefined}
+            />,
+        );
+
+        expect(await screen.findByRole('heading', { name: 'popcorn-web' })).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Modifier le nom' }));
+
+        const input = await screen.findByLabelText('Nom de l’application');
+        fireEvent.input(input, { target: { value: 'popcorn-renamed' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Enregistrer le nom' }));
+
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledWith(
+                expect.stringContaining('/api/devforge/v1/applications/app-uuid-1234'),
+                expect.objectContaining({
+                    method: 'PATCH',
+                    body: JSON.stringify({ name: 'popcorn-renamed' }),
+                }),
+            );
+        });
     });
 
 });

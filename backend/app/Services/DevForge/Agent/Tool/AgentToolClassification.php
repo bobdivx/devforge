@@ -72,6 +72,14 @@ class AgentToolClassification
             'list_tool_packages' => $readOnly,
             'install_tool' => $destructive,
             'request_tool' => $neutral,
+            'memory_read' => $readOnly,
+            'memory_write' => $neutral,
+            'todo_read' => $readOnly,
+            'todo_write' => $neutral,
+            'web_search' => $readOnly,
+            'mission_list' => $readOnly,
+            'mission_create' => $neutral,
+            'mission_update' => $neutral,
             'list_github_apps' => $readOnly,
             'list_github_repos' => $readOnly,
             'list_github_branches' => $readOnly,
@@ -83,6 +91,12 @@ class AgentToolClassification
             'list_github_workflow_runs' => $readOnly,
             'get_github_workflow_run' => $readOnly,
             'list_github_commits' => $readOnly,
+            'create_github_branch' => $destructive,
+            'write_github_file' => $destructive,
+            'create_github_pull_request' => $destructive,
+            'merge_github_pull_request' => $destructive,
+            'close_github_pull_request' => $destructive,
+            'comment_github_pull_request' => $neutral,
         ];
 
         $map = [];

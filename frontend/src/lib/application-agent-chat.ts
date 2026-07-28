@@ -12,6 +12,10 @@ export function pickApplicationChatAgent(agents: Agent[], applicationUuid: strin
             return false;
         }
 
+        if (!PREFERRED_TYPES.includes(agent.type)) {
+            return false;
+        }
+
         if (agent.resource_uuid && agent.resource_uuid !== applicationUuid) {
             return false;
         }
@@ -41,4 +45,20 @@ export function pickApplicationChatAgent(agents: Agent[], applicationUuid: strin
     scored.sort((a, b) => b.score - a.score);
 
     return scored[0]?.agent ?? null;
+}
+
+/** Préfère l’agent qui possède déjà la session App · {name} (rapports auto-deploy). */
+export function pickApplicationChatAgentPreferringSession(
+    agents: Agent[],
+    applicationUuid: string,
+    sessionTitle: string,
+    agentsWithSessionTitle: Set<string>,
+): Agent | null {
+    const withSession = agents.filter((agent) => agentsWithSessionTitle.has(agent.uuid));
+    const fromSession = pickApplicationChatAgent(withSession, applicationUuid);
+    if (fromSession) {
+        return fromSession;
+    }
+
+    return pickApplicationChatAgent(agents, applicationUuid);
 }

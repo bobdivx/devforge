@@ -17,6 +17,15 @@ class AgentToolPackage
         'list_tool_packages',
         'install_tool',
         'request_tool',
+        'request_api_key',
+        'memory_read',
+        'memory_write',
+        'todo_read',
+        'todo_write',
+        'web_search',
+        'mission_list',
+        'mission_create',
+        'mission_update',
     ];
 
     /**
@@ -75,6 +84,12 @@ class AgentToolPackage
                     'list_github_workflow_runs',
                     'get_github_workflow_run',
                     'list_github_commits',
+                    'create_github_branch',
+                    'write_github_file',
+                    'create_github_pull_request',
+                    'merge_github_pull_request',
+                    'close_github_pull_request',
+                    'comment_github_pull_request',
                 ],
                 'default_for_types' => ['github', 'debug', 'deployment', 'devforge', 'tech-watch'],
             ],

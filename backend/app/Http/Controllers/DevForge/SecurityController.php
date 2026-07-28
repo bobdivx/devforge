@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\DevForge;
 
 use App\Http\Controllers\Controller;
+use App\Models\CloudInitScript;
 use App\Models\CloudProviderToken;
 use App\Models\PrivateKey;
 use App\Models\User;
 use App\Services\DevForge\CurrentTeamContext;
 use App\Services\DevForge\Security\ApiTokenCatalog;
+use App\Services\DevForge\Security\CloudInitScriptCatalog;
 use App\Services\DevForge\Security\CloudProviderTokenCatalog;
 use App\Services\DevForge\Security\PrivateKeyCatalog;
 use Illuminate\Http\JsonResponse;
@@ -21,6 +23,7 @@ class SecurityController extends Controller
         private readonly PrivateKeyCatalog $privateKeyCatalog,
         private readonly ApiTokenCatalog $apiTokenCatalog,
         private readonly CloudProviderTokenCatalog $cloudProviderTokenCatalog,
+        private readonly CloudInitScriptCatalog $cloudInitScriptCatalog,
     ) {}
 
     public function keys(Request $request): JsonResponse
@@ -210,6 +213,74 @@ class SecurityController extends Controller
         return response()->json([
             'data' => $this->cloudProviderTokenCatalog->validateStored($token),
         ]);
+    }
+
+    public function cloudInitScripts(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $team = $this->currentTeamContext->resolve($user);
+        $this->authorize('viewAny', CloudInitScript::class);
+
+        return response()->json([
+            'data' => $this->cloudInitScriptCatalog->list($team),
+        ]);
+    }
+
+    public function storeCloudInitScript(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $team = $this->currentTeamContext->resolve($user);
+        $this->authorize('create', CloudInitScript::class);
+
+        return response()->json([
+            'data' => $this->cloudInitScriptCatalog->store($team, $request->all()),
+        ], 201);
+    }
+
+    public function updateCloudInitScript(Request $request, int $scriptId): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $team = $this->currentTeamContext->resolve($user);
+        $script = $this->findCloudInitScript($team->id, $scriptId);
+        $this->authorize('update', $script);
+
+        return response()->json([
+            'data' => $this->cloudInitScriptCatalog->update($script, $request->all()),
+        ]);
+    }
+
+    public function destroyCloudInitScript(Request $request, int $scriptId): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $team = $this->currentTeamContext->resolve($user);
+        $script = $this->findCloudInitScript($team->id, $scriptId);
+        $this->authorize('delete', $script);
+
+        $this->cloudInitScriptCatalog->destroy($script);
+
+        return response()->json([
+            'message' => 'Script cloud-init supprimé.',
+        ]);
+    }
+
+    private function findCloudInitScript(int $teamId, int $scriptId): CloudInitScript
+    {
+        $script = CloudInitScript::query()
+            ->where('team_id', $teamId)
+            ->whereKey($scriptId)
+            ->first();
+
+        abort_unless($script instanceof CloudInitScript, 404);
+
+        return $script;
     }
 
     private function findCloudToken(int $teamId, string $tokenUuid): CloudProviderToken

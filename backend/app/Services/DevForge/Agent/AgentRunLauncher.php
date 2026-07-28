@@ -55,6 +55,12 @@ class AgentRunLauncher
             'deployment_uuid' => is_string($context['deployment_uuid'] ?? null) ? $context['deployment_uuid'] : null,
             'application_uuid' => is_string($context['application_uuid'] ?? null) ? $context['application_uuid'] : null,
             'event' => is_string($context['event'] ?? null) ? $context['event'] : null,
+            'pull_request_number' => isset($context['pull_request_number']) && is_numeric($context['pull_request_number'])
+                ? (int) $context['pull_request_number']
+                : null,
+            'fingerprint' => is_string($context['fingerprint'] ?? null) ? $context['fingerprint'] : null,
+            'parent_run_uuid' => is_string($context['parent_run_uuid'] ?? null) ? $context['parent_run_uuid'] : null,
+            'resume_after_approval' => ! empty($context['resume_after_approval']) ? true : null,
             'readiness_round' => isset($context['readiness_round']) && is_numeric($context['readiness_round'])
                 ? (int) $context['readiness_round']
                 : null,

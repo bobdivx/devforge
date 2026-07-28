@@ -18,6 +18,15 @@ class LlmModelCatalog
                 $baseUrl,
             ),
             'ollama' => $this->listOllamaModels($baseUrl ?? throw new \InvalidArgumentException('URL Ollama requise.')),
+            'openai', 'openrouter' => $this->listOpenAiCompatibleModels(
+                $provider,
+                $apiKey ?? throw new \InvalidArgumentException("Clé API {$provider} requise."),
+                $baseUrl,
+            ),
+            'anthropic' => $this->listAnthropicModels(
+                $apiKey ?? throw new \InvalidArgumentException('Clé API Anthropic requise.'),
+                $baseUrl,
+            ),
             default => throw new \InvalidArgumentException("Provider {$provider} non supporté."),
         };
     }
@@ -81,6 +90,90 @@ class LlmModelCatalog
             ])
             ->filter(fn (array $model): bool => $model['id'] !== ''
                 && LlmModelResolver::isToolCallingOllamaModel($model['id']))
+            ->sortBy('label', SORT_NATURAL | SORT_FLAG_CASE)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, array{id: string, label: string, description: string|null}>
+     */
+    private function listOpenAiCompatibleModels(string $provider, string $apiKey, ?string $baseUrl = null): array
+    {
+        $resolvedBaseUrl = LlmEndpointResolver::openAiCompatibleBaseUrl($provider, $baseUrl);
+        $headers = [
+            'Authorization' => 'Bearer '.$apiKey,
+            'Accept' => 'application/json',
+        ];
+
+        if ($provider === 'openrouter') {
+            $headers['HTTP-Referer'] = (string) config('app.url', 'https://coolify.io');
+            $headers['X-Title'] = 'DevForge';
+        }
+
+        $response = Http::withHeaders($headers)
+            ->connectTimeout(5)
+            ->timeout(20)
+            ->get("{$resolvedBaseUrl}/models");
+
+        if ($response->failed()) {
+            throw new \RuntimeException("Impossible de récupérer les modèles {$provider} [{$response->status()}].");
+        }
+
+        return collect($response->json('data', []))
+            ->map(function (array $model): array {
+                $id = (string) ($model['id'] ?? '');
+
+                return [
+                    'id' => $id,
+                    'label' => $id,
+                    'description' => isset($model['owned_by'])
+                        ? (string) $model['owned_by']
+                        : (isset($model['name']) ? (string) $model['name'] : null),
+                ];
+            })
+            ->filter(fn (array $model): bool => $model['id'] !== '')
+            ->sortBy('label', SORT_NATURAL | SORT_FLAG_CASE)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, array{id: string, label: string, description: string|null}>
+     */
+    private function listAnthropicModels(string $apiKey, ?string $baseUrl = null): array
+    {
+        $resolvedBaseUrl = LlmEndpointResolver::anthropicBaseUrl($baseUrl);
+
+        $response = Http::withHeaders([
+            'x-api-key' => $apiKey,
+            'anthropic-version' => '2023-06-01',
+            'Accept' => 'application/json',
+        ])
+            ->connectTimeout(5)
+            ->timeout(20)
+            ->get("{$resolvedBaseUrl}/models");
+
+        if ($response->failed()) {
+            // Catalogue minimal si l'endpoint models n'est pas dispo.
+            return [
+                ['id' => 'claude-sonnet-4-20250514', 'label' => 'claude-sonnet-4-20250514', 'description' => 'Anthropic'],
+                ['id' => 'claude-3-5-haiku-latest', 'label' => 'claude-3-5-haiku-latest', 'description' => 'Anthropic'],
+                ['id' => 'claude-opus-4-20250514', 'label' => 'claude-opus-4-20250514', 'description' => 'Anthropic'],
+            ];
+        }
+
+        return collect($response->json('data', []))
+            ->map(function (array $model): array {
+                $id = (string) ($model['id'] ?? '');
+
+                return [
+                    'id' => $id,
+                    'label' => (string) ($model['display_name'] ?? $id),
+                    'description' => 'Anthropic',
+                ];
+            })
+            ->filter(fn (array $model): bool => $model['id'] !== '')
             ->sortBy('label', SORT_NATURAL | SORT_FLAG_CASE)
             ->values()
             ->all();

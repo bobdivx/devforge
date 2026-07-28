@@ -7,14 +7,31 @@ import { AUTO_MODEL_VALUE, CUSTOM_MODEL_VALUE, formatModelLabel, isAutoModel, mo
 import { useApiQuery } from '../../lib/use-api-query';
 import { useTeamContext } from '../../lib/team-context';
 
-const providerDefaults: Record<LlmProvider, { needsKey: boolean; needsUrl: boolean }> = {
+const providerDefaults: Record<LlmProvider, { needsKey: boolean; needsUrl: boolean; defaultUrl: string }> = {
     gemini: {
         needsKey: true,
         needsUrl: false,
+        defaultUrl: '',
     },
     ollama: {
         needsKey: false,
         needsUrl: true,
+        defaultUrl: 'http://localhost:11434',
+    },
+    openai: {
+        needsKey: true,
+        needsUrl: true,
+        defaultUrl: 'https://api.openai.com/v1',
+    },
+    openrouter: {
+        needsKey: true,
+        needsUrl: true,
+        defaultUrl: 'https://openrouter.ai/api/v1',
+    },
+    anthropic: {
+        needsKey: true,
+        needsUrl: true,
+        defaultUrl: 'https://api.anthropic.com/v1',
     },
 };
 
@@ -31,7 +48,7 @@ const emptyForm = (): NewProviderForm => ({
     provider: 'gemini',
     name: '',
     api_key: '',
-    base_url: 'http://localhost:11434',
+    base_url: providerDefaults.gemini.defaultUrl || 'http://localhost:11434',
     model: AUTO_MODEL_VALUE,
     is_default: false,
 });
@@ -40,7 +57,9 @@ function canDiscoverModels(
     form: NewProviderForm,
     existing?: Pick<AiProviderConfig, 'has_api_key'> | null,
 ): boolean {
-    if (form.provider === 'gemini') {
+    const info = providerDefaults[form.provider];
+
+    if (info.needsKey) {
         if (form.api_key.trim().length >= 8) {
             return true;
         }
@@ -48,7 +67,11 @@ function canDiscoverModels(
         return existing?.has_api_key === true;
     }
 
-    return form.base_url.trim().length > 0;
+    if (info.needsUrl) {
+        return form.base_url.trim().length > 0;
+    }
+
+    return true;
 }
 
 export function AiProvidersSettings() {
@@ -115,9 +138,8 @@ export function AiProvidersSettings() {
         try {
             const result = await domainApi.discoverAiProviderModels({
                 provider: currentForm.provider,
-                ...(currentForm.provider === 'gemini'
-                    ? { ...(currentForm.api_key ? { api_key: currentForm.api_key } : {}) }
-                    : { base_url: currentForm.base_url }),
+                ...(currentForm.api_key ? { api_key: currentForm.api_key } : {}),
+                ...(currentForm.base_url.trim() ? { base_url: currentForm.base_url } : {}),
                 ...(providerId ? { provider_id: providerId } : {}),
             });
 
@@ -330,6 +352,8 @@ export function AiProvidersSettings() {
                                         ...form,
                                         provider,
                                         model: AUTO_MODEL_VALUE,
+                                        base_url: providerDefaults[provider].defaultUrl
+                                            || (provider === 'ollama' ? 'http://localhost:11434' : form.base_url),
                                     });
                                     setAvailableModels([]);
                                     setModelsError(null);
@@ -337,6 +361,9 @@ export function AiProvidersSettings() {
                             >
                                 <option value="gemini">Gemini (Google)</option>
                                 <option value="ollama">Ollama (local)</option>
+                                <option value="openai">OpenAI</option>
+                                <option value="openrouter">OpenRouter</option>
+                                <option value="anthropic">Anthropic</option>
                             </select>
                         </label>
 
@@ -361,14 +388,14 @@ export function AiProvidersSettings() {
                                     required={! isEditing}
                                     placeholder={isEditing && editingProvider?.has_api_key
                                         ? 'Laisser vide pour conserver la clé actuelle'
-                                        : 'AIza…'}
+                                        : 'sk-… / AIza…'}
                                     value={form.api_key}
                                     onInput={(e) => setForm({ ...form, api_key: (e.target as HTMLInputElement).value })}
                                 />
                                 <span class="text-[11px] text-base-content/50">
                                     {isEditing && editingProvider?.has_api_key
                                         ? 'La clé enregistrée reste active tant que vous ne saisissez pas une nouvelle valeur.'
-                                        : 'Les modèles disponibles seront chargés automatiquement depuis l\'API Google.'}
+                                        : 'Les modèles disponibles seront chargés automatiquement depuis l\'API du provider.'}
                                 </span>
                             </label>
                         )}

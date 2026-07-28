@@ -184,6 +184,72 @@ class AgentGithubTools
     }
 
     /** @return array<mixed> */
+    public function mergePullRequest(
+        string $githubAppUuid,
+        string $owner,
+        string $repo,
+        int $number,
+        string $mergeMethod = 'squash',
+        ?string $commitTitle = null,
+    ): array {
+        $method = in_array($mergeMethod, ['merge', 'squash', 'rebase'], true) ? $mergeMethod : 'squash';
+        $payload = ['merge_method' => $method];
+        if ($commitTitle !== null && trim($commitTitle) !== '') {
+            $payload['commit_title'] = mb_substr(trim($commitTitle), 0, 256);
+        }
+
+        return $this->apiPut($githubAppUuid, "/repos/{$owner}/{$repo}/pulls/{$number}/merge", $payload, function (array $json): array {
+            return [
+                'merged' => (bool) ($json['merged'] ?? false),
+                'sha' => $json['sha'] ?? null,
+                'message' => $json['message'] ?? null,
+            ];
+        });
+    }
+
+    /** @return array<mixed> */
+    public function closePullRequest(
+        string $githubAppUuid,
+        string $owner,
+        string $repo,
+        int $number,
+    ): array {
+        return $this->apiPatch($githubAppUuid, "/repos/{$owner}/{$repo}/pulls/{$number}", [
+            'state' => 'closed',
+        ], function (array $json): array {
+            return [
+                'number' => $json['number'] ?? null,
+                'state' => $json['state'] ?? null,
+                'html_url' => $json['html_url'] ?? null,
+            ];
+        });
+    }
+
+    /** @return array<mixed> */
+    public function commentPullRequest(
+        string $githubAppUuid,
+        string $owner,
+        string $repo,
+        int $number,
+        string $body,
+    ): array {
+        $body = trim($body);
+        if ($body === '') {
+            return ['error' => 'Commentaire vide.'];
+        }
+
+        return $this->apiPost($githubAppUuid, "/repos/{$owner}/{$repo}/issues/{$number}/comments", [
+            'body' => mb_substr($body, 0, 65000),
+        ], function (array $json): array {
+            return [
+                'id' => $json['id'] ?? null,
+                'html_url' => $json['html_url'] ?? null,
+                'body' => mb_substr((string) ($json['body'] ?? ''), 0, 500),
+            ];
+        });
+    }
+
+    /** @return array<mixed> */
     public function listDir(string $githubAppUuid, string $owner, string $repo, string $path = '', ?string $ref = null): array
     {
         $result = $this->fetchGithubContent($githubAppUuid, $owner, $repo, $path, $ref, decodeFile: false);
@@ -256,6 +322,7 @@ class AgentGithubTools
                 'head' => $pr['head']['ref'] ?? null,
                 'base' => $pr['base']['ref'] ?? null,
                 'html_url' => $pr['html_url'] ?? null,
+                'updated_at' => $pr['updated_at'] ?? null,
                 'created_at' => $pr['created_at'] ?? null,
                 'merged_at' => $pr['merged_at'] ?? null,
             ])->values()->all(),
@@ -377,6 +444,46 @@ class AgentGithubTools
         array $payload,
         callable $mapper,
     ): array {
+        return $this->apiWrite('post', $githubAppUuid, $endpoint, $payload, $mapper);
+    }
+
+    /**
+     * @param  callable(array): array  $mapper
+     * @return array<mixed>
+     */
+    private function apiPut(
+        string $githubAppUuid,
+        string $endpoint,
+        array $payload,
+        callable $mapper,
+    ): array {
+        return $this->apiWrite('put', $githubAppUuid, $endpoint, $payload, $mapper);
+    }
+
+    /**
+     * @param  callable(array): array  $mapper
+     * @return array<mixed>
+     */
+    private function apiPatch(
+        string $githubAppUuid,
+        string $endpoint,
+        array $payload,
+        callable $mapper,
+    ): array {
+        return $this->apiWrite('patch', $githubAppUuid, $endpoint, $payload, $mapper);
+    }
+
+    /**
+     * @param  callable(array): array  $mapper
+     * @return array<mixed>
+     */
+    private function apiWrite(
+        string $method,
+        string $githubAppUuid,
+        string $endpoint,
+        array $payload,
+        callable $mapper,
+    ): array {
         try {
             $githubApp = $this->githubCatalog->appForTeam($this->team, $githubAppUuid);
             $token = generateGithubInstallationToken($githubApp);
@@ -384,9 +491,12 @@ class AgentGithubTools
                 return ['error' => 'Impossible de générer un token GitHub App.'];
             }
 
-            $response = Http::GitHub($githubApp->api_url, $token)
-                ->timeout(30)
-                ->post($endpoint, $payload);
+            $request = Http::GitHub($githubApp->api_url, $token)->timeout(30);
+            $response = match ($method) {
+                'put' => $request->put($endpoint, $payload),
+                'patch' => $request->patch($endpoint, $payload),
+                default => $request->post($endpoint, $payload),
+            };
 
             if (! $response->successful()) {
                 return ['error' => mb_substr($response->json('message', 'Échec API GitHub'), 0, 500)];

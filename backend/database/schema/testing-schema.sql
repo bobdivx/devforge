@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS "application_settings" (
     "is_git_submodules_enabled" INTEGER DEFAULT true NOT NULL,
     "is_git_lfs_enabled" INTEGER DEFAULT true NOT NULL,
     "is_auto_deploy_enabled" INTEGER DEFAULT true NOT NULL,
-    "is_force_https_enabled" INTEGER DEFAULT true NOT NULL,
+    "is_force_https_enabled" INTEGER DEFAULT false NOT NULL,
     "is_debug_enabled" INTEGER DEFAULT false NOT NULL,
     "is_preview_deployments_enabled" INTEGER DEFAULT false NOT NULL,
     "application_id" INTEGER NOT NULL,

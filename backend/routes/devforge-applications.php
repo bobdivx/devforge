@@ -8,6 +8,9 @@ Route::get('/deployment-targets', [ApplicationController::class, 'deploymentTarg
     ->name('deployment-targets.index');
 Route::post('/applications', [ApplicationController::class, 'store'])
     ->name('applications.store');
+Route::patch('/applications/{applicationUuid}', [ApplicationController::class, 'update'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.update');
 Route::delete('/applications/{applicationUuid}', [ApplicationController::class, 'destroy'])
     ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
     ->name('applications.destroy');
@@ -140,6 +143,9 @@ Route::get('/applications/{applicationUuid}/runtime-settings', [ApplicationContr
 Route::put('/applications/{applicationUuid}/runtime-settings', [ApplicationController::class, 'updateRuntimeSettings'])
     ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
     ->name('applications.runtime-settings.update');
+Route::post('/applications/{applicationUuid}/runtime-settings/detect', [ApplicationController::class, 'detectRuntimeSettings'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.runtime-settings.detect');
 Route::get('/applications/{applicationUuid}/readiness', [ApplicationController::class, 'readiness'])
     ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
     ->name('applications.readiness.show');

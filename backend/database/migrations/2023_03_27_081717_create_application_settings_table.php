@@ -17,7 +17,7 @@ return new class extends Migration
             $table->boolean('is_git_submodules_enabled')->default(true);
             $table->boolean('is_git_lfs_enabled')->default(true);
             $table->boolean('is_auto_deploy_enabled')->default(true);
-            $table->boolean('is_force_https_enabled')->default(true);
+            $table->boolean('is_force_https_enabled')->default(false);
             $table->boolean('is_debug_enabled')->default(false);
             $table->boolean('is_preview_deployments_enabled')->default(false);
             // $table->boolean('is_dual_cert')->default(false);

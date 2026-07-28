@@ -15,6 +15,7 @@ use App\Services\DevForge\Application\ApplicationFromGithubCreator;
 use App\Services\DevForge\Application\ApplicationPreviewCatalog;
 use App\Services\DevForge\Application\ApplicationResourceLimitsCatalog;
 use App\Services\DevForge\Application\ApplicationResourceOperationsCatalog;
+use App\Services\DevForge\Application\ApplicationRuntimeSettingsDetector;
 use App\Services\DevForge\Application\ApplicationRuntimeSettingsService;
 use App\Services\DevForge\Application\ApplicationScheduledTaskCatalog;
 use App\Services\DevForge\Application\ApplicationSourceService;
@@ -25,6 +26,7 @@ use App\Services\DevForge\CurrentTeamContext;
 use App\Services\DevForge\CurrentTeamResources;
 use App\Services\DevForge\DeploymentTargetData;
 use App\Services\DevForge\Readiness\ApplicationReadinessService;
+use App\Support\ValidationPatterns;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -48,6 +50,7 @@ class ApplicationController extends Controller
         private readonly ApplicationDomainService $applicationDomainService,
         private readonly ApplicationSourceService $applicationSourceService,
         private readonly ApplicationRuntimeSettingsService $applicationRuntimeSettingsService,
+        private readonly ApplicationRuntimeSettingsDetector $applicationRuntimeSettingsDetector,
         private readonly ApplicationReadinessService $applicationReadinessService,
         private readonly CoreResourcePresenter $presenter,
     ) {}
@@ -166,8 +169,13 @@ class ApplicationController extends Controller
         $application = $this->currentTeamResources->application($user, $applicationUuid);
         $this->authorize('update', $application);
 
+        $result = $this->applicationDomainService->update($application, $request->all());
+
         return response()->json([
-            'data' => $this->applicationDomainService->update($application, $request->all()),
+            'data' => collect($result)->except('redeploy')->all(),
+            'meta' => [
+                'redeploy' => $result['redeploy'],
+            ],
         ]);
     }
 
@@ -179,8 +187,13 @@ class ApplicationController extends Controller
         $application = $this->currentTeamResources->application($user, $applicationUuid);
         $this->authorize('update', $application);
 
+        $result = $this->applicationDomainService->generate($application, $request->all());
+
         return response()->json([
-            'data' => $this->applicationDomainService->generate($application),
+            'data' => collect($result)->except('redeploy')->all(),
+            'meta' => [
+                'redeploy' => $result['redeploy'],
+            ],
         ]);
     }
 
@@ -693,6 +706,26 @@ class ApplicationController extends Controller
         ]);
     }
 
+    public function update(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        $validated = $request->validate([
+            'name' => ValidationPatterns::nameRules(),
+        ]);
+
+        $application->name = trim((string) $validated['name']);
+        $application->save();
+
+        return response()->json([
+            'data' => $this->presenter->present($application, 'applications'),
+        ]);
+    }
+
     public function destroy(Request $request, string $applicationUuid): JsonResponse
     {
         $user = $request->user();
@@ -759,6 +792,22 @@ class ApplicationController extends Controller
             'meta' => [
                 'redeploy' => $result['redeploy'],
             ],
+        ]);
+    }
+
+    public function detectRuntimeSettings(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('view', $application);
+
+        $team = $this->currentTeamContext->resolve($user);
+        $detection = $this->applicationRuntimeSettingsDetector->detect($team, $application);
+
+        return response()->json([
+            'data' => $detection,
         ]);
     }
 

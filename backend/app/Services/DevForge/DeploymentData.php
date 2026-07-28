@@ -12,8 +12,17 @@ class DeploymentData
 {
     public function __construct(private readonly SecretRedactor $secretRedactor) {}
 
-    public function paginate(Team $team, int $page, int $perPage, ?string $applicationUuid, ?string $status): LengthAwarePaginator
-    {
+    /**
+     * @param  list<string>|null  $statuses
+     */
+    public function paginate(
+        Team $team,
+        int $page,
+        int $perPage,
+        ?string $applicationUuid,
+        ?string $status,
+        ?array $statuses = null,
+    ): LengthAwarePaginator {
         return $this->queryFor($team)
             ->when($applicationUuid, function (Builder $query) use ($applicationUuid, $team): Builder {
                 // application_id is stored as varchar; compare via string IDs (not whereHas → bigint).
@@ -29,7 +38,14 @@ class DeploymentData
 
                 return $query->whereIn('application_id', $applicationIds);
             })
-            ->when($status, fn (Builder $query, string $deploymentStatus): Builder => $query->where('status', $deploymentStatus))
+            ->when(
+                is_array($statuses) && $statuses !== [],
+                fn (Builder $query): Builder => $query->whereIn('status', $statuses),
+            )
+            ->when(
+                (! is_array($statuses) || $statuses === []) && filled($status),
+                fn (Builder $query): Builder => $query->where('status', $status),
+            )
             ->latest('id')
             ->paginate(perPage: $perPage, page: $page);
     }

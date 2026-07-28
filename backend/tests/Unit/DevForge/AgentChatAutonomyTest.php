@@ -42,7 +42,118 @@ it('classifies repair strategy from deployment log blobs', function () {
         ->and(AgentChatRepairStrategy::detectIssue('Could not find remote branch feature/foo'))
         ->toBe(AgentChatRepairStrategy::ISSUE_BRANCH)
         ->and(AgentChatRepairStrategy::detectIssue('npm ERR! code ELIFECYCLE'))
-        ->toBe(AgentChatRepairStrategy::ISSUE_GENERIC);
+        ->toBe(AgentChatRepairStrategy::ISSUE_GENERIC)
+        ->and(AgentChatRepairStrategy::detectIssue('Read-only file system ... mkdir /data/coolify/applications/app'))
+        ->toBe(AgentChatRepairStrategy::ISSUE_BASE_CONFIG)
+        ->and(AgentChatRepairStrategy::detectIssue('Failed to launch the browser process Chromium puppeteer'))
+        ->toBe(AgentChatRepairStrategy::ISSUE_PUPPETEER);
+});
+
+it('falls back to harness after diagnostic tools without recorded corrections', function () {
+    expect(AgentChatRepairStrategy::shouldFallbackToHarness(
+        'deployment_failed',
+        true,
+        false,
+        [],
+    ))->toBeTrue()
+        ->and(AgentChatRepairStrategy::shouldFallbackToHarness(
+            'deployment_failed',
+            true,
+            false,
+            [['kind' => 'git_branch']],
+        ))->toBeFalse()
+        ->and(AgentChatRepairStrategy::shouldFallbackToHarness(
+            'deployment_failed',
+            true,
+            true,
+            [],
+        ))->toBeFalse()
+        ->and(AgentChatRepairStrategy::shouldFallbackToHarness(
+            'deployment_build_started',
+            true,
+            false,
+            [],
+        ))->toBeFalse()
+        ->and(AgentChatRepairStrategy::stepsIncludeCorrectiveAction([
+            ['name' => 'get_deployment_logs', 'status' => 'done'],
+        ]))->toBeFalse()
+        ->and(AgentChatRepairStrategy::stepsIncludeCorrectiveAction([
+            ['name' => 'get_deployment_logs', 'status' => 'done'],
+            ['name' => 'fix_application_host_permissions', 'status' => 'done'],
+        ]))->toBeTrue();
+});
+
+it('harness executes fix_coolify_base_config_path on read-only logs', function () {
+    config(['devforge.agents_auto_fallback' => true]);
+
+    $agent = AiAgent::factory()->deployment()->make(['resource_uuid' => 'app-uuid-ro']);
+    $run = Mockery::mock(AiAgentRun::class);
+    $run->shouldReceive('appendLog')->andReturnNull();
+
+    $toolkit = Mockery::mock(AgentToolkit::class);
+    $toolkit->shouldReceive('execute')
+        ->once()
+        ->with('get_deployment_logs', Mockery::type('array'))
+        ->andReturn([
+            'deployments' => [
+                ['logs' => [['message' => 'mkdir: cannot create directory ‘/data/coolify/applications/x’: Read-only file system']]],
+            ],
+        ]);
+    $toolkit->shouldReceive('execute')
+        ->once()
+        ->with('fix_coolify_base_config_path', Mockery::type('array'))
+        ->andReturn(['ok' => true]);
+
+    $result = app(AgentRepairHarness::class)->execute(
+        $toolkit,
+        $agent,
+        $run,
+        ['application_uuid' => 'app-uuid-ro'],
+        'corrige',
+    );
+
+    expect($result['steps'])->toHaveCount(2)
+        ->and($result['steps'][1]['name'])->toBe('fix_coolify_base_config_path')
+        ->and($result['text'])->toContain('Réparation exécutée');
+});
+
+it('harness sets PUPPETEER_SKIP_DOWNLOAD then redeploys', function () {
+    config(['devforge.agents_auto_fallback' => true]);
+
+    $agent = AiAgent::factory()->deployment()->make(['resource_uuid' => 'app-uuid-pup']);
+    $run = Mockery::mock(AiAgentRun::class);
+    $run->shouldReceive('appendLog')->andReturnNull();
+
+    $toolkit = Mockery::mock(AgentToolkit::class);
+    $toolkit->shouldReceive('execute')
+        ->once()
+        ->with('get_deployment_logs', Mockery::type('array'))
+        ->andReturn([
+            'deployments' => [
+                ['logs' => [['message' => 'Error: Failed to launch the browser process puppeteer']]],
+            ],
+        ]);
+    $toolkit->shouldReceive('execute')
+        ->once()
+        ->with('upsert_application_env_var', Mockery::on(fn (array $args): bool => ($args['key'] ?? '') === 'PUPPETEER_SKIP_DOWNLOAD'))
+        ->andReturn(['ok' => true]);
+    $toolkit->shouldReceive('execute')
+        ->once()
+        ->with('control_resource', Mockery::on(fn (array $args): bool => ($args['action'] ?? '') === 'deploy'))
+        ->andReturn(['ok' => true, 'deployment_uuid' => 'dep-1']);
+
+    $result = app(AgentRepairHarness::class)->execute(
+        $toolkit,
+        $agent,
+        $run,
+        ['application_uuid' => 'app-uuid-pup'],
+        'corrige puppeteer',
+    );
+
+    expect($result['steps'])->toHaveCount(3)
+        ->and($result['steps'][1]['name'])->toBe('upsert_application_env_var')
+        ->and($result['steps'][2]['name'])->toBe('control_resource')
+        ->and($result['text'])->toContain('Réparation exécutée');
 });
 
 it('respects agents_auto_fallback when harness is disabled', function () {

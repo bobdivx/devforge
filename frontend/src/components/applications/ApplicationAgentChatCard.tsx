@@ -1,9 +1,10 @@
 import { Bot, ExternalLink } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
-import { AgentChatPanel, waitForChatReply } from '../agents/AgentChatPanel';
+import { AgentChatPanel } from '../agents/AgentChatPanel';
+import { waitForChatReply } from '../../lib/agent-chat-stream';
 import {
     applicationAgentSessionTitle,
-    pickApplicationChatAgent,
+    pickApplicationChatAgentPreferringSession,
 } from '../../lib/application-agent-chat';
 import { agentDetailPath } from '../../lib/agent-routes';
 import { ApiError } from '../../lib/api-client';
@@ -43,9 +44,46 @@ export function ApplicationAgentChatCard({ application }: Props) {
                     return;
                 }
 
-                const selected = pickApplicationChatAgent(agentsResponse.data, application.uuid);
+                const candidates = agentsResponse.data.filter((item) => {
+                    if (!item.is_active || !item.provider) {
+                        return false;
+                    }
+                    if (!['deployment', 'devforge', 'debug'].includes(item.type)) {
+                        return false;
+                    }
+                    if (item.resource_uuid && item.resource_uuid !== application.uuid) {
+                        return false;
+                    }
+                    return true;
+                });
+
+                const withTitle = new Set<string>();
+                await Promise.all(candidates.map(async (candidate) => {
+                    try {
+                        const sessionsResponse = await domainApi.agentSessions(candidate.uuid);
+                        if (sessionsResponse.data.some((item) => item.title === sessionTitle)) {
+                            withTitle.add(candidate.uuid);
+                        }
+                    } catch {
+                        // Ignorer un agent inaccessible.
+                    }
+                }));
+
+                if (cancelled) {
+                    return;
+                }
+
+                const selected = pickApplicationChatAgentPreferringSession(
+                    agentsResponse.data,
+                    application.uuid,
+                    sessionTitle,
+                    withTitle,
+                );
                 if (!selected) {
-                    setSetupMessage('Aucun agent IA actif n’est disponible. Configurez-en un pour discuter.');
+                    setSetupMessage(
+                        'Aucun agent IA actif (deployment / devforge / debug) avec provider LLM. '
+                        + 'Créez-en un dans Agents pour la correction automatique et ce chat.',
+                    );
                     return;
                 }
 
@@ -90,6 +128,35 @@ export function ApplicationAgentChatCard({ application }: Props) {
             cancelled = true;
         };
     }, [application.uuid, application.name, sessionTitle]);
+
+    // Poll pour les messages auto (échecs deploy / rapports agent) hors envoi manuel.
+    useEffect(() => {
+        if (!agent || !session || sending || loading) {
+            return;
+        }
+
+        let cancelled = false;
+
+        const refresh = async () => {
+            try {
+                const history = await domainApi.agentSessionMessages(agent.uuid, session.uuid);
+                if (!cancelled) {
+                    setMessages(history.data);
+                }
+            } catch {
+                // Ignorer les erreurs de polling silencieuses.
+            }
+        };
+
+        const id = window.setInterval(() => {
+            void refresh();
+        }, 4000);
+
+        return () => {
+            cancelled = true;
+            window.clearInterval(id);
+        };
+    }, [agent, session, sending, loading]);
 
     const handleSend = async (content: string) => {
         if (!agent || !session || sending) {

@@ -1,5 +1,8 @@
 import {
     ArrowLeft,
+    Ban,
+    Bot,
+    Check,
     ChevronDown,
     CircleAlert,
     ExternalLink,
@@ -7,12 +10,14 @@ import {
     GitBranch,
     Globe,
     Loader2,
+    Pencil,
     Play,
     RefreshCw,
     Rocket,
     RotateCw,
     Server,
     Square,
+    X,
     XCircle,
 } from 'lucide-preact';
 import type { ComponentChildren } from 'preact';
@@ -39,6 +44,7 @@ import { ApplicationPreviewsPanel } from './ApplicationPreviewsPanel';
 import { ApplicationResourceLimitsPanel } from './ApplicationResourceLimitsPanel';
 import { ApplicationScheduledTasksPanel } from './ApplicationScheduledTasksPanel';
 import { ApplicationStoragePanel } from './ApplicationStoragePanel';
+import { DeploymentAgentCard } from './DeploymentAgentCard';
 import { DeploymentMonitorPanel } from './DeploymentMonitorPanel';
 import { ApplicationSourceExplorer } from './ApplicationSourceExplorer';
 import {
@@ -57,7 +63,7 @@ import {
 import { applicationTabs, parseApplicationTab, type ApplicationTabId } from '../../lib/application-tabs';
 import { canVisitApplication, resolveCoreResourceActions } from '../../lib/core-resource-actions';
 import { domainApi, type ApplicationReadiness, type CoreAction } from '../../lib/domain-api';
-import { isDeploymentActive } from '../../lib/deployment-status';
+import { isDeploymentActive, isDeploymentCancellable } from '../../lib/deployment-status';
 import { pickFocusedDeployment } from '../../lib/pick-focused-deployment';
 import { partitionDeploymentAttempts } from '../../lib/partition-deployment-attempts';
 import { shouldCollapsePreviousFailures } from '../../lib/agent-correction-summary';
@@ -101,8 +107,12 @@ function DeploymentAttemptGroup({
     deployments,
     focusedUuid,
     onSelect,
+    canCancel = false,
+    cancellingUuid = null,
+    onCancel,
     collapsible = false,
     defaultCollapsed = false,
+    showAgentButton = false,
 }: {
     title: string;
     hint: string;
@@ -110,10 +120,15 @@ function DeploymentAttemptGroup({
     deployments: Deployment[];
     focusedUuid: string | null;
     onSelect: (uuid: string) => void;
+    canCancel?: boolean;
+    cancellingUuid?: string | null;
+    onCancel?: (uuid: string) => void;
     collapsible?: boolean;
     defaultCollapsed?: boolean;
+    showAgentButton?: boolean;
 }) {
     const [open, setOpen] = useState(!defaultCollapsed);
+    const [agentOpenUuid, setAgentOpenUuid] = useState<string | null>(null);
     const toneClass = {
         current: 'border-primary/35 bg-primary/5',
         active: 'border-warning/30 bg-warning/5',
@@ -161,19 +176,25 @@ function DeploymentAttemptGroup({
                 <ul class={`grid min-w-0 gap-2 ${collapsible ? 'mt-3' : ''}`}>
                     {deployments.map((deployment) => {
                         const selected = deployment.uuid === focusedUuid;
+                        const showCancel = canCancel
+                            && onCancel
+                            && isDeploymentCancellable(deployment.status);
+                        const agentExpanded = showAgentButton && agentOpenUuid === deployment.uuid;
 
                         return (
                             <li key={deployment.uuid} class="min-w-0">
-                                <button
-                                    class={`flex w-full min-w-0 flex-col gap-2 rounded-lg border px-3 py-2 text-left transition sm:flex-row sm:items-center sm:justify-between ${
+                                <div
+                                    class={`flex w-full min-w-0 flex-col gap-2 rounded-lg border px-3 py-2 transition sm:flex-row sm:items-center sm:justify-between ${
                                         selected
                                             ? 'border-primary/40 bg-base-100'
                                             : 'border-base-300/60 bg-base-100/80 hover:border-primary/30'
                                     }`}
-                                    type="button"
-                                    onClick={() => onSelect(deployment.uuid)}
                                 >
-                                    <span class="flex min-w-0 flex-1 flex-col gap-1 overflow-hidden">
+                                    <button
+                                        class="flex min-w-0 flex-1 flex-col gap-1 overflow-hidden text-left"
+                                        type="button"
+                                        onClick={() => onSelect(deployment.uuid)}
+                                    >
                                         <span class="flex min-w-0 flex-wrap items-center gap-2">
                                             <DeploymentStatusIcon status={deployment.status} showLabel={selected || tone !== 'history'} />
                                             <span class="font-mono text-[11px] text-base-content/45">
@@ -186,12 +207,56 @@ function DeploymentAttemptGroup({
                                         <span class="text-xs text-base-content/45">
                                             {formatDateTime(deployment.finished_at ?? deployment.created_at)}
                                         </span>
+                                    </button>
+                                    <span class="flex shrink-0 flex-wrap items-center gap-1">
+                                        {showCancel && (
+                                            <button
+                                                class="btn btn-ghost btn-xs text-error"
+                                                type="button"
+                                                disabled={cancellingUuid === deployment.uuid}
+                                                aria-label="Annuler le déploiement"
+                                                onClick={() => onCancel(deployment.uuid)}
+                                            >
+                                                {cancellingUuid === deployment.uuid
+                                                    ? <Loader2 class="size-3.5 animate-spin" aria-hidden />
+                                                    : <Ban class="size-3.5" aria-hidden />}
+                                                Annuler
+                                            </button>
+                                        )}
+                                        {showAgentButton && (
+                                            <button
+                                                class={`btn btn-ghost btn-xs ${agentExpanded ? 'text-primary' : ''}`}
+                                                type="button"
+                                                aria-expanded={agentExpanded}
+                                                aria-label={agentExpanded ? 'Masquer l’agent' : 'Ouvrir l’agent'}
+                                                onClick={() => setAgentOpenUuid((current) => (
+                                                    current === deployment.uuid ? null : deployment.uuid
+                                                ))}
+                                            >
+                                                <Bot class="size-3.5" aria-hidden />
+                                                Agent
+                                            </button>
+                                        )}
+                                        <button
+                                            class={`btn btn-ghost btn-xs ${selected ? 'text-primary' : ''}`}
+                                            type="button"
+                                            onClick={() => onSelect(deployment.uuid)}
+                                        >
+                                            <FileText class="size-3.5" aria-hidden />
+                                            {selected ? 'Actif' : 'Logs'}
+                                        </button>
                                     </span>
-                                    <span class={`btn btn-ghost btn-xs shrink-0 ${selected ? 'text-primary' : ''}`}>
-                                        <FileText class="size-3.5" aria-hidden />
-                                        {selected ? 'Actif' : 'Logs'}
-                                    </span>
-                                </button>
+                                </div>
+                                {agentExpanded && (
+                                    <div class="mt-2 min-w-0">
+                                        <DeploymentAgentCard
+                                            deploymentUuid={deployment.uuid}
+                                            historyMode
+                                            pollWhileActive={false}
+                                            onSelectDeployment={onSelect}
+                                        />
+                                    </div>
+                                )}
                             </li>
                         );
                     })}
@@ -342,6 +407,13 @@ export function ApplicationDetailPanel({
     const [actionError, setActionError] = useState<string | null>(null);
     const [focusedDeploymentUuid, setFocusedDeploymentUuid] = useState<string | null>(null);
     const [focusPinned, setFocusPinned] = useState(false);
+    const [pendingCancelUuid, setPendingCancelUuid] = useState<string | null>(null);
+    const [cancellingUuid, setCancellingUuid] = useState<string | null>(null);
+    const [cancelError, setCancelError] = useState<string | null>(null);
+    const [editingName, setEditingName] = useState(false);
+    const [nameDraft, setNameDraft] = useState('');
+    const [renaming, setRenaming] = useState(false);
+    const [renameError, setRenameError] = useState<string | null>(null);
 
     const resource = resourceQuery.data?.data;
     const status = resource?.status ?? 'unknown';
@@ -370,6 +442,9 @@ export function ApplicationDetailPanel({
         setActing(null);
         setPendingAction(null);
         setActionError(null);
+        setPendingCancelUuid(null);
+        setCancellingUuid(null);
+        setCancelError(null);
     }, [uuid, initialTab]);
 
     useEffect(() => {
@@ -451,6 +526,81 @@ export function ApplicationDetailPanel({
         }
     };
 
+    const confirmCancelDeployment = async () => {
+        if (!pendingCancelUuid || !canAct) {
+            return;
+        }
+
+        const uuidToCancel = pendingCancelUuid;
+        setCancellingUuid(uuidToCancel);
+        setCancelError(null);
+
+        try {
+            await domainApi.cancelDeployment(uuidToCancel);
+            setPendingCancelUuid(null);
+            await deploymentsQuery.reload();
+        } catch {
+            setCancelError('Impossible d’annuler ce déploiement.');
+        } finally {
+            setCancellingUuid(null);
+        }
+    };
+
+    const startRename = () => {
+        if (!resource || !canAct) {
+            return;
+        }
+        setNameDraft(resource.name);
+        setRenameError(null);
+        setEditingName(true);
+    };
+
+    const cancelRename = () => {
+        setEditingName(false);
+        setRenameError(null);
+        setNameDraft('');
+    };
+
+    const saveRename = async () => {
+        if (!resource) {
+            return;
+        }
+
+        const nextName = nameDraft.trim();
+        if (nextName.length < 3) {
+            setRenameError('Le nom doit contenir au moins 3 caractères.');
+            return;
+        }
+        if (nextName === resource.name) {
+            cancelRename();
+            return;
+        }
+
+        setRenaming(true);
+        setRenameError(null);
+        try {
+            await domainApi.updateApplication(resource.uuid, { name: nextName });
+            setEditingName(false);
+            await reload();
+            await onChanged();
+        } catch {
+            setRenameError('Impossible de renommer l’application.');
+        } finally {
+            setRenaming(false);
+        }
+    };
+
+    const onRenameKeyDown = (event: KeyboardEvent) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            void saveRename();
+        }
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            cancelRename();
+        }
+    };
+
     return (
         <DataState loading={resourceQuery.loading} error={resourceQuery.error} onRetry={() => void reload()}>
             {resource && config && (
@@ -462,7 +612,56 @@ export function ApplicationDetailPanel({
                                 Applications
                             </button>
                             <div class="min-w-0">
-                                <h2 class="break-words text-2xl font-bold tracking-tight sm:text-3xl">{resource.name}</h2>
+                                {editingName ? (
+                                    <div class="grid min-w-0 gap-2">
+                                        <div class="flex min-w-0 flex-wrap items-center gap-2">
+                                            <input
+                                                aria-label="Nom de l’application"
+                                                autoFocus
+                                                class="input input-bordered input-sm min-w-0 flex-1 text-base font-semibold sm:text-lg"
+                                                disabled={renaming}
+                                                maxLength={255}
+                                                type="text"
+                                                value={nameDraft}
+                                                onInput={(event) => setNameDraft((event.target as HTMLInputElement).value)}
+                                                onKeyDown={onRenameKeyDown}
+                                            />
+                                            <button
+                                                aria-label="Enregistrer le nom"
+                                                class="btn btn-primary btn-sm btn-square rounded-full"
+                                                disabled={renaming}
+                                                type="button"
+                                                onClick={() => void saveRename()}
+                                            >
+                                                {renaming ? <Loader2 class="size-3.5 animate-spin" aria-hidden /> : <Check class="size-3.5" aria-hidden />}
+                                            </button>
+                                            <button
+                                                aria-label="Annuler le renommage"
+                                                class="btn btn-ghost btn-sm btn-square rounded-full border border-base-300/80"
+                                                disabled={renaming}
+                                                type="button"
+                                                onClick={cancelRename}
+                                            >
+                                                <X class="size-3.5" aria-hidden />
+                                            </button>
+                                        </div>
+                                        {renameError && <p class="text-sm text-error">{renameError}</p>}
+                                    </div>
+                                ) : (
+                                    <div class="flex min-w-0 items-center gap-2">
+                                        <h2 class="min-w-0 break-words text-2xl font-bold tracking-tight sm:text-3xl">{resource.name}</h2>
+                                        {canAct && (
+                                            <button
+                                                aria-label="Modifier le nom"
+                                                class="btn btn-ghost btn-sm btn-square shrink-0 rounded-full text-base-content/55 hover:text-base-content"
+                                                type="button"
+                                                onClick={startRename}
+                                            >
+                                                <Pencil class="size-4" aria-hidden />
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
                                 <p class="break-words text-sm text-base-content/55">
                                     {[config.project?.name, config.environment?.name].filter(Boolean).join(' · ') || 'Application sans projet'}
                                 </p>
@@ -702,6 +901,12 @@ export function ApplicationDetailPanel({
                                                         deployments={[attemptBuckets.current]}
                                                         focusedUuid={focusedDeploymentUuid}
                                                         onSelect={(deploymentUuid) => focusDeployment(deploymentUuid, true)}
+                                                        canCancel={canAct}
+                                                        cancellingUuid={cancellingUuid}
+                                                        onCancel={(deploymentUuid) => {
+                                                            setCancelError(null);
+                                                            setPendingCancelUuid(deploymentUuid);
+                                                        }}
                                                     />
                                                 )}
                                                 {attemptBuckets.active.length > 0 && (
@@ -712,6 +917,12 @@ export function ApplicationDetailPanel({
                                                         deployments={attemptBuckets.active}
                                                         focusedUuid={focusedDeploymentUuid}
                                                         onSelect={(deploymentUuid) => focusDeployment(deploymentUuid, true)}
+                                                        canCancel={canAct}
+                                                        cancellingUuid={cancellingUuid}
+                                                        onCancel={(deploymentUuid) => {
+                                                            setCancelError(null);
+                                                            setPendingCancelUuid(deploymentUuid);
+                                                        }}
                                                     />
                                                 )}
 
@@ -776,6 +987,7 @@ export function ApplicationDetailPanel({
                                                         onSelect={(deploymentUuid) => focusDeployment(deploymentUuid, true)}
                                                         collapsible
                                                         defaultCollapsed={shouldCollapsePreviousFailures(attemptBuckets.failed.length)}
+                                                        showAgentButton
                                                     />
                                                 )}
                                                 {attemptBuckets.history.length > 0 && (
@@ -788,6 +1000,7 @@ export function ApplicationDetailPanel({
                                                         onSelect={(deploymentUuid) => focusDeployment(deploymentUuid, true)}
                                                         collapsible
                                                         defaultCollapsed={attemptBuckets.history.length > 2}
+                                                        showAgentButton
                                                     />
                                                 )}
                                             </div>
@@ -825,6 +1038,10 @@ export function ApplicationDetailPanel({
                             applicationUuid={resource.uuid}
                             canAct={canAct}
                             onChanged={reload}
+                            onRedeployQueued={(deploymentUuid) => {
+                                focusDeployment(deploymentUuid, false);
+                                openDeploymentsTab();
+                            }}
                         />
                     )}
 
@@ -912,6 +1129,7 @@ export function ApplicationDetailPanel({
                     </div>
 
                     {actionError && <p class="text-sm text-error" role="alert">{actionError}</p>}
+                    {cancelError && <p class="text-sm text-error" role="alert">{cancelError}</p>}
 
                     {pendingAction && (
                         <ConfirmDialog
@@ -925,6 +1143,20 @@ export function ApplicationDetailPanel({
                             confirmLabel={pendingAction === 'deploy' ? 'Déployer (Cache)' : 'Confirmer'}
                             secondaryConfirmLabel={pendingAction === 'deploy' ? 'Force Rebuild' : undefined}
                             onSecondaryConfirm={pendingAction === 'deploy' ? () => void runAction(pendingAction, { force: true }) : undefined}
+                        />
+                    )}
+
+                    {pendingCancelUuid && (
+                        <ConfirmDialog
+                            open
+                            title="Annuler le déploiement"
+                            message="Annuler cette tentative en file ou en cours ? Les déploiements suivants pourront démarrer."
+                            tone="danger"
+                            loading={cancellingUuid === pendingCancelUuid}
+                            onCancel={() => setPendingCancelUuid(null)}
+                            onConfirm={() => void confirmCancelDeployment()}
+                            confirmLabel="Oui, annuler"
+                            cancelLabel="Fermer"
                         />
                     )}
                 </div>

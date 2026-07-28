@@ -106,4 +106,62 @@ describe('ApplicationRuntimeSettingsPanel', () => {
             expect(screen.getByText(/redéploiement lancé/)).toBeInTheDocument();
         });
     });
+
+    it('préremplit le formulaire via Auto-détecter sans enregistrer', async () => {
+        let putCalled = false;
+
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+            const url = String(input);
+            const method = (init?.method ?? 'GET').toUpperCase();
+
+            if (url.includes('/sanctum/csrf-cookie')) {
+                return new Response(null, { status: 204 });
+            }
+
+            if (url.includes('/runtime-settings/detect') && method === 'POST') {
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        reason: null,
+                        sources: ['package.json'],
+                        suggestions: {
+                            is_static: false,
+                            ports_exposes: '4321',
+                            publish_directory: '/',
+                            start_command: 'node ./dist/server/entry.mjs',
+                        },
+                        reasons: ['Astro SSR détecté'],
+                    },
+                });
+            }
+
+            if (url.includes('/runtime-settings') && method === 'PUT') {
+                putCalled = true;
+                return jsonResponse({ data: settingsFixture });
+            }
+
+            if (url.includes('/runtime-settings')) {
+                return jsonResponse({ data: settingsFixture });
+            }
+
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(
+            <ApplicationRuntimeSettingsPanel
+                applicationUuid="app-uuid-1234"
+                canAct
+            />,
+        );
+
+        expect(await screen.findByRole('button', { name: 'Auto-détecter' })).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Auto-détecter' }));
+
+        await waitFor(() => {
+            expect(screen.getByText(/Suggestions appliquées/)).toBeInTheDocument();
+        });
+
+        expect(screen.getByDisplayValue('4321')).toBeInTheDocument();
+        expect(putCalled).toBe(false);
+    });
 });

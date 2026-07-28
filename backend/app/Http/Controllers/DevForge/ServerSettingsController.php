@@ -40,7 +40,7 @@ class ServerSettingsController extends Controller
         $this->authorize('update', $server);
 
         return response()->json([
-            'data' => $this->serverSettingsService->update($server, $request->all()),
+            'data' => $this->serverSettingsService->update($server, $request->all(), $user),
         ]);
     }
 }

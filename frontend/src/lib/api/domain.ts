@@ -265,6 +265,32 @@ export type Profile = {
     email: string;
     email_verified: boolean;
     two_factor_enabled: boolean;
+    force_password_reset?: boolean;
+};
+
+export type ProfilePasswordUpdateInput = {
+    current_password: string;
+    password: string;
+    password_confirmation: string;
+};
+
+export type TwoFactorStatus = {
+    two_factor_enabled: boolean;
+    two_factor_confirmed: boolean;
+    qr_code_svg: string | null;
+    setup_key: string | null;
+    recovery_codes: string[];
+    message?: string;
+};
+
+export type SubscriptionStatus = {
+    cloud_enabled: boolean;
+    subscription_active: boolean;
+    subscription_grace_period: boolean;
+    already_subscribed: boolean;
+    stripe_customer_id_set: boolean;
+    can_manage: boolean;
+    is_member: boolean;
 };
 
 export type Team = {
@@ -605,11 +631,51 @@ export type AgentChatMessage = {
 export type AgentChatSession = {
     uuid: string;
     title: string;
+    chat_mode?: 'plan' | 'build' | 'debug';
     is_legacy: boolean;
     last_message_at: string | null;
     created_at: string;
 };
-export type LlmProvider = 'gemini' | 'ollama';
+
+export type AgentMemory = {
+    id: number;
+    scope: 'agent' | 'shared' | 'project';
+    content: string;
+    tags: string[];
+    resource_uuid: string | null;
+    created_at: string | null;
+};
+
+export type AgentMissionKind = 'bug' | 'feature' | 'tech_watch' | 'github_pr' | 'ops' | 'other';
+export type AgentMissionStatus = 'open' | 'in_progress' | 'blocked' | 'done' | 'cancelled';
+export type AgentMissionPriority = 'low' | 'normal' | 'high' | 'urgent';
+
+export type AgentMission = {
+    uuid: string;
+    kind: AgentMissionKind | string;
+    status: AgentMissionStatus | string;
+    priority: AgentMissionPriority | string;
+    title: string;
+    description: string | null;
+    source: string | null;
+    resource_uuid: string | null;
+    agent_id: number | null;
+    assignee_agent_id: number | null;
+    metadata: Record<string, unknown>;
+    created_at: string | null;
+    updated_at: string | null;
+    completed_at: string | null;
+};
+
+export type AgentChatAttachment = {
+    type?: string;
+    label?: string;
+    url?: string;
+    text?: string;
+    selector?: string;
+};
+
+export type LlmProvider = 'gemini' | 'ollama' | 'openai' | 'openrouter' | 'anthropic';
 
 export type LlmModelOption = {
     id: string;
@@ -648,11 +714,24 @@ export type AgentEphemeralTask = {
     summary: string | null;
 };
 
+export type AgentRunPendingApproval = {
+    status?: string;
+    resolved?: string;
+    tool?: string;
+    reason?: string;
+    rule_id?: string;
+    approval_key?: string;
+    diff_preview?: Record<string, unknown>;
+};
+
 export type AgentRunMetadata = {
     model_routing?: AgentModelRouting;
     ephemeral?: boolean;
     parent_run_uuid?: string | null;
     ephemeral_tasks?: AgentEphemeralTask[];
+    pending_approval?: AgentRunPendingApproval;
+    steps?: AgentChatStep[];
+    todos?: Array<{ id: string; content: string; status: string }>;
 };
 
 export type AgentRun = {
@@ -720,6 +799,20 @@ export type SecurityKey = {
     private_key: '********';
     created_at: string;
     message?: string;
+};
+
+export type CloudInitScript = {
+    id: number;
+    name: string;
+    script: string;
+    created_at: string;
+    updated_at: string;
+    message?: string;
+};
+
+export type CloudInitScriptInput = {
+    name: string;
+    script: string;
 };
 
 export type SecurityKeyInput = {
@@ -924,6 +1017,7 @@ export type ApplicationDomainRedirect = 'both' | 'www' | 'non-www';
 
 export type ApplicationDomains = {
     domains: string[];
+    managed_domain: string | null;
     fqdn: string | null;
     redirect: ApplicationDomainRedirect;
     wildcard_domain: string | null;
@@ -987,6 +1081,23 @@ export type ApplicationRuntimeSettings = {
     supports_static_toggle: boolean;
 };
 
+export type ApplicationRuntimeSettingsDetection = {
+    available: boolean;
+    reason: string | null;
+    sources: string[];
+    suggestions: Partial<{
+        is_static: boolean;
+        ports_exposes: string;
+        publish_directory: string;
+        base_directory: string;
+        start_command: string | null;
+        build_command: string | null;
+        install_command: string | null;
+        health_check_port: string;
+    }>;
+    reasons: string[];
+};
+
 export type ApplicationRuntimeSettingsUpdateInput = Partial<{
     build_pack: string;
     is_static: boolean;
@@ -1006,6 +1117,13 @@ export type ApplicationDomainsUpdateInput = {
     domains?: string | null;
     redirect?: ApplicationDomainRedirect;
     force_domain_override?: boolean;
+    redeploy?: boolean;
+};
+
+export type ApplicationDomainRedeploy = {
+    queued: boolean;
+    deployment_uuid: string | null;
+    message: string;
 };
 
 export type DomainConflict = {
@@ -1019,6 +1137,16 @@ export type ServerSettings = {
     uuid: string;
     name: string;
     wildcard_domain: string | null;
+    advanced?: {
+        concurrent_builds: number;
+        dynamic_timeout: number;
+        deployment_queue_limit: number;
+        server_disk_usage_notification_threshold: number;
+        server_disk_usage_check_frequency: string;
+    };
+    security?: {
+        is_terminal_enabled: boolean;
+    };
     swarm?: {
         is_swarm_manager: boolean;
         is_swarm_worker: boolean;
@@ -1055,6 +1183,13 @@ export type ServerSettingsUpdateInput = {
     sentinel_metrics_refresh_rate_seconds?: number | null;
     sentinel_metrics_history_days?: number | null;
     sentinel_push_interval_seconds?: number | null;
+    concurrent_builds?: number;
+    dynamic_timeout?: number;
+    deployment_queue_limit?: number;
+    server_disk_usage_notification_threshold?: number;
+    server_disk_usage_check_frequency?: string;
+    is_terminal_enabled?: boolean;
+    confirmation_password?: string;
 };
 
 export type DatabaseEngine = 'postgresql' | 'redis' | 'mongodb' | 'mysql' | 'mariadb' | 'keydb' | 'dragonfly' | 'clickhouse' | 'libsql';
@@ -1751,13 +1886,19 @@ export const domainApi = {
         method: 'POST',
         body: JSON.stringify({ action, ...payload }),
     }),
-    deployments: (page = 1, applicationUuid?: string, perPage = 25) => {
+    deployments: (page = 1, applicationUuid?: string, perPage = 25, options?: { status?: string; active?: boolean }) => {
         const params = new URLSearchParams({
             page: String(page),
             per_page: String(perPage),
         });
         if (applicationUuid) {
             params.set('application_uuid', applicationUuid);
+        }
+        if (options?.status) {
+            params.set('status', options.status);
+        }
+        if (options?.active) {
+            params.set('active', '1');
         }
 
         return apiFetch<ApiListResponse<Deployment>>(`${API_BASE}/deployments?${params.toString()}`);
@@ -1772,12 +1913,47 @@ export const domainApi = {
         },
     ),
     deploymentMonitoring: (uuid: string) => apiFetch<ApiResponse<DeploymentMonitoring>>(`${API_BASE}/deployments/${encodeURIComponent(uuid)}/monitoring`),
+    cancelDeployment: (uuid: string) => mutate<ApiResponse<Deployment>>(
+        `/deployments/${encodeURIComponent(uuid)}/cancel`,
+        { method: 'POST' },
+    ),
     statuses: () => apiFetch<ApiResponse<ResourceStatuses>>(`${API_BASE}/resources/status`),
     realtime: () => apiFetch<ApiResponse<RealtimeMetadata>>(`${API_BASE}/realtime`),
     profile: () => apiFetch<ApiResponse<Profile>>(`${API_BASE}/profile`),
     updateProfile: (input: Pick<Profile, 'name' | 'email'>) => mutate<ApiResponse<Profile>>('/profile', {
         method: 'PUT',
         body: JSON.stringify(input),
+    }),
+    updateProfilePassword: (input: ProfilePasswordUpdateInput) => mutate<ApiResponse<{ message: string; force_password_reset: boolean }>>(
+        '/profile/password',
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    twoFactorStatus: () => apiFetch<ApiResponse<TwoFactorStatus>>(`${API_BASE}/profile/two-factor`),
+    enableTwoFactor: (currentPassword: string) => mutate<ApiResponse<TwoFactorStatus>>('/profile/two-factor', {
+        method: 'POST',
+        body: JSON.stringify({ current_password: currentPassword }),
+    }),
+    confirmTwoFactor: (code: string) => mutate<ApiResponse<TwoFactorStatus>>('/profile/two-factor/confirm', {
+        method: 'POST',
+        body: JSON.stringify({ code }),
+    }),
+    disableTwoFactor: (currentPassword: string) => mutate<ApiResponse<TwoFactorStatus>>('/profile/two-factor', {
+        method: 'DELETE',
+        body: JSON.stringify({ current_password: currentPassword }),
+    }),
+    regenerateRecoveryCodes: (currentPassword: string) => mutate<ApiResponse<TwoFactorStatus>>(
+        '/profile/two-factor/recovery-codes',
+        {
+            method: 'POST',
+            body: JSON.stringify({ current_password: currentPassword }),
+        },
+    ),
+    subscription: () => apiFetch<ApiResponse<SubscriptionStatus>>(`${API_BASE}/subscription`),
+    subscriptionPortal: () => mutate<ApiResponse<{ url: string }>>('/subscription/portal', {
+        method: 'POST',
     }),
     teams: () => apiFetch<ApiResponse<Team[]>>(`${API_BASE}/teams`),
     currentTeam: () => apiFetch<ApiResponse<Team>>(`${API_BASE}/teams/current`),
@@ -1939,6 +2115,27 @@ export const domainApi = {
         `/security/cloud-tokens/${encodeURIComponent(tokenUuid)}/validate`,
         { method: 'POST' },
     ),
+    cloudInitScripts: () => apiFetch<ApiResponse<CloudInitScript[]>>(
+        `${API_BASE}/security/cloud-init-scripts`,
+    ),
+    createCloudInitScript: (input: CloudInitScriptInput) => mutate<ApiResponse<CloudInitScript>>(
+        '/security/cloud-init-scripts',
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+    ),
+    updateCloudInitScript: (scriptId: number, input: CloudInitScriptInput) => mutate<ApiResponse<CloudInitScript>>(
+        `/security/cloud-init-scripts/${scriptId}`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
+    ),
+    deleteCloudInitScript: (scriptId: number) => mutate<{ message: string }>(
+        `/security/cloud-init-scripts/${scriptId}`,
+        { method: 'DELETE' },
+    ),
 
     deploymentTargets: () => apiFetch<ApiResponse<DeploymentTarget[]>>(`${API_BASE}/deployment-targets`),
     destinations: () => apiFetch<ApiResponse<DestinationSummary[]>>(`${API_BASE}/destinations`),
@@ -2015,16 +2212,30 @@ export const domainApi = {
     updateApplicationDomains: (
         applicationUuid: string,
         input: ApplicationDomainsUpdateInput,
-    ) => mutate<ApiResponse<ApplicationDomains>>(
+    ) => mutate<ApiResponse<ApplicationDomains> & {
+        meta?: {
+            redeploy?: ApplicationDomainRedeploy | null;
+        };
+    }>(
         `/applications/${encodeURIComponent(applicationUuid)}/domains`,
         {
             method: 'PUT',
             body: JSON.stringify(input),
         },
     ),
-    generateApplicationDomain: (applicationUuid: string) => mutate<ApiResponse<ApplicationDomains>>(
+    generateApplicationDomain: (
+        applicationUuid: string,
+        input: { redeploy?: boolean } = {},
+    ) => mutate<ApiResponse<ApplicationDomains> & {
+        meta?: {
+            redeploy?: ApplicationDomainRedeploy | null;
+        };
+    }>(
         `/applications/${encodeURIComponent(applicationUuid)}/domains/generate`,
-        { method: 'POST' },
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
     ),
     serverSettings: (serverUuid: string) => apiFetch<ApiResponse<ServerSettings>>(
         `${API_BASE}/servers/${encodeURIComponent(serverUuid)}/settings`,
@@ -2499,6 +2710,13 @@ export const domainApi = {
         `/applications/${encodeURIComponent(applicationUuid)}/environment-variables/${encodeURIComponent(envUuid)}`,
         { method: 'DELETE' },
     ),
+    updateApplication: (applicationUuid: string, input: { name: string }) => mutate<ApiResponse<CoreResource>>(
+        `/applications/${encodeURIComponent(applicationUuid)}`,
+        {
+            method: 'PATCH',
+            body: JSON.stringify(input),
+        },
+    ),
     revealApplicationEnvironmentVariable: (applicationUuid: string, envUuid: string) => apiFetch<ApiResponse<{
         uuid: string;
         value: string | null;
@@ -2507,6 +2725,10 @@ export const domainApi = {
     ),
     applicationRuntimeSettings: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationRuntimeSettings>>(
         `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/runtime-settings`,
+    ),
+    detectApplicationRuntimeSettings: (applicationUuid: string) => mutate<ApiResponse<ApplicationRuntimeSettingsDetection>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/runtime-settings/detect`,
+        { method: 'POST', body: '{}' },
     ),
     updateApplicationRuntimeSettings: (
         applicationUuid: string,
@@ -2789,21 +3011,31 @@ export const domainApi = {
     activateAgentSession: (uuid: string, sessionUuid: string) => mutate<ApiResponse<AgentChatSession>>(`/agents/${encodeURIComponent(uuid)}/sessions/${encodeURIComponent(sessionUuid)}/activate`, {
         method: 'POST',
     }),
-    updateAgentSession: (uuid: string, sessionUuid: string, title: string) => mutate<ApiResponse<AgentChatSession>>(`/agents/${encodeURIComponent(uuid)}/sessions/${encodeURIComponent(sessionUuid)}`, {
+    updateAgentSession: (
+        uuid: string,
+        sessionUuid: string,
+        payload: { title?: string; chat_mode?: 'plan' | 'build' | 'debug' } | string,
+    ) => mutate<ApiResponse<AgentChatSession>>(`/agents/${encodeURIComponent(uuid)}/sessions/${encodeURIComponent(sessionUuid)}`, {
         method: 'PATCH',
-        body: JSON.stringify({ title }),
+        body: JSON.stringify(typeof payload === 'string' ? { title: payload } : payload),
     }),
     agentSessionMessages: (uuid: string, sessionUuid: string) => apiFetch<ApiListResponse<AgentChatMessage>>(`${API_BASE}/agents/${encodeURIComponent(uuid)}/sessions/${encodeURIComponent(sessionUuid)}/messages`),
     sendAgentSessionMessage: (
         uuid: string,
         sessionUuid: string,
         content: string,
-        options?: { application_uuid?: string },
+        options?: {
+            application_uuid?: string;
+            chat_mode?: 'plan' | 'build' | 'debug';
+            attachments?: AgentChatAttachment[];
+        },
     ) => mutate<ApiResponse<{ user: AgentChatMessage; run_uuid: string; session_uuid: string; status: 'pending' }>>(`/agents/${encodeURIComponent(uuid)}/sessions/${encodeURIComponent(sessionUuid)}/messages`, {
         method: 'POST',
         body: JSON.stringify({
             content,
             ...(options?.application_uuid ? { application_uuid: options.application_uuid } : {}),
+            ...(options?.chat_mode ? { chat_mode: options.chat_mode } : {}),
+            ...(options?.attachments?.length ? { attachments: options.attachments } : {}),
         }),
     }),
     resolveAgentToolApproval: (uuid: string, messageUuid: string, decision: 'approve' | 'deny') => mutate<ApiResponse<{
@@ -2815,6 +3047,76 @@ export const domainApi = {
     }>>(`/agents/${encodeURIComponent(uuid)}/messages/${encodeURIComponent(messageUuid)}/approval`, {
         method: 'POST',
         body: JSON.stringify({ decision }),
+    }),
+    agentMemories: (uuid: string, options?: { scope?: string; resource_uuid?: string; q?: string }) => {
+        const params = new URLSearchParams();
+        if (options?.scope) params.set('scope', options.scope);
+        if (options?.resource_uuid) params.set('resource_uuid', options.resource_uuid);
+        if (options?.q) params.set('q', options.q);
+        const qs = params.toString();
+        return apiFetch<ApiListResponse<AgentMemory>>(`${API_BASE}/agents/${encodeURIComponent(uuid)}/memories${qs ? `?${qs}` : ''}`);
+    },
+    createAgentMemory: (uuid: string, input: { content: string; scope?: string; resource_uuid?: string; tags?: string[] }) => mutate<ApiResponse<AgentMemory>>(`/agents/${encodeURIComponent(uuid)}/memories`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+    }),
+    deleteAgentMemory: (uuid: string, memoryId: number) => mutate<{ data: { deleted: boolean } }>(`/agents/${encodeURIComponent(uuid)}/memories/${memoryId}`, {
+        method: 'DELETE',
+    }),
+    clearAgentMemories: (uuid: string, scope: string) => mutate<{ data: { cleared: number; scope: string } }>(`/agents/${encodeURIComponent(uuid)}/memories/clear`, {
+        method: 'POST',
+        body: JSON.stringify({ scope }),
+    }),
+    resolveAgentRunApproval: (agentUuid: string, runUuid: string, decision: 'approve' | 'deny') => mutate<ApiResponse<{
+        decision: 'approve' | 'deny';
+        run: AgentRun;
+        follow_up_run_uuid: string | null;
+    }>>(`/agents/${encodeURIComponent(agentUuid)}/runs/${encodeURIComponent(runUuid)}/approval`, {
+        method: 'POST',
+        body: JSON.stringify({ decision }),
+    }),
+    agentInstructions: (resourceUuid?: string) => {
+        const qs = resourceUuid ? `?resource_uuid=${encodeURIComponent(resourceUuid)}` : '';
+        return apiFetch<ApiResponse<{ org: string; personal: string; project: string }>>(`${API_BASE}/ai/instructions${qs}`);
+    },
+    updateAgentInstructions: (input: { org?: string; personal?: string; project?: string; resource_uuid?: string }) => mutate<ApiResponse<{ org: string; personal: string; project: string }>>('/ai/instructions', {
+        method: 'PUT',
+        body: JSON.stringify(input),
+    }),
+    agentMissions: (options?: { status?: string; kind?: string; q?: string; limit?: number }) => {
+        const params = new URLSearchParams();
+        if (options?.status) params.set('status', options.status);
+        if (options?.kind) params.set('kind', options.kind);
+        if (options?.q) params.set('q', options.q);
+        if (options?.limit) params.set('limit', String(options.limit));
+        const qs = params.toString();
+        return apiFetch<ApiListResponse<AgentMission> & { meta?: { available?: boolean; kinds?: string[]; statuses?: string[] } }>(
+            `${API_BASE}/ai/missions${qs ? `?${qs}` : ''}`,
+        );
+    },
+    createAgentMission: (input: {
+        title: string;
+        description?: string;
+        kind?: string;
+        status?: string;
+        priority?: string;
+        resource_uuid?: string;
+        assignee_agent_uuid?: string;
+    }) => mutate<ApiResponse<AgentMission>>('/ai/missions', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    }),
+    updateAgentMission: (uuid: string, input: Partial<{
+        title: string;
+        description: string | null;
+        kind: string;
+        status: string;
+        priority: string;
+        resource_uuid: string | null;
+        assignee_agent_uuid: string | null;
+    }>) => mutate<ApiResponse<AgentMission>>(`/ai/missions/${encodeURIComponent(uuid)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
     }),
     agentRuns: (agentUuid: string, page = 1) => apiFetch<ApiListResponse<AgentRun>>(`${API_BASE}/agents/${encodeURIComponent(agentUuid)}/runs?page=${page}`),
     agentRun: (agentUuid: string, runUuid: string) => apiFetch<ApiResponse<AgentRun>>(`${API_BASE}/agents/${encodeURIComponent(agentUuid)}/runs/${encodeURIComponent(runUuid)}`),

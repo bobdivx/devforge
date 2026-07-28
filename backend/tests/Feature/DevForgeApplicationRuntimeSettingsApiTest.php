@@ -76,6 +76,29 @@ it('updates is_static and start_command then queues a redeploy', function () {
         ->and($this->application->health_check_enabled)->toBeTrue();
 });
 
+it('keeps an explicit port when re-saving is_static true', function () {
+    Queue::fake();
+
+    $this->application->settings()->update(['is_static' => true]);
+    $this->application->update(['ports_exposes' => '80']);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson("/api/devforge/v1/applications/{$this->application->uuid}/runtime-settings", [
+            'is_static' => true,
+            'ports_exposes' => '8080',
+            'publish_directory' => '/dist',
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.is_static', true)
+        ->assertJsonPath('data.ports_exposes', '8080')
+        ->assertJsonPath('data.publish_directory', '/dist');
+
+    $this->application->refresh();
+    expect((string) $this->application->ports_exposes)->toBe('8080')
+        ->and($this->application->publish_directory)->toBe('/dist');
+});
+
 it('exposes runtime fields on core application resource', function () {
     $this->actingAs($this->user)
         ->withSession($this->session)

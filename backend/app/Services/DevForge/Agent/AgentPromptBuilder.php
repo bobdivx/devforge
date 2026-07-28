@@ -92,6 +92,8 @@ class AgentPromptBuilder
         };
 
         $autonomyRules = AgentDirectives::autonomyRules();
+        $memoryBlock = $this->memoryPromptBlock($agent, $context);
+        $layeredBlock = $this->layeredInstructionsBlock($agent, $context);
 
         return trim(<<<PROMPT
         {$basePrompt}
@@ -99,6 +101,10 @@ class AgentPromptBuilder
         Tu es un agent IA autonome intégré dans DevForge (PaaS Coolify).
         Équipe : {$agent->team->name}
         Type : {$agent->type}
+
+        {$layeredBlock}
+
+        {$memoryBlock}
 
         {$eventRules}
 
@@ -184,6 +190,10 @@ class AgentPromptBuilder
             ? "\nScope agent : ressource UUID {$agent->resource_uuid} uniquement (sauf demande explicite de l'équipe entière)."
             : '';
         $applicationBlock = $this->chatApplicationContextBlock($applicationContext);
+        $memoryBlock = $this->memoryPromptBlock($agent, $applicationContext);
+        $mode = AgentChatMode::parse($applicationContext['chat_mode'] ?? 'build');
+        $modeBlock = AgentChatMode::systemAddon($mode);
+        $layeredBlock = $this->layeredInstructionsBlock($agent, $applicationContext);
 
         return trim(<<<PROMPT
         {$basePrompt}
@@ -193,9 +203,68 @@ class AgentPromptBuilder
         {$scopeBlock}
         {$applicationBlock}
 
+        {$layeredBlock}
+
+        {$memoryBlock}
+
+        {$modeBlock}
+
         {$autonomyRules}
+
+        PROTOCOLE UNTIL-DONE :
+        - Ne t'arrête pas sur une intention (« je vais… »). Agis via tool_calls.
+        - Quand le travail demandé est réellement terminé, termine ta réponse finale par [DEVFORGE_DONE].
         {$hintBlock}
         PROMPT);
+    }
+
+    /**
+     * @param  array<string, mixed>  $applicationContext
+     */
+    private function layeredInstructionsBlock(AiAgent $agent, array $applicationContext = []): string
+    {
+        $agent->loadMissing('team');
+        $resourceUuid = $agent->resource_uuid
+            ?: (is_string($applicationContext['application_uuid'] ?? null)
+                ? $applicationContext['application_uuid']
+                : null);
+        $email = is_string($applicationContext['user_email'] ?? null)
+            ? $applicationContext['user_email']
+            : null;
+
+        try {
+            $service = app(AgentLayeredInstructions::class);
+            $layers = $service->load($agent->team, $email, $resourceUuid);
+
+            return $service->compose($layers);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return '';
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $applicationContext
+     */
+    private function memoryPromptBlock(AiAgent $agent, array $applicationContext = []): string
+    {
+        $agent->loadMissing('team');
+        $resourceUuid = $agent->resource_uuid
+            ?: (is_string($applicationContext['application_uuid'] ?? null)
+                ? $applicationContext['application_uuid']
+                : null);
+
+        try {
+            $service = app(AgentMemoryService::class);
+            $rows = $service->listForPrompt($agent->team, $agent, $resourceUuid);
+
+            return $service->formatPromptBlock($rows);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return '';
+        }
     }
 
     /**

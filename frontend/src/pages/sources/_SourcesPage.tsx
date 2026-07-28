@@ -6,7 +6,6 @@ import { Card } from '../../components/ui/Card';
 import { SharedVariablesPanel } from '../../components/shared-variables/SharedVariablesPanel';
 import type { BootstrapPermissions } from '../../lib/bootstrap';
 import { domainApi, type GithubAppSummary } from '../../lib/domain-api';
-import { legacyCoolifyUrl } from '../../lib/migration';
 import { useApiQuery } from '../../lib/use-api-query';
 
 type ConnexionsPageProps = {
@@ -38,7 +37,7 @@ function accountSubtitle(app: GithubAppSummary): string {
     return parts.join(' · ');
 }
 
-export function ConnexionsPage({ legacyBaseUrl = '', permissions }: ConnexionsPageProps) {
+export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
     const apps = useApiQuery('github-apps', () => domainApi.githubApps());
     const agentRequests = useApiQuery('agent-key-requests', () => domainApi.agentKeyRequests());
 
@@ -174,9 +173,11 @@ export function ConnexionsPage({ legacyBaseUrl = '', permissions }: ConnexionsPa
                                         <ExternalLink class="size-3.5" aria-hidden />
                                     </a>
                                 )}
-                                <a class="btn btn-ghost btn-xs" href={legacyCoolifyUrl(legacyBaseUrl, `/source/github/${variable.originalApp.uuid}`)} target="_blank" rel="noreferrer" title="Configurer l'App GitHub" aria-label="Configurer l'App GitHub">
-                                    <ExternalLink class="size-3.5" aria-hidden />
-                                </a>
+                                {variable.originalApp.html_url && (
+                                    <a class="btn btn-ghost btn-xs" href={variable.originalApp.html_url} target="_blank" rel="noreferrer" title="Ouvrir l'App GitHub" aria-label="Ouvrir l'App GitHub">
+                                        <ExternalLink class="size-3.5" aria-hidden />
+                                    </a>
+                                )}
                                 <button class="btn btn-ghost btn-xs" type="button" aria-label="Modifier le PAT GitHub" onClick={() => {
                                     setEditingGithubApp(variable.originalApp);
                                     setTokenDrafts((current) => ({ ...current, [variable.originalApp.uuid]: '' }));

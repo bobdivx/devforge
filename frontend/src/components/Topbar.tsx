@@ -1,6 +1,7 @@
 import { Menu, Moon, Sun } from 'lucide-preact';
 import type { BootstrapData } from '../lib/bootstrap';
 import type { Theme } from '../lib/theme';
+import { DeploymentsIndicator } from './DeploymentsIndicator';
 
 type TopbarProps = {
     bootstrap: BootstrapData;
@@ -30,6 +31,7 @@ export function Topbar({ bootstrap, theme, onOpenMenu, onToggleTheme }: TopbarPr
             </div>
 
             <div class="flex items-center gap-2">
+                <DeploymentsIndicator />
                 <button
                     class="btn btn-ghost btn-circle btn-sm border border-base-300/80"
                     type="button"

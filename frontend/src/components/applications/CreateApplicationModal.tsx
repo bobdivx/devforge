@@ -23,7 +23,7 @@ const buildPacks: Array<{ value: CreateApplicationInput['build_pack']; label: st
 
 type Props = {
     open: boolean;
-    legacyBaseUrl: string;
+    legacyBaseUrl?: string;
     onClose: () => void;
     onCreated: (applicationUuid: string) => void;
 };
@@ -36,7 +36,7 @@ type DestinationOption = {
     label: string;
 };
 
-export function CreateApplicationModal({ open, legacyBaseUrl, onClose, onCreated }: Props) {
+export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
     const [projects, setProjects] = useState<Project[]>([]);
     const [targets, setTargets] = useState<DeploymentTarget[]>([]);
     const [githubApps, setGithubApps] = useState<GithubAppSummary[]>([]);
@@ -170,16 +170,7 @@ export function CreateApplicationModal({ open, legacyBaseUrl, onClose, onCreated
             .finally(() => setLoadingBranches(false));
     }, [open, form.github_app_uuid, selectedRepository?.id]);
 
-    const legacySourcesUrl = useMemo(() => {
-        // DevForge Connexions (sidebar) — Coolify legacy for creating the GitHub App itself.
-        if (!legacyBaseUrl) {
-            return routeHref('/connexions');
-        }
-
-        const url = new URL('/sources', `${legacyBaseUrl.replace(/\/$/, '')}/`);
-        url.searchParams.set('legacy', '1');
-        return url.toString();
-    }, [legacyBaseUrl]);
+    const connexionsUrl = useMemo(() => routeHref('/connexions'), []);
 
     const handleSubmit = async (event: Event) => {
         event.preventDefault();
@@ -247,7 +238,7 @@ export function CreateApplicationModal({ open, legacyBaseUrl, onClose, onCreated
                         <p class="mt-1 text-xs text-base-content/70">
                             Connectez GitHub (compte bobdivx / org) pour lister vos dépôts privés.
                         </p>
-                        <a class="btn btn-warning btn-sm mt-3" href={legacySourcesUrl}>
+                        <a class="btn btn-warning btn-sm mt-3" href={connexionsUrl}>
                             <FolderGit2 class="size-3.5" aria-hidden />
                             Ouvrir GitHub
                         </a>

@@ -93,12 +93,20 @@ class ApplicationSetting extends Model
     {
         return Attribute::make(
             set: function ($value) {
-                if ($value) {
-                    $this->application->ports_exposes = 80;
-                }
-                $this->application->save();
+                $bool = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+                $wasStatic = filter_var($this->attributes['is_static'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
-                return $value;
+                // Only force port 80 when enabling static (false → true).
+                // Re-assigning is_static=true must not clobber an explicit ports_exposes update.
+                if ($bool && ! $wasStatic) {
+                    $application = $this->application;
+                    if ($application !== null) {
+                        $application->ports_exposes = 80;
+                        $application->save();
+                    }
+                }
+
+                return $bool;
             }
         );
     }

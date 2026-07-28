@@ -10,6 +10,7 @@ use App\Services\DevForge\Agent\LlmEndpointResolver;
 use App\Services\DevForge\Agent\LlmModelCatalog;
 use App\Services\DevForge\Agent\LlmModelResolver;
 use App\Services\DevForge\Agent\LlmProviderFactory;
+use App\Services\DevForge\Agent\LlmProviderRegistry;
 use App\Services\DevForge\Core\CurrentTeamContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -42,7 +43,7 @@ class AiProviderController extends Controller
         $this->authorize('create', AiProviderConfig::class);
 
         $validated = $request->validate([
-            'provider' => ['required', 'string', Rule::in(['gemini', 'ollama'])],
+            'provider' => ['required', 'string', Rule::in(LlmProviderRegistry::ALL)],
             'api_key' => ['nullable', 'string'],
             'base_url' => ['nullable', 'string', 'url'],
             'provider_id' => ['nullable', 'integer'],
@@ -58,21 +59,21 @@ class AiProviderController extends Controller
             $baseUrl = $baseUrl ?: $config->base_url;
         }
 
-        if ($validated['provider'] === 'gemini' && empty($apiKey)) {
-            abort(422, 'Une clé API est requise pour lister les modèles Gemini.');
+        $provider = $validated['provider'];
+
+        if (LlmProviderRegistry::requiresApiKey($provider) && empty($apiKey)) {
+            abort(422, "Une clé API est requise pour lister les modèles {$provider}.");
         }
 
-        if ($validated['provider'] === 'ollama' && empty($baseUrl)) {
+        if (LlmProviderRegistry::requiresBaseUrl($provider) && empty($baseUrl)) {
             abort(422, 'Une URL de base est requise pour lister les modèles Ollama.');
         }
 
         try {
             $models = $this->modelCatalog->listForProvider(
-                $validated['provider'],
+                $provider,
                 $apiKey,
-                $validated['provider'] === 'ollama'
-                    ? LlmEndpointResolver::ollamaBaseUrl($baseUrl)
-                    : LlmEndpointResolver::geminiBaseUrl($baseUrl),
+                $this->resolveDiscoverBaseUrl($provider, $baseUrl),
             );
         } catch (\Throwable $e) {
             return response()->json([
@@ -90,7 +91,7 @@ class AiProviderController extends Controller
         $team = $this->currentTeam($request);
 
         $validated = $request->validate([
-            'provider' => ['required', 'string', Rule::in(['gemini', 'ollama'])],
+            'provider' => ['required', 'string', Rule::in(LlmProviderRegistry::ALL)],
             'name' => ['required', 'string', 'max:100'],
             'api_key' => ['nullable', 'string'],
             'base_url' => ['nullable', 'string', 'url'],
@@ -197,13 +198,26 @@ class AiProviderController extends Controller
     /** @param array<string, mixed> $config */
     private function validateProviderConfig(array $config): void
     {
-        if ($config['provider'] === 'gemini' && empty($config['api_key'])) {
-            abort(422, 'Une clé API est requise pour Gemini.');
+        $provider = (string) ($config['provider'] ?? '');
+
+        if (LlmProviderRegistry::requiresApiKey($provider) && empty($config['api_key'])) {
+            abort(422, "Une clé API est requise pour {$provider}.");
         }
 
-        if ($config['provider'] === 'ollama' && empty($config['base_url'])) {
+        if (LlmProviderRegistry::requiresBaseUrl($provider) && empty($config['base_url'])) {
             abort(422, 'Une URL de base est requise pour Ollama.');
         }
+    }
+
+    private function resolveDiscoverBaseUrl(string $provider, ?string $baseUrl): ?string
+    {
+        return match ($provider) {
+            'ollama' => LlmEndpointResolver::ollamaBaseUrl($baseUrl),
+            'gemini' => LlmEndpointResolver::geminiBaseUrl($baseUrl),
+            'openai', 'openrouter' => LlmEndpointResolver::openAiCompatibleBaseUrl($provider, $baseUrl),
+            'anthropic' => LlmEndpointResolver::anthropicBaseUrl($baseUrl),
+            default => $baseUrl,
+        };
     }
 
     /** @return array<string, mixed> */

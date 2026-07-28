@@ -27,6 +27,11 @@ class AgentToolApprovalGrant
         Cache::put(self::cacheKey($sessionId, $approvalKey), true, self::TTL_SECONDS);
     }
 
+    public static function grantForRun(int $runId, string $approvalKey): void
+    {
+        Cache::put(self::runCacheKey($runId, $approvalKey), true, self::TTL_SECONDS);
+    }
+
     public static function consume(int $sessionId, string $approvalKey): bool
     {
         $key = self::cacheKey($sessionId, $approvalKey);
@@ -36,6 +41,11 @@ class AgentToolApprovalGrant
         }
 
         return true;
+    }
+
+    public static function consumeForRun(int $runId, string $approvalKey): bool
+    {
+        return (bool) Cache::pull(self::runCacheKey($runId, $approvalKey));
     }
 
     public static function has(int $sessionId, string $approvalKey): bool
@@ -65,5 +75,10 @@ class AgentToolApprovalGrant
     private static function cacheKey(int $sessionId, string $approvalKey): string
     {
         return "devforge:agent-tool-approval:{$sessionId}:{$approvalKey}";
+    }
+
+    private static function runCacheKey(int $runId, string $approvalKey): string
+    {
+        return "devforge:agent-tool-approval:run:{$runId}:{$approvalKey}";
     }
 }

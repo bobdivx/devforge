@@ -33,12 +33,17 @@ beforeEach(function () {
     ]);
 });
 
+it('defaults force https to disabled for new applications', function () {
+    expect((bool) $this->application->fresh('settings')->settings->is_force_https_enabled)->toBeFalse();
+});
+
 it('returns application advanced settings', function () {
     $this->actingAs($this->user)
         ->withSession($this->session)
         ->getJson("/api/devforge/v1/applications/{$this->application->uuid}/advanced")
         ->assertSuccessful()
         ->assertJsonPath('data.max_restart_count', 10)
+        ->assertJsonPath('data.is_force_https_enabled', false)
         ->assertJsonPath('data.capabilities.dockercompose', false)
         ->assertJsonStructure([
             'data' => [

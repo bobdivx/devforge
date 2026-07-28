@@ -12,6 +12,7 @@ use App\Http\Controllers\DevForge\InstanceBackupController;
 use App\Http\Controllers\DevForge\ScheduledJobsController;
 use App\Http\Controllers\DevForge\SharedVariableController;
 use App\Http\Controllers\DevForge\AgentKeyRequestController;
+use App\Http\Controllers\DevForge\SubscriptionController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/overview', OverviewController::class)->name('overview');
@@ -36,6 +37,12 @@ Route::delete('/projects/{projectUuid}/environments/{environmentUuid}', [Environ
 
 Route::get('/profile', [ProfileController::class, 'show'])->name('profile.show');
 Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
+Route::put('/profile/password', [ProfileController::class, 'updatePassword'])->name('profile.password.update');
+Route::get('/profile/two-factor', [ProfileController::class, 'twoFactorStatus'])->name('profile.two-factor.show');
+Route::post('/profile/two-factor', [ProfileController::class, 'enableTwoFactor'])->name('profile.two-factor.enable');
+Route::post('/profile/two-factor/confirm', [ProfileController::class, 'confirmTwoFactor'])->name('profile.two-factor.confirm');
+Route::delete('/profile/two-factor', [ProfileController::class, 'disableTwoFactor'])->name('profile.two-factor.disable');
+Route::post('/profile/two-factor/recovery-codes', [ProfileController::class, 'regenerateRecoveryCodes'])->name('profile.two-factor.recovery-codes');
 Route::get('/settings', [SettingsController::class, 'show'])->name('settings.show');
 Route::put('/settings/instance', [SettingsController::class, 'updateInstance'])->name('settings.instance.update');
 Route::put('/settings/advanced', [SettingsController::class, 'updateAdvanced'])->name('settings.advanced.update');
@@ -80,6 +87,19 @@ Route::delete('/security/cloud-tokens/{tokenUuid}', [SecurityController::class, 
 Route::post('/security/cloud-tokens/{tokenUuid}/validate', [SecurityController::class, 'validateCloudToken'])
     ->where('tokenUuid', '[A-Za-z0-9-]{8,64}')
     ->name('security.cloud-tokens.validate');
+Route::get('/security/cloud-init-scripts', [SecurityController::class, 'cloudInitScripts'])
+    ->name('security.cloud-init-scripts.index');
+Route::post('/security/cloud-init-scripts', [SecurityController::class, 'storeCloudInitScript'])
+    ->name('security.cloud-init-scripts.store');
+Route::put('/security/cloud-init-scripts/{scriptId}', [SecurityController::class, 'updateCloudInitScript'])
+    ->whereNumber('scriptId')
+    ->name('security.cloud-init-scripts.update');
+Route::delete('/security/cloud-init-scripts/{scriptId}', [SecurityController::class, 'destroyCloudInitScript'])
+    ->whereNumber('scriptId')
+    ->name('security.cloud-init-scripts.destroy');
 
 Route::get('/agent-key-requests', [AgentKeyRequestController::class, 'index'])->name('agent-key-requests.index');
 Route::post('/agent-key-requests/{uuid}/fulfill', [AgentKeyRequestController::class, 'fulfill'])->name('agent-key-requests.fulfill');
+
+Route::get('/subscription', [SubscriptionController::class, 'show'])->name('subscription.show');
+Route::post('/subscription/portal', [SubscriptionController::class, 'portal'])->name('subscription.portal');

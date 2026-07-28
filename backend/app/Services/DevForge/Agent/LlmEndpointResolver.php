@@ -34,6 +34,30 @@ class LlmEndpointResolver
         return rtrim(self::resolveLocalhostForContainer($candidate), '/');
     }
 
+    public static function openAiCompatibleBaseUrl(string $provider, ?string $baseUrl): string
+    {
+        $candidate = trim((string) $baseUrl);
+        $fallback = LlmProviderRegistry::defaultBaseUrl($provider)
+            ?? throw new \InvalidArgumentException("URL de base inconnue pour {$provider}.");
+
+        if ($candidate === '') {
+            return rtrim($fallback, '/');
+        }
+
+        return rtrim($candidate, '/');
+    }
+
+    public static function anthropicBaseUrl(?string $baseUrl): string
+    {
+        $candidate = trim((string) $baseUrl);
+
+        if ($candidate === '') {
+            return (string) LlmProviderRegistry::defaultBaseUrl('anthropic');
+        }
+
+        return rtrim($candidate, '/');
+    }
+
     public static function sanitizeProviderConfig(AiProviderConfig|array $config): array
     {
         $provider = is_array($config) ? ($config['provider'] ?? '') : $config->provider;
@@ -46,6 +70,18 @@ class LlmEndpointResolver
             $baseUrl = is_array($config) ? ($config['base_url'] ?? null) : $config->base_url;
 
             return ['base_url' => self::ollamaBaseUrl($baseUrl)];
+        }
+
+        if (in_array($provider, ['openai', 'openrouter'], true)) {
+            $baseUrl = is_array($config) ? ($config['base_url'] ?? null) : $config->base_url;
+
+            return ['base_url' => self::openAiCompatibleBaseUrl($provider, $baseUrl)];
+        }
+
+        if ($provider === 'anthropic') {
+            $baseUrl = is_array($config) ? ($config['base_url'] ?? null) : $config->base_url;
+
+            return ['base_url' => self::anthropicBaseUrl($baseUrl)];
         }
 
         return [];

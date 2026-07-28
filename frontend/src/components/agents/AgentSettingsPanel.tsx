@@ -10,6 +10,7 @@ import { RunHistoryTable } from './RunHistoryTable';
 import { AgentRunLog } from './AgentRunLog';
 import { AgentModelRoutingBadge } from './AgentModelRoutingBadge';
 import { AgentRunProgress } from './AgentRunProgress';
+import { AgentMemoryPanel } from './AgentMemoryPanel';
 import { useAgentRunTracker } from '../../lib/use-agent-run-tracker';
 
 type Props = {
@@ -161,6 +162,8 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
                     Supprimer
                 </button>
             </ActionToolbar>
+
+            <AgentMemoryPanel agent={agent} />
 
             <div class="grid gap-3">
                 <label class="grid gap-1 text-xs">

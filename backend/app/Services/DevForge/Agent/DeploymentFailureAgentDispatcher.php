@@ -78,6 +78,20 @@ class DeploymentFailureAgentDispatcher
             return null;
         }
 
+        try {
+            app(ApplicationOverviewChatBridge::class)->postFailureAnnouncement(
+                $agent,
+                $run,
+                $application,
+                $context,
+            );
+        } catch (\Throwable $e) {
+            Log::warning('DevForge: impossible de publier l’échec dans le chat overview.', [
+                'deployment_uuid' => $deploymentUuid,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         Log::info('DevForge: agent IA déclenché après échec de déploiement.', [
             'agent_uuid' => $agent->uuid,
             'run_uuid' => $run->uuid,

@@ -59,14 +59,30 @@ it('updates application domains', function () {
         ->putJson("/api/devforge/v1/applications/{$this->application->uuid}/domains", [
             'domains' => 'https://demo.apps.example.com',
             'redirect' => 'non-www',
+            'redeploy' => false,
         ])
         ->assertSuccessful()
         ->assertJsonPath('data.fqdn', 'https://demo.apps.example.com')
         ->assertJsonPath('data.redirect', 'non-www')
-        ->assertJsonPath('data.sslip_warning', false);
+        ->assertJsonPath('data.sslip_warning', false)
+        ->assertJsonPath('meta.redeploy', null);
 
     expect($this->application->fresh()->fqdn)->toBe('https://demo.apps.example.com');
     expect($this->application->fresh()->redirect)->toBe('non-www');
+});
+
+it('queues a restart deployment when domains change', function () {
+    $response = $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson("/api/devforge/v1/applications/{$this->application->uuid}/domains", [
+            'domains' => 'https://demo.apps.example.com',
+            'redeploy' => true,
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.fqdn', 'https://demo.apps.example.com')
+        ->assertJsonPath('meta.redeploy.queued', true);
+
+    expect($response->json('meta.redeploy.deployment_uuid'))->not->toBeEmpty();
 });
 
 it('rejects invalid domain urls', function () {
@@ -81,14 +97,61 @@ it('rejects invalid domain urls', function () {
 it('generates a domain from the server wildcard', function () {
     $response = $this->actingAs($this->user)
         ->withSession($this->session)
-        ->postJson("/api/devforge/v1/applications/{$this->application->uuid}/domains/generate")
+        ->postJson("/api/devforge/v1/applications/{$this->application->uuid}/domains/generate", [
+            'redeploy' => false,
+        ])
         ->assertSuccessful();
 
     $fqdn = $response->json('data.fqdn');
+    $managed = $response->json('data.managed_domain');
 
     expect($fqdn)->toContain($this->application->uuid);
     expect($fqdn)->toContain('apps.example.com');
+    expect($managed)->toBe($fqdn);
     expect($this->application->fresh()->fqdn)->toBe($fqdn);
+    expect($response->json('meta.redeploy'))->toBeNull();
+});
+
+it('keeps custom domains when generating a managed domain', function () {
+    $this->application->update([
+        'fqdn' => 'https://custom.example.com,https://www.custom.example.com',
+    ]);
+
+    $response = $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson("/api/devforge/v1/applications/{$this->application->uuid}/domains/generate")
+        ->assertSuccessful();
+
+    $domains = $response->json('data.domains');
+    $managed = $response->json('data.managed_domain');
+
+    expect($managed)->toContain($this->application->uuid);
+    expect($managed)->toContain('apps.example.com');
+    expect($domains)->toContain($managed);
+    expect($domains)->toContain('https://custom.example.com');
+    expect($domains)->toContain('https://www.custom.example.com');
+});
+
+it('preserves the managed domain when it is omitted from an update', function () {
+    $managed = 'https://'.$this->application->uuid.'.apps.example.com';
+    $this->application->update([
+        'fqdn' => "{$managed},https://custom.example.com",
+    ]);
+
+    $response = $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson("/api/devforge/v1/applications/{$this->application->uuid}/domains", [
+            'domains' => 'https://custom.example.com,https://autre.example.com',
+        ])
+        ->assertSuccessful();
+
+    $domains = $response->json('data.domains');
+
+    expect($response->json('data.managed_domain'))->toBe($managed);
+    expect($domains[0])->toBe($managed);
+    expect($domains)->toContain('https://custom.example.com');
+    expect($domains)->toContain('https://autre.example.com');
+    expect($this->application->fresh()->fqdn)->toContain($managed);
 });
 
 it('creates applications with the server wildcard domain', function () {

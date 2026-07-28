@@ -213,4 +213,196 @@ class AgentDelegator
             ->orderBy('name')
             ->first();
     }
+
+    /**
+     * Batch de sous-tâches éphémères (séquentielles imbriquées, plafonnées).
+     *
+     * @param  list<array{goal?: string, difficulty?: string}>  $tasks
+     * @return array<string, mixed>
+     */
+    public function spawnMany(AiAgent $parent, AiAgentRun $parentRun, array $tasks): array
+    {
+        $max = max(1, (int) config('devforge.agents_max_concurrent_subagents', 3));
+        $slice = array_slice(array_values($tasks), 0, $max);
+        $results = [];
+
+        foreach ($slice as $index => $task) {
+            if (! is_array($task)) {
+                continue;
+            }
+            $goal = trim((string) ($task['goal'] ?? ''));
+            if ($goal === '') {
+                $results[] = ['index' => $index, 'success' => false, 'error' => 'goal vide'];
+
+                continue;
+            }
+            $difficulty = isset($task['difficulty']) ? (string) $task['difficulty'] : 'auto';
+            $parentRun->appendLog('  ↳ Batch spawn #'.($index + 1).'/'.count($slice));
+            $results[] = array_merge(
+                ['index' => $index],
+                $this->spawnEphemeral($parent, $parentRun, $goal, $difficulty),
+            );
+        }
+
+        $ok = collect($results)->where('success', true)->count();
+
+        return [
+            'success' => $ok === count($results) && $results !== [],
+            'mode' => 'batch_sequential',
+            'requested' => count($tasks),
+            'executed' => count($results),
+            'succeeded' => $ok,
+            'results' => $results,
+        ];
+    }
+
+    /**
+     * Délègue plusieurs objectifs en parallèle via la queue (enfants distincts ou même enfant séquentiel).
+     *
+     * @param  list<array{goal?: string, child_agent_uuid?: string}>  $tasks
+     * @return array<string, mixed>
+     */
+    public function delegateMany(AiAgent $parent, AiAgentRun $parentRun, array $tasks): array
+    {
+        if ($parent->parent_agent_id !== null) {
+            return ['error' => 'Un sous-agent ne peut pas déléguer à un autre agent.'];
+        }
+
+        $max = max(1, (int) config('devforge.agents_max_concurrent_subagents', 3));
+        $slice = array_slice(array_values($tasks), 0, $max);
+
+        if ($slice === []) {
+            return ['error' => 'Aucune tâche à déléguer.'];
+        }
+
+        // Si une seule tâche : chemin synchrone classique.
+        if (count($slice) === 1) {
+            $task = $slice[0];
+            $goal = trim((string) ($task['goal'] ?? ''));
+            $childUuid = isset($task['child_agent_uuid']) ? (string) $task['child_agent_uuid'] : null;
+
+            return array_merge(
+                ['mode' => 'single'],
+                $this->delegate($parent, $parentRun, $goal, $childUuid),
+            );
+        }
+
+        $pending = [];
+
+        foreach ($slice as $index => $task) {
+            if (! is_array($task)) {
+                continue;
+            }
+            $goal = trim((string) ($task['goal'] ?? ''));
+            if ($goal === '') {
+                $pending[] = ['index' => $index, 'success' => false, 'error' => 'goal vide'];
+
+                continue;
+            }
+
+            $childUuid = isset($task['child_agent_uuid']) ? (string) $task['child_agent_uuid'] : null;
+            $child = $this->resolveChildAgent($parent, $childUuid);
+            if ($child === null || ! $child->hasLlmProvider()) {
+                $pending[] = [
+                    'index' => $index,
+                    'success' => false,
+                    'error' => 'Sous-agent introuvable ou sans provider.',
+                ];
+
+                continue;
+            }
+
+            $child->prepareForEventDispatch();
+            $child->refresh();
+
+            $childRun = AiAgentRun::create([
+                'agent_id' => $child->id,
+                'status' => 'pending',
+                'trigger' => 'delegation',
+                'metadata' => [
+                    'parent_run_uuid' => $parentRun->uuid,
+                    'delegated_goal' => mb_substr($goal, 0, 500),
+                    'parallel_batch' => true,
+                ],
+            ]);
+
+            $child->update(['status' => 'running']);
+
+            \App\Jobs\Agent\RunAgentJob::dispatch($child, 'delegation', [
+                'event' => 'delegated',
+                'delegated_goal' => $goal,
+                'parent_agent_uuid' => $parent->uuid,
+                'parent_run_uuid' => $parentRun->uuid,
+                'parallel_batch' => true,
+            ], $childRun->id);
+
+            $pending[] = [
+                'index' => $index,
+                'child_agent_uuid' => $child->uuid,
+                'child_run_id' => $childRun->id,
+                'child_run_uuid' => $childRun->uuid,
+                'goal' => mb_substr($goal, 0, 200),
+            ];
+            $parentRun->appendLog("  ↳ Délégation parallèle #{$index} → {$child->name}");
+        }
+
+        $timeoutSeconds = max(30, (int) config('devforge.agents_parallel_delegate_timeout', 600));
+        $deadline = microtime(true) + $timeoutSeconds;
+        $results = [];
+
+        foreach ($pending as $item) {
+            if (isset($item['success'])) {
+                $results[] = $item;
+
+                continue;
+            }
+
+            $runId = (int) ($item['child_run_id'] ?? 0);
+            $run = null;
+
+            while (microtime(true) < $deadline) {
+                $run = AiAgentRun::query()->whereKey($runId)->first();
+                if ($run && ! in_array($run->status, ['pending', 'running'], true)) {
+                    break;
+                }
+                usleep(400_000);
+            }
+
+            $run ??= AiAgentRun::query()->whereKey($runId)->first();
+
+            if (! $run) {
+                $results[] = array_merge($item, ['success' => false, 'error' => 'Run introuvable']);
+
+                continue;
+            }
+
+            if (in_array($run->status, ['pending', 'running'], true)) {
+                $results[] = array_merge($item, [
+                    'success' => false,
+                    'status' => $run->status,
+                    'error' => 'Timeout attente sous-agent',
+                ]);
+
+                continue;
+            }
+
+            $results[] = array_merge($item, [
+                'success' => $run->status === 'completed',
+                'status' => $run->status,
+                'summary' => $run->summary,
+                'error' => $run->status === 'failed' ? $run->summary : null,
+            ]);
+        }
+
+        $ok = collect($results)->where('success', true)->count();
+
+        return [
+            'success' => $ok === count($results) && $results !== [],
+            'mode' => 'parallel_queue',
+            'requested' => count($tasks),
+            'executed' => count($results),
+            'succeeded' => $ok,
+            'results' => $results,
+        ];
+    }
 }

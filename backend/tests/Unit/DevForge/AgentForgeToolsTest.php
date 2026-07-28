@@ -52,11 +52,11 @@ it('asks approval for destructive tools in tiered mode', function () {
         ->and($result['rule_id'])->toBe('mode:tiered:destructive');
 });
 
-it('auto-denies ask decisions for event triggers without approval UI', function () {
+it('auto-denies ask decisions for delegation triggers without approval UI', function () {
     config()->set('devforge.agents_permission_mode', 'tiered');
 
     $ask = $this->engine->decide($this->agent, 'control_resource', ['action' => 'deploy']);
-    $resolved = $this->engine->resolveForTrigger($ask, 'event', 'control_resource');
+    $resolved = $this->engine->resolveForTrigger($ask, 'delegation', 'control_resource');
 
     expect($ask['decision'])->toBe(AgentPermissionEngine::DECISION_ASK)
         ->and($resolved['decision'])->toBe(AgentPermissionEngine::DECISION_DENY)
@@ -65,16 +65,20 @@ it('auto-denies ask decisions for event triggers without approval UI', function 
         ->and($resolved['reason'])->toContain('mode autonome');
 });
 
-it('keeps ask decisions for chat triggers that can approve', function () {
+it('keeps ask decisions for chat and event triggers that can approve', function () {
     config()->set('devforge.agents_permission_mode', 'plan_first');
 
     $ask = $this->engine->decide($this->agent, 'exec_command', ['command' => 'uptime']);
-    $resolved = $this->engine->resolveForTrigger($ask, 'chat', 'exec_command');
+    $resolvedChat = $this->engine->resolveForTrigger($ask, 'chat', 'exec_command');
+    $resolvedEvent = $this->engine->resolveForTrigger($ask, 'event', 'exec_command');
 
     expect(AgentPermissionEngine::triggerSupportsApproval('chat'))->toBeTrue()
-        ->and(AgentPermissionEngine::triggerSupportsApproval('event'))->toBeFalse()
-        ->and($resolved['decision'])->toBe(AgentPermissionEngine::DECISION_ASK)
-        ->and($resolved)->not->toHaveKey('approval_unavailable');
+        ->and(AgentPermissionEngine::triggerSupportsApproval('event'))->toBeTrue()
+        ->and(AgentPermissionEngine::triggerSupportsApproval('scheduled'))->toBeTrue()
+        ->and(AgentPermissionEngine::triggerSupportsApproval('delegation'))->toBeFalse()
+        ->and($resolvedChat['decision'])->toBe(AgentPermissionEngine::DECISION_ASK)
+        ->and($resolvedEvent['decision'])->toBe(AgentPermissionEngine::DECISION_ASK)
+        ->and($resolvedChat)->not->toHaveKey('approval_unavailable');
 });
 
 it('exposes a stable ask payload shape for chat UI', function () {

@@ -19,6 +19,9 @@ Route::patch('/deployments/{deploymentUuid}/debug-logs', [DeploymentController::
 Route::get('/deployments/{deploymentUuid}/monitoring', [DeploymentController::class, 'monitoring'])
     ->where('deploymentUuid', '[A-Za-z0-9_-]{1,255}')
     ->name('deployments.monitoring');
+Route::post('/deployments/{deploymentUuid}/cancel', [DeploymentController::class, 'cancel'])
+    ->where('deploymentUuid', '[A-Za-z0-9_-]{1,255}')
+    ->name('deployments.cancel');
 Route::get('/realtime', RealtimeController::class)->name('realtime');
 Route::get('/resources/status', ResourceStatusController::class)->name('resources.status');
 Route::get('/terminal/config', TerminalController::class)

@@ -1,4 +1,6 @@
 import type { AgentRun } from '../../lib/domain-api';
+import { domainApi } from '../../lib/domain-api';
+import { useState } from 'preact/hooks';
 import { AgentModelRoutingBadge } from './AgentModelRoutingBadge';
 import { AgentRunLog } from './AgentRunLog';
 import { AgentRunProgress } from './AgentRunProgress';
@@ -6,11 +8,31 @@ import { AgentRunStatusBadge } from './AgentRunStatusBadge';
 
 type Props = {
     run: AgentRun;
+    agentUuid?: string;
     tracking?: boolean;
+    onResolved?: () => void;
 };
 
-export function AgentRunDetail({ run, tracking = false }: Props) {
+export function AgentRunDetail({ run, agentUuid, tracking = false, onResolved }: Props) {
     const isActive = tracking || run.status === 'running' || run.status === 'pending';
+    const pendingMeta = run.metadata?.pending_approval;
+    const pending = run.status === 'awaiting_approval'
+        && pendingMeta?.status === 'ask'
+        && !pendingMeta?.resolved;
+    const [resolving, setResolving] = useState(false);
+
+    const resolve = async (decision: 'approve' | 'deny') => {
+        if (!agentUuid || resolving) {
+            return;
+        }
+        setResolving(true);
+        try {
+            await domainApi.resolveAgentRunApproval(agentUuid, run.uuid, decision);
+            onResolved?.();
+        } finally {
+            setResolving(false);
+        }
+    };
 
     return (
         <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-4 rounded-xl border border-base-300 bg-base-200/20 p-3 sm:p-4">
@@ -23,6 +45,25 @@ export function AgentRunDetail({ run, tracking = false }: Props) {
                     <p class="min-w-0 text-sm font-medium leading-snug text-base-content lg:flex-1">{run.summary}</p>
                 )}
             </div>
+
+            {pending && agentUuid && (
+                <div class="rounded-lg border border-warning/40 bg-warning/10 p-3">
+                    <p class="mb-2 text-xs font-semibold text-base-content">
+                        Approbation requise : {pendingMeta?.tool ?? 'outil'}
+                    </p>
+                    <p class="mb-3 text-xs text-base-content/70">
+                        {pendingMeta?.reason}
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" class="btn btn-success btn-sm" disabled={resolving} onClick={() => void resolve('approve')}>
+                            Approuver
+                        </button>
+                        <button type="button" class="btn btn-ghost btn-sm" disabled={resolving} onClick={() => void resolve('deny')}>
+                            Refuser
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {isActive && <AgentRunProgress run={run} />}
 

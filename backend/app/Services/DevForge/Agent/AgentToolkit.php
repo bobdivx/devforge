@@ -112,7 +112,12 @@ class AgentToolkit
             $tools[] = $this->customTools->definitionFromTool($customTool);
         }
 
-        return $tools;
+        $chatMode = AgentChatMode::parse($this->runContext['chat_mode'] ?? 'build');
+
+        return array_values(array_filter(
+            $tools,
+            fn (array $tool): bool => AgentChatMode::isToolAllowed((string) ($tool['name'] ?? ''), $chatMode),
+        ));
     }
 
     /** @return array<array{name: string, description: string, parameters: array<mixed>}> */
@@ -182,6 +187,137 @@ class AgentToolkit
                         'reason' => ['type' => 'string', 'description' => 'Raison claire pour laquelle cette clé est nécessaire'],
                     ],
                     'required' => ['key_name', 'reason'],
+                ],
+            ],
+            [
+                'name' => 'memory_read',
+                'description' => 'Lit la mémoire persistante. scope=agent (toi), shared (équipe), project (ressource), ou all.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'scope' => [
+                            'type' => 'string',
+                            'enum' => ['agent', 'shared', 'project', 'all'],
+                            'description' => 'Portée de lecture (défaut: all)',
+                        ],
+                        'limit' => ['type' => 'integer', 'description' => 'Nombre max d’entrées (défaut 20)'],
+                        'query' => ['type' => 'string', 'description' => 'Filtre texte optionnel'],
+                        'resource_uuid' => ['type' => 'string', 'description' => 'UUID ressource pour scope=project'],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'memory_write',
+                'description' => 'Enregistre un fait durable. scope=agent (privé), shared (équipe), project (ressource). Préfère shared pour les conventions d’équipe.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'content' => ['type' => 'string', 'description' => 'Fait concis à mémoriser'],
+                        'scope' => [
+                            'type' => 'string',
+                            'enum' => ['agent', 'shared', 'project'],
+                            'description' => 'Portée (défaut: agent)',
+                        ],
+                        'resource_uuid' => ['type' => 'string', 'description' => 'UUID ressource si scope=project'],
+                        'tags' => [
+                            'type' => 'array',
+                            'items' => ['type' => 'string'],
+                            'description' => 'Tags optionnels',
+                        ],
+                    ],
+                    'required' => ['content'],
+                ],
+            ],
+            [
+                'name' => 'todo_read',
+                'description' => 'Lit la todo list de la tâche / run en cours.',
+                'parameters' => ['type' => 'object', 'properties' => (object) []],
+            ],
+            [
+                'name' => 'todo_write',
+                'description' => 'Met à jour la todo list du run. Passe items[] pour remplacer, ou content(+id/status) pour upsert.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'items' => [
+                            'type' => 'array',
+                            'description' => 'Liste complète de todos (remplace)',
+                            'items' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'id' => ['type' => 'string'],
+                                    'content' => ['type' => 'string'],
+                                    'status' => [
+                                        'type' => 'string',
+                                        'enum' => ['pending', 'in_progress', 'completed', 'cancelled'],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'content' => ['type' => 'string', 'description' => 'Contenu d’un todo (upsert)'],
+                        'id' => ['type' => 'string', 'description' => 'Id du todo à mettre à jour'],
+                        'status' => [
+                            'type' => 'string',
+                            'enum' => ['pending', 'in_progress', 'completed', 'cancelled'],
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'web_search',
+                'description' => 'Recherche web (docs, erreurs, changelogs). Préfère pour infos externes à Coolify.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'query' => ['type' => 'string', 'description' => 'Requête de recherche'],
+                        'limit' => ['type' => 'integer', 'description' => 'Nombre de résultats (1-10, défaut 5)'],
+                    ],
+                    'required' => ['query'],
+                ],
+            ],
+            [
+                'name' => 'mission_list',
+                'description' => 'Liste les missions du tableau (bugs, features, veille tech, PR).',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'status' => ['type' => 'string', 'enum' => ['open', 'in_progress', 'blocked', 'done', 'cancelled']],
+                        'kind' => ['type' => 'string', 'enum' => ['bug', 'feature', 'tech_watch', 'github_pr', 'ops', 'other']],
+                        'q' => ['type' => 'string', 'description' => 'Recherche texte'],
+                        'limit' => ['type' => 'integer', 'default' => 20],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'mission_create',
+                'description' => 'Crée une mission sur le board (bug, feature, tech_watch, etc.).',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'title' => ['type' => 'string'],
+                        'description' => ['type' => 'string'],
+                        'kind' => ['type' => 'string', 'enum' => ['bug', 'feature', 'tech_watch', 'github_pr', 'ops', 'other']],
+                        'priority' => ['type' => 'string', 'enum' => ['low', 'normal', 'high', 'urgent']],
+                        'resource_uuid' => ['type' => 'string'],
+                        'dedupe_key' => ['type' => 'string', 'description' => 'Clé anti-doublon'],
+                    ],
+                    'required' => ['title'],
+                ],
+            ],
+            [
+                'name' => 'mission_update',
+                'description' => 'Met à jour une mission (statut, priorité, titre…).',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'mission_uuid' => ['type' => 'string'],
+                        'title' => ['type' => 'string'],
+                        'description' => ['type' => 'string'],
+                        'status' => ['type' => 'string', 'enum' => ['open', 'in_progress', 'blocked', 'done', 'cancelled']],
+                        'priority' => ['type' => 'string', 'enum' => ['low', 'normal', 'high', 'urgent']],
+                        'kind' => ['type' => 'string', 'enum' => ['bug', 'feature', 'tech_watch', 'github_pr', 'ops', 'other']],
+                    ],
+                    'required' => ['mission_uuid'],
                 ],
             ],
         ];
@@ -651,14 +787,25 @@ class AgentToolkit
         if ($this->canDelegate()) {
             $tools[] = [
                 'name' => 'delegate_task',
-                'description' => 'Délègue une sous-tâche à un agent enfant (synchrone). L\'agent parent attend le résumé du sous-agent.',
+                'description' => 'Délègue une sous-tâche (ou plusieurs via tasks[]) à un agent enfant. Plusieurs tâches → parallèle via la queue.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
                         'goal' => ['type' => 'string', 'description' => 'Objectif précis pour le sous-agent'],
                         'child_agent_uuid' => ['type' => 'string', 'description' => 'UUID du sous-agent (optionnel si un seul enfant existe)'],
+                        'tasks' => [
+                            'type' => 'array',
+                            'description' => 'Batch parallèle : [{goal, child_agent_uuid?}, ...]',
+                            'items' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'goal' => ['type' => 'string'],
+                                    'child_agent_uuid' => ['type' => 'string'],
+                                ],
+                                'required' => ['goal'],
+                            ],
+                        ],
                     ],
-                    'required' => ['goal'],
                 ],
             ];
         }
@@ -666,7 +813,7 @@ class AgentToolkit
         if ($this->canSpawnEphemeral()) {
             $tools[] = [
                 'name' => 'spawn_task',
-                'description' => 'Lance une sous-tâche éphémère avec un modèle adapté à la difficulté (Auto · Flash-Lite / Flash / Pro). Isolée, synchrone, visible dans les logs du run.',
+                'description' => 'Lance une sous-tâche éphémère (ou batch via tasks[]) avec modèle adapté. Batch = séquentiel imbriqué.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -676,8 +823,19 @@ class AgentToolkit
                             'enum' => ['auto', 'light', 'standard', 'heavy'],
                             'description' => 'Difficulté : light (inspection), standard (diagnostic), heavy (analyse profonde). Défaut auto.',
                         ],
+                        'tasks' => [
+                            'type' => 'array',
+                            'description' => 'Batch : [{goal, difficulty?}, ...]',
+                            'items' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'goal' => ['type' => 'string'],
+                                    'difficulty' => ['type' => 'string', 'enum' => ['auto', 'light', 'standard', 'heavy']],
+                                ],
+                                'required' => ['goal'],
+                            ],
+                        ],
                     ],
-                    'required' => ['goal'],
                 ],
             ];
         }
@@ -858,6 +1016,101 @@ class AgentToolkit
                     'required' => ['github_app_uuid', 'owner', 'repo'],
                 ],
             ],
+            [
+                'name' => 'create_github_branch',
+                'description' => 'Crée une branche GitHub à partir d\'un SHA.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'github_app_uuid' => ['type' => 'string'],
+                        'owner' => ['type' => 'string'],
+                        'repo' => ['type' => 'string'],
+                        'branch_name' => ['type' => 'string'],
+                        'sha' => ['type' => 'string', 'description' => 'SHA de départ'],
+                    ],
+                    'required' => ['github_app_uuid', 'owner', 'repo', 'branch_name', 'sha'],
+                ],
+            ],
+            [
+                'name' => 'write_github_file',
+                'description' => 'Crée ou met à jour un fichier via l\'API GitHub contents (commit).',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'github_app_uuid' => ['type' => 'string'],
+                        'owner' => ['type' => 'string'],
+                        'repo' => ['type' => 'string'],
+                        'path' => ['type' => 'string'],
+                        'content' => ['type' => 'string'],
+                        'message' => ['type' => 'string', 'description' => 'Message de commit'],
+                        'sha' => ['type' => 'string', 'description' => 'SHA du fichier existant (requis pour update)'],
+                        'branch' => ['type' => 'string'],
+                    ],
+                    'required' => ['github_app_uuid', 'owner', 'repo', 'path', 'content', 'message'],
+                ],
+            ],
+            [
+                'name' => 'create_github_pull_request',
+                'description' => 'Ouvre une Pull Request GitHub.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'github_app_uuid' => ['type' => 'string'],
+                        'owner' => ['type' => 'string'],
+                        'repo' => ['type' => 'string'],
+                        'title' => ['type' => 'string'],
+                        'head' => ['type' => 'string', 'description' => 'Branche source'],
+                        'base' => ['type' => 'string', 'description' => 'Branche cible'],
+                        'body' => ['type' => 'string'],
+                    ],
+                    'required' => ['github_app_uuid', 'owner', 'repo', 'title', 'head', 'base'],
+                ],
+            ],
+            [
+                'name' => 'merge_github_pull_request',
+                'description' => 'Merge une Pull Request (merge|squash|rebase).',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'github_app_uuid' => ['type' => 'string'],
+                        'owner' => ['type' => 'string'],
+                        'repo' => ['type' => 'string'],
+                        'number' => ['type' => 'integer'],
+                        'merge_method' => ['type' => 'string', 'enum' => ['merge', 'squash', 'rebase'], 'default' => 'squash'],
+                        'commit_title' => ['type' => 'string'],
+                    ],
+                    'required' => ['github_app_uuid', 'owner', 'repo', 'number'],
+                ],
+            ],
+            [
+                'name' => 'close_github_pull_request',
+                'description' => 'Ferme une Pull Request sans merge.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'github_app_uuid' => ['type' => 'string'],
+                        'owner' => ['type' => 'string'],
+                        'repo' => ['type' => 'string'],
+                        'number' => ['type' => 'integer'],
+                    ],
+                    'required' => ['github_app_uuid', 'owner', 'repo', 'number'],
+                ],
+            ],
+            [
+                'name' => 'comment_github_pull_request',
+                'description' => 'Commente une Pull Request (issue comment).',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'github_app_uuid' => ['type' => 'string'],
+                        'owner' => ['type' => 'string'],
+                        'repo' => ['type' => 'string'],
+                        'number' => ['type' => 'integer'],
+                        'body' => ['type' => 'string'],
+                    ],
+                    'required' => ['github_app_uuid', 'owner', 'repo', 'number', 'body'],
+                ],
+            ],
         ];
     }
 
@@ -891,6 +1144,15 @@ class AgentToolkit
             ];
         }
 
+        $chatMode = AgentChatMode::parse($this->runContext['chat_mode'] ?? 'build');
+        if (! AgentChatMode::isToolAllowed($toolName, $chatMode)) {
+            return [
+                'error' => "Outil « {$toolName} » interdit en mode ".AgentChatMode::label($chatMode).'. Passez en Build ou Debug.',
+                'denied' => true,
+                'chat_mode' => $chatMode,
+            ];
+        }
+
         $permissionResult = $this->checkPermission($toolName, $arguments);
         if ($permissionResult !== null) {
             return $this->enrichSourceWriteApproval($toolName, $arguments, $permissionResult);
@@ -919,6 +1181,17 @@ class AgentToolkit
                 (string) ($arguments['key_name'] ?? ''),
                 (string) ($arguments['reason'] ?? '')
             ),
+            'memory_read' => $this->memoryRead($arguments),
+            'memory_write' => $this->memoryWrite($arguments),
+            'todo_read' => $this->todoRead(),
+            'todo_write' => $this->todoWrite($arguments),
+            'web_search' => app(AgentWebSearchService::class)->search(
+                (string) ($arguments['query'] ?? ''),
+                (int) ($arguments['limit'] ?? 5),
+            ),
+            'mission_list' => $this->missionList($arguments),
+            'mission_create' => $this->missionCreate($arguments),
+            'mission_update' => $this->missionUpdate($arguments),
             'list_github_apps' => $this->githubTools->listApps(),
             'list_github_repos' => $this->githubTools->listRepos((string) ($arguments['github_app_uuid'] ?? '')),
             'list_github_branches' => $this->githubTools->listBranches(
@@ -973,6 +1246,53 @@ class AgentToolkit
                 (string) ($arguments['repo'] ?? ''),
                 isset($arguments['branch']) ? (string) $arguments['branch'] : null,
                 (int) ($arguments['limit'] ?? 10),
+            ),
+            'create_github_branch' => $this->githubTools->createBranch(
+                (string) ($arguments['github_app_uuid'] ?? ''),
+                (string) ($arguments['owner'] ?? ''),
+                (string) ($arguments['repo'] ?? ''),
+                (string) ($arguments['branch_name'] ?? ''),
+                (string) ($arguments['sha'] ?? ''),
+            ),
+            'write_github_file' => $this->githubTools->writeFile(
+                (string) ($arguments['github_app_uuid'] ?? ''),
+                (string) ($arguments['owner'] ?? ''),
+                (string) ($arguments['repo'] ?? ''),
+                (string) ($arguments['path'] ?? ''),
+                (string) ($arguments['content'] ?? ''),
+                (string) ($arguments['message'] ?? ''),
+                isset($arguments['sha']) ? (string) $arguments['sha'] : null,
+                isset($arguments['branch']) ? (string) $arguments['branch'] : null,
+            ),
+            'create_github_pull_request' => $this->githubTools->createPullRequest(
+                (string) ($arguments['github_app_uuid'] ?? ''),
+                (string) ($arguments['owner'] ?? ''),
+                (string) ($arguments['repo'] ?? ''),
+                (string) ($arguments['title'] ?? ''),
+                (string) ($arguments['head'] ?? ''),
+                (string) ($arguments['base'] ?? ''),
+                (string) ($arguments['body'] ?? ''),
+            ),
+            'merge_github_pull_request' => $this->githubTools->mergePullRequest(
+                (string) ($arguments['github_app_uuid'] ?? ''),
+                (string) ($arguments['owner'] ?? ''),
+                (string) ($arguments['repo'] ?? ''),
+                (int) ($arguments['number'] ?? 0),
+                (string) ($arguments['merge_method'] ?? 'squash'),
+                isset($arguments['commit_title']) ? (string) $arguments['commit_title'] : null,
+            ),
+            'close_github_pull_request' => $this->githubTools->closePullRequest(
+                (string) ($arguments['github_app_uuid'] ?? ''),
+                (string) ($arguments['owner'] ?? ''),
+                (string) ($arguments['repo'] ?? ''),
+                (int) ($arguments['number'] ?? 0),
+            ),
+            'comment_github_pull_request' => $this->githubTools->commentPullRequest(
+                (string) ($arguments['github_app_uuid'] ?? ''),
+                (string) ($arguments['owner'] ?? ''),
+                (string) ($arguments['repo'] ?? ''),
+                (int) ($arguments['number'] ?? 0),
+                (string) ($arguments['body'] ?? ''),
             ),
             'list_resources' => $this->listResources($arguments['type'] ?? 'all'),
             'get_resource_status' => $this->getResourceStatus(
@@ -1087,14 +1407,8 @@ class AgentToolkit
                 (string) ($arguments['reason'] ?? ''),
                 isset($arguments['container']) ? (string) $arguments['container'] : null,
             ),
-            'delegate_task' => $this->delegateTask(
-                $arguments['goal'] ?? '',
-                $arguments['child_agent_uuid'] ?? null,
-            ),
-            'spawn_task' => $this->spawnTask(
-                $arguments['goal'] ?? '',
-                $arguments['difficulty'] ?? 'auto',
-            ),
+            'delegate_task' => $this->delegateTask($arguments),
+            'spawn_task' => $this->spawnTask($arguments),
             'propose_plan' => $this->proposePlan(is_array($arguments) ? $arguments : []),
             default => $this->executeCustomTool($toolName, $arguments),
         };
@@ -1126,6 +1440,11 @@ class AgentToolkit
         $sessionId = $this->run->session_id !== null ? (int) $this->run->session_id : null;
         $decision = $engine->decide($this->agent, $toolName, $arguments, $classification, $sessionId);
         $decision = $engine->resolveForTrigger($decision, (string) ($this->run->trigger ?? 'manual'), $toolName);
+        $decision = $engine->resolveForAutoDeployFix(
+            $decision,
+            (string) ($this->run->trigger ?? 'manual'),
+            is_array($this->runContext) ? $this->runContext : [],
+        );
 
         if ($decision['decision'] === AgentPermissionEngine::DECISION_ALLOW) {
             return null;
@@ -1141,8 +1460,14 @@ class AgentToolkit
                 return null;
             }
 
+            if (AgentToolApprovalGrant::consumeForRun((int) $this->run->id, $approvalKey)) {
+                $this->run->appendLog("  ✓ Approbation run consommée [{$decision['rule_id']}] pour « {$toolName} »");
+
+                return null;
+            }
+
             $message = "Approbation requise pour « {$toolName} » : {$decision['reason']} "
-                .'Validez ou refusez dans l’UI chat, puis réessayez.';
+                .'Validez ou refusez dans l’UI, puis réessayez.';
             $this->run->appendLog("  ⏸ Approbation requise [{$decision['rule_id']}]: {$message}");
 
             return [
@@ -1369,44 +1694,145 @@ class AgentToolkit
         return ['logged' => true, 'message' => $message];
     }
 
-    /** @return array<mixed> */
-    private function delegateTask(string $goal, ?string $childAgentUuid): array
+    /** @param array<string, mixed> $arguments
+     * @return array<mixed> */
+    private function delegateTask(array $arguments): array
     {
         if (! $this->canDelegate()) {
             return ['error' => 'Délégation non disponible pour cet agent.'];
         }
 
-        $goal = trim($goal);
+        if (isset($arguments['tasks']) && is_array($arguments['tasks']) && $arguments['tasks'] !== []) {
+            return $this->delegator->delegateMany($this->agent, $this->run, $arguments['tasks']);
+        }
+
+        $goal = trim((string) ($arguments['goal'] ?? ''));
         if ($goal === '') {
-            return ['error' => 'Objectif de délégation vide.'];
+            return ['error' => 'Objectif de délégation vide (goal ou tasks[]).'];
         }
 
         return $this->delegator->delegate(
             $this->agent,
             $this->run,
             $goal,
-            $childAgentUuid,
+            isset($arguments['child_agent_uuid']) ? (string) $arguments['child_agent_uuid'] : null,
         );
     }
 
-    /** @return array<mixed> */
-    private function spawnTask(string $goal, ?string $difficulty): array
+    /** @param array<string, mixed> $arguments
+     * @return array<mixed> */
+    private function spawnTask(array $arguments): array
     {
         if (! $this->canSpawnEphemeral()) {
             return ['error' => 'Sous-tâches éphémères non disponibles pour cet agent.'];
         }
 
-        $goal = trim($goal);
+        if (isset($arguments['tasks']) && is_array($arguments['tasks']) && $arguments['tasks'] !== []) {
+            return $this->delegator->spawnMany($this->agent, $this->run, $arguments['tasks']);
+        }
+
+        $goal = trim((string) ($arguments['goal'] ?? ''));
         if ($goal === '') {
-            return ['error' => 'Objectif de sous-tâche vide.'];
+            return ['error' => 'Objectif de sous-tâche vide (goal ou tasks[]).'];
         }
 
         return $this->delegator->spawnEphemeral(
             $this->agent,
             $this->run,
             $goal,
-            $difficulty ?? 'auto',
+            isset($arguments['difficulty']) ? (string) $arguments['difficulty'] : 'auto',
         );
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function missionList(array $arguments): array
+    {
+        $board = app(AgentMissionBoard::class);
+        if (! $board->available()) {
+            return ['error' => 'Missions indisponibles (migration manquante).', 'missions' => []];
+        }
+
+        $rows = $board->list($this->agent->team, [
+            'status' => $arguments['status'] ?? null,
+            'kind' => $arguments['kind'] ?? null,
+            'q' => $arguments['q'] ?? null,
+            'agent_id' => $this->agent->id,
+        ], (int) ($arguments['limit'] ?? 20));
+
+        return [
+            'count' => $rows->count(),
+            'missions' => $rows->map(fn ($m) => [
+                'uuid' => $m->uuid,
+                'kind' => $m->kind,
+                'status' => $m->status,
+                'priority' => $m->priority,
+                'title' => $m->title,
+                'description' => mb_substr((string) $m->description, 0, 400),
+                'resource_uuid' => $m->resource_uuid,
+            ])->values()->all(),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function missionCreate(array $arguments): array
+    {
+        $board = app(AgentMissionBoard::class);
+        $result = $board->create($this->agent->team, [
+            'title' => $arguments['title'] ?? '',
+            'description' => $arguments['description'] ?? null,
+            'kind' => $arguments['kind'] ?? 'other',
+            'priority' => $arguments['priority'] ?? 'normal',
+            'resource_uuid' => $arguments['resource_uuid'] ?? $this->agent->resource_uuid,
+            'dedupe_key' => $arguments['dedupe_key'] ?? null,
+            'source' => 'agent',
+            'assignee_agent_uuid' => $this->agent->uuid,
+        ], $this->agent);
+
+        if (is_array($result) && isset($result['error'])) {
+            return $result;
+        }
+
+        return [
+            'created' => true,
+            'uuid' => $result->uuid,
+            'title' => $result->title,
+            'status' => $result->status,
+            'kind' => $result->kind,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function missionUpdate(array $arguments): array
+    {
+        $uuid = trim((string) ($arguments['mission_uuid'] ?? ''));
+        if ($uuid === '') {
+            return ['error' => 'mission_uuid requis'];
+        }
+
+        $board = app(AgentMissionBoard::class);
+        $result = $board->update($this->agent->team, $uuid, $arguments);
+
+        if (is_array($result) && isset($result['error'])) {
+            return $result;
+        }
+
+        return [
+            'updated' => true,
+            'uuid' => $result->uuid,
+            'title' => $result->title,
+            'status' => $result->status,
+            'kind' => $result->kind,
+            'priority' => $result->priority,
+        ];
     }
 
     /**
@@ -1650,6 +2076,155 @@ class AgentToolkit
             'message' => "Demande pour la clé {$keyName} soumise à l'utilisateur. Le run va se mettre en pause jusqu'à ce qu'elle soit fournie.",
             'request_uuid' => $request->uuid,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function memoryRead(array $arguments): array
+    {
+        $service = app(AgentMemoryService::class);
+        $scopeRaw = strtolower(trim((string) ($arguments['scope'] ?? 'all')));
+        $limit = max(1, min(50, (int) ($arguments['limit'] ?? 20)));
+        $query = isset($arguments['query']) ? trim((string) $arguments['query']) : null;
+        $resourceUuid = $this->resolveMemoryResourceUuid($arguments);
+
+        if ($scopeRaw === 'all') {
+            $rows = $service->listForPrompt($this->team, $this->agent, $resourceUuid, $limit);
+            if ($query) {
+                $rows = $rows->filter(
+                    fn ($row): bool => str_contains(mb_strtolower($row->content), mb_strtolower($query)),
+                )->values();
+            }
+
+            return [
+                'scope' => 'all',
+                'count' => $rows->count(),
+                'memories' => $service->formatToolOutput('all', $rows),
+            ];
+        }
+
+        $scope = $service->parseScope($scopeRaw);
+        if ($scope === AgentMemoryService::SCOPE_PROJECT && ($resourceUuid === null || $resourceUuid === '')) {
+            return ['error' => 'resource_uuid requis pour scope=project (ou assignez une ressource à l\'agent).'];
+        }
+
+        $rows = $service->listByScope($this->team, $scope, $this->agent, $resourceUuid, $limit, $query);
+
+        return [
+            'scope' => $scope,
+            'count' => $rows->count(),
+            'memories' => $service->formatToolOutput($scope, $rows),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function memoryWrite(array $arguments): array
+    {
+        $service = app(AgentMemoryService::class);
+        $content = trim((string) ($arguments['content'] ?? $arguments['fact'] ?? ''));
+        $scope = $service->parseScope($arguments['scope'] ?? 'agent');
+        $resourceUuid = $this->resolveMemoryResourceUuid($arguments);
+        $tags = is_array($arguments['tags'] ?? null)
+            ? array_map('strval', $arguments['tags'])
+            : null;
+
+        $result = $service->write(
+            team: $this->team,
+            content: $content,
+            scope: $scope,
+            agent: $this->agent,
+            resourceUuid: $resourceUuid,
+            tags: $tags,
+        );
+
+        if (is_array($result)) {
+            return $result;
+        }
+
+        $this->run->appendLog("  ✓ Mémoire #{$result->id} enregistrée (scope={$scope}).");
+
+        return [
+            'saved' => true,
+            'id' => $result->id,
+            'scope' => $scope,
+            'message' => "Mémoire #{$result->id} enregistrée (scope={$scope}).",
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function todoRead(): array
+    {
+        $items = app(AgentTodoService::class)->list($this->run);
+
+        return [
+            'count' => count($items),
+            'todos' => $items,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function todoWrite(array $arguments): array
+    {
+        $service = app(AgentTodoService::class);
+
+        if (isset($arguments['items']) && is_array($arguments['items'])) {
+            $items = $service->replace($this->run, $arguments['items']);
+
+            return [
+                'replaced' => true,
+                'count' => count($items),
+                'todos' => $items,
+            ];
+        }
+
+        $content = trim((string) ($arguments['content'] ?? ''));
+        if ($content === '') {
+            return ['error' => 'Passe items[] ou content.'];
+        }
+
+        $result = $service->upsert(
+            $this->run,
+            $content,
+            (string) ($arguments['status'] ?? 'pending'),
+            isset($arguments['id']) ? (string) $arguments['id'] : null,
+        );
+
+        if (isset($result['error'])) {
+            return $result;
+        }
+
+        return [
+            'saved' => true,
+            'todo' => $result,
+            'todos' => $service->list($this->run),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     */
+    private function resolveMemoryResourceUuid(array $arguments): ?string
+    {
+        $fromArgs = trim((string) ($arguments['resource_uuid'] ?? $arguments['application_uuid'] ?? ''));
+        if ($fromArgs !== '') {
+            return $fromArgs;
+        }
+
+        if (is_string($this->assignedResourceUuid) && $this->assignedResourceUuid !== '') {
+            return $this->assignedResourceUuid;
+        }
+
+        $fromContext = trim((string) ($this->runContext['application_uuid'] ?? ''));
+
+        return $fromContext !== '' ? $fromContext : null;
     }
 
     /**
