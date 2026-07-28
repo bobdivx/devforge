@@ -200,8 +200,8 @@ class Index extends Component
                 return;
             }
 
-            $imageRef = escapeshellarg("ghcr.io/coollabsio/coolify-helper:{$version}");
-            $buildCommand = "docker build -t {$imageRef} -f docker/coolify-helper/Dockerfile .";
+            $imageRef = escapeshellarg("bobdivx/devforge:{$version}");
+            $buildCommand = "docker build -t {$imageRef} -f docker/devforge-helper/Dockerfile .";
 
             $activity = remote_process(
                 command: [$buildCommand],
@@ -212,7 +212,7 @@ class Index extends Component
             $this->buildActivityId = $activity->id;
             $this->dispatch('activityMonitor', $activity->id);
 
-            $this->dispatch('success', "Building coolify-helper:{$version}...");
+            $this->dispatch('success', "Building bobdivx/devforge:{$version}...");
         } catch (\Exception $e) {
             return handleError($e, $this);
         }

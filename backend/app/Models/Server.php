@@ -481,11 +481,11 @@ class Server extends BaseModel
                                 'service' => 'coolify',
                                 'rule' => "Host(`{$host}`)",
                             ],
-                            'coolify-realtime-ws' => [
+                            'devforge-realtime-ws' => [
                                 'entryPoints' => [
                                     0 => 'http',
                                 ],
-                                'service' => 'coolify-realtime',
+                                'service' => 'devforge-realtime',
                                 'rule' => "Host(`{$host}`) && PathPrefix(`/app`)",
                             ],
                             'coolify-terminal-ws' => [
@@ -506,11 +506,11 @@ class Server extends BaseModel
                                     ],
                                 ],
                             ],
-                            'coolify-realtime' => [
+                            'devforge-realtime' => [
                                 'loadBalancer' => [
                                     'servers' => [
                                         0 => [
-                                            'url' => 'http://coolify-realtime:6001',
+                                            'url' => 'http://devforge-realtime:6001',
                                         ],
                                     ],
                                 ],
@@ -519,7 +519,7 @@ class Server extends BaseModel
                                 'loadBalancer' => [
                                     'servers' => [
                                         0 => [
-                                            'url' => 'http://coolify-realtime:6002',
+                                            'url' => 'http://devforge-realtime:6002',
                                         ],
                                     ],
                                 ],
@@ -543,11 +543,11 @@ class Server extends BaseModel
                             'certresolver' => 'letsencrypt',
                         ],
                     ];
-                    $traefik_dynamic_conf['http']['routers']['coolify-realtime-wss'] = [
+                    $traefik_dynamic_conf['http']['routers']['devforge-realtime-wss'] = [
                         'entryPoints' => [
                             0 => 'https',
                         ],
-                        'service' => 'coolify-realtime',
+                        'service' => 'devforge-realtime',
                         'rule' => "Host(`{$host}`) && PathPrefix(`/app`)",
                         'tls' => [
                             'certresolver' => 'letsencrypt',
@@ -590,10 +590,10 @@ class Server extends BaseModel
                 $caddy_file = "
 $schema://$host {
     handle /app/* {
-        reverse_proxy coolify-realtime:6001
+        reverse_proxy devforge-realtime:6001
     }
     handle /terminal/ws {
-        reverse_proxy coolify-realtime:6002
+        reverse_proxy devforge-realtime:6002
     }
     reverse_proxy coolify:8080
 }";

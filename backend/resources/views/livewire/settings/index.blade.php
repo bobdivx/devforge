@@ -89,7 +89,7 @@
                         @endif
                         @if(isDev())
                             <x-forms.input canGate="update" :canResource="$settings" id="dev_helper_version" label="Dev Helper Version (Development Only)"
-                                helper="Override the default coolify-helper image version. Leave empty to use the default version from config ({{ config('constants.coolify.helper_version') }}). Examples: 1.0.11, latest, dev"
+                                helper="Override the default DevForge helper image tag. Leave empty to use the default from config ({{ config('constants.coolify.helper_version') }}). Examples: helper, helper-sha-abc1234, latest"
                                 placeholder="{{ config('constants.coolify.helper_version') }}" />
                         @endif
                 </div>

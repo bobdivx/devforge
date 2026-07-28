@@ -16,14 +16,14 @@ class CleanupDocker
         $realtimeImage = config('constants.coolify.realtime_image');
         $realtimeImageVersion = config('constants.coolify.realtime_version');
         $realtimeImageWithVersion = "$realtimeImage:$realtimeImageVersion";
-        $realtimeImageWithoutPrefix = 'coollabsio/coolify-realtime';
-        $realtimeImageWithoutPrefixVersion = "coollabsio/coolify-realtime:$realtimeImageVersion";
+        $realtimeImageWithoutPrefix = 'bobdivx/devforge';
+        $realtimeImageWithoutPrefixVersion = "bobdivx/devforge:$realtimeImageVersion";
 
         $helperImageVersion = getHelperVersion();
         $helperImage = config('constants.coolify.helper_image');
         $helperImageWithVersion = "$helperImage:$helperImageVersion";
-        $helperImageWithoutPrefix = 'coollabsio/coolify-helper';
-        $helperImageWithoutPrefixVersion = "coollabsio/coolify-helper:$helperImageVersion";
+        $helperImageWithoutPrefix = 'bobdivx/devforge';
+        $helperImageWithoutPrefixVersion = "bobdivx/devforge:$helperImageVersion";
 
         $cleanupLog = [];
 
@@ -101,15 +101,14 @@ class CleanupDocker
             return preg_replace('/([.\\\\+*?\[\]^$(){}|])/', '\\\\$1', $repo);
         })->implode('|');
 
-        // Build grep pattern to exclude Coolify infrastructure images (current version only)
-        // This pattern matches the image name regardless of registry prefix:
-        // - ghcr.io/coollabsio/coolify-helper:1.0.12
-        // - docker.io/coollabsio/coolify-helper:1.0.12
-        // - coollabsio/coolify-helper:1.0.12
-        // Pattern: (^|/)coollabsio/coolify-(helper|realtime):VERSION$
+        // Build grep pattern to exclude DevForge infrastructure images (current version only)
+        // Matches regardless of registry prefix:
+        // - docker.io/bobdivx/devforge:helper
+        // - ghcr.io/bobdivx/devforge-realtime:latest
+        // - bobdivx/devforge:realtime
         $escapedHelperVersion = preg_replace('/([.\\\\+*?\[\]^$(){}|])/', '\\\\$1', $helperImageVersion);
         $escapedRealtimeVersion = preg_replace('/([.\\\\+*?\[\]^$(){}|])/', '\\\\$1', $realtimeImageVersion);
-        $infraExcludePattern = "(^|/)coollabsio/coolify-helper:{$escapedHelperVersion}$|(^|/)coollabsio/coolify-realtime:{$escapedRealtimeVersion}$";
+        $infraExcludePattern = "(^|/)bobdivx/devforge:{$escapedHelperVersion}$|(^|/)bobdivx/devforge:{$escapedRealtimeVersion}$|(^|/)bobdivx/devforge-(helper|realtime)(:|$)";
 
         // Delete unused images that:
         // - Are not application images (don't match app repos)
