@@ -14,6 +14,11 @@ it('renders the DevForge login page when DevForge is enabled', function () {
         ->assertOk()
         ->assertSee('DevForge', false)
         ->assertSee('Connectez-vous pour accéder à votre espace', false)
+        ->assertSee('devforge-auth-page', false)
+        ->assertSee('devforge-auth-logo', false)
+        ->assertSee('devforge-auth-primary', false)
+        ->assertSee('devforge-auth-primary-block', false)
+        ->assertSee('brand/logo.png', false)
         ->assertDontSee('>Coolify<', false);
 });
 

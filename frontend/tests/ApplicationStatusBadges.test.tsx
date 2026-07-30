@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApplicationStatusBadges } from '../src/components/applications/ApplicationStatusBadges';
 import type { ApplicationReadiness } from '../src/lib/domain-api';
@@ -28,6 +28,7 @@ const readinessHealthy: ApplicationReadiness = {
 afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    vi.useRealTimers();
 });
 
 describe('ApplicationStatusBadges', () => {
@@ -95,5 +96,75 @@ describe('ApplicationStatusBadges', () => {
 
         fireEvent.click(screen.getByRole('button', { name: /Déploiement/i }));
         expect(onOpenTab).toHaveBeenCalledWith('deployments');
+    });
+
+    it('rafraîchit les bases liées quand pollDatabases est actif', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        let calls = 0;
+
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+            const url = String(input);
+
+            if (url.includes('/linkable-databases')) {
+                calls += 1;
+                return jsonResponse({
+                    data: [{
+                        uuid: 'db-1',
+                        name: 'app-db',
+                        engine: 'libsql',
+                        status: calls === 1 ? 'starting' : 'running:healthy',
+                        default_env_key: 'DATABASE_URL',
+                        connected_applications: [],
+                        is_linkable: true,
+                    }],
+                    meta: {
+                        connections: [{
+                            database_uuid: 'db-1',
+                            env_keys: ['DATABASE_URL'],
+                            is_runtime: true,
+                            is_buildtime: true,
+                            updated_at: null,
+                        }],
+                    },
+                });
+            }
+
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(
+            <ApplicationStatusBadges
+                applicationUuid="app-1"
+                resourceStatus="running:healthy"
+                latestDeployment={{
+                    uuid: 'deploy-1',
+                    status: 'in_progress',
+                    pull_request_id: 0,
+                    commit: 'abc123',
+                    commit_message: 'ok',
+                    force_rebuild: false,
+                    rollback: false,
+                    created_at: '2026-07-17T08:00:00.000Z',
+                    updated_at: '2026-07-17T08:05:00.000Z',
+                    finished_at: null,
+                    application: { uuid: 'app-1', name: 'demo' },
+                    is_debug_enabled: false,
+                }}
+                readiness={readinessHealthy}
+                pollDatabases
+            />,
+        );
+
+        expect(await screen.findByTitle('Base : Indisponible')).toBeInTheDocument();
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(3000);
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTitle('Base : Accessible')).toBeInTheDocument();
+        });
+
+        vi.useRealTimers();
     });
 });

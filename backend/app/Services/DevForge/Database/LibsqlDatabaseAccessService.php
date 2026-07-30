@@ -3,9 +3,11 @@
 namespace App\Services\DevForge\Database;
 
 use App\Actions\Database\StartDatabase;
+use App\Actions\Database\StopDatabaseProxy;
 use App\Models\StandaloneLibsql;
 use App\Models\User;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class LibsqlDatabaseAccessService
 {
@@ -30,6 +32,7 @@ class LibsqlDatabaseAccessService
             'turso_database_url_external' => $values['turso_url_external'],
             'turso_auth_token' => $values['token'],
             'libsql_url' => $values['full_url'],
+            'fqdn' => $database->is_public ? $database->fqdn : null,
             'is_public' => (bool) $database->is_public,
             'public_port' => $database->is_public ? $database->public_port : null,
             'env_profiles' => [
@@ -84,13 +87,25 @@ class LibsqlDatabaseAccessService
         ])->validate();
 
         $enabled = (bool) $validated['enabled'];
+        $wasPublic = (bool) $database->is_public;
+
         $database->is_public = $enabled;
-        $database->public_port = $enabled
-            ? (int) ($validated['public_port'] ?? ($database->public_port ?: $this->defaultPublicPort($database)))
-            : null;
+
+        if ($enabled) {
+            $database->public_port = (int) ($validated['public_port'] ?? ($database->public_port ?: $this->defaultPublicPort($database)));
+            $this->ensurePublicFqdn($database);
+        } else {
+            $database->public_port = null;
+        }
+
         $database->save();
 
-        if ($database->isRunning()) {
+        if ($wasPublic && ! $enabled) {
+            StopDatabaseProxy::dispatch($database);
+        }
+
+        // Restart (or start) so Traefik/Caddy domain labels are applied or removed.
+        if ($enabled || $wasPublic) {
             StartDatabase::dispatch($database);
         }
 
@@ -104,6 +119,7 @@ class LibsqlDatabaseAccessService
             'user_id' => $user->id,
             'is_public' => $enabled,
             'public_port' => $database->public_port,
+            'fqdn' => $database->fqdn,
         ]);
 
         return [
@@ -111,6 +127,32 @@ class LibsqlDatabaseAccessService
             'synced_applications' => $synced['applications'],
             'redeployments_queued' => $synced['redeployments_queued'],
         ];
+    }
+
+    /**
+     * Auto-assign a Traefik/Caddy domain from the server wildcard (or sslip) when missing.
+     * Format: https://db-{uuid}.{wildcard-host}
+     */
+    public function ensurePublicFqdn(StandaloneLibsql $database): ?string
+    {
+        if (! $database->is_public) {
+            return $database->fqdn;
+        }
+
+        if (filled($database->fqdn)) {
+            return $database->fqdn;
+        }
+
+        $server = $database->destination?->server;
+        if (! $server) {
+            throw ValidationException::withMessages([
+                'enabled' => ['Impossible de générer un domaine : serveur de destination introuvable.'],
+            ]);
+        }
+
+        $database->fqdn = generateUrl(server: $server, random: 'db-'.$database->uuid, forceHttps: true);
+
+        return $database->fqdn;
     }
 
     private function defaultPublicPort(StandaloneLibsql $database): int

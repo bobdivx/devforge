@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApplicationDetailPanel } from '../src/components/applications/ApplicationDetailPanel';
 
@@ -37,6 +37,7 @@ const application = {
 afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    vi.useRealTimers();
 });
 
 describe('ApplicationDetailPanel', () => {
@@ -351,4 +352,140 @@ describe('ApplicationDetailPanel', () => {
         });
     });
 
+    it('met à jour les badges quand le déploiement passe de en cours à terminé', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+
+        let deploymentStatus = 'in_progress';
+        let appStatus = 'restarting:unknown';
+        let readinessStatus: 'probing' | 'healthy' = 'probing';
+        let readinessOk: boolean | null = null;
+
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+            const url = String(input);
+
+            if (url.includes('/api/devforge/v1/core/applications/app-uuid-1234')) {
+                return jsonResponse({
+                    data: {
+                        ...application,
+                        status: appStatus,
+                    },
+                });
+            }
+            if (url.includes('/api/devforge/v1/deployments')) {
+                if (url.includes('/monitoring') || url.includes('/logs')) {
+                    return jsonResponse({
+                        data: url.includes('/logs')
+                            ? { items: [], next_cursor: 0, complete: false }
+                            : {
+                                deployment: {
+                                    uuid: 'deploy-1',
+                                    status: deploymentStatus,
+                                    pull_request_id: 0,
+                                    commit: '84f8e3ef12ab',
+                                    commit_message: 'fix(auth): allow registration',
+                                    force_rebuild: false,
+                                    rollback: false,
+                                    created_at: '2026-04-27T10:00:00.000Z',
+                                    updated_at: '2026-04-27T10:05:00.000Z',
+                                    finished_at: deploymentStatus === 'finished' ? '2026-04-27T10:05:00.000Z' : null,
+                                    application: { uuid: application.uuid, name: application.name },
+                                },
+                                agent_runs: [],
+                                redeployments: [],
+                                agents: { enabled: true, auto_fix_deployments: true, webhook_build: true },
+                            },
+                    });
+                }
+
+                return jsonResponse({
+                    data: [{
+                        uuid: 'deploy-1',
+                        status: deploymentStatus,
+                        pull_request_id: 0,
+                        commit: '84f8e3ef12ab',
+                        commit_message: 'fix(auth): allow registration',
+                        force_rebuild: false,
+                        rollback: false,
+                        created_at: '2026-04-27T10:00:00.000Z',
+                        updated_at: '2026-04-27T10:05:00.000Z',
+                        finished_at: deploymentStatus === 'finished' ? '2026-04-27T10:05:00.000Z' : null,
+                        application: { uuid: application.uuid, name: application.name },
+                        is_debug_enabled: false,
+                    }],
+                    meta: { total: 1 },
+                });
+            }
+            if (url.includes('/linkable-databases')) {
+                return jsonResponse({ data: [], meta: { connections: [] } });
+            }
+            if (url.includes('/environment-variables')) {
+                return jsonResponse({ data: { production: [], preview: [] } });
+            }
+            if (url.includes('/logs') && url.includes('/applications/')) {
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        reason: null,
+                        message: null,
+                        container: 'popcorn-web-abc',
+                        container_status: 'running',
+                        line_count: 0,
+                        items: [],
+                    },
+                });
+            }
+            if (url.includes('/readiness')) {
+                return jsonResponse({
+                    data: {
+                        uuid: 'readiness-1',
+                        status: readinessStatus,
+                        autonomous_enabled: true,
+                        last_probe_at: readinessOk ? '2026-04-27T10:05:00.000Z' : null,
+                        last_probe_ok: readinessOk,
+                        last_probe_error: null,
+                        last_http_status: readinessOk ? 200 : null,
+                        round: 0,
+                        max_rounds: 5,
+                        last_deployment_uuid: 'deploy-1',
+                        probe_url: 'https://popcornn.app',
+                        intervention: null,
+                    },
+                });
+            }
+            if (url.includes('/api/devforge/v1/agents')) {
+                return jsonResponse({ data: [] });
+            }
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(
+            <ApplicationDetailPanel
+                uuid="app-uuid-1234"
+                canAct
+                onClose={() => undefined}
+                onChanged={async () => undefined}
+            />,
+        );
+
+        expect(await screen.findByLabelText('État de l’application')).toBeInTheDocument();
+        expect(screen.getByTitle('Déploiement : En cours')).toBeInTheDocument();
+        expect(screen.getByTitle('URL : Vérification…')).toBeInTheDocument();
+
+        deploymentStatus = 'finished';
+        appStatus = 'running:healthy';
+        readinessStatus = 'healthy';
+        readinessOk = true;
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(3000);
+        });
+
+        await waitFor(() => {
+            expect(screen.getByTitle('Déploiement : Terminé')).toBeInTheDocument();
+            expect(screen.getByTitle('App : Sain')).toBeInTheDocument();
+            expect(screen.getByTitle('URL : Accessible')).toBeInTheDocument();
+        });
+
+        vi.useRealTimers();
+    });
 });

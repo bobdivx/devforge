@@ -1,14 +1,11 @@
 <?php
 
-use App\Actions\Database\StartDatabase;
 use App\Models\Application;
 use App\Models\Environment;
-use App\Models\EnvironmentVariable;
 use App\Models\Project;
 use App\Models\Server;
 use App\Models\StandaloneDocker;
 use App\Models\StandaloneLibsql;
-use App\Models\Team;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
@@ -91,15 +88,21 @@ it('regenerates libsql auth token and syncs linked applications', function () {
     $this->database->refresh();
     expect($this->database->libsql_auth_token)->toBe($newToken);
 
-    expect(EnvironmentVariable::query()
-        ->where('resourceable_id', $this->application->id)
+    $tokenVar = $this->application->environment_variables()
         ->where('key', 'TURSO_AUTH_TOKEN')
-        ->first()?->real_value)
-        ->toBe($newToken);
+        ->where('is_preview', false)
+        ->first();
+
+    expect($tokenVar)->not->toBeNull()
+        ->and($tokenVar->value)->toBe($newToken);
 });
 
 it('enables public access for libsql databases', function () {
-    Bus::fake([StartDatabase::class]);
+    Bus::fake();
+
+    $this->server->settings->update([
+        'wildcard_domain' => 'https://apps.example.com',
+    ]);
 
     $response = $this->actingAs($this->user)
         ->withSession($this->session)
@@ -112,11 +115,43 @@ it('enables public access for libsql databases', function () {
         ->assertJsonPath('data.is_public', true)
         ->assertJsonPath('data.public_port', 19080);
 
-    expect($response->json('data.turso_database_url_external'))->toEndWith(':19080');
+    expect($response->json('data.turso_database_url_external'))
+        ->toBe('libsql://db-'.$this->database->uuid.'.apps.example.com');
+    expect($response->json('data.fqdn'))
+        ->toBe('https://db-'.$this->database->uuid.'.apps.example.com');
 
     $this->database->refresh();
     expect($this->database->is_public)->toBeTrue()
-        ->and($this->database->public_port)->toBe(19080);
+        ->and($this->database->public_port)->toBe(19080)
+        ->and($this->database->fqdn)->toBe('https://db-'.$this->database->uuid.'.apps.example.com');
+});
 
-    Bus::assertDispatched(StartDatabase::class);
+it('prefers domain url over ip port for external credentials', function () {
+    $this->database->update([
+        'is_public' => true,
+        'public_port' => 19080,
+        'fqdn' => 'https://db-demo.apps.example.com',
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson("/api/devforge/v1/databases/{$this->database->uuid}/credentials")
+        ->assertSuccessful()
+        ->assertJsonPath('data.turso_database_url_external', 'libsql://db-demo.apps.example.com')
+        ->assertJsonPath('data.fqdn', 'https://db-demo.apps.example.com');
+});
+
+it('falls back to ip port when public without fqdn', function () {
+    $this->database->update([
+        'is_public' => true,
+        'public_port' => 19080,
+        'fqdn' => null,
+    ]);
+
+    $response = $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson("/api/devforge/v1/databases/{$this->database->uuid}/credentials")
+        ->assertSuccessful();
+
+    expect($response->json('data.turso_database_url_external'))->toEndWith(':19080');
 });

@@ -3,6 +3,7 @@
 namespace App\Actions\Database;
 
 use App\Models\StandaloneLibsql;
+use App\Services\DevForge\Database\LibsqlDatabaseAccessService;
 use Lorisleiva\Actions\Concerns\AsAction;
 use Symfony\Component\Yaml\Yaml;
 
@@ -19,6 +20,12 @@ class StartLibsql
     public function handle(StandaloneLibsql $database)
     {
         $this->database = $database;
+        $this->database->loadMissing(['destination.server.settings', 'environment.project']);
+
+        if ($this->database->is_public && blank($this->database->fqdn)) {
+            app(LibsqlDatabaseAccessService::class)->ensurePublicFqdn($this->database);
+            $this->database->save();
+        }
 
         $container_name = $this->database->uuid;
         $this->configuration_dir = database_configuration_dir().'/'.$container_name;
@@ -43,7 +50,11 @@ class StartLibsql
                     'networks' => [
                         $this->database->destination->network,
                     ],
-                    'labels' => defaultDatabaseLabels($this->database)->toArray(),
+                    'labels' => defaultDatabaseLabels($this->database)
+                        ->merge(libsqlFqdnLabels($this->database))
+                        ->unique()
+                        ->values()
+                        ->toArray(),
                     // libsql-server image has neither wget nor curl; probe the HTTP port with bash /dev/tcp.
                     'healthcheck' => $this->database->healthCheckConfiguration([
                         'CMD-SHELL',

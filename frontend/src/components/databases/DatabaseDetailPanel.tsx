@@ -305,7 +305,12 @@ export function DatabaseDetailPanel({
             await credentialsQuery.reload();
             await resourceQuery.reload();
             if (response.data.turso_database_url_external) {
-                setAccessMessage('Accès distant activé. Utilisez l’URL Turso distante ci-dessous.');
+                const viaDomain = Boolean(response.data.fqdn);
+                setAccessMessage(
+                    viaDomain
+                        ? 'Accès distant activé via le domaine proxy. Utilisez l’URL Turso distante ci-dessous.'
+                        : 'Accès distant activé. Utilisez l’URL Turso distante ci-dessous.',
+                );
             }
         } catch {
             setActionError('La mise à jour de l’accès distant a échoué.');
@@ -655,12 +660,22 @@ export function DatabaseDetailPanel({
                                                     />
                                                     <span>Accès distant</span>
                                                 </label>
+                                                {credentials.is_public && credentials.fqdn && (
+                                                    <span class="text-xs text-base-content/55">
+                                                        Domaine : <span class="font-mono">{credentials.fqdn.replace(/^https?:\/\//, '')}</span>
+                                                    </span>
+                                                )}
                                                 {credentials.is_public && credentials.public_port && (
                                                     <span class="text-xs text-base-content/55">
-                                                        Port public : <span class="font-mono">{credentials.public_port}</span>
+                                                        Port TCP (secours) : <span class="font-mono">{credentials.public_port}</span>
                                                     </span>
                                                 )}
                                             </div>
+                                            {credentials.is_public && credentials.fqdn && (
+                                                <p class="text-xs text-base-content/55">
+                                                    L’URL distante passe par le proxy (HTTPS / 443). Le DNS wildcard du serveur doit pointer vers cette machine.
+                                                </p>
+                                            )}
                                             {accessMessage && <p class="text-xs text-success" role="status">{accessMessage}</p>}
                                         </div>
                                     )}

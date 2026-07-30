@@ -21,7 +21,7 @@ import {
     XCircle,
 } from 'lucide-preact';
 import type { ComponentChildren } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ActionToolbar } from '../ui/ActionToolbar';
 import { DataState } from '../ui/DataState';
@@ -466,17 +466,35 @@ export function ApplicationDetailPanel({
     useEffect(() => {
         setFocusedDeploymentUuid((current) => pickFocusedDeployment(deployments, current, { pinned: focusPinned }));
     }, [deployments, focusPinned]);
+
+    const hadActiveDeploymentRef = useRef(false);
+
     useEffect(() => {
         if (!hasActiveDeployment) {
             return;
         }
 
-        const interval = window.setInterval(() => {
+        const refreshStatus = () => {
             void deploymentsQuery.reload({ silent: true });
-        }, 3000);
+            void resourceQuery.reload({ silent: true });
+            void readinessQuery.reload({ silent: true });
+        };
+
+        refreshStatus();
+        const interval = window.setInterval(refreshStatus, 3000);
 
         return () => window.clearInterval(interval);
-    }, [hasActiveDeployment, uuid, deploymentsQuery.reload]);
+    }, [hasActiveDeployment, uuid, deploymentsQuery.reload, resourceQuery.reload, readinessQuery.reload]);
+
+    useEffect(() => {
+        if (hadActiveDeploymentRef.current && !hasActiveDeployment) {
+            void deploymentsQuery.reload({ silent: true });
+            void resourceQuery.reload({ silent: true });
+            void readinessQuery.reload({ silent: true });
+        }
+
+        hadActiveDeploymentRef.current = hasActiveDeployment;
+    }, [hasActiveDeployment, deploymentsQuery.reload, resourceQuery.reload, readinessQuery.reload]);
 
     useEffect(() => {
         if (!readiness || !shouldPollApplicationReadiness(readiness.status)) {
@@ -673,6 +691,7 @@ export function ApplicationDetailPanel({
                                         latestDeployment={latest}
                                         readiness={readiness}
                                         readinessLoading={readinessQuery.loading}
+                                        pollDatabases={hasActiveDeployment}
                                         onOpenTab={(tab) => {
                                             if (tab === 'deployments') {
                                                 openDeploymentsTab();

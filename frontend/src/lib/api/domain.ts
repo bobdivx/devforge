@@ -1565,6 +1565,7 @@ export type LibsqlCredentials = {
     turso_database_url_external: string | null;
     turso_auth_token: string;
     libsql_url: string;
+    fqdn: string | null;
     is_public: boolean;
     public_port: number | null;
     env_profiles: {

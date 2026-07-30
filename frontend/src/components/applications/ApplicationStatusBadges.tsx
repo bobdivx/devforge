@@ -9,6 +9,7 @@ import {
     XCircle,
 } from 'lucide-preact';
 import type { ComponentChildren } from 'preact';
+import { useEffect, useRef } from 'preact/hooks';
 import {
     type ApplicationReadiness,
     type Deployment,
@@ -36,6 +37,8 @@ type Props = {
     latestDeployment: Deployment | null;
     readiness: ApplicationReadiness | null;
     readinessLoading?: boolean;
+    /** Rafraîchir le badge base pendant un déploiement actif. */
+    pollDatabases?: boolean;
     onOpenTab?: (tab: 'deployments' | 'databases' | 'domains') => void;
 };
 
@@ -253,12 +256,33 @@ export function ApplicationStatusBadges({
     latestDeployment,
     readiness,
     readinessLoading = false,
+    pollDatabases = false,
     onOpenTab,
 }: Props) {
     const databasesQuery = useApiQuery(
         `linkable-databases:${applicationUuid}`,
         () => domainApi.linkableDatabases(applicationUuid),
     );
+
+    useEffect(() => {
+        if (!pollDatabases) {
+            return;
+        }
+
+        const interval = window.setInterval(() => {
+            void databasesQuery.reload({ silent: true });
+        }, 3000);
+
+        return () => window.clearInterval(interval);
+    }, [pollDatabases, applicationUuid, databasesQuery.reload]);
+
+    const wasPollingDatabasesRef = useRef(false);
+    useEffect(() => {
+        if (wasPollingDatabasesRef.current && !pollDatabases) {
+            void databasesQuery.reload({ silent: true });
+        }
+        wasPollingDatabasesRef.current = pollDatabases;
+    }, [pollDatabases, databasesQuery.reload]);
 
     const databases = databasesQuery.data?.data ?? [];
     const connections = databasesQuery.data?.meta?.connections ?? [];

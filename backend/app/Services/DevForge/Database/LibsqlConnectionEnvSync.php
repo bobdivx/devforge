@@ -34,10 +34,15 @@ class LibsqlConnectionEnvSync
         $encodedToken = rawurlencode($token);
 
         $tursoUrlExternal = null;
-        if ($database->is_public && $database->public_port) {
-            $serverIp = $database->destination?->server?->getIp;
-            if (! empty($serverIp)) {
-                $tursoUrlExternal = "libsql://{$serverIp}:{$database->public_port}";
+        if ($database->is_public) {
+            $domainHost = $database->publicDomainHost();
+            if ($domainHost) {
+                $tursoUrlExternal = "libsql://{$domainHost}";
+            } elseif ($database->public_port) {
+                $serverIp = $database->destination?->server?->getIp;
+                if (! empty($serverIp)) {
+                    $tursoUrlExternal = "libsql://{$serverIp}:{$database->public_port}";
+                }
             }
         }
 
@@ -47,6 +52,7 @@ class LibsqlConnectionEnvSync
             'turso_url' => "libsql://{$host}:8080",
             'turso_url_external' => $tursoUrlExternal,
             'full_url' => "libsql://{$encodedUser}:{$encodedToken}@{$host}:8080",
+            'full_url_external' => $database->external_db_url,
         ];
     }
 

@@ -9,6 +9,7 @@ use App\Traits\HasSafeStringAttribute;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Spatie\Url\Url;
 
 class StandaloneLibsql extends BaseModel
 {
@@ -28,6 +29,7 @@ class StandaloneLibsql extends BaseModel
         'image',
         'is_public',
         'public_port',
+        'fqdn',
         'ports_mappings',
         'limits_memory',
         'limits_memory_swap',
@@ -305,13 +307,23 @@ class StandaloneLibsql extends BaseModel
     {
         return new Attribute(
             get: function () {
-                if ($this->is_public && $this->public_port) {
+                if (! $this->is_public) {
+                    return null;
+                }
+
+                $user = rawurlencode((string) ($this->libsql_auth_user ?: 'libsql'));
+                $password = rawurlencode((string) $this->libsql_auth_token);
+
+                $domainHost = $this->publicDomainHost();
+                if ($domainHost) {
+                    return "libsql://{$user}:{$password}@{$domainHost}";
+                }
+
+                if ($this->public_port) {
                     $serverIp = $this->destination->server->getIp;
                     if (empty($serverIp)) {
                         return null;
                     }
-                    $user = rawurlencode((string) ($this->libsql_auth_user ?: 'libsql'));
-                    $password = rawurlencode((string) $this->libsql_auth_token);
 
                     return "libsql://{$user}:{$password}@{$serverIp}:{$this->public_port}";
                 }
@@ -319,6 +331,21 @@ class StandaloneLibsql extends BaseModel
                 return null;
             }
         );
+    }
+
+    public function publicDomainHost(): ?string
+    {
+        if (! $this->is_public || blank($this->fqdn)) {
+            return null;
+        }
+
+        try {
+            $host = Url::fromString((string) $this->fqdn)->getHost();
+
+            return filled($host) ? $host : null;
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     public function environment()

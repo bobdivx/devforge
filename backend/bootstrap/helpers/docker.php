@@ -5,6 +5,7 @@ use App\Models\Application;
 use App\Models\ApplicationPreview;
 use App\Models\Server;
 use App\Models\ServiceApplication;
+use App\Models\StandaloneLibsql;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Spatie\Url\Url;
@@ -228,6 +229,58 @@ function defaultDatabaseLabels($database)
     $labels->push('coolify.database.subType='.$database->type());
 
     return $labels;
+}
+
+/**
+ * HTTP/Hrana Traefik+Caddy labels for public libSQL access via domain (port 8080).
+ * Gzip disabled: Hrana may use WebSockets.
+ */
+function libsqlFqdnLabels(StandaloneLibsql $database): Collection
+{
+    if (! $database->is_public || blank($database->fqdn)) {
+        return collect();
+    }
+
+    $domains = collect([(string) $database->fqdn])->filter();
+    $server = $database->destination?->server;
+    if (! $server || $domains->isEmpty()) {
+        return collect();
+    }
+
+    $uuid = $database->uuid;
+    $network = $database->destination->network;
+    $shouldGenerateLabelsExactly = (bool) ($server->settings?->generate_exact_labels);
+
+    $traefik = fn (): Collection => fqdnLabelsForTraefik(
+        uuid: $uuid,
+        domains: $domains,
+        onlyPort: 8080,
+        is_force_https_enabled: true,
+        is_gzip_enabled: false,
+        is_stripprefix_enabled: true,
+        redirect_direction: 'both',
+    );
+
+    $caddy = fn (): Collection => fqdnLabelsForCaddy(
+        network: $network,
+        uuid: $uuid,
+        domains: $domains,
+        onlyPort: 8080,
+        is_force_https_enabled: true,
+        is_gzip_enabled: false,
+        is_stripprefix_enabled: true,
+        redirect_direction: 'both',
+    );
+
+    if ($shouldGenerateLabelsExactly) {
+        return match ($server->proxyType()) {
+            ProxyTypes::TRAEFIK->value => $traefik(),
+            ProxyTypes::CADDY->value => $caddy(),
+            default => collect(),
+        };
+    }
+
+    return $traefik()->merge($caddy());
 }
 
 function defaultLabels($id, $name, string $projectName, string $resourceName, string $environment, $pull_request_id = 0, string $type = 'application', $subType = null, $subId = null, $subName = null)

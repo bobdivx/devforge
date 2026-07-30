@@ -4,11 +4,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const backendRoot = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(backendRoot, "..");
-
-function fromRepo(...segments) {
-    return path.relative(repoRoot, path.join(...segments)).replaceAll("\\", "/");
-}
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, backendRoot, "");
@@ -16,7 +11,8 @@ export default defineConfig(({ mode }) => {
     const vitePort = Number(env.VITE_PORT || 5173);
 
     return {
-        root: repoRoot,
+        // Keep Vite root on backend/ so manifest keys match @vite(['resources/js/app.js', ...])
+        root: backendRoot,
         css: {
             postcss: path.join(backendRoot, "postcss.config.cjs"),
         },
@@ -46,14 +42,13 @@ export default defineConfig(({ mode }) => {
         plugins: [
             laravel({
                 input: [
-                    fromRepo(backendRoot, "resources", "css", "app.css"),
-                    fromRepo(backendRoot, "resources", "js", "app.js"),
+                    "resources/css/app.css",
+                    "resources/js/app.js",
                 ],
                 refresh: [
-                    fromRepo(backendRoot, "resources", "views") + "/**",
-                    fromRepo(backendRoot, "app", "Livewire") + "/**",
+                    "resources/views/**",
+                    "app/Livewire/**",
                 ],
-                publicDirectory: fromRepo(backendRoot, "public"),
             }),
         ],
     };
