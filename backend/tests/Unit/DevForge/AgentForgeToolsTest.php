@@ -195,6 +195,23 @@ it('registers subagent runs', function () {
         ->and($record->fresh()->output)->toBe('Résumé OK');
 });
 
+it('accepts a long subagent reason beyond varchar(255)', function () {
+    $parent = AiAgent::factory()->create(['team_id' => $this->team->id]);
+    $child = AiAgent::factory()->subAgent($parent, 'res-uuid')->create();
+
+    $reason = 'Corriger le déploiement en échec Logs: docker: Error response from daemon: '
+        .'manifest for bobdivx/devforge:helper not found: manifest unknown: manifest unknown. '
+        .'— lire les logs, corriger via update_application_runtime_settings / upsert_application_env_var / '
+        .'write_application_source, puis redeploy 1×.';
+
+    expect(strlen($reason))->toBeGreaterThan(255);
+
+    $registry = new AgentSubagentRegistry;
+    $record = $registry->start($parent, $child, null, $reason);
+
+    expect($record->fresh()->reason)->toBe(mb_substr($reason, 0, 500));
+});
+
 it('exposes propose_plan in toolkit definitions', function () {
     $run = AiAgentRun::factory()->create(['agent_id' => $this->agent->id]);
 

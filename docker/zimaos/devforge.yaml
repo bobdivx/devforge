@@ -4,6 +4,7 @@
 # Images Docker Hub :
 #   bobdivx/devforge:api
 #   bobdivx/devforge:realtime
+#   bobdivx/devforge:helper   ← requis pour les déploiements (pull à la demande, pas un service compose)
 #
 # Build / publish : workflow GitHub "DevForge Docker Images"
 # ou : .\scripts\nas-fix-devforge.ps1 -EnableAgents
@@ -41,6 +42,7 @@ services:
       - DEVFORGE_ENABLED=true
       - DEVFORGE_MCP_ENABLED=${DEVFORGE_MCP_ENABLED:-true}
       - DEVFORGE_DATA_DIR=${DEVFORGE_PLATFORM_DATA:-/media/Docker/AppData/devforge/data}
+      - HELPER_IMAGE=${HELPER_IMAGE:-bobdivx/devforge}
       - PUSHER_APP_ID=${PUSHER_APP_ID:-devforge}
       - PUSHER_APP_KEY=${PUSHER_APP_KEY:-devforge}
       - PUSHER_APP_SECRET=${PUSHER_APP_SECRET:-devforge}

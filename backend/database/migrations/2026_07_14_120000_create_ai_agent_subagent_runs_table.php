@@ -15,7 +15,7 @@ return new class extends Migration
             $table->foreignId('parent_run_id')->nullable()->constrained('ai_agent_runs')->nullOnDelete();
             $table->foreignId('child_run_id')->nullable()->constrained('ai_agent_runs')->nullOnDelete();
             $table->string('status')->default('pending');
-            $table->string('reason')->nullable();
+            $table->text('reason')->nullable();
             $table->text('output')->nullable();
             $table->text('error')->nullable();
             $table->timestamp('started_at')->nullable();

@@ -51,6 +51,7 @@ services:
       DEVFORGE_ENABLED: "true"
       DEVFORGE_AGENTS_ENABLED: ${DEVFORGE_AGENTS_ENABLED:-true}
       DEVFORGE_DATA_DIR: ${DEVFORGE_PLATFORM_DATA:-/data/devforge}
+      HELPER_IMAGE: ${HELPER_IMAGE:-bobdivx/devforge}
     env_file:
       - ${DEVFORGE_ENV_FILE:-./.env}
     depends_on:

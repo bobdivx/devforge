@@ -1,8 +1,11 @@
 name: DevForge Docker Images
 
 # Build & push to Docker Hub: bobdivx/devforge
-# Tags per component: api / web / realtime (+ -latest, -sha-*, -version)
+# Tags per component: api / web / realtime / helper (+ -latest, -sha-*, -version)
 # Also mirrors to GHCR: ghcr.io/<owner>/devforge-<component>
+#
+# Note: :helper is required on every deployment server (pulled on demand by
+# ApplicationDeploymentJob). Without it, deploys fail with "manifest unknown".
 
 on:
   push:
@@ -13,6 +16,7 @@ on:
       - docker/devforge-api/**
       - docker/devforge-web/**
       - docker/devforge-realtime/**
+      - docker/devforge-helper/**
       - docker/production/**
       - package.json
       - package-lock.json
@@ -40,6 +44,8 @@ jobs:
             file: docker/devforge-web/Dockerfile
           - name: realtime
             file: docker/devforge-realtime/Dockerfile
+          - name: helper
+            file: docker/devforge-helper/Dockerfile
     steps:
       - uses: actions/checkout@v5
         with:
@@ -125,7 +131,10 @@ jobs:
           echo "  bobdivx/devforge:web-latest"
           echo "  bobdivx/devforge:realtime"
           echo "  bobdivx/devforge:realtime-latest"
+          echo "  bobdivx/devforge:helper"
+          echo "  bobdivx/devforge:helper-latest"
           echo "GHCR mirrors:"
           echo "  ghcr.io/bobdivx/devforge-api:latest"
           echo "  ghcr.io/bobdivx/devforge-web:latest"
           echo "  ghcr.io/bobdivx/devforge-realtime:latest"
+          echo "  ghcr.io/bobdivx/devforge-helper:latest"
