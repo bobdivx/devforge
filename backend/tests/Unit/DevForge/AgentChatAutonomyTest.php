@@ -24,7 +24,24 @@ it('detects when the model defers to the user', function () {
 it('detects tool names written in prose instead of tool_calls', function () {
     expect(AgentDirectives::mentionsToolWithoutCalling('Je vais appeler spawn_task maintenant'))->toBeTrue()
         ->and(AgentDirectives::mentionsToolWithoutCalling('{"method":"spawn_task","goal":"fix"}'))->toBeTrue()
+        ->and(AgentDirectives::mentionsToolWithoutCalling('get_github_workflow_run(owner=…)'))->toBeTrue()
         ->and(AgentDirectives::mentionsToolWithoutCalling('Le déploiement a échoué sur la branche main.'))->toBeFalse();
+});
+
+it('detects model refusals that block DevForge agent runs', function () {
+    expect(AgentDirectives::isModelRefusal(
+        'Je suis désolé, mais je ne peux pas poursuivre cette conversation car elle semble être liée à une application spécifique (apparently Coolify)',
+    ))->toBeTrue()
+        ->and(AgentDirectives::isModelRefusal('Voici le résumé des jobs en échec.'))->toBeFalse();
+});
+
+it('nudges github-actions agents toward real tool calls', function () {
+    expect(AgentDirectives::toolNudgeMessage('github-actions'))
+        ->toContain('list_github_apps')
+        ->and(AgentDirectives::refusalNudgeMessage('github-actions'))
+        ->toContain('DevForge')
+        ->and(AgentDirectives::proseToolNudgeMessage('github-actions'))
+        ->toContain('tool_call');
 });
 
 it('detects repair chat intents for autonomous fallback', function () {

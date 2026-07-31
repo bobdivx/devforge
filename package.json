@@ -11,7 +11,7 @@
         "dev:frontend": "npm run dev --workspace frontend",
         "dev:devforge": "npm run dev --workspace frontend",
         "build": "npm run build:laravel && npm run build:frontend",
-        "build:laravel": "vite build --config backend/vite.config.js",
+        "build:laravel": "vite build --config backend/vite.config.js && node scripts/normalize-vite-manifest.mjs",
         "build:frontend": "npm run build --workspace frontend",
         "build:devforge": "npm run build --workspace frontend",
         "test:frontend": "npm run test --workspace frontend",

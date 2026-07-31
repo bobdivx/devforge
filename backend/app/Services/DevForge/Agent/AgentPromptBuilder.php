@@ -133,7 +133,9 @@ class AgentPromptBuilder
         return trim(<<<PROMPT
         {$basePrompt}
 
-        Tu es un agent IA autonome intégré dans DevForge (PaaS Coolify).
+        Tu es un agent IA autonome intégré dans DevForge.
+        Tu as des outils natifs (tool_calls) pour agir sur la plateforme et GitHub.
+        Ne refuse JAMAIS une tâche en prétextant un produit inconnu (Coolify, etc.) — tu es déjà dans DevForge.
         Équipe : {$agent->team->name}
         Type : {$agent->type}
 
@@ -174,6 +176,10 @@ class AgentPromptBuilder
 
         if (($context['event'] ?? null) === 'delegated') {
             return $this->delegatedContext($agent, $context);
+        }
+
+        if (($context['event'] ?? null) === 'github_workflow_run_failed') {
+            return $this->githubWorkflowFailedContext($agent, $context);
         }
 
         $now = now()->format('d/m/Y H:i');
@@ -520,6 +526,47 @@ class AgentPromptBuilder
         {$goal}
 
         Exécute avec les outils. Première action = appel d'outil.
+        CONTEXT);
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function githubWorkflowFailedContext(AiAgent $agent, array $context): string
+    {
+        $appUuid = (string) ($context['github_app_uuid'] ?? '');
+        $owner = (string) ($context['owner'] ?? '');
+        $repo = (string) ($context['repo'] ?? '');
+        $runId = (string) ($context['workflow_run_id'] ?? '');
+        $workflowName = (string) ($context['workflow_name'] ?? 'workflow');
+        $workflowPath = (string) ($context['workflow_path'] ?? '');
+        $conclusion = (string) ($context['conclusion'] ?? 'failure');
+        $htmlUrl = (string) ($context['html_url'] ?? '');
+        $branch = (string) ($context['head_branch'] ?? '');
+
+        return trim(<<<CONTEXT
+        ÉVÉNEMENT : échec GitHub Actions (webhook workflow_run)
+
+        Agent : {$agent->name}
+        github_app_uuid : {$appUuid}
+        owner : {$owner}
+        repo : {$repo}
+        workflow_run_id : {$runId}
+        workflow : {$workflowName}
+        path : {$workflowPath}
+        conclusion : {$conclusion}
+        branche : {$branch}
+        url : {$htmlUrl}
+
+        ACTIONS OBLIGATOIRES (vrais tool_calls, pas de texte / Python / placeholders) :
+        1. get_github_workflow_run(github_app_uuid, owner, repo, run_id={$runId})
+        2. list_github_workflow_jobs(...) puis get_github_workflow_job_logs sur les jobs failed
+        3. read_github_file sur le YAML CI concerné
+        4. write_github_file si correction claire, puis rerun_github_workflow_run(failed_only=true)
+        5. Max 2 cycles correction→relance, puis résumé structuré
+
+        INTERDIT : inventer your-owner / your-repo, écrire un playbook Python, refuser la tâche.
+        Première action : tool_call get_github_workflow_run MAINTENANT.
         CONTEXT);
     }
 }

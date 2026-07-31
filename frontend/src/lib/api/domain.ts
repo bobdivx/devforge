@@ -646,7 +646,7 @@ export type SharedVariableUpdateInput = {
 
 export type SharedVariables = Record<'team' | 'project' | 'environment' | 'server', SharedVariable[]>;
 
-export type AgentType = 'debug' | 'tech-watch' | 'github' | 'devforge' | 'deployment' | 'security';
+export type AgentType = 'debug' | 'tech-watch' | 'github' | 'github-actions' | 'devforge' | 'deployment' | 'security';
 export type AgentStatus = 'idle' | 'running' | 'error' | 'paused';
 export type AgentRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'awaiting_approval' | 'waiting_for_input' | 'waiting_for_subagents';
 export type AgentTrigger = 'scheduled' | 'manual' | 'event' | 'chat' | 'ephemeral' | 'delegation';
@@ -805,6 +805,7 @@ export type AgentRun = {
 export type AgentTriggerMode = 'manual' | 'schedule' | 'webhook' | 'cron';
 
 export type Agent = {
+    id: number;
     uuid: string;
     type: AgentType;
     name: string;
@@ -816,14 +817,26 @@ export type Agent = {
     heartbeat_enabled?: boolean;
     last_heartbeat_at?: string | null;
     trigger_mode: AgentTriggerMode;
+    event_trigger_label?: string | null;
+    is_event_only?: boolean;
     is_active: boolean;
     status: AgentStatus;
+    llm_available?: boolean;
     last_run_at: string | null;
     provider: { id: number; name: string; provider: LlmProvider; model: string; model_label?: string } | null;
     fallback_provider: { id: number; name: string; provider: LlmProvider; model: string; model_label?: string } | null;
     parent_agent_id: number | null;
     resource_uuid: string | null;
     sub_agents_count: number;
+    sub_agents?: Array<{
+        id: number;
+        uuid: string;
+        type: AgentType;
+        name: string;
+        avatar_color: string;
+        status: AgentStatus;
+        is_active: boolean;
+    }>;
     latest_run: (Omit<AgentRun, 'logs' | 'actions_taken' | 'duration_seconds'> & { metadata?: AgentRunMetadata }) | null;
     default_directives?: string;
     autonomous_playbook?: string[];
@@ -960,6 +973,57 @@ export type GithubAppSummary = {
     html_url: string | null;
     is_system_wide: boolean;
     has_packages_token?: boolean;
+};
+
+export type GithubRunner = {
+    id: string;
+    name: string;
+    container_id: string;
+    image: string;
+    state: string;
+    status: string;
+    created: string;
+    server_uuid: string;
+    server_name: string;
+    repo_url: string | null;
+    runner_name: string;
+    environment?: Array<{ key: string; value: string }>;
+    github_status?: 'online' | 'offline' | 'busy' | string | null;
+    github_busy?: boolean | null;
+    github_runner_id?: number | null;
+    github_labels?: string[];
+    github_repo?: string | null;
+    source?: 'docker' | 'github' | 'both';
+};
+
+export type GithubRunnerAction = 'start' | 'stop' | 'restart';
+
+export type GithubRunnerCreateInput = {
+    github_app_uuid: string;
+    owner: string;
+    repo: string;
+    server_uuid: string;
+    runner_name: string;
+    container_name?: string;
+    labels?: string;
+    image?: string;
+};
+
+export type GithubRunnerActionResult = {
+    ok: boolean;
+    action: GithubRunnerAction;
+    message: string;
+    runner: GithubRunner;
+};
+
+export type GithubRunnerLogs = {
+    available: boolean;
+    reason: string | null;
+    message: string | null;
+    container: string | null;
+    container_status: string | null;
+    line_count: number;
+    items: Array<{ cursor: number; message: string }>;
 };
 
 export type GithubRepository = {
@@ -2291,6 +2355,30 @@ export const domainApi = {
     ),
     githubRepositories: (githubAppUuid: string) => apiFetch<ApiResponse<GithubRepository[]>>(`${API_BASE}/github/apps/${encodeURIComponent(githubAppUuid)}/repositories`),
     githubBranches: (githubAppUuid: string, owner: string, repo: string) => apiFetch<ApiResponse<GithubBranch[]>>(`${API_BASE}/github/apps/${encodeURIComponent(githubAppUuid)}/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`),
+    githubRunners: () => apiFetch<ApiResponse<GithubRunner[]>>(`${API_BASE}/github/runners`, {}, 60_000),
+    createGithubRunner: (input: GithubRunnerCreateInput) => mutate<ApiResponse<GithubRunner> & { message?: string }>(
+        '/github/runners',
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+        60_000,
+    ),
+    githubRunner: (serverUuid: string, containerName: string) => apiFetch<ApiResponse<GithubRunner>>(
+        `${API_BASE}/github/runners/${encodeURIComponent(serverUuid)}/${encodeURIComponent(containerName)}`,
+        {},
+        45_000,
+    ),
+    githubRunnerLogs: (serverUuid: string, containerName: string, lines = 200) => apiFetch<ApiResponse<GithubRunnerLogs>>(
+        `${API_BASE}/github/runners/${encodeURIComponent(serverUuid)}/${encodeURIComponent(containerName)}/logs?lines=${lines}`,
+        {},
+        45_000,
+    ),
+    githubRunnerAction: (serverUuid: string, containerName: string, action: GithubRunnerAction) => mutate<ApiResponse<GithubRunnerActionResult> & { message?: string }>(
+        `/github/runners/${encodeURIComponent(serverUuid)}/${encodeURIComponent(containerName)}/${action}`,
+        { method: 'POST' },
+        45_000,
+    ),
     createApplication: (input: CreateApplicationInput) => mutate<ApiResponse<CoreResource>>('/applications', {
         method: 'POST',
         body: JSON.stringify(input),

@@ -4,7 +4,7 @@ use App\Services\DevForge\Agent\Tool\AgentToolClassification;
 use App\Services\DevForge\Agent\Tool\AgentToolPackage;
 
 it('includes github in default packages for work-on-apps agent types', function () {
-    foreach (['debug', 'deployment', 'devforge', 'tech-watch'] as $type) {
+    foreach (['debug', 'deployment', 'devforge', 'tech-watch', 'github-actions'] as $type) {
         expect(AgentToolPackage::defaultForAgentType($type))
             ->toContain(AgentToolPackage::PACKAGE_GITHUB);
     }

@@ -1,8 +1,12 @@
 # Raccourci deploiement DevForge NAS (lit scripts/devforge-deploy.env)
 #
 # 1. cp scripts/devforge-deploy.env.example scripts/devforge-deploy.env
-# 2. DEPLOY_MODE=images (defaut) ou overlay
-# 3. .\scripts\nas-fix-devforge.ps1 -EnableAgents
+# 2. Patch rapide (recommandé au quotidien):
+#      DEPLOY_MODE=overlay
+#      NAS_CONTAINER=devforge-api
+#    Puis: .\scripts\nas-fix-devforge.ps1 -EnableAgents
+# 3. Rebuild images sur le NAS (sans Docker Hub):
+#      .\scripts\nas-fix-devforge.ps1 -EnableAgents -DeployMode images
 #
 # Voir docs/devforge-nas-cutover.md pour remplacer Coolify par la stack DevForge.
 

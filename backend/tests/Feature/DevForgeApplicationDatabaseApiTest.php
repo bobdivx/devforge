@@ -339,10 +339,12 @@ it('keeps LIBSQL_URL when the application already uses it', function () {
             'instant_deploy' => false,
         ])
         ->assertSuccessful()
-        ->assertJsonPath('data.env_keys', ['LIBSQL_URL']);
+        ->assertJsonPath('data.env_keys', ['LIBSQL_URL', 'TURSO_AUTH_TOKEN']);
 
     expect(EnvironmentVariable::query()->where('resourceable_id', $this->application->id)->where('key', 'LIBSQL_URL')->first()?->real_value)
-        ->toBe($libsql->internal_db_url);
+        ->toBe("libsql://{$libsql->uuid}:8080")
+        ->and(EnvironmentVariable::query()->where('resourceable_id', $this->application->id)->where('key', 'TURSO_AUTH_TOKEN')->first()?->real_value)
+        ->toBe('secret-token');
 });
 
 it('groups libsql connection variables into a single application connection', function () {

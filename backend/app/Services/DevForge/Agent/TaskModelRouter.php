@@ -58,7 +58,7 @@ class TaskModelRouter
             return TaskModelTier::Standard;
         }
 
-        if (in_array($agentType, ['debug', 'devforge', 'github', 'deployment'], true)) {
+        if (in_array($agentType, ['debug', 'devforge', 'github', 'github-actions', 'deployment'], true)) {
             return TaskModelTier::Standard;
         }
 

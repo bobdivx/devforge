@@ -15,16 +15,27 @@ fail() { echo "ERROR: $*" >&2; exit 1; }
 command -v docker >/dev/null 2>&1 || fail "docker introuvable"
 [[ -d "${CONTEXT_DIR}" ]] || fail "context manquant: ${CONTEXT_DIR}"
 
-mkdir -p \
-  "${COMPOSE_DIR}" \
-  "${DATA_ROOT}/ssh" \
-  "${DATA_ROOT}/applications" \
-  "${DATA_ROOT}/databases" \
-  "${DATA_ROOT}/services" \
-  "${DATA_ROOT}/backups" \
-  "${DATA_ROOT}/data" \
-  "${DATA_ROOT}/postgres" \
-  "${DATA_ROOT}/redis"
+ensure_dir() {
+  local dir="$1"
+  if mkdir -p "${dir}" 2>/dev/null; then
+    return 0
+  fi
+  if command -v sudo >/dev/null 2>&1 && sudo mkdir -p "${dir}"; then
+    sudo chown -R "$(id -u):$(id -g)" "${dir}" 2>/dev/null || true
+    return 0
+  fi
+  fail "impossible de creer ${dir} (permission denied — NAS_USE_SUDO / droits root)"
+}
+
+ensure_dir "${COMPOSE_DIR}"
+ensure_dir "${DATA_ROOT}/ssh"
+ensure_dir "${DATA_ROOT}/applications"
+ensure_dir "${DATA_ROOT}/databases"
+ensure_dir "${DATA_ROOT}/services"
+ensure_dir "${DATA_ROOT}/backups"
+ensure_dir "${DATA_ROOT}/data"
+ensure_dir "${DATA_ROOT}/postgres"
+ensure_dir "${DATA_ROOT}/redis"
 
 echo "==> Sync compose + docker configs"
 cp -f "${CONTEXT_DIR}/docker-compose.yml" "${COMPOSE_DIR}/"

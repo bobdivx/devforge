@@ -81,6 +81,21 @@ it('is never due for devforge agents because they are webhook triggered', functi
         ->and($agent->triggerMode())->toBe('webhook');
 });
 
+it('is never due for github-actions agents because they are webhook triggered', function () {
+    $agent = AiAgent::factory()->create([
+        'type' => 'github-actions',
+        'is_active' => true,
+        'schedule_minutes' => 15,
+        'status' => 'idle',
+        'last_run_at' => null,
+    ]);
+
+    expect($agent->isDueForScheduledRun())->toBeFalse()
+        ->and($agent->isEventOnly())->toBeTrue()
+        ->and($agent->triggerMode())->toBe('webhook')
+        ->and($agent->eventTriggerLabel())->toContain('workflow_run');
+});
+
 it('has parent and sub-agent relationships', function () {
     $parent = AiAgent::factory()->create();
     $child = AiAgent::factory()->create([

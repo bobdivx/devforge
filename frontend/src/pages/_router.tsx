@@ -8,6 +8,7 @@ import { CoreResourcesPage } from './resources/_CoreResourcesPage';
 import { DeploymentsPage } from './deployments/_DeploymentsPage';
 import { DestinationsPage } from './destinations/_DestinationsPage';
 import { MonitoringPage } from './monitoring/_MonitoringPage';
+import { RunnersPage } from './runners/_RunnersPage';
 import { OnboardingPage } from './onboarding/_OnboardingPage';
 import { OverviewPage } from './dashboard/_OverviewPage';
 import { ProfilePage } from './profile/_ProfilePage';
@@ -53,6 +54,8 @@ export function DomainPage({ bootstrap, route, onSwitchTeam }: DomainPageProps) 
             return <DeploymentsPage />;
         case 'monitoring':
             return <MonitoringPage />;
+        case 'github-runners':
+            return <RunnersPage />;
         case 'settings':
             return (
                 <SettingsPage

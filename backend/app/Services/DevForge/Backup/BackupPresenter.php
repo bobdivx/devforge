@@ -4,9 +4,24 @@ namespace App\Services\DevForge\Backup;
 
 use App\Models\ScheduledDatabaseBackup;
 use App\Models\ScheduledDatabaseBackupExecution;
+use Carbon\CarbonInterface;
+use Illuminate\Support\Carbon;
 
 class BackupPresenter
 {
+    private function iso8601(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if ($value instanceof CarbonInterface) {
+            return $value->toIso8601String();
+        }
+
+        return Carbon::parse($value)->toIso8601String();
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -42,8 +57,8 @@ class BackupPresenter
             'latest_execution' => $backup->latest_log
                 ? $this->execution($backup->latest_log)
                 : null,
-            'created_at' => $backup->created_at?->toIso8601String(),
-            'updated_at' => $backup->updated_at?->toIso8601String(),
+            'created_at' => $this->iso8601($backup->created_at),
+            'updated_at' => $this->iso8601($backup->updated_at),
         ];
     }
 
@@ -60,8 +75,8 @@ class BackupPresenter
             'filename' => $execution->filename,
             'database_name' => $execution->database_name,
             's3_uploaded' => $execution->s3_uploaded,
-            'created_at' => $execution->created_at?->toIso8601String(),
-            'finished_at' => $execution->finished_at?->toIso8601String(),
+            'created_at' => $this->iso8601($execution->created_at),
+            'finished_at' => $this->iso8601($execution->finished_at),
         ];
     }
 

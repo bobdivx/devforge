@@ -2,46 +2,47 @@
     @extends('layouts.devforge-auth')
 
     @section('content')
-        <div class="flex min-h-screen flex-col items-center justify-center px-6 py-8">
-            <div class="w-full max-w-lg space-y-6 text-center">
-                <img
-                    src="{{ asset('brand/logo.png') }}"
-                    alt="DevForge"
-                    class="mx-auto h-12 w-12 rounded-xl"
-                    width="48"
-                    height="48"
-                />
-                <div>
-                    <p class="font-mono text-5xl font-semibold text-[#fcd452]">419</p>
-                    <h1 class="mt-4 text-xl font-bold text-white">Session expirée</h1>
-                    <p class="mt-2 text-sm text-neutral-400">
-                        Le jeton de sécurité n’a pas pu être validé. Cela arrive souvent quand le FQDN
-                        ou les cookies ne correspondent pas à l’URL utilisée.
-                    </p>
-                </div>
+        <div class="devforge-auth-shell">
+            <div class="devforge-auth-panel devforge-auth-panel-wide">
+                <header class="devforge-auth-brand">
+                    <img
+                        src="{{ asset('brand/logo.png') }}"
+                        alt=""
+                        class="devforge-auth-logo"
+                        width="56"
+                        height="56"
+                        aria-hidden="true"
+                    />
+                    <div>
+                        <p class="devforge-auth-hero-code">419</p>
+                        <h1 class="devforge-auth-heading">Session expirée</h1>
+                        <p class="devforge-auth-subtitle">
+                            Le jeton de sécurité n’a pas pu être validé. Cela arrive souvent quand le FQDN
+                            ou les cookies ne correspondent pas à l’URL utilisée.
+                        </p>
+                    </div>
+                </header>
 
-                <details class="devforge-auth-card p-4 text-left text-sm text-neutral-400">
-                    <summary class="cursor-pointer font-medium text-neutral-200">
-                        Reverse proxy ou accès sur le port 8080 ?
-                    </summary>
-                    <ul class="mt-3 list-disc space-y-2 pl-5">
+                <details class="devforge-auth-card devforge-auth-details">
+                    <summary>Reverse proxy ou accès sur le port 8080 ?</summary>
+                    <ul>
                         <li>
                             Définissez le FQDN dans <strong>Settings → FQDN</strong> avec le même domaine que votre URL
-                            (ex. <code class="text-xs">http://votre-domaine.tld</code>).
+                            (ex. <code class="devforge-auth-code">http://votre-domaine.tld</code>).
                         </li>
                         <li>
                             Accédez toujours via la même URL, y compris le port si vous utilisez
-                            <code class="text-xs">:8080</code>.
+                            <code class="devforge-auth-code">:8080</code>.
                         </li>
                         <li>
-                            Si vous êtes en HTTP, ajoutez dans le <code class="text-xs">.env</code> Coolify :
-                            <code class="text-xs">SESSION_SECURE_COOKIE=false</code>
+                            Si vous êtes en HTTP, ajoutez dans le <code class="devforge-auth-code">.env</code> :
+                            <code class="devforge-auth-code">SESSION_SECURE_COOKIE=false</code>
                         </li>
                         <li>Videz les cookies du site, puis reconnectez-vous.</li>
                     </ul>
                 </details>
 
-                <div class="flex flex-wrap items-center justify-center gap-3">
+                <div class="devforge-auth-actions" style="margin-top: 1.25rem;">
                     <a href="/login" class="devforge-auth-primary">
                         Retour à la connexion
                     </a>

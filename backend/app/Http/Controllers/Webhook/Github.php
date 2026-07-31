@@ -284,6 +284,14 @@ class Github extends Controller
 
                 return response('cool');
             }
+
+            if ($x_github_event === 'workflow_run') {
+                app(\App\Services\DevForge\Agent\GithubWorkflowRunAgentDispatcher::class)
+                    ->dispatch($github_app, is_array($payload) ? $payload : $payload->toArray());
+
+                return response('workflow_run handled');
+            }
+
             if ($x_github_event === 'push') {
                 $id = data_get($payload, 'repository.id');
                 $branch = data_get($payload, 'ref');

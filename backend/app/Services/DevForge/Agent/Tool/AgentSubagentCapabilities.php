@@ -27,6 +27,8 @@ class AgentSubagentCapabilities
 
     public const PROFILE_REDEPLOY = 'redeploy';
 
+    public const PROFILE_FIX_CI = 'fix-ci';
+
     /**
      * @param  array<string, mixed>  $context
      */
@@ -157,6 +159,30 @@ class AgentSubagentCapabilities
                 'get_application_runtime_settings',
                 'memory_read',
                 'todo_read',
+                'list_tool_packages',
+                'enable_tool_package',
+            ],
+            self::PROFILE_FIX_CI => [
+                'list_github_apps',
+                'list_github_repos',
+                'list_github_branches',
+                'list_github_workflows',
+                'list_github_workflow_runs',
+                'get_github_workflow_run',
+                'list_github_workflow_jobs',
+                'get_github_workflow_job_logs',
+                'rerun_github_workflow_run',
+                'dispatch_github_workflow',
+                'read_github_file',
+                'list_github_dir',
+                'write_github_file',
+                'create_github_branch',
+                'create_github_pull_request',
+                'list_github_commits',
+                'memory_read',
+                'memory_write',
+                'todo_read',
+                'todo_write',
                 'list_tool_packages',
                 'enable_tool_package',
             ],

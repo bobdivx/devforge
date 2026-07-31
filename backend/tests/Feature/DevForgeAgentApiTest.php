@@ -102,6 +102,24 @@ it('forces devforge agents to webhook mode without schedule', function () {
         ->assertJsonPath('data.trigger_mode', 'webhook');
 });
 
+it('forces github-actions agents to event mode without schedule', function () {
+    $provider = AiProviderConfig::factory()->create(['team_id' => $this->team->id]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/agents', [
+            'type' => 'github-actions',
+            'name' => 'Actions Fixer',
+            'schedule_minutes' => 15,
+            'provider_config_id' => $provider->id,
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.type', 'github-actions')
+        ->assertJsonPath('data.schedule_minutes', 0)
+        ->assertJsonPath('data.trigger_mode', 'webhook')
+        ->assertJsonPath('data.is_event_only', true);
+});
+
 it('rejects invalid agent type', function () {
     $this->actingAs($this->user)
         ->withSession($this->session)
@@ -124,7 +142,68 @@ it('shows agent detail with sub-agent count', function () {
         ->getJson("/api/devforge/v1/agents/{$parent->uuid}")
         ->assertSuccessful()
         ->assertJsonPath('data.uuid', $parent->uuid)
-        ->assertJsonPath('data.sub_agents_count', 2);
+        ->assertJsonPath('data.id', $parent->id)
+        ->assertJsonPath('data.sub_agents_count', 2)
+        ->assertJsonCount(2, 'data.sub_agents');
+});
+
+it('lists only top-level agents and reports sub-agent counts', function () {
+    $parent = AiAgent::factory()->create(['team_id' => $this->team->id, 'name' => 'Parent']);
+    AiAgent::factory()->count(2)->create([
+        'team_id' => $this->team->id,
+        'parent_agent_id' => $parent->id,
+    ]);
+    AiAgent::factory()->create(['team_id' => $this->team->id, 'name' => 'Solo']);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/agents')
+        ->assertSuccessful()
+        ->assertJsonCount(2, 'data')
+        ->assertJsonPath('meta.count', 2)
+        ->assertJsonFragment(['name' => 'Parent', 'sub_agents_count' => 2])
+        ->assertJsonFragment(['name' => 'Solo', 'sub_agents_count' => 0]);
+});
+
+it('creates a permanent sub-agent under a parent without schedule', function () {
+    $provider = AiProviderConfig::factory()->create(['team_id' => $this->team->id]);
+    $parent = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'type' => 'deployment',
+        'provider_config_id' => $provider->id,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/agents', [
+            'type' => 'debug',
+            'name' => 'Diagnostiqueur',
+            'parent_agent_id' => $parent->id,
+            'schedule_minutes' => 30,
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.name', 'Diagnostiqueur')
+        ->assertJsonPath('data.parent_agent_id', $parent->id)
+        ->assertJsonPath('data.schedule_minutes', 0)
+        ->assertJsonPath('data.provider.id', $provider->id);
+});
+
+it('rejects nesting a sub-agent under another sub-agent', function () {
+    $parent = AiAgent::factory()->create(['team_id' => $this->team->id]);
+    $child = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'parent_agent_id' => $parent->id,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/agents', [
+            'type' => 'debug',
+            'name' => 'Trop profond',
+            'parent_agent_id' => $child->id,
+        ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['parent_agent_id']);
 });
 
 it('updates agent name and schedule', function () {

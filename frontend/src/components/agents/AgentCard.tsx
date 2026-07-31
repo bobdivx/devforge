@@ -17,6 +17,7 @@ const typeLabels: Record<string, string> = {
     debug: 'Débogage',
     'tech-watch': 'Veille Tech',
     github: 'GitHub',
+    'github-actions': 'GitHub Actions',
     devforge: 'DevForge',
     deployment: 'Déploiement',
     security: 'Sécurité',

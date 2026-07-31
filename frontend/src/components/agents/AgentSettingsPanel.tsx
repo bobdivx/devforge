@@ -2,7 +2,7 @@ import { Play, Trash2, CheckCircle2 } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
 import type { Agent, AgentInput, AiProviderConfig } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
-import { isEventOnlyAgentType } from '../../lib/agent-triggers';
+import { isEventOnlyAgentType, eventTriggerLabel } from '../../lib/agent-triggers';
 import { ApiError } from '../../lib/api-client';
 import { navigateTo } from '../../lib/use-navigate';
 import { ActionToolbar } from '../ui/ActionToolbar';
@@ -12,6 +12,7 @@ import { AgentModelRoutingBadge } from './AgentModelRoutingBadge';
 import { AgentRunProgress } from './AgentRunProgress';
 import { AgentMemoryPanel } from './AgentMemoryPanel';
 import { AgentStandingOrdersPanel } from './AgentStandingOrdersPanel';
+import { AgentSubAgentsPanel } from './AgentSubAgentsPanel';
 import { useAgentRunTracker } from '../../lib/use-agent-run-tracker';
 
 type Props = {
@@ -168,6 +169,7 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
 
             <AgentMemoryPanel agent={agent} />
             <AgentStandingOrdersPanel agent={agent} />
+            <AgentSubAgentsPanel agent={agent} onUpdated={onUpdated} />
 
             <div class="grid gap-3">
                 <label class="grid gap-1 text-xs">
@@ -199,7 +201,7 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
                 </label>
                 {isEventOnlyAgentType(agent.type) ? (
                     <p class="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-[11px] text-base-content/70">
-                        Cet agent DevForge se déclenche à chaque build webhook, pas via un minuteur.
+                        {eventTriggerLabel(agent.type)}
                     </p>
                 ) : (
                     <>

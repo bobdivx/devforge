@@ -8,6 +8,7 @@ import type { Agent } from '../src/lib/domain-api';
 
 function agent(partial: Partial<Agent> & Pick<Agent, 'uuid' | 'type' | 'name'>): Agent {
     return {
+        id: 1,
         description: null,
         avatar_color: '#000',
         system_prompt: null,

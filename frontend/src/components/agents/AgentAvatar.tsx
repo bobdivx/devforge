@@ -1,10 +1,11 @@
-import { Bug, Bot, GitBranch, Layers, Rocket, ShieldCheck, type LucideIcon } from 'lucide-preact';
+import { Bug, Bot, GitBranch, Layers, Rocket, ShieldCheck, CirclePlay, type LucideIcon } from 'lucide-preact';
 import type { AgentType } from '../../lib/domain-api';
 
 const typeIcons: Record<AgentType, LucideIcon> = {
     debug: Bug,
     'tech-watch': Layers,
     github: GitBranch,
+    'github-actions': CirclePlay,
     devforge: Bot,
     deployment: Rocket,
     security: ShieldCheck,

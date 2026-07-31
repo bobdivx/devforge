@@ -53,8 +53,8 @@ export function AgentsPage() {
                         </div>
                         <div>
                             <h3 class="text-sm font-semibold">Pas encore d&apos;agents</h3>
-                            <p class="mt-1 text-xs text-base-content/60">
-                                Créez votre première équipe d'agents IA pour automatiser la surveillance et la maintenance.
+                            <p class="mt-1 max-w-sm text-xs text-base-content/60">
+                                Choisissez un rôle (CI, déploiement, veille…) — le déclenchement événementiel ou planifié est préconfiguré.
                             </p>
                         </div>
                         <button class="btn btn-primary btn-sm" type="button" onClick={() => setCreateOpen(true)}>

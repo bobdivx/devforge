@@ -161,6 +161,33 @@ it('returns export metadata for the latest local execution', function () {
         ->assertJsonStructure(['data' => ['execution_id', 'download_url', 'filename']]);
 });
 
+it('can fetch instance backup settings when executions have finished_at', function () {
+    seedInstanceDatabase();
+
+    $backup = ScheduledDatabaseBackup::find(0);
+    ScheduledDatabaseBackupExecution::create([
+        'scheduled_database_backup_id' => $backup->id,
+        'filename' => '/data/devforge/backups/instance.sql.gz',
+        'status' => 'success',
+        'size' => 1234,
+        'finished_at' => now(),
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/settings/backup')
+        ->assertSuccessful()
+        ->assertJsonPath('data.database.name', 'coolify-db')
+        ->assertJsonCount(1, 'data.executions')
+        ->assertJsonStructure([
+            'data' => [
+                'executions' => [
+                    ['uuid', 'status', 'finished_at', 'created_at'],
+                ],
+            ],
+        ]);
+});
+
 it('rejects invalid instance backup import files', function () {
     seedInstanceDatabase();
 

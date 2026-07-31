@@ -31,7 +31,9 @@ class AgentController extends Controller
 
         $agents = AiAgent::query()
             ->where('team_id', $team->id)
+            ->whereNull('parent_agent_id')
             ->with($this->agentRelations())
+            ->withCount('subAgents')
             ->orderBy('type')
             ->orderBy('name')
             ->get();
@@ -56,7 +58,7 @@ class AgentController extends Controller
         $team = $this->currentTeam($request);
 
         $validated = $request->validate([
-            'type' => ['required', 'string', Rule::in(['debug', 'tech-watch', 'github', 'devforge', 'deployment', 'security'])],
+            'type' => ['required', 'string', Rule::in(['debug', 'tech-watch', 'github', 'github-actions', 'devforge', 'deployment', 'security'])],
             'name' => ['required', 'string', 'max:100'],
             'description' => ['nullable', 'string', 'max:500'],
             'avatar_color' => ['nullable', 'string', 'max:20'],
@@ -76,6 +78,38 @@ class AgentController extends Controller
             return response()->json(['message' => 'Expression cron invalide.', 'errors' => ['schedule_cron' => ['Expression cron invalide.']]], 422);
         }
 
+        if (! empty($validated['parent_agent_id'])) {
+            $parent = AiAgent::query()
+                ->where('team_id', $team->id)
+                ->whereKey($validated['parent_agent_id'])
+                ->first();
+
+            if (! $parent instanceof AiAgent) {
+                return response()->json([
+                    'message' => 'Agent parent introuvable.',
+                    'errors' => ['parent_agent_id' => ['Agent parent introuvable.']],
+                ], 422);
+            }
+
+            if ($parent->parent_agent_id !== null) {
+                return response()->json([
+                    'message' => 'Impossible d’ajouter un sous-agent à un sous-agent.',
+                    'errors' => ['parent_agent_id' => ['Un seul niveau de sous-agents est autorisé.']],
+                ], 422);
+            }
+
+            $validated['schedule_minutes'] = 0;
+            $validated['schedule_cron'] = null;
+
+            if (empty($validated['provider_config_id']) && $parent->provider_config_id) {
+                $validated['provider_config_id'] = $parent->provider_config_id;
+            }
+
+            if (empty($validated['fallback_provider_config_id']) && $parent->fallback_provider_config_id) {
+                $validated['fallback_provider_config_id'] = $parent->fallback_provider_config_id;
+            }
+        }
+
         if (empty($validated['provider_config_id'])) {
             $defaultProvider = AiProviderConfig::query()
                 ->where('team_id', $team->id)
@@ -93,7 +127,7 @@ class AgentController extends Controller
             ...$this->defaultAgentFields($validated),
         ]);
 
-        return response()->json(['data' => $this->present($agent->load($this->agentRelations(false)))], 201);
+        return response()->json(['data' => $this->present($agent->load($this->agentRelations(false))->loadCount('subAgents'))], 201);
     }
 
     public function show(Request $request, string $uuid): JsonResponse
@@ -109,7 +143,7 @@ class AgentController extends Controller
                 ...$this->agentRelations(false),
                 'subAgents',
                 'runs' => fn ($q) => $q->latest()->limit(5),
-            ])),
+            ])->loadCount('subAgents')),
         ]);
     }
 
@@ -203,6 +237,7 @@ class AgentController extends Controller
         $displayProvider = $agent->providerConfig ?? $agent->effectiveProviderConfig();
 
         return [
+            'id' => $agent->id,
             'uuid' => $agent->uuid,
             'type' => $agent->type,
             'name' => $agent->name,
@@ -220,6 +255,8 @@ class AgentController extends Controller
                 ? $agent->last_heartbeat_at?->toISOString()
                 : null,
             'trigger_mode' => $agent->triggerMode(),
+            'event_trigger_label' => $agent->eventTriggerLabel(),
+            'is_event_only' => $agent->isEventOnly(),
             'is_active' => $agent->is_active,
             'status' => $agent->status,
             'llm_available' => $agent->hasLlmProvider(),
@@ -240,7 +277,19 @@ class AgentController extends Controller
             ] : null,
             'parent_agent_id' => $agent->parent_agent_id,
             'resource_uuid' => $agent->resource_uuid,
-            'sub_agents_count' => $agent->relationLoaded('subAgents') ? $agent->subAgents->count() : 0,
+            'sub_agents_count' => (int) ($agent->sub_agents_count
+                ?? ($agent->relationLoaded('subAgents') ? $agent->subAgents->count() : 0)),
+            'sub_agents' => $agent->relationLoaded('subAgents')
+                ? $agent->subAgents->map(fn (AiAgent $child): array => [
+                    'id' => $child->id,
+                    'uuid' => $child->uuid,
+                    'type' => $child->type,
+                    'name' => $child->name,
+                    'avatar_color' => $child->avatar_color,
+                    'status' => $child->status,
+                    'is_active' => $child->is_active,
+                ])->values()->all()
+                : [],
             'latest_run' => $latestRun ? [
                 'uuid' => $latestRun->uuid,
                 'status' => $latestRun->status,
@@ -285,7 +334,13 @@ class AgentController extends Controller
     {
         $type = (string) ($validated['type'] ?? $agent?->type ?? '');
 
-        if ($type === 'devforge') {
+        if (in_array($type, ['devforge', 'github-actions'], true)) {
+            $validated['schedule_minutes'] = 0;
+            $validated['schedule_cron'] = null;
+        }
+
+        $parentId = $validated['parent_agent_id'] ?? $agent?->parent_agent_id;
+        if (! empty($parentId)) {
             $validated['schedule_minutes'] = 0;
             $validated['schedule_cron'] = null;
         }
@@ -312,7 +367,7 @@ class AgentController extends Controller
             $fields['description'] = $catalog['description'];
         }
 
-        if (! array_key_exists('schedule_minutes', $validated) && $catalog !== null && $type !== 'devforge') {
+        if (! array_key_exists('schedule_minutes', $validated) && $catalog !== null && ! in_array($type, ['devforge', 'github-actions'], true)) {
             $fields['schedule_minutes'] = $catalog['default_schedule'];
         }
 

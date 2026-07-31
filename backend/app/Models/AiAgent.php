@@ -318,7 +318,19 @@ class AiAgent extends Model
 
     public function isEventOnly(): bool
     {
-        return $this->type === 'devforge';
+        return in_array($this->type, ['devforge', 'github-actions'], true);
+    }
+
+    /**
+     * Libellé du déclencheur événementiel (null si minuteur / manuel).
+     */
+    public function eventTriggerLabel(): ?string
+    {
+        return match ($this->type) {
+            'devforge' => 'À chaque build webhook',
+            'github-actions' => 'Sur échec GitHub Actions (workflow_run)',
+            default => null,
+        };
     }
 
     public function triggerMode(): string

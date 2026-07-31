@@ -642,12 +642,9 @@ export function DatabaseDetailPanel({
                                         <div class="grid gap-3">
                                             <CredentialField label="TURSO_DATABASE_URL (réseau interne)" value={credentials.turso_database_url} />
                                             <CredentialField label="TURSO_AUTH_TOKEN" value={credentials.turso_auth_token} masked />
-                                            <CredentialField label="LIBSQL_URL (URL complète interne)" value={credentials.libsql_url} masked />
+                                            <CredentialField label="LIBSQL_URL (réseau interne)" value={credentials.libsql_url} />
                                             {credentials.turso_database_url_external && (
                                                 <CredentialField label="TURSO_DATABASE_URL (accès distant)" value={credentials.turso_database_url_external} />
-                                            )}
-                                            {credentials.external_url && (
-                                                <CredentialField label="URL distante complète" value={credentials.external_url} masked />
                                             )}
                                             <div class="flex flex-wrap items-center gap-3 rounded-lg border border-base-300/60 bg-base-100 px-3 py-2 text-sm">
                                                 <label class="flex items-center gap-2">

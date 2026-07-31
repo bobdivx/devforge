@@ -13,8 +13,8 @@
                     src="{{ asset('brand/logo.png') }}"
                     alt=""
                     class="devforge-auth-logo"
-                    width="72"
-                    height="72"
+                    width="56"
+                    height="56"
                     aria-hidden="true"
                 />
                 <div>
@@ -25,7 +25,7 @@
                 </div>
             </header>
 
-            <div class="devforge-auth-card space-y-5">
+            <div class="devforge-auth-card">
                 @if (session('status'))
                     <div class="devforge-auth-alert devforge-auth-alert-success" role="status">
                         {{ session('status') }}
@@ -41,12 +41,12 @@
                 @if ($errors->any())
                     <div class="devforge-auth-alert devforge-auth-alert-error" role="alert">
                         @foreach ($errors->all() as $error)
-                            <p class="m-0 {{ ! $loop->last ? 'mb-1' : '' }}">{{ $error }}</p>
+                            <p>{{ $error }}</p>
                         @endforeach
                     </div>
                 @endif
 
-                <form action="/login" method="POST" class="flex flex-col gap-4">
+                <form action="/login" method="POST" class="devforge-auth-form">
                     @csrf
 
                     <div class="devforge-auth-field">
@@ -97,7 +97,7 @@
                         </div>
                     </div>
 
-                    <div class="flex items-center justify-end">
+                    <div class="devforge-auth-row">
                         <a href="/forgot-password" class="devforge-auth-link">
                             {{ __('auth.forgot_password_link') }}
                         </a>
@@ -109,23 +109,23 @@
                 </form>
 
                 @if ($is_registration_enabled)
-                    <div class="devforge-auth-divider text-center">
+                    <div class="devforge-auth-divider">
                         <span>Pas encore de compte ?</span>
                     </div>
                     <a href="/register" class="devforge-auth-secondary">
                         {{ __('auth.register_now') }}
                     </a>
                 @else
-                    <p class="m-0 text-center text-sm" style="color: color-mix(in oklab, #e7e7e7 45%, transparent);">
+                    <p class="devforge-auth-muted devforge-auth-center">
                         {{ __('auth.registration_disabled') }}
                     </p>
                 @endif
 
                 @if ($enabled_oauth_providers->isNotEmpty())
-                    <div class="devforge-auth-divider text-center">
+                    <div class="devforge-auth-divider">
                         <span>ou continuer avec</span>
                     </div>
-                    <div class="flex flex-col gap-2.5">
+                    <div class="devforge-auth-stack">
                         @foreach ($enabled_oauth_providers as $provider_setting)
                             <a
                                 href="/auth/{{ $provider_setting->provider }}/redirect"

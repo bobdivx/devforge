@@ -46,6 +46,7 @@ class LibsqlDatabaseAccessService
                 ] : null,
                 'libsql_url' => [
                     'LIBSQL_URL' => $values['full_url'],
+                    'TURSO_AUTH_TOKEN' => $values['token'],
                 ],
             ],
         ];

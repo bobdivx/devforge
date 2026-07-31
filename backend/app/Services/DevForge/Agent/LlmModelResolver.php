@@ -39,16 +39,17 @@ class LlmModelResolver
 
     /** @var array<int, string> */
     public const AUTO_OLLAMA_PRIORITY = [
+        'qwen2.5:7b',
+        'qwen2.5:14b',
+        'qwen2.5:3b',
+        'qwen2.5',
+        'llama3.1:8b',
+        'llama3.1',
+        'mistral',
+        'mixtral',
         'llama3.2:latest',
         'llama3.2:3b',
         'llama3.2',
-        'llama3.1:8b',
-        'llama3.1',
-        'qwen2.5:7b',
-        'qwen2.5:3b',
-        'qwen2.5',
-        'mistral',
-        'mixtral',
         'gemma2:2b',
         'gemma2',
     ];

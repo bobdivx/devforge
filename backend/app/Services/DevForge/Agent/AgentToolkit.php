@@ -1013,7 +1013,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'list_github_workflow_runs',
-                'description' => 'Liste les exécutions GitHub Actions récentes d\'un dépôt.',
+                'description' => 'Liste les exécutions GitHub Actions récentes d\'un dépôt (filtrable status/conclusion/branche).',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -1021,6 +1021,8 @@ class AgentToolkit
                         'owner' => ['type' => 'string'],
                         'repo' => ['type' => 'string'],
                         'branch' => ['type' => 'string', 'description' => 'Filtrer par branche (optionnel)'],
+                        'status' => ['type' => 'string', 'description' => 'queued|in_progress|completed…'],
+                        'conclusion' => ['type' => 'string', 'description' => 'success|failure|cancelled…'],
                         'limit' => ['type' => 'integer', 'default' => 10],
                     ],
                     'required' => ['github_app_uuid', 'owner', 'repo'],
@@ -1038,6 +1040,79 @@ class AgentToolkit
                         'run_id' => ['type' => 'integer'],
                     ],
                     'required' => ['github_app_uuid', 'owner', 'repo', 'run_id'],
+                ],
+            ],
+            [
+                'name' => 'list_github_workflows',
+                'description' => 'Liste les workflows GitHub Actions définis dans un dépôt (.github/workflows).',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'github_app_uuid' => ['type' => 'string'],
+                        'owner' => ['type' => 'string'],
+                        'repo' => ['type' => 'string'],
+                    ],
+                    'required' => ['github_app_uuid', 'owner', 'repo'],
+                ],
+            ],
+            [
+                'name' => 'list_github_workflow_jobs',
+                'description' => 'Liste les jobs (et steps) d\'une exécution GitHub Actions.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'github_app_uuid' => ['type' => 'string'],
+                        'owner' => ['type' => 'string'],
+                        'repo' => ['type' => 'string'],
+                        'run_id' => ['type' => 'integer'],
+                    ],
+                    'required' => ['github_app_uuid', 'owner', 'repo', 'run_id'],
+                ],
+            ],
+            [
+                'name' => 'get_github_workflow_job_logs',
+                'description' => 'Lit les logs texte d\'un job GitHub Actions (fin du log si trop long).',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'github_app_uuid' => ['type' => 'string'],
+                        'owner' => ['type' => 'string'],
+                        'repo' => ['type' => 'string'],
+                        'job_id' => ['type' => 'integer'],
+                        'max_chars' => ['type' => 'integer', 'default' => 12000],
+                    ],
+                    'required' => ['github_app_uuid', 'owner', 'repo', 'job_id'],
+                ],
+            ],
+            [
+                'name' => 'rerun_github_workflow_run',
+                'description' => 'Relance une exécution GitHub Actions (tous les jobs ou seulement les échecs).',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'github_app_uuid' => ['type' => 'string'],
+                        'owner' => ['type' => 'string'],
+                        'repo' => ['type' => 'string'],
+                        'run_id' => ['type' => 'integer'],
+                        'failed_only' => ['type' => 'boolean', 'default' => true],
+                    ],
+                    'required' => ['github_app_uuid', 'owner', 'repo', 'run_id'],
+                ],
+            ],
+            [
+                'name' => 'dispatch_github_workflow',
+                'description' => 'Déclenche un workflow_dispatch (fichier .yml ou workflow_id + ref branche).',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'github_app_uuid' => ['type' => 'string'],
+                        'owner' => ['type' => 'string'],
+                        'repo' => ['type' => 'string'],
+                        'workflow_id' => ['type' => 'string', 'description' => 'ID numérique ou nom de fichier ex. build.yml'],
+                        'ref' => ['type' => 'string', 'description' => 'Branche ou tag'],
+                        'inputs' => ['type' => 'object', 'description' => 'Inputs workflow_dispatch (optionnel)'],
+                    ],
+                    'required' => ['github_app_uuid', 'owner', 'repo', 'workflow_id', 'ref'],
                 ],
             ],
             [
@@ -1300,12 +1375,47 @@ class AgentToolkit
                 (string) ($arguments['repo'] ?? ''),
                 isset($arguments['branch']) ? (string) $arguments['branch'] : null,
                 (int) ($arguments['limit'] ?? 10),
+                isset($arguments['status']) ? (string) $arguments['status'] : null,
+                isset($arguments['conclusion']) ? (string) $arguments['conclusion'] : null,
             ),
             'get_github_workflow_run' => $this->githubTools->getWorkflowRun(
                 (string) ($arguments['github_app_uuid'] ?? ''),
                 (string) ($arguments['owner'] ?? ''),
                 (string) ($arguments['repo'] ?? ''),
                 (int) ($arguments['run_id'] ?? 0),
+            ),
+            'list_github_workflows' => $this->githubTools->listWorkflows(
+                (string) ($arguments['github_app_uuid'] ?? ''),
+                (string) ($arguments['owner'] ?? ''),
+                (string) ($arguments['repo'] ?? ''),
+            ),
+            'list_github_workflow_jobs' => $this->githubTools->listWorkflowJobs(
+                (string) ($arguments['github_app_uuid'] ?? ''),
+                (string) ($arguments['owner'] ?? ''),
+                (string) ($arguments['repo'] ?? ''),
+                (int) ($arguments['run_id'] ?? 0),
+            ),
+            'get_github_workflow_job_logs' => $this->githubTools->getWorkflowJobLogs(
+                (string) ($arguments['github_app_uuid'] ?? ''),
+                (string) ($arguments['owner'] ?? ''),
+                (string) ($arguments['repo'] ?? ''),
+                (int) ($arguments['job_id'] ?? 0),
+                (int) ($arguments['max_chars'] ?? 12000),
+            ),
+            'rerun_github_workflow_run' => $this->githubTools->rerunWorkflowRun(
+                (string) ($arguments['github_app_uuid'] ?? ''),
+                (string) ($arguments['owner'] ?? ''),
+                (string) ($arguments['repo'] ?? ''),
+                (int) ($arguments['run_id'] ?? 0),
+                (bool) ($arguments['failed_only'] ?? true),
+            ),
+            'dispatch_github_workflow' => $this->githubTools->dispatchWorkflow(
+                (string) ($arguments['github_app_uuid'] ?? ''),
+                (string) ($arguments['owner'] ?? ''),
+                (string) ($arguments['repo'] ?? ''),
+                (string) ($arguments['workflow_id'] ?? ''),
+                (string) ($arguments['ref'] ?? ''),
+                is_array($arguments['inputs'] ?? null) ? $arguments['inputs'] : [],
             ),
             'list_github_commits' => $this->githubTools->listCommits(
                 (string) ($arguments['github_app_uuid'] ?? ''),

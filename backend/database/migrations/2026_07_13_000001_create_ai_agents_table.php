@@ -15,7 +15,7 @@ return new class extends Migration
             $table->foreignId('parent_agent_id')->nullable()->constrained('ai_agents')->nullOnDelete();
             $table->foreignId('provider_config_id')->nullable()->constrained('ai_provider_configs')->nullOnDelete();
             $table->string('resource_uuid')->nullable();
-            $table->string('type'); // debug|tech-watch|github|devforge|deployment|security
+            $table->string('type'); // debug|tech-watch|github|github-actions|devforge|deployment|security
             $table->string('name');
             $table->text('description')->nullable();
             $table->string('avatar_color')->default('#6366f1');

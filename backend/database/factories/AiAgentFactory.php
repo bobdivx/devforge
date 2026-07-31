@@ -24,7 +24,7 @@ class AiAgentFactory extends Factory
             'fallback_provider_config_id' => null,
             'parent_agent_id' => null,
             'resource_uuid' => null,
-            'type' => $this->faker->randomElement(['debug', 'tech-watch', 'github', 'devforge', 'deployment', 'security']),
+            'type' => $this->faker->randomElement(['debug', 'tech-watch', 'github', 'github-actions', 'devforge', 'deployment', 'security']),
             'name' => $this->faker->name().' Agent',
             'description' => $this->faker->sentence(),
             'avatar_color' => $this->faker->randomElement($colors),

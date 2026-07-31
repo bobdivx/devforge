@@ -82,8 +82,13 @@ class AgentToolPackage
                     'get_application_git_info',
                     'list_github_pull_requests',
                     'get_github_pull_request',
+                    'list_github_workflows',
                     'list_github_workflow_runs',
                     'get_github_workflow_run',
+                    'list_github_workflow_jobs',
+                    'get_github_workflow_job_logs',
+                    'rerun_github_workflow_run',
+                    'dispatch_github_workflow',
                     'list_github_commits',
                     'create_github_branch',
                     'write_github_file',
@@ -92,7 +97,7 @@ class AgentToolPackage
                     'close_github_pull_request',
                     'comment_github_pull_request',
                 ],
-                'default_for_types' => ['github', 'debug', 'deployment', 'devforge', 'tech-watch'],
+                'default_for_types' => ['github', 'github-actions', 'debug', 'deployment', 'devforge', 'tech-watch'],
             ],
         ];
     }

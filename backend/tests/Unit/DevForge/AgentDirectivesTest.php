@@ -28,6 +28,35 @@ it('builds autonomous initial message with playbook', function () {
         ->and($message)->toContain('Playbook');
 });
 
+it('builds github-actions webhook context with concrete tool ids', function () {
+    $agent = AiAgent::factory()->make([
+        'type' => 'github-actions',
+        'name' => 'Correcteur CI',
+        'team_id' => 1,
+    ]);
+    $agent->setRelation('team', Team::factory()->make(['name' => 'Equipe Test']));
+
+    $system = app(AgentPromptBuilder::class)->autonomousSystemPrompt($agent);
+    $message = app(AgentPromptBuilder::class)->autonomousInitialMessage($agent, [
+        'event' => 'github_workflow_run_failed',
+        'github_app_uuid' => 'app-uuid-1',
+        'owner' => 'acme',
+        'repo' => 'demo',
+        'workflow_run_id' => 9911,
+        'workflow_name' => 'CI',
+        'workflow_path' => '.github/workflows/ci.yml',
+        'conclusion' => 'failure',
+    ], 'event');
+
+    expect($system)->toContain('DevForge')
+        ->and($system)->not->toContain('PaaS Coolify')
+        ->and($system)->toContain('Ne refuse JAMAIS')
+        ->and($message)->toContain('workflow_run_id : 9911')
+        ->and($message)->toContain('get_github_workflow_run')
+        ->and($message)->toContain('owner : acme')
+        ->and($message)->toContain('INTERDIT');
+});
+
 it('requires tool usage in autonomy rules', function () {
     expect(AgentDirectives::autonomyRules())->toContain('première action DOIT être un appel d\'outil');
 });

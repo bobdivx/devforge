@@ -59,6 +59,9 @@ class AgentRunLauncher
                 ? (int) $context['pull_request_number']
                 : null,
             'fingerprint' => is_string($context['fingerprint'] ?? null) ? $context['fingerprint'] : null,
+            'workflow_run_id' => isset($context['workflow_run_id']) && is_numeric($context['workflow_run_id'])
+                ? (int) $context['workflow_run_id']
+                : null,
             'parent_run_uuid' => is_string($context['parent_run_uuid'] ?? null) ? $context['parent_run_uuid'] : null,
             'resume_after_approval' => ! empty($context['resume_after_approval']) ? true : null,
             'readiness_round' => isset($context['readiness_round']) && is_numeric($context['readiness_round'])

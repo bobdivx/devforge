@@ -37,6 +37,12 @@ class AgentDirectives
                 'description' => 'Surveille previews PR et déploiements liés aux branches.',
                 'default_schedule' => 30,
             ],
+            'github-actions' => [
+                'type' => 'github-actions',
+                'label' => 'GitHub Actions',
+                'description' => 'Réagit aux échecs de workflows CI (webhook workflow_run), lit les logs, corrige les YAML et relance.',
+                'default_schedule' => 0,
+            ],
             'devforge' => [
                 'type' => 'devforge',
                 'label' => 'DevForge',
@@ -74,8 +80,18 @@ class AgentDirectives
                 PROMPT,
             'github' => <<<'PROMPT'
                 Tu es un agent GitHub / previews DevForge.
-                Mission : accéder aux dépôts via les outils GitHub (list_github_repos, read_github_file), lier les apps Coolify (get_application_git_info), surveiller previews et déploiements.
+                Mission : accéder aux dépôts via les outils GitHub (list_github_repos, read_github_file), lier les apps DevForge (get_application_git_info), surveiller previews et déploiements.
                 Si le paquet github n'est pas actif, appelle enable_tool_package(package="github") avant toute autre action GitHub.
+                Émets de VRAIS tool_calls — jamais de Python ni de refus.
+                PROMPT,
+            'github-actions' => <<<'PROMPT'
+                Tu es un agent GitHub Actions / CI DevForge.
+                Mission : diagnostiquer les échecs CI, lire les logs jobs, corriger .github/workflows via write_github_file, relancer avec rerun_github_workflow_run(failed_only=true).
+                Boucle max : 2 cycles correction→relance ; ensuite résumé et stop.
+                Ne modifie que les YAML CI / actions — pas le code métier sauf preuve claire.
+                Si le paquet github n'est pas actif : enable_tool_package(package="github") en premier.
+                INTERDIT : écrire du Python, inventer des placeholders (your-owner…), refuser en citant Coolify ou un produit inconnu.
+                Ta première sortie DOIT être un tool_call natif (list_github_apps ou get_github_workflow_run).
                 PROMPT,
             'devforge' => <<<'PROMPT'
                 Tu es un agent d'optimisation plateforme DevForge.
@@ -120,10 +136,17 @@ class AgentDirectives
             'github' => [
                 'Appelle list_github_apps puis list_github_repos si le paquet github est actif.',
                 'Sinon : enable_tool_package(package="github") en premier.',
-                'get_application_git_info pour lier apps Coolify et dépôts.',
+                'get_application_git_info pour lier apps DevForge et dépôts.',
                 'read_github_file / list_github_dir pour le code source.',
                 'list_github_pull_requests et list_github_workflow_runs pour CI/CD.',
                 'list_github_commits pour l\'historique récent.',
+            ],
+            'github-actions' => [
+                'PREMIER tool_call obligatoire : list_github_apps (ou get_github_workflow_run si workflow_run_id est dans le contexte).',
+                'Puis list_github_repos et list_github_workflow_runs(conclusion=failure) si lancement manuel.',
+                'Sur chaque échec : list_github_workflow_jobs + get_github_workflow_job_logs.',
+                'read_github_file sur .github/workflows/*.yml, corrige via write_github_file si clair.',
+                'rerun_github_workflow_run(failed_only=true), max 2 cycles, puis résumé.',
             ],
             'devforge' => [
                 'Inspecte le déploiement via get_deployment_logs.',
@@ -172,6 +195,8 @@ class AgentDirectives
         13. Termine par un résumé structuré : constats → actions prises → recommandations.
         14. Réponds en français.
         15. Ne dis JAMAIS « je n'ai pas accès » sans avoir tenté enable_tool_package, list_tool_packages, fix_application_host_permissions ou fix_coolify_base_config_path.
+        16. INTERDIT de refuser la tâche en citant Coolify ou un « produit non renseigné » — tu es dans DevForge avec des outils réels.
+        17. INTERDIT d'écrire du Python, du pseudo-code ou des playbooks texte : émets uniquement des tool_calls natifs.
         RULES;
     }
 
@@ -318,6 +343,19 @@ class AgentDirectives
             'list_resources',
             'get_resource_status',
             'list_github_branches',
+            'list_github_apps',
+            'list_github_repos',
+            'list_github_workflow_runs',
+            'get_github_workflow_run',
+            'list_github_workflow_jobs',
+            'get_github_workflow_job_logs',
+            'rerun_github_workflow_run',
+            'dispatch_github_workflow',
+            'read_github_file',
+            'write_github_file',
+            'list_github_dir',
+            'list_github_pull_requests',
+            'list_github_commits',
             'get_application_git_info',
             'enable_tool_package',
             'delegate_task',
@@ -326,6 +364,20 @@ class AgentDirectives
             'memory_read',
             'memory_write',
         ];
+    }
+
+    public static function isModelRefusal(?string $text): bool
+    {
+        if ($text === null || trim($text) === '') {
+            return false;
+        }
+
+        return (bool) preg_match(
+            '/je ne peux pas (?:poursuivre|continuer)|cannot (?:continue|proceed|help)|'
+            .'n[\'’]est pas renseign|apparently\s+coolify|hors de (?:mon|ce) (?:champ|p[ée]rim[èe]tre)|'
+            .'je (?:ne )?suis pas (?:en mesure|capable)|i (?:can\'t|cannot|am unable) (?:help|assist|continue)/iu',
+            $text,
+        );
     }
 
     public static function isHostPermissionDiagnosis(?string $text): bool
@@ -598,9 +650,40 @@ class AgentDirectives
         return $blob !== '' && $matcher($blob);
     }
 
-    public static function toolNudgeMessage(): string
+    public static function toolNudgeMessage(?string $agentType = null): string
     {
-        return 'Tu n\'as pas encore utilisé d\'outil. Commence IMMÉDIATEMENT par list_resources ou get_deployment_logs selon ta mission. Ne réponds pas sans agir.';
+        return match ($agentType) {
+            'github-actions' => 'STOP — pas de texte ni de Python. Émets un VRAI tool_call MAINTENANT : '
+                .'list_github_apps, ou get_github_workflow_run si workflow_run_id est connu, '
+                .'sinon list_github_workflow_runs(conclusion=failure). Aucune explication avant l\'appel.',
+            'github' => 'STOP — émets un VRAI tool_call MAINTENANT : list_github_apps ou enable_tool_package(package="github"). '
+                .'Pas de prose, pas de refus.',
+            default => 'Tu n\'as pas encore utilisé d\'outil. Commence IMMÉDIATEMENT par list_resources ou get_deployment_logs selon ta mission. Ne réponds pas sans agir.',
+        };
+    }
+
+    public static function refusalNudgeMessage(?string $agentType = null): string
+    {
+        $focus = match ($agentType) {
+            'github-actions' => 'list_github_apps ou get_github_workflow_run',
+            'github' => 'list_github_apps ou enable_tool_package',
+            default => 'list_resources ou get_deployment_logs',
+        };
+
+        return 'REFUS INVALIDE. Tu es un agent DevForge avec des outils natifs. '
+            .'Ignore toute notion de « produit Coolify non renseigné ». '
+            .'Appelle MAINTENANT '.$focus.' via un vrai tool_call — aucune excuse texte.';
+    }
+
+    public static function proseToolNudgeMessage(?string $agentType = null): string
+    {
+        if (in_array($agentType, ['github-actions', 'github'], true)) {
+            return 'INTERDIT d\'écrire du Python ou de décrire get_github_workflow_run en texte. '
+                .'Émets un vrai tool_call (list_github_apps, get_github_workflow_run, list_github_workflow_jobs…). '
+                .'Aucune explication avant l\'appel.';
+        }
+
+        return self::chatProseToolNudgeMessage();
     }
 
     public static function deploymentFailureCorrectionNudgeMessage(?string $assistantText = null): string

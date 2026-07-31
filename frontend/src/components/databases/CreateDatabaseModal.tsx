@@ -25,14 +25,14 @@ const engines: Array<{ value: DatabaseEngine; label: string; description: string
 ];
 
 const engineHints: Partial<Record<DatabaseEngine, string>> = {
-    libsql: 'libSQL utilise l’image officielle ghcr.io/tursodatabase/libsql-server. Connectez-vous avec l’URL libsql:// affichée dans le détail de la ressource.',
+    libsql: 'libSQL utilise l’image officielle ghcr.io/tursodatabase/libsql-server. Connectez-vous avec TURSO_DATABASE_URL + TURSO_AUTH_TOKEN (le jeton n’est jamais dans l’URL).',
     postgresql: 'PostgreSQL sera accessible via DATABASE_URL sur le réseau Docker interne.',
 };
 
 function defaultEnvKeyForEngine(engine: DatabaseEngine): string {
     switch (engine) {
         case 'libsql':
-            return 'LIBSQL_URL';
+            return 'TURSO_DATABASE_URL';
         case 'mongodb':
             return 'MONGODB_URI';
         case 'redis':
@@ -84,7 +84,7 @@ export function CreateDatabaseModal({ open, onClose, onCreated }: Props) {
         environment_uuid: '',
         destination_uuid: '',
         application_uuid: '',
-        env_key: 'LIBSQL_URL',
+        env_key: 'TURSO_DATABASE_URL',
         name: '',
         image: 'postgres:16-alpine',
         instant_deploy: true,
@@ -121,7 +121,7 @@ export function CreateDatabaseModal({ open, onClose, onCreated }: Props) {
                     environment_uuid: firstEnvironment?.uuid ?? '',
                     destination_uuid: firstDestination?.uuid ?? '',
                     application_uuid: '',
-                    env_key: 'LIBSQL_URL',
+                    env_key: 'TURSO_DATABASE_URL',
                     name: '',
                     image: 'postgres:16-alpine',
                     instant_deploy: true,

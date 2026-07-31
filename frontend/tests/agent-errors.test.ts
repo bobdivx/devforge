@@ -4,6 +4,7 @@ import type { Agent } from '../src/lib/domain-api';
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
     return {
+        id: 1,
         uuid: 'agent-1',
         type: 'debug',
         name: 'Debug',

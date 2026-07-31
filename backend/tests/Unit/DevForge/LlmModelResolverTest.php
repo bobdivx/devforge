@@ -88,7 +88,7 @@ it('prioritizes tool-capable ollama models for auto mode', function () {
         'llama3.2:latest',
     ]);
 
-    expect($ordered[0])->toBe('llama3.2:latest')
-        ->and($ordered[1])->toBe('qwen2.5:7b')
+    expect($ordered[0])->toBe('qwen2.5:7b')
+        ->and($ordered[1])->toBe('llama3.2:latest')
         ->and($ordered)->not->toContain('codegemma:2b');
 });

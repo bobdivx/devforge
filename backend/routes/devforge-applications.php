@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\DevForge\ApplicationController;
 use App\Http\Controllers\DevForge\GithubController;
+use App\Http\Controllers\DevForge\GithubRunnerController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/deployment-targets', [ApplicationController::class, 'deploymentTargets'])
@@ -173,4 +174,26 @@ Route::prefix('github')->name('github.')->group(function () {
     Route::get('/apps/{githubAppUuid}/repositories/{owner}/{repo}/branches', [GithubController::class, 'branches'])
         ->where('githubAppUuid', '[A-Za-z0-9-]{8,64}')
         ->name('apps.branches');
+
+    Route::get('/runners', [GithubRunnerController::class, 'index'])->name('runners.index');
+    Route::post('/runners', [GithubRunnerController::class, 'store'])->name('runners.store');
+    Route::get('/runners/{serverUuid}/{containerName}', [GithubRunnerController::class, 'show'])
+        ->where([
+            'serverUuid' => '[A-Za-z0-9-]{8,64}',
+            'containerName' => '[A-Za-z0-9][A-Za-z0-9._-]{0,254}',
+        ])
+        ->name('runners.show');
+    Route::get('/runners/{serverUuid}/{containerName}/logs', [GithubRunnerController::class, 'logs'])
+        ->where([
+            'serverUuid' => '[A-Za-z0-9-]{8,64}',
+            'containerName' => '[A-Za-z0-9][A-Za-z0-9._-]{0,254}',
+        ])
+        ->name('runners.logs');
+    Route::post('/runners/{serverUuid}/{containerName}/{action}', [GithubRunnerController::class, 'action'])
+        ->where([
+            'serverUuid' => '[A-Za-z0-9-]{8,64}',
+            'containerName' => '[A-Za-z0-9][A-Za-z0-9._-]{0,254}',
+            'action' => 'start|stop|restart',
+        ])
+        ->name('runners.action');
 });

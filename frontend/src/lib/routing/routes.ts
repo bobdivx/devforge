@@ -15,6 +15,7 @@ import {
     Cloud,
     Wrench,
     CalendarClock,
+    Cpu,
     type LucideIcon,
 } from 'lucide-preact';
 
@@ -82,6 +83,8 @@ export type PageKey =
 
     | 'scheduled-tasks'
 
+    | 'github-runners'
+
     | 'not-found';
 
 
@@ -119,6 +122,8 @@ export const appRoutes: AppRoute[] = [
     { path: '/storage', label: 'Stockage', description: 'Espace disque, nettoyage Docker et surveillance.', icon: HardDrive, page: 'storage' },
 
     { path: '/monitoring', label: 'Supervision', description: 'État et métriques système.', icon: Activity, page: 'monitoring' },
+
+    { path: '/github-runners', label: 'Runners GitHub', description: 'Runners self-hosted, état, logs et actions.', icon: Cpu, page: 'github-runners' },
 
     { path: '/scheduled-tasks', label: 'Tâches planifiées', description: 'Historique des exécutions.', icon: CalendarClock, page: 'scheduled-tasks' },
 
@@ -161,6 +166,8 @@ export const staticRoutePaths = [
     '/storages',
 
     '/storage',
+
+    '/github-runners',
 
     '/destinations',
 

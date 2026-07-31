@@ -157,19 +157,28 @@ it('connects a created libsql database to an application when requested', functi
         ])
         ->assertCreated()
         ->assertJsonPath('data.name', 'Demo app · libSQL')
-        ->assertJsonPath('meta.connection.env_key', 'LIBSQL_URL')
+        ->assertJsonPath('meta.connection.env_key', 'TURSO_DATABASE_URL')
+        ->assertJsonPath('meta.connection.env_keys', ['TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN'])
         ->assertJsonPath('meta.connection.application_uuid', $application->uuid);
 
     $databaseUuid = $response->json('data.uuid');
 
-    $variable = EnvironmentVariable::query()
+    $urlVariable = EnvironmentVariable::query()
         ->where('resourceable_type', Application::class)
         ->where('resourceable_id', $application->id)
-        ->where('key', 'LIBSQL_URL')
+        ->where('key', 'TURSO_DATABASE_URL')
         ->first();
 
-    expect($variable)->not->toBeNull()
-        ->and($variable->comment)->toBe('devforge:database:'.$databaseUuid);
+    $tokenVariable = EnvironmentVariable::query()
+        ->where('resourceable_type', Application::class)
+        ->where('resourceable_id', $application->id)
+        ->where('key', 'TURSO_AUTH_TOKEN')
+        ->first();
+
+    expect($urlVariable)->not->toBeNull()
+        ->and($urlVariable->comment)->toBe('devforge:database:'.$databaseUuid)
+        ->and($urlVariable->real_value)->not->toContain('@')
+        ->and($tokenVariable)->not->toBeNull();
 });
 
 it('lists applications connected to a database', function () {

@@ -21,7 +21,7 @@ class LibsqlConnectionEnvSync
     }
 
     /**
-     * @return array{auth_user: string, token: string, turso_url: string, full_url: string}
+     * @return array{auth_user: string, token: string, turso_url: string, turso_url_external: ?string, full_url: string, full_url_external: ?string}
      */
     public function valuesFor(Model $database): array
     {
@@ -30,8 +30,6 @@ class LibsqlConnectionEnvSync
         $authUser = (string) ($database->libsql_auth_user ?: 'libsql');
         $token = (string) $database->libsql_auth_token;
         $host = (string) $database->uuid;
-        $encodedUser = rawurlencode($authUser);
-        $encodedToken = rawurlencode($token);
 
         $tursoUrlExternal = null;
         if ($database->is_public) {
@@ -46,12 +44,15 @@ class LibsqlConnectionEnvSync
             }
         }
 
+        // Never embed credentials in libsql:// URLs — clients use TURSO_AUTH_TOKEN / authToken.
+        $tursoUrl = "libsql://{$host}:8080";
+
         return [
             'auth_user' => $authUser,
             'token' => $token,
-            'turso_url' => "libsql://{$host}:8080",
+            'turso_url' => $tursoUrl,
             'turso_url_external' => $tursoUrlExternal,
-            'full_url' => "libsql://{$encodedUser}:{$encodedToken}@{$host}:8080",
+            'full_url' => $tursoUrl,
             'full_url_external' => $database->external_db_url,
         ];
     }
@@ -74,7 +75,7 @@ class LibsqlConnectionEnvSync
         }
 
         if ($existingKeys->contains('LIBSQL_URL')) {
-            return ['LIBSQL_URL'];
+            return ['LIBSQL_URL', 'TURSO_AUTH_TOKEN'];
         }
 
         return ['TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN'];
@@ -87,6 +88,7 @@ class LibsqlConnectionEnvSync
     {
         return match ($envKey) {
             'TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN' => ['TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN'],
+            'LIBSQL_URL', 'DATABASE_URL' => [$envKey, 'TURSO_AUTH_TOKEN'],
             default => [$envKey],
         };
     }

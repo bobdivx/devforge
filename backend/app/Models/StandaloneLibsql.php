@@ -294,12 +294,8 @@ class StandaloneLibsql extends BaseModel
     protected function internalDbUrl(): Attribute
     {
         return new Attribute(
-            get: function () {
-                $user = rawurlencode((string) ($this->libsql_auth_user ?: 'libsql'));
-                $password = rawurlencode((string) $this->libsql_auth_token);
-
-                return "libsql://{$user}:{$password}@{$this->uuid}:8080";
-            }
+            // libSQL / Turso: never embed the auth token in the URL — pass TURSO_AUTH_TOKEN separately.
+            get: fn () => "libsql://{$this->uuid}:8080",
         );
     }
 
@@ -311,12 +307,9 @@ class StandaloneLibsql extends BaseModel
                     return null;
                 }
 
-                $user = rawurlencode((string) ($this->libsql_auth_user ?: 'libsql'));
-                $password = rawurlencode((string) $this->libsql_auth_token);
-
                 $domainHost = $this->publicDomainHost();
                 if ($domainHost) {
-                    return "libsql://{$user}:{$password}@{$domainHost}";
+                    return "libsql://{$domainHost}";
                 }
 
                 if ($this->public_port) {
@@ -325,7 +318,7 @@ class StandaloneLibsql extends BaseModel
                         return null;
                     }
 
-                    return "libsql://{$user}:{$password}@{$serverIp}:{$this->public_port}";
+                    return "libsql://{$serverIp}:{$this->public_port}";
                 }
 
                 return null;

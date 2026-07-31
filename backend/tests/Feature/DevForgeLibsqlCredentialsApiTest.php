@@ -133,12 +133,18 @@ it('prefers domain url over ip port for external credentials', function () {
         'fqdn' => 'https://db-demo.apps.example.com',
     ]);
 
-    $this->actingAs($this->user)
+    $response = $this->actingAs($this->user)
         ->withSession($this->session)
         ->getJson("/api/devforge/v1/databases/{$this->database->uuid}/credentials")
         ->assertSuccessful()
         ->assertJsonPath('data.turso_database_url_external', 'libsql://db-demo.apps.example.com')
+        ->assertJsonPath('data.external_url', 'libsql://db-demo.apps.example.com')
+        ->assertJsonPath('data.libsql_url', "libsql://{$this->database->uuid}:8080")
         ->assertJsonPath('data.fqdn', 'https://db-demo.apps.example.com');
+
+    expect($response->json('data.external_url'))->not->toContain('initial-token')
+        ->and($response->json('data.external_url'))->not->toContain('@')
+        ->and($response->json('data.libsql_url'))->not->toContain('@');
 });
 
 it('falls back to ip port when public without fqdn', function () {

@@ -366,26 +366,42 @@ class AgentGithubTools
         string $repo,
         ?string $branch = null,
         int $limit = 10,
+        ?string $status = null,
+        ?string $conclusion = null,
     ): array {
         $limit = max(1, min($limit, 30));
         $query = ['per_page' => $limit];
         if ($branch) {
             $query['branch'] = $branch;
         }
+        if (filled($status)) {
+            $query['status'] = $status;
+        }
 
-        return $this->apiGet($githubAppUuid, "/repos/{$owner}/{$repo}/actions/runs", $query, fn (array $payload): array => [
-            'workflow_runs' => collect($payload['workflow_runs'] ?? [])->map(fn (array $run): array => [
-                'id' => $run['id'] ?? null,
-                'name' => $run['name'] ?? null,
-                'status' => $run['status'] ?? null,
-                'conclusion' => $run['conclusion'] ?? null,
-                'head_branch' => $run['head_branch'] ?? null,
-                'head_sha' => $run['head_sha'] ?? null,
-                'html_url' => $run['html_url'] ?? null,
-                'created_at' => $run['created_at'] ?? null,
-                'updated_at' => $run['updated_at'] ?? null,
-            ])->values()->all(),
-        ], rootKey: 'workflow_runs');
+        return $this->apiGet($githubAppUuid, "/repos/{$owner}/{$repo}/actions/runs", $query, function (array $payload) use ($conclusion): array {
+            $runs = collect($payload['workflow_runs'] ?? []);
+            if (filled($conclusion)) {
+                $runs = $runs->filter(
+                    fn (array $run): bool => strcasecmp((string) ($run['conclusion'] ?? ''), (string) $conclusion) === 0,
+                );
+            }
+
+            return [
+                'workflow_runs' => $runs->map(fn (array $run): array => [
+                    'id' => $run['id'] ?? null,
+                    'name' => $run['name'] ?? null,
+                    'workflow_id' => $run['workflow_id'] ?? null,
+                    'path' => $run['path'] ?? null,
+                    'status' => $run['status'] ?? null,
+                    'conclusion' => $run['conclusion'] ?? null,
+                    'head_branch' => $run['head_branch'] ?? null,
+                    'head_sha' => $run['head_sha'] ?? null,
+                    'html_url' => $run['html_url'] ?? null,
+                    'created_at' => $run['created_at'] ?? null,
+                    'updated_at' => $run['updated_at'] ?? null,
+                ])->values()->all(),
+            ];
+        }, rootKey: 'workflow_runs');
     }
 
     /** @return array<mixed> */
@@ -396,6 +412,8 @@ class AgentGithubTools
                 'workflow_run' => [
                     'id' => $run['id'] ?? null,
                     'name' => $run['name'] ?? null,
+                    'workflow_id' => $run['workflow_id'] ?? null,
+                    'path' => $run['path'] ?? null,
                     'status' => $run['status'] ?? null,
                     'conclusion' => $run['conclusion'] ?? null,
                     'head_branch' => $run['head_branch'] ?? null,
@@ -407,6 +425,178 @@ class AgentGithubTools
                 ],
             ];
         }, single: true);
+    }
+
+    /** @return array<mixed> */
+    public function listWorkflows(string $githubAppUuid, string $owner, string $repo): array
+    {
+        return $this->apiGet($githubAppUuid, "/repos/{$owner}/{$repo}/actions/workflows", ['per_page' => 100], fn (array $payload): array => [
+            'workflows' => collect($payload['workflows'] ?? [])->map(fn (array $workflow): array => [
+                'id' => $workflow['id'] ?? null,
+                'name' => $workflow['name'] ?? null,
+                'path' => $workflow['path'] ?? null,
+                'state' => $workflow['state'] ?? null,
+                'html_url' => $workflow['html_url'] ?? null,
+                'badge_url' => $workflow['badge_url'] ?? null,
+            ])->values()->all(),
+        ], rootKey: 'workflows');
+    }
+
+    /** @return array<mixed> */
+    public function listWorkflowJobs(string $githubAppUuid, string $owner, string $repo, int $runId): array
+    {
+        return $this->apiGet($githubAppUuid, "/repos/{$owner}/{$repo}/actions/runs/{$runId}/jobs", ['per_page' => 50], fn (array $payload): array => [
+            'jobs' => collect($payload['jobs'] ?? [])->map(fn (array $job): array => [
+                'id' => $job['id'] ?? null,
+                'name' => $job['name'] ?? null,
+                'status' => $job['status'] ?? null,
+                'conclusion' => $job['conclusion'] ?? null,
+                'html_url' => $job['html_url'] ?? null,
+                'started_at' => $job['started_at'] ?? null,
+                'completed_at' => $job['completed_at'] ?? null,
+                'steps' => collect($job['steps'] ?? [])->map(fn (array $step): array => [
+                    'name' => $step['name'] ?? null,
+                    'status' => $step['status'] ?? null,
+                    'conclusion' => $step['conclusion'] ?? null,
+                    'number' => $step['number'] ?? null,
+                ])->values()->all(),
+            ])->values()->all(),
+        ], rootKey: 'jobs');
+    }
+
+    /** @return array<mixed> */
+    public function getWorkflowJobLogs(
+        string $githubAppUuid,
+        string $owner,
+        string $repo,
+        int $jobId,
+        int $maxChars = 12000,
+    ): array {
+        $maxChars = max(1000, min($maxChars, 30000));
+
+        try {
+            $githubApp = $this->githubCatalog->appForTeam($this->team, $githubAppUuid);
+            $token = generateGithubInstallationToken($githubApp);
+            if (! $token) {
+                return ['error' => 'Impossible de générer un token GitHub App.'];
+            }
+
+            $response = Http::GitHub($githubApp->api_url, $token)
+                ->timeout(30)
+                ->withHeaders(['Accept' => 'application/vnd.github+json'])
+                ->get("/repos/{$owner}/{$repo}/actions/jobs/{$jobId}/logs");
+
+            if (! $response->successful()) {
+                return ['error' => mb_substr($response->json('message') ?? $response->body() ?: 'Échec lecture logs job', 0, 500)];
+            }
+
+            $body = (string) $response->body();
+            $truncated = mb_strlen($body) > $maxChars;
+            if ($truncated) {
+                $body = mb_substr($body, -$maxChars);
+            }
+
+            return [
+                'job_id' => $jobId,
+                'truncated' => $truncated,
+                'logs' => $body,
+            ];
+        } catch (\Throwable $exception) {
+            return ['error' => mb_substr($exception->getMessage(), 0, 500)];
+        }
+    }
+
+    /** @return array<mixed> */
+    public function rerunWorkflowRun(
+        string $githubAppUuid,
+        string $owner,
+        string $repo,
+        int $runId,
+        bool $failedOnly = false,
+    ): array {
+        $endpoint = $failedOnly
+            ? "/repos/{$owner}/{$repo}/actions/runs/{$runId}/rerun-failed-jobs"
+            : "/repos/{$owner}/{$repo}/actions/runs/{$runId}/rerun";
+
+        return $this->apiPostEmpty($githubAppUuid, $endpoint, [
+            'ok' => true,
+            'run_id' => $runId,
+            'failed_only' => $failedOnly,
+            'message' => $failedOnly
+                ? 'Relance des jobs en échec demandée.'
+                : 'Relance complète du workflow demandée.',
+        ]);
+    }
+
+    /** @return array<mixed> */
+    public function dispatchWorkflow(
+        string $githubAppUuid,
+        string $owner,
+        string $repo,
+        string $workflowIdOrFilename,
+        string $ref,
+        array $inputs = [],
+    ): array {
+        if ($workflowIdOrFilename === '' || $ref === '') {
+            return ['error' => 'workflow_id (ou fichier .yml) et ref (branche/tag) sont requis.'];
+        }
+
+        $payload = ['ref' => $ref];
+        if ($inputs !== []) {
+            $payload['inputs'] = $inputs;
+        }
+
+        try {
+            $githubApp = $this->githubCatalog->appForTeam($this->team, $githubAppUuid);
+            $token = generateGithubInstallationToken($githubApp);
+            if (! $token) {
+                return ['error' => 'Impossible de générer un token GitHub App.'];
+            }
+
+            $response = Http::GitHub($githubApp->api_url, $token)
+                ->timeout(30)
+                ->post("/repos/{$owner}/{$repo}/actions/workflows/{$workflowIdOrFilename}/dispatches", $payload);
+
+            if (! $response->successful()) {
+                return ['error' => mb_substr($response->json('message', 'Échec API GitHub'), 0, 500)];
+            }
+
+            return [
+                'ok' => true,
+                'workflow' => $workflowIdOrFilename,
+                'ref' => $ref,
+                'message' => 'workflow_dispatch déclenché.',
+            ];
+        } catch (\Throwable $exception) {
+            return ['error' => mb_substr($exception->getMessage(), 0, 500)];
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $successPayload
+     * @return array<mixed>
+     */
+    private function apiPostEmpty(string $githubAppUuid, string $endpoint, array $successPayload): array
+    {
+        try {
+            $githubApp = $this->githubCatalog->appForTeam($this->team, $githubAppUuid);
+            $token = generateGithubInstallationToken($githubApp);
+            if (! $token) {
+                return ['error' => 'Impossible de générer un token GitHub App.'];
+            }
+
+            $response = Http::GitHub($githubApp->api_url, $token)
+                ->timeout(30)
+                ->post($endpoint);
+
+            if (! $response->successful()) {
+                return ['error' => mb_substr($response->json('message', 'Échec API GitHub'), 0, 500)];
+            }
+
+            return $successPayload;
+        } catch (\Throwable $exception) {
+            return ['error' => mb_substr($exception->getMessage(), 0, 500)];
+        }
     }
 
     /** @return array<mixed> */

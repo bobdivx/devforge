@@ -21,7 +21,7 @@ class AgentRunner
     /** @var array<array{role: string, content: string}> */
     private array $messages = [];
 
-    private bool $toolNudgeUsed = false;
+    private int $toolNudgeCount = 0;
 
     private bool $correctionNudgeUsed = false;
 
@@ -40,7 +40,7 @@ class AgentRunner
 
     public function run(AiAgent $agent, AiAgentRun $run, array $context = []): void
     {
-        $this->toolNudgeUsed = false;
+        $this->toolNudgeCount = 0;
         $this->correctionNudgeUsed = false;
         $this->anyToolUsed = false;
         $this->harnessUsed = false;
@@ -167,17 +167,30 @@ class AgentRunner
                 }
 
                 if (! $response->hasToolCalls()) {
-                    if (! $this->anyToolUsed && ! $this->toolNudgeUsed) {
-                        $this->toolNudgeUsed = true;
-                        $this->messages[] = ['role' => 'assistant', 'content' => $response->text ?: 'En attente d\'action.'];
-                        $this->messages[] = ['role' => 'user', 'content' => AgentDirectives::toolNudgeMessage()];
-                        $run->appendLog('Relance autonome : premier tour sans outil — nouvelle consigne envoyée.');
+                    $assistantText = (string) ($response->text ?? '');
+                    $isProseTools = AgentDirectives::mentionsToolWithoutCalling($assistantText);
+                    $isRefusal = AgentDirectives::isModelRefusal($assistantText);
+                    $maxNudges = ($isProseTools || $isRefusal) ? 3 : 2;
+
+                    if (! $this->anyToolUsed && $this->toolNudgeCount < $maxNudges) {
+                        $this->toolNudgeCount++;
+                        $this->messages[] = ['role' => 'assistant', 'content' => $assistantText !== '' ? $assistantText : 'En attente d\'action.'];
+                        $nudge = match (true) {
+                            $isRefusal => AgentDirectives::refusalNudgeMessage($agent->type),
+                            $isProseTools => AgentDirectives::proseToolNudgeMessage($agent->type),
+                            default => AgentDirectives::toolNudgeMessage($agent->type),
+                        };
+                        $this->messages[] = ['role' => 'user', 'content' => $nudge];
+                        $run->appendLog(match (true) {
+                            $isRefusal => 'Relance autonome : refus modèle détecté — consigne anti-refus envoyée.',
+                            $isProseTools => 'Relance autonome : outils décrits en prose — consigne tool_call envoyée.',
+                            default => 'Relance autonome : premier tour sans outil — nouvelle consigne envoyée.',
+                        });
 
                         continue;
                     }
 
                     $correctionActions = $run->metadata['correction_actions'] ?? [];
-                    $assistantText = (string) ($response->text ?? '');
                     if (
                         ($context['event'] ?? null) === 'deployment_failed'
                         && ! $this->correctionNudgeUsed

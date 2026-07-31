@@ -218,6 +218,108 @@ class GithubAppCatalog
     }
 
     /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function runners(GithubApp $githubApp, string $owner, string $repo): array
+    {
+        $token = $this->apiToken($githubApp);
+        abort_unless($token, 400, 'Impossible de générer un jeton GitHub.');
+
+        $runners = collect();
+        $page = 1;
+
+        while ($page <= 20) {
+            $response = Http::GitHub($githubApp->api_url, $token)
+                ->timeout(8)
+                ->retry(1, 100, throw: false)
+                ->get("/repos/{$owner}/{$repo}/actions/runners", [
+                    'per_page' => 100,
+                    'page' => $page,
+                ]);
+
+            abort_unless(
+                $response->status() === 200,
+                $response->status(),
+                $response->json('message', 'Impossible de lister les runners GitHub.'),
+            );
+
+            $batch = $response->json('runners', []);
+            if (! is_array($batch) || $batch === []) {
+                break;
+            }
+
+            $runners = $runners->concat($batch);
+            if (count($batch) < 100) {
+                break;
+            }
+
+            $page++;
+        }
+
+        return $runners
+            ->map(fn (array $runner): array => [
+                'id' => (int) data_get($runner, 'id'),
+                'name' => (string) data_get($runner, 'name', ''),
+                'os' => (string) data_get($runner, 'os', ''),
+                'status' => (string) data_get($runner, 'status', 'offline'),
+                'busy' => (bool) data_get($runner, 'busy', false),
+                'labels' => collect(data_get($runner, 'labels', []))
+                    ->map(fn ($label): string => is_array($label)
+                        ? (string) data_get($label, 'name', '')
+                        : (string) $label)
+                    ->filter()
+                    ->values()
+                    ->all(),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array{token: string, expires_at: string|null}
+     */
+    public function registrationToken(GithubApp $githubApp, string $owner, string $repo): array
+    {
+        $token = $this->apiToken($githubApp);
+        abort_unless($token, 400, 'Impossible de générer un jeton GitHub.');
+
+        $response = Http::GitHub($githubApp->api_url, $token)
+            ->timeout(20)
+            ->retry(2, 200, throw: false)
+            ->post("/repos/{$owner}/{$repo}/actions/runners/registration-token");
+
+        abort_unless(
+            $response->status() === 201 || $response->status() === 200,
+            $response->status(),
+            $response->json('message', 'Impossible de créer un jeton d’enregistrement runner.'),
+        );
+
+        $runnerToken = (string) $response->json('token', '');
+        abort_unless($runnerToken !== '', 502, 'Jeton d’enregistrement vide.');
+
+        return [
+            'token' => $runnerToken,
+            'expires_at' => is_string($response->json('expires_at'))
+                ? (string) $response->json('expires_at')
+                : null,
+        ];
+    }
+
+    private function apiToken(GithubApp $githubApp): ?string
+    {
+        try {
+            $installationToken = generateGithubInstallationToken($githubApp);
+            if (filled($installationToken)) {
+                return $installationToken;
+            }
+        } catch (\Throwable) {
+            // Fall back to packages PAT when the GitHub App cannot mint an installation token.
+        }
+
+        return filled($githubApp->packages_token) ? (string) $githubApp->packages_token : null;
+    }
+
+    /**
      * @param  array<string, mixed>  $repository
      * @return array<string, mixed>
      */
