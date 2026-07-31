@@ -1478,11 +1478,9 @@ $schema://$host {
 
     public function storageCheck(): ?string
     {
-        $commands = [
-            'df / --output=pcent | tr -cd 0-9',
-        ];
-
-        return instant_remote_process($commands, $this, false);
+        // Prefer the Docker workload mount (/media/Docker on CasaOS/ZimaOS).
+        // Root "/" is often a tiny squashfs and reports 100% even when healthy.
+        return $this->getWorkloadDiskUsage();
     }
 
     public function isIpv6(): bool

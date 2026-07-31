@@ -231,3 +231,5 @@ x-casaos:
     1. Définir APP_KEY et DB_PASSWORD avant le premier démarrage.
     2. Images : bobdivx/devforge:api et bobdivx/devforge:realtime (Docker Hub).
     3. Données sous /media/Docker/AppData/devforge/
+    4. Surveiller l'espace /media/Docker (builds + images) — un disque plein fait planter Postgres.
+    5. Cleanup Docker forcé toutes les heures sur le serveur localhost (seuil 70%).

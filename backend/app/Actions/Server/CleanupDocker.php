@@ -108,7 +108,9 @@ class CleanupDocker
         // - bobdivx/devforge:realtime
         $escapedHelperVersion = preg_replace('/([.\\\\+*?\[\]^$(){}|])/', '\\\\$1', $helperImageVersion);
         $escapedRealtimeVersion = preg_replace('/([.\\\\+*?\[\]^$(){}|])/', '\\\\$1', $realtimeImageVersion);
-        $infraExcludePattern = "(^|/)bobdivx/devforge:{$escapedHelperVersion}$|(^|/)bobdivx/devforge:{$escapedRealtimeVersion}$|(^|/)bobdivx/devforge-(helper|realtime)(:|$)";
+        // Also protect platform DB/cache images so a prune never removes them
+        // while containers are briefly stopped/recreating (ENOSPC recovery).
+        $infraExcludePattern = "(^|/)bobdivx/devforge:{$escapedHelperVersion}$|(^|/)bobdivx/devforge:{$escapedRealtimeVersion}$|(^|/)bobdivx/devforge-(helper|realtime)(:|$)|(^|/)postgres(:|$)|(^|/)redis(:|$)|(^|/)redis/redis-stack(:|$)";
 
         // Delete unused images that:
         // - Are not application images (don't match app repos)
