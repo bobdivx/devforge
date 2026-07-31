@@ -149,3 +149,19 @@ it('expires stale failures according to retention hours', function () {
     expect($agent->syncOperationalStatus())->toBeTrue()
         ->and($agent->fresh()->status)->toBe('idle');
 });
+
+it('stores and clears preferred llm model in metadata', function () {
+    $agent = AiAgent::factory()->create(['metadata' => null]);
+
+    $agent->setPreferredLlmModel('qwen2.5:7b');
+    $agent->save();
+
+    expect($agent->fresh()->preferredLlmModel())->toBe('qwen2.5:7b')
+        ->and($agent->fresh()->metadata['llm_model'])->toBe('qwen2.5:7b');
+
+    $agent->setPreferredLlmModel('auto');
+    $agent->save();
+
+    expect($agent->fresh()->preferredLlmModel())->toBeNull()
+        ->and($agent->fresh()->metadata)->toBeNull();
+});

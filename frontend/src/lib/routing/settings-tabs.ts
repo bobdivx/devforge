@@ -14,8 +14,7 @@ export type SettingsTabId =
     | 'notifications'
     | 'variables'
     | 'security'
-    | 'storages'
-    | 'ai';
+    | 'storages';
 
 export type SettingsTab = {
     id: SettingsTabId;
@@ -40,7 +39,6 @@ export const settingsTabs: SettingsTab[] = [
     { id: 'variables', label: 'Variables', path: '/settings/variables' },
     { id: 'security', label: 'Sécurité', path: '/settings/security' },
     { id: 'storages', label: 'Stockage S3', path: '/settings/storages' },
-    { id: 'ai', label: 'Intelligence artificielle', path: '/settings/ai', requiresAgents: true },
 ];
 
 export const settingsTabPaths = settingsTabs.map(({ path }) => path);
@@ -59,7 +57,7 @@ export function visibleSettingsTabs(agentsEnabled: boolean, instanceAdmin: boole
     });
 }
 
-export type SettingsTabGroupId = 'personal' | 'organization' | 'infrastructure' | 'instance' | 'ai';
+export type SettingsTabGroupId = 'personal' | 'organization' | 'infrastructure' | 'instance';
 
 export type SettingsTabGroup = {
     id: SettingsTabGroupId;
@@ -77,7 +75,6 @@ const settingsTabGroupMeta: Array<{
     { id: 'organization', label: 'Organisation' },
     { id: 'infrastructure', label: 'Infrastructure' },
     { id: 'instance', label: 'Instance', requiresInstanceAdmin: true },
-    { id: 'ai', label: 'Intelligence artificielle', requiresAgents: true },
 ];
 
 const tabGroupById: Record<SettingsTabId, SettingsTabGroupId> = {
@@ -95,7 +92,6 @@ const tabGroupById: Record<SettingsTabId, SettingsTabGroupId> = {
     oauth: 'instance',
     updates: 'instance',
     backup: 'instance',
-    ai: 'ai',
 };
 
 export function groupedVisibleSettingsTabs(

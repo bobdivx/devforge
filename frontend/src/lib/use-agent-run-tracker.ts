@@ -29,6 +29,8 @@ export function useAgentRunTracker(agentUuid: string, options: Options = {}) {
     const [outcome, setOutcome] = useState<RunOutcome>(null);
     const pollRef = useRef<number | null>(null);
     const attemptsRef = useRef(0);
+    const trackingRunRef = useRef<string | null>(null);
+    const settledRunRef = useRef<string | null>(null);
 
     const stopPolling = useCallback(() => {
         if (pollRef.current !== null) {
@@ -37,9 +39,21 @@ export function useAgentRunTracker(agentUuid: string, options: Options = {}) {
         }
     }, []);
 
-    const pollRun = useCallback((runUuid: string) => {
+    const pollRun = useCallback((runUuid: string, options?: { force?: boolean }) => {
+        // Avoid restarting the same in-flight poll (prevents card flicker).
+        if (!options?.force && trackingRunRef.current === runUuid && pollRef.current !== null) {
+            return;
+        }
+
+        // A finished run must not be re-tracked when parent props are still stale.
+        if (!options?.force && settledRunRef.current === runUuid) {
+            return;
+        }
+
         stopPolling();
         attemptsRef.current = 0;
+        trackingRunRef.current = runUuid;
+        settledRunRef.current = null;
         setIsTracking(true);
         setOutcome(null);
         setRunError(null);
@@ -54,6 +68,8 @@ export function useAgentRunTracker(agentUuid: string, options: Options = {}) {
 
                 if (isTerminalAgentRunStatus(response.data.status)) {
                     stopPolling();
+                    trackingRunRef.current = null;
+                    settledRunRef.current = runUuid;
                     setIsTracking(false);
                     setOutcome(response.data.status === 'completed' ? 'completed' : 'failed');
 
@@ -67,6 +83,8 @@ export function useAgentRunTracker(agentUuid: string, options: Options = {}) {
                 }
             } catch (error) {
                 stopPolling();
+                trackingRunRef.current = null;
+                settledRunRef.current = runUuid;
                 setIsTracking(false);
                 setRunError(error instanceof ApiError ? error.message : 'Impossible de suivre l\'exécution.');
                 setOutcome('failed');
@@ -77,6 +95,8 @@ export function useAgentRunTracker(agentUuid: string, options: Options = {}) {
 
             if (attemptsRef.current >= MAX_POLL_ATTEMPTS) {
                 stopPolling();
+                trackingRunRef.current = null;
+                settledRunRef.current = runUuid;
                 setIsTracking(false);
                 setOutcome('timeout');
                 setRunError('Délai dépassé — ouvrez les logs pour voir si l\'agent tourne encore.');
@@ -94,13 +114,15 @@ export function useAgentRunTracker(agentUuid: string, options: Options = {}) {
         setRunError(null);
         setOutcome(null);
         setActiveRun(null);
+        settledRunRef.current = null;
+        trackingRunRef.current = null;
         setIsLaunching(true);
         setIsTracking(true);
 
         try {
             const response = await domainApi.runAgent(agentUuid);
             setIsLaunching(false);
-            pollRun(response.data.run_uuid);
+            pollRun(response.data.run_uuid, { force: true });
         } catch (error) {
             setIsLaunching(false);
             setIsTracking(false);
@@ -119,6 +141,17 @@ export function useAgentRunTracker(agentUuid: string, options: Options = {}) {
     }, []);
 
     useEffect(() => () => stopPolling(), [stopPolling]);
+
+    useEffect(() => {
+        stopPolling();
+        trackingRunRef.current = null;
+        settledRunRef.current = null;
+        setIsLaunching(false);
+        setIsTracking(false);
+        setActiveRun(null);
+        setRunError(null);
+        setOutcome(null);
+    }, [agentUuid, stopPolling]);
 
     return {
         isLaunching,

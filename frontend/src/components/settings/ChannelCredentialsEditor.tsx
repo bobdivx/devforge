@@ -2,6 +2,7 @@ import { Save } from 'lucide-preact';
 import { useState } from 'preact/hooks';
 import type { NotificationChannel, NotificationChannelCredentials } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
+import { HiddenUsernameField } from '../ui/HiddenUsernameField';
 
 type FieldDef =
     | { key: string; label: string; kind: 'boolean' }
@@ -128,7 +129,16 @@ export function ChannelCredentialsEditor({ channel, canManage, onUpdated }: Chan
     };
 
     return (
-        <div class="grid gap-3 rounded-lg border border-base-300/70 p-3">
+        <form
+            class="grid gap-3 rounded-lg border border-base-300/70 p-3"
+            onSubmit={(event) => {
+                event.preventDefault();
+                if (canManage && !saving) {
+                    void save();
+                }
+            }}
+        >
+            <HiddenUsernameField />
             <div>
                 <h3 class="text-sm font-semibold">Identifiants du canal</h3>
                 <p class="text-xs text-base-content/55">
@@ -169,7 +179,7 @@ export function ChannelCredentialsEditor({ channel, canManage, onUpdated }: Chan
                                 value={draft[field.key] === null || draft[field.key] === undefined ? '' : String(draft[field.key])}
                                 placeholder={field.secret && setFlag ? 'Laisser vide pour conserver' : field.placeholder}
                                 disabled={!canManage || saving}
-                                autocomplete="off"
+                                autoComplete={field.kind === 'password' ? 'new-password' : 'off'}
                                 onInput={(event) => setDraft((current) => ({
                                     ...current,
                                     [field.key]: event.currentTarget.value,
@@ -182,11 +192,11 @@ export function ChannelCredentialsEditor({ channel, canManage, onUpdated }: Chan
             {error && <p class="text-sm text-error">{error}</p>}
             {message && <p class="text-sm text-success">{message}</p>}
             {canManage && (
-                <button class="btn btn-primary btn-sm w-fit" type="button" disabled={saving} onClick={() => void save()}>
+                <button class="btn btn-primary btn-sm w-fit" type="submit" disabled={saving}>
                     <Save class="size-3.5" aria-hidden />
                     {saving ? 'Enregistrement…' : 'Enregistrer les identifiants'}
                 </button>
             )}
-        </div>
+        </form>
     );
 }

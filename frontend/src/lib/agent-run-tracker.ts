@@ -9,6 +9,29 @@ export function isTerminalAgentRunStatus(status: AgentRunStatus): boolean {
         || status === 'waiting_for_input';
 }
 
+/** Run still in progress — safe to poll / show as busy. */
+export function isInFlightAgentRunStatus(status: AgentRunStatus): boolean {
+    return status === 'pending'
+        || status === 'running'
+        || status === 'waiting_for_subagents';
+}
+
+/**
+ * Whether the agent card/detail should auto-track latest_run.
+ * Skips terminal runs even if agent.status is still stale "running".
+ */
+export function shouldTrackAgentLatestRun(
+    agentStatus: string,
+    latestRun: { uuid: string; status: AgentRunStatus } | null | undefined,
+    isTracking: boolean,
+): boolean {
+    if (isTracking || agentStatus !== 'running' || !latestRun?.uuid) {
+        return false;
+    }
+
+    return isInFlightAgentRunStatus(latestRun.status);
+}
+
 export function parseLastAgentLogLine(logs: string | null | undefined, maxLength = 140): string | null {
     if (!logs?.trim()) {
         return null;

@@ -10,6 +10,7 @@ use App\Http\Controllers\DevForge\AgentRunController;
 use App\Http\Controllers\DevForge\AgentRunStreamController;
 use App\Http\Controllers\DevForge\AgentSessionController;
 use App\Http\Controllers\DevForge\AiProviderController;
+use App\Http\Controllers\DevForge\OllamaController;
 use App\Http\Middleware\EnsureDevForgeAgentsEnabled;
 use Illuminate\Support\Facades\Route;
 
@@ -107,6 +108,22 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
         Route::put('/providers/{id}', [AiProviderController::class, 'update'])->name('providers.update');
         Route::delete('/providers/{id}', [AiProviderController::class, 'destroy'])->name('providers.destroy');
         Route::post('/providers/{id}/test', [AiProviderController::class, 'test'])->name('providers.test');
+        Route::get('/ollama', [OllamaController::class, 'status'])->name('ollama.status');
+        Route::get('/ollama/instances', [OllamaController::class, 'instances'])->name('ollama.instances');
+        Route::post('/ollama/pull', [OllamaController::class, 'pull'])
+            ->middleware('throttle:10,1')
+            ->name('ollama.pull');
+        Route::post('/ollama/models/delete', [OllamaController::class, 'destroyModel'])
+            ->middleware('throttle:20,1')
+            ->name('ollama.destroy');
+        // Alias legacy (DELETE + body is often stripped/blocked by proxies).
+        Route::delete('/ollama/models', [OllamaController::class, 'destroyModel'])
+            ->middleware('throttle:20,1')
+            ->name('ollama.destroy.legacy');
+        Route::put('/ollama/provider-model', [OllamaController::class, 'setProviderModel'])
+            ->name('ollama.provider-model');
+        Route::post('/ollama/assign-agent', [OllamaController::class, 'assignToAgent'])
+            ->name('ollama.assign-agent');
         Route::get('/instructions', [AgentInstructionsController::class, 'show'])->name('instructions.show');
         Route::put('/instructions', [AgentInstructionsController::class, 'update'])->name('instructions.update');
         Route::get('/missions', [AgentMissionController::class, 'index'])->name('missions.index');

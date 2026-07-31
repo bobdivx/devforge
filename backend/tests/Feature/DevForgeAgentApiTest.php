@@ -34,6 +34,52 @@ it('lists agents scoped to current team', function () {
         ->assertJsonPath('meta.count', 2);
 });
 
+it('creates an agent with preferred model override', function () {
+    $provider = AiProviderConfig::factory()->ollama()->create([
+        'team_id' => $this->team->id,
+        'base_url' => 'https://ollama.example.test',
+        'model' => 'auto',
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/agents', [
+            'type' => 'github-actions',
+            'name' => 'CI Watcher',
+            'provider_config_id' => $provider->id,
+            'preferred_model' => 'qwen2.5:7b',
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.preferred_model', 'qwen2.5:7b')
+        ->assertJsonPath('data.provider.model', 'qwen2.5:7b')
+        ->assertJsonPath('data.provider.model_label', 'qwen2.5:7b')
+        ->assertJsonPath('data.provider.base_url', 'https://ollama.example.test');
+
+    $agent = AiAgent::where('team_id', $this->team->id)->first();
+    expect($agent->preferredLlmModel())->toBe('qwen2.5:7b');
+});
+
+it('updates an agent preferred model', function () {
+    $provider = AiProviderConfig::factory()->ollama()->create([
+        'team_id' => $this->team->id,
+        'base_url' => 'https://ollama.example.test',
+    ]);
+    $agent = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'provider_config_id' => $provider->id,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson("/api/devforge/v1/agents/{$agent->uuid}", [
+            'preferred_model' => 'llama3.1:8b',
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.preferred_model', 'llama3.1:8b');
+
+    expect($agent->fresh()->preferredLlmModel())->toBe('llama3.1:8b');
+});
+
 it('lists agents when the session team was not initialized yet', function () {
     AiAgent::factory()->create(['team_id' => $this->team->id]);
 

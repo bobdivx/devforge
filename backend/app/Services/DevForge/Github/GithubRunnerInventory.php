@@ -78,7 +78,13 @@ class GithubRunnerInventory
 
         Cache::forget('devforge.github.runners.list.'.$team->id);
 
-        return $this->enrichWithGithubStatus($team, collect([$presented]), allowColdFetch: true)->first();
+        try {
+            $enriched = $this->enrichWithGithubStatus($team, collect([$presented]), allowColdFetch: true)->first();
+        } catch (\Throwable) {
+            $enriched = null;
+        }
+
+        return is_array($enriched) ? $enriched : $this->withEmptyGithubFields($presented);
     }
 
     /**
@@ -89,7 +95,6 @@ class GithubRunnerInventory
         $lines = max(10, min($lines, 1000));
         $server = $this->serverForTeam($team, $serverUuid);
         $this->assertValidContainerName($containerName);
-        $this->findRunner($server, $containerName);
 
         if (! $server->isFunctional()) {
             return $this->unavailableLogs(
@@ -97,6 +102,17 @@ class GithubRunnerInventory
                 reason: 'server_unavailable',
                 message: 'Le serveur n’est pas joignable.',
             );
+        }
+
+        // Prefer inventory match, but still attempt docker logs by name when discovery is flaky.
+        try {
+            $this->findRunner($server, $containerName);
+        } catch (ModelNotFoundException) {
+            if (! $this->containerExistsByName($server, $containerName)) {
+                throw (new ModelNotFoundException)->setModel('GithubRunner', [$containerName]);
+            }
+        } catch (ValidationException $e) {
+            throw $e;
         }
 
         $status = getContainerStatus($server, $containerName);
@@ -121,7 +137,7 @@ class GithubRunnerInventory
             'container' => $containerName,
             'container_status' => $status,
             'line_count' => $lines,
-            'items' => $this->parseLines($rawLogs),
+            'items' => $this->parseLines(is_string($rawLogs) ? $rawLogs : ''),
         ];
     }
 
@@ -278,7 +294,8 @@ class GithubRunnerInventory
      */
     public function isGithubRunnerContainer(array $container): bool
     {
-        $name = $this->normalizeContainerName((string) data_get($container, 'Names', data_get($container, 'Name', '')));
+        $names = $this->containerNameCandidates($container);
+        $name = strtolower(implode(' ', $names));
         $image = strtolower((string) data_get($container, 'Image', ''));
         $labels = strtolower((string) data_get($container, 'Labels', ''));
 
@@ -298,10 +315,12 @@ class GithubRunnerInventory
             return true;
         }
 
-        if (preg_match('/(^|[.-])runner($|[.-])/', $name) === 1 && (
-            str_contains($image, 'runner') || str_contains($labels, 'runner')
-        )) {
-            return true;
+        foreach ($names as $candidate) {
+            if (preg_match('/(^|[.-])runner($|[.-])/', strtolower($candidate)) === 1 && (
+                str_contains($image, 'runner') || str_contains($labels, 'runner')
+            )) {
+                return true;
+            }
         }
 
         return false;
@@ -336,8 +355,11 @@ class GithubRunnerInventory
                 );
             }
 
-            $githubRunners = $repoCache[$cacheKey];
-            $match = collect($githubRunners)->first(function (array $githubRunner) use ($runner): bool {
+            $githubRunners = collect($repoCache[$cacheKey])
+                ->filter(fn ($githubRunner): bool => is_array($githubRunner))
+                ->values();
+
+            $match = $githubRunners->first(function (array $githubRunner) use ($runner): bool {
                 $localName = strtolower((string) ($runner['runner_name'] ?? $runner['name'] ?? ''));
                 $remoteName = strtolower((string) ($githubRunner['name'] ?? ''));
 
@@ -361,7 +383,7 @@ class GithubRunnerInventory
                 'github_status' => $status,
                 'github_busy' => (bool) ($match['busy'] ?? false),
                 'github_runner_id' => (int) ($match['id'] ?? 0) ?: null,
-                'github_labels' => $match['labels'] ?? [],
+                'github_labels' => is_array($match['labels'] ?? null) ? $match['labels'] : [],
                 'github_repo' => $parsed['owner'].'/'.$parsed['repo'],
                 'source' => 'both',
             ];
@@ -521,7 +543,7 @@ class GithubRunnerInventory
                     return false;
                 }
 
-                return $this->normalizeContainerName((string) data_get($container, 'Names', '')) === $containerName
+                return $this->containerNamesMatch($container, $containerName)
                     && $this->isGithubRunnerContainer($container);
             });
         } catch (\Throwable) {
@@ -529,6 +551,11 @@ class GithubRunnerInventory
         }
 
         if (! is_array($match)) {
+            $match = $this->inspectRunnerContainer($server, $containerName);
+        }
+
+        if (! is_array($match)) {
+            Cache::forget('devforge.github.runners.list.'.$server->team_id);
             throw (new ModelNotFoundException)->setModel('GithubRunner', [$containerName]);
         }
 
@@ -542,7 +569,7 @@ class GithubRunnerInventory
         try {
             $containers = $this->loadRunnerContainers($server);
         } catch (\Throwable) {
-            return false;
+            return $this->containerExistsByName($server, $containerName);
         }
 
         return $containers->contains(function ($container) use ($containerName): bool {
@@ -550,8 +577,75 @@ class GithubRunnerInventory
                 return false;
             }
 
-            return $this->normalizeContainerName((string) data_get($container, 'Names', '')) === $containerName;
+            return $this->containerNamesMatch($container, $containerName);
+        }) || $this->containerExistsByName($server, $containerName);
+    }
+
+    private function containerExistsByName(Server $server, string $containerName): bool
+    {
+        try {
+            $raw = instant_remote_process([
+                'docker inspect '.escapeshellarg($containerName).' --format "{{.Id}}"',
+            ], $server, false, false, 8);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return is_string($raw) && trim($raw) !== '';
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function inspectRunnerContainer(Server $server, string $containerName): ?array
+    {
+        try {
+            $raw = instant_remote_process([
+                'docker ps -a --filter name='.escapeshellarg($containerName)." --format '{{json .}}'",
+            ], $server, false, false, 10);
+            $containers = format_docker_command_output_to_json(is_string($raw) ? $raw : '');
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $match = $containers->first(function ($container) use ($containerName): bool {
+            return is_array($container)
+                && $this->containerNamesMatch($container, $containerName)
+                && $this->isGithubRunnerContainer($container);
         });
+
+        return is_array($match) ? $match : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $container
+     */
+    private function containerNamesMatch(array $container, string $containerName): bool
+    {
+        $needle = strtolower($this->normalizeContainerName($containerName));
+
+        foreach ($this->containerNameCandidates($container) as $candidate) {
+            if (strtolower($candidate) === $needle) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<string, mixed>  $container
+     * @return array<int, string>
+     */
+    private function containerNameCandidates(array $container): array
+    {
+        $raw = (string) data_get($container, 'Names', data_get($container, 'Name', ''));
+
+        return collect(preg_split('/[,\s]+/', $raw) ?: [])
+            ->map(fn (string $name): string => $this->normalizeContainerName($name))
+            ->filter(fn (string $name): bool => $name !== '')
+            ->values()
+            ->all();
     }
 
     /**
@@ -560,7 +654,8 @@ class GithubRunnerInventory
      */
     private function presentContainer(Server $server, array $container): array
     {
-        $name = $this->normalizeContainerName((string) data_get($container, 'Names', data_get($container, 'Name', '')));
+        $candidates = $this->containerNameCandidates($container);
+        $name = $candidates[0] ?? $this->normalizeContainerName((string) data_get($container, 'Names', data_get($container, 'Name', '')));
         $state = strtolower((string) data_get($container, 'State', ''));
         $status = (string) data_get($container, 'Status', $state);
         $labels = (string) data_get($container, 'Labels', '');
@@ -628,7 +723,9 @@ class GithubRunnerInventory
 
                 return [
                     'key' => $key,
-                    'value' => $this->isSensitiveEnvKey($key) ? '••••••••' : $value,
+                    'value' => $this->isSensitiveEnvKey($key)
+                        ? '••••••••'
+                        : (function_exists('sanitize_utf8_text') ? sanitize_utf8_text($value) : $value),
                 ];
             })
             ->filter(fn (array $entry): bool => $entry['key'] !== '')
@@ -641,7 +738,7 @@ class GithubRunnerInventory
         $upper = strtoupper($key);
 
         foreach (self::SENSITIVE_ENV_KEYS as $needle) {
-            if ($upper === $needle || str_ends_with($upper, '_'.$needle) || str_contains($upper, $needle)) {
+            if ($upper === $needle || str_ends_with($upper, '_'.$needle)) {
                 return true;
             }
         }
@@ -713,7 +810,7 @@ class GithubRunnerInventory
             ->values()
             ->map(fn (string $line, int $index): array => [
                 'cursor' => $index + 1,
-                'message' => $line,
+                'message' => function_exists('sanitize_utf8_text') ? sanitize_utf8_text($line) : $line,
             ])
             ->all();
     }

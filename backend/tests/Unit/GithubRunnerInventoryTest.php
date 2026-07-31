@@ -13,6 +13,11 @@ it('detects github runner containers by name image and labels', function (array 
         'Image' => 'ghcr.io/bobdivx/popcorn-github-runner-client:latest',
         'Labels' => 'com.casaos.app_id=github-runners',
     ], true],
+    'comma separated names' => [[
+        'Names' => '/github-runner-client,github-runner-client',
+        'Image' => 'ghcr.io/bobdivx/popcorn-github-runner-client:latest',
+        'Labels' => 'com.casaos.app_id=github-runners',
+    ], true],
     'server runner name' => [[
         'Names' => '/github-runner-server',
         'Image' => 'alpine:latest',

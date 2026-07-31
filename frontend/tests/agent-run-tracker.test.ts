@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
     agentRunProgressLabel,
+    isInFlightAgentRunStatus,
     isTerminalAgentRunStatus,
     parseLastAgentLogLine,
+    shouldTrackAgentLatestRun,
 } from '../src/lib/agent-run-tracker';
 import type { AgentRun } from '../src/lib/domain-api';
 
@@ -34,6 +36,34 @@ describe('isTerminalAgentRunStatus', () => {
     it('returns false for in-flight statuses', () => {
         expect(isTerminalAgentRunStatus('running')).toBe(false);
         expect(isTerminalAgentRunStatus('pending')).toBe(false);
+    });
+});
+
+describe('isInFlightAgentRunStatus', () => {
+    it('detects pending, running and waiting_for_subagents', () => {
+        expect(isInFlightAgentRunStatus('pending')).toBe(true);
+        expect(isInFlightAgentRunStatus('running')).toBe(true);
+        expect(isInFlightAgentRunStatus('waiting_for_subagents')).toBe(true);
+        expect(isInFlightAgentRunStatus('completed')).toBe(false);
+        expect(isInFlightAgentRunStatus('failed')).toBe(false);
+    });
+});
+
+describe('shouldTrackAgentLatestRun', () => {
+    it('tracks only when agent is running and latest run is still in flight', () => {
+        expect(shouldTrackAgentLatestRun('running', { uuid: 'r1', status: 'running' }, false)).toBe(true);
+        expect(shouldTrackAgentLatestRun('running', { uuid: 'r1', status: 'pending' }, false)).toBe(true);
+    });
+
+    it('does not re-track a finished run while agent status is still stale running', () => {
+        expect(shouldTrackAgentLatestRun('running', { uuid: 'r1', status: 'completed' }, false)).toBe(false);
+        expect(shouldTrackAgentLatestRun('running', { uuid: 'r1', status: 'failed' }, false)).toBe(false);
+    });
+
+    it('skips when already tracking or agent is idle', () => {
+        expect(shouldTrackAgentLatestRun('running', { uuid: 'r1', status: 'running' }, true)).toBe(false);
+        expect(shouldTrackAgentLatestRun('idle', { uuid: 'r1', status: 'running' }, false)).toBe(false);
+        expect(shouldTrackAgentLatestRun('running', null, false)).toBe(false);
     });
 });
 

@@ -13,7 +13,9 @@ import { AgentRunProgress } from './AgentRunProgress';
 import { AgentMemoryPanel } from './AgentMemoryPanel';
 import { AgentStandingOrdersPanel } from './AgentStandingOrdersPanel';
 import { AgentSubAgentsPanel } from './AgentSubAgentsPanel';
+import { AgentProviderModelFields } from './AgentProviderModelFields';
 import { useAgentRunTracker } from '../../lib/use-agent-run-tracker';
+import { isInFlightAgentRunStatus, shouldTrackAgentLatestRun } from '../../lib/agent-run-tracker';
 
 type Props = {
     agent: Agent;
@@ -57,10 +59,10 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
     }, [agent.uuid]);
 
     useEffect(() => {
-        if (agent.status === 'running' && agent.latest_run?.uuid && !isTracking) {
-            trackExistingRun(agent.latest_run.uuid);
+        if (shouldTrackAgentLatestRun(agent.status, agent.latest_run, isTracking)) {
+            trackExistingRun(agent.latest_run!.uuid);
         }
-    }, [agent.status, agent.latest_run?.uuid, isTracking, trackExistingRun]);
+    }, [agent.status, agent.latest_run?.uuid, agent.latest_run?.status, isTracking, trackExistingRun]);
 
     useEffect(() => {
         if (outcome === 'completed' && activeRun?.uuid) {
@@ -78,6 +80,7 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
             heartbeat_enabled: agent.heartbeat_enabled ?? false,
             provider_config_id: agent.provider?.id ?? null,
             fallback_provider_config_id: agent.fallback_provider?.id ?? null,
+            preferred_model: agent.preferred_model ?? null,
         });
     }, [agent]);
 
@@ -109,8 +112,9 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
         await launch();
     };
 
-    const isBusy = isTracking || agent.status === 'running';
-    const showProgress = isTracking && activeRun && (activeRun.status === 'running' || activeRun.status === 'pending');
+    const isBusy = isTracking
+        || (agent.status === 'running' && Boolean(agent.latest_run && isInFlightAgentRunStatus(agent.latest_run.status)));
+    const showProgress = isTracking && activeRun && (activeRun.status === 'running' || activeRun.status === 'pending' || activeRun.status === 'waiting_for_subagents');
     const runFeedback = runError ?? (outcome === 'failed' && activeRun?.summary ? activeRun.summary : null);
 
     const handleDelete = async () => {
@@ -176,29 +180,15 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
                     <span class="font-medium">Nom</span>
                     <input class="input input-bordered input-sm" type="text" value={form.name ?? ''} onInput={(e) => setForm({ ...form, name: (e.target as HTMLInputElement).value })} />
                 </label>
-                <label class="grid gap-1 text-xs">
-                    <span class="font-medium">Provider LLM</span>
-                    <select class="select select-bordered select-sm" value={form.provider_config_id ?? ''} onChange={(e) => {
-                        const v = (e.target as HTMLSelectElement).value;
-                        setForm({ ...form, provider_config_id: v ? Number(v) : null });
-                    }}
-                    >
-                        <option value="">Auto (provider par défaut)</option>
-                        {providers.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.provider})</option>)}
-                    </select>
-                    <span class="text-[11px] text-base-content/50">Modèle en mode Auto — sélection automatique comme Cursor.</span>
-                </label>
-                <label class="grid gap-1 text-xs">
-                    <span class="font-medium">Provider de secours</span>
-                    <select class="select select-bordered select-sm" value={form.fallback_provider_config_id ?? ''} onChange={(e) => {
-                        const v = (e.target as HTMLSelectElement).value;
-                        setForm({ ...form, fallback_provider_config_id: v ? Number(v) : null });
-                    }}
-                    >
-                        <option value="">Automatique</option>
-                        {providers.filter((p) => p.id !== form.provider_config_id).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                </label>
+                <AgentProviderModelFields
+                    providers={providers}
+                    providerConfigId={form.provider_config_id}
+                    fallbackProviderConfigId={form.fallback_provider_config_id}
+                    preferredModel={form.preferred_model}
+                    onProviderChange={(id) => setForm({ ...form, provider_config_id: id, preferred_model: null })}
+                    onFallbackChange={(id) => setForm({ ...form, fallback_provider_config_id: id })}
+                    onPreferredModelChange={(model) => setForm({ ...form, preferred_model: model })}
+                />
                 {isEventOnlyAgentType(agent.type) ? (
                     <p class="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-[11px] text-base-content/70">
                         {eventTriggerLabel(agent.type)}

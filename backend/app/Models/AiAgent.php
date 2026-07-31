@@ -364,4 +364,33 @@ class AiAgent extends Model
     {
         return $this->effectiveProviderConfig() !== null;
     }
+
+    /**
+     * Modèle préféré pour cet agent (override du modèle du provider). Null = hériter du provider / Auto.
+     */
+    public function preferredLlmModel(): ?string
+    {
+        $model = $this->metadata['llm_model'] ?? null;
+        if (! is_string($model)) {
+            return null;
+        }
+
+        $model = trim($model);
+
+        return $model === '' ? null : $model;
+    }
+
+    public function setPreferredLlmModel(?string $model): void
+    {
+        $metadata = is_array($this->metadata) ? $this->metadata : [];
+        $normalized = is_string($model) ? trim($model) : '';
+
+        if ($normalized === '' || strtolower($normalized) === 'auto') {
+            unset($metadata['llm_model']);
+        } else {
+            $metadata['llm_model'] = $normalized;
+        }
+
+        $this->metadata = $metadata === [] ? null : $metadata;
+    }
 }

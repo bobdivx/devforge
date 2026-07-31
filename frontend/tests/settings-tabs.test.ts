@@ -8,16 +8,15 @@ import {
 } from '../src/lib/settings-tabs';
 
 describe('onglets paramètres DevForge', () => {
-    it('masque les onglets instance admin et agents selon les permissions', () => {
+    it('masque les onglets instance admin selon les permissions', () => {
         const memberTabs = visibleSettingsTabs(false, false);
         expect(memberTabs.some(({ id }) => id === 'instance')).toBe(false);
         expect(memberTabs.some(({ id }) => id === 'oauth')).toBe(false);
-        expect(memberTabs.some(({ id }) => id === 'ai')).toBe(false);
         expect(memberTabs.some(({ id }) => id === 'notifications')).toBe(true);
 
         const adminTabs = visibleSettingsTabs(true, true);
         expect(adminTabs.some(({ id }) => id === 'instance')).toBe(true);
-        expect(adminTabs.some(({ id }) => id === 'ai')).toBe(true);
+        expect(adminTabs.map(({ id }) => id)).not.toContain('ai');
     });
 
     it('déduit le canal de notification depuis les routes legacy', () => {

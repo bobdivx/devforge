@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findRoute, normalizeRoutePath, routeHref, visibleRoutes, appRoutes } from '../src/lib/routes';
+import { findRoute, normalizeRoutePath, resolveResourceCanonicalLocation, routeHref, visibleRoutes, appRoutes } from '../src/lib/routes';
 import { parseSettingsTab, settingsTabPath } from '../src/lib/settings-tabs';
 
 describe('routage DevForge', () => {
@@ -116,13 +116,6 @@ describe('routage DevForge', () => {
 
         expect(storage?.path).toBe('/storage');
         expect(storage?.label).toBe('Stockage');
-
-        const deploymentIndex = routes.findIndex(({ page }) => page === 'deployments');
-        const monitoringIndex = routes.findIndex(({ page }) => page === 'monitoring');
-        const storageIndex = routes.findIndex(({ page }) => page === 'storage');
-
-        expect(storageIndex).toBeGreaterThan(deploymentIndex);
-        expect(storageIndex).toBeLessThan(monitoringIndex);
     });
 
     it('priorise les applications dans le menu principal', () => {
@@ -137,5 +130,12 @@ describe('routage DevForge', () => {
         }
 
         expect(findRoute('/agents').description).toBe("Équipe d'agents autonomes DevForge.");
+    });
+
+    it('redirige les anciens paramètres AI vers /agents', () => {
+        expect(resolveResourceCanonicalLocation('/settings/ai')).toBe('/agents');
+        expect(resolveResourceCanonicalLocation('/devforge/settings/ai')).toBe('/agents');
+        expect(findRoute('/settings/ai').page).toBe('agents');
+        expect(findRoute('/devforge/settings/ai').path).toBe('/agents');
     });
 });

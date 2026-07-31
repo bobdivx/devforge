@@ -4,6 +4,7 @@ import { Card } from '../ui/Card';
 import { DataState } from '../ui/DataState';
 import { StatusBadge } from '../ui/StatusBadge';
 import { CronInput } from '../ui/CronInput';
+import { HiddenUsernameField } from '../ui/HiddenUsernameField';
 import type { BootstrapPermissions } from '../../lib/bootstrap';
 import {
     domainApi,
@@ -235,7 +236,16 @@ function AdvancedForm({
     };
 
     return (
-        <div class="grid gap-3">
+        <form
+            class="grid gap-3"
+            onSubmit={(event) => {
+                event.preventDefault();
+                if (canEdit && !saving) {
+                    void save();
+                }
+            }}
+        >
+            <HiddenUsernameField />
             <ToggleField
                 label="Inscriptions"
                 checked={form.is_registration_enabled}
@@ -309,6 +319,7 @@ function AdvancedForm({
                         type="password"
                         value={confirmationPassword}
                         disabled={!canEdit || saving}
+                        autoComplete="current-password"
                         onInput={(event) => setConfirmationPassword(event.currentTarget.value)}
                     />
                 </Field>
@@ -316,12 +327,12 @@ function AdvancedForm({
             {error && <p class="text-sm text-error">{error}</p>}
             {message && <p class="text-sm text-base-content/60" role="status">{message}</p>}
             {canEdit && (
-                <button class="btn btn-primary btn-sm w-fit rounded-xl" type="button" disabled={saving} onClick={() => void save()}>
+                <button class="btn btn-primary btn-sm w-fit rounded-xl" type="submit" disabled={saving}>
                     <Save class="size-3.5" aria-hidden />
                     {saving ? 'Enregistrement…' : 'Enregistrer'}
                 </button>
             )}
-        </div>
+        </form>
     );
 }
 
@@ -376,7 +387,16 @@ function EmailForm({
     };
 
     return (
-        <div class="grid gap-3">
+        <form
+            class="grid gap-3"
+            onSubmit={(event) => {
+                event.preventDefault();
+                if (canEdit && !saving) {
+                    void save();
+                }
+            }}
+        >
+            <HiddenUsernameField />
             <ToggleField
                 label="SMTP"
                 checked={form.smtp_enabled}
@@ -477,12 +497,12 @@ function EmailForm({
             {error && <p class="text-sm text-error">{error}</p>}
             {message && <p class="text-sm text-base-content/60" role="status">{message}</p>}
             {canEdit && (
-                <button class="btn btn-primary btn-sm w-fit rounded-xl" type="button" disabled={saving} onClick={() => void save()}>
+                <button class="btn btn-primary btn-sm w-fit rounded-xl" type="submit" disabled={saving}>
                     <Save class="size-3.5" aria-hidden />
                     {saving ? 'Enregistrement…' : 'Enregistrer'}
                 </button>
             )}
-        </div>
+        </form>
     );
 }
 
@@ -673,7 +693,16 @@ function OauthProviderForm({
     };
 
     return (
-        <div class="rounded-xl border border-base-300/70 p-4">
+        <form
+            class="rounded-xl border border-base-300/70 p-4"
+            onSubmit={(event) => {
+                event.preventDefault();
+                if (canEdit && !saving) {
+                    void save();
+                }
+            }}
+        >
+            <HiddenUsernameField />
             <div class="mb-3 flex items-center justify-between gap-2">
                 <p class="text-sm font-semibold capitalize">{provider.provider}</p>
                 <StatusBadge label={form.enabled ? 'Activé' : 'Désactivé'} tone={form.enabled ? 'success' : 'neutral'} />
@@ -699,6 +728,7 @@ function OauthProviderForm({
                         type="password"
                         value={form.client_secret}
                         disabled={!canEdit || saving}
+                        autoComplete="new-password"
                         onInput={(event) => setForm((current) => ({ ...current, client_secret: event.currentTarget.value }))}
                     />
                 </Field>
@@ -729,13 +759,13 @@ function OauthProviderForm({
                 {error && <p class="text-sm text-error">{error}</p>}
                 {message && <p class="text-sm text-base-content/60" role="status">{message}</p>}
                 {canEdit && (
-                    <button class="btn btn-primary btn-sm w-fit rounded-xl" type="button" disabled={saving} onClick={() => void save()}>
+                    <button class="btn btn-primary btn-sm w-fit rounded-xl" type="submit" disabled={saving}>
                         <Save class="size-3.5" aria-hidden />
                         {saving ? 'Enregistrement…' : 'Enregistrer'}
                     </button>
                 )}
             </div>
-        </div>
+        </form>
     );
 }
 

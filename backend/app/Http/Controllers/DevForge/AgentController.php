@@ -65,6 +65,7 @@ class AgentController extends Controller
             'system_prompt' => ['nullable', 'string', 'max:5000'],
             'provider_config_id' => ['nullable', 'integer', Rule::exists('ai_provider_configs', 'id')->where('team_id', $team->id)],
             'fallback_provider_config_id' => ['nullable', 'integer', Rule::exists('ai_provider_configs', 'id')->where('team_id', $team->id)],
+            'preferred_model' => ['nullable', 'string', 'max:120'],
             'parent_agent_id' => ['nullable', 'integer', Rule::exists('ai_agents', 'id')->where('team_id', $team->id)],
             'resource_uuid' => ['nullable', 'string', 'max:64'],
             'schedule_minutes' => ['nullable', 'integer', 'min:0'],
@@ -160,6 +161,7 @@ class AgentController extends Controller
             'system_prompt' => ['sometimes', 'nullable', 'string', 'max:5000'],
             'provider_config_id' => ['sometimes', 'nullable', 'integer', Rule::exists('ai_provider_configs', 'id')->where('team_id', $team->id)],
             'fallback_provider_config_id' => ['sometimes', 'nullable', 'integer', Rule::exists('ai_provider_configs', 'id')->where('team_id', $team->id)],
+            'preferred_model' => ['sometimes', 'nullable', 'string', 'max:120'],
             'schedule_minutes' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'schedule_cron' => ['sometimes', 'nullable', 'string', 'max:120'],
             'heartbeat_enabled' => ['sometimes', 'boolean'],
@@ -261,20 +263,11 @@ class AgentController extends Controller
             'status' => $agent->status,
             'llm_available' => $agent->hasLlmProvider(),
             'last_run_at' => $agent->last_run_at?->toISOString(),
-            'provider' => $displayProvider ? [
-                'id' => $displayProvider->id,
-                'name' => $displayProvider->name,
-                'provider' => $displayProvider->provider,
-                'model' => LlmModelResolver::AUTO,
-                'model_label' => 'Auto',
-            ] : null,
-            'fallback_provider' => $agent->relationLoaded('fallbackProviderConfig') && $agent->fallbackProviderConfig ? [
-                'id' => $agent->fallbackProviderConfig->id,
-                'name' => $agent->fallbackProviderConfig->name,
-                'provider' => $agent->fallbackProviderConfig->provider,
-                'model' => $agent->fallbackProviderConfig->model,
-                'model_label' => $agent->fallbackProviderConfig->modelDisplayLabel(),
-            ] : null,
+            'preferred_model' => $agent->preferredLlmModel(),
+            'provider' => $displayProvider ? $this->presentProvider($displayProvider, $agent->preferredLlmModel()) : null,
+            'fallback_provider' => $agent->relationLoaded('fallbackProviderConfig') && $agent->fallbackProviderConfig
+                ? $this->presentProvider($agent->fallbackProviderConfig)
+                : null,
             'parent_agent_id' => $agent->parent_agent_id,
             'resource_uuid' => $agent->resource_uuid,
             'sub_agents_count' => (int) ($agent->sub_agents_count
@@ -327,6 +320,32 @@ class AgentController extends Controller
     }
 
     /**
+     * @return array{id: int, name: string, provider: string, model: string, model_label: string, base_url: string|null}
+     */
+    private function presentProvider(AiProviderConfig $provider, ?string $modelOverride = null): array
+    {
+        $effectiveModel = $modelOverride;
+        if ($effectiveModel === null || LlmModelResolver::isAuto($effectiveModel)) {
+            $effectiveModel = $provider->model;
+        }
+
+        $modelLabel = $modelOverride !== null && ! LlmModelResolver::isAuto($modelOverride)
+            ? trim($modelOverride)
+            : $provider->modelDisplayLabel();
+
+        return [
+            'id' => $provider->id,
+            'name' => $provider->name,
+            'provider' => $provider->provider,
+            'base_url' => $provider->base_url,
+            'model' => is_string($effectiveModel) && trim($effectiveModel) !== ''
+                ? trim($effectiveModel)
+                : LlmModelResolver::AUTO,
+            'model_label' => $modelLabel !== '' ? $modelLabel : 'Auto',
+        ];
+    }
+
+    /**
      * @param  array<string, mixed>  $validated
      * @return array<string, mixed>
      */
@@ -343,6 +362,25 @@ class AgentController extends Controller
         if (! empty($parentId)) {
             $validated['schedule_minutes'] = 0;
             $validated['schedule_cron'] = null;
+        }
+
+        if (array_key_exists('preferred_model', $validated)) {
+            $preferred = $validated['preferred_model'];
+            unset($validated['preferred_model']);
+
+            $metadata = is_array($agent?->metadata) ? $agent->metadata : [];
+            if (is_array($validated['metadata'] ?? null)) {
+                $metadata = array_merge($metadata, $validated['metadata']);
+            }
+
+            $normalized = is_string($preferred) ? trim($preferred) : '';
+            if ($normalized === '' || strtolower($normalized) === LlmModelResolver::AUTO) {
+                unset($metadata['llm_model']);
+            } else {
+                $metadata['llm_model'] = $normalized;
+            }
+
+            $validated['metadata'] = $metadata === [] ? null : $metadata;
         }
 
         return $validated;

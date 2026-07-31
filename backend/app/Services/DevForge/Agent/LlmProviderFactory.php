@@ -20,24 +20,24 @@ class LlmProviderFactory
         private readonly OllamaFallbackResolver $ollamaFallbackResolver,
     ) {}
 
-    public function make(AiProviderConfig $config, ?TaskModelTier $tier = null): LlmProvider
+    public function make(AiProviderConfig $config, ?TaskModelTier $tier = null, ?string $modelOverride = null): LlmProvider
     {
         return match ($config->provider) {
             'gemini' => new GeminiModelFailoverProvider(
                 apiKey: (string) $config->api_key,
-                model: $config->resolvedModel(),
+                model: $this->resolveGeminiModel($config, $modelOverride),
                 baseUrl: LlmEndpointResolver::geminiBaseUrl($config->base_url),
-                autoModels: LlmModelResolver::isAuto($config->model)
+                autoModels: LlmModelResolver::isAuto($modelOverride ?? $config->model)
                     ? $this->resolveAutoGeminiModels($config, $tier)
                     : null,
             ),
             'ollama' => new OllamaProvider(
                 baseUrl: LlmEndpointResolver::ollamaBaseUrl($config->base_url),
-                model: $this->resolveOllamaModel($config),
+                model: $this->resolveOllamaModel($config, $modelOverride),
             ),
             'openai', 'openrouter' => new OpenAiCompatibleProvider(
                 apiKey: (string) $config->api_key,
-                model: $this->resolveOpenAiCompatibleModel($config),
+                model: $this->resolveOpenAiCompatibleModel($config, $modelOverride),
                 baseUrl: LlmEndpointResolver::openAiCompatibleBaseUrl($config->provider, $config->base_url),
                 label: $config->provider,
                 extraHeaders: $config->provider === 'openrouter'
@@ -49,7 +49,7 @@ class LlmProviderFactory
             ),
             'anthropic' => new AnthropicProvider(
                 apiKey: (string) $config->api_key,
-                model: $this->resolveAnthropicModel($config),
+                model: $this->resolveAnthropicModel($config, $modelOverride),
                 baseUrl: LlmEndpointResolver::anthropicBaseUrl($config->base_url),
             ),
             default => throw new \InvalidArgumentException("Provider non supporté : {$config->provider}"),
@@ -64,7 +64,8 @@ class LlmProviderFactory
             throw new \InvalidArgumentException('Aucun provider LLM configuré pour cet agent.');
         }
 
-        $primary = $this->make($primaryConfig, $tier);
+        $override = $agent->preferredLlmModel();
+        $primary = $this->make($primaryConfig, $tier, $override);
         $fallback = $this->resolveFallbackProvider($agent, $primaryConfig, $tier);
 
         if ($fallback === null) {
@@ -74,7 +75,7 @@ class LlmProviderFactory
         return new ResilientLlmProvider(
             primary: $primary,
             fallback: $fallback['provider'],
-            primaryLabel: $this->label($primaryConfig),
+            primaryLabel: $this->label($primaryConfig, $override),
             fallbackLabel: $fallback['label'],
             onFallback: $onFallback,
         );
@@ -134,16 +135,23 @@ class LlmProviderFactory
         return null;
     }
 
-    public function describeResolvedModel(AiProviderConfig $config): string
+    public function describeResolvedModel(AiProviderConfig $config, ?string $modelOverride = null): string
     {
         return match ($config->provider) {
-            'ollama' => 'ollama/'.$this->resolveOllamaModel($config),
+            'ollama' => 'ollama/'.$this->resolveOllamaModel($config, $modelOverride),
             default => LlmModelResolver::displayProviderLabel($config),
         };
     }
 
-    private function label(AiProviderConfig $config): string
+    private function label(AiProviderConfig $config, ?string $modelOverride = null): string
     {
+        if ($modelOverride !== null && ! LlmModelResolver::isAuto($modelOverride)) {
+            $trimmed = trim($modelOverride);
+            if ($trimmed !== '') {
+                return $config->provider.'/'.$trimmed;
+            }
+        }
+
         return LlmModelResolver::displayProviderLabel($config);
     }
 
@@ -178,8 +186,28 @@ class LlmProviderFactory
         }
     }
 
-    private function resolveOllamaModel(AiProviderConfig $config): string
+    private function resolveGeminiModel(AiProviderConfig $config, ?string $modelOverride = null): string
     {
+        $candidate = $modelOverride ?? $config->model;
+        if (! LlmModelResolver::isAuto($candidate)) {
+            $explicit = trim((string) $candidate);
+            if ($explicit !== '') {
+                return $explicit;
+            }
+        }
+
+        return $config->resolvedModel();
+    }
+
+    private function resolveOllamaModel(AiProviderConfig $config, ?string $modelOverride = null): string
+    {
+        if ($modelOverride !== null && ! LlmModelResolver::isAuto($modelOverride)) {
+            $override = trim($modelOverride);
+            if ($override !== '') {
+                return $override;
+            }
+        }
+
         if (! LlmModelResolver::isAuto($config->model)) {
             $explicit = trim($config->model);
 
@@ -208,10 +236,11 @@ class LlmProviderFactory
         return LlmModelResolver::defaultOllamaModel();
     }
 
-    private function resolveOpenAiCompatibleModel(AiProviderConfig $config): string
+    private function resolveOpenAiCompatibleModel(AiProviderConfig $config, ?string $modelOverride = null): string
     {
-        if (! LlmModelResolver::isAuto($config->model)) {
-            $explicit = trim($config->model);
+        $candidate = $modelOverride ?? $config->model;
+        if (! LlmModelResolver::isAuto($candidate)) {
+            $explicit = trim((string) $candidate);
 
             if ($explicit !== '') {
                 return $explicit;
@@ -221,10 +250,11 @@ class LlmProviderFactory
         return LlmProviderRegistry::defaultModel($config->provider);
     }
 
-    private function resolveAnthropicModel(AiProviderConfig $config): string
+    private function resolveAnthropicModel(AiProviderConfig $config, ?string $modelOverride = null): string
     {
-        if (! LlmModelResolver::isAuto($config->model)) {
-            $explicit = trim($config->model);
+        $candidate = $modelOverride ?? $config->model;
+        if (! LlmModelResolver::isAuto($candidate)) {
+            $explicit = trim((string) $candidate);
 
             if ($explicit !== '') {
                 return $explicit;

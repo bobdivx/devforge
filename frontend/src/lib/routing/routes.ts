@@ -141,6 +141,9 @@ export const staticRoutePaths = [
 
     ...settingsTabPaths.filter((path) => path !== '/settings'),
 
+    // Redirection legacy → /agents (voir resolveResourceCanonicalLocation)
+    '/settings/ai',
+
     '/shared-variables',
 
     '/shared-variables/team',
@@ -360,6 +363,10 @@ export function servicePath(uuid: string, tab: ServiceDetailTabId = 'overview'):
  */
 export function resolveResourceCanonicalLocation(pathname: string): string | null {
     const normalizedPath = normalizeRoutePath(pathname);
+
+    if (normalizedPath === '/settings/ai') {
+        return '/agents';
+    }
 
     const applicationMatch = normalizedPath.match(
         /^\/project\/[^/]+\/environment\/[^/]+\/application\/([^/]+)(?:\/([^/]+))?/,
@@ -607,6 +614,10 @@ const dynamicRoutes: Array<{ pattern: RegExp; route: AppRoute }> = [
 export function findRoute(pathname: string): AppRoute {
 
     const normalizedPath = normalizeRoutePath(pathname);
+
+    if (normalizedPath === '/settings/ai') {
+        return agentsRoute;
+    }
 
     const exactRoute = appRoutes.find(({ path }) => path === normalizedPath);
 

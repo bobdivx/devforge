@@ -1,5 +1,3 @@
-import { AiProvidersSettings } from '../../components/agents/AiProvidersSettings';
-import { LayeredInstructionsPanel } from '../../components/agents/LayeredInstructionsPanel';
 import { InstanceSettingsPanels, OauthSettingsPanel } from '../../components/settings/InstanceSettingsPanels';
 import { NotificationsSettingsPanel } from '../../components/settings/NotificationsSettingsPanel';
 import { InstanceBackupSettingsPanel } from '../../components/settings/InstanceBackupSettingsPanel';
@@ -10,7 +8,6 @@ import { TeamSettingsPanel } from '../../components/settings/TeamSettingsPanel';
 import { SharedVariablesPanel } from '../../components/shared-variables/SharedVariablesPanel';
 import { S3StoragesSettings } from '../../components/storages/S3StoragesSettings';
 import { PageHeader } from '../../components/PageHeader';
-import { Card } from '../../components/ui/Card';
 import type { BootstrapPermissions, BootstrapTeam, BootstrapUser } from '../../lib/bootstrap';
 import {
     parseNotificationChannel,
@@ -92,23 +89,11 @@ export function SettingsPage({
                         <S3StoragesSettings canManage={permissions.create_resources} />
                     </div>
                 );
-            case 'ai':
-                return (
-                    <div class="grid gap-4">
-                        <Card title="Intelligence Artificielle" eyebrow="Providers LLM">
-                            <AiProvidersSettings />
-                        </Card>
-                        {agentsEnabled && (
-                            <Card title="Instructions agents" eyebrow="Couches org / perso / projet">
-                                <LayeredInstructionsPanel />
-                            </Card>
-                        )}
-                    </div>
-                );
             default:
                 return (
                     <ProfileSettingsPanel
                         legacyBaseUrl={legacyBaseUrl}
+                        email={user.email}
                         twoFactorEnabled={user.two_factor_enabled}
                         forcePasswordReset={user.force_password_reset}
                     />

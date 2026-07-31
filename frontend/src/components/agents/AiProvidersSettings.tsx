@@ -1,6 +1,7 @@
 import { CheckCircle, Pencil, Plus, RefreshCw, Trash2, Wifi, XCircle } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
 import { ActionToolbar } from '../ui/ActionToolbar';
+import { HiddenUsernameField } from '../ui/HiddenUsernameField';
 import type { AiProviderConfig, LlmModelOption, LlmProvider } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
 import { AUTO_MODEL_VALUE, CUSTOM_MODEL_VALUE, formatModelLabel, isAutoModel, modelSelectValue } from '../../lib/llm-models';
@@ -250,7 +251,9 @@ export function AiProvidersSettings() {
             <div class="toolbar-row">
                 <div>
                     <h3 class="text-sm font-semibold">Providers LLM</h3>
-                    <p class="text-xs text-base-content/60">Configurez Gemini ou Ollama pour alimenter vos agents IA.</p>
+                    <p class="text-xs text-base-content/60">
+                        Gemini, Ollama, etc. Plusieurs Ollama possibles (ex. PC 3090 + NAS A2000) = un provider par URL.
+                    </p>
                 </div>
                 <div class="card-toolbar w-full sm:w-auto">
                     <button class="btn btn-primary btn-sm w-full sm:w-auto" type="button" onClick={openCreateForm}>
@@ -338,6 +341,7 @@ export function AiProvidersSettings() {
 
             {showForm && (
                 <form class="rounded-xl border border-primary/30 bg-base-100 p-4" onSubmit={handleSubmit}>
+                    <HiddenUsernameField />
                     <h4 class="mb-4 text-sm font-semibold">{isEditing ? 'Modifier le provider' : 'Nouveau provider'}</h4>
                     <div class="grid gap-3 sm:grid-cols-2">
                         <label class="grid gap-1 text-xs">
@@ -386,6 +390,7 @@ export function AiProvidersSettings() {
                                     class="input input-bordered input-sm"
                                     type="password"
                                     required={! isEditing}
+                                    autoComplete="new-password"
                                     placeholder={isEditing && editingProvider?.has_api_key
                                         ? 'Laisser vide pour conserver la clé actuelle'
                                         : 'sk-… / AIza…'}
@@ -412,8 +417,8 @@ export function AiProvidersSettings() {
                                     onInput={(e) => setForm({ ...form, base_url: (e.target as HTMLInputElement).value })}
                                 />
                                 <span class="text-[11px] text-base-content/50">
-                                    Depuis le conteneur DevForge, utilisez l’IP de l’hôte ou{' '}
-                                    <code class="text-[10px]">host.docker.internal</code> — pas{' '}
+                                    URL publique OK (ex. https://ollama.briseteia.me). En local Docker : IP hôte ou{' '}
+                                    <code class="text-[10px]">host.docker.internal</code>, pas{' '}
                                     <code class="text-[10px]">localhost</code>.
                                 </span>
                             </label>

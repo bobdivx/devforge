@@ -742,6 +742,65 @@ export type AiProviderConfig = {
     created_at: string;
 };
 
+export type OllamaGpuInfo = {
+    index: number;
+    name: string;
+    memory_total_mib: number | null;
+    memory_used_mib: number | null;
+    memory_free_mib: number | null;
+    utilization_percent: number | null;
+    temperature_c: number | null;
+};
+
+export type OllamaHostInfo = {
+    server_id: number | null;
+    server_name: string | null;
+    probed: boolean;
+    cpu_cores: number | null;
+    memory_total_bytes: number | null;
+    memory_available_bytes: number | null;
+    gpus: OllamaGpuInfo[];
+    error: string | null;
+};
+
+export type OllamaModelInfo = {
+    name: string;
+    size: number | null;
+    parameter_size: string | null;
+    quantization: string | null;
+    family: string | null;
+    modified_at: string | null;
+};
+
+export type OllamaRunningModel = {
+    name: string;
+    size: number | null;
+    size_vram: number | null;
+    expires_at: string | null;
+};
+
+export type OllamaStatus = {
+    reachable: boolean;
+    base_url: string | null;
+    provider_id?: number | null;
+    provider_name?: string | null;
+    version: string | null;
+    models: OllamaModelInfo[];
+    running: OllamaRunningModel[];
+    host: OllamaHostInfo;
+    error: string | null;
+};
+
+export type OllamaInstance = {
+    id: number;
+    name: string;
+    base_url: string | null;
+    resolved_base_url: string | null;
+    is_default: boolean;
+    model: string | null;
+    reachable: boolean;
+};
+
 export type AgentModelRouting = {
     tier: 'light' | 'standard' | 'heavy';
     tier_label: string;
@@ -823,8 +882,9 @@ export type Agent = {
     status: AgentStatus;
     llm_available?: boolean;
     last_run_at: string | null;
-    provider: { id: number; name: string; provider: LlmProvider; model: string; model_label?: string } | null;
-    fallback_provider: { id: number; name: string; provider: LlmProvider; model: string; model_label?: string } | null;
+    provider: { id: number; name: string; provider: LlmProvider; model: string; model_label?: string; base_url?: string | null } | null;
+    fallback_provider: { id: number; name: string; provider: LlmProvider; model: string; model_label?: string; base_url?: string | null } | null;
+    preferred_model?: string | null;
     parent_agent_id: number | null;
     resource_uuid: string | null;
     sub_agents_count: number;
@@ -851,6 +911,7 @@ export type AgentInput = {
     system_prompt?: string;
     provider_config_id?: number | null;
     fallback_provider_config_id?: number | null;
+    preferred_model?: string | null;
     parent_agent_id?: number | null;
     resource_uuid?: string | null;
     schedule_minutes?: number;
@@ -3372,6 +3433,41 @@ export const domainApi = {
         base_url?: string | null;
         provider_id?: number;
     }) => mutate<ApiResponse<{ models: LlmModelOption[] }>>('/ai/providers/models', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    }),
+
+    ollamaInstances: () => apiFetch<ApiResponse<OllamaInstance[]>>(`${API_BASE}/ai/ollama/instances`),
+    ollamaStatus: (opts?: { baseUrl?: string | null; providerId?: number | null }) => {
+        const params = new URLSearchParams();
+        if (opts?.baseUrl) {
+            params.set('base_url', opts.baseUrl);
+        }
+        if (opts?.providerId != null) {
+            params.set('provider_id', String(opts.providerId));
+        }
+        const query = params.toString() ? `?${params.toString()}` : '';
+        return apiFetch<ApiResponse<OllamaStatus>>(`${API_BASE}/ai/ollama${query}`);
+    },
+    ollamaPull: (input: { model: string; base_url?: string | null; provider_id?: number | null }) => mutate<ApiResponse<{ ok: boolean; model: string; status: string | null }>>('/ai/ollama/pull', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    }, 900_000),
+    ollamaDeleteModel: (input: { model: string; base_url?: string | null; provider_id?: number | null }) => mutate<ApiResponse<{ ok: boolean; model: string }>>('/ai/ollama/models/delete', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    }),
+    ollamaSetProviderModel: (input: { provider_id: number; model: string }) => mutate<ApiResponse<{ id: number; name: string; model: string; model_label: string }>>('/ai/ollama/provider-model', {
+        method: 'PUT',
+        body: JSON.stringify(input),
+    }),
+    ollamaAssignAgent: (input: { agent_uuid: string; provider_id: number; model?: string | null }) => mutate<ApiResponse<{
+        agent_uuid: string;
+        agent_name: string;
+        provider_id: number;
+        provider_name: string;
+        preferred_model: string | null;
+    }>>('/ai/ollama/assign-agent', {
         method: 'POST',
         body: JSON.stringify(input),
     }),

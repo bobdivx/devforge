@@ -76,19 +76,29 @@ function getCurrentServiceContainerStatus(Server $server, int $id): Collection
 
 function format_docker_command_output_to_json($rawOutput): Collection
 {
-    $outputLines = explode(PHP_EOL, $rawOutput);
-    if (count($outputLines) === 1) {
-        $outputLines = collect($outputLines[0]);
-    } else {
-        $outputLines = collect($outputLines);
-    }
+    $outputLines = collect(preg_split("/\r\n|\n|\r/", (string) $rawOutput) ?: [])
+        ->map(fn ($line) => trim((string) $line))
+        ->reject(fn ($line) => $line === '');
 
     try {
         return $outputLines
-            ->reject(fn ($line) => empty($line))
-            ->map(fn ($outputLine) => json_decode($outputLine, true, flags: JSON_THROW_ON_ERROR));
+            ->map(fn ($outputLine) => json_decode($outputLine, true, flags: JSON_THROW_ON_ERROR))
+            ->filter(fn ($decoded) => is_array($decoded))
+            ->values();
     } catch (Throwable) {
-        return collect([]);
+        // Decode line-by-line so one bad line does not discard the whole payload.
+        return $outputLines
+            ->map(function ($outputLine) {
+                try {
+                    $decoded = json_decode($outputLine, true, flags: JSON_THROW_ON_ERROR);
+
+                    return is_array($decoded) ? $decoded : null;
+                } catch (Throwable) {
+                    return null;
+                }
+            })
+            ->filter()
+            ->values();
     }
 }
 

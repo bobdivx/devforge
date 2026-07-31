@@ -4,6 +4,7 @@ import type { Agent } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
 import { routeHref } from '../../lib/routes';
 import { scheduleLabel } from '../../lib/agent-triggers';
+import { isInFlightAgentRunStatus, shouldTrackAgentLatestRun } from '../../lib/agent-run-tracker';
 import { ActionToolbar } from '../ui/ActionToolbar';
 import { AgentAvatar } from './AgentAvatar';
 import { AgentErrorAlert } from './AgentErrorAlert';
@@ -61,15 +62,37 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
     } = useAgentRunTracker(agent.uuid, { onComplete: onRefresh });
 
     useEffect(() => {
-        if (agent.status === 'running' && agent.latest_run?.uuid && !isTracking) {
-            trackExistingRun(agent.latest_run.uuid);
+        if (shouldTrackAgentLatestRun(agent.status, agent.latest_run, isTracking)) {
+            trackExistingRun(agent.latest_run!.uuid);
         }
-    }, [agent.status, agent.latest_run?.uuid, isTracking, trackExistingRun]);
+    }, [agent.status, agent.latest_run?.uuid, agent.latest_run?.status, isTracking, trackExistingRun]);
+
+    const detailPath = agentDetailPath(agent.uuid);
+    const settingsPath = agentDetailPath(agent.uuid, { settings: true });
+    const runsPath = agentDetailPath(agent.uuid, {
+        view: 'runs',
+        run: activeRun?.uuid ?? agent.latest_run?.uuid ?? null,
+    });
+    const latestRunInFlight = Boolean(
+        agent.latest_run && isInFlightAgentRunStatus(agent.latest_run.status),
+    );
+    // is_active = permanently enabled; status/running = one execution only.
+    const isBusy = isTracking || (agent.status === 'running' && latestRunInFlight);
+    const displayStatus = !agent.is_active
+        ? 'paused'
+        : isBusy
+            ? 'running'
+            : agent.status === 'running' && !latestRunInFlight
+                ? 'idle'
+                : agent.status;
+    const showProgress = isTracking && activeRun && (activeRun.status === 'running' || activeRun.status === 'pending' || activeRun.status === 'waiting_for_subagents');
+    const showSuccess = outcome === 'completed' && !isTracking;
+    const displayError = runError ?? (outcome === 'failed' && activeRun?.summary ? activeRun.summary : null);
 
     const handleRun = async (e: MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        if (isTracking || agent.status === 'running') {
+        if (isBusy) {
             return;
         }
         await launch();
@@ -91,18 +114,6 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
             setToggling(false);
         }
     };
-
-    const detailPath = agentDetailPath(agent.uuid);
-    const settingsPath = agentDetailPath(agent.uuid, { settings: true });
-    const runsPath = agentDetailPath(agent.uuid, {
-        view: 'runs',
-        run: activeRun?.uuid ?? agent.latest_run?.uuid ?? null,
-    });
-    const isBusy = isTracking || agent.status === 'running';
-    const displayStatus = isBusy ? 'running' : agent.status;
-    const showProgress = isTracking && activeRun && (activeRun.status === 'running' || activeRun.status === 'pending');
-    const showSuccess = outcome === 'completed' && !isTracking;
-    const displayError = runError ?? (outcome === 'failed' && activeRun?.summary ? activeRun.summary : null);
 
     return (
         <article
@@ -140,7 +151,12 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                             )}
                         </p>
                     </div>
-                    <AgentStatusBadge status={displayStatus} spinning={isLaunching} />
+                    <div class="flex flex-col items-end gap-1">
+                        <AgentStatusBadge status={displayStatus} spinning={isLaunching || displayStatus === 'running'} />
+                        {agent.is_active && displayStatus !== 'paused' && (
+                            <span class="text-[10px] font-medium text-success/80">Activé</span>
+                        )}
+                    </div>
                 </div>
 
                 {agent.description && (
@@ -197,13 +213,15 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                         <button
                             class="btn btn-ghost btn-xs gap-1"
                             type="button"
-                            title={agent.is_active ? "Suspendre l'agent" : "Activer l'agent"}
+                            title={agent.is_active ? "Suspendre l'agent (reste configuré, ne s'exécute plus)" : "Activer l'agent (éligible au planning / lancement)"}
                             disabled={toggling || isBusy}
                             onClick={handleToggleActive}
                         >
                             {toggling
                                 ? <RefreshCw class="size-3 animate-spin" aria-hidden />
-                                : <Pause class="size-3" aria-hidden />}
+                                : agent.is_active
+                                    ? <Pause class="size-3" aria-hidden />
+                                    : <Play class="size-3" aria-hidden />}
                         </button>
                         <button
                             class={`btn btn-xs gap-1 ${isBusy ? 'btn-primary pointer-events-none' : 'btn-primary'}`}

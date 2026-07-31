@@ -14,6 +14,7 @@ import {
     type SubAgentPreset,
 } from '../../lib/agent-presets';
 import { AgentAvatar } from './AgentAvatar';
+import { AgentProviderModelFields } from './AgentProviderModelFields';
 import { Modal } from '../ui/Modal';
 
 const avatarColors = [
@@ -40,6 +41,7 @@ function emptyForm(type: AgentType = 'deployment', parentId?: number | null): Ag
         schedule_minutes: defaultScheduleForType(type),
         provider_config_id: null,
         fallback_provider_config_id: null,
+        preferred_model: null,
         parent_agent_id: parentId ?? null,
         is_active: true,
     };
@@ -332,40 +334,15 @@ export function CreateAgentModal({ open, onClose, onCreated, parentAgent = null 
 
                     {showAdvanced && (
                         <div class="grid gap-3 rounded-lg border border-base-300 p-3">
-                            <label class="grid gap-1 text-xs">
-                                <span class="font-medium">Provider LLM</span>
-                                <select
-                                    class="select select-bordered select-sm"
-                                    value={form.provider_config_id ?? ''}
-                                    onChange={(e) => {
-                                        const v = (e.target as HTMLSelectElement).value;
-                                        setForm({ ...form, provider_config_id: v ? Number(v) : null });
-                                    }}
-                                >
-                                    <option value="">Auto (défaut équipe)</option>
-                                    {providers.map((p) => (
-                                        <option key={p.id} value={p.id}>{p.name} ({p.provider})</option>
-                                    ))}
-                                </select>
-                            </label>
-                            <label class="grid gap-1 text-xs">
-                                <span class="font-medium">Provider de secours</span>
-                                <select
-                                    class="select select-bordered select-sm"
-                                    value={form.fallback_provider_config_id ?? ''}
-                                    onChange={(e) => {
-                                        const v = (e.target as HTMLSelectElement).value;
-                                        setForm({ ...form, fallback_provider_config_id: v ? Number(v) : null });
-                                    }}
-                                >
-                                    <option value="">Automatique</option>
-                                    {providers
-                                        .filter((p) => p.id !== form.provider_config_id)
-                                        .map((p) => (
-                                            <option key={p.id} value={p.id}>{p.name}</option>
-                                        ))}
-                                </select>
-                            </label>
+                            <AgentProviderModelFields
+                                providers={providers}
+                                providerConfigId={form.provider_config_id}
+                                fallbackProviderConfigId={form.fallback_provider_config_id}
+                                preferredModel={form.preferred_model}
+                                onProviderChange={(id) => setForm({ ...form, provider_config_id: id, preferred_model: null })}
+                                onFallbackChange={(id) => setForm({ ...form, fallback_provider_config_id: id })}
+                                onPreferredModelChange={(model) => setForm({ ...form, preferred_model: model })}
+                            />
                             {providers.length === 0 && (
                                 <p class="text-[11px] text-warning">
                                     Aucun provider configuré. Ajoutez-en un dans Paramètres → Intelligence Artificielle.

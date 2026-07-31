@@ -9,6 +9,7 @@ use App\Services\DevForge\Github\GithubRunnerInventory;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class GithubRunnerController extends Controller
@@ -51,6 +52,12 @@ class GithubRunnerController extends Controller
             throw $e;
         } catch (ModelNotFoundException) {
             return response()->json(['message' => 'Ressource introuvable.'], 404);
+        } catch (\Throwable $e) {
+            Log::error('github_runner.create_failed', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json(['message' => 'Impossible de créer le runner.'], 500);
         }
 
         return response()->json([
@@ -80,6 +87,16 @@ class GithubRunnerController extends Controller
             ]);
         } catch (ModelNotFoundException) {
             return response()->json(['message' => 'Runner introuvable.'], 404);
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            Log::error('github_runner.show_failed', [
+                'server_uuid' => $serverUuid,
+                'container' => $containerName,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json(['message' => 'Impossible de charger le détail du runner.'], 500);
         }
     }
 
@@ -113,6 +130,16 @@ class GithubRunnerController extends Controller
             ]);
         } catch (ModelNotFoundException) {
             return response()->json(['message' => 'Runner introuvable.'], 404);
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            Log::error('github_runner.logs_failed', [
+                'server_uuid' => $serverUuid,
+                'container' => $containerName,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json(['message' => 'Impossible de lire les logs du runner.'], 500);
         }
     }
 
@@ -140,6 +167,17 @@ class GithubRunnerController extends Controller
             ]);
         } catch (ModelNotFoundException) {
             return response()->json(['message' => 'Runner introuvable.'], 404);
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            Log::error('github_runner.action_failed', [
+                'server_uuid' => $serverUuid,
+                'container' => $containerName,
+                'action' => $action,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json(['message' => 'Action runner impossible.'], 500);
         }
     }
 }

@@ -83,6 +83,55 @@ it('returns runner logs', function () {
         ->assertJsonPath('data.items.0.message', '√ Connected to GitHub');
 });
 
+it('returns a runner detail payload', function () {
+    $fake = Mockery::mock(GithubRunnerInventory::class);
+    $fake->shouldReceive('show')
+        ->once()
+        ->with(
+            Mockery::type(Team::class),
+            $this->server->uuid,
+            'github-runner-client',
+        )
+        ->andReturn([
+            'id' => $this->server->uuid.':github-runner-client',
+            'name' => 'github-runner-client',
+            'state' => 'running',
+            'server_uuid' => $this->server->uuid,
+            'runner_name' => 'casaos-runner-popcorn-client',
+            'repo_url' => 'https://github.com/bobdivx/popcorn-client',
+            'github_status' => 'online',
+            'environment' => [
+                ['key' => 'REPO_URL', 'value' => 'https://github.com/bobdivx/popcorn-client'],
+                ['key' => 'ACCESS_TOKEN', 'value' => '••••••••'],
+            ],
+        ]);
+
+    $this->app->instance(GithubRunnerInventory::class, $fake);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/github/runners/'.$this->server->uuid.'/github-runner-client')
+        ->assertSuccessful()
+        ->assertJsonPath('data.name', 'github-runner-client')
+        ->assertJsonPath('data.github_status', 'online')
+        ->assertJsonPath('data.environment.1.value', '••••••••');
+});
+
+it('returns json 404 when runner detail is missing', function () {
+    $fake = Mockery::mock(GithubRunnerInventory::class);
+    $fake->shouldReceive('show')
+        ->once()
+        ->andThrow((new Illuminate\Database\Eloquent\ModelNotFoundException)->setModel('GithubRunner', ['missing']));
+
+    $this->app->instance(GithubRunnerInventory::class, $fake);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/github/runners/'.$this->server->uuid.'/missing-runner')
+        ->assertNotFound()
+        ->assertJsonPath('message', 'Runner introuvable.');
+});
+
 it('restarts a github runner', function () {
     $fake = Mockery::mock(GithubRunnerInventory::class);
     $fake->shouldReceive('action')

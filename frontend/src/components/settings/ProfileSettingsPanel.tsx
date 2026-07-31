@@ -2,17 +2,20 @@ import { Save, Shield } from 'lucide-preact';
 import { useState } from 'preact/hooks';
 import { Card } from '../ui/Card';
 import { DataState } from '../ui/DataState';
+import { HiddenUsernameField } from '../ui/HiddenUsernameField';
 import { StatusBadge } from '../ui/StatusBadge';
 import { domainApi, type TwoFactorStatus } from '../../lib/domain-api';
 import { useApiQuery } from '../../lib/use-api-query';
 
 type ProfileSettingsPanelProps = {
     legacyBaseUrl?: string;
+    email?: string;
     twoFactorEnabled?: boolean;
     forcePasswordReset?: boolean;
 };
 
 export function ProfileSettingsPanel({
+    email = '',
     twoFactorEnabled = false,
     forcePasswordReset = false,
 }: ProfileSettingsPanelProps) {
@@ -30,6 +33,7 @@ export function ProfileSettingsPanel({
     const [twoFactorMessage, setTwoFactorMessage] = useState<string | null>(null);
     const [setupState, setSetupState] = useState<TwoFactorStatus | null>(null);
     const profile = query.data?.data;
+    const username = profile?.email || email;
     const twoFactor = setupState ?? twoFactorQuery.data?.data;
     const isTwoFactorOn = twoFactor?.two_factor_enabled || twoFactorEnabled || profile?.two_factor_enabled;
     const pendingSetup = Boolean(twoFactor?.qr_code_svg || (twoFactor && !twoFactor.two_factor_confirmed && twoFactor.setup_key));
@@ -37,7 +41,10 @@ export function ProfileSettingsPanel({
     const applyTwoFactorResult = async (result: TwoFactorStatus) => {
         setSetupState(result);
         setTwoFactorMessage(result.message ?? null);
-        await Promise.all([query.reload(), twoFactorQuery.reload()]);
+        await Promise.all([
+            query.reload({ silent: true }),
+            twoFactorQuery.reload({ silent: true }),
+        ]);
     };
 
     return (
@@ -63,7 +70,7 @@ export function ProfileSettingsPanel({
                                         name: String(form.get('name') ?? ''),
                                         email: String(form.get('email') ?? ''),
                                     });
-                                    await query.reload();
+                                    await query.reload({ silent: true });
                                     setMessage('Profil enregistré.');
                                 } catch {
                                     setMessage('Échec de la mise à jour.');
@@ -79,7 +86,14 @@ export function ProfileSettingsPanel({
                                 </label>
                                 <label class="grid gap-1.5 text-sm">
                                     <span class="font-medium">E-mail</span>
-                                    <input class="input input-bordered input-sm w-full rounded-xl" name="email" type="email" required defaultValue={profile.email} />
+                                    <input
+                                        class="input input-bordered input-sm w-full rounded-xl"
+                                        name="email"
+                                        type="email"
+                                        required
+                                        autoComplete="username"
+                                        defaultValue={profile.email}
+                                    />
                                 </label>
                             </div>
                             <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -127,6 +141,7 @@ export function ProfileSettingsPanel({
                         }
                     }}
                 >
+                    <HiddenUsernameField username={username} />
                     <div class="grid gap-3 md:grid-cols-3">
                         <label class="grid gap-1.5 text-sm">
                             <span class="font-medium">Mot de passe actuel</span>
@@ -170,16 +185,23 @@ export function ProfileSettingsPanel({
                             />
                         </div>
 
-                        <label class="grid max-w-sm gap-1.5 text-sm">
-                            <span class="font-medium">Mot de passe actuel (requis pour activer / désactiver)</span>
-                            <input
-                                class="input input-bordered input-sm w-full rounded-xl"
-                                type="password"
-                                value={twoFactorPassword}
-                                onInput={(event) => setTwoFactorPassword(event.currentTarget.value)}
-                                autoComplete="current-password"
-                            />
-                        </label>
+                        <form
+                            class="grid max-w-sm gap-1.5 text-sm"
+                            onSubmit={(event) => event.preventDefault()}
+                        >
+                            <HiddenUsernameField username={username} />
+                            <label class="grid gap-1.5">
+                                <span class="font-medium">Mot de passe actuel (requis pour activer / désactiver)</span>
+                                <input
+                                    class="input input-bordered input-sm w-full rounded-xl"
+                                    type="password"
+                                    name="current_password"
+                                    value={twoFactorPassword}
+                                    onInput={(event) => setTwoFactorPassword(event.currentTarget.value)}
+                                    autoComplete="current-password"
+                                />
+                            </label>
+                        </form>
 
                         {pendingSetup && twoFactor && (
                             <div class="grid gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4">

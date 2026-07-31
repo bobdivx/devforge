@@ -4,6 +4,7 @@ import type { Agent } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
 import { shouldOpenAgentSettings, syncAgentDetailQuery } from '../../lib/agent-routes';
 import { useAgentRunTracker } from '../../lib/use-agent-run-tracker';
+import { shouldTrackAgentLatestRun } from '../../lib/agent-run-tracker';
 import { AgentRunDetail } from './AgentRunDetail';
 import { RunHistoryTable } from './RunHistoryTable';
 
@@ -68,11 +69,11 @@ export function AgentRunsView({ agent, initialRunUuid = null, onAgentUpdated }: 
     }, [initialRunUuid]);
 
     useEffect(() => {
-        if (agent.status === 'running' && agent.latest_run?.uuid && !isTracking) {
-            trackExistingRun(agent.latest_run.uuid);
-            setSelectedRunUuid(agent.latest_run.uuid);
+        if (shouldTrackAgentLatestRun(agent.status, agent.latest_run, isTracking)) {
+            trackExistingRun(agent.latest_run!.uuid);
+            setSelectedRunUuid(agent.latest_run!.uuid);
         }
-    }, [agent.status, agent.latest_run?.uuid, isTracking, trackExistingRun]);
+    }, [agent.status, agent.latest_run?.uuid, agent.latest_run?.status, isTracking, trackExistingRun]);
 
     useEffect(() => {
         if (!selectedRunUuid) {
