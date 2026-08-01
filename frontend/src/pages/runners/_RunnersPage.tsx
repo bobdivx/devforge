@@ -88,6 +88,9 @@ export function RunnersPage() {
         if (!selectedId && items[0]) {
             setSelectedId(items[0].id);
         }
+        if (selectedId && items.length > 0 && !items.some((runner) => runner.id === selectedId)) {
+            setSelectedId(items[0]?.id ?? null);
+        }
     }, [items, selectedId]);
 
     const detail = useApiQuery(
@@ -105,10 +108,10 @@ export function RunnersPage() {
             return;
         }
 
+        // Poll logs only — full list rebuild is SSH-heavy and was wiping the UI when cold discovery failed.
         const interval = window.setInterval(() => {
-            void runners.reload({ silent: true });
             void logs.reload({ silent: true });
-        }, 5000);
+        }, 8000);
 
         return () => window.clearInterval(interval);
     }, [selected?.id, lines]);
@@ -120,7 +123,7 @@ export function RunnersPage() {
         try {
             const result = await domainApi.githubRunnerAction(runner.server_uuid, runner.name, action);
             setFeedback(result.message ?? result.data.message);
-            await runners.reload();
+            await runners.reload({ silent: true });
             if (selected?.id === runner.id) {
                 await Promise.all([detail.reload({ silent: true }), logs.reload({ silent: true })]);
             }
@@ -148,7 +151,15 @@ export function RunnersPage() {
                             <Plus class="size-3.5" aria-hidden />
                             Nouveau runner
                         </button>
-                        <button class="btn btn-ghost btn-sm" type="button" onClick={() => void runners.reload()}>
+                        <button
+                            class="btn btn-ghost btn-sm"
+                            type="button"
+                            onClick={() => {
+                                void runners.reload({ silent: true });
+                                void detail.reload({ silent: true });
+                                void logs.reload({ silent: true });
+                            }}
+                        >
                             <RefreshCw class="size-3.5" aria-hidden />
                             Actualiser
                         </button>
@@ -164,7 +175,11 @@ export function RunnersPage() {
 
             <div class="grid gap-4 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
                 <Card title="Runners" eyebrow={`${items.length} détecté(s)`}>
-                    <DataState loading={runners.loading} error={runners.error} onRetry={() => void runners.reload()}>
+                    <DataState
+                        loading={runners.loading && !runners.data}
+                        error={runners.error && !runners.data ? runners.error : null}
+                        onRetry={() => void runners.reload()}
+                    >
                         {items.length === 0 ? (
                             <p class="text-xs text-base-content/55">
                                 Aucun runner détecté. Créez-en un, ou déployez des conteneurs
@@ -239,7 +254,11 @@ export function RunnersPage() {
                                     </button>
                                 </ActionToolbar>
 
-                                <DataState loading={detail.loading && !detail.data} error={detail.error} onRetry={() => void detail.reload()}>
+                                <DataState
+                                    loading={detail.loading && !detail.data}
+                                    error={detail.error && !detail.data ? detail.error : null}
+                                    onRetry={() => void detail.reload()}
+                                >
                                     <dl class="grid gap-3 text-xs sm:grid-cols-2">
                                         <div>
                                             <dt class="text-base-content/45">Docker</dt>
@@ -318,15 +337,19 @@ export function RunnersPage() {
                                                 ))}
                                             </select>
                                         </label>
-                                        <button class="btn btn-ghost btn-sm" type="button" onClick={() => void logs.reload()}>
+                                        <button class="btn btn-ghost btn-sm" type="button" onClick={() => void logs.reload({ silent: true })}>
                                             <RefreshCw class="size-3.5" aria-hidden />
                                             Actualiser
                                         </button>
                                     </div>
                                 </div>
                                 <div class="p-5">
-                                    <DataState loading={logs.loading && !logs.data} error={logs.error} onRetry={() => void logs.reload()}>
-                                        {logData && (
+                                    <DataState
+                                        loading={logs.loading && !logs.data}
+                                        error={logs.error && !logs.data ? logs.error : null}
+                                        onRetry={() => void logs.reload()}
+                                    >
+                                        {logData ? (
                                             <>
                                                 {!logData.available && (
                                                     <p class="mb-3 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
@@ -344,6 +367,8 @@ export function RunnersPage() {
                                                     ))}
                                                 </div>
                                             </>
+                                        ) : (
+                                            <p class="text-xs text-base-content/55">Chargement des logs…</p>
                                         )}
                                     </DataState>
                                 </div>
@@ -375,7 +400,7 @@ export function RunnersPage() {
                 onClose={() => setCreateOpen(false)}
                 onCreated={() => {
                     setFeedback('Runner créé.');
-                    void runners.reload();
+                    void runners.reload({ silent: true });
                 }}
             />
         </>

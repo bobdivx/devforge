@@ -132,10 +132,11 @@ describe('routage DevForge', () => {
         expect(findRoute('/agents').description).toBe("Équipe d'agents autonomes DevForge.");
     });
 
-    it('redirige les anciens paramètres AI vers /agents', () => {
-        expect(resolveResourceCanonicalLocation('/settings/ai')).toBe('/agents');
-        expect(resolveResourceCanonicalLocation('/devforge/settings/ai')).toBe('/agents');
-        expect(findRoute('/settings/ai').page).toBe('agents');
-        expect(findRoute('/devforge/settings/ai').path).toBe('/agents');
+    it('redirige les anciens paramètres AI vers /agents/settings', () => {
+        expect(resolveResourceCanonicalLocation('/settings/ai')).toBe('/agents/settings');
+        expect(resolveResourceCanonicalLocation('/devforge/settings/ai')).toBe('/agents/settings');
+        expect(findRoute('/settings/ai').page).toBe('agents-settings');
+        expect(findRoute('/devforge/settings/ai').path).toBe('/agents/settings');
+        expect(findRoute('/agents/settings').page).toBe('agents-settings');
     });
 });

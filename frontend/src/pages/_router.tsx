@@ -4,6 +4,7 @@ import { extractApplicationUuid } from '../lib/routes';
 import { extractGithubAppUuid } from '../lib/settings-tabs';
 import { AgentDetailPage } from './agents/_AgentDetailPage';
 import { AgentsPage } from './agents/_AgentsPage';
+import { AgentsSettingsPage } from './agents/_AgentsSettingsPage';
 import { CoreResourcesPage } from './resources/_CoreResourcesPage';
 import { DeploymentsPage } from './deployments/_DeploymentsPage';
 import { DestinationsPage } from './destinations/_DestinationsPage';
@@ -142,13 +143,26 @@ export function DomainPage({ bootstrap, route, onSwitchTeam }: DomainPageProps) 
             );
         case 'agents':
             return (bootstrap.features?.agents_enabled ?? false)
-                ? <AgentsPage permissions={bootstrap.permissions} />
+                ? <AgentsPage />
                 : (
                     <>
                         <PageHeader title="Agents IA" description="Fonctionnalité désactivée sur cette instance." eyebrow="Indisponible" />
                         <Card title="Agents désactivés">
                             <p class="text-sm text-base-content/65">
                                 Activez <code class="text-xs">DEVFORGE_AGENTS_ENABLED=true</code> et exécutez les migrations pour utiliser les agents IA.
+                            </p>
+                        </Card>
+                    </>
+                );
+        case 'agents-settings':
+            return (bootstrap.features?.agents_enabled ?? false)
+                ? <AgentsSettingsPage permissions={bootstrap.permissions} />
+                : (
+                    <>
+                        <PageHeader title="Paramètres AI" description="Fonctionnalité désactivée sur cette instance." eyebrow="Indisponible" />
+                        <Card title="Agents désactivés">
+                            <p class="text-sm text-base-content/65">
+                                Activez <code class="text-xs">DEVFORGE_AGENTS_ENABLED=true</code> pour configurer les providers et Ollama.
                             </p>
                         </Card>
                     </>

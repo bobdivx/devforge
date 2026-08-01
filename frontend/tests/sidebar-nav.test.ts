@@ -43,6 +43,17 @@ describe('navigation latérale groupée', () => {
         expect(visibleSidebarNav(true).some((entry) => entry.id === 'agents')).toBe(true);
     });
 
+    it('expose Gérer et Paramètres AI sous Agents IA', () => {
+        const agents = visibleSidebarNav(true).find(
+            (entry): entry is SidebarNavGroup => entry.type === 'group' && entry.id === 'agents',
+        );
+
+        expect(agents?.items.map(({ label, path }) => ({ label, path }))).toEqual([
+            { label: 'Gérer', path: '/agents' },
+            { label: 'Paramètres AI', path: '/agents/settings' },
+        ]);
+    });
+
     it('ouvre le groupe Applications sur une page fille', () => {
         const applications = visibleSidebarNav(false).find(
             (entry): entry is SidebarNavGroup => entry.type === 'group' && entry.id === 'applications',

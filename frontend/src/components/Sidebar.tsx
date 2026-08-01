@@ -159,6 +159,7 @@ export function Sidebar({
 
     const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
         applications: true,
+        agents: true,
     });
 
     useEffect(() => {

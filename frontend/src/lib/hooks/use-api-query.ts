@@ -31,8 +31,9 @@ export function useApiQuery<T>(
         }
 
         const requestId = ++requestIdRef.current;
+        const keepPrevious = Boolean(options?.silent);
 
-        if (!options?.silent) {
+        if (!keepPrevious) {
             setLoading(true);
             setError(null);
         }
@@ -43,14 +44,13 @@ export function useApiQuery<T>(
                 return;
             }
             setData(nextData);
-            if (options?.silent) {
-                setError(null);
-            }
+            setError(null);
         } catch (requestError) {
             if (requestId !== requestIdRef.current) {
                 return;
             }
-            if (!options?.silent) {
+            // Keep last successful payload on silent refresh failures.
+            if (!keepPrevious) {
                 setData(null);
             }
             setError(requestError);
@@ -58,16 +58,24 @@ export function useApiQuery<T>(
             if (requestId !== requestIdRef.current) {
                 return;
             }
-            if (!options?.silent) {
+            if (!keepPrevious) {
                 setLoading(false);
             }
         }
     }, [cacheKey]);
 
+    const previousKeyRef = useRef(cacheKey);
+
     useEffect(() => {
-        setData(null);
+        if (previousKeyRef.current !== cacheKey) {
+            previousKeyRef.current = cacheKey;
+            requestIdRef.current += 1;
+            setData(null);
+            setError(null);
+            setLoading(cacheKey !== null);
+        }
         void reload();
-    }, [reload]);
+    }, [reload, cacheKey]);
 
     return { data, loading, error, reload };
 }

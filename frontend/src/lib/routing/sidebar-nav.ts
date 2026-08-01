@@ -124,13 +124,25 @@ export const sidebarNav: SidebarNavEntry[] = [
         pages: ['connexions', 'github', 'sources'],
     },
     {
-        type: 'link',
+        type: 'group',
         id: 'agents',
         label: 'Agents IA',
-        path: '/agents',
         icon: Bot,
-        pages: ['agents', 'agent-detail'],
         requiresAgents: true,
+        items: [
+            {
+                id: 'agents-manage',
+                label: 'Gérer',
+                path: '/agents',
+                pages: ['agents', 'agent-detail'],
+            },
+            {
+                id: 'agents-settings',
+                label: 'Paramètres AI',
+                path: '/agents/settings',
+                pages: ['agents-settings'],
+            },
+        ],
     },
     {
         type: 'link',

@@ -79,6 +79,8 @@ export type PageKey =
 
     | 'agents'
 
+    | 'agents-settings'
+
     | 'agent-detail'
 
     | 'scheduled-tasks'
@@ -131,6 +133,8 @@ export const appRoutes: AppRoute[] = [
 
     { path: '/agents', label: 'Agents IA', description: "Équipe d'agents autonomes DevForge.", icon: Bot, page: 'agents' },
 
+    { path: '/agents/settings', label: 'Paramètres AI', description: 'Providers LLM, Ollama et instructions agents.', icon: Bot, page: 'agents-settings' },
+
 ];
 
 
@@ -141,7 +145,7 @@ export const staticRoutePaths = [
 
     ...settingsTabPaths.filter((path) => path !== '/settings'),
 
-    // Redirection legacy → /agents (voir resolveResourceCanonicalLocation)
+    // Redirection legacy → /agents/settings (voir resolveResourceCanonicalLocation)
     '/settings/ai',
 
     '/shared-variables',
@@ -365,7 +369,7 @@ export function resolveResourceCanonicalLocation(pathname: string): string | nul
     const normalizedPath = normalizeRoutePath(pathname);
 
     if (normalizedPath === '/settings/ai') {
-        return '/agents';
+        return '/agents/settings';
     }
 
     const applicationMatch = normalizedPath.match(
@@ -425,7 +429,14 @@ export function readApplicationTabFromLocation(search = typeof window === 'undef
 
 export function visibleRoutes(agentsEnabled: boolean): AppRoute[] {
 
-    return appRoutes.filter(({ page }) => agentsEnabled || page !== 'agents');
+    return appRoutes.filter(({ page }) => {
+        // Sous-menu Agents — pas d’entrée plate dans l’ancien menu
+        if (page === 'agents-settings') {
+            return false;
+        }
+
+        return agentsEnabled || page !== 'agents';
+    });
 
 }
 
@@ -605,6 +616,8 @@ const dynamicRoutes: Array<{ pattern: RegExp; route: AppRoute }> = [
 
     { pattern: /^\/security\/[^/]+(?:\/.*)?$/, route: settingsRoute },
 
+    { pattern: /^\/agents\/settings$/, route: { ...agentsRoute, path: '/agents/settings', label: 'Paramètres AI', description: 'Providers LLM, Ollama et instructions agents.', page: 'agents-settings' } },
+
     { pattern: /^\/agents\/[^/]+(?:\/.*)?$/, route: { ...agentsRoute, page: 'agent-detail' } },
 
 ];
@@ -616,7 +629,13 @@ export function findRoute(pathname: string): AppRoute {
     const normalizedPath = normalizeRoutePath(pathname);
 
     if (normalizedPath === '/settings/ai') {
-        return agentsRoute;
+        return {
+            ...agentsRoute,
+            path: '/agents/settings',
+            label: 'Paramètres AI',
+            description: 'Providers LLM, Ollama et instructions agents.',
+            page: 'agents-settings',
+        };
     }
 
     const exactRoute = appRoutes.find(({ path }) => path === normalizedPath);

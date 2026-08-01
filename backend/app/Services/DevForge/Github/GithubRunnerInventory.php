@@ -37,7 +37,7 @@ class GithubRunnerInventory
         $cacheKey = 'devforge.github.runners.list.'.$team->id;
 
         /** @var array<int, array<string, mixed>> $cached */
-        $cached = Cache::remember($cacheKey, now()->addSeconds(15), function () use ($team): array {
+        $cached = Cache::remember($cacheKey, now()->addSeconds(30), function () use ($team): array {
             $runners = $this->serversForTeam($team)
                 ->flatMap(fn (Server $server): Collection => $this->runnersOnServer($server, enrichEnv: false))
                 ->values();
@@ -75,8 +75,6 @@ class GithubRunnerInventory
             'runner_name' => $runnerName,
             'environment' => $environment,
         ];
-
-        Cache::forget('devforge.github.runners.list.'.$team->id);
 
         try {
             $enriched = $this->enrichWithGithubStatus($team, collect([$presented]), allowColdFetch: true)->first();
@@ -555,7 +553,6 @@ class GithubRunnerInventory
         }
 
         if (! is_array($match)) {
-            Cache::forget('devforge.github.runners.list.'.$server->team_id);
             throw (new ModelNotFoundException)->setModel('GithubRunner', [$containerName]);
         }
 
