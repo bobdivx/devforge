@@ -77,7 +77,7 @@ export const sidebarNav: SidebarNavEntry[] = [
             },
             {
                 id: 'deployments',
-                label: 'Déploiements',
+                label: 'Cartographie',
                 path: '/deployments',
                 pages: ['deployments'],
             },

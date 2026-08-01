@@ -19,6 +19,8 @@ class AgentChatRepairStrategy
 
     public const ISSUE_PUPPETEER = 'puppeteer';
 
+    public const ISSUE_HEALTHCHECK_PORT = 'healthcheck_port';
+
     public const ISSUE_GENERIC = 'generic';
 
     /** Outils de lecture / diagnostic — ne comptent pas comme correction. */
@@ -49,7 +51,16 @@ class AgentChatRepairStrategy
             return self::ISSUE_BASE_CONFIG;
         }
 
-        if (str_contains($blob, 'permission denied') || str_contains($blob, 'tee:')) {
+        // Healthcheck sur mauvais port (ex. curl :3000 alors qu’Astro écoute :4321) — avant permissions.
+        if (AgentDirectives::isHealthcheckPortMismatchIssue($logsBlob)) {
+            return self::ISSUE_HEALTHCHECK_PORT;
+        }
+
+        // « tee: » seul est trop large (faux positifs) — exiger permission denied.
+        if (
+            str_contains($blob, 'permission denied')
+            || (bool) preg_match('/tee:.*permission\s+denied/iu', $logsBlob)
+        ) {
             return self::ISSUE_PERMISSIONS;
         }
 

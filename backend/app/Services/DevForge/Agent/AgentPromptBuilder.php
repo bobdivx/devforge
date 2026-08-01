@@ -42,6 +42,9 @@ class AgentPromptBuilder
             - Site statique qui sert la page nginx par défaut / publish_directory vide :
               Déduis le dossier de build depuis les logs (directory: /app/…, astro/vite/next) puis
               update_application_runtime_settings(publish_directory=…, redeploy=true).
+            - Conteneur unhealthy + « Healthcheck URL … :3000 » alors que les logs disent « listening on … :4321 » :
+              update_application_runtime_settings(ports_exposes=4321, health_check_port=4321, redeploy=true)
+              et upsert_application_env_var PORT=4321 (runtime). Astro SSR écoute souvent 4321, pas 3000.
             - npm E401 / unauthenticated sur npm.pkg.github.com :
               Coolify injecte NODE_AUTH_TOKEN au build via PAT enregistré (Connexions → token Packages)
               ou token GitHub App si packages:read est accordé.

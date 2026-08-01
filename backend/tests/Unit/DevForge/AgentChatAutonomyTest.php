@@ -49,8 +49,32 @@ it('detects repair chat intents for autonomous fallback', function () {
         ->and(AgentDirectives::isChatRepairIntent('corrige le déploiement maintenant'))->toBeTrue()
         ->and(AgentDirectives::isChatRepairIntent('fix permission denied'))->toBeTrue()
         ->and(AgentDirectives::isChatRepairIntent('Permission denied'))->toBeTrue()
+        ->and(AgentDirectives::isChatRepairIntent('https://mf3d.app/ me donne la page nginx et no l\'appli'))->toBeTrue()
+        ->and(AgentDirectives::isChatRepairIntent('pourquoi je ne peux pas accéder a l\'appli https://mf3d.app/'))->toBeTrue()
+        ->and(AgentDirectives::isChatRepairIntent('Page nginx par défaut détectée (publish_directory probablement incorrect)'))->toBeTrue()
         ->and(AgentDirectives::isChatRepairIntent('Pourquoi le déploiement échoue ?'))->toBeFalse()
         ->and(AgentDirectives::isChatRepairIntent('Bonjour'))->toBeFalse();
+});
+
+it('extracts tool calls from prose JSON dumps', function () {
+    $calls = AgentDirectives::extractProseToolCalls(
+        'Voici la commande requise : {"method":"spawn_task","goal":"reparer_le_deploiement","difficulty":"heavy"}',
+    );
+
+    expect($calls)->toHaveCount(1)
+        ->and($calls[0]['name'])->toBe('spawn_task')
+        ->and($calls[0]['arguments']['goal'])->toBe('reparer_le_deploiement')
+        ->and($calls[0]['arguments']['difficulty'])->toBe('heavy');
+
+    $named = AgentDirectives::extractProseToolCalls(
+        '```json\n{"name":"control_resource","arguments":{"uuid":"app-1","type":"applications","action":"deploy"}}\n```',
+    );
+
+    expect($named)->toHaveCount(1)
+        ->and($named[0]['name'])->toBe('control_resource')
+        ->and($named[0]['arguments']['action'])->toBe('deploy');
+
+    expect(AgentDirectives::extractProseToolCalls('Le déploiement a échoué sur la branche main.'))->toBe([]);
 });
 
 it('classifies repair strategy from deployment log blobs', function () {
@@ -63,7 +87,64 @@ it('classifies repair strategy from deployment log blobs', function () {
         ->and(AgentChatRepairStrategy::detectIssue('Read-only file system ... mkdir /data/coolify/applications/app'))
         ->toBe(AgentChatRepairStrategy::ISSUE_BASE_CONFIG)
         ->and(AgentChatRepairStrategy::detectIssue('Failed to launch the browser process Chromium puppeteer'))
-        ->toBe(AgentChatRepairStrategy::ISSUE_PUPPETEER);
+        ->toBe(AgentChatRepairStrategy::ISSUE_PUPPETEER)
+        ->and(AgentChatRepairStrategy::detectIssue(
+            "Healthcheck URL (inside the container): GET: http://localhost:3000/\n".
+            "[@astrojs/node] Server listening on\n local: http://localhost:4321\n".
+            'New container is unhealthy.'
+        ))->toBe(AgentChatRepairStrategy::ISSUE_HEALTHCHECK_PORT)
+        ->and(AgentChatRepairStrategy::detectIssue('docker tee: /artifacts/foo without permission words'))
+        ->toBe(AgentChatRepairStrategy::ISSUE_GENERIC);
+});
+
+it('harness aligns ports when healthcheck mismatches listen port', function () {
+    config(['devforge.agents_auto_fallback' => true]);
+
+    $agent = AiAgent::factory()->deployment()->make(['resource_uuid' => 'app-uuid-port']);
+    $run = Mockery::mock(AiAgentRun::class);
+    $run->shouldReceive('appendLog')->andReturnNull();
+    $run->shouldReceive('mergeMetadata')->andReturnNull();
+    $run->metadata = [];
+
+    $toolkit = Mockery::mock(AgentToolkit::class);
+    $toolkit->shouldReceive('execute')
+        ->once()
+        ->with('get_deployment_logs', Mockery::type('array'))
+        ->andReturn([
+            'deployments' => [
+                ['logs' => [[
+                    'message' => "Healthcheck URL (inside the container): GET: http://localhost:3000/\n".
+                        "[@astrojs/node] Server listening on\n local: http://localhost:4321\n".
+                        'New container is unhealthy.',
+                ]]],
+            ],
+        ]);
+    $toolkit->shouldReceive('execute')
+        ->once()
+        ->with('update_application_runtime_settings', Mockery::on(
+            fn (array $args): bool => ($args['ports_exposes'] ?? null) === '4321'
+                && ($args['health_check_port'] ?? null) === '4321'
+                && ($args['redeploy'] ?? false) === true
+        ))
+        ->andReturn(['ok' => true]);
+    $toolkit->shouldReceive('execute')
+        ->once()
+        ->with('upsert_application_env_var', Mockery::on(
+            fn (array $args): bool => ($args['key'] ?? '') === 'PORT' && ($args['value'] ?? '') === '4321'
+        ))
+        ->andReturn(['ok' => true]);
+
+    $result = app(AgentRepairHarness::class)->execute(
+        $toolkit,
+        $agent,
+        $run,
+        ['application_uuid' => 'app-uuid-port'],
+        'corrige le déploiement',
+    );
+
+    expect($result['steps'])->toHaveCount(3)
+        ->and($result['steps'][1]['name'])->toBe('update_application_runtime_settings')
+        ->and($result['text'])->toContain('4321');
 });
 
 it('falls back to harness after diagnostic tools without recorded corrections', function () {
@@ -173,18 +254,48 @@ it('harness sets PUPPETEER_SKIP_DOWNLOAD then redeploys', function () {
         ->and($result['text'])->toContain('Réparation exécutée');
 });
 
-it('respects agents_auto_fallback when harness is disabled', function () {
-    config(['devforge.agents_auto_fallback' => false]);
+it('harness classifies nginx from chat goal when logs are clean', function () {
+    config(['devforge.agents_auto_fallback' => true]);
 
-    $agent = AiAgent::factory()->deployment()->make(['resource_uuid' => 'app-uuid']);
+    $agent = AiAgent::factory()->deployment()->make(['resource_uuid' => 'app-uuid-nginx']);
     $run = Mockery::mock(AiAgentRun::class);
+    $run->shouldReceive('appendLog')->andReturnNull();
+    $run->shouldReceive('mergeMetadata')->andReturnNull();
+    $run->shouldReceive('getAttribute')->with('metadata')->andReturn([]);
+    $run->metadata = [];
+
     $toolkit = Mockery::mock(AgentToolkit::class);
-    $toolkit->shouldNotReceive('execute');
+    $toolkit->shouldReceive('execute')
+        ->once()
+        ->with('get_deployment_logs', Mockery::type('array'))
+        ->andReturn([
+            'deployments' => [
+                ['logs' => [['message' => 'Deployment successful']]],
+            ],
+        ]);
+    $toolkit->shouldReceive('execute')
+        ->once()
+        ->with('list_application_source', Mockery::type('array'))
+        ->andReturn(['entries' => [['name' => 'dist', 'type' => 'dir']]]);
+    $toolkit->shouldReceive('execute')
+        ->once()
+        ->with('update_application_runtime_settings', Mockery::on(
+            fn (array $args): bool => ($args['publish_directory'] ?? null) === '/dist'
+                && ($args['redeploy'] ?? false) === true
+        ))
+        ->andReturn(['ok' => true]);
 
-    $result = app(AgentRepairHarness::class)->execute($toolkit, $agent, $run, [], 'corrige');
+    $result = app(AgentRepairHarness::class)->execute(
+        $toolkit,
+        $agent,
+        $run,
+        ['application_uuid' => 'app-uuid-nginx'],
+        'https://mf3d.app/ me donne la page nginx',
+    );
 
-    expect($result['steps'])->toBe([])
-        ->and($result['text'])->toContain('désactivé');
+    expect($result['steps'])->toHaveCount(3)
+        ->and($result['steps'][2]['name'])->toBe('update_application_runtime_settings')
+        ->and($result['text'])->toContain('publish_directory');
 });
 
 it('harness executes fix_application_host_permissions on permission denied logs', function () {

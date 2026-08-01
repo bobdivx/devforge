@@ -168,6 +168,21 @@ class AgentRunner
 
                 if (! $response->hasToolCalls()) {
                     $assistantText = (string) ($response->text ?? '');
+
+                    $recoveredCalls = AgentDirectives::extractProseToolCalls($assistantText);
+                    if ($recoveredCalls !== []) {
+                        $run->appendLog('Autonome : tool_calls récupérés depuis prose/JSON ('.count($recoveredCalls).').');
+                        $response = new LlmResponse(
+                            text: $assistantText,
+                            toolCalls: $recoveredCalls,
+                            tokensUsed: $response->tokensUsed,
+                            isFinished: $response->isFinished,
+                        );
+                    }
+                }
+
+                if (! $response->hasToolCalls()) {
+                    $assistantText = (string) ($response->text ?? '');
                     $isProseTools = AgentDirectives::mentionsToolWithoutCalling($assistantText);
                     $isRefusal = AgentDirectives::isModelRefusal($assistantText);
                     $maxNudges = ($isProseTools || $isRefusal) ? 3 : 2;

@@ -150,7 +150,7 @@ export function DeploymentsIndicator() {
                                 En cours
                             </p>
                             <a class="link link-hover text-xs" href={routeHref('/deployments')}>
-                                Tout voir
+                                Cartographie
                             </a>
                         </div>
                         <DeploymentList
@@ -184,7 +184,7 @@ export function DeploymentsIndicator() {
                                         En cours
                                     </p>
                                     <a class="link link-hover text-xs" href={routeHref('/deployments')}>
-                                        Tout voir
+                                        Cartographie
                                     </a>
                                 </div>
                                 <DeploymentList

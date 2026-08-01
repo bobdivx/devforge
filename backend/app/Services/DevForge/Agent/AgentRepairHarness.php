@@ -84,12 +84,111 @@ class AgentRepairHarness
                 'probe_error' => $probe,
             ], JSON_UNESCAPED_UNICODE) ?: '');
         }
-        $issue = AgentChatRepairStrategy::detectIssue($logsBlob);
+
+        // Inclure le goal chat + erreurs probe du contexte (page nginx souvent hors logs build).
+        $probeHint = is_string($runContext['probe_error'] ?? null) ? (string) $runContext['probe_error'] : '';
+        $lastProbe = is_string($runContext['last_probe_error'] ?? null) ? (string) $runContext['last_probe_error'] : '';
+        $issueBlob = trim($logsBlob.' '.$goal.' '.$probeHint.' '.$lastProbe);
+        $issue = AgentChatRepairStrategy::detectIssue($issueBlob);
 
         if ($issue === AgentChatRepairStrategy::ISSUE_BASE_CONFIG) {
             $fixArgs = [...$appArgs, 'redeploy' => true, 'reason' => 'Harness: Read-only Coolify BASE_CONFIG_PATH'];
             $fixResult = $toolkit->execute('fix_coolify_base_config_path', $fixArgs);
             $record('fix_coolify_base_config_path', $fixArgs, $fixResult);
+        } elseif ($issue === AgentChatRepairStrategy::ISSUE_HEALTHCHECK_PORT) {
+            $listenPort = AgentDirectives::inferListenPortFromLogs($issueBlob)
+                ?? AgentDirectives::inferListenPortFromLogs($logsBlob);
+            $healthPort = AgentDirectives::inferHealthcheckPortFromLogs($issueBlob)
+                ?? AgentDirectives::inferHealthcheckPortFromLogs($logsBlob);
+
+            $targetPort = $listenPort ?? $healthPort;
+            // Prefer the port the process actually binds to.
+            if ($listenPort !== null) {
+                $targetPort = $listenPort;
+            }
+
+            if ($targetPort !== null && $applicationUuid !== null) {
+                $settingsArgs = [
+                    ...$appArgs,
+                    'ports_exposes' => $targetPort,
+                    'health_check_port' => $targetPort,
+                    'is_static' => false,
+                    'redeploy' => true,
+                    'reason' => "Harness: healthcheck port mismatch → ports/health={$targetPort}"
+                        .($healthPort !== null && $listenPort !== null ? " (était health={$healthPort}, listen={$listenPort})" : ''),
+                ];
+                $settingsResult = $toolkit->execute('update_application_runtime_settings', $settingsArgs);
+                $record('update_application_runtime_settings', $settingsArgs, $settingsResult);
+
+                $envArgs = [
+                    ...$appArgs,
+                    'key' => 'PORT',
+                    'value' => $targetPort,
+                    'is_buildtime' => false,
+                    'is_runtime' => true,
+                ];
+                $envResult = $toolkit->execute('upsert_application_env_var', $envArgs);
+                $record('upsert_application_env_var', $envArgs, $envResult);
+
+                $headline = "Port aligné sur {$targetPort} (healthcheck + ports_exposes + PORT) — redeploy lancé.";
+                $action = [
+                    'kind' => 'runtime_settings',
+                    'label' => 'healthcheck_port',
+                    'detail' => $targetPort,
+                    'ok' => ! isset($settingsResult['error']),
+                    'at' => now()->toISOString(),
+                ];
+                $run->mergeMetadata([
+                    'correction_actions' => [
+                        ...((is_array($run->metadata['correction_actions'] ?? null)) ? $run->metadata['correction_actions'] : []),
+                        $action,
+                    ],
+                    'correction' => [
+                        'outcome' => isset($settingsResult['error']) ? 'partial' : 'fixed',
+                        'headline' => $headline,
+                        'diagnosis' => 'Healthcheck sur un port différent de celui où l’application écoute (ex. curl :3000 vs Astro :4321).',
+                        'source_scope' => 'runtime_settings',
+                        'actions' => [$action],
+                        'steps' => [
+                            "ports_exposes={$targetPort}",
+                            "health_check_port={$targetPort}",
+                            "PORT={$targetPort}",
+                            'Redéployer',
+                        ],
+                        'pills' => [
+                            ['id' => 'build', 'label' => 'Ports', 'active' => true, 'href' => null, 'detail' => ":{$targetPort}"],
+                            ['id' => 'redeploy', 'label' => 'Redeploy', 'active' => true, 'href' => null, 'detail' => 'lancé'],
+                        ],
+                        'belongs_to_deployment_uuid' => is_string($runContext['deployment_uuid'] ?? null)
+                            ? $runContext['deployment_uuid']
+                            : null,
+                    ],
+                ]);
+
+                return [
+                    'text' => $headline,
+                    'steps' => $steps,
+                ];
+            }
+
+            $headline = 'Healthcheck unhealthy — impossible de déduire le port d’écoute depuis les logs.';
+            $run->mergeMetadata([
+                'correction_actions' => [
+                    ...((is_array($run->metadata['correction_actions'] ?? null)) ? $run->metadata['correction_actions'] : []),
+                    [
+                        'kind' => 'needs_user',
+                        'label' => 'healthcheck_port',
+                        'detail' => $headline,
+                        'ok' => false,
+                        'at' => now()->toISOString(),
+                    ],
+                ],
+            ]);
+
+            return [
+                'text' => $headline."\n\nVérifiez ports_exposes / health_check_port / variable PORT (Astro SSR → souvent 4321).",
+                'steps' => $steps,
+            ];
         } elseif ($issue === AgentChatRepairStrategy::ISSUE_PERMISSIONS) {
             $fixArgs = [...$appArgs, 'redeploy' => true, 'reason' => 'Harness: Permission denied host'];
             $fixResult = $toolkit->execute('fix_application_host_permissions', $fixArgs);
@@ -278,8 +377,74 @@ class AgentRepairHarness
                 'steps' => $steps,
             ];
         } elseif ($issue === AgentChatRepairStrategy::ISSUE_NGINX_PUBLISH) {
+            $application = $applicationUuid !== null
+                ? \App\Models\Application::query()->where('uuid', $applicationUuid)->first()
+                : null;
+            $alreadyStatic = (bool) ($application?->settings?->is_static ?? false)
+                || strtolower((string) ($application?->build_pack ?? '')) === 'static';
+            $portsExposes = trim((string) ($application?->ports_exposes ?? ''));
+            $framework = mb_strtolower((string) ($application?->detected_framework ?? ''));
+            $looksLikeSsr = str_contains($framework, 'ssr')
+                || (
+                    ! $alreadyStatic && (
+                        str_contains($framework, 'astro')
+                        || in_array($portsExposes, ['4321', '3000', '3001', '8080'], true)
+                        || filled($application?->start_command)
+                    )
+                );
+
+            // Astro/Node SSR servi comme nginx stock → forcer runtime Node, pas publish_directory.
+            if ($looksLikeSsr && $applicationUuid !== null) {
+                $port = $portsExposes !== '' ? $portsExposes : '4321';
+                $settingsArgs = [
+                    ...$appArgs,
+                    'is_static' => false,
+                    'ports_exposes' => $port,
+                    'publish_directory' => '/',
+                    'redeploy' => true,
+                    'reason' => "Harness: page nginx sur app SSR → is_static=false ports={$port}",
+                ];
+                $settingsResult = $toolkit->execute('update_application_runtime_settings', $settingsArgs);
+                $record('update_application_runtime_settings', $settingsArgs, $settingsResult);
+
+                $headline = "Runtime SSR rétabli (is_static=false, port {$port}) — page nginx ne doit plus être servie.";
+                $action = [
+                    'kind' => 'runtime_settings',
+                    'label' => 'ssr_runtime',
+                    'detail' => "ports_exposes={$port}",
+                    'ok' => ! isset($settingsResult['error']),
+                    'at' => now()->toISOString(),
+                ];
+                $run->mergeMetadata([
+                    'correction_actions' => [
+                        ...((is_array($run->metadata['correction_actions'] ?? null)) ? $run->metadata['correction_actions'] : []),
+                        $action,
+                    ],
+                    'correction' => [
+                        'outcome' => isset($settingsResult['error']) ? 'partial' : 'fixed',
+                        'headline' => $headline,
+                        'diagnosis' => 'Page nginx stock sur une app SSR — le conteneur Node doit écouter le port exposé (pas nginx static).',
+                        'source_scope' => 'runtime_settings',
+                        'actions' => [$action],
+                        'steps' => ["is_static=false", "ports_exposes={$port}", 'Redéployer'],
+                        'pills' => [
+                            ['id' => 'build', 'label' => 'Build', 'active' => true, 'href' => null, 'detail' => "SSR :{$port}"],
+                            ['id' => 'redeploy', 'label' => 'Redeploy', 'active' => true, 'href' => null, 'detail' => 'lancé'],
+                        ],
+                        'belongs_to_deployment_uuid' => is_string($runContext['deployment_uuid'] ?? null)
+                            ? $runContext['deployment_uuid']
+                            : null,
+                    ],
+                ]);
+
+                return [
+                    'text' => $headline,
+                    'steps' => $steps,
+                ];
+            }
+
             $publishDirectory = AgentDirectives::inferStaticPublishDirectory([
-                ['message' => $logsBlob],
+                ['message' => $issueBlob !== '' ? $issueBlob : $logsBlob],
             ]);
 
             if ($publishDirectory === null && $applicationUuid !== null) {
@@ -291,7 +456,7 @@ class AgentRepairHarness
                 );
             }
 
-            if ($publishDirectory === null && preg_match('/ex\.\s*(\/[A-Za-z0-9._-]+)/iu', $logsBlob, $m) === 1) {
+            if ($publishDirectory === null && preg_match('/ex\.\s*(\/[A-Za-z0-9._-]+)/iu', $issueBlob !== '' ? $issueBlob : $logsBlob, $m) === 1) {
                 $publishDirectory = AgentDirectives::normalizePublishDirectory($m[1]);
             }
 
@@ -302,9 +467,6 @@ class AgentRepairHarness
                     'redeploy' => true,
                     'reason' => "Harness: page nginx → publish_directory={$publishDirectory}",
                 ];
-                $application = \App\Models\Application::query()->where('uuid', $applicationUuid)->first();
-                $alreadyStatic = (bool) ($application?->settings?->is_static ?? false)
-                    || strtolower((string) ($application?->build_pack ?? '')) === 'static';
                 if ($alreadyStatic) {
                     $settingsArgs['is_static'] = true;
                 }

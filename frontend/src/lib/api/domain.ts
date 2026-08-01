@@ -113,6 +113,53 @@ export type Deployment = {
     is_debug_enabled: boolean;
 };
 
+export type TopologyNodeType =
+    | 'hub'
+    | 'application'
+    | 'deployment'
+    | 'production'
+    | 'github'
+    | 'repository'
+    | 'agent'
+    | 'intervention';
+
+export type TopologyTone = 'primary' | 'success' | 'warning' | 'error' | 'info' | 'neutral';
+
+export type TopologyNode = {
+    id: string;
+    type: TopologyNodeType;
+    label: string;
+    subtitle: string;
+    tone: TopologyTone;
+    status: string | null;
+    href: string | null;
+    meta: Record<string, unknown>;
+};
+
+export type TopologyEdge = {
+    id: string;
+    from: string;
+    to: string;
+    kind: string;
+    label: string;
+};
+
+export type DeploymentTopology = {
+    nodes: TopologyNode[];
+    edges: TopologyEdge[];
+    summary: {
+        applications: number;
+        deployments: number;
+        production_urls: number;
+        agents: number;
+        interventions: number;
+        github_connections: number;
+        repositories: number;
+        reachable_urls: number;
+        agents_enabled: boolean;
+    };
+};
+
 export type DeploymentLog = {
     cursor: number;
     timestamp: string | null;
@@ -2106,6 +2153,7 @@ export const domainApi = {
 
         return apiFetch<ApiListResponse<Deployment>>(`${API_BASE}/deployments?${params.toString()}`);
     },
+    deploymentTopology: () => apiFetch<ApiResponse<DeploymentTopology>>(`${API_BASE}/deployments/topology`),
     deployment: (uuid: string) => apiFetch<ApiResponse<Deployment>>(`${API_BASE}/deployments/${encodeURIComponent(uuid)}`),
     deploymentLogs: (uuid: string, after = 0) => apiFetch<ApiResponse<DeploymentLogs>>(`${API_BASE}/deployments/${encodeURIComponent(uuid)}/logs?after=${after}`),
     toggleDeploymentDebugLogs: (uuid: string, enabled?: boolean) => mutate<ApiResponse<{ is_debug_enabled: boolean }>>(

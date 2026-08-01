@@ -1,12 +1,14 @@
 <?php
 
 use App\Http\Controllers\DevForge\DeploymentController;
+use App\Http\Controllers\DevForge\DeploymentTopologyController;
 use App\Http\Controllers\DevForge\RealtimeController;
 use App\Http\Controllers\DevForge\ResourceStatusController;
 use App\Http\Controllers\DevForge\TerminalController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/deployments', [DeploymentController::class, 'index'])->name('deployments.index');
+Route::get('/deployments/topology', DeploymentTopologyController::class)->name('deployments.topology');
 Route::get('/deployments/{deploymentUuid}', [DeploymentController::class, 'show'])
     ->where('deploymentUuid', '[A-Za-z0-9_-]{1,255}')
     ->name('deployments.show');

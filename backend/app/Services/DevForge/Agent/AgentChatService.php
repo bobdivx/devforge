@@ -567,6 +567,21 @@ class AgentChatService
 
             if (! $response->hasToolCalls()) {
 
+                // Modèle a écrit du JSON/prose d'outil → promouvoir en vrais appels.
+                $recoveredCalls = AgentDirectives::extractProseToolCalls($response->text);
+                if ($recoveredCalls !== []) {
+                    $run->appendLog('Chat : tool_calls récupérés depuis prose/JSON ('.count($recoveredCalls).').');
+                    $response = new LlmResponse(
+                        text: (string) ($response->text ?? ''),
+                        toolCalls: $recoveredCalls,
+                        tokensUsed: $response->tokensUsed,
+                        isFinished: $response->isFinished,
+                    );
+                }
+            }
+
+            if (! $response->hasToolCalls()) {
+
                 // Intention réparation + aucune correction (même si diagnostic logs lu) → harness.
                 if (
                     AgentDirectives::isChatRepairIntent($userContent)
@@ -618,6 +633,32 @@ class AgentChatService
 
                     continue;
 
+                }
+
+                // Après nudge prose échoué : forcer le harness si l'utilisateur décrit un incident.
+                if (
+                    $proseToolNudgeUsed
+                    && AgentDirectives::mentionsToolWithoutCalling($response->text)
+                    && AgentDirectives::isChatRepairIntent($userContent)
+                    && ! AgentChatRepairStrategy::stepsIncludeCorrectiveAction($steps)
+                ) {
+                    $run->appendLog('Fallback chat : prose outils persistante — harness forcé.');
+
+                    $harness = app(AgentRepairHarness::class)->execute(
+                        $toolkit,
+                        $agent,
+                        $run,
+                        $runContext,
+                        $userContent,
+                    );
+
+                    return [
+                        'text' => $harness['text'],
+                        'tokens_used' => $tokensUsed,
+                        'iterations' => $budget->getUsed(),
+                        'steps' => [...$steps, ...$harness['steps']],
+                        ...isset($harness['pending_approval']) ? ['pending_approval' => $harness['pending_approval']] : [],
+                    ];
                 }
 
                 if (! $confirmationNudgeUsed && AgentDirectives::defersToUser($response->text)) {

@@ -191,12 +191,14 @@ class AgentDirectives
         11. Site statique qui sert la page nginx par défaut / publish_directory vide :
             déduis le dossier depuis les logs de build (get_deployment_logs / get_application_runtime_settings)
             puis update_application_runtime_settings(publish_directory=…, redeploy=true).
-        12. Après un deploy mis en file : résume et arrête — ne poll pas les logs en boucle.
-        13. Termine par un résumé structuré : constats → actions prises → recommandations.
-        14. Réponds en français.
-        15. Ne dis JAMAIS « je n'ai pas accès » sans avoir tenté enable_tool_package, list_tool_packages, fix_application_host_permissions ou fix_coolify_base_config_path.
-        16. INTERDIT de refuser la tâche en citant Coolify ou un « produit non renseigné » — tu es dans DevForge avec des outils réels.
-        17. INTERDIT d'écrire du Python, du pseudo-code ou des playbooks texte : émets uniquement des tool_calls natifs.
+        12. Conteneur unhealthy + healthcheck sur un port ≠ listening (ex. :3000 vs Astro :4321) :
+            update_application_runtime_settings(ports_exposes + health_check_port) et upsert PORT, puis redeploy.
+        13. Après un deploy mis en file : résume et arrête — ne poll pas les logs en boucle.
+        14. Termine par un résumé structuré : constats → actions prises → recommandations.
+        15. Réponds en français.
+        16. Ne dis JAMAIS « je n'ai pas accès » sans avoir tenté enable_tool_package, list_tool_packages, fix_application_host_permissions ou fix_coolify_base_config_path.
+        17. INTERDIT de refuser la tâche en citant Coolify ou un « produit non renseigné » — tu es dans DevForge avec des outils réels.
+        18. INTERDIT d'écrire du Python, du pseudo-code ou des playbooks texte : émets uniquement des tool_calls natifs.
         RULES;
     }
 
@@ -285,7 +287,109 @@ class AgentDirectives
         }
 
         // Problèmes host / permissions souvent collés tels quels depuis les logs.
-        return (bool) preg_match('/permission\s+denied|\bchown\b|\bchmod\b|droits?\s+(?:host|fichier)/iu', $message);
+        if (preg_match('/permission\s+denied|\bchown\b|\bchmod\b|droits?\s+(?:host|fichier)/iu', $message) === 1) {
+            return true;
+        }
+
+        // Site inaccessible / page nginx stock / publish_directory (souvent collé depuis le probe).
+        if (self::isMissingStaticPublishDirectoryIssue($message)) {
+            return true;
+        }
+
+        return (bool) preg_match(
+            '/\b(?:url\s+inaccessible|inaccessible|acc[eèé]d(?:e|er|é|ée)?|n[\'’]?acc[eèé]de|ne\s+(?:marche|fonctionne)\s+pas|page\s+nginx|welcome\s+to\s+nginx|publish_directory|me\s+donne\s+la\s+page)\b/iu',
+            $message,
+        );
+    }
+
+    /**
+     * Récupère des appels d'outils écrits en prose/JSON (modèles qui n'émettent pas de tool_calls API).
+     *
+     * @return list<array{name: string, arguments: array<string, mixed>}>
+     */
+    public static function extractProseToolCalls(?string $text): array
+    {
+        if ($text === null || trim($text) === '') {
+            return [];
+        }
+
+        $known = array_fill_keys(array_map('strtolower', self::chatKnownToolNames()), true);
+        $calls = [];
+
+        $candidates = [];
+        if (preg_match_all('/```(?:json)?\s*(\{[\s\S]*?\})\s*```/u', $text, $fenced) > 0) {
+            foreach ($fenced[1] as $block) {
+                if (is_string($block) && $block !== '') {
+                    $candidates[] = $block;
+                }
+            }
+        }
+
+        if (preg_match_all('/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/u', $text, $loose) > 0) {
+            foreach ($loose[0] as $block) {
+                if (is_string($block) && $block !== '') {
+                    $candidates[] = $block;
+                }
+            }
+        }
+
+        foreach ($candidates as $raw) {
+            $decoded = json_decode($raw, true);
+            if (! is_array($decoded)) {
+                continue;
+            }
+
+            $name = null;
+            $arguments = [];
+
+            if (isset($decoded['method']) && is_string($decoded['method'])) {
+                $name = $decoded['method'];
+                $arguments = $decoded;
+                unset($arguments['method']);
+            } elseif (isset($decoded['name']) && is_string($decoded['name'])) {
+                $name = $decoded['name'];
+                $args = $decoded['arguments'] ?? $decoded['parameters'] ?? null;
+                $arguments = is_array($args) ? $args : [];
+                if ($arguments === []) {
+                    $arguments = $decoded;
+                    unset($arguments['name'], $arguments['arguments'], $arguments['parameters']);
+                }
+            } elseif (isset($decoded['tool']) && is_string($decoded['tool'])) {
+                $name = $decoded['tool'];
+                $args = $decoded['arguments'] ?? $decoded['parameters'] ?? null;
+                $arguments = is_array($args) ? $args : [];
+            }
+
+            if ($name === null || $name === '') {
+                continue;
+            }
+
+            if (! isset($known[strtolower($name)])) {
+                continue;
+            }
+
+            /** @var array<string, mixed> $safeArgs */
+            $safeArgs = [];
+            foreach ($arguments as $key => $value) {
+                if (! is_string($key)) {
+                    continue;
+                }
+                if (is_scalar($value) || $value === null || is_array($value)) {
+                    $safeArgs[$key] = $value;
+                }
+            }
+
+            $calls[] = [
+                'name' => $name,
+                'arguments' => $safeArgs,
+            ];
+
+            if (count($calls) >= 3) {
+                break;
+            }
+        }
+
+        return $calls;
     }
 
     public static function defersToUser(string $text): bool
@@ -461,6 +565,53 @@ class AgentDirectives
             '/Welcome to nginx!|publish_directory probablement incorrect|Page nginx par d[ée]faut|nginx is successfully installed/iu',
             $text,
         );
+    }
+
+    /**
+     * Healthcheck Coolify sur un port différent de celui où l’app écoute réellement.
+     */
+    public static function isHealthcheckPortMismatchIssue(?string $text): bool
+    {
+        if ($text === null || trim($text) === '') {
+            return false;
+        }
+
+        $healthPort = self::inferHealthcheckPortFromLogs($text);
+        $listenPort = self::inferListenPortFromLogs($text);
+
+        return $healthPort !== null && $listenPort !== null && $healthPort !== $listenPort;
+    }
+
+    /**
+     * Déduit le port d’écoute réel depuis les logs (ex. « Server listening on … :4321 »).
+     */
+    public static function inferListenPortFromLogs(string $logsBlob): ?string
+    {
+        if (preg_match('/(?:server\s+)?listening\s+on[^\n:]*:(\d{2,5})\b/iu', $logsBlob, $m) === 1) {
+            return $m[1];
+        }
+
+        if (preg_match('/\blocal:\s*https?:\/\/[^:\s\/]+:(\d{2,5})\b/iu', $logsBlob, $m) === 1) {
+            return $m[1];
+        }
+
+        return null;
+    }
+
+    /**
+     * Déduit le port healthcheck depuis les logs Coolify.
+     */
+    public static function inferHealthcheckPortFromLogs(string $logsBlob): ?string
+    {
+        if (preg_match('/healthcheck\s+url[^\n]*localhost:(\d{2,5})\b/iu', $logsBlob, $m) === 1) {
+            return $m[1];
+        }
+
+        if (preg_match('/GET:\s*https?:\/\/[^:\s\/]+:(\d{2,5})\b/iu', $logsBlob, $m) === 1) {
+            return $m[1];
+        }
+
+        return null;
     }
 
     /**
