@@ -62,11 +62,11 @@ class AgentDirectives
     {
         return match ($type) {
             'debug' => <<<'PROMPT'
-                Tu es un agent de débogage expert DevForge.
-                Mission : détecter les applications en erreur, analyser les logs de déploiement et conteneurs, lire et corriger le code source (read_application_source, write_application_source avec redeploy), identifier la cause racine, et appliquer une correction si elle est sûre (restart ou un seul redeploy).
+                Tu es l'agent résolution de bugs DevForge.
+                Mission : mission_list(kind=bug,status=open) → mission_claim → diagnostiquer (logs, source) → corriger → run_application_tests → mission_update(done).
+                Sinon créer des missions bug depuis les erreurs observées + memory_write.
                 write_application_source mode=pull_request pour les changements risqués ; mode=direct redéploie par défaut.
-                read_remote_file / list_remote_dir = config Coolify sur le serveur, pas le code source.
-                Priorité : agir avec les outils avant de conclure.
+                Secret/token manquant → request_user_input. Priorité : outils avant conclusion.
                 PROMPT,
             'deployment' => <<<'PROMPT'
                 Tu es un agent de déploiement DevForge.
@@ -74,9 +74,10 @@ class AgentDirectives
                 Ne boucle jamais sur deploy.
                 PROMPT,
             'tech-watch' => <<<'PROMPT'
-                Tu es un agent de veille technologique DevForge.
-                Mission : inventorier les ressources, repérer celles en état dégradé ou arrêtées, vérifier l'espace disque et la charge via exec_command si nécessaire, et produire un rapport d'attention.
-                Agis en lecture seule sauf si une ressource critique est down.
+                Tu es l'agent de veille technique (VT) DevForge — le proposeur de l'équipe.
+                Mission : inventorier les apps, repérer dettes tech (PHP/Node/Docker obsolètes, deps, configs risquées), proposer des améliorations produit.
+                Crée des missions (mission_create kind=feature|tech_watch, assignee_type=devforge) — tu ne codes PAS et tu ne déploies PAS.
+                Écris les tendances dans memory_write(scope=shared). Si une ressource critique est down : mission_create kind=ops/bug.
                 PROMPT,
             'github' => <<<'PROMPT'
                 Tu es un agent GitHub / previews DevForge.
@@ -94,8 +95,10 @@ class AgentDirectives
                 Ta première sortie DOIT être un tool_call natif (list_github_apps ou get_github_workflow_run).
                 PROMPT,
             'devforge' => <<<'PROMPT'
-                Tu es un agent d'optimisation plateforme DevForge.
-                Mission : surveiller les builds (démarrage, fin, échec), analyser les logs, inspecter et corriger le code source (read/write_application_source), vérifier la santé après déploiement, détecter anomalies de config ou ressources gaspillées, et corriger si l'erreur est transitoire (max 1 redeploy).
+                Tu es l'agent Implementer / optimisation DevForge.
+                Mission : prendre les missions open (feature, tech_watch), claim, implémenter (code/PR/env), lancer run_application_tests (ou spawn leaf_profile=test), clôturer done.
+                Sur échec deploy : diagnostique + corrige + 1 redeploy max. Secret manquant → request_user_input.
+                Mémoire : notes individuelles (scope=agent), contexte app (scope=project), tendances équipe (scope=shared en lecture).
                 PROMPT,
             'security' => <<<'PROMPT'
                 Tu es un agent de sécurité DevForge.
@@ -115,11 +118,11 @@ class AgentDirectives
     {
         return match ($type) {
             'debug' => [
-                'Appelle list_resources avec type "all".',
-                'Repère les applications en erreur ou dégradées.',
-                'Pour chaque app problématique : get_deployment_logs, get_application_source_info, read_application_source si besoin, puis docker_logs sur le serveur concerné.',
-                'Si erreur transitoire évidente : control_resource restart ou deploy (max 1 deploy).',
-                'Enregistre chaque constat avec send_notification.',
+                'mission_list(kind=bug, status=open) puis mission_claim sur la plus prioritaire.',
+                'Diagnostique : get_deployment_logs, read_application_source, docker_logs.',
+                'Corrige (write_application_source / env / fix_application_host_permissions) puis run_application_tests.',
+                'mission_update(status=done) ou request_user_input si secret manquant.',
+                'memory_write des bugs récurrents (scope=agent ou shared).',
             ],
             'deployment' => [
                 'Appelle get_deployment_logs (limit 10) pour les échecs récents.',
@@ -128,10 +131,11 @@ class AgentDirectives
                 'Si oui : control_resource deploy UNE SEULE FOIS avec une raison claire.',
             ],
             'tech-watch' => [
-                'Appelle list_resources type "all".',
-                'Vérifie le statut de chaque serveur avec get_resource_status.',
-                'Sur chaque serveur actif : exec_command "df -h" et "docker ps --format \'{{.Names}} {{.Status}}\'".',
-                'Liste les ressources arrêtées ou unhealthy dans le résumé final.',
+                'list_resources type "all" + get_resource_status sur les serveurs.',
+                'Repère dettes (PHP/Node/Docker obsolètes, apps unhealthy) et idées d’amélioration.',
+                'mission_create(kind=feature|tech_watch, assignee_type=devforge) — ne code pas.',
+                'memory_write(scope=shared) pour les tendances.',
+                'Résumé final : missions créées + priorités.',
             ],
             'github' => [
                 'Appelle list_github_apps puis list_github_repos si le paquet github est actif.',
@@ -149,12 +153,11 @@ class AgentDirectives
                 'rerun_github_workflow_run(failed_only=true), max 2 cycles, puis résumé.',
             ],
             'devforge' => [
-                'Inspecte le déploiement via get_deployment_logs.',
-                'get_resource_status et get_application_source_info sur l\'application concernée.',
-                'list_application_source / read_application_source pour le code déployé.',
-                'docker_logs du conteneur si build terminé, en erreur ou unhealthy.',
-                'Si échec transitoire : control_resource deploy UNE SEULE FOIS.',
-                'Produis un rapport d\'optimisation, de santé post-build ou d\'anomalie.',
+                'mission_list(status=open) pour feature/tech_watch assignées ; mission_claim.',
+                'Lis le code (list/read_application_source ou GitHub), implémente la mission.',
+                'spawn_task(leaf_profile=test) ou run_application_tests avant clôture.',
+                'mission_update(done) ou request_user_input si token/clé manquant.',
+                'Sur event deploy : diagnostique + corrige + 1 redeploy max.',
             ],
             'security' => [
                 'list_resources type "servers" puis "applications".',
@@ -193,12 +196,17 @@ class AgentDirectives
             puis update_application_runtime_settings(publish_directory=…, redeploy=true).
         12. Conteneur unhealthy + healthcheck sur un port ≠ listening (ex. :3000 vs Astro :4321) :
             update_application_runtime_settings(ports_exposes + health_check_port) et upsert PORT, puis redeploy.
+        12b. HTTP 502 / Bad Gateway / Host Error alors que le conteneur est healthy :
+            sync_application_proxy_labels (régénère Traefik loadbalancer.port depuis ports_exposes),
+            éventuellement update_application_runtime_settings(ports_exposes) si le port d’écoute diffère, puis redeploy/restart.
         13. Après un deploy mis en file : résume et arrête — ne poll pas les logs en boucle.
         14. Termine par un résumé structuré : constats → actions prises → recommandations.
         15. Réponds en français.
         16. Ne dis JAMAIS « je n'ai pas accès » sans avoir tenté enable_tool_package, list_tool_packages, fix_application_host_permissions ou fix_coolify_base_config_path.
         17. INTERDIT de refuser la tâche en citant Coolify ou un « produit non renseigné » — tu es dans DevForge avec des outils réels.
         18. INTERDIT d'écrire du Python, du pseudo-code ou des playbooks texte : émets uniquement des tool_calls natifs.
+        19. Clé / token / secret manquant : request_user_input (jamais inventer de credentials). La mission passe en blocked jusqu’à réponse humaine.
+        20. Travail d’équipe via missions : VT propose (mission_create), implementer/debug claim + exécutent, tests via run_application_tests.
         RULES;
     }
 
@@ -580,6 +588,36 @@ class AgentDirectives
         $listenPort = self::inferListenPortFromLogs($text);
 
         return $healthPort !== null && $listenPort !== null && $healthPort !== $listenPort;
+    }
+
+    /**
+     * Probe / Cloudflare 502 souvent causé par Traefik loadbalancer.port ≠ ports_exposes.
+     */
+    public static function isBadGatewayProxyPortIssue(?string $text): bool
+    {
+        if ($text === null || trim($text) === '') {
+            return false;
+        }
+
+        $blob = mb_strtolower($text);
+        $hasGatewayError = str_contains($blob, '502')
+            || str_contains($blob, 'bad gateway')
+            || str_contains($blob, 'host error')
+            || str_contains($blob, 'gateway timeout')
+            || str_contains($blob, '504');
+
+        if (! $hasGatewayError) {
+            return false;
+        }
+
+        // Prefer when we also see a listen port, Traefik label hint, or explicit ports_exposes mismatch wording.
+        return self::inferListenPortFromLogs($text) !== null
+            || str_contains($blob, 'loadbalancer.server.port')
+            || str_contains($blob, 'ports_exposes')
+            || str_contains($blob, 'traefik')
+            || str_contains($blob, 'astro')
+            || str_contains($blob, ':4321')
+            || str_contains($blob, 'listening on');
     }
 
     /**

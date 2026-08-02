@@ -855,6 +855,76 @@ function generateLabelsApplication(Application $application, ?ApplicationPreview
     return $labels->all();
 }
 
+/**
+ * First published container port used by the reverse proxy (Traefik/Caddy).
+ */
+function applicationExpectedProxyPort(Application $application): ?string
+{
+    $ports = $application->settings?->is_static
+        ? [80]
+        : ($application->ports_exposes_array ?? []);
+
+    if ($ports === [] || $ports === null) {
+        return null;
+    }
+
+    $port = (string) $ports[0];
+
+    return $port !== '' ? $port : null;
+}
+
+/**
+ * True when stored custom_labels point Traefik/Caddy at a different port than ports_exposes.
+ * That mismatch produces Cloudflare/Traefik 502 while the app itself is healthy.
+ */
+function applicationProxyLabelsNeedPortSync(Application $application, ?string $labelsText = null): bool
+{
+    $expected = applicationExpectedProxyPort($application);
+    if ($expected === null) {
+        return false;
+    }
+
+    if ($labelsText === null) {
+        $encoded = data_get($application, 'custom_labels');
+        if (! filled($encoded)) {
+            return filled($application->fqdn);
+        }
+        $decoded = base64_decode((string) $encoded, true);
+        $labelsText = is_string($decoded) ? $decoded : '';
+    }
+
+    if (trim((string) $labelsText) === '') {
+        return filled($application->fqdn);
+    }
+
+    if (preg_match_all('/loadbalancer\.server\.port\s*=\s*(\d+)/i', (string) $labelsText, $matches) < 1) {
+        return (bool) preg_match('/traefik\.enable\s*=\s*true/i', (string) $labelsText);
+    }
+
+    foreach ($matches[1] as $port) {
+        if ((string) $port !== $expected) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Regenerate and persist proxy labels from current FQDN + ports_exposes.
+ *
+ * @return list<string>
+ */
+function syncApplicationProxyLabels(Application $application, ?ApplicationPreview $preview = null): array
+{
+    $application->loadMissing(['settings', 'destination.server']);
+    $labels = generateLabelsApplication($application, $preview);
+    $application->custom_labels = base64_encode(implode("\n", $labels));
+    $application->save();
+
+    return $labels;
+}
+
 function isDatabaseImage(?string $image = null, ?array $serviceConfig = null)
 {
     if (is_null($image)) {

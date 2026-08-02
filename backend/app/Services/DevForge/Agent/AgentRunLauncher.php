@@ -75,6 +75,12 @@ class AgentRunLauncher
             'max_redeploy' => isset($context['max_redeploy']) && is_numeric($context['max_redeploy'])
                 ? (int) $context['max_redeploy']
                 : null,
+            'mission_uuid' => is_string($context['mission_uuid'] ?? null) ? $context['mission_uuid'] : null,
+            'mission_kind' => is_string($context['mission_kind'] ?? null) ? $context['mission_kind'] : null,
+            'mission_title' => is_string($context['mission_title'] ?? null) ? $context['mission_title'] : null,
+            'resource_uuid' => is_string($context['resource_uuid'] ?? null) ? $context['resource_uuid'] : null,
+            'resume_after_user_input' => ! empty($context['resume_after_user_input']) ? true : null,
+            'user_input_key' => is_string($context['user_input_key'] ?? null) ? $context['user_input_key'] : null,
         ], fn (mixed $value): bool => $value !== null && $value !== '');
 
         return $metadata === [] ? null : $metadata;

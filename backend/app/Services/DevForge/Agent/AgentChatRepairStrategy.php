@@ -21,6 +21,8 @@ class AgentChatRepairStrategy
 
     public const ISSUE_HEALTHCHECK_PORT = 'healthcheck_port';
 
+    public const ISSUE_PROXY_PORT = 'proxy_port';
+
     public const ISSUE_GENERIC = 'generic';
 
     /** Outils de lecture / diagnostic — ne comptent pas comme correction. */
@@ -41,6 +43,10 @@ class AgentChatRepairStrategy
         'web_search',
         'mission_list',
         'mission_show',
+        'mission_claim',
+        'mission_create',
+        'request_user_input',
+        'run_application_tests',
     ];
 
     public static function detectIssue(string $logsBlob): string
@@ -54,6 +60,11 @@ class AgentChatRepairStrategy
         // Healthcheck sur mauvais port (ex. curl :3000 alors qu’Astro écoute :4321) — avant permissions.
         if (AgentDirectives::isHealthcheckPortMismatchIssue($logsBlob)) {
             return self::ISSUE_HEALTHCHECK_PORT;
+        }
+
+        // 502 Bad Gateway / Host Error : labels Traefik souvent restés sur port 80 alors que l’app écoute 4321/3000.
+        if (AgentDirectives::isBadGatewayProxyPortIssue($logsBlob)) {
+            return self::ISSUE_PROXY_PORT;
         }
 
         // « tee: » seul est trop large (faux positifs) — exiger permission denied.

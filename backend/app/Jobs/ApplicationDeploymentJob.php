@@ -3215,7 +3215,15 @@ COPY ./nginx.conf /etc/nginx/conf.d/default.conf");
         $persistent_storages = $this->generate_local_persistent_volumes();
         $persistent_file_volumes = $this->application->fileStorages()->get();
         $volume_names = $this->generate_local_persistent_volumes_only_volume_names();
-        if (data_get($this->application, 'custom_labels')) {
+        $readonlyLabels = (bool) ($this->application->settings->is_container_label_readonly_enabled ?? true);
+        $shouldRegenerateProxyLabels = $readonlyLabels
+            || ! data_get($this->application, 'custom_labels')
+            || applicationProxyLabelsNeedPortSync($this->application);
+
+        if ($shouldRegenerateProxyLabels) {
+            // Always align Traefik/Caddy loadbalancer.port with ports_exposes (avoids stale port=80 → 502).
+            $labels = collect(syncApplicationProxyLabels($this->application, $this->preview));
+        } elseif (data_get($this->application, 'custom_labels')) {
             $this->application->parseContainerLabels();
             $labels = collect(preg_split("/\r\n|\n|\r/", base64_decode($this->application->custom_labels)));
             $labels = $labels->filter(function ($value, $key) {
@@ -3224,9 +3232,7 @@ COPY ./nginx.conf /etc/nginx/conf.d/default.conf");
             $this->application->custom_labels = base64_encode($labels->implode("\n"));
             $this->application->save();
         } else {
-            if ($this->application->settings->is_container_label_readonly_enabled) {
-                $labels = collect(generateLabelsApplication($this->application, $this->preview));
-            }
+            $labels = collect(generateLabelsApplication($this->application, $this->preview));
         }
         if ($this->pull_request_id !== 0) {
             $labels = collect(generateLabelsApplication($this->application, $this->preview));

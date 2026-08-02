@@ -16,9 +16,20 @@ class AiAgentKeyRequest extends Model
         'agent_id',
         'run_id',
         'key_name',
+        'kind',
         'reason',
         'status',
+        'resource_uuid',
+        'mission_uuid',
+        'resolved_at',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'resolved_at' => 'datetime',
+        ];
+    }
 
     /** @return string[] */
     public function uniqueIds(): array

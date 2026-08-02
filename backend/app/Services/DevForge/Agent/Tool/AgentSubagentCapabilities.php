@@ -29,6 +29,12 @@ class AgentSubagentCapabilities
 
     public const PROFILE_FIX_CI = 'fix-ci';
 
+    public const PROFILE_IMPLEMENT = 'implement';
+
+    public const PROFILE_TEST = 'test';
+
+    public const PROFILE_RESEARCH = 'research';
+
     /**
      * @param  array<string, mixed>  $context
      */
@@ -183,6 +189,73 @@ class AgentSubagentCapabilities
                 'memory_write',
                 'todo_read',
                 'todo_write',
+                'list_tool_packages',
+                'enable_tool_package',
+            ],
+            self::PROFILE_IMPLEMENT => [
+                'list_resources',
+                'get_resource_status',
+                'get_application_source_info',
+                'list_application_source',
+                'read_application_source',
+                'write_application_source',
+                'list_application_env_vars',
+                'upsert_application_env_var',
+                'get_application_runtime_settings',
+                'update_application_runtime_settings',
+                'get_application_git_info',
+                'list_github_branches',
+                'read_github_file',
+                'write_github_file',
+                'create_github_branch',
+                'create_github_pull_request',
+                'mission_show',
+                'mission_update',
+                'request_user_input',
+                'memory_read',
+                'memory_write',
+                'todo_read',
+                'todo_write',
+                'list_tool_packages',
+                'enable_tool_package',
+            ],
+            self::PROFILE_TEST => [
+                'list_resources',
+                'get_resource_status',
+                'get_application_source_info',
+                'list_application_source',
+                'read_application_source',
+                'run_application_tests',
+                'exec_command',
+                'docker_logs',
+                'list_github_workflow_runs',
+                'get_github_workflow_run',
+                'get_github_workflow_job_logs',
+                'mission_show',
+                'mission_update',
+                'memory_read',
+                'todo_read',
+                'todo_write',
+                'list_tool_packages',
+                'enable_tool_package',
+            ],
+            self::PROFILE_RESEARCH => [
+                'list_resources',
+                'get_resource_status',
+                'get_application_source_info',
+                'list_application_source',
+                'read_application_source',
+                'get_application_git_info',
+                'list_github_repos',
+                'read_github_file',
+                'list_github_dir',
+                'web_search',
+                'mission_list',
+                'mission_create',
+                'mission_show',
+                'memory_read',
+                'memory_write',
+                'todo_read',
                 'list_tool_packages',
                 'enable_tool_package',
             ],

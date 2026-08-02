@@ -93,3 +93,34 @@ it('does not overwrite a custom publish directory', function () {
         ->and($this->application->detected_framework)->toBe('astro-static')
         ->and($result['changes'])->not->toContain('publish_directory=/dist');
 });
+
+it('applies Astro SSR listen port when still on Coolify default 3000', function () {
+    $detection = [
+        'available' => true,
+        'reason' => null,
+        'sources' => ['package.json', 'astro.config.mjs'],
+        'suggestions' => [
+            'is_static' => false,
+            'ports_exposes' => '4321',
+            'publish_directory' => '/',
+            'base_directory' => '/',
+            'start_command' => 'node ./dist/server/entry.mjs',
+            'build_command' => 'astro build',
+            'install_command' => 'npm ci',
+            'health_check_port' => '4321',
+            'framework' => 'astro-ssr',
+            'framework_label' => 'Astro SSR',
+        ],
+        'reasons' => ['Astro SSR détecté'],
+    ];
+
+    $reconciler = app(ApplicationDeploySettingsReconciler::class);
+    $result = $reconciler->applyDetection($this->application, $detection);
+
+    $this->application->refresh();
+
+    expect($result['applied'])->toBeTrue()
+        ->and($result['framework'])->toBe('astro-ssr')
+        ->and((string) $this->application->ports_exposes)->toBe('4321')
+        ->and($this->application->settings->is_static)->toBeFalse();
+});

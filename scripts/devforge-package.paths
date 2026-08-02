@@ -53,6 +53,8 @@ public/brand
 # libSQL + crÃ©ation de bases (helpers et actions Coolify core patchÃ©s)
 bootstrap/helpers/constants.php
 bootstrap/helpers/databases.php
+bootstrap/helpers/docker.php
+app/Jobs/ApplicationDeploymentJob.php
 app/Models/StandaloneLibsql.php
 app/Actions/Database/StartLibsql.php
 app/Actions/Database/StartDatabase.php

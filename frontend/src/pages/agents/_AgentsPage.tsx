@@ -1,6 +1,7 @@
 import { Bot, Plus, RefreshCw } from 'lucide-preact';
 import { useState } from 'preact/hooks';
 import { AgentCard } from '../../components/agents/AgentCard';
+import { AgentUserRequestsInbox } from '../../components/agents/AgentUserRequestsInbox';
 import { CreateAgentModal } from '../../components/agents/CreateAgentModal';
 import { MissionBoardPanel } from '../../components/agents/MissionBoardPanel';
 import { PageHeader } from '../../components/PageHeader';
@@ -36,6 +37,8 @@ export function AgentsPage() {
                     </>
                 )}
             />
+
+            <AgentUserRequestsInbox />
 
             <div class="mb-5">
                 <MissionBoardPanel />

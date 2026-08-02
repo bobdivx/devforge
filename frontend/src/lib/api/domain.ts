@@ -744,6 +744,11 @@ export type AgentMissionKind = 'bug' | 'feature' | 'tech_watch' | 'github_pr' | 
 export type AgentMissionStatus = 'open' | 'in_progress' | 'blocked' | 'done' | 'cancelled';
 export type AgentMissionPriority = 'low' | 'normal' | 'high' | 'urgent';
 
+export type AgentMissionTimelineEvent = {
+    at: string | null;
+    label: string;
+};
+
 export type AgentMission = {
     uuid: string;
     kind: AgentMissionKind | string;
@@ -754,7 +759,16 @@ export type AgentMission = {
     source: string | null;
     resource_uuid: string | null;
     agent_id: number | null;
+    agent_uuid?: string | null;
+    agent_name?: string | null;
+    agent_type?: string | null;
     assignee_agent_id: number | null;
+    assignee_uuid?: string | null;
+    assignee_name?: string | null;
+    assignee_type?: string | null;
+    blocked_reason?: string | null;
+    run_uuid?: string | null;
+    timeline?: AgentMissionTimelineEvent[];
     metadata: Record<string, unknown>;
     created_at: string | null;
     updated_at: string | null;
@@ -2095,18 +2109,39 @@ const STORAGE_API_TIMEOUT_MS = 120_000;
 export interface AgentKeyRequest {
     uuid: string;
     key_name: string;
+    kind?: string;
     reason: string | null;
     status: string;
+    resource_uuid?: string | null;
+    mission_uuid?: string | null;
+    agent_uuid?: string | null;
+    agent_name?: string | null;
+    agent_type?: string | null;
     agent?: {
+        uuid?: string;
         name: string;
+        type?: string;
     };
+    created_at?: string | null;
+    resolved_at?: string | null;
 }
 
 export const domainApi = {
-    agentKeyRequests: () => apiFetch<AgentKeyRequest[]>(`${API_BASE}/agent-key-requests`),
-    fulfillAgentKeyRequest: (uuid: string, value: string) => mutate<{message: string}>(`/agent-key-requests/${encodeURIComponent(uuid)}/fulfill`, {
+    agentKeyRequests: (options?: { status?: string }) => {
+        const params = new URLSearchParams();
+        if (options?.status) params.set('status', options.status);
+        const qs = params.toString();
+        return apiFetch<{ data: AgentKeyRequest[]; meta?: { pending_count?: number } }>(
+            `${API_BASE}/agent-key-requests${qs ? `?${qs}` : ''}`,
+        );
+    },
+    fulfillAgentKeyRequest: (uuid: string, value: string, options?: { scope?: 'shared' | 'application'; confirmed?: boolean }) => mutate<{ message: string }>(`/agent-key-requests/${encodeURIComponent(uuid)}/fulfill`, {
         method: 'POST',
-        body: JSON.stringify({ value }),
+        body: JSON.stringify({
+            value,
+            scope: options?.scope,
+            confirmed: options?.confirmed,
+        }),
     }),
     overview: () => apiFetch<ApiResponse<Overview>>(`${API_BASE}/overview`),
     projects: () => apiFetch<ApiResponse<Project[]>>(`${API_BASE}/projects`),
@@ -3444,6 +3479,7 @@ export const domainApi = {
         priority?: string;
         resource_uuid?: string;
         assignee_agent_uuid?: string;
+        assignee_type?: string;
     }) => mutate<ApiResponse<AgentMission>>('/ai/missions', {
         method: 'POST',
         body: JSON.stringify(input),
@@ -3456,6 +3492,8 @@ export const domainApi = {
         priority: string;
         resource_uuid: string | null;
         assignee_agent_uuid: string | null;
+        assignee_type: string | null;
+        blocked_reason: string | null;
     }>) => mutate<ApiResponse<AgentMission>>(`/ai/missions/${encodeURIComponent(uuid)}`, {
         method: 'PATCH',
         body: JSON.stringify(input),

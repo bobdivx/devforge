@@ -99,6 +99,17 @@ class ApplicationDeploySettingsReconciler
             }
         }
 
+        // Non-static (SSR/Node): apply detected listen port when unset or still on Coolify default 3000/80.
+        if (! $suggestedStatic) {
+            $suggestedPorts = is_string($suggestions['ports_exposes'] ?? null) ? (string) $suggestions['ports_exposes'] : null;
+            $currentPorts = trim((string) ($application->ports_exposes ?? ''));
+            $looksLikeDefault = $currentPorts === '' || in_array($currentPorts, ['3000', '80'], true);
+            if ($suggestedPorts !== null && $suggestedPorts !== '' && $looksLikeDefault && $suggestedPorts !== $currentPorts) {
+                $payload['ports_exposes'] = $suggestedPorts;
+                $changes[] = "ports_exposes={$suggestedPorts}";
+            }
+        }
+
         foreach (['install_command', 'build_command', 'start_command'] as $commandKey) {
             $suggested = $suggestions[$commandKey] ?? null;
             if (! is_string($suggested) || trim($suggested) === '') {

@@ -68,6 +68,7 @@ class Kernel extends ConsoleKernel
             $this->scheduleInstance->command('agents:heartbeat')->everyFifteenMinutes()->onOneServer();
             $this->scheduleInstance->command('agents:watch-github-prs')->everyFifteenMinutes()->onOneServer();
             $this->scheduleInstance->command('agents:watch-tech')->hourly()->onOneServer();
+            $this->scheduleInstance->command('agents:work-missions')->everyTwoMinutes()->onOneServer();
 
             $this->scheduleInstance->job(new ApplicationReadinessWatchdogJob)
                 ->everyThreeMinutes()
@@ -103,6 +104,7 @@ class Kernel extends ConsoleKernel
             $this->scheduleInstance->command('agents:heartbeat')->everyFifteenMinutes()->onOneServer();
             $this->scheduleInstance->command('agents:watch-github-prs')->everyFifteenMinutes()->onOneServer();
             $this->scheduleInstance->command('agents:watch-tech')->hourly()->onOneServer();
+            $this->scheduleInstance->command('agents:work-missions')->everyTwoMinutes()->onOneServer();
             $this->scheduleInstance->job(new ApplicationReadinessWatchdogJob)
                 ->everyThreeMinutes()
                 ->onOneServer();

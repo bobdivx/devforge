@@ -45,6 +45,10 @@ class AgentPromptBuilder
             - Conteneur unhealthy + « Healthcheck URL … :3000 » alors que les logs disent « listening on … :4321 » :
               update_application_runtime_settings(ports_exposes=4321, health_check_port=4321, redeploy=true)
               et upsert_application_env_var PORT=4321 (runtime). Astro SSR écoute souvent 4321, pas 3000.
+              Puis sync_application_proxy_labels si les labels Traefik restent sur port 80.
+            - HTTP 502 / Bad Gateway / Host Error (Cloudflare) alors que le conteneur est healthy :
+              sync_application_proxy_labels (régénère Traefik loadbalancer.port depuis ports_exposes) puis redeploy.
+              Cause typique : custom_labels figés sur port=80 alors que ports_exposes=4321.
             - npm E401 / unauthenticated sur npm.pkg.github.com :
               Coolify injecte NODE_AUTH_TOKEN au build via PAT enregistré (Connexions → token Packages)
               ou token GitHub App si packages:read est accordé.
@@ -86,8 +90,10 @@ class AgentPromptBuilder
             - Si page nginx par défaut / publish_directory vide sur site statique :
               déduis le dossier depuis get_deployment_logs / get_application_runtime_settings puis
               update_application_runtime_settings(publish_directory=…, is_static=true, redeploy=true) IMMÉDIATEMENT.
+            - Si HTTP 502 / Bad Gateway / Host Error et conteneur healthy :
+              sync_application_proxy_labels (Traefik port ≠ ports_exposes, souvent 80 vs 4321) puis redeploy.
             - Cherche env manquantes (ex. ASTRO_DB_*, DATABASE_URL, secrets).
-            - Corrige via outils autorisés : update_application_runtime_settings, upsert_application_env_var, control_resource restart/redeploy (1 fois max).
+            - Corrige via outils autorisés : sync_application_proxy_labels, update_application_runtime_settings, upsert_application_env_var, control_resource restart/redeploy (1 fois max).
             - Si correction automatique possible : applique puis termine avec outcome auto_fixed.
             - Si une action humaine est nécessaire : outcome needs_user avec :
               - title = action concrète attendue (ex. « Ajouter ASTRO_DB_REMOTE_URL »), JAMAIS « Intervention requise »
@@ -102,6 +108,28 @@ class AgentPromptBuilder
             - Concentre-toi sur l'objectif fourni.
             - INTERDIT : spawn_task, delegate_task, yield_wait (tu es un leaf).
             - Produis un résumé clair et actionnable pour le parent (preuves, erreurs, prochaines étapes suggérées).
+            RULES,
+            'mission_work' => <<<'RULES'
+
+            Contexte : mission assignée via le board (équipe autonome).
+            - mission_show sur mission_uuid, puis travaille jusqu'à done ou blocked.
+            - Si kind=feature|tech_watch : implémente (read/write_application_source ou GitHub), puis run_application_tests (ou spawn_task leaf_profile=test + yield_wait).
+            - Si kind=bug : diagnostique, corrige, teste, mission_update(done).
+            - Secret/token manquant : request_user_input (jamais inventer de credentials).
+            - Termine par mission_update(status=done|blocked) avec blocked_reason si besoin.
+            RULES,
+            'user_input_resolved' => <<<'RULES'
+
+            Contexte : l'utilisateur a fourni une clé/token/confirmation.
+            - La valeur N'EST PAS dans ce prompt (sécurité) — elle a été injectée côté plateforme.
+            - Reprends la mission / le travail en cours immédiatement avec les outils.
+            - Ne redemande pas le même secret.
+            RULES,
+            'tech_watch_missions' => <<<'RULES'
+
+            Contexte : nouvelles missions veille créées.
+            - Tu es proposeur : mission_list, enrichis les descriptions, memory_write(scope=shared).
+            - INTERDIT write_application_source / control_resource deploy — assigne assignee_type=devforge.
             RULES,
             default => '',
         };
@@ -183,6 +211,32 @@ class AgentPromptBuilder
 
         if (($context['event'] ?? null) === 'github_workflow_run_failed') {
             return $this->githubWorkflowFailedContext($agent, $context);
+        }
+
+        if (($context['event'] ?? null) === 'mission_work') {
+            $missionUuid = (string) ($context['mission_uuid'] ?? '');
+            $title = (string) ($context['mission_title'] ?? 'mission');
+            $kind = (string) ($context['mission_kind'] ?? 'other');
+            $resource = (string) ($context['resource_uuid'] ?? $context['application_uuid'] ?? '');
+
+            return trim(<<<CONTEXT
+            MISSION WORK — exécute maintenant
+            Mission UUID : {$missionUuid}
+            Titre : {$title}
+            Kind : {$kind}
+            Resource : {$resource}
+
+            1. mission_show(mission_uuid="{$missionUuid}")
+            2. Agis avec les outils jusqu'à résolution
+            3. run_application_tests si code modifié
+            4. mission_update(status=done) ou blocked + request_user_input si secret manquant
+            CONTEXT);
+        }
+
+        if (($context['event'] ?? null) === 'user_input_resolved') {
+            $handoff = (string) ($context['user_input_handoff_message'] ?? 'Entrée utilisateur reçue — reprends.');
+
+            return $handoff;
         }
 
         $now = now()->format('d/m/Y H:i');

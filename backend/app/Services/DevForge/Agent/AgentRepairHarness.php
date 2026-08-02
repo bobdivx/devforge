@@ -3,10 +3,12 @@
 namespace App\Services\DevForge\Agent;
 
 use App\Models\AiAgent;
+use App\Models\AiAgentKeyRequest;
 use App\Models\AiAgentRun;
 use App\Models\Application;
 use App\Services\DevForge\Application\ApplicationGitRepositoryParser;
 use App\Services\DevForge\Application\GithubPackagesBuildAuthInjector;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Séquence de réparation déterministe quand le LLM refuse d'émettre des tool_calls.
@@ -130,6 +132,15 @@ class AgentRepairHarness
                 $envResult = $toolkit->execute('upsert_application_env_var', $envArgs);
                 $record('upsert_application_env_var', $envArgs, $envResult);
 
+                // Ensure Traefik labels follow the corrected port (not stale port=80).
+                $syncArgs = [
+                    ...$appArgs,
+                    'redeploy' => false,
+                    'reason' => "Harness: sync labels après healthcheck → {$targetPort}",
+                ];
+                $syncResult = $toolkit->execute('sync_application_proxy_labels', $syncArgs);
+                $record('sync_application_proxy_labels', $syncArgs, $syncResult);
+
                 $headline = "Port aligné sur {$targetPort} (healthcheck + ports_exposes + PORT) — redeploy lancé.";
                 $action = [
                     'kind' => 'runtime_settings',
@@ -185,8 +196,86 @@ class AgentRepairHarness
                 ],
             ]);
 
+                return [
+                    'text' => $headline."\n\nVérifiez ports_exposes / health_check_port / variable PORT (Astro SSR → souvent 4321).",
+                    'steps' => $steps,
+                ];
+        } elseif ($issue === AgentChatRepairStrategy::ISSUE_PROXY_PORT) {
+            $listenPort = AgentDirectives::inferListenPortFromLogs($issueBlob)
+                ?? AgentDirectives::inferListenPortFromLogs($logsBlob);
+
+            $application = $applicationUuid !== null
+                ? Application::query()->where('uuid', $applicationUuid)->first()
+                : null;
+            $currentPorts = trim((string) ($application?->ports_exposes ?? ''));
+            $targetPort = $listenPort
+                ?? ($currentPorts !== '' && $currentPorts !== '80' ? $currentPorts : null)
+                ?? '4321';
+
+            if ($applicationUuid !== null) {
+                if ((string) $currentPorts !== (string) $targetPort) {
+                    $settingsArgs = [
+                        ...$appArgs,
+                        'ports_exposes' => $targetPort,
+                        'health_check_port' => $targetPort,
+                        'is_static' => false,
+                        'redeploy' => false,
+                        'reason' => "Harness: 502 proxy → ports_exposes={$targetPort}",
+                    ];
+                    $settingsResult = $toolkit->execute('update_application_runtime_settings', $settingsArgs);
+                    $record('update_application_runtime_settings', $settingsArgs, $settingsResult);
+                }
+
+                $syncArgs = [
+                    ...$appArgs,
+                    'redeploy' => true,
+                    'reason' => "Harness: 502 — sync Traefik labels → port {$targetPort}",
+                ];
+                $syncResult = $toolkit->execute('sync_application_proxy_labels', $syncArgs);
+                $record('sync_application_proxy_labels', $syncArgs, $syncResult);
+
+                $headline = "Labels proxy alignés sur le port {$targetPort} (502 Bad Gateway) — redeploy lancé.";
+                $action = [
+                    'kind' => 'proxy_labels',
+                    'label' => 'sync_proxy_labels',
+                    'detail' => "port={$targetPort}",
+                    'ok' => ! isset($syncResult['error']),
+                    'at' => now()->toISOString(),
+                ];
+                $run->mergeMetadata([
+                    'correction_actions' => [
+                        ...((is_array($run->metadata['correction_actions'] ?? null)) ? $run->metadata['correction_actions'] : []),
+                        $action,
+                    ],
+                    'correction' => [
+                        'outcome' => isset($syncResult['error']) ? 'partial' : 'fixed',
+                        'headline' => $headline,
+                        'diagnosis' => 'Traefik loadbalancer.server.port désynchronisé de ports_exposes (souvent 80 vs 4321) → Cloudflare 502.',
+                        'source_scope' => 'proxy_labels',
+                        'actions' => [$action],
+                        'steps' => [
+                            "ports_exposes={$targetPort}",
+                            'Régénérer custom_labels Traefik',
+                            'Redéployer',
+                        ],
+                        'pills' => [
+                            ['id' => 'proxy', 'label' => 'Proxy', 'active' => true, 'href' => null, 'detail' => ":{$targetPort}"],
+                            ['id' => 'redeploy', 'label' => 'Redeploy', 'active' => true, 'href' => null, 'detail' => 'lancé'],
+                        ],
+                        'belongs_to_deployment_uuid' => is_string($runContext['deployment_uuid'] ?? null)
+                            ? $runContext['deployment_uuid']
+                            : null,
+                    ],
+                ]);
+
+                return [
+                    'text' => $headline,
+                    'steps' => $steps,
+                ];
+            }
+
             return [
-                'text' => $headline."\n\nVérifiez ports_exposes / health_check_port / variable PORT (Astro SSR → souvent 4321).",
+                'text' => '502 Bad Gateway — impossible d’aligner les labels proxy sans UUID application.',
                 'steps' => $steps,
             ];
         } elseif ($issue === AgentChatRepairStrategy::ISSUE_PERMISSIONS) {
@@ -333,6 +422,16 @@ class AgentRepairHarness
                 'at' => now()->toISOString(),
             ];
 
+            $keyRequestUuid = $this->queueUserTokenRequest(
+                $agent,
+                $run,
+                'GITHUB_PACKAGES_TOKEN',
+                'token',
+                'Token GitHub Packages (read:packages) requis pour npm.pkg.github.com (E401). '
+                    .'Fournis un PAT ou enregistre-le dans Connexions — la valeur n’est pas renvoyée au modèle.',
+                $applicationUuid,
+            );
+
             $run->mergeMetadata([
                 'correction_actions' => [
                     ...((is_array($run->metadata['correction_actions'] ?? null)) ? $run->metadata['correction_actions'] : []),
@@ -345,6 +444,7 @@ class AgentRepairHarness
                     'source_scope' => 'env',
                     'actions' => [$needsUserAction],
                     'steps' => $stepsText,
+                    'user_request_uuid' => $keyRequestUuid,
                     'pills' => [
                         [
                             'id' => 'connexions',
@@ -352,6 +452,13 @@ class AgentRepairHarness
                             'active' => true,
                             'href' => '/connexions',
                             'detail' => 'token Packages',
+                        ],
+                        [
+                            'id' => 'agents_inbox',
+                            'label' => 'Inbox agents',
+                            'active' => true,
+                            'href' => '/devforge/agents',
+                            'detail' => 'fournir token',
                         ],
                         [
                             'id' => 'build',
@@ -366,6 +473,13 @@ class AgentRepairHarness
                         : null,
                 ],
             ]);
+
+            $run->update([
+                'status' => 'waiting_for_input',
+                'summary' => mb_substr($headline, 0, 1000),
+                'finished_at' => now(),
+            ]);
+            $agent->update(['status' => 'idle', 'last_run_at' => now()]);
 
             $text = $headline."\n\n".collect($stepsText)
                 ->values()
@@ -622,6 +736,59 @@ class AgentRepairHarness
         }
 
         return implode(', ', $parts);
+    }
+
+    /**
+     * Crée une demande inbox (request_user_input) pour un token manquant — sans exposer de secret au LLM.
+     */
+    private function queueUserTokenRequest(
+        AiAgent $agent,
+        AiAgentRun $run,
+        string $keyName,
+        string $kind,
+        string $message,
+        ?string $resourceUuid,
+    ): ?string {
+        if (! Schema::hasTable('ai_agent_key_requests') || $agent->team_id === null) {
+            return null;
+        }
+
+        $existing = AiAgentKeyRequest::query()
+            ->where('team_id', $agent->team_id)
+            ->where('key_name', $keyName)
+            ->where('status', 'pending')
+            ->when(
+                $resourceUuid !== null && $resourceUuid !== '',
+                fn ($q) => Schema::hasColumn('ai_agent_key_requests', 'resource_uuid')
+                    ? $q->where('resource_uuid', $resourceUuid)
+                    : $q,
+            )
+            ->first();
+
+        if ($existing instanceof AiAgentKeyRequest) {
+            return $existing->uuid;
+        }
+
+        $payload = [
+            'team_id' => $agent->team_id,
+            'agent_id' => $agent->id,
+            'run_id' => $run->id,
+            'key_name' => $keyName,
+            'reason' => mb_substr($message, 0, 2000),
+            'status' => 'pending',
+        ];
+
+        if (Schema::hasColumn('ai_agent_key_requests', 'kind')) {
+            $payload['kind'] = $kind;
+        }
+        if (Schema::hasColumn('ai_agent_key_requests', 'resource_uuid') && $resourceUuid) {
+            $payload['resource_uuid'] = $resourceUuid;
+        }
+
+        $request = AiAgentKeyRequest::create($payload);
+        $run->appendLog("Demande utilisateur créée ({$keyName}) — inbox agents.");
+
+        return $request->uuid;
     }
 
     /**

@@ -18,14 +18,18 @@ class AgentToolPackage
         'install_tool',
         'request_tool',
         'request_api_key',
+        'request_user_input',
         'memory_read',
         'memory_write',
         'todo_read',
         'todo_write',
         'web_search',
         'mission_list',
+        'mission_show',
         'mission_create',
+        'mission_claim',
         'mission_update',
+        'run_application_tests',
     ];
 
     /**
@@ -66,6 +70,7 @@ class AgentToolPackage
                     'delegate_task',
                     'spawn_task',
                     'yield_wait',
+                    'run_application_tests',
                 ],
                 'default_for_types' => ['debug', 'deployment', 'tech-watch', 'devforge', 'security'],
             ],

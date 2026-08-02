@@ -363,6 +363,72 @@ class ApplicationRepairActions
     }
 
     /**
+     * Régénère custom_labels Traefik/Caddy depuis ports_exposes (corrige les 502 port=80 vs 4321).
+     *
+     * @return array<string, mixed>
+     */
+    public function syncApplicationProxyLabels(
+        ?string $applicationUuid,
+        bool $redeploy = true,
+        string $reason = '',
+    ): array {
+        $application = $this->resolveApplication($applicationUuid);
+        if (is_array($application)) {
+            return $application;
+        }
+
+        $application->loadMissing(['settings', 'destination.server']);
+        $expectedPort = applicationExpectedProxyPort($application);
+        $neededSync = applicationProxyLabelsNeedPortSync($application);
+        $labels = syncApplicationProxyLabels($application);
+
+        $this->appendRunLog(
+            '  ✓ Labels proxy régénérés pour '.$application->uuid
+            .($expectedPort !== null ? " (port={$expectedPort})" : '')
+            .($neededSync ? ' [mismatch corrigé]' : '')
+        );
+
+        $this->recordAction([
+            'tool' => 'sync_application_proxy_labels',
+            'uuid' => $application->uuid,
+            'type' => 'applications',
+            'action' => 'sync_proxy_labels',
+            'reason' => $reason !== '' ? $reason : 'Sync Traefik loadbalancer.port',
+            'port' => $expectedPort,
+            'at' => now()->toISOString(),
+        ]);
+
+        $payload = [
+            'ok' => true,
+            'application_uuid' => $application->uuid,
+            'ports_exposes' => (string) ($application->ports_exposes ?? ''),
+            'expected_proxy_port' => $expectedPort,
+            'labels_count' => count($labels),
+            'had_mismatch' => $neededSync,
+            'hint' => 'Labels Traefik/Caddy alignés sur ports_exposes.',
+        ];
+
+        if (! $redeploy) {
+            return $payload;
+        }
+
+        $deploy = $this->deployApplication(
+            $application->uuid,
+            $reason !== '' ? $reason : 'Redeploy après sync labels proxy',
+        );
+
+        if (isset($deploy['error'])) {
+            return [
+                ...$payload,
+                'redeploy' => $deploy,
+                'hint' => 'Labels mis à jour, mais le redeploy a échoué — réessaie control_resource deploy.',
+            ];
+        }
+
+        return [...$payload, 'redeploy' => $deploy];
+    }
+
+    /**
      * Recharge BASE_CONFIG_PATH dans Coolify (config:clear + horizon:terminate) quand
      * les déploiements écrivent encore sous /data/coolify alors que CasaOS expose /media/Docker/...
      *

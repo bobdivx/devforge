@@ -130,10 +130,13 @@ class ApplicationRuntimeSettingsService
             $settings->save();
         }
 
+        $portsChanged = false;
         if ($hasPortsDeferred) {
-            $application->ports_exposes = $portsDeferred !== null && $portsDeferred !== ''
+            $nextPorts = $portsDeferred !== null && $portsDeferred !== ''
                 ? $portsDeferred
                 : $application->ports_exposes;
+            $portsChanged = (string) $application->ports_exposes !== (string) $nextPorts;
+            $application->ports_exposes = $nextPorts;
             $needsRebuild = true;
         }
 
@@ -142,6 +145,12 @@ class ApplicationRuntimeSettingsService
 
         $application->refresh();
         $application->loadMissing('settings');
+
+        // Keep Traefik/Caddy labels in sync when the published port changes (or is still stale).
+        if ($portsChanged || $settingsChanged || applicationProxyLabelsNeedPortSync($application)) {
+            syncApplicationProxyLabels($application);
+            $changed = true;
+        }
 
         $redeploy = null;
         if ($shouldRedeploy && $changed) {

@@ -11,7 +11,7 @@ it('provides autonomous playbook steps per agent type', function () {
 
     expect($playbook)->toBeArray()
         ->and(count($playbook))->toBeGreaterThan(2)
-        ->and($playbook[0])->toContain('list_resources');
+        ->and($playbook[0])->toContain('mission_list');
 });
 
 it('builds autonomous initial message with playbook', function () {
@@ -24,7 +24,7 @@ it('builds autonomous initial message with playbook', function () {
     $message = app(AgentPromptBuilder::class)->autonomousInitialMessage($agent, [], 'manual');
 
     expect($message)->toContain('DÉMARRAGE AUTONOME')
-        ->and($message)->toContain('list_resources')
+        ->and($message)->toContain('mission_list')
         ->and($message)->toContain('Playbook');
 });
 
@@ -233,4 +233,14 @@ it('builds readiness failure prompts with structured outcome instructions', func
         ->and($message)->toContain('ALERTE READINESS')
         ->and($message)->toContain('http_request')
         ->and($message)->toContain('publish_directory');
+});
+
+it('detects bad gateway proxy port mismatches for agent harness', function () {
+    expect(AgentDirectives::isBadGatewayProxyPortIssue(
+        'HTTP 502 Bad Gateway — Host Error. Server listening on http://localhost:4321'
+    ))->toBeTrue()
+        ->and(AgentDirectives::isBadGatewayProxyPortIssue('HTTP 404 not found'))->toBeFalse()
+        ->and(AgentChatRepairStrategy::detectIssue(mb_strtolower(
+            'probe_error HTTP 502 bad gateway traefik loadbalancer.server.port=80 astro'
+        )))->toBe(AgentChatRepairStrategy::ISSUE_PROXY_PORT);
 });

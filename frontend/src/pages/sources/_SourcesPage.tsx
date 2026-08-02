@@ -116,13 +116,13 @@ export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
                 <p class={`text-sm ${error ? 'text-error' : 'text-success'}`}>{error ?? feedback}</p>
             )}
 
-            {agentRequests.data && agentRequests.data.length > 0 && (
+            {agentRequests.data?.data && agentRequests.data.data.length > 0 && (
                 <Card title="Demandes d'agents" eyebrow="Action Requise" class="border-warning bg-warning/5">
                     <p class="mb-4 text-xs text-base-content/70">
                         Certains agents IA sont en pause car ils ont besoin de variables ou clés API pour continuer leur travail.
                     </p>
                     <div class="grid gap-4">
-                        {agentRequests.data.map((req) => (
+                        {agentRequests.data.data.map((req) => (
                             <div key={req.uuid} class="flex flex-col gap-2 rounded-lg border border-base-300 bg-base-100 p-4">
                                 <div class="flex items-center gap-2">
                                     <Bot class="size-4 text-primary" aria-hidden />

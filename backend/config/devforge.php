@@ -103,8 +103,11 @@ return [
 
     'agents_max_concurrent_subagents' => (int) env('DEVFORGE_AGENTS_MAX_CONCURRENT_SUBAGENTS', 3),
 
-    /** Profondeur max de spawn (0 = main, 1 = leaf). Inspiré OpenClaw maxSpawnDepth. */
-    'agents_max_spawn_depth' => (int) env('DEVFORGE_AGENTS_MAX_SPAWN_DEPTH', 1),
+    /** Profondeur max de spawn (0 = main, 1 = leaf, 2 = orchestrateur→implement→test). */
+    'agents_max_spawn_depth' => (int) env('DEVFORGE_AGENTS_MAX_SPAWN_DEPTH', 2),
+
+    /** Cooldown entre deux dispatches mission_work pour la même mission (minutes). */
+    'agents_mission_work_cooldown_minutes' => (int) env('DEVFORGE_AGENTS_MISSION_WORK_COOLDOWN_MINUTES', 10),
 
     /** Intervalle heartbeats agents (minutes). 0 = désactivé. */
     'agents_heartbeat_minutes' => (int) env('DEVFORGE_AGENTS_HEARTBEAT_MINUTES', 30),

@@ -125,11 +125,15 @@ frontend/src/pages/agents/
 | P2 Tech-watch → missions | fait (`agents:watch-tech`) |
 | P2 Délégation parallèle / batch | fait (`tasks[]` spawn/delegate) |
 | P2 Cron libre | fait (`schedule_cron` + `agents:run-scheduled`) |
-| P2 MCP client dans la boucle | backlog |
+| P2 MCP client dans la boucle | P5 optionnel (hors chemin critique équipe native) |
 | P3.1 Spawn async + yield_wait + handoff + rôles | fait |
 | P3.2 Pipeline deploy orchestrator → leafs | fait |
 | P3.3 Chat sous-agents parallèles + UI | fait |
 | P3.4 Standing orders + heartbeats | fait (`ai_agent_standing_orders`, `agents:heartbeat`) |
+| P4.0 Pipeline missions cross-agent | fait (`mission_claim` / assignee_type / `agents:work-missions`) |
+| P4.1 request_user_input + reprise | fait (étend `ai_agent_key_requests` + inbox UI) |
+| P4.2 Playbooks VT / implementer / bugs + tests | fait (`run_application_tests`, leaf implement/test, spawn depth 2) |
+| P4.3 Kanban « Travail de l’équipe » | fait (`MissionBoardPanel` + `AgentUserRequestsInbox`) |
 
 ## P3 — Patterns OpenClaw (natifs, sans runtime OpenClaw)
 
@@ -151,4 +155,35 @@ frontend/src/pages/agents/
 - Table `ai_agent_standing_orders` + API `/ai/standing-orders`
 - Cron libre `schedule_cron` sur `ai_agents`
 - Heartbeats `heartbeat_enabled` + `agents:heartbeat` (HEARTBEAT_OK silencieux)
+
+## P4 — Équipe autonome (natif, sans runtime OpenClaw)
+
+Objectif : VT propose → implementer code/teste → debug corrige bugs, avec mémoire partagée/individuelle et HITL uniquement pour secrets/tokens.
+
+### P4.0 Pipeline missions
+- `mission_create` / `mission_update` : `assignee_agent_uuid` **ou** `assignee_type`
+- `mission_claim` / `mission_show`
+- Routage kind → type : `tech_watch`/`feature`→`devforge`, `bug`→`debug`, `ops`→`deployment`
+- `MissionWorkDispatcher` + cron `agents:work-missions` (toutes les 2 min)
+- VT `upsertTechWatch` assigne `assignee_type=devforge` (plus d’auto-assignation)
+
+### P4.1 Demande utilisateur
+- Outil `request_user_input` (kind secret|token|confirm|text) → run `waiting_for_input`, mission `blocked`
+- Fulfill injecte env (shared ou application) **sans renvoyer le secret au LLM**
+- `ResumeAgentAfterUserInputJob` reprend le travail
+- Inbox UI Agents + page Connexions
+
+### P4.2 Rôles + tests
+- Playbooks VT / debug / devforge orientés missions
+- Leaf profiles `implement`, `test`, `research`
+- `run_application_tests` (composer/pest/npm/pnpm ou docker exec)
+- `agents_max_spawn_depth` défaut **2**
+- Scanner VT enrichi (Docker tags, Node legacy)
+
+### P4.3 Suivi
+- Kanban missions : Ouvert / En cours / Bloqué (toi) / Terminé
+- Timeline courte + badge actions requises
+
+### P5 (optionnel)
+- MCP client dans la boucle agent
 

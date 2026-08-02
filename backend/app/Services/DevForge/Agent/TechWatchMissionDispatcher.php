@@ -71,6 +71,8 @@ class TechWatchMissionDispatcher
 
         $created += $this->maybeCreateCoolifyUpdateMission($agent, $team) ? 1 : 0;
         $created += $this->scanApplicationPhpVersions($agent, $team);
+        $created += $this->scanStaleDockerTags($agent, $team);
+        $created += $this->scanNodeLegacyHints($agent, $team);
 
         return $created;
     }
@@ -180,6 +182,99 @@ class TechWatchMissionDispatcher
             );
 
             if ($mission !== null) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    private function scanStaleDockerTags(AiAgent $agent, Team $team): int
+    {
+        $query = Application::query()
+            ->whereHas('environment.project', fn ($q) => $q->where('team_id', $team->id))
+            ->limit(30);
+
+        $count = 0;
+        $stale = ['latest', 'alpine', 'node:14', 'node:16', 'node:18', 'php:7', 'php:8.0', 'php:8.1'];
+
+        foreach ($query->get() as $application) {
+            $tag = strtolower(trim((string) ($application->docker_registry_image_tag ?? '')));
+            $image = strtolower(trim((string) ($application->docker_registry_image_name ?? '')));
+            $hint = $image.':'.$tag;
+
+            $matched = null;
+            foreach ($stale as $needle) {
+                if ($tag === $needle || str_contains($hint, $needle)) {
+                    $matched = $needle;
+                    break;
+                }
+            }
+
+            if ($matched === null) {
+                continue;
+            }
+
+            $mission = $this->missionBoard->upsertTechWatch(
+                $team,
+                $agent,
+                "Image Docker potentiellement obsolète — {$application->name}",
+                "L'application {$application->name} utilise une image/tag à risque ({$matched}). Vérifier une montée de version et créer une PR si pertinent.",
+                'tech-watch:docker-stale:'.$application->uuid.':'.$matched,
+                [
+                    'application_uuid' => $application->uuid,
+                    'image' => $image,
+                    'tag' => $tag,
+                    'matched' => $matched,
+                ],
+                $application->uuid,
+            );
+
+            if ($mission !== null) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    private function scanNodeLegacyHints(AiAgent $agent, Team $team): int
+    {
+        $query = Application::query()
+            ->whereHas('environment.project', fn ($q) => $q->where('team_id', $team->id))
+            ->limit(30);
+
+        $count = 0;
+
+        foreach ($query->get() as $application) {
+            $hint = strtolower(implode(' ', array_filter([
+                (string) ($application->build_pack ?? ''),
+                (string) ($application->dockerfile ?? ''),
+                (string) ($application->docker_registry_image_name ?? ''),
+                (string) ($application->docker_registry_image_tag ?? ''),
+                (string) ($application->install_command ?? ''),
+            ])));
+
+            if (! preg_match('/node[:\s-]*(14|16|18)\b|nodejs[:\s-]*(14|16|18)\b/i', $hint)) {
+                continue;
+            }
+
+            $mission = $this->missionBoard->create($team, [
+                'title' => "Runtime Node potentiellement obsolète — {$application->name}",
+                'description' => "L'application {$application->name} semble cibler Node 14/16/18. Proposer une montée vers Node 20/22 LTS et adapter les scripts de build.",
+                'kind' => 'feature',
+                'priority' => 'normal',
+                'source' => 'tech-watch',
+                'dedupe_key' => 'tech-watch:node-outdated:'.$application->uuid,
+                'resource_uuid' => $application->uuid,
+                'assignee_type' => 'devforge',
+                'metadata' => [
+                    'application_uuid' => $application->uuid,
+                    'hint' => mb_substr($hint, 0, 200),
+                ],
+            ], $agent);
+
+            if ($mission instanceof \App\Models\AiAgentMission) {
                 $count++;
             }
         }

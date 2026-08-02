@@ -306,8 +306,19 @@ class AgentToolkit
                 ],
             ],
             [
+                'name' => 'mission_show',
+                'description' => 'Détail d’une mission (assignee, statut, blocked_reason, metadata).',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'mission_uuid' => ['type' => 'string'],
+                    ],
+                    'required' => ['mission_uuid'],
+                ],
+            ],
+            [
                 'name' => 'mission_create',
-                'description' => 'Crée une mission sur le board (bug, feature, tech_watch, etc.).',
+                'description' => 'Crée une mission sur le board. Assigne via assignee_agent_uuid ou assignee_type (devforge, debug, deployment…).',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -317,13 +328,29 @@ class AgentToolkit
                         'priority' => ['type' => 'string', 'enum' => ['low', 'normal', 'high', 'urgent']],
                         'resource_uuid' => ['type' => 'string'],
                         'dedupe_key' => ['type' => 'string', 'description' => 'Clé anti-doublon'],
+                        'assignee_agent_uuid' => ['type' => 'string', 'description' => 'UUID agent assignee'],
+                        'assignee_type' => [
+                            'type' => 'string',
+                            'description' => 'Type d’agent cible (ex: devforge, debug, deployment, github)',
+                        ],
                     ],
                     'required' => ['title'],
                 ],
             ],
             [
+                'name' => 'mission_claim',
+                'description' => 'Prend en charge une mission open (passe en in_progress et t’assigne).',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'mission_uuid' => ['type' => 'string'],
+                    ],
+                    'required' => ['mission_uuid'],
+                ],
+            ],
+            [
                 'name' => 'mission_update',
-                'description' => 'Met à jour une mission (statut, priorité, titre…).',
+                'description' => 'Met à jour une mission (statut, priorité, assignee, blocked_reason…).',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -333,8 +360,44 @@ class AgentToolkit
                         'status' => ['type' => 'string', 'enum' => ['open', 'in_progress', 'blocked', 'done', 'cancelled']],
                         'priority' => ['type' => 'string', 'enum' => ['low', 'normal', 'high', 'urgent']],
                         'kind' => ['type' => 'string', 'enum' => ['bug', 'feature', 'tech_watch', 'github_pr', 'ops', 'other']],
+                        'assignee_agent_uuid' => ['type' => 'string'],
+                        'assignee_type' => ['type' => 'string'],
+                        'blocked_reason' => ['type' => 'string', 'description' => 'Raison si status=blocked (ex: secret manquant)'],
                     ],
                     'required' => ['mission_uuid'],
+                ],
+            ],
+            [
+                'name' => 'request_user_input',
+                'description' => 'Demande une clé, un token ou une confirmation à l’utilisateur. Met le run en pause (waiting_for_input) et bloque la mission associée.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'kind' => [
+                            'type' => 'string',
+                            'enum' => ['secret', 'token', 'confirm', 'text'],
+                            'description' => 'Type de demande (défaut: secret)',
+                        ],
+                        'key' => ['type' => 'string', 'description' => 'Nom de variable (ex: NPM_TOKEN, OPENAI_API_KEY)'],
+                        'message' => ['type' => 'string', 'description' => 'Message clair pour l’utilisateur'],
+                        'resource_uuid' => ['type' => 'string', 'description' => 'UUID application pour injecter l’env'],
+                        'mission_uuid' => ['type' => 'string', 'description' => 'Mission à bloquer en attendant la réponse'],
+                    ],
+                    'required' => ['key', 'message'],
+                ],
+            ],
+            [
+                'name' => 'run_application_tests',
+                'description' => 'Détecte et exécute les tests d’une application (composer test / pest / npm test / pnpm test) via SSH sur le serveur.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => ['type' => 'string'],
+                        'server_uuid' => ['type' => 'string', 'description' => 'Serveur (défaut: destination de l’app)'],
+                        'command' => ['type' => 'string', 'description' => 'Commande de test forcée (optionnel)'],
+                        'timeout' => ['type' => 'integer', 'description' => 'Timeout secondes (défaut 180, max 300)'],
+                    ],
+                    'required' => ['application_uuid'],
                 ],
             ],
         ];
@@ -676,6 +739,27 @@ class AgentToolkit
                         'redeploy' => [
                             'type' => 'boolean',
                             'description' => 'Queue un redéploiement après la mise à jour (défaut: true)',
+                        ],
+                        'reason' => [
+                            'type' => 'string',
+                            'description' => 'Raison courte pour les logs',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'sync_application_proxy_labels',
+                'description' => 'Régénère les labels Traefik/Caddy (custom_labels) depuis ports_exposes. À utiliser sur HTTP 502 / Bad Gateway / Host Error quand le conteneur est healthy mais le proxy pointe encore vers le mauvais port (souvent 80 vs 4321 Astro). Redéploie par défaut.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID de l\'application. Omis si contexte déploiement ou agent lié à l\'app.',
+                        ],
+                        'redeploy' => [
+                            'type' => 'boolean',
+                            'description' => 'Queue un redéploiement après sync (défaut: true)',
                         ],
                         'reason' => [
                             'type' => 'string',
@@ -1332,8 +1416,12 @@ class AgentToolkit
                 (int) ($arguments['limit'] ?? 5),
             ),
             'mission_list' => $this->missionList($arguments),
+            'mission_show' => $this->missionShow($arguments),
             'mission_create' => $this->missionCreate($arguments),
+            'mission_claim' => $this->missionClaim($arguments),
             'mission_update' => $this->missionUpdate($arguments),
+            'request_user_input' => $this->requestUserInput($arguments),
+            'run_application_tests' => $this->runApplicationTests($arguments),
             'list_github_apps' => $this->githubTools->listApps(),
             'list_github_repos' => $this->githubTools->listRepos((string) ($arguments['github_app_uuid'] ?? '')),
             'list_github_branches' => $this->githubTools->listBranches(
@@ -1571,6 +1659,11 @@ class AgentToolkit
             'update_application_runtime_settings' => $this->updateApplicationRuntimeSettings(
                 isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
                 is_array($arguments) ? $arguments : [],
+            ),
+            'sync_application_proxy_labels' => $this->syncApplicationProxyLabels(
+                isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
+                array_key_exists('redeploy', $arguments) ? (bool) $arguments['redeploy'] : true,
+                (string) ($arguments['reason'] ?? ''),
             ),
             'fix_application_host_permissions' => $this->fixApplicationHostPermissions(
                 isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
@@ -1953,24 +2046,40 @@ class AgentToolkit
             return ['error' => 'Missions indisponibles (migration manquante).', 'missions' => []];
         }
 
+        $mineOnly = filter_var($arguments['mine_only'] ?? false, FILTER_VALIDATE_BOOLEAN);
         $rows = $board->list($this->agent->team, [
             'status' => $arguments['status'] ?? null,
             'kind' => $arguments['kind'] ?? null,
             'q' => $arguments['q'] ?? null,
-            'agent_id' => $this->agent->id,
+            'agent_id' => $mineOnly ? $this->agent->id : null,
         ], (int) ($arguments['limit'] ?? 20));
 
         return [
             'count' => $rows->count(),
-            'missions' => $rows->map(fn ($m) => [
-                'uuid' => $m->uuid,
-                'kind' => $m->kind,
-                'status' => $m->status,
-                'priority' => $m->priority,
-                'title' => $m->title,
-                'description' => mb_substr((string) $m->description, 0, 400),
-                'resource_uuid' => $m->resource_uuid,
-            ])->values()->all(),
+            'missions' => $rows->map(fn ($m) => $this->presentMissionRow($m))->values()->all(),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function missionShow(array $arguments): array
+    {
+        $uuid = trim((string) ($arguments['mission_uuid'] ?? ''));
+        if ($uuid === '') {
+            return ['error' => 'mission_uuid requis'];
+        }
+
+        $board = app(AgentMissionBoard::class);
+        $result = $board->show($this->agent->team, $uuid);
+
+        if (is_array($result) && isset($result['error'])) {
+            return $result;
+        }
+
+        return [
+            'mission' => $this->presentMissionRow($result, detailed: true),
         ];
     }
 
@@ -1981,7 +2090,7 @@ class AgentToolkit
     private function missionCreate(array $arguments): array
     {
         $board = app(AgentMissionBoard::class);
-        $result = $board->create($this->agent->team, [
+        $payload = [
             'title' => $arguments['title'] ?? '',
             'description' => $arguments['description'] ?? null,
             'kind' => $arguments['kind'] ?? 'other',
@@ -1989,8 +2098,18 @@ class AgentToolkit
             'resource_uuid' => $arguments['resource_uuid'] ?? $this->agent->resource_uuid,
             'dedupe_key' => $arguments['dedupe_key'] ?? null,
             'source' => 'agent',
-            'assignee_agent_uuid' => $this->agent->uuid,
-        ], $this->agent);
+        ];
+
+        if (! empty($arguments['assignee_agent_uuid'])) {
+            $payload['assignee_agent_uuid'] = (string) $arguments['assignee_agent_uuid'];
+        } elseif (! empty($arguments['assignee_type'])) {
+            $payload['assignee_type'] = (string) $arguments['assignee_type'];
+        } else {
+            // VT propose → implementer ; sinon défaut par kind (pas auto-assignation au créateur).
+            $payload['assignee_type'] = $board->defaultAssigneeTypeForKind((string) ($payload['kind'] ?? 'other'));
+        }
+
+        $result = $board->create($this->agent->team, $payload, $this->agent);
 
         if (is_array($result) && isset($result['error'])) {
             return $result;
@@ -2002,6 +2121,32 @@ class AgentToolkit
             'title' => $result->title,
             'status' => $result->status,
             'kind' => $result->kind,
+            'assignee_agent_id' => $result->assignee_agent_id,
+            'assignee_type' => is_array($result->metadata) ? ($result->metadata['assignee_type'] ?? null) : null,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function missionClaim(array $arguments): array
+    {
+        $uuid = trim((string) ($arguments['mission_uuid'] ?? ''));
+        if ($uuid === '') {
+            return ['error' => 'mission_uuid requis'];
+        }
+
+        $board = app(AgentMissionBoard::class);
+        $result = $board->claim($this->agent->team, $uuid, $this->agent);
+
+        if (is_array($result) && isset($result['error'])) {
+            return $result;
+        }
+
+        return [
+            'claimed' => true,
+            'mission' => $this->presentMissionRow($result, detailed: true),
         ];
     }
 
@@ -2030,7 +2175,201 @@ class AgentToolkit
             'status' => $result->status,
             'kind' => $result->kind,
             'priority' => $result->priority,
+            'assignee_agent_id' => $result->assignee_agent_id,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function requestUserInput(array $arguments): array
+    {
+        $key = strtoupper(trim((string) ($arguments['key'] ?? $arguments['key_name'] ?? '')));
+        $message = trim((string) ($arguments['message'] ?? $arguments['reason'] ?? ''));
+        $kind = strtolower(trim((string) ($arguments['kind'] ?? 'secret')));
+        if (! in_array($kind, ['secret', 'token', 'confirm', 'text'], true)) {
+            $kind = 'secret';
+        }
+
+        if ($key === '' || $message === '') {
+            return ['error' => 'Paramètres key et message requis pour request_user_input.'];
+        }
+
+        $resourceUuid = isset($arguments['resource_uuid'])
+            ? trim((string) $arguments['resource_uuid'])
+            : (is_string($this->agent->resource_uuid ?? null) ? $this->agent->resource_uuid : null);
+        $missionUuid = isset($arguments['mission_uuid'])
+            ? trim((string) $arguments['mission_uuid'])
+            : (is_string($this->run->metadata['mission_uuid'] ?? null) ? $this->run->metadata['mission_uuid'] : null);
+
+        $payload = [
+            'team_id' => $this->team->id,
+            'agent_id' => $this->agent->id,
+            'run_id' => $this->run->id,
+            'key_name' => mb_substr($key, 0, 190),
+            'reason' => mb_substr($message, 0, 2000),
+            'status' => 'pending',
+        ];
+
+        if (\Illuminate\Support\Facades\Schema::hasColumn('ai_agent_key_requests', 'kind')) {
+            $payload['kind'] = $kind;
+        }
+        if (\Illuminate\Support\Facades\Schema::hasColumn('ai_agent_key_requests', 'resource_uuid')
+            && $resourceUuid !== null && $resourceUuid !== '') {
+            $payload['resource_uuid'] = mb_substr($resourceUuid, 0, 64);
+        }
+        if (\Illuminate\Support\Facades\Schema::hasColumn('ai_agent_key_requests', 'mission_uuid')
+            && $missionUuid !== null && $missionUuid !== '') {
+            $payload['mission_uuid'] = mb_substr($missionUuid, 0, 64);
+        }
+
+        $request = AiAgentKeyRequest::create($payload);
+
+        if ($missionUuid !== null && $missionUuid !== '') {
+            app(AgentMissionBoard::class)->update($this->agent->team, $missionUuid, [
+                'status' => 'blocked',
+                'blocked_reason' => "En attente utilisateur ({$kind}): {$key} — {$message}",
+            ]);
+        }
+
+        $this->run->mergeMetadata([
+            'pending_user_input' => [
+                'request_uuid' => $request->uuid,
+                'key' => $key,
+                'kind' => $kind,
+                'mission_uuid' => $missionUuid,
+            ],
+        ]);
+        $this->run->appendLog("Demande utilisateur ({$kind}/{$key}) — run en pause.");
+
+        return [
+            'status' => 'waiting_for_input',
+            'message' => "Demande « {$key} » soumise à l'utilisateur. Le run se met en pause jusqu'à réponse.",
+            'request_uuid' => $request->uuid,
+            'kind' => $kind,
+            'key' => $key,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function runApplicationTests(array $arguments): array
+    {
+        $applicationUuid = trim((string) ($arguments['application_uuid'] ?? ''));
+        $application = $this->resolveApplication($applicationUuid !== '' ? $applicationUuid : null);
+        if (is_array($application)) {
+            return $application;
+        }
+
+        $serverUuid = trim((string) ($arguments['server_uuid'] ?? ''));
+        if ($serverUuid === '') {
+            $destination = $application->destination;
+            $server = $destination?->server ?? null;
+            $serverUuid = is_object($server) && isset($server->uuid) ? (string) $server->uuid : '';
+        }
+
+        if ($serverUuid === '') {
+            return ['error' => 'Impossible de résoudre le serveur de l’application.'];
+        }
+
+        $timeout = max(30, min(300, (int) ($arguments['timeout'] ?? 180)));
+        $forced = trim((string) ($arguments['command'] ?? ''));
+
+        $detectAndRun = $forced !== ''
+            ? $forced
+            : 'if [ -f composer.json ] && grep -qE "pestphp/pest|phpunit/phpunit" composer.json 2>/dev/null; then '
+                .'if [ -f vendor/bin/pest ]; then ./vendor/bin/pest --compact; '
+                .'elif [ -f vendor/bin/phpunit ]; then ./vendor/bin/phpunit; '
+                .'else composer test 2>/dev/null || composer run test 2>/dev/null; fi; '
+                .'elif [ -f pnpm-lock.yaml ]; then pnpm test; '
+                .'elif [ -f yarn.lock ]; then yarn test; '
+                .'elif [ -f package.json ]; then npm test --if-present; '
+                .'else echo "NO_TEST_RUNNER"; exit 2; fi';
+
+        $appUuid = preg_replace('/[^a-zA-Z0-9_-]/', '', (string) $application->uuid) ?: 'app';
+        $script = 'set +e; '
+            .'APP_DIR=""; '
+            .'for d in /data/devforge/applications/'.$appUuid
+            .' /data/coolify/applications/'.$appUuid
+            .' /var/www/html /app; do '
+            .'  if [ -d "$d" ]; then APP_DIR="$d"; break; fi; '
+            .'done; '
+            .'if [ -z "$APP_DIR" ]; then '
+            .'  CID=$(docker ps -q --filter "name='.$appUuid.'" | head -1); '
+            .'  if [ -n "$CID" ]; then docker exec "$CID" sh -lc '.escapeshellarg($detectAndRun).'; exit $?; fi; '
+            .'  echo "NO_APP_WORKDIR"; exit 3; '
+            .'fi; '
+            .'cd "$APP_DIR" && '.$detectAndRun;
+
+        $result = $this->serverExecutor->execOnServer($serverUuid, $script, $timeout);
+        $output = mb_substr((string) ($result['output'] ?? $result['error'] ?? ''), 0, 6000);
+        $success = (bool) ($result['success'] ?? false);
+
+        if (str_contains($output, 'NO_TEST_RUNNER')) {
+            return [
+                'ok' => false,
+                'skipped' => true,
+                'reason' => 'Aucun runner de tests détecté (composer/npm/pnpm).',
+                'output' => $output,
+            ];
+        }
+
+        if (str_contains($output, 'NO_APP_WORKDIR')) {
+            return [
+                'ok' => false,
+                'skipped' => true,
+                'reason' => 'Répertoire source / conteneur introuvable pour exécuter les tests.',
+                'output' => $output,
+            ];
+        }
+
+        $this->run->appendLog($success
+            ? '  ✓ Tests application OK'
+            : '  ✗ Tests application en échec');
+
+        return [
+            'ok' => $success,
+            'application_uuid' => $application->uuid,
+            'server_uuid' => $serverUuid,
+            'output' => $output,
+            'hint' => $success
+                ? 'Tests passés — tu peux clôturer la mission (done).'
+                : 'Tests en échec — corrige puis relance run_application_tests.',
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function presentMissionRow(mixed $mission, bool $detailed = false): array
+    {
+        $metadata = is_array($mission->metadata ?? null) ? $mission->metadata : [];
+        $row = [
+            'uuid' => $mission->uuid,
+            'kind' => $mission->kind,
+            'status' => $mission->status,
+            'priority' => $mission->priority,
+            'title' => $mission->title,
+            'description' => mb_substr((string) ($mission->description ?? ''), 0, $detailed ? 4000 : 400),
+            'resource_uuid' => $mission->resource_uuid,
+            'assignee_agent_id' => $mission->assignee_agent_id,
+            'assignee_uuid' => $mission->assignee?->uuid,
+            'assignee_type' => $metadata['assignee_type'] ?? ($mission->assignee?->type),
+            'blocked_reason' => $metadata['blocked_reason'] ?? null,
+            'run_uuid' => $metadata['run_uuid'] ?? null,
+        ];
+
+        if ($detailed) {
+            $row['metadata'] = $metadata;
+            $row['source'] = $mission->source;
+            $row['created_at'] = $mission->created_at?->toISOString();
+            $row['updated_at'] = $mission->updated_at?->toISOString();
+        }
+
+        return $row;
     }
 
     /**
@@ -2254,26 +2593,11 @@ class AgentToolkit
 
     private function requestApiKey(string $keyName, string $reason): array
     {
-        if ($keyName === '') {
-            return ['error' => 'Le paramètre key_name est obligatoire.'];
-        }
-
-        $request = AiAgentKeyRequest::create([
-            'team_id' => $this->team->id,
-            'agent_id' => $this->agent?->id,
-            'run_id' => $this->run->id,
-            'key_name' => $keyName,
-            'reason' => $reason,
-            'status' => 'pending',
+        return $this->requestUserInput([
+            'kind' => 'token',
+            'key' => $keyName,
+            'message' => $reason,
         ]);
-
-        $this->run->appendLog("Demande de clé API ({$keyName}) enregistrée en attente.");
-
-        return [
-            'status' => 'waiting_for_input',
-            'message' => "Demande pour la clé {$keyName} soumise à l'utilisateur. Le run va se mettre en pause jusqu'à ce qu'elle soit fournie.",
-            'request_uuid' => $request->uuid,
-        ];
     }
 
     /**
@@ -2707,6 +3031,15 @@ class AgentToolkit
         }
 
         return [...$payload, 'redeploy' => $deploy];
+    }
+
+    /** @return array<string, mixed> */
+    private function syncApplicationProxyLabels(
+        ?string $applicationUuid,
+        bool $redeploy = true,
+        string $reason = '',
+    ): array {
+        return $this->repairActions->syncApplicationProxyLabels($applicationUuid, $redeploy, $reason);
     }
 
     /** @return array<string, mixed> */

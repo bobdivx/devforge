@@ -93,7 +93,7 @@ export const agentPresets: AgentPreset[] = [
     {
         type: 'tech-watch',
         label: 'Veille Tech',
-        description: 'Repère configs obsolètes et ressources inactives.',
+        description: 'Propose améliorations et dettes tech ; crée des missions pour l’implementer.',
         triggerHint: scheduleHint(60),
         category: 'watch',
         suggestedName: 'Veille technique',
@@ -154,6 +154,40 @@ export function subAgentPresetsForParent(parentType: AgentType): SubAgentPreset[
                     label: 'Relance',
                     description: 'Relance un déploiement après correction.',
                     suggestedName: 'Relance déploiement',
+                },
+                {
+                    id: 'test',
+                    type: 'debug',
+                    label: 'Testeur',
+                    description: 'Exécute run_application_tests et rapporte le résultat.',
+                    suggestedName: 'Testeur',
+                },
+            ];
+        case 'devforge':
+            return [
+                {
+                    id: 'implement',
+                    type: 'devforge',
+                    label: 'Implementer',
+                    description: 'Applique le code / PR pour une mission feature.',
+                    suggestedName: 'Implementer',
+                },
+                {
+                    id: 'test',
+                    type: 'debug',
+                    label: 'Testeur',
+                    description: 'Lance les tests après implémentation.',
+                    suggestedName: 'Testeur',
+                },
+            ];
+        case 'tech-watch':
+            return [
+                {
+                    id: 'research',
+                    type: 'tech-watch',
+                    label: 'Recherche',
+                    description: 'Veille lecture seule + création de missions.',
+                    suggestedName: 'Recherche VT',
                 },
             ];
         case 'github-actions':

@@ -397,6 +397,20 @@ class AgentRunner
                 return;
             }
 
+            // Harness / request_user_input peut déjà avoir mis le run en pause.
+            $run->refresh();
+            if ($run->status === 'waiting_for_input') {
+                if ($summary !== '') {
+                    $run->update(['summary' => mb_substr($summary, 0, 1000)]);
+                }
+                app(AgentRunCorrectionSummarizer::class)->finalize($run->fresh() ?? $run);
+                $this->publishOverviewInterventionReport($agent, $run->fresh() ?? $run, $context);
+                $agent->update(['status' => 'idle', 'last_run_at' => now()]);
+                broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'waiting_for_input'));
+
+                return;
+            }
+
             $run->update([
                 'status' => 'completed',
                 'summary' => mb_substr($summary, 0, 1000),

@@ -54,3 +54,18 @@ it('updates mission status to done', function () {
         ->and($updated->status)->toBe('done')
         ->and($updated->completed_at)->not->toBeNull();
 });
+
+it('stores assignee_type in metadata when no agent of that type exists', function () {
+    $team = Team::factory()->create();
+    $board = app(AgentMissionBoard::class);
+
+    $mission = $board->create($team, [
+        'title' => 'Orphan assignee type',
+        'kind' => 'feature',
+        'assignee_type' => 'devforge',
+    ]);
+
+    expect($mission)->toBeInstanceOf(AiAgentMission::class)
+        ->and($mission->assignee_agent_id)->toBeNull()
+        ->and($mission->metadata['assignee_type'] ?? null)->toBe('devforge');
+});
