@@ -11,7 +11,9 @@ export default defineConfig(({ mode }) => {
     const vitePort = Number(env.VITE_PORT || 5173);
 
     return {
-        // Keep Vite root on backend/ so manifest keys match @vite(['resources/js/app.js', ...])
+        // Keep Vite root on backend/ so manifest keys match @vite(['resources/js/app.js', ...]).
+        // Builds must run with cwd=backend (see scripts/build-laravel-vite.mjs); invoking
+        // `vite --config backend/vite.config.js` from the monorepo root fails to resolve entries.
         root: backendRoot,
         css: {
             postcss: path.join(backendRoot, "postcss.config.cjs"),
