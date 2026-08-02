@@ -14,12 +14,14 @@ describe('API métiers DevForge', () => {
 
         await domainApi.coreResources('applications');
         await domainApi.coreResource('applications', 'app-uuid-1234');
+        await domainApi.applicationBootSequence();
         await domainApi.deployments(2);
         await domainApi.deploymentLogs('deployment-1', 12);
 
         expect(fetchMock.mock.calls.map(([input]) => input)).toEqual([
             '/api/devforge/v1/core/applications',
             '/api/devforge/v1/core/applications/app-uuid-1234',
+            '/api/devforge/v1/core/applications/boot-sequence',
             '/api/devforge/v1/deployments?page=2&per_page=25',
             '/api/devforge/v1/deployments/deployment-1/logs?after=12',
         ]);

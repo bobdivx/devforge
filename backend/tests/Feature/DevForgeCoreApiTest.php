@@ -92,6 +92,20 @@ it('exposes stable summaries without internal ids or secrets', function () {
         ->not->toContain('docker_compose');
 });
 
+it('exposes the application boot sequence contract', function () {
+    $this->application->update(['status' => 'starting:unknown']);
+
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson('/api/devforge/v1/core/applications/boot-sequence')
+        ->assertSuccessful()
+        ->assertJsonPath('data.active', true)
+        ->assertJsonPath('data.status', 'running')
+        ->assertJsonPath('data.total', 1)
+        ->assertJsonPath('data.items.0.uuid', $this->application->uuid)
+        ->assertJsonPath('data.items.0.phase', 'starting');
+});
+
 it('returns list and detail contracts scoped to the current team', function () {
     $this->actingAs($this->user)
         ->withSession(['currentTeam' => $this->team])

@@ -1,5 +1,6 @@
 import { Eye, Play, Plus, RefreshCw, RotateCw, Rocket, Square } from 'lucide-preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
+import { ApplicationBootSequenceBanner } from '../../components/applications/ApplicationBootSequenceBanner';
 import { ApplicationDetailPanel } from '../../components/applications/ApplicationDetailPanel';
 import { ApplicationLogo } from '../../components/applications/ApplicationLogo';
 import { CreateApplicationModal } from '../../components/applications/CreateApplicationModal';
@@ -17,7 +18,13 @@ import { ResourceStatusIcon } from '../../components/ui/ResourceStatusIcon';
 import { resourceStatusInput } from '../../lib/resource-status';
 import { resolveCoreResourceActions } from '../../lib/core-resource-actions';
 import type { BootstrapPermissions } from '../../lib/bootstrap';
-import { domainApi, type CoreAction, type CoreResource, type CoreResourceType } from '../../lib/domain-api';
+import {
+    domainApi,
+    type ApplicationBootSequenceItem,
+    type CoreAction,
+    type CoreResource,
+    type CoreResourceType,
+} from '../../lib/domain-api';
 import { applicationPath, parseApplicationTab, type ApplicationTabId } from '../../lib/application-tabs';
 import {
     databasePath,
@@ -28,9 +35,46 @@ import {
     type ServiceDetailTabId,
 } from '../../lib/routes';
 import { parseResourceStatus } from '../../lib/resource-status';
+import { useApplicationBootSequence } from '../../lib/hooks/use-application-boot-sequence';
 import { useApiQuery } from '../../lib/use-api-query';
 import { navigateTo, useNavigate } from '../../lib/use-navigate';
 import { sanitizeResourceUuid } from '../../lib/route-path';
+
+function bootPhaseForResource(
+    resourceUuid: string,
+    items: ApplicationBootSequenceItem[],
+    bootActive: boolean,
+): ApplicationBootSequenceItem['phase'] | null {
+    if (!bootActive) {
+        return null;
+    }
+
+    return items.find((item) => item.uuid === resourceUuid)?.phase ?? null;
+}
+
+function bootCardClass(phase: ApplicationBootSequenceItem['phase'] | null): string {
+    if (phase === null) {
+        return '';
+    }
+
+    if (phase === 'waiting') {
+        return 'application-boot-card application-boot-card--waiting';
+    }
+
+    if (phase === 'starting') {
+        return 'application-boot-card application-boot-card--starting';
+    }
+
+    if (phase === 'running') {
+        return 'application-boot-card application-boot-card--running';
+    }
+
+    if (phase === 'failed') {
+        return 'application-boot-card application-boot-card--failed';
+    }
+
+    return 'application-boot-card';
+}
 
 function readUuidDeepLink(): string | null {
     if (typeof window === 'undefined') {
@@ -241,6 +285,7 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
     const databaseDeepLink = type === 'databases' ? readDatabaseDeepLink() : { uuid: null, tab: 'overview' as DatabaseDetailTabId };
     const serviceDeepLink = type === 'services' ? readServiceDeepLink() : { uuid: null, tab: 'overview' as ServiceDetailTabId };
     const query = useApiQuery(`core:${type}`, () => domainApi.coreResources(type));
+    const bootSequence = useApplicationBootSequence(type === 'applications');
     const [selectedUuid, setSelectedUuid] = useState<string | null>(
         initialResourceUuid
         ?? (type === 'databases' ? databaseDeepLink.uuid : null)
@@ -255,6 +300,14 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
     const [search, setSearch] = useState('');
     const [createModalOpen, setCreateModalOpen] = useState(false);
     const resources = query.data?.data ?? [];
+
+    useEffect(() => {
+        if (type !== 'applications' || !bootSequence.active) {
+            return;
+        }
+
+        void query.reload({ silent: true });
+    }, [type, bootSequence.active, bootSequence.completed, bootSequence.current_uuid, query.reload]);
 
     useEffect(() => {
         setSearch('');
@@ -316,9 +369,17 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
 
     const filtered = useMemo(() => {
         const normalized = search.trim().toLowerCase();
-        if (!normalized) return resources;
-        return resources.filter((resource) => resourceSearchHaystack(resource, type).includes(normalized));
-    }, [resources, search, type]);
+        const list = !normalized
+            ? resources
+            : resources.filter((resource) => resourceSearchHaystack(resource, type).includes(normalized));
+
+        if (type !== 'applications' || !bootSequence.active || bootSequence.items.length === 0) {
+            return list;
+        }
+
+        const order = new Map(bootSequence.items.map((item) => [item.uuid, item.order]));
+        return [...list].sort((left, right) => (order.get(left.uuid) ?? 999) - (order.get(right.uuid) ?? 999));
+    }, [resources, search, type, bootSequence.active, bootSequence.items]);
 
     const activeUuid = useMemo(() => {
         const candidate = sanitizeResourceUuid(selectedUuid);
@@ -428,6 +489,10 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                         />
                     )}
 
+                    {type === 'applications' && bootSequence.active && (
+                        <ApplicationBootSequenceBanner sequence={bootSequence} />
+                    )}
+
                     <DataState
                         loading={query.loading}
                         error={query.error}
@@ -436,13 +501,27 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                         onRetry={() => void query.reload()}
                     >
                         <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                            {filtered.map((resource) => (
+                            {filtered.map((resource) => {
+                                const bootPhase = type === 'applications'
+                                    ? bootPhaseForResource(resource.uuid, bootSequence.items, bootSequence.active)
+                                    : null;
+                                const bootItem = bootSequence.items.find((item) => item.uuid === resource.uuid);
+                                const statusInput = bootPhase === 'starting'
+                                    ? 'starting:unknown'
+                                    : bootPhase === 'waiting'
+                                        ? 'created:unknown'
+                                        : resourceStatusInput(resource);
+
+                                return (
                                 <button
                                     class={`rounded-2xl border bg-base-100 p-4 text-left shadow-sm transition hover:border-primary/30 hover:shadow-md focus-visible:ring-2 focus-visible:ring-primary ${
                                         activeUuid === resource.uuid ? 'border-primary/40 ring-1 ring-primary/15' : 'border-base-300/70'
-                                    }`}
+                                    } ${bootCardClass(bootPhase)}`}
                                     type="button"
                                     key={resource.uuid}
+                                    style={bootItem && bootSequence.active
+                                        ? { animationDelay: `${Math.min(bootItem.order, 12) * 70}ms` }
+                                        : undefined}
                                     onClick={() => {
                                         if (type === 'applications') {
                                             openApplication(resource.uuid);
@@ -481,14 +560,15 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                                                 )}
                                             </div>
                                         </div>
-                                        <ResourceStatusIcon status={resourceStatusInput(resource)} />
+                                        <ResourceStatusIcon status={statusInput} />
                                     </div>
                                     <span class="inline-flex items-center gap-1 text-xs text-primary">
                                         <Eye class="size-3.5" aria-hidden />
                                         Voir le détail
                                     </span>
                                 </button>
-                            ))}
+                                );
+                            })}
                         </div>
                     </DataState>
                 </>

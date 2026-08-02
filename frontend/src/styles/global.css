@@ -309,3 +309,48 @@ input {
 .cleanup-progress-bar {
     animation: cleanup-progress-slide 1.6s ease-in-out infinite;
 }
+
+@keyframes application-boot-reveal {
+    from {
+        opacity: 0.35;
+        transform: translateY(10px) scale(0.98);
+        filter: grayscale(0.35);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: grayscale(0);
+    }
+}
+
+@keyframes application-boot-pulse {
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-primary) 35%, transparent);
+    }
+
+    50% {
+        box-shadow: 0 0 0 6px color-mix(in oklab, var(--color-primary) 0%, transparent);
+    }
+}
+
+.application-boot-card--waiting {
+    opacity: 0.45;
+    filter: grayscale(0.4);
+    transform: translateY(6px);
+}
+
+.application-boot-card--starting {
+    animation: application-boot-pulse 1.4s ease-in-out infinite;
+    border-color: color-mix(in oklab, var(--color-primary) 45%, var(--color-base-300)) !important;
+}
+
+.application-boot-card--running {
+    animation: application-boot-reveal 0.55s ease-out both;
+}
+
+.application-boot-card--failed {
+    opacity: 0.8;
+    border-color: color-mix(in oklab, var(--color-error) 45%, var(--color-base-300)) !important;
+}

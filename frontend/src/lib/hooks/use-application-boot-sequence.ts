@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { domainApi, type ApplicationBootSequence } from '../domain-api';
 import { useTeamContext } from '../team-context';
 
@@ -17,11 +17,6 @@ const idleSequence: ApplicationBootSequence = {
 export function useApplicationBootSequence(enabled: boolean) {
     const { revision } = useTeamContext();
     const [sequence, setSequence] = useState<ApplicationBootSequence>(idleSequence);
-    const onTickRef = useRef<(() => void) | null>(null);
-
-    const setOnTick = (callback: (() => void) | null) => {
-        onTickRef.current = callback;
-    };
 
     useEffect(() => {
         if (!enabled) {
@@ -40,9 +35,6 @@ export function useApplicationBootSequence(enabled: boolean) {
                 }
 
                 setSequence(response.data);
-                if (response.data.active) {
-                    onTickRef.current?.();
-                }
 
                 const delay = response.data.active
                     ? Math.max(1000, response.data.poll_interval_ms || 2500)
@@ -72,5 +64,5 @@ export function useApplicationBootSequence(enabled: boolean) {
         };
     }, [enabled, revision]);
 
-    return { sequence, setOnTick };
+    return sequence;
 }

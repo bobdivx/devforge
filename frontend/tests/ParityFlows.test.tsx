@@ -54,6 +54,21 @@ describe('actions core DevForge', () => {
             if (url === '/api/devforge/v1/core/applications') {
                 return jsonResponse({ data: [application], meta: { count: 1 } });
             }
+            if (url === '/api/devforge/v1/core/applications/boot-sequence') {
+                return jsonResponse({
+                    data: {
+                        active: false,
+                        status: 'idle',
+                        started_at: null,
+                        finished_at: null,
+                        current_uuid: null,
+                        completed: 0,
+                        total: 0,
+                        poll_interval_ms: 2500,
+                        items: [],
+                    },
+                });
+            }
             if (url === `/api/devforge/v1/core/applications/${application.uuid}`) {
                 return jsonResponse({ data: application });
             }

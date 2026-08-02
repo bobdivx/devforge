@@ -34,6 +34,21 @@ function installApiMock() {
             });
         }
         if (url === '/api/devforge/v1/core/applications') return jsonResponse({ data: [], meta: { count: 0 } });
+        if (url === '/api/devforge/v1/core/applications/boot-sequence') {
+            return jsonResponse({
+                data: {
+                    active: false,
+                    status: 'idle',
+                    started_at: null,
+                    finished_at: null,
+                    current_uuid: null,
+                    completed: 0,
+                    total: 0,
+                    poll_interval_ms: 2500,
+                    items: [],
+                },
+            });
+        }
         if (url.includes('/api/devforge/v1/applications/') || url.includes('/api/devforge/v1/core/applications/')) {
             return jsonResponse({ data: null, message: 'Not found' }, 404);
         }
