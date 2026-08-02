@@ -62,6 +62,31 @@ export type ProjectInput = {
 export type CoreResourceType = 'servers' | 'applications' | 'databases' | 'services';
 export type CoreAction = 'start' | 'stop' | 'restart' | 'deploy';
 
+export type ApplicationBootSequencePhase = 'waiting' | 'starting' | 'running' | 'failed' | 'skipped';
+
+export type ApplicationBootSequenceItem = {
+    uuid: string;
+    name: string;
+    order: number;
+    phase: ApplicationBootSequencePhase;
+    status: string;
+    message: string | null;
+    started_at: string | null;
+    finished_at: string | null;
+};
+
+export type ApplicationBootSequence = {
+    active: boolean;
+    status: 'idle' | 'running' | 'completed' | string;
+    started_at: string | null;
+    finished_at: string | null;
+    current_uuid: string | null;
+    completed: number;
+    total: number;
+    poll_interval_ms: number;
+    items: ApplicationBootSequenceItem[];
+};
+
 export type CoreActionResult = {
     resource_uuid: string;
     resource_type: string;
@@ -2167,6 +2192,7 @@ export const domainApi = {
     deleteEnvironment: (projectUuid: string, uuid: string) => mutate<void>(`/projects/${encodeURIComponent(projectUuid)}/environments/${encodeURIComponent(uuid)}`, { method: 'DELETE' }),
     coreResources: (type?: CoreResourceType) => apiFetch<ApiListResponse<CoreResource>>(`${API_BASE}/core/${type ?? 'resources'}`),
     coreResource: (type: CoreResourceType, uuid: string) => apiFetch<ApiResponse<CoreResource>>(`${API_BASE}/core/${type}/${encodeURIComponent(uuid)}`),
+    applicationBootSequence: () => apiFetch<ApiResponse<ApplicationBootSequence>>(`${API_BASE}/core/applications/boot-sequence`),
     coreAction: (type: Exclude<CoreResourceType, 'servers'>, uuid: string, action: CoreAction, payload?: { force?: boolean }) => mutate<ApiResponse<CoreActionResult>>(`/core/${type}/${encodeURIComponent(uuid)}/${action}`, {
         method: 'POST',
         body: JSON.stringify({ action, ...payload }),
