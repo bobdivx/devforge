@@ -8,13 +8,21 @@ function shouldChangeOwnership(string $path): bool
 {
     $path = trim($path);
 
-    // Coolify data dirs (incl. NAS mounts like /media/.../coolify/data/applications).
-    $isCoolifyPath = Str::startsWith($path, '/data/coolify')
-        || Str::startsWith($path, '/tmp/coolify')
-        || (bool) preg_match('#/(?:data/)?coolify/(?:data/)?applications(?:/|$)#', $path)
-        || (bool) preg_match('#/coolify/data(?:/|$)#', $path);
+    // Configured Coolify/DevForge data dir (ZimaOS: /media/.../devforge/data).
+    $baseConfigPath = rtrim((string) config('constants.coolify.base_config_path', '/data/coolify'), '/');
+    if ($baseConfigPath !== '' && ($path === $baseConfigPath || Str::startsWith($path, $baseConfigPath.'/'))) {
+        return true;
+    }
 
-    if ($isCoolifyPath) {
+    // Coolify/DevForge data dirs (incl. NAS mounts under /media/.../{coolify|devforge}/...).
+    $isPlatformPath = Str::startsWith($path, '/data/coolify')
+        || Str::startsWith($path, '/data/devforge')
+        || Str::startsWith($path, '/tmp/coolify')
+        || Str::startsWith($path, '/tmp/devforge')
+        || (bool) preg_match('#/(?:data/)?(?:coolify|devforge)/(?:data/)?(?:applications|databases|services|backups)(?:/|$)#', $path)
+        || (bool) preg_match('#/(?:coolify|devforge)/data(?:/|$)#', $path);
+
+    if ($isPlatformPath) {
         return true;
     }
 

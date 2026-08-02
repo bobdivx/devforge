@@ -1078,7 +1078,8 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
                     "echo '{$this->docker_compose_base64}' | base64 -d | tee $composeFileName > /dev/null",
                 ],
                 [
-                    "echo '{$readme}' > $mainDir/README.md",
+                    // Use tee so non-root SSH + sudo can write (shell `>` ignores sudo).
+                    "echo '{$readme}' | tee $mainDir/README.md > /dev/null",
                 ]
             );
             if ($this->use_build_server) {

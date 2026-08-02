@@ -9,6 +9,7 @@ use App\Jobs\CheckTraefikVersionJob;
 use App\Jobs\CleanupInstanceStuffsJob;
 use App\Jobs\CleanupOrphanedPreviewContainersJob;
 use App\Jobs\CleanupStaleMultiplexedConnections;
+use App\Jobs\DevForge\ApplicationBootSequenceJob;
 use App\Jobs\DevForge\ApplicationReadinessWatchdogJob;
 use App\Jobs\DevForge\InstanceHostDiskGuardJob;
 use App\Jobs\PullChangelog;
@@ -74,6 +75,10 @@ class Kernel extends ConsoleKernel
                 ->everyThreeMinutes()
                 ->onOneServer();
 
+            $this->scheduleInstance->job(new ApplicationBootSequenceJob)
+                ->everyMinute()
+                ->onOneServer();
+
             $this->scheduleInstance->job(new InstanceHostDiskGuardJob)
                 ->everyFiveMinutes()
                 ->onOneServer();
@@ -107,6 +112,10 @@ class Kernel extends ConsoleKernel
             $this->scheduleInstance->command('agents:work-missions')->everyTwoMinutes()->onOneServer();
             $this->scheduleInstance->job(new ApplicationReadinessWatchdogJob)
                 ->everyThreeMinutes()
+                ->onOneServer();
+
+            $this->scheduleInstance->job(new ApplicationBootSequenceJob)
+                ->everyMinute()
                 ->onOneServer();
 
             $this->scheduleInstance->job(new InstanceHostDiskGuardJob)

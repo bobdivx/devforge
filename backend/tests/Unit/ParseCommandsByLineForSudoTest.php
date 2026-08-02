@@ -653,3 +653,40 @@ test('shouldChangeOwnership allows coolify paths under /media mounts', function 
         ->and(shouldChangeOwnership('/data/coolify/applications/appuuid'))->toBeTrue()
         ->and(shouldChangeOwnership('/media/other'))->toBeFalse();
 });
+
+test('shouldChangeOwnership allows devforge paths under /media mounts', function () {
+    expect(shouldChangeOwnership('/media/Docker/AppData/devforge/data/applications/appuuid'))->toBeTrue()
+        ->and(shouldChangeOwnership('/media/Docker/AppData/devforge/data/applications/appuuid/README.md'))->toBeTrue()
+        ->and(shouldChangeOwnership('/data/devforge/applications/appuuid'))->toBeTrue();
+});
+
+test('shouldChangeOwnership allows configured BASE_CONFIG_PATH', function () {
+    config(['constants.coolify.base_config_path' => '/media/Docker/AppData/devforge/data']);
+
+    expect(shouldChangeOwnership('/media/Docker/AppData/devforge/data'))->toBeTrue()
+        ->and(shouldChangeOwnership('/media/Docker/AppData/devforge/data/applications/x'))->toBeTrue();
+});
+
+test('parseLineForSudo sudo-ifies tee for README writes', function () {
+    $command = "echo 'Resource name: popcorn-web
+Latest Deployment Date: 2026-08-02 21:17:37' | tee /media/Docker/AppData/devforge/data/applications/appuuid/README.md > /dev/null";
+
+    $result = parseLineForSudo($command, $this->server);
+
+    expect($result)->toContain('| sudo tee ')
+        ->and($result)->not->toStartWith('sudo echo');
+});
+
+test('mkdir under devforge media path gets chown for non-root user', function () {
+    $commands = collect([
+        'mkdir -p /media/Docker/AppData/devforge/data/applications/appuuid',
+    ]);
+
+    $result = parseCommandsByLineForSudo($commands, $this->server);
+
+    expect($result[0])->toBe(
+        'sudo mkdir -p /media/Docker/AppData/devforge/data/applications/appuuid'
+        .' && sudo chown -R ubuntu: /media/Docker/AppData/devforge/data/applications/appuuid'
+        .' && sudo chmod -R o-rwx /media/Docker/AppData/devforge/data/applications/appuuid'
+    );
+});

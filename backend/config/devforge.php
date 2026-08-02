@@ -53,6 +53,23 @@ return [
     */
     'data_dir' => env('DEVFORGE_DATA_DIR', env('COOLIFY_DATA_DIR', '/data/devforge')),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Séquence de démarrage des applications
+    |--------------------------------------------------------------------------
+    |
+    | Au boot (ou quand beaucoup d’apps ne sont pas encore prêtes), DevForge
+    | démarre les applications arrêtées une par une et expose la progression
+    | à la page « Gérer Applications ».
+    |
+    */
+    'application_boot_sequence' => [
+        'enabled' => env('DEVFORGE_APPLICATION_BOOT_SEQUENCE', true),
+        'window_seconds' => (int) env('DEVFORGE_APPLICATION_BOOT_SEQUENCE_WINDOW', 900),
+        'item_timeout_seconds' => (int) env('DEVFORGE_APPLICATION_BOOT_SEQUENCE_ITEM_TIMEOUT', 300),
+        'poll_interval_ms' => (int) env('DEVFORGE_APPLICATION_BOOT_SEQUENCE_POLL_MS', 2500),
+    ],
+
     'agents_monitor_build_enabled' => env(
         'DEVFORGE_AGENTS_MONITOR_BUILD_ENABLED',
         env('DEVFORGE_AGENTS_WEBHOOK_BUILD_ENABLED', true),

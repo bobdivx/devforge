@@ -1,11 +1,14 @@
 <?php
 
+use App\Http\Controllers\DevForge\Core\ApplicationBootSequenceController;
 use App\Http\Controllers\DevForge\Core\ResourceController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('core')->name('core.')->group(function () {
     Route::get('/resources', [ResourceController::class, 'catalog'])->name('resources.index');
     Route::get('/configuration', [ResourceController::class, 'configuration'])->name('configuration');
+    Route::get('/applications/boot-sequence', ApplicationBootSequenceController::class)
+        ->name('applications.boot-sequence');
 
     Route::get('/{type}', [ResourceController::class, 'index'])
         ->whereIn('type', ['servers', 'applications', 'databases', 'services'])
