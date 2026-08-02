@@ -61,7 +61,9 @@ COPY frontend/package.json ./frontend/package.json
 RUN --mount=type=cache,target=/root/.npm \
     npm ci
 COPY . .
-RUN npm run build
+RUN npm run build \
+    && node scripts/normalize-vite-manifest.mjs \
+    && node -e "const fs=require('fs'); const m=JSON.parse(fs.readFileSync('backend/public/build/manifest.json','utf8')); if(!m['resources/js/app.js']||!m['resources/css/app.css']){console.error('Vite manifest missing Laravel keys',Object.keys(m)); process.exit(1);} console.log('Vite manifest OK');"
 
 # =================================================================
 # Stage 3: Get MinIO client
@@ -159,7 +161,17 @@ COPY --chown=www-data:www-data backend/artisan artisan
 COPY --chown=www-data:www-data backend/openapi.yaml ./openapi.yaml
 COPY --chown=www-data:www-data docs/changelogs/ ./changelogs/
 
-RUN composer dump-autoload
+# .dockerignore excludes storage/{logs,framework/cache|sessions|views}; recreate + own as www-data.
+RUN mkdir -p \
+        storage/logs \
+        storage/framework/cache/data \
+        storage/framework/sessions \
+        storage/framework/views \
+        bootstrap/cache \
+    && rm -f storage/logs/*.log \
+    && composer dump-autoload \
+    && chown -R www-data:www-data storage bootstrap/cache \
+    && chmod -R ug+rwX storage bootstrap/cache
 
 # Configure Nginx and S6 overlay
 COPY docker/production/etc/nginx/conf.d/custom.conf /etc/nginx/conf.d/custom.conf

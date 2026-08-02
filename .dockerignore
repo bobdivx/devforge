@@ -2,6 +2,7 @@ node_modules
 frontend/node_modules
 backend/vendor
 backend/node_modules
+# Excluded from build context (local runtime junk). Dockerfiles recreate these as www-data.
 backend/storage/logs
 backend/storage/framework/cache
 backend/storage/framework/sessions

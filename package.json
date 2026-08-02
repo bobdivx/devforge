@@ -15,7 +15,8 @@
         "build:frontend": "npm run build --workspace frontend",
         "build:devforge": "npm run build --workspace frontend",
         "test:frontend": "npm run test --workspace frontend",
-        "test:devforge": "npm run test --workspace frontend"
+        "test:devforge": "npm run test --workspace frontend",
+        "test:vite-manifest": "node scripts/normalize-vite-manifest.test.mjs"
     },
     "devDependencies": {
         "@tailwindcss/postcss": "4.1.18",

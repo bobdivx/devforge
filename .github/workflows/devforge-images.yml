@@ -18,8 +18,10 @@ on:
       - docker/devforge-realtime/**
       - docker/devforge-helper/**
       - docker/production/**
+      - scripts/**
       - package.json
       - package-lock.json
+      - .dockerignore
       - .github/workflows/devforge-images.yml
   workflow_dispatch:
 
