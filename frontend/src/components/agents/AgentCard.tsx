@@ -224,9 +224,11 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                                     : <Play class="size-3" aria-hidden />}
                         </button>
                         <button
-                            class={`btn btn-xs gap-1 ${isBusy ? 'btn-primary pointer-events-none' : 'btn-primary'}`}
+                            class={`btn btn-xs gap-1 ${isBusy ? 'btn-primary pointer-events-none' : 'btn-ghost'}`}
                             type="button"
-                            title={isBusy ? 'Exécution en cours…' : 'Lancer maintenant'}
+                            title={isBusy
+                                ? 'Exécution en cours…'
+                                : 'Forcer un run immédiat (debug / urgence). En usage normal l’agent tourne seul via planning, webhooks ou missions.'}
                             disabled={isBusy || !agent.is_active || !agent.provider}
                             onClick={handleRun}
                             aria-busy={isLaunching}
@@ -241,7 +243,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                             ) : (
                                 <>
                                     <Play class="size-3" aria-hidden />
-                                    Lancer
+                                    Forcer
                                 </>
                             )}
                         </button>

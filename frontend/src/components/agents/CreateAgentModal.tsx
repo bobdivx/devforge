@@ -4,6 +4,11 @@ import type { Agent, AgentInput, AgentType, AiProviderConfig } from '../../lib/d
 import { domainApi } from '../../lib/domain-api';
 import { isEventOnlyAgentType, eventTriggerLabel } from '../../lib/agent-triggers';
 import {
+    AGENT_SCHEDULE_PRESETS,
+    applySchedulePreset,
+    matchSchedulePreset,
+} from '../../lib/agent-schedule-presets';
+import {
     agentPresets,
     categoryLabels,
     defaultScheduleForType,
@@ -89,12 +94,22 @@ export function CreateAgentModal({ open, onClose, onCreated, parentAgent = null 
     }, [open, isSubAgent, parentAgent?.id, parentAgent?.type]);
 
     const applyPreset = (preset: AgentPreset) => {
+        const schedule = isEventOnlyAgentType(preset.type)
+            ? { schedule_minutes: 0, schedule_cron: null as string | null }
+            : preset.type === 'tech-watch'
+                ? applySchedulePreset('workday-hourly')
+                : {
+                    schedule_minutes: preset.defaultScheduleMinutes,
+                    schedule_cron: null as string | null,
+                };
+
         setForm({
             ...form,
             type: preset.type,
             name: form.name.trim() ? form.name : preset.suggestedName,
             description: form.description?.trim() ? form.description : preset.description,
-            schedule_minutes: isEventOnlyAgentType(preset.type) ? 0 : preset.defaultScheduleMinutes,
+            schedule_minutes: schedule.schedule_minutes,
+            schedule_cron: schedule.schedule_cron,
             parent_agent_id: parentAgent?.id ?? null,
             avatar_color: form.avatar_color || avatarColors[0],
         });
@@ -127,6 +142,7 @@ export function CreateAgentModal({ open, onClose, onCreated, parentAgent = null 
                 ...form,
                 name: form.name.trim(),
                 schedule_minutes: isSubAgent || isEventOnlyAgentType(form.type) ? 0 : form.schedule_minutes,
+                schedule_cron: isSubAgent || isEventOnlyAgentType(form.type) ? null : (form.schedule_cron ?? null),
                 parent_agent_id: parentAgent?.id ?? null,
             };
             const response = await domainApi.createAgent(payload);
@@ -309,18 +325,26 @@ export function CreateAgentModal({ open, onClose, onCreated, parentAgent = null 
                             <select
                                 id="agent-schedule"
                                 class="select select-bordered select-sm w-full"
-                                value={form.schedule_minutes ?? 0}
-                                onChange={(e) => setForm({ ...form, schedule_minutes: Number((e.target as HTMLSelectElement).value) })}
+                                value={matchSchedulePreset(form.schedule_minutes ?? 0, form.schedule_cron)}
+                                onChange={(e) => {
+                                    const next = applySchedulePreset((e.target as HTMLSelectElement).value);
+                                    setForm({
+                                        ...form,
+                                        schedule_minutes: next.schedule_minutes,
+                                        schedule_cron: next.schedule_cron,
+                                    });
+                                }}
                             >
-                                <option value={0}>Manuel uniquement</option>
-                                <option value={10}>Toutes les 10 min</option>
-                                <option value={15}>Toutes les 15 min</option>
-                                <option value={30}>Toutes les 30 min</option>
-                                <option value={60}>Toutes les heures</option>
-                                <option value={120}>Toutes les 2 heures</option>
-                                <option value={360}>Toutes les 6 heures</option>
-                                <option value={1440}>Une fois par jour</option>
+                                {AGENT_SCHEDULE_PRESETS.filter((preset) => preset.id !== 'custom').map((preset) => (
+                                    <option key={preset.id} value={preset.id}>{preset.label}</option>
+                                ))}
                             </select>
+                            <p class="text-[11px] text-base-content/55">
+                                L’agent tourne seul selon ce planning. Pas besoin de cliquer « Forcer ».
+                                {form.type === 'tech-watch'
+                                    ? ' Pour la veille tech, privilégie « Heures de travail » ou « Matin jours ouvrés ».'
+                                    : ''}
+                            </p>
                         </div>
                     )}
 

@@ -3,6 +3,11 @@ import { useEffect, useState } from 'preact/hooks';
 import type { Agent, AgentInput, AiProviderConfig } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
 import { isEventOnlyAgentType, eventTriggerLabel } from '../../lib/agent-triggers';
+import {
+    AGENT_SCHEDULE_PRESETS,
+    applySchedulePreset,
+    matchSchedulePreset,
+} from '../../lib/agent-schedule-presets';
 import { ApiError } from '../../lib/api-client';
 import { navigateTo } from '../../lib/use-navigate';
 import { ActionToolbar } from '../ui/ActionToolbar';
@@ -150,7 +155,14 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
             )}
 
             <ActionToolbar>
-                <button class="btn btn-primary btn-sm gap-1" type="button" disabled={isBusy} onClick={() => void handleRun()} aria-busy={isLaunching}>
+                <button
+                    class="btn btn-ghost btn-sm gap-1"
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => void handleRun()}
+                    aria-busy={isLaunching}
+                    title="Forcer un run immédiat. L’autonomie vient du planning / cron / webhooks / missions, pas de ce bouton."
+                >
                     {isLaunching ? (
                         <>
                             <span class="loading loading-spinner loading-xs" aria-hidden />
@@ -161,7 +173,7 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
                     ) : (
                         <>
                             <Play class="size-3.5" aria-hidden />
-                            Lancer autonome
+                            Forcer un run
                         </>
                     )}
                 </button>
@@ -195,20 +207,66 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
                     </p>
                 ) : (
                     <>
+                        <p class="rounded-md border border-base-300 bg-base-200/40 px-3 py-2 text-[11px] text-base-content/70">
+                            L’agent est autonome via cette planification (ou les missions / webhooks).
+                            Le bouton « Forcer » ne sert qu’au debug ou à un passage immédiat.
+                        </p>
                         <label class="grid gap-1 text-xs">
-                            <span class="font-medium">Planification (min, 0 = manuel)</span>
-                            <input class="input input-bordered input-sm" type="number" min="0" value={form.schedule_minutes ?? 0} onInput={(e) => setForm({ ...form, schedule_minutes: Number((e.target as HTMLInputElement).value) })} />
+                            <span class="font-medium">Horaires de travail</span>
+                            <select
+                                class="select select-bordered select-sm"
+                                value={matchSchedulePreset(form.schedule_minutes ?? 0, form.schedule_cron)}
+                                onChange={(e) => {
+                                    const presetId = (e.target as HTMLSelectElement).value;
+                                    const next = applySchedulePreset(presetId);
+                                    setForm({
+                                        ...form,
+                                        schedule_minutes: next.schedule_minutes,
+                                        schedule_cron: next.schedule_cron ?? '',
+                                    });
+                                }}
+                            >
+                                {AGENT_SCHEDULE_PRESETS.map((preset) => (
+                                    <option key={preset.id} value={preset.id}>{preset.label}</option>
+                                ))}
+                            </select>
+                            {(() => {
+                                const preset = AGENT_SCHEDULE_PRESETS.find(
+                                    (row) => row.id === matchSchedulePreset(form.schedule_minutes ?? 0, form.schedule_cron),
+                                );
+                                return preset?.hint
+                                    ? <span class="text-[11px] text-base-content/55">{preset.hint}</span>
+                                    : null;
+                            })()}
                         </label>
-                        <label class="grid gap-1 text-xs">
-                            <span class="font-medium">Cron libre (prioritaire si renseigné)</span>
-                            <input
-                                class="input input-bordered input-sm font-mono"
-                                type="text"
-                                placeholder="0 */6 * * *"
-                                value={form.schedule_cron ?? ''}
-                                onInput={(e) => setForm({ ...form, schedule_cron: (e.target as HTMLInputElement).value })}
-                            />
-                        </label>
+                        {matchSchedulePreset(form.schedule_minutes ?? 0, form.schedule_cron) === 'custom' && (
+                            <>
+                                <label class="grid gap-1 text-xs">
+                                    <span class="font-medium">Intervalle (minutes, 0 = off)</span>
+                                    <input
+                                        class="input input-bordered input-sm"
+                                        type="number"
+                                        min="0"
+                                        value={form.schedule_minutes ?? 0}
+                                        onInput={(e) => setForm({
+                                            ...form,
+                                            schedule_minutes: Number((e.target as HTMLInputElement).value),
+                                            schedule_cron: '',
+                                        })}
+                                    />
+                                </label>
+                                <label class="grid gap-1 text-xs">
+                                    <span class="font-medium">Cron libre (prioritaire si renseigné)</span>
+                                    <input
+                                        class="input input-bordered input-sm font-mono"
+                                        type="text"
+                                        placeholder="0 9-18 * * 1-5"
+                                        value={form.schedule_cron ?? ''}
+                                        onInput={(e) => setForm({ ...form, schedule_cron: (e.target as HTMLInputElement).value })}
+                                    />
+                                </label>
+                            </>
+                        )}
                         <label class="flex items-center gap-2 text-xs">
                             <input
                                 class="checkbox checkbox-sm"

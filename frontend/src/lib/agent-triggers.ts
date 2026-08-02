@@ -1,4 +1,5 @@
 import type { AgentType, AgentTriggerMode } from './domain-api';
+import { scheduleCronLabel } from './agent-schedule-presets';
 
 export function isEventOnlyAgentType(type: AgentType): boolean {
     return type === 'devforge' || type === 'github-actions';
@@ -21,18 +22,30 @@ export function triggerModeLabel(mode: AgentTriggerMode): string {
             return 'Événement';
         case 'schedule':
             return 'Planifié';
+        case 'cron':
+            return 'Horaires';
         default:
             return 'Manuel';
     }
 }
 
-export function scheduleLabel(agent: { type: AgentType; schedule_minutes: number; trigger_mode?: AgentTriggerMode }): string {
+export function scheduleLabel(agent: {
+    type: AgentType;
+    schedule_minutes: number;
+    schedule_cron?: string | null;
+    trigger_mode?: AgentTriggerMode;
+}): string {
     if (agent.trigger_mode === 'webhook' || isEventOnlyAgentType(agent.type)) {
         if (agent.type === 'github-actions') {
             return 'Sur échec Actions (webhook)';
         }
 
         return 'À chaque build webhook';
+    }
+
+    const cronLabel = scheduleCronLabel(agent.schedule_cron ?? '');
+    if (cronLabel) {
+        return cronLabel;
     }
 
     if (agent.schedule_minutes > 0) {
