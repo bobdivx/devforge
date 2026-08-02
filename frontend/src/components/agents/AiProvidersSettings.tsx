@@ -85,7 +85,15 @@ export function AiProvidersSettings() {
     const [modelsLoading, setModelsLoading] = useState(false);
     const [modelsError, setModelsError] = useState<string | null>(null);
     const [submitting, setSubmitting] = useState(false);
-    const [testResults, setTestResults] = useState<Record<number, { success: boolean; message: string } | null>>({});
+    const [testResults, setTestResults] = useState<Record<number, {
+        success: boolean;
+        message: string;
+        models_available?: string[];
+        models_working?: string[];
+        models_failed?: Array<{ id: string; error: string | null }>;
+        recommended?: string[];
+        lines?: string[];
+    } | null>>({});
     const [testing, setTesting] = useState<Record<number, boolean>>({});
     const [deleting, setDeleting] = useState<Record<number, boolean>>({});
 
@@ -286,11 +294,30 @@ export function AiProvidersSettings() {
                                     {provider.has_api_key && ' · Clé API configurée'}
                                 </p>
                                 {testResults[provider.id] && (
-                                    <div class={`mt-1 flex items-center gap-1 text-[11px] ${testResults[provider.id]!.success ? 'text-success' : 'text-error'}`}>
-                                        {testResults[provider.id]!.success
-                                            ? <CheckCircle class="size-3" aria-hidden />
-                                            : <XCircle class="size-3" aria-hidden />}
-                                        {testResults[provider.id]!.message}
+                                    <div class={`mt-1 space-y-1 text-[11px] ${testResults[provider.id]!.success ? 'text-success' : 'text-error'}`}>
+                                        <div class="flex items-center gap-1">
+                                            {testResults[provider.id]!.success
+                                                ? <CheckCircle class="size-3" aria-hidden />
+                                                : <XCircle class="size-3" aria-hidden />}
+                                            <span>{testResults[provider.id]!.message}</span>
+                                        </div>
+                                        {(testResults[provider.id]!.models_working?.length ?? 0) > 0 && (
+                                            <p class="text-base-content/60">
+                                                OK : {testResults[provider.id]!.models_working!.join(', ')}
+                                            </p>
+                                        )}
+                                        {(testResults[provider.id]!.models_failed?.length ?? 0) > 0 && (
+                                            <p class="text-error/80">
+                                                KO : {testResults[provider.id]!.models_failed!
+                                                    .map((row) => row.id)
+                                                    .join(', ')}
+                                            </p>
+                                        )}
+                                        {(testResults[provider.id]!.recommended?.length ?? 0) > 0 && (
+                                            <p class="text-base-content/60">
+                                                Recommandés : {testResults[provider.id]!.recommended!.slice(0, 4).join(', ')}
+                                            </p>
+                                        )}
                                     </div>
                                 )}
                             </div>

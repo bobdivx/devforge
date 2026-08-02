@@ -10,6 +10,7 @@ uses(RefreshDatabase::class);
 
 it('uses the agent preferred ollama model override', function () {
     config()->set('devforge.agents_auto_fallback', false);
+    config()->set('devforge.agents_provider_probe', false);
 
     $provider = AiProviderConfig::factory()->ollama()->create([
         'base_url' => 'https://ollama.example.test',

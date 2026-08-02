@@ -18,7 +18,7 @@ class GeminiProvider implements LlmProvider
     private const MAX_RETRIES = 3;
 
     /** @var array<int, int> */
-    private const RETRYABLE_STATUS_CODES = [408, 500, 502, 503, 504];
+    private const RETRYABLE_STATUS_CODES = [408, 429, 500, 502, 503, 504];
 
     public function __construct(
         private readonly string $apiKey,
@@ -59,7 +59,7 @@ class GeminiProvider implements LlmProvider
 
         for ($attempt = 0; $attempt <= self::MAX_RETRIES; $attempt++) {
             if ($attempt > 0) {
-                Sleep::sleep(2 ** $attempt);
+                Sleep::sleep($this->retryDelaySeconds($attempt, $lastResponse));
             }
 
             $response = Http::withHeaders([
@@ -85,25 +85,76 @@ class GeminiProvider implements LlmProvider
         throw new \RuntimeException($this->formatApiError($status, (string) $lastResponse?->body()));
     }
 
+    private function retryDelaySeconds(int $attempt, ?Response $lastResponse): int
+    {
+        if ($lastResponse?->status() === 429) {
+            $retryAfter = (int) ($lastResponse->header('Retry-After') ?: 0);
+            if ($retryAfter > 0) {
+                return min(60, max(2, $retryAfter));
+            }
+
+            // RPM/TPM Gemini : backoff plus long que les 5xx classiques.
+            return min(45, 5 * (2 ** ($attempt - 1)));
+        }
+
+        return 2 ** $attempt;
+    }
+
     private function formatApiError(int $status, string $body): string
     {
         $message = null;
+        $metric = null;
 
         $decoded = json_decode($body, true);
         if (is_array($decoded)) {
-            $message = $decoded['error']['message'] ?? $decoded['message'] ?? null;
+            // Parfois un tableau d'erreurs (proxy / OpenAI-compat).
+            if (array_is_list($decoded) && isset($decoded[0]) && is_array($decoded[0])) {
+                $decoded = $decoded[0];
+            }
+
+            $error = is_array($decoded['error'] ?? null) ? $decoded['error'] : null;
+            $message = $error['message'] ?? $decoded['message'] ?? null;
+            $details = $error['details'] ?? [];
+            if (is_array($details)) {
+                foreach ($details as $detail) {
+                    if (! is_array($detail)) {
+                        continue;
+                    }
+                    $candidate = $detail['metadata']['quota_metric']
+                        ?? $detail['metadata']['quotaMetric']
+                        ?? $detail['quotaMetric']
+                        ?? null;
+                    if (is_string($candidate) && $candidate !== '') {
+                        $metric = $candidate;
+                        break;
+                    }
+                }
+            }
         }
 
         $model = $this->normalizeModelId($this->model);
-        $detail = $message ?: mb_substr($body, 0, 300);
+        $detail = is_string($message) && $message !== '' ? $message : mb_substr($body, 0, 300);
 
         return match ($status) {
-            429 => "Gemini [{$model}] [429]: {$detail}",
+            429 => $this->formatRateLimitError($model, $detail, $metric),
             404 => "Gemini [{$model}] [404]: modèle indisponible ou non autorisé. {$detail}",
             400 => "Gemini [{$model}] [400]: requête refusée. {$detail}",
             503 => "Gemini [{$model}] [503]: modèle temporairement surchargé. {$detail}",
             default => "Gemini [{$model}] [{$status}]: {$detail}",
         };
+    }
+
+    private function formatRateLimitError(string $model, string $detail, ?string $metric): string
+    {
+        $hint = 'Limite de débit / quota projet Google (RPM, TPM ou RPD) — pas forcément un crédit à 0. '
+            .'Vérifie AI Studio → Rate limit pour la clé/projet utilisés par DevForge, '
+            .'et que la facturation est bien liée à ce projet.';
+
+        if (is_string($metric) && $metric !== '') {
+            $hint .= " Métrique: {$metric}.";
+        }
+
+        return "Gemini [{$model}] [429]: {$detail} {$hint}";
     }
 
     public function testConnection(): bool

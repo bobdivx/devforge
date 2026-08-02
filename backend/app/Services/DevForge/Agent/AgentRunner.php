@@ -97,6 +97,15 @@ class AgentRunner
                 $run->appendLog("Bascule vers le provider de secours : {$fallbackLabel}");
             },
             config('devforge.agents_smart_routing', true) ? $tier : null,
+            function (array $report) use ($run): void {
+                $provider = (string) ($report['provider'] ?? 'llm');
+                $run->appendLog('Diagnostic '.$provider.' : '.(string) ($report['summary'] ?? ''));
+                foreach (array_slice($report['lines'] ?? [], 0, 8) as $line) {
+                    if (is_string($line) && $line !== '') {
+                        $run->appendLog($line);
+                    }
+                }
+            },
         );
         $run->appendLog('Provider LLM prêt.');
 

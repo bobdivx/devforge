@@ -49,6 +49,43 @@ it('falls back to a secondary provider when the primary is overloaded', function
     expect($response->text)->toBe('réponse secours');
 });
 
+it('falls back when ollama returns a 502 bad gateway', function () {
+    $primary = new class implements \App\Services\DevForge\Agent\Contracts\LlmProvider
+    {
+        public function chat(array $messages, array $tools = []): LlmResponse
+        {
+            throw new RuntimeException('Ollama API error [502]: error code: 502');
+        }
+
+        public function testConnection(): bool
+        {
+            return true;
+        }
+    };
+
+    $fallback = new class implements \App\Services\DevForge\Agent\Contracts\LlmProvider
+    {
+        public function chat(array $messages, array $tools = []): LlmResponse
+        {
+            return new LlmResponse(text: 'via gemini', toolCalls: [], tokensUsed: 1, isFinished: true);
+        }
+
+        public function testConnection(): bool
+        {
+            return true;
+        }
+    };
+
+    $provider = new ResilientLlmProvider(
+        primary: $primary,
+        fallback: $fallback,
+        primaryLabel: 'ollama/llama3.2:latest',
+        fallbackLabel: 'gemini/gemini-2.5-flash',
+    );
+
+    expect($provider->chat([['role' => 'user', 'content' => 'test']])->text)->toBe('via gemini');
+});
+
 it('falls back when gemini quota message is raised', function () {
     $primary = new class implements \App\Services\DevForge\Agent\Contracts\LlmProvider
     {
@@ -88,6 +125,7 @@ it('falls back when gemini quota message is raised', function () {
 
 it('resolves an automatic fallback provider for an agent', function () {
     config()->set('devforge.agents_auto_fallback', true);
+    config()->set('devforge.agents_provider_probe', false);
 
     $team = Team::factory()->create();
     $primary = AiProviderConfig::factory()->create([
@@ -114,7 +152,72 @@ it('resolves an automatic fallback provider for an agent', function () {
     expect($secondary->id)->not->toBe($primary->id);
 });
 
+it('auto-falls back from ollama primary to a cloud provider', function () {
+    config()->set('devforge.agents_auto_fallback', true);
+    config()->set('devforge.agents_provider_probe', false);
+
+    $team = Team::factory()->create();
+    $primary = AiProviderConfig::factory()->create([
+        'team_id' => $team->id,
+        'provider' => 'ollama',
+        'model' => 'llama3.2',
+        'base_url' => 'http://localhost:11434',
+    ]);
+    $gemini = AiProviderConfig::factory()->create([
+        'team_id' => $team->id,
+        'provider' => 'gemini',
+        'model' => 'gemini-2.5-flash',
+        'is_default' => true,
+    ]);
+
+    $agent = AiAgent::factory()->create([
+        'team_id' => $team->id,
+        'provider_config_id' => $primary->id,
+        'fallback_provider_config_id' => null,
+    ]);
+
+    $provider = app(LlmProviderFactory::class)->makeForAgent($agent);
+
+    expect($provider)->toBeInstanceOf(ResilientLlmProvider::class);
+    expect($gemini->id)->not->toBe($primary->id);
+});
+
+it('chains a second cloud provider after gemini when ollama is primary', function () {
+    config()->set('devforge.agents_auto_fallback', true);
+    config()->set('devforge.agents_provider_probe', false);
+
+    $team = Team::factory()->create();
+    $primary = AiProviderConfig::factory()->create([
+        'team_id' => $team->id,
+        'provider' => 'ollama',
+        'model' => 'llama3.2',
+        'base_url' => 'http://localhost:11434',
+    ]);
+    AiProviderConfig::factory()->create([
+        'team_id' => $team->id,
+        'provider' => 'gemini',
+        'model' => 'gemini-2.5-flash',
+    ]);
+    AiProviderConfig::factory()->create([
+        'team_id' => $team->id,
+        'provider' => 'openrouter',
+        'model' => 'openai/gpt-4o-mini',
+    ]);
+
+    $agent = AiAgent::factory()->create([
+        'team_id' => $team->id,
+        'provider_config_id' => $primary->id,
+        'fallback_provider_config_id' => null,
+    ]);
+
+    $provider = app(LlmProviderFactory::class)->makeForAgent($agent);
+
+    expect($provider)->toBeInstanceOf(ResilientLlmProvider::class);
+});
+
 it('uses an explicit fallback provider when configured on the agent', function () {
+    config()->set('devforge.agents_provider_probe', false);
+
     $team = Team::factory()->create();
     $primary = AiProviderConfig::factory()->create(['team_id' => $team->id, 'provider' => 'gemini']);
     $explicit = AiProviderConfig::factory()->create([

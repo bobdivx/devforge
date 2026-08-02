@@ -14,6 +14,9 @@ class TaskModelRouter
         'light' => [
             'gemini-2.0-flash-lite',
             'gemini-2.5-flash-lite',
+            // Overflow quota free-tier : Flash-Lite souvent saturé avant Flash.
+            'gemini-2.0-flash',
+            'gemini-2.5-flash',
         ],
         'standard' => [
             'gemini-2.5-flash',

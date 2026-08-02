@@ -16,6 +16,12 @@ return [
 
     'agents_auto_fallback' => env('DEVFORGE_AGENTS_AUTO_FALLBACK', true),
 
+    /*
+    | Probe providers (liste modèles + micro-chat) avant / pendant le routage Auto.
+    | Cache ~5 min par config. Désactiver si le NAS est trop lent vers Google.
+    */
+    'agents_provider_probe' => env('DEVFORGE_AGENTS_PROVIDER_PROBE', true),
+
     'agents_github_pr_watch' => env('DEVFORGE_AGENTS_GITHUB_PR_WATCH', true),
 
     'agents_tech_watch' => env('DEVFORGE_AGENTS_TECH_WATCH', true),

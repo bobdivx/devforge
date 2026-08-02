@@ -14,10 +14,13 @@ use App\Services\DevForge\Agent\Providers\ResilientLlmProvider;
 
 class LlmProviderFactory
 {
+    private ?\Closure $diagnosticSink = null;
+
     public function __construct(
         private readonly LlmModelCatalog $modelCatalog,
         private readonly TaskModelRouter $taskModelRouter,
         private readonly OllamaFallbackResolver $ollamaFallbackResolver,
+        private readonly LlmProviderProbe $providerProbe,
     ) {}
 
     public function make(AiProviderConfig $config, ?TaskModelTier $tier = null, ?string $modelOverride = null): LlmProvider
@@ -56,7 +59,23 @@ class LlmProviderFactory
         };
     }
 
-    public function makeForAgent(AiAgent $agent, ?\Closure $onFallback = null, ?TaskModelTier $tier = null): LlmProvider
+    public function makeForAgent(
+        AiAgent $agent,
+        ?\Closure $onFallback = null,
+        ?TaskModelTier $tier = null,
+        ?\Closure $onDiagnostic = null,
+    ): LlmProvider {
+        $previousSink = $this->diagnosticSink;
+        $this->diagnosticSink = $onDiagnostic;
+
+        try {
+            return $this->makeForAgentWithDiagnostics($agent, $onFallback, $tier);
+        } finally {
+            $this->diagnosticSink = $previousSink;
+        }
+    }
+
+    private function makeForAgentWithDiagnostics(AiAgent $agent, ?\Closure $onFallback, ?TaskModelTier $tier): LlmProvider
     {
         $primaryConfig = $agent->effectiveProviderConfig();
 
@@ -65,74 +84,136 @@ class LlmProviderFactory
         }
 
         $override = $agent->preferredLlmModel();
-        $primary = $this->make($primaryConfig, $tier, $override);
-        $fallback = $this->resolveFallbackProvider($agent, $primaryConfig, $tier);
 
-        if ($fallback === null) {
+        if (
+            config('devforge.agents_provider_probe', true)
+            && $primaryConfig->provider === 'ollama'
+        ) {
+            $ollamaReport = $this->providerProbe->diagnose($primaryConfig);
+            $this->emitDiagnostic($ollamaReport);
+        }
+
+        $primary = $this->make($primaryConfig, $tier, $override);
+        $fallbacks = $this->resolveFallbackProviders($agent, $primaryConfig, $tier);
+
+        if ($fallbacks === []) {
             return $primary;
+        }
+
+        // Chaîne : primary → fallback1 → fallback2 (ex. Ollama → Gemini → OpenRouter).
+        $wrapped = array_pop($fallbacks);
+        $provider = $wrapped['provider'];
+        $label = $wrapped['label'];
+
+        while ($fallbacks !== []) {
+            $previous = array_pop($fallbacks);
+            $provider = new ResilientLlmProvider(
+                primary: $previous['provider'],
+                fallback: $provider,
+                primaryLabel: $previous['label'],
+                fallbackLabel: $label,
+                onFallback: $onFallback,
+            );
+            $label = $previous['label'].' → '.$label;
         }
 
         return new ResilientLlmProvider(
             primary: $primary,
-            fallback: $fallback['provider'],
+            fallback: $provider,
             primaryLabel: $this->label($primaryConfig, $override),
-            fallbackLabel: $fallback['label'],
+            fallbackLabel: $label,
             onFallback: $onFallback,
         );
     }
 
     /**
-     * Résout un fallback sans health-check bloquant à l'init.
+     * Résout une chaîne de fallbacks sans health-check bloquant à l'init.
      * ResilientLlmProvider bascule au premier échec réel du primaire.
      *
-     * @return array{provider: LlmProvider, label: string}|null
+     * @return array<int, array{provider: LlmProvider, label: string}>
      */
-    private function resolveFallbackProvider(AiAgent $agent, AiProviderConfig $primaryConfig, ?TaskModelTier $tier): ?array
+    private function resolveFallbackProviders(AiAgent $agent, AiProviderConfig $primaryConfig, ?TaskModelTier $tier): array
     {
+        $fallbacks = [];
+        $usedIds = [(int) $primaryConfig->id];
+
         if ($agent->fallback_provider_config_id) {
             $config = AiProviderConfig::query()
                 ->where('team_id', $agent->team_id)
                 ->whereKey($agent->fallback_provider_config_id)
                 ->first();
 
-            if ($config && $config->id !== $primaryConfig->id) {
-                return [
+            if ($config && ! in_array((int) $config->id, $usedIds, true)) {
+                $fallbacks[] = [
                     'provider' => $this->make($config, $tier),
                     'label' => $this->label($config),
                 ];
+                $usedIds[] = (int) $config->id;
             }
         }
 
         if (! config('devforge.agents_auto_fallback', true)) {
-            return null;
+            return $fallbacks;
         }
 
-        // Préférer la découverte réseau (DEVFORGE_OLLAMA_URL) — rapide et fiable depuis Docker.
+        // Si le primaire est Ollama (souvent instable / 502 NAS), basculer vers les clouds
+        // déjà configurés (Gemini puis OpenRouter…) plutôt qu’un autre Ollama mort.
+        // Pour Gemini Auto, remonter au moins en Standard : Flash-Lite est trop fragile en secours.
+        if ($primaryConfig->provider === 'ollama') {
+            $cloudTier = $tier === TaskModelTier::Light || $tier === null
+                ? TaskModelTier::Standard
+                : $tier;
+
+            $cloudFallbacks = AiProviderConfig::query()
+                ->where('team_id', $agent->team_id)
+                ->where('provider', '!=', 'ollama')
+                ->whereNotIn('id', $usedIds)
+                ->orderByDesc('is_default')
+                ->orderByRaw("CASE provider WHEN 'gemini' THEN 0 WHEN 'openrouter' THEN 1 WHEN 'openai' THEN 2 WHEN 'anthropic' THEN 3 ELSE 9 END")
+                ->orderBy('id')
+                ->limit(2)
+                ->get();
+
+            foreach ($cloudFallbacks as $cloudFallback) {
+                $makeTier = $cloudFallback->provider === 'gemini' ? $cloudTier : $tier;
+                $fallbacks[] = [
+                    'provider' => $this->make($cloudFallback, $makeTier),
+                    'label' => $this->label($cloudFallback).' (auto)',
+                ];
+                $usedIds[] = (int) $cloudFallback->id;
+            }
+
+            return $fallbacks;
+        }
+
+        // Préférer la découverte réseau (DEVFORGE_OLLAMA_URL) — utile si le primaire est cloud.
         $discovered = $this->ollamaFallbackResolver->discover();
 
         if ($discovered !== null) {
-            return [
+            $fallbacks[] = [
                 'provider' => new OllamaProvider($discovered['base_url'], $discovered['model']),
                 'label' => 'ollama/'.$discovered['model'].' (auto)',
             ];
+
+            return $fallbacks;
         }
 
         $dbFallback = AiProviderConfig::query()
             ->where('team_id', $agent->team_id)
             ->where('provider', 'ollama')
-            ->whereKeyNot($agent->provider_config_id)
+            ->whereNotIn('id', $usedIds)
             ->orderByDesc('is_default')
             ->orderBy('id')
             ->first();
 
         if ($dbFallback) {
-            return [
+            $fallbacks[] = [
                 'provider' => $this->make($dbFallback, $tier),
                 'label' => $this->label($dbFallback),
             ];
         }
 
-        return null;
+        return $fallbacks;
     }
 
     public function describeResolvedModel(AiProviderConfig $config, ?string $modelOverride = null): string
@@ -158,18 +239,49 @@ class LlmProviderFactory
     /** @return array<int, string> */
     private function resolveAutoGeminiModels(AiProviderConfig $config, ?TaskModelTier $tier = null): array
     {
-        // Pour les runs agents (tier fourni), éviter un listModels Gemini synchrone
-        // qui peut bloquer l'init plusieurs dizaines de secondes depuis le NAS.
-        if ($tier !== null && config('devforge.agents_smart_routing', true)) {
-            return $this->taskModelRouter->prioritizeModelsForTier(
+        $preferred = $tier !== null && config('devforge.agents_smart_routing', true)
+            ? $this->taskModelRouter->prioritizeModelsForTier(
                 $tier,
                 LlmModelResolver::defaultAutoGeminiModels(),
-            );
+            )
+            : LlmModelResolver::defaultAutoGeminiModels();
+
+        if (! config('devforge.agents_provider_probe', true)) {
+            if ($tier !== null && config('devforge.agents_smart_routing', true)) {
+                return $preferred;
+            }
+
+            return LlmModelResolver::prioritizeGeminiModels($this->availableGeminiModels($config));
         }
 
-        $available = $this->availableGeminiModels($config);
+        $report = $this->providerProbe->diagnose($config, $preferred);
+        $this->emitDiagnostic($report);
 
-        return LlmModelResolver::prioritizeGeminiModels($available);
+        $recommended = $report['recommended'];
+        if ($recommended === []) {
+            return $preferred;
+        }
+
+        // Garder l’ordre du tier, en tête les modèles qui ont passé le micro-chat.
+        $working = array_values(array_filter(
+            $recommended,
+            fn (string $id): bool => in_array($id, array_column(
+                array_filter($report['models_probed'], fn (array $row): bool => $row['ok']),
+                'id',
+            ), true),
+        ));
+
+        if ($working === []) {
+            // Liste OK mais probes KO (RPM) : croiser preferred ∩ available.
+            $available = $report['models_available'];
+            $intersect = array_values(array_filter($preferred, fn (string $id): bool => in_array($id, $available, true)));
+
+            return $intersect !== [] ? $intersect : $recommended;
+        }
+
+        $rest = array_values(array_filter($preferred, fn (string $id): bool => ! in_array($id, $working, true)));
+
+        return array_values(array_unique([...$working, ...$rest, ...$recommended]));
     }
 
     /** @return array<int, string> */
@@ -183,6 +295,24 @@ class LlmProviderFactory
             ))->pluck('id')->all();
         } catch (\Throwable) {
             return LlmModelResolver::defaultAutoGeminiModels();
+        }
+    }
+
+    /**
+     * @param  array{
+     *     ok: bool,
+     *     provider: string,
+     *     models_available: array<int, string>,
+     *     models_probed: array<int, array{id: string, ok: bool, error: string|null}>,
+     *     recommended: array<int, string>,
+     *     summary: string,
+     *     lines: array<int, string>
+     * }  $report
+     */
+    private function emitDiagnostic(array $report): void
+    {
+        if ($this->diagnosticSink instanceof \Closure) {
+            ($this->diagnosticSink)($report);
         }
     }
 

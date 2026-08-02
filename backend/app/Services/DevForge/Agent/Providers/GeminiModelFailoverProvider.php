@@ -46,7 +46,9 @@ class GeminiModelFailoverProvider implements LlmProvider
                 $lastException = $exception;
                 $errors[] = $exception->getMessage();
 
-                if ($this->isAuthError($exception) || $this->isGlobalQuotaExhausted($exception)) {
+                // Auth = stop immédiat. Un 429 « exceeded quota » Gemini est souvent
+                // par modèle (free tier) : on continue la liste pour Flash / Pro.
+                if ($this->isAuthError($exception)) {
                     break;
                 }
 
@@ -98,9 +100,12 @@ class GeminiModelFailoverProvider implements LlmProvider
         $lastError = $lastException->getMessage();
 
         if ($this->allErrorsAreQuota($errors)) {
-            return 'Quota Gemini atteint sur les modèles chat essayés ('.implode(', ', $models).'). '
-                .'Dernière erreur : '.$lastError.'. '
-                .'Réessayez plus tard ou configurez un provider Ollama de secours.';
+            return 'Gemini a refusé les modèles essayés ('.implode(', ', $models).') avec 429 RESOURCE_EXHAUSTED. '
+                .'Souvent un rate-limit (RPM/TPM) ou un bucket free-tier du mauvais projet Google — '
+                .'pas forcément « plus de crédit ». '
+                .'Dernière erreur : '.$lastError.' '
+                .'Vérifie la clé API / le projet dans AI Studio (Rate limit), '
+                .'ou ajoute OpenRouter/OpenAI en secours.';
         }
 
         if (count($errors) > 1) {
@@ -128,14 +133,6 @@ class GeminiModelFailoverProvider implements LlmProvider
         }
 
         return true;
-    }
-
-    private function isGlobalQuotaExhausted(\Throwable $exception): bool
-    {
-        $lower = mb_strtolower($exception->getMessage());
-
-        return str_contains($lower, 'exceeded your current quota')
-            || str_contains($lower, 'check your plan and billing');
     }
 
     private function isAuthError(\Throwable $exception): bool

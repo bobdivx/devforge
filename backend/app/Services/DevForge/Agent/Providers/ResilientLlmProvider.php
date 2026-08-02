@@ -46,10 +46,17 @@ class ResilientLlmProvider implements LlmProvider
     {
         $message = mb_strtolower($exception->getMessage());
 
-        return str_contains($message, '[503]')
+        return str_contains($message, '[502]')
+            || str_contains($message, '[503]')
+            || str_contains($message, '[504]')
             || str_contains($message, '[429]')
             || str_contains($message, '[500]')
             || str_contains($message, '[404]')
+            || str_contains($message, 'ollama api error')
+            || str_contains($message, 'connection')
+            || str_contains($message, 'timed out')
+            || str_contains($message, 'timeout')
+            || str_contains($message, 'curl error')
             || str_contains($message, 'mode auto gemini')
             || str_contains($message, 'quota gemini atteint')
             || str_contains($message, 'surcharg')

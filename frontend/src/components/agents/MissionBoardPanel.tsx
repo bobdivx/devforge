@@ -201,9 +201,12 @@ export function MissionBoardPanel() {
         <section class="rounded-xl border border-base-300 bg-base-100 p-4">
             <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div>
-                    <h3 class="text-sm font-semibold">Travail de l’équipe</h3>
+                    <h3 class="text-sm font-semibold">
+                        Kanban — Travail de l’équipe
+                        <span class="badge badge-primary badge-sm ml-2">missions</span>
+                    </h3>
                     <p class="text-xs text-base-content/55">
-                        Kanban missions — VT propose, implementer / debug exécutent.
+                        Colonnes Ouvert / En cours / Bloqué / Terminé — VT propose, implementer et debug exécutent.
                     </p>
                 </div>
                 <button class="btn btn-ghost btn-xs" type="button" onClick={() => void query.reload()}>

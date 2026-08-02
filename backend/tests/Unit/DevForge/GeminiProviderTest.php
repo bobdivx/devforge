@@ -241,6 +241,35 @@ it('sends tool results with tool_call_id on follow up turns', function () {
     });
 });
 
+it('retries gemini chat when the api returns a transient 429', function () {
+    Illuminate\Support\Sleep::fake();
+
+    Http::fake([
+        'generativelanguage.googleapis.com/*' => Http::sequence()
+            ->push([
+                'error' => [
+                    'code' => 429,
+                    'message' => 'You exceeded your current quota, please check your plan and billing details.',
+                    'status' => 'RESOURCE_EXHAUSTED',
+                ],
+            ], 429)
+            ->push([
+                'choices' => [
+                    [
+                        'message' => ['role' => 'assistant', 'content' => 'OK after retry'],
+                        'finish_reason' => 'stop',
+                    ],
+                ],
+                'usage' => ['total_tokens' => 4],
+            ]),
+    ]);
+
+    $provider = new GeminiProvider('AIzaTestKey', 'gemini-2.5-flash');
+
+    expect($provider->chat([['role' => 'user', 'content' => 'Bonjour']])->text)->toBe('OK after retry');
+    Http::assertSentCount(2);
+});
+
 it('falls back to another gemini model when the primary model is rate limited', function () {
     Illuminate\Support\Sleep::fake();
 
@@ -403,7 +432,36 @@ it('adds skip validator when thought signature is missing on follow up turns', f
     });
 });
 
-it('stops model failover when gemini quota is globally exhausted', function () {
+it('continues gemini model failover when a per-model quota message is returned', function () {
+    Http::fake([
+        'generativelanguage.googleapis.com/*' => Http::sequence()
+            ->push([
+                'error' => ['message' => 'You exceeded your current quota, please check your plan and billing details.'],
+            ], 429)
+            ->push([
+                'choices' => [
+                    [
+                        'message' => ['role' => 'assistant', 'content' => 'OK via flash'],
+                        'finish_reason' => 'stop',
+                    ],
+                ],
+                'usage' => ['total_tokens' => 4],
+            ]),
+    ]);
+
+    $provider = new GeminiModelFailoverProvider(
+        'AIzaTestKey',
+        LlmModelResolver::AUTO,
+        autoModels: ['gemini-2.0-flash-lite', 'gemini-2.5-flash'],
+    );
+
+    $response = $provider->chat([['role' => 'user', 'content' => 'test']]);
+
+    expect($response->text)->toBe('OK via flash');
+    Http::assertSentCount(2);
+});
+
+it('reports quota exhaustion only after all gemini auto models fail', function () {
     Http::fake([
         'generativelanguage.googleapis.com/*' => Http::response([
             'error' => ['message' => 'You exceeded your current quota, please check your plan and billing details.'],
@@ -413,13 +471,13 @@ it('stops model failover when gemini quota is globally exhausted', function () {
     $provider = new GeminiModelFailoverProvider(
         'AIzaTestKey',
         LlmModelResolver::AUTO,
-        autoModels: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'],
+        autoModels: ['gemini-2.5-pro', 'gemini-2.5-flash'],
     );
 
     expect(fn () => $provider->chat([['role' => 'user', 'content' => 'test']]))
         ->toThrow(RuntimeException::class, 'Quota Gemini atteint');
 
-    Http::assertSentCount(1);
+    Http::assertSentCount(2);
 });
 
 it('tries multiple auto models when the first model is unavailable', function () {

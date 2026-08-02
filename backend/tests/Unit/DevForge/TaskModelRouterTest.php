@@ -21,7 +21,7 @@ it('classifies deep analysis requests as heavy tier', function () {
     expect($router->classify('Analyse la cause racine du crash', 'chat', 'debug', []))->toBe(TaskModelTier::Heavy);
 });
 
-it('prioritizes lite models for light tier', function () {
+it('prioritizes lite models for light tier then flash as quota overflow', function () {
     $router = new TaskModelRouter;
 
     $models = $router->prioritizeModelsForTier(TaskModelTier::Light, [
@@ -30,7 +30,7 @@ it('prioritizes lite models for light tier', function () {
         'gemini-2.5-flash-native-audio-latest',
     ]);
 
-    expect($models)->toBe(['gemini-2.0-flash-lite']);
+    expect($models)->toBe(['gemini-2.0-flash-lite', 'gemini-2.5-flash']);
 });
 
 it('prioritizes flash before pro for heavy tier', function () {

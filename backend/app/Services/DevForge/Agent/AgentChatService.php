@@ -413,17 +413,19 @@ class AgentChatService
         $run->appendLog('Chat — '.$routing['display'].' ('.$routing['tier_label'].') : '.$reason);
 
         $provider = $this->providerFactory->makeForAgent(
-
             $agent,
-
             function (\Throwable $exception, string $primaryLabel, string $fallbackLabel) use ($run): void {
-
                 $run->appendLog("Provider {$primaryLabel} indisponible, bascule vers {$fallbackLabel}.");
-
             },
-
             config('devforge.agents_smart_routing', true) ? $tier : null,
-
+            function (array $report) use ($run): void {
+                $run->appendLog('Diagnostic '.(string) ($report['provider'] ?? 'llm').' : '.(string) ($report['summary'] ?? ''));
+                foreach (array_slice($report['lines'] ?? [], 0, 6) as $line) {
+                    if (is_string($line) && $line !== '') {
+                        $run->appendLog($line);
+                    }
+                }
+            },
         );
 
         $delegator = new AgentDelegator(

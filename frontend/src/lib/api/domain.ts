@@ -3512,7 +3512,15 @@ export const domainApi = {
         body: JSON.stringify(input),
     }),
     deleteAiProvider: (id: number) => mutate<void>(`/ai/providers/${id}`, { method: 'DELETE' }),
-    testAiProvider: (id: number) => mutate<ApiResponse<{ success: boolean; message: string }>>(`/ai/providers/${id}/test`, { method: 'POST' }),
+    testAiProvider: (id: number) => mutate<ApiResponse<{
+        success: boolean;
+        message: string;
+        models_available?: string[];
+        models_working?: string[];
+        models_failed?: Array<{ id: string; error: string | null }>;
+        recommended?: string[];
+        lines?: string[];
+    }>>(`/ai/providers/${id}/test`, { method: 'POST' }),
     discoverAiProviderModels: (input: {
         provider: LlmProvider;
         api_key?: string;

@@ -10,6 +10,7 @@ use App\Services\DevForge\Agent\LlmEndpointResolver;
 use App\Services\DevForge\Agent\LlmModelCatalog;
 use App\Services\DevForge\Agent\LlmModelResolver;
 use App\Services\DevForge\Agent\LlmProviderFactory;
+use App\Services\DevForge\Agent\LlmProviderProbe;
 use App\Services\DevForge\Agent\LlmProviderRegistry;
 use App\Services\DevForge\Core\CurrentTeamContext;
 use Illuminate\Http\JsonResponse;
@@ -22,6 +23,7 @@ class AiProviderController extends Controller
         private readonly CurrentTeamContext $currentTeamContext,
         private readonly LlmProviderFactory $providerFactory,
         private readonly LlmModelCatalog $modelCatalog,
+        private readonly LlmProviderProbe $providerProbe,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -165,16 +167,47 @@ class AiProviderController extends Controller
         try {
             $provider = $this->providerFactory->make($config);
             $connected = $provider->testConnection();
+            $diagnostic = $this->providerProbe->diagnose($config, useCache: false);
+
+            $working = collect($diagnostic['models_probed'] ?? [])
+                ->filter(fn (array $row): bool => (bool) ($row['ok'] ?? false))
+                ->pluck('id')
+                ->values()
+                ->all();
+
+            $message = $connected
+                ? 'Connexion réussie. '.$diagnostic['summary']
+                : 'Connexion échouée. '.$diagnostic['summary'];
 
             return response()->json([
                 'data' => [
-                    'success' => $connected,
-                    'message' => $connected ? 'Connexion réussie.' : 'Connexion échouée.',
+                    'success' => $connected && $diagnostic['ok'],
+                    'message' => $message,
+                    'models_available' => $diagnostic['models_available'],
+                    'models_working' => $working,
+                    'models_failed' => collect($diagnostic['models_probed'] ?? [])
+                        ->reject(fn (array $row): bool => (bool) ($row['ok'] ?? false))
+                        ->map(fn (array $row): array => [
+                            'id' => $row['id'],
+                            'error' => $row['error'],
+                        ])
+                        ->values()
+                        ->all(),
+                    'recommended' => $diagnostic['recommended'],
+                    'lines' => $diagnostic['lines'],
                 ],
             ]);
         } catch (\Throwable $e) {
             return response()->json([
-                'data' => ['success' => false, 'message' => $e->getMessage()],
+                'data' => [
+                    'success' => false,
+                    'message' => $e->getMessage(),
+                    'models_available' => [],
+                    'models_working' => [],
+                    'models_failed' => [],
+                    'recommended' => [],
+                    'lines' => [$e->getMessage()],
+                ],
             ]);
         }
     }
