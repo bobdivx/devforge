@@ -488,4 +488,116 @@ describe('ApplicationDetailPanel', () => {
 
         vi.useRealTimers();
     });
+
+    it('n’affiche qu’un seul badge de statut de déploiement dans l’onglet Déploiements', async () => {
+        const activeDeployment = {
+            uuid: 'deploy-active-1',
+            status: 'in_progress',
+            pull_request_id: 0,
+            commit: '84f8e3ef12ab',
+            commit_message: 'feat: deploy',
+            force_rebuild: false,
+            rollback: false,
+            created_at: '2026-04-27T10:00:00.000Z',
+            updated_at: '2026-04-27T10:01:00.000Z',
+            finished_at: null,
+            application: { uuid: application.uuid, name: application.name },
+            is_debug_enabled: false,
+        };
+
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+            const url = String(input);
+
+            if (url.includes('/api/devforge/v1/core/applications/app-uuid-1234')) {
+                return jsonResponse({ data: application });
+            }
+            if (url.includes('/api/devforge/v1/deployments')) {
+                if (url.includes('/monitoring')) {
+                    return jsonResponse({
+                        data: {
+                            deployment: activeDeployment,
+                            agent_runs: [],
+                            redeployments: [],
+                            agents: {
+                                enabled: true,
+                                auto_fix_deployments: true,
+                                webhook_build: true,
+                            },
+                        },
+                    });
+                }
+
+                if (url.includes('/logs')) {
+                    return jsonResponse({
+                        data: {
+                            items: [],
+                            next_cursor: 0,
+                            complete: false,
+                        },
+                    });
+                }
+
+                return jsonResponse({
+                    data: [activeDeployment],
+                    meta: { total: 1 },
+                });
+            }
+            if (url.includes('/linkable-databases')) {
+                return jsonResponse({ data: [], meta: { connections: [] } });
+            }
+            if (url.includes('/environment-variables')) {
+                return jsonResponse({ data: { production: [], preview: [] } });
+            }
+            if (url.includes('/logs')) {
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        reason: null,
+                        message: null,
+                        container: 'popcorn-web-abc',
+                        container_status: 'running',
+                        line_count: 0,
+                        items: [],
+                    },
+                });
+            }
+            if (url.includes('/readiness')) {
+                return jsonResponse({
+                    data: {
+                        uuid: 'readiness-1',
+                        status: 'idle',
+                        autonomous_enabled: true,
+                        last_probe_at: null,
+                        last_probe_ok: null,
+                        last_probe_error: null,
+                        last_http_status: null,
+                        round: 0,
+                        max_rounds: 5,
+                        last_deployment_uuid: activeDeployment.uuid,
+                        probe_url: 'https://popcornn.app',
+                        intervention: null,
+                    },
+                });
+            }
+            if (url.includes('/api/devforge/v1/agents')) {
+                return jsonResponse({ data: [] });
+            }
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(
+            <ApplicationDetailPanel
+                uuid="app-uuid-1234"
+                canAct
+                onClose={() => undefined}
+                onChanged={async () => undefined}
+            />,
+        );
+
+        expect(await screen.findByRole('heading', { name: 'popcorn-web' })).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('tab', { name: 'Déploiements' }));
+
+        expect(await screen.findByText('Sélection')).toBeInTheDocument();
+        expect(screen.getAllByLabelText('Déploiement en cours')).toHaveLength(1);
+    });
 });

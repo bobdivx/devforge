@@ -911,7 +911,7 @@ export function ApplicationDetailPanel({
                                 <div class="grid min-w-0 gap-5">
                                     {(attemptBuckets.current || attemptBuckets.active.length > 0) && (
                                         <section class="min-w-0 overflow-hidden rounded-2xl border border-primary/25 bg-base-100 shadow-sm">
-                                            <div class="toolbar-row border-b border-base-300/70 px-4 py-4 sm:px-5">
+                                            <div class="border-b border-base-300/70 px-4 py-4 sm:px-5">
                                                 <div class="min-w-0">
                                                     <p class="text-sm font-semibold">
                                                         {hasActiveDeployment ? 'Déploiement en cours' : 'Déploiement suivi'}
@@ -920,9 +920,6 @@ export function ApplicationDetailPanel({
                                                         Logs et agent pour la tentative sélectionnée
                                                     </p>
                                                 </div>
-                                                {selectedDeployment && (
-                                                    <DeploymentStatusIcon status={selectedDeployment.status} showLabel />
-                                                )}
                                             </div>
 
                                             <div class="grid min-w-0 gap-4 p-4 sm:p-5">
@@ -975,16 +972,11 @@ export function ApplicationDetailPanel({
 
                                     {!attemptBuckets.current && attemptBuckets.active.length === 0 && focusedDeploymentUuid && (
                                         <section class="grid min-w-0 gap-3 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 p-4 shadow-sm sm:p-5">
-                                            <div class="flex min-w-0 flex-wrap items-center justify-between gap-3">
-                                                <div class="min-w-0">
-                                                    <p class="text-sm font-semibold">Suivi du déploiement</p>
-                                                    <p class="text-xs text-base-content/50">
-                                                        Logs et agent liés à cette tentative
-                                                    </p>
-                                                </div>
-                                                {selectedDeployment && (
-                                                    <DeploymentStatusIcon status={selectedDeployment.status} showLabel />
-                                                )}
+                                            <div class="min-w-0">
+                                                <p class="text-sm font-semibold">Suivi du déploiement</p>
+                                                <p class="text-xs text-base-content/50">
+                                                    Logs et agent liés à cette tentative
+                                                </p>
                                             </div>
                                             <DeploymentMonitorPanel
                                                 deploymentUuid={focusedDeploymentUuid}
@@ -1168,14 +1160,40 @@ export function ApplicationDetailPanel({
                         <ConfirmDialog
                             open
                             title={actionLabels[pendingAction]}
-                            message={`Confirmer « ${actionLabels[pendingAction]} » sur « ${resource.name} » ?`}
-                            tone="danger"
+                            message={pendingAction === 'deploy' ? (
+                                <>
+                                    <p>
+                                        Déployer «
+                                        {' '}
+                                        <span class="font-medium text-base-content">{resource.name}</span>
+                                        » ?
+                                    </p>
+                                    <ul class="list-disc space-y-1 pl-5 text-base-content/65">
+                                        <li>
+                                            <span class="font-medium text-base-content">Reconstruire l’image</span>
+                                            {' '}
+                                            — recommandé : nouvelle image + conteneur (variables d’env, dépendances, code).
+                                        </li>
+                                        <li>
+                                            <span class="font-medium text-base-content">Déployer (cache)</span>
+                                            {' '}
+                                            — plus rapide : réutilise l’image existante si possible.
+                                        </li>
+                                    </ul>
+                                </>
+                            ) : `Confirmer « ${actionLabels[pendingAction]} » sur « ${resource.name} » ?`}
+                            tone={pendingAction === 'deploy' ? 'primary' : 'danger'}
                             loading={acting === pendingAction}
                             onCancel={() => setPendingAction(null)}
-                            onConfirm={() => void runAction(pendingAction)}
-                            confirmLabel={pendingAction === 'deploy' ? 'Déployer (Cache)' : 'Confirmer'}
-                            secondaryConfirmLabel={pendingAction === 'deploy' ? 'Force Rebuild' : undefined}
-                            onSecondaryConfirm={pendingAction === 'deploy' ? () => void runAction(pendingAction, { force: true }) : undefined}
+                            onConfirm={() => void runAction(
+                                pendingAction,
+                                pendingAction === 'deploy' ? { force: true } : undefined,
+                            )}
+                            confirmLabel={pendingAction === 'deploy' ? 'Reconstruire l’image' : 'Confirmer'}
+                            secondaryConfirmLabel={pendingAction === 'deploy' ? 'Déployer (cache)' : undefined}
+                            onSecondaryConfirm={pendingAction === 'deploy'
+                                ? () => void runAction(pendingAction)
+                                : undefined}
                         />
                     )}
 

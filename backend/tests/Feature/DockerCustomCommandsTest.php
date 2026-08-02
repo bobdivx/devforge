@@ -1,5 +1,13 @@
 <?php
 
+test('NullCustomDockerRunOptionsReturnsEmptyArray', function () {
+    expect(convertDockerRunToCompose(null))->toBe([]);
+});
+
+test('EmptyCustomDockerRunOptionsReturnsEmptyArray', function () {
+    expect(convertDockerRunToCompose(''))->toBe([]);
+});
+
 test('Hostname', function () {
     $input = '--hostname=test';
     $output = convertDockerRunToCompose($input);

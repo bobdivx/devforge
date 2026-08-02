@@ -34,6 +34,7 @@ const variablesFixture = {
 
 afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
 });
 
 describe('ApplicationEnvironmentVariablesPanel', () => {
@@ -69,5 +70,38 @@ describe('ApplicationEnvironmentVariablesPanel', () => {
 
         expect(await screen.findByText('production')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Masquer APP_ENV' })).toBeInTheDocument();
+    });
+
+    it('préremplit la valeur réelle dans le formulaire de modification', async () => {
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+            const url = String(input);
+
+            if (url.includes('/environment-variables') && url.includes('/reveal')) {
+                return jsonResponse({ data: { uuid: 'env-prod-1', value: 'production' } });
+            }
+
+            if (url.includes('/environment-variables')) {
+                return jsonResponse({ data: variablesFixture });
+            }
+
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(
+            <ApplicationEnvironmentVariablesPanel
+                applicationUuid="app-uuid-1234"
+                canAct
+            />,
+        );
+
+        expect(await screen.findByText('APP_ENV')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Modifier APP_ENV' }));
+
+        expect(await screen.findByRole('heading', { name: 'Modifier APP_ENV' })).toBeInTheDocument();
+
+        const valueField = await screen.findByDisplayValue('production');
+        expect(valueField).toBeInTheDocument();
+        expect(screen.queryByText(/laisser vide pour conserver/i)).not.toBeInTheDocument();
     });
 });

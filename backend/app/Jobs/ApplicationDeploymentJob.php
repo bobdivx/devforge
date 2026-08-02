@@ -841,7 +841,8 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
                 $command = "{$this->coolify_variables} docker compose";
                 // Always use .env file
                 $command .= " --env-file {$server_workdir}/.env";
-                $command .= " --project-directory {$server_workdir} -f {$server_workdir}{$this->docker_compose_location} up -d";
+                // --force-recreate: compose does not always recreate when only .env changes
+                $command .= " --project-directory {$server_workdir} -f {$server_workdir}{$this->docker_compose_location} up -d --force-recreate --remove-orphans";
                 $this->execute_remote_command(
                     ['command' => $command, 'hidden' => false, 'type' => 'stdout', 'command_hidden' => true],
                 );
@@ -872,7 +873,8 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
                 if ($this->preserveRepository) {
                     // Always use .env file
                     $command .= " --env-file {$server_workdir}/.env";
-                    $command .= " --project-name {$this->application->uuid} --project-directory {$server_workdir} -f {$server_workdir}{$this->docker_compose_location} up -d";
+                    // --force-recreate: compose does not always recreate when only .env changes
+                    $command .= " --project-name {$this->application->uuid} --project-directory {$server_workdir} -f {$server_workdir}{$this->docker_compose_location} up -d --force-recreate --remove-orphans";
                     $this->write_deployment_configurations();
 
                     $this->execute_remote_command(
@@ -881,7 +883,8 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
                 } else {
                     // Always use .env file
                     $command .= " --env-file {$this->workdir}/.env";
-                    $command .= " --project-name {$this->application->uuid} --project-directory {$this->workdir} -f {$this->workdir}{$this->docker_compose_location} up -d";
+                    // --force-recreate: compose does not always recreate when only .env changes
+                    $command .= " --project-name {$this->application->uuid} --project-directory {$this->workdir} -f {$this->workdir}{$this->docker_compose_location} up -d --force-recreate --remove-orphans";
                     $this->execute_remote_command(
                         [executeInDocker($this->deployment_uuid, $command), 'hidden' => false, 'type' => 'stdout', 'command_hidden' => true],
                     );
@@ -1335,7 +1338,7 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
         $ports = $this->application->main_port();
         $coolify_envs = $this->generate_coolify_env_variables();
         $coolify_envs->each(function ($item, $key) use ($envs) {
-            $envs->push($key.'='.$item);
+            $envs->push($key.'='.\escapeDotEnvValue($item));
         });
         if ($this->pull_request_id === 0) {
             // Generate SERVICE_ variables first for dockercompose
@@ -1351,8 +1354,8 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
                         $coolifyScheme = $coolifyUrl->getScheme();
                         $coolifyFqdn = $coolifyUrl->getHost();
                         $coolifyUrl = $coolifyUrl->withScheme($coolifyScheme)->withHost($coolifyFqdn)->withPort(null);
-                        $envs->push('SERVICE_URL_'.str($forServiceName)->upper().'='.$coolifyUrl->__toString());
-                        $envs->push('SERVICE_FQDN_'.str($forServiceName)->upper().'='.$coolifyFqdn);
+                        $envs->push('SERVICE_URL_'.str($forServiceName)->upper().'='.\escapeDotEnvValue($coolifyUrl->__toString()));
+                        $envs->push('SERVICE_FQDN_'.str($forServiceName)->upper().'='.\escapeDotEnvValue($coolifyFqdn));
                     }
                 }
 
@@ -1364,7 +1367,7 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
                 }
                 $services = data_get($dockerCompose, 'services', []);
                 foreach ($services as $serviceName => $_) {
-                    $envs->push('SERVICE_NAME_'.str($serviceName)->replace('-', '_')->replace('.', '_')->upper().'='.$serviceName);
+                    $envs->push('SERVICE_NAME_'.str($serviceName)->replace('-', '_')->replace('.', '_')->upper().'='.\escapeDotEnvValue($serviceName));
                 }
             }
 
@@ -1383,7 +1386,7 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
             });
 
             foreach ($runtime_environment_variables as $env) {
-                $envs->push($env->key.'='.$env->getResolvedValueWithServer($this->mainServer));
+                $envs->push($env->key.'='.\escapeDotEnvValue($env->getRawResolvedValueWithServer($this->mainServer)));
             }
 
             // Check for PORT environment variable mismatch with ports_exposes
@@ -1400,12 +1403,12 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
             // Add PORT if not exists, use the first port as default
             if ($this->build_pack !== 'dockercompose') {
                 if ($this->application->environment_variables->where('key', 'PORT')->isEmpty() && ! empty($ports)) {
-                    $envs->push("PORT={$ports[0]}");
+                    $envs->push('PORT='.\escapeDotEnvValue((string) $ports[0]));
                 }
             }
             // Add HOST if not exists
             if ($this->application->environment_variables->where('key', 'HOST')->isEmpty()) {
-                $envs->push('HOST=0.0.0.0');
+                $envs->push('HOST='.\escapeDotEnvValue('0.0.0.0'));
             }
         } else {
             // Generate SERVICE_ variables first for dockercompose preview
@@ -1421,8 +1424,8 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
                         $coolifyScheme = $coolifyUrl->getScheme();
                         $coolifyFqdn = $coolifyUrl->getHost();
                         $coolifyUrl = $coolifyUrl->withScheme($coolifyScheme)->withHost($coolifyFqdn)->withPort(null);
-                        $envs->push('SERVICE_URL_'.str($forServiceName)->replace('-', '_')->replace('.', '_')->upper().'='.$coolifyUrl->__toString());
-                        $envs->push('SERVICE_FQDN_'.str($forServiceName)->replace('-', '_')->replace('.', '_')->upper().'='.$coolifyFqdn);
+                        $envs->push('SERVICE_URL_'.str($forServiceName)->replace('-', '_')->replace('.', '_')->upper().'='.\escapeDotEnvValue($coolifyUrl->__toString()));
+                        $envs->push('SERVICE_FQDN_'.str($forServiceName)->replace('-', '_')->replace('.', '_')->upper().'='.\escapeDotEnvValue($coolifyFqdn));
                     }
                 }
 
@@ -1430,7 +1433,7 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
                 $rawDockerCompose = Yaml::parse($this->application->docker_compose_raw);
                 $rawServices = data_get($rawDockerCompose, 'services', []);
                 foreach ($rawServices as $rawServiceName => $_) {
-                    $envs->push('SERVICE_NAME_'.str($rawServiceName)->replace('-', '_')->replace('.', '_')->upper().'='.addPreviewDeploymentSuffix($rawServiceName, $this->pull_request_id));
+                    $envs->push('SERVICE_NAME_'.str($rawServiceName)->replace('-', '_')->replace('.', '_')->upper().'='.\escapeDotEnvValue(addPreviewDeploymentSuffix($rawServiceName, $this->pull_request_id)));
                 }
             }
 
@@ -1449,7 +1452,7 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
             });
 
             foreach ($runtime_environment_variables_preview as $env) {
-                $envs->push($env->key.'='.$env->getResolvedValueWithServer($this->mainServer));
+                $envs->push($env->key.'='.\escapeDotEnvValue($env->getRawResolvedValueWithServer($this->mainServer)));
             }
 
             // Fall back to production env vars for keys not overridden by preview vars,
@@ -1463,19 +1466,19 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
                     return $env->is_runtime && ! in_array($env->key, $previewKeys);
                 });
                 foreach ($fallback_production_vars as $env) {
-                    $envs->push($env->key.'='.$env->getResolvedValueWithServer($this->mainServer));
+                    $envs->push($env->key.'='.\escapeDotEnvValue($env->getRawResolvedValueWithServer($this->mainServer)));
                 }
             }
 
             // Add PORT if not exists, use the first port as default
             if ($this->build_pack !== 'dockercompose') {
                 if ($this->application->environment_variables_preview->where('key', 'PORT')->isEmpty()) {
-                    $envs->push("PORT={$ports[0]}");
+                    $envs->push('PORT='.\escapeDotEnvValue((string) $ports[0]));
                 }
             }
             // Add HOST if not exists
             if ($this->application->environment_variables_preview->where('key', 'HOST')->isEmpty()) {
-                $envs->push('HOST=0.0.0.0');
+                $envs->push('HOST='.\escapeDotEnvValue('0.0.0.0'));
             }
         }
 
@@ -2271,16 +2274,22 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
         } else {
             $fqdn = $this->preview->fqdn;
         }
-        if (isset($fqdn)) {
-            $url = Url::fromString($fqdn);
-            $fqdn = $url->getHost();
-            $url = $url->withHost($fqdn)->withPort(null)->__toString();
-            if ((int) $this->application->compose_parsing_version >= 3) {
-                $this->coolify_variables .= "COOLIFY_URL={$url} ";
-                $this->coolify_variables .= "COOLIFY_FQDN={$fqdn} ";
-            } else {
-                $this->coolify_variables .= "COOLIFY_URL={$fqdn} ";
-                $this->coolify_variables .= "COOLIFY_FQDN={$url} ";
+        if (isset($fqdn) && filled($fqdn)) {
+            // Multi-domain FQDNs are comma-separated; Url::fromString only accepts one URL.
+            $primaryFqdn = str($fqdn)->explode(',')->map(fn ($part) => trim((string) $part))->first(
+                fn ($part) => $part !== ''
+            );
+            if (filled($primaryFqdn)) {
+                $url = Url::fromString($primaryFqdn);
+                $host = $url->getHost();
+                $url = $url->withHost($host)->withPort(null)->__toString();
+                if ((int) $this->application->compose_parsing_version >= 3) {
+                    $this->coolify_variables .= 'COOLIFY_URL='.escapeShellValue($url).' ';
+                    $this->coolify_variables .= 'COOLIFY_FQDN='.escapeShellValue($host).' ';
+                } else {
+                    $this->coolify_variables .= 'COOLIFY_URL='.escapeShellValue($host).' ';
+                    $this->coolify_variables .= 'COOLIFY_FQDN='.escapeShellValue($url).' ';
+                }
             }
         }
         if (isset($this->application->git_branch)) {

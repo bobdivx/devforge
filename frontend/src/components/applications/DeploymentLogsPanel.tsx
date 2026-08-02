@@ -2,7 +2,6 @@ import { Bug, Check, Copy, RefreshCw } from 'lucide-preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { DataState } from '../ui/DataState';
 import { ActionToolbar } from '../ui/ActionToolbar';
-import { DeploymentStatusIcon } from '../ui/DeploymentStatusIcon';
 import { domainApi, type Deployment } from '../../lib/domain-api';
 import { formatDeploymentLogsText } from '../../lib/deployment-log-text';
 import { useDeploymentLogs } from '../../lib/use-deployment-logs';
@@ -91,9 +90,6 @@ export function DeploymentLogsPanel({
                         </p>
                     </div>
                     <ActionToolbar class="w-full min-w-0 sm:w-auto">
-                        {resolvedDeployment && (
-                            <DeploymentStatusIcon status={resolvedDeployment.status} showLabel />
-                        )}
                         <button
                             class={`btn btn-ghost btn-sm ${debugEnabled ? 'text-warning' : ''}`}
                             type="button"

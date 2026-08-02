@@ -1,5 +1,5 @@
 import { Braces, Eye, EyeOff, LoaderCircle, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-preact';
-import { useMemo, useState } from 'preact/hooks';
+import { useMemo, useRef, useState } from 'preact/hooks';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ActionToolbar } from '../ui/ActionToolbar';
 import { DataState } from '../ui/DataState';
@@ -164,10 +164,13 @@ export function DatabaseEnvironmentVariablesPanel({
     const [formOpen, setFormOpen] = useState(false);
     const [editing, setEditing] = useState<ApplicationEnvironmentVariable | null>(null);
     const [form, setForm] = useState<ApplicationEnvironmentVariableInput>(defaultForm());
+    const [valuePrefilled, setValuePrefilled] = useState(false);
+    const [loadingValue, setLoadingValue] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [formError, setFormError] = useState<string | null>(null);
     const [pendingDelete, setPendingDelete] = useState<ApplicationEnvironmentVariable | null>(null);
     const [deleting, setDeleting] = useState(false);
+    const editRequestId = useRef(0);
 
     const variables = query.data?.data ?? [];
 
@@ -187,11 +190,15 @@ export function DatabaseEnvironmentVariablesPanel({
     const openCreate = () => {
         setEditing(null);
         setForm(defaultForm());
+        setValuePrefilled(true);
+        setLoadingValue(false);
         setFormError(null);
         setFormOpen(true);
     };
 
     const openEdit = (variable: ApplicationEnvironmentVariable) => {
+        const requestId = ++editRequestId.current;
+
         setEditing(variable);
         setForm({
             key: variable.key,
@@ -202,13 +209,49 @@ export function DatabaseEnvironmentVariablesPanel({
             is_multiline: variable.is_multiline,
             is_literal: variable.is_literal,
         });
+        setValuePrefilled(!variable.has_value);
+        setLoadingValue(false);
         setFormError(null);
         setFormOpen(true);
+
+        if (!variable.is_revealable || !variable.has_value) {
+            return;
+        }
+
+        setLoadingValue(true);
+
+        void domainApi.revealResourceEnvironmentVariable(resourceType, uuid, variable.uuid)
+            .then((response) => {
+                if (requestId !== editRequestId.current) {
+                    return;
+                }
+
+                setForm((current) => ({
+                    ...current,
+                    value: response.data.value,
+                }));
+                setValuePrefilled(true);
+            })
+            .catch(() => {
+                if (requestId !== editRequestId.current) {
+                    return;
+                }
+
+                setFormError('Impossible de charger la valeur actuelle. Laissez vide pour la conserver.');
+            })
+            .finally(() => {
+                if (requestId === editRequestId.current) {
+                    setLoadingValue(false);
+                }
+            });
     };
 
     const closeForm = () => {
+        editRequestId.current += 1;
         setFormOpen(false);
         setEditing(null);
+        setValuePrefilled(false);
+        setLoadingValue(false);
         setFormError(null);
     };
 
@@ -219,13 +262,17 @@ export function DatabaseEnvironmentVariablesPanel({
             return;
         }
 
+        if (loadingValue) {
+            return;
+        }
+
         setSubmitting(true);
         setFormError(null);
 
         try {
             if (editing) {
                 await domainApi.updateResourceEnvironmentVariable(resourceType, uuid, editing.uuid, {
-                    value: form.value || undefined,
+                    value: valuePrefilled ? form.value : (form.value || undefined),
                     comment: form.comment,
                     is_runtime: form.is_runtime,
                     is_multiline: form.is_multiline,
@@ -401,17 +448,27 @@ export function DatabaseEnvironmentVariablesPanel({
 
                             <label class="grid gap-1 text-sm">
                                 <span class="text-xs font-medium text-base-content/60">
-                                    Valeur {editing ? '(laisser vide pour conserver)' : ''}
+                                    Valeur {editing && !valuePrefilled ? '(laisser vide pour conserver)' : ''}
                                 </span>
-                                <textarea
-                                    class="textarea textarea-bordered textarea-sm font-mono"
-                                    rows={form.is_multiline ? 5 : 2}
-                                    value={form.value ?? ''}
-                                    onInput={(event) => setForm((current) => ({
-                                        ...current,
-                                        value: (event.target as HTMLTextAreaElement).value,
-                                    }))}
-                                />
+                                <div class="relative">
+                                    <textarea
+                                        class="textarea textarea-bordered textarea-sm w-full font-mono"
+                                        rows={form.is_multiline ? 5 : 2}
+                                        value={form.value ?? ''}
+                                        disabled={loadingValue}
+                                        aria-busy={loadingValue}
+                                        onInput={(event) => setForm((current) => ({
+                                            ...current,
+                                            value: (event.target as HTMLTextAreaElement).value,
+                                        }))}
+                                    />
+                                    {loadingValue && (
+                                        <span class="absolute inset-y-0 right-3 flex items-center text-base-content/50">
+                                            <LoaderCircle class="size-4 animate-spin" aria-hidden />
+                                            <span class="sr-only">Chargement de la valeur…</span>
+                                        </span>
+                                    )}
+                                </div>
                             </label>
 
                             <label class="grid gap-1 text-sm">
@@ -453,8 +510,8 @@ export function DatabaseEnvironmentVariablesPanel({
                                 <button class="btn btn-ghost btn-sm" type="button" onClick={closeForm} disabled={submitting}>
                                     Annuler
                                 </button>
-                                <button class="btn btn-primary btn-sm" type="submit" disabled={submitting}>
-                                    {submitting
+                                <button class="btn btn-primary btn-sm" type="submit" disabled={submitting || loadingValue}>
+                                    {submitting || loadingValue
                                         ? <LoaderCircle class="size-3.5 animate-spin" aria-hidden />
                                         : (editing ? 'Enregistrer' : 'Créer')}
                                 </button>

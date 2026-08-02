@@ -51,7 +51,7 @@ class StartLibsql
                         $this->database->destination->network,
                     ],
                     'labels' => defaultDatabaseLabels($this->database)
-                        ->merge(libsqlFqdnLabels($this->database))
+                        ->merge(\libsqlFqdnLabels($this->database))
                         ->unique()
                         ->values()
                         ->toArray(),

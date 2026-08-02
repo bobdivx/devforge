@@ -1,5 +1,5 @@
 import { Braces, Eye, EyeOff, LoaderCircle, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-preact';
-import { useMemo, useState } from 'preact/hooks';
+import { useMemo, useRef, useState } from 'preact/hooks';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ActionToolbar } from '../ui/ActionToolbar';
 import { DataState } from '../ui/DataState';
@@ -168,10 +168,14 @@ export function ApplicationEnvironmentVariablesPanel({
     const [formOpen, setFormOpen] = useState(false);
     const [editing, setEditing] = useState<ApplicationEnvironmentVariable | null>(null);
     const [form, setForm] = useState<ApplicationEnvironmentVariableInput>(defaultForm());
+    const [valuePrefilled, setValuePrefilled] = useState(false);
+    const [loadingValue, setLoadingValue] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [formError, setFormError] = useState<string | null>(null);
+    const [success, setSuccess] = useState<string | null>(null);
     const [pendingDelete, setPendingDelete] = useState<ApplicationEnvironmentVariable | null>(null);
     const [deleting, setDeleting] = useState(false);
+    const editRequestId = useRef(0);
 
     const variables = useMemo(() => {
         const data = query.data?.data;
@@ -199,11 +203,15 @@ export function ApplicationEnvironmentVariablesPanel({
     const openCreate = () => {
         setEditing(null);
         setForm(defaultForm(scope === 'preview'));
+        setValuePrefilled(true);
+        setLoadingValue(false);
         setFormError(null);
         setFormOpen(true);
     };
 
     const openEdit = (variable: ApplicationEnvironmentVariable) => {
+        const requestId = ++editRequestId.current;
+
         setEditing(variable);
         setForm({
             key: variable.key,
@@ -215,13 +223,49 @@ export function ApplicationEnvironmentVariablesPanel({
             is_multiline: variable.is_multiline,
             is_literal: variable.is_literal,
         });
+        setValuePrefilled(!variable.has_value);
+        setLoadingValue(false);
         setFormError(null);
         setFormOpen(true);
+
+        if (!variable.is_revealable || !variable.has_value) {
+            return;
+        }
+
+        setLoadingValue(true);
+
+        void domainApi.revealApplicationEnvironmentVariable(applicationUuid, variable.uuid)
+            .then((response) => {
+                if (requestId !== editRequestId.current) {
+                    return;
+                }
+
+                setForm((current) => ({
+                    ...current,
+                    value: response.data.value,
+                }));
+                setValuePrefilled(true);
+            })
+            .catch(() => {
+                if (requestId !== editRequestId.current) {
+                    return;
+                }
+
+                setFormError('Impossible de charger la valeur actuelle. Laissez vide pour la conserver.');
+            })
+            .finally(() => {
+                if (requestId === editRequestId.current) {
+                    setLoadingValue(false);
+                }
+            });
     };
 
     const closeForm = () => {
+        editRequestId.current += 1;
         setFormOpen(false);
         setEditing(null);
+        setValuePrefilled(false);
+        setLoadingValue(false);
         setFormError(null);
     };
 
@@ -232,25 +276,48 @@ export function ApplicationEnvironmentVariablesPanel({
             return;
         }
 
+        if (loadingValue) {
+            return;
+        }
+
         setSubmitting(true);
         setFormError(null);
+
+        const rawValue = valuePrefilled ? form.value : (form.value || undefined);
+        let nextValue = rawValue;
+        let nextMultiline = form.is_multiline;
+
+        if (typeof rawValue === 'string' && /[\r\n]/.test(rawValue)) {
+            if (rawValue.includes('-----BEGIN ')) {
+                nextMultiline = true;
+            } else {
+                // Base64 wrapé (clé Tesla HA, etc.) : une ligne sinon Compose casse sur `/`.
+                nextValue = rawValue.replace(/\s+/g, '');
+                nextMultiline = false;
+            }
+        }
 
         try {
             if (editing) {
                 await domainApi.updateApplicationEnvironmentVariable(applicationUuid, editing.uuid, {
-                    value: form.value || undefined,
+                    value: nextValue,
                     comment: form.comment,
                     is_runtime: form.is_runtime,
                     is_buildtime: form.is_buildtime,
-                    is_multiline: form.is_multiline,
+                    is_multiline: nextMultiline,
                     is_literal: form.is_literal,
                 });
             } else {
-                await domainApi.createApplicationEnvironmentVariable(applicationUuid, form);
+                await domainApi.createApplicationEnvironmentVariable(applicationUuid, {
+                    ...form,
+                    value: nextValue ?? '',
+                    is_multiline: nextMultiline,
+                });
             }
 
             closeForm();
             await query.reload();
+            setSuccess('Variable enregistrée. Redémarre ou redéploie l’application pour l’injecter dans le conteneur.');
         } catch {
             setFormError(editing
                 ? 'La mise à jour de la variable a échoué.'
@@ -286,6 +353,7 @@ export function ApplicationEnvironmentVariablesPanel({
                     </div>
                     <p class="text-xs text-base-content/50">
                         Variables injectées au build et au runtime de cette application.
+                        Après modification, un redémarrage / redéploiement est nécessaire.
                     </p>
                 </div>
                 <ActionToolbar>
@@ -302,6 +370,11 @@ export function ApplicationEnvironmentVariablesPanel({
                 </ActionToolbar>
             </div>
 
+            {success && (
+                <p class="rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-sm text-success" role="status">
+                    {success}
+                </p>
+            )}
             <Tabs
                 items={scopeTabs}
                 active={scope}
@@ -422,17 +495,27 @@ export function ApplicationEnvironmentVariablesPanel({
 
                             <label class="grid gap-1 text-sm">
                                 <span class="text-xs font-medium text-base-content/60">
-                                    Valeur {editing ? '(laisser vide pour conserver)' : ''}
+                                    Valeur {editing && !valuePrefilled ? '(laisser vide pour conserver)' : ''}
                                 </span>
-                                <textarea
-                                    class="textarea textarea-bordered textarea-sm font-mono"
-                                    rows={form.is_multiline ? 5 : 2}
-                                    value={form.value ?? ''}
-                                    onInput={(event) => setForm((current) => ({
-                                        ...current,
-                                        value: (event.target as HTMLTextAreaElement).value,
-                                    }))}
-                                />
+                                <div class="relative">
+                                    <textarea
+                                        class="textarea textarea-bordered textarea-sm w-full font-mono"
+                                        rows={form.is_multiline ? 5 : 2}
+                                        value={form.value ?? ''}
+                                        disabled={loadingValue}
+                                        aria-busy={loadingValue}
+                                        onInput={(event) => setForm((current) => ({
+                                            ...current,
+                                            value: (event.target as HTMLTextAreaElement).value,
+                                        }))}
+                                    />
+                                    {loadingValue && (
+                                        <span class="absolute inset-y-0 right-3 flex items-center text-base-content/50">
+                                            <LoaderCircle class="size-4 animate-spin" aria-hidden />
+                                            <span class="sr-only">Chargement de la valeur…</span>
+                                        </span>
+                                    )}
+                                </div>
                             </label>
 
                             <label class="grid gap-1 text-sm">
@@ -475,8 +558,8 @@ export function ApplicationEnvironmentVariablesPanel({
                                 <button class="btn btn-ghost btn-sm" type="button" onClick={closeForm} disabled={submitting}>
                                     Annuler
                                 </button>
-                                <button class="btn btn-primary btn-sm" type="submit" disabled={submitting}>
-                                    {submitting
+                                <button class="btn btn-primary btn-sm" type="submit" disabled={submitting || loadingValue}>
+                                    {submitting || loadingValue
                                         ? <LoaderCircle class="size-3.5 animate-spin" aria-hidden />
                                         : (editing ? 'Enregistrer' : 'Créer')}
                                 </button>

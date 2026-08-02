@@ -255,7 +255,10 @@ class EnvironmentVariable extends BaseModel
         return $this->get_real_environment_variables_internal($environment_variable, $resource, $server);
     }
 
-    public function getResolvedValueWithServer($server = null)
+    /**
+     * Resolve shared-variable placeholders without shell/dotenv quoting.
+     */
+    public function getRawResolvedValueWithServer($server = null): ?string
     {
         if (! $this->relationLoaded('resourceable')) {
             $this->load('resourceable');
@@ -276,7 +279,15 @@ class EnvironmentVariable extends BaseModel
             $resource->load('destination.server');
         }
 
-        $real_value = $this->get_real_environment_variables_internal($this->value, $resource, $server);
+        return $this->get_real_environment_variables_internal($this->value, $resource, $server);
+    }
+
+    public function getResolvedValueWithServer($server = null)
+    {
+        $real_value = $this->getRawResolvedValueWithServer($server);
+        if ($real_value === null) {
+            return null;
+        }
 
         // Skip escaping for valid JSON objects/arrays to prevent quote corruption (see #6160)
         if (json_validate($real_value) && (str_starts_with($real_value, '{') || str_starts_with($real_value, '['))) {

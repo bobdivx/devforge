@@ -1052,6 +1052,9 @@ function isDatabaseImageWithContext(string $imageName, array $serviceConfig): bo
 
 function convertDockerRunToCompose(?string $custom_docker_run_options = null)
 {
+    // PHP 8.1+ deprecates (8.4+ TypeError) null subjects for preg_*; new DBs leave this column null.
+    $custom_docker_run_options ??= '';
+
     $options = [];
     $compose_options = collect([]);
     preg_match_all('/(--\w+(?:-\w+)*)(?:\s|=)?([^\s-]+)?/', $custom_docker_run_options, $matches, PREG_SET_ORDER);
@@ -1340,6 +1343,30 @@ function escapeDollarSign($value)
     $replace = ['$$'];
 
     return str_replace($search, $replace, $value);
+}
+
+/**
+ * Escape a value for Docker Compose / compose-go dotenv (.env via env_file).
+ *
+ * Always double-quotes and encodes newlines so multiline secrets (PEM, wrapped base64)
+ * cannot produce orphan lines that Compose parses as invalid variable names
+ * (e.g. unexpected character "/" in variable name).
+ *
+ * Dollars are left intact so intentional $SERVICE_* / ${VAR} interpolation still works.
+ */
+function escapeDotEnvValue(?string $value): string
+{
+    if ($value === null) {
+        return '""';
+    }
+
+    $escaped = str_replace('\\', '\\\\', $value);
+    $escaped = str_replace('"', '\\"', $escaped);
+    $escaped = str_replace("\r\n", '\\n', $escaped);
+    $escaped = str_replace("\n", '\\n', $escaped);
+    $escaped = str_replace("\r", '\\r', $escaped);
+
+    return '"'.$escaped.'"';
 }
 
 /**

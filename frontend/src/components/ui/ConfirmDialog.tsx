@@ -1,10 +1,11 @@
+import type { ComponentChildren } from 'preact';
 import { Modal } from './Modal';
 import { Button } from './Button';
 
 type ConfirmDialogProps = {
     open: boolean;
     title: string;
-    message: string;
+    message: ComponentChildren;
     confirmLabel?: string;
     cancelLabel?: string;
     tone?: 'danger' | 'primary';
@@ -47,7 +48,11 @@ export function ConfirmDialog({
                 </>
             )}
         >
-            <p class="text-sm text-base-content/70">{message}</p>
+            {typeof message === 'string' ? (
+                <p class="whitespace-pre-line text-sm text-base-content/70">{message}</p>
+            ) : (
+                <div class="grid gap-2 text-sm text-base-content/70">{message}</div>
+            )}
         </Modal>
     );
 }

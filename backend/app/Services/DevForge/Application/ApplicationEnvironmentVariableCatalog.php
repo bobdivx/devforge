@@ -55,12 +55,17 @@ class ApplicationEnvironmentVariableCatalog
             ]);
         }
 
+        [$value, $isMultiline] = $this->normalizeStoredValue(
+            $validated['value'] ?? null,
+            (bool) ($validated['is_multiline'] ?? false),
+        );
+
         $variable = $application->environment_variables()->create([
             'key' => $key,
-            'value' => $validated['value'] ?? null,
+            'value' => $value,
             'is_preview' => $isPreview,
             'is_literal' => (bool) ($validated['is_literal'] ?? false),
-            'is_multiline' => (bool) ($validated['is_multiline'] ?? false),
+            'is_multiline' => $isMultiline,
             'is_shown_once' => (bool) ($validated['is_shown_once'] ?? false),
             'is_runtime' => (bool) ($validated['is_runtime'] ?? true),
             'is_buildtime' => (bool) ($validated['is_buildtime'] ?? true),
@@ -108,7 +113,14 @@ class ApplicationEnvironmentVariableCatalog
         $validated = $this->validateInput($input, creating: false);
 
         if (array_key_exists('value', $validated)) {
-            $variable->value = $validated['value'];
+            $isMultiline = array_key_exists('is_multiline', $validated)
+                ? (bool) $validated['is_multiline']
+                : (bool) $variable->is_multiline;
+
+            [$value, $isMultiline] = $this->normalizeStoredValue($validated['value'], $isMultiline);
+            $variable->value = $value;
+            $variable->is_multiline = $isMultiline;
+            unset($validated['is_multiline']);
         }
 
         foreach (['is_literal', 'is_multiline', 'is_runtime', 'is_buildtime'] as $flag) {
@@ -259,5 +271,32 @@ class ApplicationEnvironmentVariableCatalog
         }
 
         return $validated;
+    }
+
+    /**
+     * Empêche les valeurs avec retours à la ligne de casser le .env Compose
+     * (ligne orpheline lue comme nom de variable, ex. base64 Tesla avec `/`).
+     *
+     * @return array{0: string|null, 1: bool}
+     */
+    private function normalizeStoredValue(?string $value, bool $isMultiline): array
+    {
+        if ($value === null) {
+            return [null, $isMultiline];
+        }
+
+        $hasNewline = str_contains($value, "\n") || str_contains($value, "\r");
+
+        if (! $hasNewline) {
+            return [$value, $isMultiline];
+        }
+
+        // PEM / blocs structurés : conserver les lignes, forcer multiligne.
+        if (str_contains($value, '-----BEGIN ')) {
+            return [str_replace(["\r\n", "\r"], "\n", $value), true];
+        }
+
+        // Corps base64 wrapé (ex. clé HA collée) : une seule ligne pour Compose.
+        return [preg_replace('/\s+/', '', $value) ?? $value, false];
     }
 }
