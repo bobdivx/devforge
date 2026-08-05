@@ -50,6 +50,10 @@ class AgentToolkit
 
     private readonly ApplicationEnvironmentVariableCatalog $envCatalog;
 
+    /**
+     * @param  array<string, mixed>  $runContext
+     * @param  list<string>  $extraToolPackages
+     */
     public function __construct(
         private readonly Team $team,
         private readonly AiAgentRun $run,
@@ -58,12 +62,12 @@ class AgentToolkit
         private readonly DeploymentData $deploymentData,
         private readonly ?AiAgent $agent = null,
         private readonly ?string $assignedResourceUuid = null,
-        /** @var array<string, mixed> */
         private readonly array $runContext = [],
         private readonly ?AgentPermissionEngine $permissionEngine = null,
         private readonly ?AgentDelegator $delegator = null,
         ?GithubAppCatalog $githubAppCatalog = null,
         ?ApplicationEnvironmentVariableCatalog $envCatalog = null,
+        array $extraToolPackages = [],
     ) {
         $this->serverExecutor = new AgentServerExecutor(
             team: $this->team,
@@ -81,7 +85,7 @@ class AgentToolkit
             runContext: $this->runContext,
             maxDeployActions: self::MAX_DEPLOY_ACTIONS_PER_RUN,
         );
-        $this->session = new AgentToolkitSession($this->agent);
+        $this->session = new AgentToolkitSession($this->agent, $extraToolPackages);
         $this->githubTools = new AgentGithubTools(
             $this->team,
             $this->catalog,

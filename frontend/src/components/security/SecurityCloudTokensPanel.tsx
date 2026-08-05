@@ -106,7 +106,8 @@ export function SecurityCloudTokensPanel() {
         <div class="grid gap-4">
             <div class="toolbar-row">
                 <p class="text-xs text-base-content/55">
-                    Jetons des fournisseurs cloud pour le provisionnement de serveurs.
+                    Jetons Hetzner / DigitalOcean pour créer des serveurs. Pour Cursor ou l’API DevForge, utilisez
+                    l’onglet API & MCP.
                 </p>
                 <div class="card-toolbar flex flex-wrap gap-2">
                     <button class="btn btn-ghost btn-sm" type="button" onClick={() => void query.reload()}>

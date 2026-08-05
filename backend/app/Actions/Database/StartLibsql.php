@@ -4,6 +4,8 @@ namespace App\Actions\Database;
 
 use App\Models\StandaloneLibsql;
 use App\Services\DevForge\Database\LibsqlDatabaseAccessService;
+use App\Services\DevForge\Database\LibsqlJwtCredentials;
+use App\Services\DevForge\Database\LinkedDatabaseEnvSync;
 use Lorisleiva\Actions\Concerns\AsAction;
 use Symfony\Component\Yaml\Yaml;
 
@@ -181,8 +183,17 @@ class StartLibsql
             $environment_variables->push("$env->key=$env->real_value");
         }
 
-        if ($environment_variables->filter(fn ($env) => str($env)->contains('SQLD_HTTP_AUTH'))->isEmpty()) {
-            $environment_variables->push('SQLD_HTTP_AUTH='.$this->database->httpBasicAuthParam());
+        $hasJwtKey = $environment_variables->contains(fn ($env) => str($env)->startsWith('SQLD_AUTH_JWT_KEY='));
+        $hasBasicAuth = $environment_variables->contains(fn ($env) => str($env)->startsWith('SQLD_HTTP_AUTH='));
+
+        if (! $hasJwtKey && ! $hasBasicAuth) {
+            $jwt = app(LibsqlJwtCredentials::class);
+            $bootstrapped = $jwt->ensure($this->database);
+            if ($bootstrapped) {
+                // Legacy basic-auth passwords become Bearer JWTs — push them to linked apps.
+                app(LinkedDatabaseEnvSync::class)->syncLinkedApplications($this->database, redeployApplications: true);
+            }
+            $environment_variables->push('SQLD_AUTH_JWT_KEY='.$jwt->sqldAuthJwtKey($this->database->fresh()));
         }
 
         if ($environment_variables->filter(fn ($env) => str($env)->contains('SQLD_NODE'))->isEmpty()) {

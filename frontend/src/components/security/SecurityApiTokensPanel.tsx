@@ -5,15 +5,16 @@ import { DataState } from '../ui/DataState';
 import { StatusBadge } from '../ui/StatusBadge';
 import { Table } from '../ui/Table';
 import { domainApi, type ApiToken } from '../../lib/domain-api';
+import { navigateTo } from '../../lib/use-navigate';
 import { useApiQuery } from '../../lib/use-api-query';
 
 const ALL_ABILITIES = [
-    { id: 'read', label: 'read' },
-    { id: 'read:sensitive', label: 'read:sensitive' },
-    { id: 'write', label: 'write' },
-    { id: 'write:sensitive', label: 'write:sensitive' },
-    { id: 'deploy', label: 'deploy' },
-    { id: 'root', label: 'root' },
+    { id: 'read', label: 'read', hint: 'Lecture API et MCP' },
+    { id: 'read:sensitive', label: 'read:sensitive', hint: 'Inclut les secrets' },
+    { id: 'write', label: 'write', hint: 'Écriture API / réparation MCP' },
+    { id: 'write:sensitive', label: 'write:sensitive', hint: 'Écriture des secrets' },
+    { id: 'deploy', label: 'deploy', hint: 'Déploiements uniquement' },
+    { id: 'root', label: 'root', hint: 'Accès administrateur instance' },
 ] as const;
 
 const EXPIRATION_OPTIONS = [
@@ -24,6 +25,8 @@ const EXPIRATION_OPTIONS = [
     { value: 365, label: '1 an' },
     { value: 'never', label: 'Jamais' },
 ] as const;
+
+const MCP_ABILITIES = ['read', 'write'] as const;
 
 function formatDate(value: string | null): string {
     if (!value) {
@@ -37,10 +40,34 @@ function formatDate(value: string | null): string {
     }
 }
 
+function mcpEndpoint(): string {
+    if (typeof window === 'undefined') {
+        return '/mcp/devforge';
+    }
+
+    return `${window.location.origin}/mcp/devforge`;
+}
+
+function cursorMcpSnippet(endpoint: string): string {
+    return `{
+  "mcpServers": {
+    "devforge": {
+      "url": "${endpoint}",
+      "headers": {
+        "Authorization": "Bearer VOTRE_JETON",
+        "Accept": "application/json, text/event-stream"
+      }
+    }
+  }
+}`;
+}
+
 export function SecurityApiTokensPanel() {
     const query = useApiQuery('security-api-tokens', () => domainApi.apiTokens());
     const tokens = query.data?.data ?? [];
     const meta = query.data?.meta;
+    const endpoint = mcpEndpoint();
+    const snippet = cursorMcpSnippet(endpoint);
 
     const [name, setName] = useState('');
     const [abilities, setAbilities] = useState<string[]>(['read']);
@@ -53,6 +80,7 @@ export function SecurityApiTokensPanel() {
     const [error, setError] = useState<string | null>(null);
     const [message, setMessage] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
+    const [copiedSnippet, setCopiedSnippet] = useState(false);
 
     const availableAbilities = useMemo(() => {
         return ALL_ABILITIES.filter((ability) => {
@@ -91,6 +119,15 @@ export function SecurityApiTokensPanel() {
 
             return next;
         });
+    };
+
+    const applyMcpPreset = () => {
+        setShowForm(true);
+        setName((current) => (current.trim() === '' ? 'Cursor MCP' : current));
+        setAbilities([...MCP_ABILITIES]);
+        setExpiresInDays(365);
+        setError(null);
+        setMessage(null);
     };
 
     const createToken = async () => {
@@ -153,11 +190,21 @@ export function SecurityApiTokensPanel() {
         }
     };
 
+    const copySnippet = async () => {
+        try {
+            await navigator.clipboard.writeText(snippet);
+            setCopiedSnippet(true);
+        } catch {
+            setError('Impossible de copier le snippet Cursor.');
+        }
+    };
+
     return (
         <div class="grid gap-4">
             <div class="toolbar-row">
                 <p class="text-xs text-base-content/55">
-                    Jetons d’accès API Sanctum pour l’automatisation.
+                    Ces jetons authentifient l’API REST et le MCP DevForge. Ce n’est pas un jeton Hetzner/DigitalOcean
+                    (onglet Providers cloud).
                 </p>
                 <div class="card-toolbar flex flex-wrap gap-2">
                     <button class="btn btn-ghost btn-sm" type="button" onClick={() => void query.reload()}>
@@ -176,9 +223,46 @@ export function SecurityApiTokensPanel() {
                 </div>
             </div>
 
+            <section class="grid gap-3 rounded-2xl border border-primary/25 bg-primary/5 p-4">
+                <div class="grid gap-1">
+                    <h3 class="text-sm font-semibold text-primary">MCP DevForge (Cursor)</h3>
+                    <p class="text-xs text-base-content/65">
+                        Endpoint : <code class="font-mono text-[11px]">{endpoint}</code>
+                        {' · '}40+ outils (infra, déploiements, SSH, GitHub). Abilities :{' '}
+                        <code class="font-mono text-[11px]">read</code> +{' '}
+                        <code class="font-mono text-[11px]">write</code>. Activez le serveur MCP dans{' '}
+                        <button
+                            class="link link-primary text-xs"
+                            type="button"
+                            onClick={() => navigateTo('/settings/advanced')}
+                        >
+                            Paramètres → Avancé
+                        </button>
+                        .
+                    </p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button
+                        class="btn btn-outline btn-sm"
+                        type="button"
+                        disabled={meta?.is_api_enabled === false || meta?.can_use_write === false}
+                        onClick={applyMcpPreset}
+                    >
+                        Créer un jeton pour MCP
+                    </button>
+                    <button class="btn btn-ghost btn-sm" type="button" onClick={() => void copySnippet()}>
+                        <Copy class="size-3.5" aria-hidden />
+                        {copiedSnippet ? 'Snippet copié' : 'Copier config Cursor'}
+                    </button>
+                </div>
+                <pre class="overflow-x-auto rounded-xl bg-base-100 px-3 py-2 font-mono text-[11px] leading-relaxed text-base-content/80">
+                    {snippet}
+                </pre>
+            </section>
+
             {meta?.is_api_enabled === false && (
                 <p class="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
-                    L’API est désactivée sur cette instance. Activez-la dans les paramètres avancés.
+                    L’API est désactivée sur cette instance. Activez-la dans Paramètres → Avancé.
                 </p>
             )}
 
@@ -192,7 +276,10 @@ export function SecurityApiTokensPanel() {
             {plainTextToken && (
                 <div class="rounded-xl border border-warning/40 bg-warning/10 p-4">
                     <p class="text-sm font-semibold text-warning">Copiez ce jeton maintenant</p>
-                    <p class="mt-1 text-xs text-base-content/60">Il ne sera plus affiché après actualisation.</p>
+                    <p class="mt-1 text-xs text-base-content/60">
+                        Il ne sera plus affiché après actualisation. Collez-le dans Cursor (`Authorization: Bearer …`)
+                        ou dans la variable `DEVFORGE_MCP_TOKEN`.
+                    </p>
                     <code class="mt-3 block break-all rounded-lg bg-base-100 px-3 py-2 font-mono text-xs">{plainTextToken}</code>
                     <button class="btn btn-outline btn-sm mt-3" type="button" onClick={() => void copyToken()}>
                         <Copy class="size-3.5" aria-hidden />
@@ -209,7 +296,7 @@ export function SecurityApiTokensPanel() {
                             class="input input-bordered input-sm"
                             value={name}
                             onInput={(event) => setName((event.target as HTMLInputElement).value)}
-                            placeholder="Mon jeton CI"
+                            placeholder="Cursor MCP"
                         />
                     </label>
                     <label class="grid gap-1.5 text-sm">
@@ -230,17 +317,20 @@ export function SecurityApiTokensPanel() {
                         </select>
                     </label>
                     <div class="grid gap-2">
-                        <p class="text-sm font-medium">Abilities</p>
+                        <p class="text-sm font-medium">Permissions</p>
                         <div class="grid gap-2 sm:grid-cols-2">
                             {availableAbilities.map((ability) => (
-                                <label key={ability.id} class="flex items-center gap-2 text-sm">
+                                <label key={ability.id} class="flex items-start gap-2 text-sm">
                                     <input
                                         type="checkbox"
-                                        class="checkbox checkbox-sm"
+                                        class="checkbox checkbox-sm mt-0.5"
                                         checked={abilities.includes(ability.id)}
                                         onChange={() => toggleAbility(ability.id)}
                                     />
-                                    <code class="text-xs">{ability.label}</code>
+                                    <span class="grid gap-0.5">
+                                        <code class="text-xs">{ability.label}</code>
+                                        <span class="text-[11px] text-base-content/55">{ability.hint}</span>
+                                    </span>
                                 </label>
                             ))}
                         </div>
@@ -261,10 +351,10 @@ export function SecurityApiTokensPanel() {
                 loading={query.loading}
                 error={query.error}
                 empty={tokens.length === 0}
-                emptyMessage="Aucun jeton API."
+                emptyMessage="Aucun jeton API. Créez-en un pour l’API ou le MCP Cursor."
                 onRetry={() => void query.reload()}
             >
-                <Table headers={['Nom', 'Abilities', 'Dernier usage', 'Expire', '']} embedded>
+                <Table headers={['Nom', 'Permissions', 'Dernier usage', 'Expire', '']} embedded>
                     {tokens.map((token) => (
                         <tr key={token.id}>
                             <td>

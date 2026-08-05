@@ -53,6 +53,7 @@ class AgentToolClassification
             'get_application_runtime_settings' => $readOnly,
             'update_application_runtime_settings' => $destructive,
             'update_application_git_branch' => $destructive,
+            'sync_application_proxy_labels' => $destructive,
             'fix_application_host_permissions' => $destructive,
             'fix_coolify_base_config_path' => $destructive,
             'get_server_metrics' => $readOnly,

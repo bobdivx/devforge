@@ -8,8 +8,8 @@ import { navigateTo } from '../../lib/use-navigate';
 
 const sections = [
     { id: 'keys' as const, label: 'Clés privées', path: '/security/private-key' },
-    { id: 'api-tokens' as const, label: 'Jetons API', path: '/security/api-tokens' },
-    { id: 'cloud-tokens' as const, label: 'Jetons cloud', path: '/security/cloud-tokens' },
+    { id: 'api-tokens' as const, label: 'API & MCP', path: '/security/api-tokens' },
+    { id: 'cloud-tokens' as const, label: 'Providers cloud', path: '/security/cloud-tokens' },
     { id: 'cloud-init-scripts' as const, label: 'Cloud-init', path: '/security/cloud-init-scripts' },
 ] as const;
 
@@ -19,16 +19,16 @@ const sectionMeta = {
         description: 'Clés SSH et de déploiement accessibles à l’équipe active.',
     },
     'cloud-tokens': {
-        title: 'Jetons cloud',
-        description: 'Jetons des fournisseurs cloud pour le provisionnement.',
+        title: 'Jetons providers cloud',
+        description: 'Hetzner / DigitalOcean pour provisionner des serveurs — pas pour Cursor ni le MCP DevForge.',
     },
     'cloud-init-scripts': {
         title: 'Scripts cloud-init',
         description: 'Scripts d’initialisation pour les nouveaux serveurs (Hetzner).',
     },
     'api-tokens': {
-        title: 'Jetons API',
-        description: 'Jetons d’accès API Sanctum pour l’automatisation.',
+        title: 'Jetons API & MCP',
+        description: 'Jetons Sanctum pour l’API REST et le MCP DevForge (Cursor, agents).',
     },
 } as const;
 

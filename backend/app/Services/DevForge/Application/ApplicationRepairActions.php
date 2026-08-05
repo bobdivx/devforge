@@ -140,7 +140,7 @@ class ApplicationRepairActions
     }
 
     /**
-     * MCP v1 : uniquement deploy sur applications.
+     * Raccourci deploy pour applications (MCP / agents).
      *
      * @return array<mixed>
      */

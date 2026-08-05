@@ -274,7 +274,7 @@ it('uses TURSO_DATABASE_URL and TURSO_AUTH_TOKEN by default for libsql databases
         ->first();
 
     expect($urlVariable)->not->toBeNull()
-        ->and($urlVariable->real_value)->toBe("libsql://{$libsql->uuid}:8080")
+        ->and($urlVariable->real_value)->toBe("http://{$libsql->uuid}:8080")
         ->and($tokenVariable)->not->toBeNull()
         ->and($tokenVariable->real_value)->toBe('secret-token');
 });
@@ -309,7 +309,7 @@ it('reuses existing TURSO variables when connecting a libsql database', function
         ->assertJsonPath('data.env_keys', ['TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN']);
 
     expect(EnvironmentVariable::query()->where('resourceable_id', $this->application->id)->where('key', 'TURSO_DATABASE_URL')->first()?->real_value)
-        ->toBe("libsql://{$libsql->uuid}:8080");
+        ->toBe("http://{$libsql->uuid}:8080");
 });
 
 it('keeps LIBSQL_URL when the application already uses it', function () {
@@ -342,7 +342,7 @@ it('keeps LIBSQL_URL when the application already uses it', function () {
         ->assertJsonPath('data.env_keys', ['LIBSQL_URL', 'TURSO_AUTH_TOKEN']);
 
     expect(EnvironmentVariable::query()->where('resourceable_id', $this->application->id)->where('key', 'LIBSQL_URL')->first()?->real_value)
-        ->toBe("libsql://{$libsql->uuid}:8080")
+        ->toBe("http://{$libsql->uuid}:8080")
         ->and(EnvironmentVariable::query()->where('resourceable_id', $this->application->id)->where('key', 'TURSO_AUTH_TOKEN')->first()?->real_value)
         ->toBe('secret-token');
 });

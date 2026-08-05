@@ -2,41 +2,38 @@
 
 namespace App\Mcp\Servers;
 
-use App\Mcp\Tools\DevForge\ControlResource;
-use App\Mcp\Tools\DevForge\FixApplicationHostPermissions;
-use App\Mcp\Tools\DevForge\GetDeploymentLogs;
-use App\Mcp\Tools\DevForge\UpdateApplicationGitBranch;
-use App\Mcp\Tools\GetApplication;
+use App\Services\DevForge\Mcp\DevForgeMcpToolRegistrar;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Version;
 
 #[Name('DevForge')]
-#[Version('0.1.0')]
+#[Version('0.2.0')]
 #[Instructions(<<<'MD'
-DevForge MCP — repair-focused tools for Coolify applications (team-scoped Sanctum token).
+DevForge MCP — full team-scoped surface for Coolify/DevForge (Sanctum token).
 
-Recommended workflow:
-1. get_application — confirm UUID / branch / status.
-2. get_deployment_logs — inspect recent failures (Permission denied, remote branch, build).
-3. fix_application_host_permissions — when host Permission denied / tee errors.
-4. update_application_git_branch — when remote branch is missing.
-5. control_resource — redeploy (type=applications, action=deploy only).
+Includes:
+1. Coolify read tools — infrastructure overview, servers, projects, applications, databases, services.
+2. AgentToolkit core — deployments, control_resource (start/stop/restart/deploy), SSH/docker, source, env, runtime, repair.
+3. GitHub package — apps, repos, branches, PRs, workflows, commits (read + write).
 
-Mutating tools require the token ability `write`. Read tools require `read`.
+Mutating tools require token ability `write`. Read tools require `read`.
 MD)]
 class DevForgeServer extends Server
 {
-    protected array $tools = [
-        GetApplication::class,
-        GetDeploymentLogs::class,
-        FixApplicationHostPermissions::class,
-        UpdateApplicationGitBranch::class,
-        ControlResource::class,
-    ];
+    public int $maxPaginationLength = 100;
+
+    public int $defaultPaginationLength = 100;
+
+    protected array $tools = [];
 
     protected array $resources = [];
 
     protected array $prompts = [];
+
+    protected function boot(): void
+    {
+        $this->tools = DevForgeMcpToolRegistrar::allTools();
+    }
 }

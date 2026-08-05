@@ -30,19 +30,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | MCP DevForge (/mcp/devforge) — outils de réparation (writes)
+    | MCP DevForge (/mcp/devforge) — surface complète (reads + writes)
     |--------------------------------------------------------------------------
     |
-    | Distinct du MCP Coolify lecture seule (/mcp). Défaut false jusqu'à
-    | activation explicite sur le NAS. Requiert aussi is_mcp_server_enabled.
+    | Distinct du MCP Coolify lecture seule (/mcp). Expose les outils Coolify
+    | + AgentToolkit core/GitHub (hors missions/todos/délégation). Défaut false
+    | jusqu'à activation explicite. Requiert aussi is_mcp_server_enabled.
     |
     | Checklist NAS :
     | 1. Déployer Coolify + rebuild UI DevForge si besoin
     | 2. DEVFORGE_AGENTS_ENABLED=true, DEVFORGE_AGENTS_AUTO_FALLBACK=true
     | 3. DEVFORGE_MCP_ENABLED=true + activer MCP instance (UI / API)
     | 4. Token Sanctum team avec abilities read+write
-    | 5. Smoke chat « corrige le déploiement maintenant » → carte Actions
-    | 6. Smoke MCP get_deployment_logs puis fix_application_host_permissions
+    | 5. Smoke MCP tools/list → 40+ tools (list_resources, control_resource, …)
+    | 6. Smoke get_deployment_logs puis fix_application_host_permissions
     |
     */
     'mcp_enabled' => env('DEVFORGE_MCP_ENABLED', false),

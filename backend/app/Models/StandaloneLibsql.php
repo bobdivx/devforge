@@ -23,6 +23,8 @@ class StandaloneLibsql extends BaseModel
         'description',
         'libsql_auth_user',
         'libsql_auth_token',
+        'libsql_jwt_secret_key',
+        'libsql_jwt_public_key',
         'is_log_drain_enabled',
         'is_include_timestamps',
         'status',
@@ -65,6 +67,7 @@ class StandaloneLibsql extends BaseModel
         'health_check_retries' => 'integer',
         'health_check_start_period' => 'integer',
         'libsql_auth_token' => 'encrypted',
+        'libsql_jwt_secret_key' => 'encrypted',
         'public_port_timeout' => 'integer',
         'restart_count' => 'integer',
         'last_restart_at' => 'datetime',
@@ -107,6 +110,9 @@ class StandaloneLibsql extends BaseModel
         });
     }
 
+    /**
+     * @deprecated Legacy sqld basic auth. Prefer JWT via SQLD_AUTH_JWT_KEY + TURSO_AUTH_TOKEN.
+     */
     public function httpBasicAuthParam(): string
     {
         $user = $this->libsql_auth_user ?: 'libsql';
@@ -294,8 +300,10 @@ class StandaloneLibsql extends BaseModel
     protected function internalDbUrl(): Attribute
     {
         return new Attribute(
-            // libSQL / Turso: never embed the auth token in the URL — pass TURSO_AUTH_TOKEN separately.
-            get: fn () => "libsql://{$this->uuid}:8080",
+            // Self-hosted sqld speaks plain HTTP on the Docker network.
+            // libsql:// would force TLS and break with ERR_SSL_PACKET_LENGTH_TOO_LONG.
+            // Pass TURSO_AUTH_TOKEN separately as a Bearer JWT.
+            get: fn () => "http://{$this->uuid}:8080",
         );
     }
 
@@ -318,7 +326,8 @@ class StandaloneLibsql extends BaseModel
                         return null;
                     }
 
-                    return "libsql://{$serverIp}:{$this->public_port}";
+                    // TCP proxy has no TLS — clients must use http:// not libsql://.
+                    return "http://{$serverIp}:{$this->public_port}";
                 }
 
                 return null;

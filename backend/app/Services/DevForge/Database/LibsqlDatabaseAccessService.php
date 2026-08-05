@@ -6,7 +6,6 @@ use App\Actions\Database\StartDatabase;
 use App\Actions\Database\StopDatabaseProxy;
 use App\Models\StandaloneLibsql;
 use App\Models\User;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class LibsqlDatabaseAccessService
@@ -14,6 +13,7 @@ class LibsqlDatabaseAccessService
     public function __construct(
         private readonly LibsqlConnectionEnvSync $libsqlConnectionEnvSync,
         private readonly LinkedDatabaseEnvSync $linkedDatabaseEnvSync,
+        private readonly LibsqlJwtCredentials $libsqlJwtCredentials,
     ) {}
 
     /**
@@ -57,8 +57,14 @@ class LibsqlDatabaseAccessService
      */
     public function regenerateToken(User $user, StandaloneLibsql $database, bool $redeployApplications = true): array
     {
-        $database->libsql_auth_token = Str::password(length: 64, symbols: false);
-        $database->save();
+        $needsDatabaseRestart = blank($database->libsql_jwt_public_key);
+
+        $this->libsqlJwtCredentials->regenerateToken($database);
+
+        if ($needsDatabaseRestart) {
+            // First-time JWT bootstrap replaces SQLD_HTTP_AUTH with SQLD_AUTH_JWT_KEY.
+            StartDatabase::dispatch($database);
+        }
 
         $synced = $this->linkedDatabaseEnvSync->syncLinkedApplications($database, $redeployApplications);
 

@@ -15,8 +15,12 @@ class AgentToolkitSession
     /** @var array<int, array<string, mixed>> */
     private array $customTools;
 
+    /**
+     * @param  list<string>  $extraPackages
+     */
     public function __construct(
         private readonly ?AiAgent $agent = null,
+        array $extraPackages = [],
     ) {
         $metadata = is_array($this->agent?->metadata) ? $this->agent->metadata : [];
         $toolState = is_array($metadata['tool_packages'] ?? null) ? $metadata['tool_packages'] : [];
@@ -30,10 +34,16 @@ class AgentToolkitSession
             ? AgentToolPackage::defaultForAgentType($this->agent->type)
             : [AgentToolPackage::PACKAGE_CORE];
 
+        $extras = array_values(array_filter(
+            array_map('strval', $extraPackages),
+            fn (string $id): bool => AgentToolPackage::exists($id),
+        ));
+
         $this->enabledPackages = array_values(array_unique([
             AgentToolPackage::PACKAGE_CORE,
             ...$typeDefaults,
             ...$persisted,
+            ...$extras,
         ]));
 
         $this->customTools = is_array($toolState['custom_tools'] ?? null) ? $toolState['custom_tools'] : [];

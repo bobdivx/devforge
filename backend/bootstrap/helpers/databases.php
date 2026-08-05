@@ -187,16 +187,22 @@ function create_standalone_libsql($environment_id, StandaloneDocker|SwarmDocker 
     $database->uuid = (string) new Cuid2;
     $database->name = 'libsql-database-'.$database->uuid;
     $database->libsql_auth_user = 'libsql';
-    $database->libsql_auth_token = Str::password(length: 64, symbols: false);
     $database->environment_id = $environment_id;
     $database->destination_id = $destination->id;
     $database->destination_type = $destination->getMorphClass();
+
+    // libsql_auth_token is NOT NULL — generate JWT credentials before the first insert.
+    $credentials = app(\App\Services\DevForge\Database\LibsqlJwtCredentials::class)->generate();
+    $database->libsql_jwt_secret_key = $credentials['secret_key'];
+    $database->libsql_jwt_public_key = $credentials['public_key'];
+    $database->libsql_auth_token = $credentials['token'];
+
     if ($otherData) {
         $database->fill($otherData);
     }
     $database->save();
 
-    return $database;
+    return $database->fresh();
 }
 
 function deleteBackupsLocally(string|array|null $filenames, Server $server): void

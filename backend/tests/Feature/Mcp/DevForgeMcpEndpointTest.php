@@ -1,12 +1,8 @@
 <?php
 
-use App\Models\AiAgent;
-use App\Models\AiAgentRun;
 use App\Models\InstanceSettings;
 use App\Models\Team;
 use App\Models\User;
-use App\Services\DevForge\Agent\AgentRepairHarness;
-use App\Services\DevForge\Agent\AgentToolkit;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Once;
 
@@ -80,7 +76,7 @@ test('DevForge MCP returns 404 when instance MCP setting is disabled', function 
     $response->assertStatus(404);
 });
 
-test('DevForge MCP lists repair tools for an authenticated token', function () {
+test('DevForge MCP lists Coolify reads and AgentToolkit tools', function () {
     $token = $this->user->createToken('mcp-write', ['read', 'write'])->plainTextToken;
 
     $response = mcpDevforgeListTools($token);
@@ -88,12 +84,20 @@ test('DevForge MCP lists repair tools for an authenticated token', function () {
 
     $toolNames = collect($response->json('result.tools'))->pluck('name')->all();
     expect($toolNames)->toContain(
+        'get_infrastructure_overview',
+        'list_applications',
         'get_application',
+        'list_resources',
         'get_deployment_logs',
         'fix_application_host_permissions',
         'update_application_git_branch',
         'control_resource',
+        'exec_command',
+        'list_github_apps',
+        'sync_application_proxy_labels',
     );
+    expect(count($toolNames))->toBeGreaterThan(40);
+    expect($toolNames)->not->toContain('mission_create', 'delegate_task', 'todo_write');
 });
 
 test('DevForge MCP rejects mutating tools without write ability', function () {
@@ -120,16 +124,17 @@ test('DevForge MCP allows get_deployment_logs with read ability', function () {
     expect($response->json('result.isError'))->toBeFalse();
 });
 
-test('DevForge MCP control_resource rejects non-deploy actions', function () {
+test('DevForge MCP control_resource accepts stop but reports missing resource', function () {
     $token = $this->user->createToken('mcp-write', ['read', 'write'])->plainTextToken;
 
     $response = mcpDevforgeCallTool($token, 'control_resource', [
         'uuid' => 'app-missing',
         'type' => 'applications',
         'action' => 'stop',
+        'reason' => 'mcp test',
     ]);
     $response->assertOk();
 
     expect($response->json('result.isError'))->toBeTrue();
-    expect($response->json('result.content.0.text'))->toContain('only supports');
+    expect($response->json('result.content.0.text'))->toContain('introuvable');
 });

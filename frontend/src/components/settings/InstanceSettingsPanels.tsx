@@ -43,20 +43,27 @@ function Field({
 
 function ToggleField({
     label,
+    description,
     checked,
     disabled,
     onChange,
 }: {
     label: string;
+    description?: string;
     checked: boolean;
     disabled?: boolean;
     onChange: (value: boolean) => void;
 }) {
     return (
         <label class="flex items-center justify-between gap-3 rounded-xl border border-base-300/70 px-3 py-2 text-sm">
-            <span>{label}</span>
+            <span class="grid gap-0.5">
+                <span>{label}</span>
+                {description && (
+                    <span class="text-xs font-normal text-base-content/55">{description}</span>
+                )}
+            </span>
             <input
-                class="toggle toggle-sm"
+                class="toggle toggle-sm shrink-0"
                 type="checkbox"
                 checked={checked}
                 disabled={disabled}
@@ -308,6 +315,7 @@ function AdvancedForm({
             />
             <ToggleField
                 label="Serveur MCP"
+                description="Active /mcp (lecture) et /mcp/devforge (réparation). Les clients (Cursor) utilisent un jeton API read+write — Sécurité → API & MCP."
                 checked={form.is_mcp_server_enabled}
                 disabled={!canEdit || saving}
                 onChange={(value) => setForm((current) => ({ ...current, is_mcp_server_enabled: value }))}

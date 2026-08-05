@@ -1,6 +1,8 @@
 # MCP DevForge — checklist NAS
 
-Endpoint: `POST /mcp/devforge` (Sanctum team token). Distinct from read-only `/mcp`.
+Endpoint: `POST /mcp/devforge` (Sanctum team token). Distinct from read-only `/mcp` (Coolify).
+
+DevForge MCP **v0.2** exposes Coolify reads + AgentToolkit core/GitHub (40+ tools). Agent-only tools (missions, todos, memory, delegation) stay out of MCP.
 
 ## Activation
 
@@ -15,6 +17,6 @@ Endpoint: `POST /mcp/devforge` (Sanctum team token). Distinct from read-only `/m
 ## Smoke
 
 1. Chat: « corrige le déploiement maintenant » → carte Actions with real tool steps (not prose JSON).
-2. MCP `tools/list` on `/mcp/devforge` → `get_application`, `get_deployment_logs`, `fix_application_host_permissions`, `update_application_git_branch`, `control_resource`.
+2. MCP `tools/list` on `/mcp/devforge` → includes `get_infrastructure_overview`, `list_resources`, `get_deployment_logs`, `control_resource`, `exec_command`, `list_github_apps`, …
 3. MCP `get_deployment_logs` then `fix_application_host_permissions` on a test app (write ability required for mutate).
-4. `control_resource` with `action=stop` must fail (v1 deploy-only).
+4. `control_resource` supports `start` / `stop` / `restart` / `deploy` on applications, databases, and services.

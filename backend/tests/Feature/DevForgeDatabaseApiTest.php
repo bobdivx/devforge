@@ -84,6 +84,10 @@ it('creates a libsql database for the current team', function () {
     $database = StandaloneLibsql::query()->where('uuid', $uuid)->first();
     expect($database)->not->toBeNull()
         ->and($database->libsql_auth_user)->toBe('libsql')
+        ->and($database->libsql_auth_token)->not->toBeEmpty()
+        ->and(substr_count((string) $database->libsql_auth_token, '.'))->toBe(2)
+        ->and($database->libsql_jwt_public_key)->not->toBeEmpty()
+        ->and($database->libsql_jwt_secret_key)->not->toBeEmpty()
         ->and($database->environment_id)->toBe($this->environment->id);
 });
 

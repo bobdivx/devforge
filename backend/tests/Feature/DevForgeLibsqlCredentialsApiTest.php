@@ -52,15 +52,17 @@ it('returns libsql credentials for authorized users', function () {
         ->withSession($this->session)
         ->getJson("/api/devforge/v1/databases/{$this->database->uuid}/credentials")
         ->assertSuccessful()
-        ->assertJsonPath('data.turso_database_url', "libsql://{$this->database->uuid}:8080")
+        ->assertJsonPath('data.turso_database_url', "http://{$this->database->uuid}:8080")
         ->assertJsonPath('data.turso_auth_token', 'initial-token')
         ->assertJsonPath('data.is_public', false);
 });
 
 it('regenerates libsql auth token and syncs linked applications', function () {
+    Bus::fake();
+
     $this->application->environment_variables()->create([
         'key' => 'TURSO_DATABASE_URL',
-        'value' => "libsql://{$this->database->uuid}:8080",
+        'value' => "http://{$this->database->uuid}:8080",
         'comment' => 'devforge:database:'.$this->database->uuid,
         'is_preview' => false,
         'is_runtime' => true,
@@ -83,10 +85,12 @@ it('regenerates libsql auth token and syncs linked applications', function () {
         ->assertSuccessful();
 
     $newToken = $response->json('data.turso_auth_token');
-    expect($newToken)->not->toBe('initial-token');
+    expect($newToken)->not->toBe('initial-token')
+        ->and(substr_count((string) $newToken, '.'))->toBe(2);
 
     $this->database->refresh();
-    expect($this->database->libsql_auth_token)->toBe($newToken);
+    expect($this->database->libsql_auth_token)->toBe($newToken)
+        ->and($this->database->libsql_jwt_public_key)->not->toBeEmpty();
 
     $tokenVar = $this->application->environment_variables()
         ->where('key', 'TURSO_AUTH_TOKEN')
@@ -139,7 +143,7 @@ it('prefers domain url over ip port for external credentials', function () {
         ->assertSuccessful()
         ->assertJsonPath('data.turso_database_url_external', 'libsql://db-demo.apps.example.com')
         ->assertJsonPath('data.external_url', 'libsql://db-demo.apps.example.com')
-        ->assertJsonPath('data.libsql_url', "libsql://{$this->database->uuid}:8080")
+        ->assertJsonPath('data.libsql_url', "http://{$this->database->uuid}:8080")
         ->assertJsonPath('data.fqdn', 'https://db-demo.apps.example.com');
 
     expect($response->json('data.external_url'))->not->toContain('initial-token')

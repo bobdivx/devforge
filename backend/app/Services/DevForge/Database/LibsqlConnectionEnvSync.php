@@ -35,17 +35,20 @@ class LibsqlConnectionEnvSync
         if ($database->is_public) {
             $domainHost = $database->publicDomainHost();
             if ($domainHost) {
+                // Public hostname is terminated by Traefik/Caddy with TLS.
                 $tursoUrlExternal = "libsql://{$domainHost}";
             } elseif ($database->public_port) {
                 $serverIp = $database->destination?->server?->getIp;
                 if (! empty($serverIp)) {
-                    $tursoUrlExternal = "libsql://{$serverIp}:{$database->public_port}";
+                    // Raw TCP proxy is plain HTTP.
+                    $tursoUrlExternal = "http://{$serverIp}:{$database->public_port}";
                 }
             }
         }
 
-        // Never embed credentials in libsql:// URLs — clients use TURSO_AUTH_TOKEN / authToken.
-        $tursoUrl = "libsql://{$host}:8080";
+        // Internal Docker network is plain HTTP. Never embed credentials —
+        // clients use TURSO_AUTH_TOKEN as a Bearer JWT (SQLD_AUTH_JWT_KEY).
+        $tursoUrl = "http://{$host}:8080";
 
         return [
             'auth_user' => $authUser,
