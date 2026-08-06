@@ -667,16 +667,30 @@ export function ApplicationDetailPanel({
                                         {renameError && <p class="text-sm text-error">{renameError}</p>}
                                     </div>
                                 ) : (
-                                    <div class="flex min-w-0 items-center gap-2">
-                                        <h2 class="min-w-0 break-words text-2xl font-bold tracking-tight sm:text-3xl">{resource.name}</h2>
+                                    <div class="flex min-w-0 items-start gap-2">
+                                        <h2 class="min-w-0 flex-1 break-words text-2xl font-bold tracking-tight sm:text-3xl">
+                                            {canAct ? (
+                                                <button
+                                                    class="max-w-full rounded-md text-start transition hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                                                    type="button"
+                                                    title="Modifier le nom"
+                                                    onClick={startRename}
+                                                >
+                                                    {resource.name}
+                                                </button>
+                                            ) : (
+                                                resource.name
+                                            )}
+                                        </h2>
                                         {canAct && (
                                             <button
                                                 aria-label="Modifier le nom"
-                                                class="btn btn-ghost btn-sm btn-square shrink-0 rounded-full text-base-content/55 hover:text-base-content"
+                                                class="btn btn-sm btn-square shrink-0 rounded-full border border-base-content/45 bg-base-100 text-base-content shadow-sm hover:border-primary hover:bg-primary/15 hover:text-primary"
                                                 type="button"
+                                                title="Modifier le nom"
                                                 onClick={startRename}
                                             >
-                                                <Pencil class="size-4" aria-hidden />
+                                                <Pencil class="size-4 stroke-[2.25]" aria-hidden />
                                             </button>
                                         )}
                                     </div>

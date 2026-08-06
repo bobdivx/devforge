@@ -24,9 +24,22 @@ class GithubRunnerController extends Controller
         $team = $this->currentTeamContext->resolve($request->user());
         $this->authorize('viewAny', Server::class);
 
-        return response()->json([
-            'data' => $this->githubRunnerInventory->listForTeam($team),
-        ]);
+        try {
+            return response()->json([
+                'data' => $this->githubRunnerInventory->listForTeam($team),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('github_runner.list_failed', [
+                'team_id' => $team->id,
+                'message' => $e->getMessage(),
+            ]);
+
+            // Keep the page usable: prefer an empty list over a hard 500.
+            return response()->json([
+                'data' => [],
+                'message' => 'Impossible de lister les runners GitHub pour le moment.',
+            ]);
+        }
     }
 
     public function store(Request $request): JsonResponse
@@ -178,6 +191,43 @@ class GithubRunnerController extends Controller
             ]);
 
             return response()->json(['message' => 'Action runner impossible.'], 500);
+        }
+    }
+
+    public function destroy(Request $request, string $serverUuid, string $containerName): JsonResponse
+    {
+        $team = $this->currentTeamContext->resolve($request->user());
+
+        try {
+            $server = Server::query()
+                ->where('team_id', $team->id)
+                ->where('uuid', $serverUuid)
+                ->firstOrFail();
+        } catch (ModelNotFoundException) {
+            return response()->json(['message' => 'Serveur introuvable.'], 404);
+        }
+
+        $this->authorize('update', $server);
+
+        try {
+            $result = $this->githubRunnerInventory->destroy($team, $serverUuid, $containerName);
+
+            return response()->json([
+                'data' => $result,
+                'message' => $result['message'],
+            ]);
+        } catch (ModelNotFoundException) {
+            return response()->json(['message' => 'Runner introuvable.'], 404);
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            Log::error('github_runner.destroy_failed', [
+                'server_uuid' => $serverUuid,
+                'container' => $containerName,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json(['message' => 'Impossible de supprimer le runner.'], 500);
         }
     }
 }

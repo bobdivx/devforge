@@ -25,6 +25,7 @@ use App\Services\DevForge\Application\ApplicationSourceService;
 use App\Services\DevForge\Core\CoreResourceAction;
 use App\Services\DevForge\Core\CoreResourceCatalog;
 use App\Services\DevForge\DeploymentData;
+use App\Services\DevForge\Docker\DockerImageUpdateChecker;
 use App\Services\DevForge\Github\GithubAppCatalog;
 use App\Services\DevForge\Server\ServerPathValidator;
 use Illuminate\Database\Eloquent\Model;
@@ -452,6 +453,28 @@ class AgentToolkit
                         'deployment_uuid' => ['type' => 'string', 'description' => 'UUID d\'un déploiement précis pour inclure les logs.'],
                         'limit' => ['type' => 'integer', 'description' => 'Nombre de déploiements à retourner (défaut: 5)', 'default' => 5],
                         'log_lines' => ['type' => 'integer', 'description' => 'Nombre de lignes de logs à inclure pour deployment_uuid (défaut: 80)', 'default' => 80],
+                    ],
+                    'required' => [],
+                ],
+            ],
+            [
+                'name' => 'check_docker_image_update',
+                'description' => 'Vérifie si une image Docker (app dockerimage ou image=repo:tag) est à jour vs Docker Hub/Quay. Compare tags semver et digests ; inspecte le conteneur running si possible.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID d\'une application (idéal build_pack=dockerimage).',
+                        ],
+                        'image' => [
+                            'type' => 'string',
+                            'description' => 'Image explicite repo:tag (ex: nginx:1.25, library/redis:7). Prioritaire sur l\'app.',
+                        ],
+                        'inspect_running' => [
+                            'type' => 'boolean',
+                            'description' => 'Inspecter le conteneur running pour comparer les digests (défaut: true si application_uuid).',
+                        ],
                     ],
                     'required' => [],
                 ],
@@ -1574,6 +1597,7 @@ class AgentToolkit
                 $arguments['deployment_uuid'] ?? null,
                 (int) ($arguments['log_lines'] ?? 80),
             ),
+            'check_docker_image_update' => $this->checkDockerImageUpdate($arguments),
             'control_resource' => $this->controlResource(
                 (string) ($arguments['uuid'] ?? ''),
                 (string) ($arguments['type'] ?? ''),
@@ -2916,6 +2940,28 @@ class AgentToolkit
         string $reason = '',
     ): array {
         return $this->repairActions->updateApplicationGitBranch($applicationUuid, $gitBranch, $redeploy, $reason);
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function checkDockerImageUpdate(array $arguments): array
+    {
+        $applicationUuid = isset($arguments['application_uuid'])
+            ? (string) $arguments['application_uuid']
+            : ($this->assignedResourceUuid ?? (is_string($this->runContext['application_uuid'] ?? null) ? $this->runContext['application_uuid'] : null));
+        $image = isset($arguments['image']) ? (string) $arguments['image'] : null;
+        $inspectRunning = array_key_exists('inspect_running', $arguments)
+            ? (bool) $arguments['inspect_running']
+            : true;
+
+        return app(DockerImageUpdateChecker::class)->check(
+            team: $this->team,
+            applicationUuid: is_string($applicationUuid) && $applicationUuid !== '' ? $applicationUuid : null,
+            image: is_string($image) && $image !== '' ? $image : null,
+            inspectRunning: $inspectRunning,
+        );
     }
 
     /** @return array<string, mixed> */

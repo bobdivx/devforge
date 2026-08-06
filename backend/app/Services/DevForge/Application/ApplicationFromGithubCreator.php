@@ -65,8 +65,12 @@ class ApplicationFromGithubCreator
         $portsExposes = (int) ($validated['ports_exposes'] ?? ($buildPack === BuildPackTypes::STATIC->value ? 80 : 3000));
         $instantDeploy = (bool) ($validated['instant_deploy'] ?? false);
 
+        $name = filled($validated['name'] ?? null)
+            ? trim((string) $validated['name'])
+            : generate_application_name($validated['git_repository'], $validated['git_branch']);
+
         $application = Application::create([
-            'name' => $validated['name'] ?? generate_application_name($validated['git_repository'], $validated['git_branch']),
+            'name' => $name,
             'repository_project_id' => $repositoryId,
             'git_repository' => $validated['git_repository'],
             'git_branch' => $validated['git_branch'],
@@ -83,11 +87,6 @@ class ApplicationFromGithubCreator
         abort_unless($server !== null, 422, 'Destination server not found.');
         $server->loadMissing('settings');
         $application->fqdn = generateUrl(server: $server, random: $application->uuid);
-        $application->name = generate_application_name(
-            $validated['git_repository'],
-            $validated['git_branch'],
-            $application->uuid,
-        );
         $application->save();
 
         app(ApplicationReadinessService::class)->ensureFor($application, autonomousEnabled: true);

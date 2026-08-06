@@ -46,6 +46,7 @@ class AgentToolPackage
                     'list_resources',
                     'get_resource_status',
                     'get_deployment_logs',
+                    'check_docker_image_update',
                     'control_resource',
                     'get_server_metrics',
                     'send_notification',

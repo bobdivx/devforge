@@ -22,11 +22,16 @@ app/Policies/AiAgentPolicy.php
 app/Policies/AiProviderConfigPolicy.php
 app/Services/DevForge
 app/Support/DevForge
+app/Mcp
+app/Http/Middleware/EnsureDevForgeMcpEnabled.php
+app/Http/Middleware/EnsureMcpEnabled.php
 app/Console/Commands/RunScheduledAgentsCommand.php
 app/Providers/RouteServiceProvider.php
 app/Http/Kernel.php
 app/Console/Kernel.php
 config/devforge.php
+routes/ai.php
+app/Services/DockerImageParser.php
 glob:database/migrations/*application_readiness*
 glob:database/migrations/*packages_token*
 bootstrap/helpers/sudo.php

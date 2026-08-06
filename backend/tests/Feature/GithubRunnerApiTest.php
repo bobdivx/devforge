@@ -51,6 +51,22 @@ it('lists github runners for the current team', function () {
         ->assertJsonPath('data.0.server_uuid', $this->server->uuid);
 });
 
+it('returns an empty list when runner inventory listing fails', function () {
+    $fake = Mockery::mock(GithubRunnerInventory::class);
+    $fake->shouldReceive('listForTeam')
+        ->once()
+        ->andThrow(new RuntimeException('ssh timeout'));
+
+    $this->app->instance(GithubRunnerInventory::class, $fake);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/github/runners')
+        ->assertSuccessful()
+        ->assertJsonPath('data', [])
+        ->assertJsonPath('message', 'Impossible de lister les runners GitHub pour le moment.');
+});
+
 it('returns runner logs', function () {
     $fake = Mockery::mock(GithubRunnerInventory::class);
     $fake->shouldReceive('logs')
@@ -200,4 +216,66 @@ it('creates a github runner', function () {
         ->assertCreated()
         ->assertJsonPath('message', 'Runner créé et démarré.')
         ->assertJsonPath('data.name', 'github-runner-popcorn-client');
+});
+
+it('creates a github runner with a personal access token', function () {
+    $fake = Mockery::mock(GithubRunnerInventory::class);
+    $fake->shouldReceive('create')
+        ->once()
+        ->with(
+            Mockery::type(Team::class),
+            Mockery::on(fn (array $input): bool => ($input['auth_mode'] ?? null) === 'pat'
+                && ($input['access_token'] ?? null) === 'ghp_testtoken'
+                && ($input['owner'] ?? null) === 'bobdivx'),
+        )
+        ->andReturn([
+            'message' => 'Runner créé et démarré.',
+            'runner' => [
+                'id' => $this->server->uuid.':github-runner-client',
+                'name' => 'github-runner-client',
+                'state' => 'running',
+                'server_uuid' => $this->server->uuid,
+            ],
+        ]);
+
+    $this->app->instance(GithubRunnerInventory::class, $fake);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/github/runners', [
+            'auth_mode' => 'pat',
+            'access_token' => 'ghp_testtoken',
+            'owner' => 'bobdivx',
+            'repo' => 'popcorn-client',
+            'server_uuid' => $this->server->uuid,
+            'runner_name' => 'casaos-runner-popcorn-client',
+            'container_name' => 'github-runner-client',
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.name', 'github-runner-client');
+});
+
+it('deletes a github runner', function () {
+    $fake = Mockery::mock(GithubRunnerInventory::class);
+    $fake->shouldReceive('destroy')
+        ->once()
+        ->with(
+            Mockery::type(Team::class),
+            $this->server->uuid,
+            'github-runner-client',
+        )
+        ->andReturn([
+            'ok' => true,
+            'message' => 'Runner supprimé.',
+            'container' => 'github-runner-client',
+        ]);
+
+    $this->app->instance(GithubRunnerInventory::class, $fake);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->deleteJson('/api/devforge/v1/github/runners/'.$this->server->uuid.'/github-runner-client')
+        ->assertSuccessful()
+        ->assertJsonPath('data.ok', true)
+        ->assertJsonPath('message', 'Runner supprimé.');
 });

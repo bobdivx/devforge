@@ -157,6 +157,7 @@ it('creates an application from a github repository', function () {
         ])
         ->assertCreated()
         ->assertJsonPath('data.type', 'application')
+        ->assertJsonPath('data.name', 'demo-app')
         ->assertJsonPath('data.configuration.git_repository', 'acme/demo-app')
         ->assertJsonPath('data.configuration.git_branch', 'main')
         ->assertJsonPath('meta.instant_deploy', false);
@@ -166,6 +167,7 @@ it('creates an application from a github repository', function () {
 
     $application = \App\Models\Application::query()->where('uuid', $uuid)->first();
     expect($application)->not->toBeNull()
+        ->and($application->name)->toBe('demo-app')
         ->and($application->readiness)->not->toBeNull()
         ->and($application->readiness->autonomous_enabled)->toBeTrue();
 });

@@ -280,29 +280,65 @@ class GithubAppCatalog
      */
     public function registrationToken(GithubApp $githubApp, string $owner, string $repo): array
     {
-        $token = $this->apiToken($githubApp);
-        abort_unless($token, 400, 'Impossible de générer un jeton GitHub.');
+        $candidates = $this->tokenCandidatesForRunnerRegistration($githubApp);
+        abort_unless($candidates !== [], 400, 'Impossible de générer un jeton GitHub.');
 
-        $response = Http::GitHub($githubApp->api_url, $token)
-            ->timeout(20)
-            ->retry(2, 200, throw: false)
-            ->post("/repos/{$owner}/{$repo}/actions/runners/registration-token");
+        $lastStatus = 0;
+        $lastMessage = 'Impossible de créer un jeton d’enregistrement runner.';
 
-        abort_unless(
-            $response->status() === 201 || $response->status() === 200,
-            $response->status(),
-            $response->json('message', 'Impossible de créer un jeton d’enregistrement runner.'),
-        );
+        foreach ($candidates as $token) {
+            // GitHub rejects a JSON body of [] / {} for this endpoint (422 schema error).
+            $response = Http::GitHub($githubApp->api_url, $token)
+                ->timeout(20)
+                ->retry(2, 200, throw: false)
+                ->withBody('', 'application/json')
+                ->post("/repos/{$owner}/{$repo}/actions/runners/registration-token");
 
-        $runnerToken = (string) $response->json('token', '');
-        abort_unless($runnerToken !== '', 502, 'Jeton d’enregistrement vide.');
+            $lastStatus = $response->status();
+            $lastMessage = (string) $response->json('message', $lastMessage);
 
-        return [
-            'token' => $runnerToken,
-            'expires_at' => is_string($response->json('expires_at'))
-                ? (string) $response->json('expires_at')
-                : null,
-        ];
+            if (! in_array($lastStatus, [200, 201], true)) {
+                continue;
+            }
+
+            $runnerToken = (string) $response->json('token', '');
+            if ($runnerToken === '') {
+                continue;
+            }
+
+            return [
+                'token' => $runnerToken,
+                'expires_at' => is_string($response->json('expires_at'))
+                    ? (string) $response->json('expires_at')
+                    : null,
+            ];
+        }
+
+        abort($lastStatus > 0 ? $lastStatus : 502, $lastMessage);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function tokenCandidatesForRunnerRegistration(GithubApp $githubApp): array
+    {
+        $candidates = [];
+
+        // Packages / PAT often has admin:repo; GitHub App installation tokens frequently lack Administration.
+        if (filled($githubApp->packages_token)) {
+            $candidates[] = (string) $githubApp->packages_token;
+        }
+
+        try {
+            $installationToken = generateGithubInstallationToken($githubApp);
+            if (filled($installationToken)) {
+                $candidates[] = $installationToken;
+            }
+        } catch (\Throwable) {
+            // Ignore and rely on packages token when present.
+        }
+
+        return array_values(array_unique($candidates));
     }
 
     private function apiToken(GithubApp $githubApp): ?string

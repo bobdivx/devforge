@@ -126,3 +126,74 @@ it('skips cold github api fetches when listing', function () {
         ->and($enriched['github_repo'])->toBe('bobdivx/popcorn-client')
         ->and($enriched['source'])->toBe('docker');
 });
+
+it('builds docker run commands with volumes network and timezone', function () {
+    $inventory = new GithubRunnerInventory(Mockery::mock(GithubAppCatalog::class));
+
+    $command = $inventory->buildDockerRunCommand(
+        containerName: 'github-runner-client',
+        image: 'ghcr.io/bobdivx/popcorn-github-runner-client:latest',
+        repoUrl: 'https://github.com/bobdivx/popcorn-client',
+        runnerName: 'casaos-runner-popcorn-client',
+        authToken: 'REGISTRATION_TOKEN',
+        authMode: 'registration',
+        labels: 'self-hosted,popcorn',
+        networkMode: 'bridge',
+        timezone: 'Europe/Paris',
+        replaceExisting: true,
+        volumes: [
+            '/media/Docker/AppData/runner/client:/shared-data',
+            '/media/Docker/AppData/runner/npm:/home/runner/.npm',
+        ],
+        extraEnv: [
+            ['key' => 'ANDROID_HOME', 'value' => '/opt/android-sdk'],
+        ],
+    );
+
+    expect($command)
+        ->toContain('--name '.escapeshellarg('github-runner-client'))
+        ->toContain('--network '.escapeshellarg('bridge'))
+        ->toContain('-v '.escapeshellarg('/media/Docker/AppData/runner/client:/shared-data'))
+        ->toContain('-e '.escapeshellarg('TZ=Europe/Paris'))
+        ->toContain('-e '.escapeshellarg('RUNNER_REPLACE_EXISTING=true'))
+        ->toContain('-e '.escapeshellarg('ANDROID_HOME=/opt/android-sdk'))
+        ->toContain('-e '.escapeshellarg('RUNNER_TOKEN=REGISTRATION_TOKEN'))
+        ->toContain('-e '.escapeshellarg('ACCESS_TOKEN=REGISTRATION_TOKEN'))
+        ->toContain('-e '.escapeshellarg('RUNNER_LABELS=self-hosted,popcorn'))
+        ->toContain(escapeshellarg('ghcr.io/bobdivx/popcorn-github-runner-client:latest'));
+});
+
+it('builds host network mode for server runners', function () {
+    $inventory = new GithubRunnerInventory(Mockery::mock(GithubAppCatalog::class));
+
+    $command = $inventory->buildDockerRunCommand(
+        containerName: 'github-runner-server',
+        image: 'ghcr.io/bobdivx/popcorn-github-runner-server:latest',
+        repoUrl: 'https://github.com/bobdivx/popcorn-server',
+        runnerName: 'casaos-runner-popcorn-server',
+        authToken: 'TOKEN',
+        authMode: 'registration',
+        networkMode: 'host',
+    );
+
+    expect($command)->toContain('--network '.escapeshellarg('host'));
+});
+
+it('builds pat auth without runner_token env', function () {
+    $inventory = new GithubRunnerInventory(Mockery::mock(GithubAppCatalog::class));
+
+    $command = $inventory->buildDockerRunCommand(
+        containerName: 'github-runner-client',
+        image: 'ghcr.io/bobdivx/popcorn-github-runner-client:latest',
+        repoUrl: 'https://github.com/bobdivx/popcorn-client',
+        runnerName: 'casaos-runner-popcorn-client',
+        authToken: 'ghp_exampletoken',
+        authMode: 'pat',
+    );
+
+    expect($command)
+        ->toContain('-e '.escapeshellarg('ACCESS_TOKEN=ghp_exampletoken'))
+        ->toContain('-e '.escapeshellarg('PAT_TOKEN=ghp_exampletoken'))
+        ->toContain('--label '.escapeshellarg('com.devforge.runner.auth_mode=pat'))
+        ->not->toContain('RUNNER_TOKEN=');
+});

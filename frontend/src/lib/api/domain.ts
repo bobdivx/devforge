@@ -1145,8 +1145,12 @@ export type GithubRunner = {
 
 export type GithubRunnerAction = 'start' | 'stop' | 'restart';
 
+export type GithubRunnerAuthMode = 'registration' | 'pat';
+
 export type GithubRunnerCreateInput = {
-    github_app_uuid: string;
+    auth_mode?: GithubRunnerAuthMode;
+    access_token?: string;
+    github_app_uuid?: string;
     owner: string;
     repo: string;
     server_uuid: string;
@@ -1154,6 +1158,12 @@ export type GithubRunnerCreateInput = {
     container_name?: string;
     labels?: string;
     image?: string;
+    network_mode?: 'bridge' | 'host' | 'none';
+    timezone?: string;
+    replace_existing?: boolean;
+    recreate?: boolean;
+    volumes?: string[];
+    extra_env?: Array<{ key: string; value: string }>;
 };
 
 export type GithubRunnerActionResult = {
@@ -2533,6 +2543,11 @@ export const domainApi = {
             body: JSON.stringify(input),
         },
         60_000,
+    ),
+    deleteGithubRunner: (serverUuid: string, containerName: string) => mutate<ApiResponse<{ ok: boolean; container: string }> & { message?: string }>(
+        `/github/runners/${encodeURIComponent(serverUuid)}/${encodeURIComponent(containerName)}`,
+        { method: 'DELETE' },
+        45_000,
     ),
     githubRunner: (serverUuid: string, containerName: string) => apiFetch<ApiResponse<GithubRunner>>(
         `${API_BASE}/github/runners/${encodeURIComponent(serverUuid)}/${encodeURIComponent(containerName)}`,

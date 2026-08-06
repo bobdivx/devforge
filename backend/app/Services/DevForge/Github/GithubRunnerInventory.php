@@ -190,7 +190,9 @@ class GithubRunnerInventory
     public function create(Team $team, array $input): array
     {
         $validated = validator($input, [
-            'github_app_uuid' => ['required', 'string', 'max:64'],
+            'auth_mode' => ['nullable', 'string', 'in:registration,pat'],
+            'access_token' => ['nullable', 'string', 'max:512'],
+            'github_app_uuid' => ['nullable', 'string', 'max:64'],
             'owner' => ['required', 'string', 'max:100', 'regex:/^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/'],
             'repo' => ['required', 'string', 'max:100', 'regex:/^[A-Za-z0-9._-]+$/'],
             'server_uuid' => ['required', 'string', 'max:64'],
@@ -198,9 +200,33 @@ class GithubRunnerInventory
             'container_name' => ['nullable', ...ValidationPatterns::containerNameRules(64)],
             'labels' => ['nullable', 'string', 'max:255'],
             'image' => ['nullable', 'string', 'max:255', 'regex:/^[A-Za-z0-9][A-Za-z0-9._\/:-]*$/'],
+            'network_mode' => ['nullable', 'string', 'in:bridge,host,none'],
+            'timezone' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_\\/+-]+$/'],
+            'replace_existing' => ['nullable', 'boolean'],
+            'recreate' => ['nullable', 'boolean'],
+            'volumes' => ['nullable', 'array', 'max:20'],
+            'volumes.*' => ['string', 'max:512'],
+            'extra_env' => ['nullable', 'array', 'max:30'],
+            'extra_env.*.key' => ['required', 'string', 'max:128', 'regex:/^[A-Z][A-Z0-9_]*$/'],
+            'extra_env.*.value' => ['nullable', 'string', 'max:2048'],
         ])->validate();
 
-        $githubApp = $this->githubAppCatalog->appForTeam($team, $validated['github_app_uuid']);
+        $authMode = (string) ($validated['auth_mode'] ?? 'registration');
+        if ($authMode === 'pat') {
+            if (! filled($validated['access_token'] ?? null)) {
+                throw ValidationException::withMessages([
+                    'access_token' => ['Un Personal Access Token GitHub est requis.'],
+                ]);
+            }
+        } elseif (! filled($validated['github_app_uuid'] ?? null)) {
+            throw ValidationException::withMessages([
+                'github_app_uuid' => ['Une GitHub App est requise pour générer un jeton d’enregistrement.'],
+            ]);
+        }
+
+        $githubApp = filled($validated['github_app_uuid'] ?? null)
+            ? $this->githubAppCatalog->appForTeam($team, (string) $validated['github_app_uuid'])
+            : null;
         $server = $this->serverForTeam($team, $validated['server_uuid']);
 
         if (! $server->isFunctional()) {
@@ -213,40 +239,84 @@ class GithubRunnerInventory
             ?? 'github-runner-'.Str::slug($validated['runner_name'], '-');
         $this->assertValidContainerName($containerName);
 
-        if ($this->containerExists($server, $containerName)) {
+        $volumes = collect($validated['volumes'] ?? [])
+            ->map(fn ($volume): string => trim((string) $volume))
+            ->filter(fn (string $volume): bool => $volume !== '')
+            ->values()
+            ->all();
+
+        foreach ($volumes as $index => $volume) {
+            $this->assertSafeVolumeMount($volume, "volumes.{$index}");
+        }
+
+        $extraEnv = collect($validated['extra_env'] ?? [])
+            ->map(fn ($entry): array => [
+                'key' => strtoupper(trim((string) data_get($entry, 'key', ''))),
+                'value' => (string) data_get($entry, 'value', ''),
+            ])
+            ->filter(fn (array $entry): bool => $entry['key'] !== '')
+            ->reject(fn (array $entry): bool => in_array($entry['key'], [
+                'REPO_URL',
+                'RUNNER_URL',
+                'RUNNER_NAME',
+                'RUNNER_TOKEN',
+                'ACCESS_TOKEN',
+                'PAT_TOKEN',
+                'RUNNER_SCOPE',
+                'LABELS',
+                'RUNNER_LABELS',
+                'RUNNER_WORKDIR',
+                'TZ',
+                'RUNNER_REPLACE_EXISTING',
+            ], true))
+            ->values()
+            ->all();
+
+        $exists = $this->containerExists($server, $containerName);
+        if ($exists && ! ($validated['recreate'] ?? false)) {
             throw ValidationException::withMessages([
                 'container_name' => ["Le conteneur {$containerName} existe déjà sur ce serveur."],
             ]);
         }
 
-        $registration = $this->githubAppCatalog->registrationToken(
-            $githubApp,
-            $validated['owner'],
-            $validated['repo'],
-        );
+        if ($exists && ($validated['recreate'] ?? false)) {
+            $this->removeContainer($server, $containerName);
+        }
+
+        if ($authMode === 'pat') {
+            $authToken = trim((string) $validated['access_token']);
+        } else {
+            $registration = $this->githubAppCatalog->registrationToken(
+                $githubApp,
+                $validated['owner'],
+                $validated['repo'],
+            );
+            $authToken = $registration['token'];
+        }
 
         $repoUrl = 'https://github.com/'.$validated['owner'].'/'.$validated['repo'];
         $image = filled($validated['image'] ?? null) ? (string) $validated['image'] : self::DEFAULT_IMAGE;
         $labels = filled($validated['labels'] ?? null) ? (string) $validated['labels'] : 'self-hosted,devforge';
+        $networkMode = filled($validated['network_mode'] ?? null) ? (string) $validated['network_mode'] : 'bridge';
+        $timezone = filled($validated['timezone'] ?? null) ? (string) $validated['timezone'] : 'UTC';
+        $replaceExisting = array_key_exists('replace_existing', $validated)
+            ? (bool) $validated['replace_existing']
+            : true;
 
-        $command = implode(' ', [
-            'docker run -d',
-            '--name '.escapeshellarg($containerName),
-            '--restart unless-stopped',
-            '--privileged',
-            '-v /var/run/docker.sock:/var/run/docker.sock',
-            '-e '.escapeshellarg('REPO_URL='.$repoUrl),
-            '-e '.escapeshellarg('RUNNER_NAME='.$validated['runner_name']),
-            '-e '.escapeshellarg('RUNNER_TOKEN='.$registration['token']),
-            '-e '.escapeshellarg('RUNNER_SCOPE=repo'),
-            '-e '.escapeshellarg('LABELS='.$labels),
-            '-e '.escapeshellarg('RUNNER_WORKDIR=/tmp/runner/work'),
-            '--label '.escapeshellarg('com.devforge.runner=true'),
-            '--label '.escapeshellarg('com.devforge.runner.repo_url='.$repoUrl),
-            '--label '.escapeshellarg('com.devforge.runner.name='.$validated['runner_name']),
-            '--label '.escapeshellarg('com.casaos.app_id=github-runners'),
-            escapeshellarg($image),
-        ]);
+        $command = $this->buildDockerRunCommand(
+            containerName: $containerName,
+            image: $image,
+            repoUrl: $repoUrl,
+            runnerName: $validated['runner_name'],
+            authToken: $authToken,
+            authMode: $authMode,
+            labels: $labels,
+            networkMode: $networkMode,
+            timezone: $timezone,
+            replaceExisting: $replaceExisting,
+            volumes: $volumes,
+            extraEnv: $extraEnv,
+        );
 
         try {
             instant_remote_process([$command], $server);
@@ -265,6 +335,103 @@ class GithubRunnerInventory
             'message' => 'Runner créé et démarré.',
             'runner' => $this->show($team, $server->uuid, $containerName),
         ];
+    }
+
+    /**
+     * @return array{ok: bool, message: string, container: string}
+     */
+    public function destroy(Team $team, string $serverUuid, string $containerName): array
+    {
+        $server = $this->serverForTeam($team, $serverUuid);
+        $this->assertValidContainerName($containerName);
+        $this->findRunner($server, $containerName);
+
+        if (! $server->isFunctional()) {
+            throw ValidationException::withMessages([
+                'server' => ['Le serveur n’est pas joignable.'],
+            ]);
+        }
+
+        $this->removeContainer($server, $containerName);
+        Cache::forget('devforge.github.runners.list.'.$team->id);
+
+        return [
+            'ok' => true,
+            'message' => 'Runner supprimé.',
+            'container' => $containerName,
+        ];
+    }
+
+    /**
+     * @param  array<int, string>  $volumes
+     * @param  array<int, array{key: string, value: string}>  $extraEnv
+     */
+    public function buildDockerRunCommand(
+        string $containerName,
+        string $image,
+        string $repoUrl,
+        string $runnerName,
+        string $authToken,
+        string $authMode = 'registration',
+        string $labels = 'self-hosted,devforge',
+        string $networkMode = 'bridge',
+        string $timezone = 'UTC',
+        bool $replaceExisting = true,
+        array $volumes = [],
+        array $extraEnv = [],
+    ): string {
+        $parts = [
+            'docker run -d',
+            '--name '.escapeshellarg($containerName),
+            '--restart unless-stopped',
+            '--privileged',
+            '--network '.escapeshellarg($networkMode),
+            '-v /var/run/docker.sock:/var/run/docker.sock',
+        ];
+
+        foreach ($volumes as $volume) {
+            $parts[] = '-v '.escapeshellarg($volume);
+        }
+
+        $parts = [
+            ...$parts,
+            '-e '.escapeshellarg('REPO_URL='.$repoUrl),
+            '-e '.escapeshellarg('RUNNER_URL='.$repoUrl),
+            '-e '.escapeshellarg('RUNNER_NAME='.$runnerName),
+            '-e '.escapeshellarg('RUNNER_SCOPE=repo'),
+            '-e '.escapeshellarg('LABELS='.$labels),
+            '-e '.escapeshellarg('RUNNER_LABELS='.$labels),
+            '-e '.escapeshellarg('RUNNER_WORKDIR=/tmp/runner/work'),
+            '-e '.escapeshellarg('TZ='.$timezone),
+            '-e '.escapeshellarg('RUNNER_REPLACE_EXISTING='.($replaceExisting ? 'true' : 'false')),
+        ];
+
+        if ($authMode === 'pat') {
+            // Classic / fine-grained PAT: popcorn + myoung34 mint a registration token from it.
+            $parts[] = '-e '.escapeshellarg('ACCESS_TOKEN='.$authToken);
+            $parts[] = '-e '.escapeshellarg('PAT_TOKEN='.$authToken);
+        } else {
+            // Short-lived registration token (works for myoung34 via RUNNER_TOKEN and popcorn via ACCESS_TOKEN).
+            $parts[] = '-e '.escapeshellarg('RUNNER_TOKEN='.$authToken);
+            $parts[] = '-e '.escapeshellarg('ACCESS_TOKEN='.$authToken);
+            $parts[] = '-e '.escapeshellarg('PAT_TOKEN='.$authToken);
+        }
+
+        foreach ($extraEnv as $entry) {
+            $parts[] = '-e '.escapeshellarg($entry['key'].'='.$entry['value']);
+        }
+
+        $parts = [
+            ...$parts,
+            '--label '.escapeshellarg('com.devforge.runner=true'),
+            '--label '.escapeshellarg('com.devforge.runner.repo_url='.$repoUrl),
+            '--label '.escapeshellarg('com.devforge.runner.name='.$runnerName),
+            '--label '.escapeshellarg('com.devforge.runner.auth_mode='.$authMode),
+            '--label '.escapeshellarg('com.casaos.app_id=github-runners'),
+            escapeshellarg($image),
+        ];
+
+        return implode(' ', $parts);
     }
 
     /**
@@ -445,6 +612,7 @@ class GithubRunnerInventory
     private function serversForTeam(Team $team): Collection
     {
         return Server::query()
+            ->with('settings')
             ->where('team_id', $team->id)
             ->orderBy('name')
             ->get();
@@ -469,11 +637,11 @@ class GithubRunnerInventory
      */
     private function runnersOnServer(Server $server, bool $enrichEnv = true): Collection
     {
-        if (! $server->isFunctional()) {
-            return collect([]);
-        }
-
         try {
+            if (! $server->isFunctional()) {
+                return collect([]);
+            }
+
             $containers = $this->loadRunnerContainers($server);
         } catch (\Throwable) {
             return collect([]);
@@ -790,6 +958,59 @@ class GithubRunnerInventory
         if (! ValidationPatterns::isValidContainerName($name)) {
             throw ValidationException::withMessages([
                 'container' => ['Nom de conteneur invalide.'],
+            ]);
+        }
+    }
+
+    private function assertSafeVolumeMount(string $volume, string $field): void
+    {
+        $parts = explode(':', $volume);
+        if (count($parts) < 2 || count($parts) > 3) {
+            throw ValidationException::withMessages([
+                $field => ['Volume invalide. Format attendu : /host/path:/container/path[:ro|rw].'],
+            ]);
+        }
+
+        [$host, $container] = $parts;
+        $mode = $parts[2] ?? null;
+
+        if ($host === '' || $container === '' || ! str_starts_with($host, '/') || ! str_starts_with($container, '/')) {
+            throw ValidationException::withMessages([
+                $field => ['Les chemins host et conteneur doivent être absolus.'],
+            ]);
+        }
+
+        if (str_contains($host, '..') || str_contains($container, '..')) {
+            throw ValidationException::withMessages([
+                $field => ['Les chemins de volume ne doivent pas contenir « .. ».'],
+            ]);
+        }
+
+        if ($mode !== null && ! in_array($mode, ['ro', 'rw'], true)) {
+            throw ValidationException::withMessages([
+                $field => ['Mode de volume invalide. Utilisez ro ou rw.'],
+            ]);
+        }
+
+        $forbiddenPrefixes = ['/etc', '/root', '/boot', '/proc', '/sys', '/dev', '/var/run'];
+        foreach ($forbiddenPrefixes as $prefix) {
+            if ($host === $prefix || str_starts_with($host, $prefix.'/')) {
+                throw ValidationException::withMessages([
+                    $field => ["Le montage de {$prefix} est interdit."],
+                ]);
+            }
+        }
+    }
+
+    private function removeContainer(Server $server, string $containerName): void
+    {
+        try {
+            instant_remote_process([
+                'docker rm -f '.escapeshellarg($containerName),
+            ], $server);
+        } catch (\Throwable $e) {
+            throw ValidationException::withMessages([
+                'container' => ['Impossible de supprimer le conteneur : '.$e->getMessage()],
             ]);
         }
     }
