@@ -29,6 +29,7 @@ class AgentChatMode
         'fix_coolify_base_config_path',
         'control_resource',
         'exec_command',
+        'execute_code',
         'install_tool',
         'create_github_branch',
         'create_github_pull_request',

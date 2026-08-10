@@ -304,6 +304,7 @@ class AgentSubagentCapabilities
                 'todo_write',
                 'list_tool_packages',
                 'enable_tool_package',
+                'execute_code',
             ],
             'tester' => [
                 'list_resources',
@@ -312,6 +313,7 @@ class AgentSubagentCapabilities
                 'list_application_source',
                 'read_application_source',
                 'run_application_tests',
+                'execute_code',
                 'exec_command',
                 'docker_logs',
                 'list_github_workflow_runs',

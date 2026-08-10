@@ -88,6 +88,7 @@ class AgentToolClassification
             'request_api_key' => $neutral,
             'request_user_input' => $neutral,
             'run_application_tests' => $destructive,
+            'execute_code' => $destructive,
             'list_github_apps' => $readOnly,
             'list_github_repos' => $readOnly,
             'list_github_branches' => $readOnly,

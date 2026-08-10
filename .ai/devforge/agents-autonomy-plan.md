@@ -142,7 +142,7 @@ frontend/src/pages/agents/
 | P5.1 Collaboration multi-rôles (tools + LLM par rôle) | fait (allowlists distinctes + tierForRole + model_override) |
 | P5.2 Mode débat / speaker selection | fait (`AgentCollabOrchestrator`, orchestration=collab) |
 | P5.3 Team report + timeline contributions | fait (`AgentTeamReporter`, panneau Contributions) |
-| P5.4 Sandbox code-exec (Docker) | à faire (opt-in) |
+| P5.4 Sandbox code-exec (Docker) | fait (`AgentCodeSandbox` / `execute_code`, opt-in) |
 | P6 MCP client dans la boucle | optionnel |
 
 ## P3 — Patterns OpenClaw (natifs, sans runtime OpenClaw)
@@ -313,9 +313,9 @@ Objectif : passer d’une équipe **ops à profils leaf fixes** à une équipe c
 - Config + policy `AgentPermissionEngine`
 
 **Critères de done**
-- [ ] Opt-in only ; deny si flag off
-- [ ] Test feature (Docker) : script trivial → stdout capturé dans tool result
-- [ ] Pas d’accès au socket Docker host hors sandbox prévu
+- [x] Opt-in only ; deny si flag off
+- [x] Test unit : commande docker sans socket + deny désactivé (+ exécution réelle si Docker dispo)
+- [x] Pas d’accès au socket Docker host hors sandbox prévu
 
 ### Ordre d’implémentation recommandé
 

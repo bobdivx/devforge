@@ -170,6 +170,19 @@ return [
 
     'agents_collab_speaker_selection' => (string) env('DEVFORGE_AGENTS_COLLAB_SPEAKER_SELECTION', 'auto'),
 
+    /** P5.4 — sandbox execute_code (Docker éphémère). DÉSACTIVÉ par défaut. */
+    'agents_code_sandbox_enabled' => filter_var(
+        env('DEVFORGE_AGENTS_CODE_SANDBOX_ENABLED', false),
+        FILTER_VALIDATE_BOOLEAN,
+    ),
+    'agents_code_sandbox_memory' => (string) env('DEVFORGE_AGENTS_CODE_SANDBOX_MEMORY', '256m'),
+    'agents_code_sandbox_cpus' => (string) env('DEVFORGE_AGENTS_CODE_SANDBOX_CPUS', '0.5'),
+    'agents_code_sandbox_user' => (string) env('DEVFORGE_AGENTS_CODE_SANDBOX_USER', '65534:65534'),
+    'agents_code_sandbox_workdir' => (string) env('DEVFORGE_AGENTS_CODE_SANDBOX_WORKDIR', sys_get_temp_dir()),
+    'agents_code_sandbox_image_php' => (string) env('DEVFORGE_AGENTS_CODE_SANDBOX_IMAGE_PHP', 'php:8.4-cli'),
+    'agents_code_sandbox_image_node' => (string) env('DEVFORGE_AGENTS_CODE_SANDBOX_IMAGE_NODE', 'node:22-alpine'),
+    'agents_code_sandbox_image_python' => (string) env('DEVFORGE_AGENTS_CODE_SANDBOX_IMAGE_PYTHON', 'python:3.12-alpine'),
+
     /** Cooldown entre deux dispatches mission_work pour la même mission (minutes). */
     'agents_mission_work_cooldown_minutes' => (int) env('DEVFORGE_AGENTS_MISSION_WORK_COOLDOWN_MINUTES', 10),
 

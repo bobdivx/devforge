@@ -145,7 +145,7 @@ class AgentToolkit
     /** @return array<array{name: string, description: string, parameters: array<mixed>}> */
     private function metaToolDefinitions(): array
     {
-        return [
+        $tools = [
             [
                 'name' => 'enable_tool_package',
                 'description' => 'Active un paquet d\'outils manquant (ex: github). Persisté pour les prochains runs. À utiliser dès qu\'un besoin n\'est pas couvert.',
@@ -406,6 +406,34 @@ class AgentToolkit
                 ],
             ],
         ];
+
+        if (app(AgentCodeSandbox::class)->enabled()) {
+            $tools[] = [
+                'name' => 'execute_code',
+                'description' => 'Exécute un snippet php/node/python dans un conteneur Docker isolé (sans réseau, sans docker.sock). Distinct de exec_command SSH et run_application_tests.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'language' => [
+                            'type' => 'string',
+                            'enum' => ['php', 'node', 'python'],
+                            'description' => 'Runtime sandbox',
+                        ],
+                        'code' => [
+                            'type' => 'string',
+                            'description' => 'Source complète à exécuter (stdout pour le résultat)',
+                        ],
+                        'timeout' => [
+                            'type' => 'integer',
+                            'description' => 'Timeout secondes (défaut 15, max 60)',
+                        ],
+                    ],
+                    'required' => ['language', 'code'],
+                ],
+            ];
+        }
+
+        return $tools;
     }
 
     /** @return array<array{name: string, description: string, parameters: array<mixed>}> */
@@ -1484,6 +1512,7 @@ class AgentToolkit
             'mission_update' => $this->missionUpdate($arguments),
             'request_user_input' => $this->requestUserInput($arguments),
             'run_application_tests' => $this->runApplicationTests($arguments),
+            'execute_code' => $this->executeCode($arguments),
             'list_github_apps' => $this->githubTools->listApps(),
             'list_github_repos' => $this->githubTools->listRepos((string) ($arguments['github_app_uuid'] ?? '')),
             'list_github_branches' => $this->githubTools->listBranches(
@@ -2377,6 +2406,34 @@ class AgentToolkit
             'kind' => $kind,
             'key' => $key,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function executeCode(array $arguments): array
+    {
+        $sandbox = app(AgentCodeSandbox::class);
+        $language = (string) ($arguments['language'] ?? '');
+        $code = (string) ($arguments['code'] ?? '');
+        $timeout = isset($arguments['timeout']) ? (int) $arguments['timeout'] : null;
+
+        $result = $sandbox->execute($language, $code, $timeout);
+
+        if (isset($result['error'])) {
+            $this->run->appendLog('  ✗ execute_code: '.mb_substr((string) $result['error'], 0, 200));
+
+            return $result;
+        }
+
+        $ok = ($result['ok'] ?? false) === true;
+        $this->run->appendLog(
+            ($ok ? '  ✓' : '  ✗').' execute_code '.$language
+            .' exit='.(string) ($result['exit_code'] ?? '?'),
+        );
+
+        return $result;
     }
 
     /**

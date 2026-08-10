@@ -56,6 +56,15 @@ class AgentPermissionEngine
             ];
         }
 
+        if ($toolName === 'execute_code'
+            && ! filter_var(config('devforge.agents_code_sandbox_enabled', false), FILTER_VALIDATE_BOOLEAN)) {
+            return [
+                'decision' => self::DECISION_DENY,
+                'reason' => 'Sandbox code désactivée (agents_code_sandbox_enabled=false).',
+                'rule_id' => 'sandbox:disabled',
+            ];
+        }
+
         $agentPermissions = $this->agentPermissionConfig($agent);
 
         if (in_array($toolName, $agentPermissions['denied_tools'], true)) {

@@ -30,6 +30,7 @@ class AgentToolPackage
         'mission_claim',
         'mission_update',
         'run_application_tests',
+        'execute_code',
     ];
 
     /**
@@ -74,6 +75,7 @@ class AgentToolPackage
                     'yield_wait',
                     'propose_plan',
                     'run_application_tests',
+                    'execute_code',
                 ],
                 'default_for_types' => ['debug', 'deployment', 'tech-watch', 'devforge', 'security'],
             ],

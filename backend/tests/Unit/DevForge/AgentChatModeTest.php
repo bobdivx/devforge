@@ -14,6 +14,8 @@ it('blocks destructive tools in plan mode', function () {
     expect(AgentChatMode::isToolAllowed('read_github_file', 'plan'))->toBeTrue()
         ->and(AgentChatMode::isToolAllowed('write_github_file', 'plan'))->toBeFalse()
         ->and(AgentChatMode::isToolAllowed('control_resource', 'plan'))->toBeFalse()
+        ->and(AgentChatMode::isToolAllowed('execute_code', 'plan'))->toBeFalse()
+        ->and(AgentChatMode::isToolAllowed('execute_code', 'build'))->toBeTrue()
         ->and(AgentChatMode::isToolAllowed('write_github_file', 'build'))->toBeTrue();
 });
 
