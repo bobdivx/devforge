@@ -114,6 +114,10 @@ body {
     gap: 0.5rem;
 }
 
+.action-toolbar.agent-card-actions {
+    grid-template-columns: repeat(auto-fit, minmax(2.5rem, 1fr));
+}
+
 .action-toolbar > .btn,
 .action-toolbar > a.btn {
     width: 100%;
@@ -135,17 +139,35 @@ body {
 }
 
 @media (max-width: 639px) {
-    .btn,
-    .btn-sm {
+    .btn:not(.btn-square):not(.btn-circle):not(.btn-xs),
+    .btn-sm:not(.btn-square):not(.btn-circle) {
         min-height: 2.75rem;
         height: auto;
         padding-block: 0.5rem;
     }
 
-    .btn-xs {
-        min-height: 2.5rem;
+    .btn-xs:not(.btn-square):not(.btn-circle) {
+        min-height: 2.25rem;
         height: auto;
         padding-block: 0.375rem;
+    }
+
+    .btn-square,
+    .btn-circle {
+        width: 2.25rem;
+        min-width: 2.25rem;
+        height: 2.25rem;
+        min-height: 2.25rem;
+        padding-inline: 0;
+        padding-block: 0;
+    }
+
+    .btn-square.btn-sm,
+    .btn-circle.btn-sm {
+        width: 2.25rem;
+        min-width: 2.25rem;
+        height: 2.25rem;
+        min-height: 2.25rem;
     }
 
     .modal-action,
@@ -177,6 +199,10 @@ body {
 
     .action-toolbar > details {
         grid-column: 1 / -1;
+    }
+
+    .action-toolbar {
+        grid-template-columns: repeat(auto-fit, minmax(2.75rem, 1fr));
     }
 }
 
@@ -290,6 +316,11 @@ input {
 
 .dashboard-shell {
     min-height: 100vh;
+    overflow-x: clip;
+}
+
+:root {
+    --devforge-fab-clearance: 1rem;
 }
 
 .card:hover {

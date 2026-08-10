@@ -183,11 +183,7 @@ export function DomainPage({ bootstrap, route, onSwitchTeam }: DomainPageProps) 
                 );
         case 'agent-detail':
             return (bootstrap.features?.agents_enabled ?? false)
-                ? (
-                    <div class="-m-4">
-                        <AgentDetailPage path={route.path} />
-                    </div>
-                )
+                ? <AgentDetailPage path={route.path} />
                 : (
                     <>
                         <PageHeader title="Agents IA" description="Fonctionnalité désactivée sur cette instance." eyebrow="Indisponible" />

@@ -124,6 +124,15 @@ export function DeploymentsIndicator() {
         }
     }, [deployments.length]);
 
+    useEffect(() => {
+        const clearance = deployments.length > 0 ? '5.5rem' : '1rem';
+        document.documentElement.style.setProperty('--devforge-fab-clearance', clearance);
+
+        return () => {
+            document.documentElement.style.removeProperty('--devforge-fab-clearance');
+        };
+    }, [deployments.length]);
+
     if (deployments.length === 0) {
         return null;
     }
@@ -162,15 +171,15 @@ export function DeploymentsIndicator() {
             </div>
 
             {/* Mobile — panneau déroulant en bas d’écran */}
-            <div class="fixed inset-x-0 bottom-0 z-50 md:hidden">
-                <div class="mx-auto max-w-lg px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            <div class="pointer-events-none fixed inset-x-0 bottom-0 z-40 md:hidden">
+                <div class="pointer-events-auto mx-auto max-w-lg px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
                     <div class="overflow-hidden rounded-2xl border border-base-300 bg-base-100 shadow-2xl">
                         <div class="flex justify-center px-3 pt-2">
                             <TriggerButton
                                 count={count}
                                 expanded={expanded}
                                 onToggle={() => setExpanded((current) => !current)}
-                                className="w-full justify-center rounded-xl py-2.5"
+                                className="w-full max-w-full justify-center rounded-xl py-2.5"
                             />
                         </div>
                         {expanded && (

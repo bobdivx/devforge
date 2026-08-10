@@ -49,6 +49,7 @@ class AgentToolClassification
             'list_application_source' => $readOnly,
             'read_application_source' => $readOnly,
             'write_application_source' => $destructive,
+            'get_application_preview' => $readOnly,
             'list_application_env_vars' => $readOnly,
             'upsert_application_env_var' => $destructive,
             'get_application_runtime_settings' => $readOnly,

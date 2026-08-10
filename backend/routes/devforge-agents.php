@@ -6,6 +6,7 @@ use App\Http\Controllers\DevForge\AgentInstructionsController;
 use App\Http\Controllers\DevForge\AgentMemoryController;
 use App\Http\Controllers\DevForge\AgentMessageController;
 use App\Http\Controllers\DevForge\AgentMissionController;
+use App\Http\Controllers\DevForge\AgentFeatureDeliveryController;
 use App\Http\Controllers\DevForge\AgentRunController;
 use App\Http\Controllers\DevForge\AgentRunStreamController;
 use App\Http\Controllers\DevForge\AgentSessionController;
@@ -131,6 +132,15 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
         Route::patch('/missions/{uuid}', [AgentMissionController::class, 'update'])
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->name('missions.update');
+        Route::get('/missions/{uuid}/delivery', [AgentFeatureDeliveryController::class, 'show'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->name('missions.delivery.show');
+        Route::post('/missions/{uuid}/delivery/validate', [AgentFeatureDeliveryController::class, 'validateMerge'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->name('missions.delivery.validate');
+        Route::post('/missions/{uuid}/delivery/request-changes', [AgentFeatureDeliveryController::class, 'requestChanges'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->name('missions.delivery.request-changes');
         Route::get('/standing-orders', [AgentStandingOrderController::class, 'index'])->name('standing-orders.index');
         Route::post('/standing-orders', [AgentStandingOrderController::class, 'store'])->name('standing-orders.store');
         Route::put('/standing-orders/{id}', [AgentStandingOrderController::class, 'update'])

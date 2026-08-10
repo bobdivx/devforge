@@ -225,7 +225,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                             {relativeTime(agent.last_run_at)}
                         </span>
                     </div>
-                    <ActionToolbar>
+                    <ActionToolbar class="agent-card-actions">
                         <a
                             class="btn btn-primary btn-xs gap-1"
                             href={routeHref(detailPath)}
@@ -236,7 +236,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                             Chat
                         </a>
                         <button
-                            class={`btn btn-ghost btn-xs gap-1 ${agent.is_primary_chat ? 'text-primary' : ''}`}
+                            class={`btn btn-ghost btn-xs btn-square size-8 min-h-8 gap-1 p-0 ${agent.is_primary_chat ? 'text-primary' : ''}`}
                             type="button"
                             title={agent.is_primary_chat ? 'Retirer du chat principal' : 'Définir comme chat principal'}
                             onClick={handleSetPrimaryChat}
@@ -244,7 +244,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                             <Star class={`size-3 ${agent.is_primary_chat ? 'fill-current' : ''}`} aria-hidden />
                         </button>
                         <button
-                            class="btn btn-ghost btn-xs gap-1"
+                            class="btn btn-ghost btn-xs btn-square size-8 min-h-8 gap-1 p-0"
                             type="button"
                             title={agent.is_active ? "Suspendre l'agent (reste configuré, ne s'exécute plus)" : "Activer l'agent (éligible au planning / lancement)"}
                             disabled={toggling || isBusy}
@@ -269,7 +269,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                             {isLaunching ? (
                                 <>
                                     <span class="loading loading-spinner loading-xs" aria-hidden />
-                                    Démarrage…
+                                    <span>Démarrage…</span>
                                 </>
                             ) : isBusy ? (
                                 <>En cours</>
@@ -281,7 +281,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                             )}
                         </button>
                         <a
-                            class="btn btn-ghost btn-xs"
+                            class="btn btn-ghost btn-xs btn-square size-8 min-h-8 p-0"
                             href={routeHref(settingsPath)}
                             title="Configurer"
                             onClick={(e) => onNavigate(e as unknown as MouseEvent, settingsPath)}

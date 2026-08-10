@@ -58,6 +58,7 @@ class AgentToolPackage
                     'list_application_source',
                     'read_application_source',
                     'write_application_source',
+                    'get_application_preview',
                     'read_remote_file',
                     'list_remote_dir',
                     'search_remote_files',

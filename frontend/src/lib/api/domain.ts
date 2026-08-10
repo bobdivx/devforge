@@ -823,9 +823,34 @@ export type AgentMission = {
     run_uuid?: string | null;
     timeline?: AgentMissionTimelineEvent[];
     metadata: Record<string, unknown>;
+    is_feature_delivery?: boolean;
     created_at: string | null;
     updated_at: string | null;
     completed_at: string | null;
+};
+
+export type FeatureDeliveryPreview = {
+    uuid: string;
+    pull_request_id: number;
+    pull_request_html_url?: string | null;
+    fqdn: string | null;
+    status: string | null;
+    is_running?: boolean;
+};
+
+export type FeatureDeliveryStatus = {
+    workflow: string;
+    awaiting: string;
+    force_pull_request: boolean;
+    application_uuid: string | null;
+    application_name?: string | null;
+    pull_request_number: number | null;
+    pull_request_url: string | null;
+    branch: string | null;
+    preview: FeatureDeliveryPreview | null;
+    preview_deployments_enabled: boolean;
+    can_validate: boolean;
+    run_uuid: string | null;
 };
 
 export type AgentChatAttachment = {
@@ -3630,6 +3655,46 @@ export const domainApi = {
     }>) => mutate<ApiResponse<AgentMission>>(`/ai/missions/${encodeURIComponent(uuid)}`, {
         method: 'PATCH',
         body: JSON.stringify(input),
+    }),
+    createApplicationFeatureRequest: (applicationUuid: string, input: {
+        title: string;
+        description?: string;
+        priority?: string;
+        dispatch_now?: boolean;
+    }) => mutate<ApiResponse<{
+        mission: AgentMission;
+        dispatched: boolean;
+        run_uuid: string | null;
+        feature_delivery: FeatureDeliveryStatus;
+    }>>(`/applications/${encodeURIComponent(applicationUuid)}/feature-requests`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+    }),
+    missionDelivery: (uuid: string) => apiFetch<ApiResponse<{
+        mission: AgentMission;
+        feature_delivery: FeatureDeliveryStatus;
+    }>>(`${API_BASE}/ai/missions/${encodeURIComponent(uuid)}/delivery`),
+    validateMissionDelivery: (uuid: string, input?: { merge_method?: 'merge' | 'squash' | 'rebase' }) => mutate<ApiResponse<{
+        ok: boolean;
+        merged?: boolean;
+        sha?: string | null;
+        message?: string;
+        pull_request_number?: number;
+        pull_request_url?: string | null;
+        mission: AgentMission;
+        feature_delivery: FeatureDeliveryStatus;
+    }>>(`/ai/missions/${encodeURIComponent(uuid)}/delivery/validate`, {
+        method: 'POST',
+        body: JSON.stringify(input ?? {}),
+    }),
+    requestMissionDeliveryChanges: (uuid: string, feedback: string) => mutate<ApiResponse<{
+        ok: boolean;
+        message?: string;
+        mission: AgentMission;
+        feature_delivery: FeatureDeliveryStatus;
+    }>>(`/ai/missions/${encodeURIComponent(uuid)}/delivery/request-changes`, {
+        method: 'POST',
+        body: JSON.stringify({ feedback }),
     }),
     agentRuns: (agentUuid: string, page = 1) => apiFetch<ApiListResponse<AgentRun>>(`${API_BASE}/agents/${encodeURIComponent(agentUuid)}/runs?page=${page}`),
     agentRun: (agentUuid: string, runUuid: string) => apiFetch<ApiResponse<AgentRun>>(`${API_BASE}/agents/${encodeURIComponent(agentUuid)}/runs/${encodeURIComponent(runUuid)}`),

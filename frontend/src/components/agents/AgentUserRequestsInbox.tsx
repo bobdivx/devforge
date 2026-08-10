@@ -51,9 +51,9 @@ export function AgentUserRequestsInbox() {
     }
 
     return (
-        <section id="agent-user-requests-inbox" class="mb-5 rounded-xl border border-warning/40 bg-warning/5 p-4">
+        <section id="agent-user-requests-inbox" class="mb-5 min-w-0 overflow-hidden rounded-xl border border-warning/40 bg-warning/5 p-3 sm:p-4">
             <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div>
+                <div class="min-w-0">
                     <h3 class="text-sm font-semibold">
                         Actions requises
                         <span class="badge badge-warning badge-sm ml-2">{pendingCount}</span>
@@ -88,9 +88,9 @@ export function AgentUserRequestsInbox() {
                                 Confirmer
                             </button>
                         ) : (
-                            <div class="flex flex-wrap gap-2">
+                            <div class="flex min-w-0 flex-wrap gap-2">
                                 <input
-                                    class="input input-bordered input-sm min-w-[12rem] flex-1 font-mono"
+                                    class="input input-bordered input-sm min-w-0 flex-1 basis-full font-mono sm:basis-auto sm:min-w-[12rem]"
                                     type="password"
                                     placeholder={`Valeur pour ${req.key_name}`}
                                     value={drafts[req.uuid] ?? ''}

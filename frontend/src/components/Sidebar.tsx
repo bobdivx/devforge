@@ -1,5 +1,5 @@
 import { ChevronDown, PanelLeftClose, PanelLeftOpen, X } from 'lucide-preact';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useMemo, useState } from 'preact/hooks';
 import type { BootstrapData } from '../lib/bootstrap';
 import { DEVFORGE_BRAND_NAME, DEVFORGE_LOGO_URL } from '../lib/brand';
 import {
@@ -157,30 +157,7 @@ export function Sidebar({
     const entries = useMemo(() => visibleSidebarNav(agentsEnabled), [agentsEnabled]);
     const panelClass = collapsed ? 'w-16' : 'w-64';
 
-    const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-        applications: true,
-        agents: true,
-    });
-
-    useEffect(() => {
-        setOpenGroups((current) => {
-            let changed = false;
-            const next = { ...current };
-
-            for (const entry of entries) {
-                if (entry.type !== 'group') {
-                    continue;
-                }
-
-                if (isNavGroupActive(entry, route.page) && !next[entry.id]) {
-                    next[entry.id] = true;
-                    changed = true;
-                }
-            }
-
-            return changed ? next : current;
-        });
-    }, [route.page, entries]);
+    const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
     const toggleGroup = (id: string) => {
         setOpenGroups((current) => ({

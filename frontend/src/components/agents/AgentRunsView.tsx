@@ -120,9 +120,9 @@ export function AgentRunsView({ agent, initialRunUuid = null, onAgentUpdated }: 
         || isTracking;
 
     return (
-        <div class="flex min-h-0 flex-1 flex-col">
+        <div class="flex min-h-0 min-w-0 flex-1 flex-col">
             {hasLiveRun && (
-                <div class="flex shrink-0 items-center gap-3 border-b border-success/30 bg-success/10 px-4 py-2.5">
+                <div class="flex shrink-0 items-center gap-3 border-b border-success/30 bg-success/10 px-3 py-2.5 sm:px-4">
                     <span class="relative flex size-2.5 shrink-0">
                         <span class="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-75" />
                         <span class="relative inline-flex size-2.5 rounded-full bg-success" />
@@ -135,9 +135,9 @@ export function AgentRunsView({ agent, initialRunUuid = null, onAgentUpdated }: 
                 </div>
             )}
 
-            <div class="flex shrink-0 items-center justify-between border-b border-base-300 bg-base-100 px-4 py-2.5">
-                <p class="text-xs text-base-content/60">
-                    Historique des runs autonomes
+            <div class="flex shrink-0 items-center justify-between gap-2 border-b border-base-300 bg-base-100 px-3 py-2.5 sm:px-4">
+                <p class="min-w-0 truncate text-xs text-base-content/60">
+                    Historique des runs
                 </p>
                 <button
                     class="btn btn-ghost btn-xs gap-1.5"
@@ -149,8 +149,8 @@ export function AgentRunsView({ agent, initialRunUuid = null, onAgentUpdated }: 
                 </button>
             </div>
 
-            <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
-                <aside class="max-h-[min(40vh,18rem)] shrink-0 overflow-y-auto border-b border-base-300 bg-base-200/20 lg:max-h-none lg:w-80 lg:max-w-[40%] lg:border-b-0 lg:border-e">
+            <div class="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+                <aside class="max-h-[min(32vh,14rem)] shrink-0 overflow-y-auto border-b border-base-300 bg-base-200/20 lg:max-h-none lg:w-80 lg:max-w-[40%] lg:border-b-0 lg:border-e">
                     {loading ? (
                         <div class="flex items-center justify-center px-4 py-10 text-xs text-base-content/50">
                             <span class="loading loading-spinner loading-sm me-2" />

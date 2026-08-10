@@ -35,6 +35,7 @@ export function App({ initialPath }: AppProps) {
     const [toasts, setToasts] = useState<Toast[]>([]);
     const [teamRevision, setTeamRevision] = useState(0);
     const route = useMemo(() => findRoute(pathname), [pathname]);
+    const immersiveChat = route.page === 'agent-detail';
     const showChatFab = Boolean(
         bootstrap?.features?.agents_enabled
         && route.page !== 'agent-detail'
@@ -152,7 +153,7 @@ export function App({ initialPath }: AppProps) {
                             revision: teamRevision,
                             agentsEnabled: bootstrapData.features?.agents_enabled ?? false,
                         }}>
-                            <div class="flex min-h-screen gap-3 p-3 md:gap-4 md:p-4">
+                            <div class={`flex gap-3 p-3 md:gap-4 md:p-4 ${immersiveChat ? 'h-dvh max-h-dvh overflow-hidden' : 'min-h-screen'}`}>
                                 {sidebarOpen && (
                                     <button
                                         class="fixed inset-0 z-30 bg-black/50 backdrop-blur-[1px] lg:hidden"
@@ -172,7 +173,7 @@ export function App({ initialPath }: AppProps) {
                                     onToggleCollapsed={() => setSidebarCollapsed((current) => !current)}
                                 />
 
-                                <div class="flex min-w-0 flex-1 flex-col gap-3 md:gap-4">
+                                <div class={`flex min-w-0 flex-1 flex-col gap-3 md:gap-4 ${immersiveChat ? 'min-h-0' : ''}`}>
                                     <Topbar
                                         bootstrap={bootstrapData}
                                         theme={theme}
@@ -181,10 +182,18 @@ export function App({ initialPath }: AppProps) {
                                     />
                                     <main
                                         id="devforge-content"
-                                        class="custom-scrollbar devforge-panel min-w-0 flex-1 overflow-x-hidden overflow-y-auto rounded-2xl bg-base-100/70 p-4 shadow-sm outline-none md:p-6"
+                                        class={`custom-scrollbar devforge-panel min-w-0 flex-1 rounded-2xl bg-base-100/70 shadow-sm outline-none ${
+                                            immersiveChat
+                                                ? 'flex min-h-0 flex-col overflow-hidden p-0'
+                                                : 'overflow-x-hidden overflow-y-auto p-4 md:p-6'
+                                        }`}
                                         tabIndex={-1}
                                     >
-                                        <div class={`mx-auto grid min-w-0 ${contentWidthClass(appearance.pageWidth)} gap-5`}>
+                                        <div class={`mx-auto w-full min-w-0 ${contentWidthClass(appearance.pageWidth)} ${
+                                            immersiveChat
+                                                ? 'flex min-h-0 flex-1 flex-col'
+                                                : 'grid gap-5'
+                                        }`}>
                                             <DomainPage
                                                 key={`${bootstrapData.current_team.id}-${teamRevision}`}
                                                 bootstrap={bootstrapData}
@@ -204,7 +213,9 @@ export function App({ initialPath }: AppProps) {
                             {showChatFab && (
                                 <a
                                     class="btn btn-primary btn-circle fixed end-4 z-40 size-12 shadow-lg lg:hidden"
-                                    style={{ bottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+                                    style={{
+                                        bottom: 'max(var(--devforge-fab-clearance, 1rem), calc(env(safe-area-inset-bottom) + 0.75rem))',
+                                    }}
                                     href={routeHref(AGENTS_CHAT_PATH)}
                                     aria-label="Ouvrir le chat agent"
                                     title="Chat agent"

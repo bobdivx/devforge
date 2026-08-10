@@ -10,13 +10,13 @@ type PageHeaderProps = {
 
 export function PageHeader({ title, description, eyebrow, actions }: PageHeaderProps) {
     return (
-        <header class="mb-2 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-            <div class="grid gap-2">
+        <header class="mb-2 flex min-w-0 flex-col justify-between gap-4 sm:flex-row sm:items-end">
+            <div class="grid min-w-0 gap-2">
                 {eyebrow && <p class="text-[11px] font-semibold uppercase tracking-widest text-base-content/40">{eyebrow}</p>}
                 <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1>
                 <p class="max-w-2xl text-sm text-base-content/55">{description}</p>
             </div>
-            {actions && <ActionToolbar>{actions}</ActionToolbar>}
+            {actions && <ActionToolbar class="w-full sm:w-auto">{actions}</ActionToolbar>}
         </header>
     );
 }

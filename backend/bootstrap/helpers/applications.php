@@ -75,6 +75,9 @@ function queue_application_deployment(Application $application, string $deployme
         }
     }
 
+    // Newest wins: cancel any active deployment for this application/PR before queueing another.
+    cancel_superseded_application_deployments($application_id, (int) $pull_request_id);
+
     $deployment = ApplicationDeploymentQueue::create([
         'application_id' => $application_id,
         'application_name' => $application->name,
@@ -117,6 +120,57 @@ function queue_application_deployment(Application $application, string $deployme
         'deployment_uuid' => $deployment_uuid,
     ];
 }
+
+/**
+ * Cancel queued/in-progress deployments for an application (and PR scope) so a newer one can take over.
+ * Does not call next_after_cancel — the caller is expected to queue the replacement immediately.
+ */
+function cancel_superseded_application_deployments(string|int $application_id, int $pull_request_id = 0): int
+{
+    $activeDeployments = ApplicationDeploymentQueue::where('application_id', $application_id)
+        ->where('pull_request_id', $pull_request_id)
+        ->whereIn('status', [
+            ApplicationDeploymentStatus::QUEUED->value,
+            ApplicationDeploymentStatus::IN_PROGRESS->value,
+        ])
+        ->get();
+
+    $cancelled = 0;
+
+    foreach ($activeDeployments as $deployment) {
+        try {
+            $deployment->update([
+                'status' => ApplicationDeploymentStatus::CANCELLED_BY_USER->value,
+                'current_process_id' => null,
+            ]);
+            $deployment->addLogEntry('Deployment cancelled: superseded by a newer deployment.', 'stderr');
+
+            $serverId = $deployment->build_server_id ?? $deployment->server_id;
+            $server = $serverId ? Server::find($serverId) : null;
+
+            if ($server) {
+                try {
+                    $escapedUuid = escapeshellarg($deployment->deployment_uuid);
+                    $checkCommand = "docker ps -a --filter name={$escapedUuid} --format '{{.Names}}'";
+                    $containerExists = instant_remote_process([$checkCommand], $server);
+
+                    if ($containerExists && str($containerExists)->trim()->isNotEmpty()) {
+                        instant_remote_process(["docker rm -f {$escapedUuid}"], $server);
+                    }
+                } catch (Throwable) {
+                    // Best effort — container may already be gone or server unreachable.
+                }
+            }
+
+            $cancelled++;
+        } catch (Throwable $e) {
+            \Log::warning("Failed to cancel superseded deployment {$deployment->id}: {$e->getMessage()}");
+        }
+    }
+
+    return $cancelled;
+}
+
 function force_start_deployment(ApplicationDeploymentQueue $deployment)
 {
     $deployment->update([

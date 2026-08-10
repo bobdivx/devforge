@@ -24,14 +24,16 @@ export function AgentDetailPage({ path }: Props) {
     }
 
     return (
-        <DataState loading={agentQuery.loading} error={agentQuery.error} onRetry={() => void agentQuery.reload()}>
-            {agent && (
-                <AgentChatView
-                    agent={agent}
-                    onBack={(e) => onNavigate(e, '/agents')}
-                    onAgentUpdated={() => void agentQuery.reload({ silent: true })}
-                />
-            )}
-        </DataState>
+        <div class="flex h-full min-h-0 min-w-0 flex-col">
+            <DataState loading={agentQuery.loading} error={agentQuery.error} onRetry={() => void agentQuery.reload()}>
+                {agent && (
+                    <AgentChatView
+                        agent={agent}
+                        onBack={(e) => onNavigate(e, '/agents')}
+                        onAgentUpdated={() => void agentQuery.reload({ silent: true })}
+                    />
+                )}
+            </DataState>
+        </div>
     );
 }

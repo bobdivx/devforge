@@ -7,6 +7,7 @@ use App\Models\AiAgentRun;
 use App\Models\AiAgentKeyRequest;
 use App\Models\Application;
 use App\Models\Team;
+use App\Services\DevForge\Agent\AgentFeatureDelivery;
 use App\Services\DevForge\Agent\Tool\AgentCustomTools;
 use App\Services\DevForge\Agent\Tool\AgentGithubTools;
 use App\Services\DevForge\Agent\Tool\AgentPermissionEngine;
@@ -955,6 +956,20 @@ class AgentToolkit
                 ],
             ],
             [
+                'name' => 'get_application_preview',
+                'description' => 'Récupère l’URL preview Coolify liée à une PR (après write_application_source mode=pull_request). Retourne fqdn + status.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => ['type' => 'string'],
+                        'pull_request_id' => [
+                            'type' => 'integer',
+                            'description' => 'Numéro de PR GitHub (sinon utilise la PR de la mission en cours)',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'name' => 'search_remote_files',
                 'description' => 'Recherche des fichiers par nom (find) ou contenu (grep) sur un serveur distant.',
                 'parameters' => [
@@ -1768,6 +1783,7 @@ class AgentToolkit
                 isset($arguments['pr_title']) ? (string) $arguments['pr_title'] : null,
                 isset($arguments['pr_body']) ? (string) $arguments['pr_body'] : null,
             ),
+            'get_application_preview' => $this->getApplicationPreview($arguments),
             'list_application_env_vars' => $this->listApplicationEnvVars(
                 isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
             ),
@@ -3446,6 +3462,11 @@ class AgentToolkit
             return $application;
         }
 
+        if ($this->shouldForcePullRequest()) {
+            $mode = 'pull_request';
+            $redeploy = false;
+        }
+
         $options = [];
         if ($mode !== null && $mode !== '') {
             $options['mode'] = $mode;
@@ -3464,7 +3485,7 @@ class AgentToolkit
         }
 
         try {
-            return $this->applicationSourceService()->writeFile(
+            $result = $this->applicationSourceService()->writeFile(
                 $this->team,
                 $application,
                 $path,
@@ -3473,6 +3494,9 @@ class AgentToolkit
                 $sha,
                 $options,
             );
+            $this->syncMissionPullRequestFromWrite($result);
+
+            return $result;
         } catch (ValidationException $exception) {
             $error = collect($exception->errors())->flatten()->first() ?? 'Écriture source impossible.';
             $payload = ['error' => $error];
@@ -3483,6 +3507,132 @@ class AgentToolkit
 
             return $payload;
         }
+    }
+
+    private function shouldForcePullRequest(): bool
+    {
+        if (($this->runContext['force_pull_request'] ?? false) === true) {
+            return true;
+        }
+
+        if (($this->runContext['workflow'] ?? null) === AgentFeatureDelivery::WORKFLOW) {
+            return true;
+        }
+
+        if (($this->runContext['mission_kind'] ?? null) === 'feature') {
+            return true;
+        }
+
+        $missionUuid = $this->runContext['mission_uuid'] ?? null;
+        if (! is_string($missionUuid) || $missionUuid === '') {
+            return false;
+        }
+
+        $mission = \App\Models\AiAgentMission::query()
+            ->where('team_id', $this->team->id)
+            ->where('uuid', $missionUuid)
+            ->first();
+
+        return $mission instanceof \App\Models\AiAgentMission
+            && app(AgentFeatureDelivery::class)->isFeatureDelivery($mission);
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     */
+    private function syncMissionPullRequestFromWrite(array $result): void
+    {
+        $prNumber = (int) ($result['pull_request_number'] ?? 0);
+        if ($prNumber <= 0) {
+            return;
+        }
+
+        $missionUuid = $this->runContext['mission_uuid'] ?? null;
+        if (! is_string($missionUuid) || $missionUuid === '') {
+            return;
+        }
+
+        $mission = \App\Models\AiAgentMission::query()
+            ->where('team_id', $this->team->id)
+            ->where('uuid', $missionUuid)
+            ->first();
+
+        if (! $mission instanceof \App\Models\AiAgentMission) {
+            return;
+        }
+
+        app(AgentFeatureDelivery::class)->attachPullRequest(
+            $mission,
+            $prNumber,
+            isset($result['pull_request_url']) ? (string) $result['pull_request_url'] : null,
+            isset($result['branch']) ? (string) $result['branch'] : null,
+        );
+
+        $meta = is_array($this->run->metadata) ? $this->run->metadata : [];
+        $meta['pull_request_number'] = $prNumber;
+        if (! empty($result['pull_request_url'])) {
+            $meta['pull_request_url'] = $result['pull_request_url'];
+        }
+        $this->run->metadata = $meta;
+        $this->run->save();
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function getApplicationPreview(array $arguments): array
+    {
+        $application = $this->resolveApplication(
+            isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
+        );
+        if (is_array($application)) {
+            return $application;
+        }
+
+        $prId = isset($arguments['pull_request_id']) ? (int) $arguments['pull_request_id'] : 0;
+        if ($prId <= 0) {
+            $prId = (int) ($this->run->metadata['pull_request_number'] ?? 0);
+        }
+        if ($prId <= 0) {
+            $missionUuid = $this->runContext['mission_uuid'] ?? null;
+            if (is_string($missionUuid) && $missionUuid !== '') {
+                $mission = \App\Models\AiAgentMission::query()
+                    ->where('team_id', $this->team->id)
+                    ->where('uuid', $missionUuid)
+                    ->first();
+                $prId = (int) (($mission?->metadata['pull_request_number'] ?? 0));
+            }
+        }
+
+        if ($prId <= 0) {
+            return [
+                'error' => 'Aucun pull_request_id — passe le numéro de PR ou crée d’abord une PR via write_application_source mode=pull_request.',
+            ];
+        }
+
+        $delivery = app(AgentFeatureDelivery::class);
+        $preview = $delivery->findPreview($application, $prId);
+        $settings = app(\App\Services\DevForge\Application\ApplicationPreviewCatalog::class)->settings($application);
+
+        if ($preview === null) {
+            return [
+                'ok' => false,
+                'pull_request_id' => $prId,
+                'preview_deployments_enabled' => (bool) $settings['is_preview_deployments_enabled'],
+                'message' => (bool) $settings['is_preview_deployments_enabled']
+                    ? 'Preview pas encore créée — le webhook GitHub PR peut prendre quelques secondes/minutes.'
+                    : 'Preview deployments désactivés sur cette app (Paramètres → Previews). La PR reste testable via GitHub.',
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'pull_request_id' => $prId,
+            'preview' => $preview,
+            'preview_url' => $preview['fqdn'] ?? null,
+            'preview_deployments_enabled' => true,
+        ];
     }
 
     private function isEnvFilePath(string $path): bool

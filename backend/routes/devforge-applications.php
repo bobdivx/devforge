@@ -66,6 +66,9 @@ Route::post('/applications/{applicationUuid}/scheduled-tasks/{taskUuid}/run', [A
 Route::get('/applications/{applicationUuid}/previews', [ApplicationController::class, 'previews'])
     ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
     ->name('applications.previews.index');
+Route::post('/applications/{applicationUuid}/feature-requests', [\App\Http\Controllers\DevForge\AgentFeatureDeliveryController::class, 'storeForApplication'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.feature-requests.store');
 Route::get('/applications/{applicationUuid}/previews/settings', [ApplicationController::class, 'previewSettings'])
     ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
     ->name('applications.previews.settings.show');

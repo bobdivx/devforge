@@ -165,21 +165,21 @@ function DetailPanel({
         : [];
 
     return (
-        <div class="grid gap-3 rounded-2xl border border-base-300/70 bg-base-100 p-4 shadow-sm">
-            <div>
+        <div class="grid min-w-0 gap-3 rounded-2xl border border-base-300/70 bg-base-100 p-4 shadow-sm">
+            <div class="min-w-0">
                 <p class="text-[11px] font-semibold uppercase tracking-widest text-base-content/45">
                     {STAGE_LABELS[stage.kind]}
                 </p>
-                <h3 class="mt-1 text-base font-semibold">{stage.label}</h3>
-                <p class="text-xs text-base-content/55">{stage.detail}</p>
+                <h3 class="mt-1 break-words text-base font-semibold">{stage.label}</h3>
+                <p class="break-words text-xs text-base-content/55">{stage.detail}</p>
             </div>
 
             {lines.length > 0 && (
-                <dl class="grid gap-2">
+                <dl class="grid min-w-0 gap-2">
                     {lines.map((line) => (
-                        <div key={line.label}>
+                        <div key={line.label} class="min-w-0">
                             <dt class="text-[10px] uppercase tracking-wide text-base-content/40">{line.label}</dt>
-                            <dd class="truncate text-xs font-medium">{line.value}</dd>
+                            <dd class="break-all text-xs font-medium">{line.value}</dd>
                         </div>
                     ))}
                 </dl>
@@ -251,10 +251,10 @@ function PipelineRow({
     const agentCount = pipeline.agents.reduce((sum, item) => sum + item.interventions.length, pipeline.agents.length);
 
     return (
-        <article class={`overflow-hidden rounded-2xl border bg-base-100 shadow-sm transition ${expanded ? 'border-primary/35' : 'border-base-300/70'}`}>
+        <article class={`min-w-0 overflow-hidden rounded-2xl border bg-base-100 shadow-sm transition ${expanded ? 'border-primary/35' : 'border-base-300/70'}`}>
             <button
                 type="button"
-                class="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-base-200/40"
+                class="flex w-full min-w-0 items-center gap-3 px-3 py-3 text-left hover:bg-base-200/40 sm:px-4"
                 onClick={onToggle}
                 aria-expanded={expanded}
             >
@@ -303,9 +303,9 @@ function PipelineRow({
             )}
 
             {expanded && (
-                <div class="grid gap-4 border-t border-base-300/70 p-4 xl:grid-cols-[minmax(0,1fr)_280px]">
-                    <div class="grid gap-3">
-                        <div class="flex flex-col gap-2 lg:flex-row lg:items-stretch">
+                <div class="grid min-w-0 gap-4 border-t border-base-300/70 p-3 sm:p-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+                    <div class="grid min-w-0 gap-3">
+                        <div class="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-stretch">
                             {pipeline.stages.map((stage, index) => (
                                 <div key={stage.kind} class="flex min-w-0 flex-1 items-stretch gap-2">
                                     <StageCard
@@ -371,9 +371,9 @@ export function TopologySummaryChips({
     ];
 
     return (
-        <div class="flex flex-wrap gap-2">
+        <div class="flex flex-wrap gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:overflow-visible">
             {chips.map((chip) => (
-                <div key={chip.label} class="inline-flex items-center gap-2 rounded-full border border-base-300/70 bg-base-100 px-3 py-1.5 text-xs shadow-sm">
+                <div key={chip.label} class="inline-flex shrink-0 items-center gap-2 rounded-full border border-base-300/70 bg-base-100 px-3 py-1.5 text-xs shadow-sm">
                     {chip.icon}
                     <span class="text-base-content/55">{chip.label}</span>
                     <span class="font-semibold tabular-nums">{chip.value}</span>
@@ -396,24 +396,24 @@ export function OperationsExplorer({ topology }: OperationsExplorerProps) {
     );
 
     return (
-        <div class="grid gap-4">
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <label class="input input-sm flex max-w-md flex-1 items-center gap-2 rounded-full border-base-300 bg-base-100">
-                    <Search class="size-3.5 opacity-50" aria-hidden />
+        <div class="grid min-w-0 gap-4">
+            <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <label class="input input-sm flex w-full min-w-0 max-w-md flex-1 items-center gap-2 rounded-full border-base-300 bg-base-100">
+                    <Search class="size-3.5 shrink-0 opacity-50" aria-hidden />
                     <input
                         type="search"
-                        class="grow"
+                        class="min-w-0 grow"
                         placeholder="Rechercher une app, un dépôt, une URL…"
                         value={query}
                         onInput={(event) => setQuery((event.target as HTMLInputElement).value)}
                     />
                 </label>
-                <div class="flex flex-wrap gap-1.5">
+                <div class="flex max-w-full flex-wrap gap-1.5">
                     {(['all', 'healthy', 'deploying', 'failing', 'unknown'] as const).map((value) => (
                         <button
                             key={value}
                             type="button"
-                            class={`btn btn-xs rounded-full ${health === value ? 'btn-primary' : 'btn-ghost border border-base-300/80'}`}
+                            class={`btn btn-xs h-8 min-h-8 rounded-full px-2.5 ${health === value ? 'btn-primary' : 'btn-ghost border border-base-300/80'}`}
                             onClick={() => setHealth(value)}
                         >
                             {HEALTH_LABELS[value]}

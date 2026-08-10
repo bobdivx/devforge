@@ -18,7 +18,7 @@ describe('navigation latérale groupée', () => {
             'Gérer',
             'Bases de données',
             'Services',
-            'Déploiements',
+            'Cartographie',
         ]);
         expect(applications?.items.map(({ path }) => path)).toEqual([
             '/applications',
@@ -49,7 +49,8 @@ describe('navigation latérale groupée', () => {
         );
 
         expect(agents?.items.map(({ label, path }) => ({ label, path }))).toEqual([
-            { label: 'Gérer', path: '/agents' },
+            { label: 'Chat', path: '/agents/chat' },
+            { label: 'Équipe', path: '/agents' },
             { label: 'Paramètres AI', path: '/agents/settings' },
         ]);
     });
@@ -61,6 +62,15 @@ describe('navigation latérale groupée', () => {
 
         expect(applications && isNavGroupActive(applications, 'databases')).toBe(true);
         expect(applications && isNavGroupActive(applications, 'dashboard')).toBe(false);
+    });
+
+    it('laisse tous les groupes repliés hors interaction', () => {
+        const entries = visibleSidebarNav(true);
+        const groups = entries.filter((entry): entry is SidebarNavGroup => entry.type === 'group');
+
+        expect(groups.map(({ id }) => id)).toEqual(['applications', 'infrastructure', 'agents']);
+        // L’état ouvert est géré manuellement dans Sidebar (défaut : aucun groupe déroulé).
+        expect(groups.every((group) => !isNavGroupActive(group, 'dashboard'))).toBe(true);
     });
 
     it('aplatit les liens pour le mode réduit', () => {

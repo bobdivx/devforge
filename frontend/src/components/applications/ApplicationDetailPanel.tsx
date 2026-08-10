@@ -16,6 +16,7 @@ import {
     Rocket,
     RotateCw,
     Server,
+    Sparkles,
     Square,
     X,
     XCircle,
@@ -47,6 +48,7 @@ import { ApplicationStoragePanel } from './ApplicationStoragePanel';
 import { DeploymentAgentCard } from './DeploymentAgentCard';
 import { DeploymentMonitorPanel } from './DeploymentMonitorPanel';
 import { ApplicationSourceExplorer } from './ApplicationSourceExplorer';
+import { ApplicationFeatureRequestModal } from './ApplicationFeatureRequestModal';
 import {
     deploymentSystemLabel,
     formatDateTime,
@@ -415,6 +417,7 @@ export function ApplicationDetailPanel({
     const [nameDraft, setNameDraft] = useState('');
     const [renaming, setRenaming] = useState(false);
     const [renameError, setRenameError] = useState<string | null>(null);
+    const [featureRequestOpen, setFeatureRequestOpen] = useState(false);
 
     const resource = resourceQuery.data?.data;
     const status = resource?.status ?? 'unknown';
@@ -723,6 +726,16 @@ export function ApplicationDetailPanel({
                                     <ExternalLink class="size-3.5" aria-hidden />
                                     Visiter
                                 </a>
+                            )}
+                            {canAct && (
+                                <button
+                                    class="btn btn-ghost btn-sm rounded-full border border-base-300/80"
+                                    type="button"
+                                    onClick={() => setFeatureRequestOpen(true)}
+                                >
+                                    <Sparkles class="size-3.5" aria-hidden />
+                                    Nouvelle fonctionnalité
+                                </button>
                             )}
                             {canAct && availableActions.map((action) => {
                                 const Icon = actionIcons[action];
@@ -1224,6 +1237,13 @@ export function ApplicationDetailPanel({
                             cancelLabel="Fermer"
                         />
                     )}
+
+                    <ApplicationFeatureRequestModal
+                        open={featureRequestOpen}
+                        applicationUuid={resource.uuid}
+                        applicationName={resource.name}
+                        onClose={() => setFeatureRequestOpen(false)}
+                    />
                 </div>
             )}
         </DataState>

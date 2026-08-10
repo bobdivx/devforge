@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AiAgentMission;
 use App\Models\Team;
 use App\Models\User;
+use App\Services\DevForge\Agent\AgentFeatureDelivery;
 use App\Services\DevForge\Agent\AgentMissionBoard;
 use App\Services\DevForge\Core\CurrentTeamContext;
 use Illuminate\Http\JsonResponse;
@@ -17,6 +18,7 @@ class AgentMissionController extends Controller
     public function __construct(
         private readonly CurrentTeamContext $currentTeamContext,
         private readonly AgentMissionBoard $missionBoard,
+        private readonly AgentFeatureDelivery $featureDelivery,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -138,6 +140,7 @@ class AgentMissionController extends Controller
                 ? $metadata['timeline']
                 : $this->buildTimeline($mission, is_array($metadata) ? $metadata : []),
             'metadata' => $metadata,
+            'is_feature_delivery' => $this->featureDelivery->isFeatureDelivery($mission),
             'created_at' => $mission->created_at?->toISOString(),
             'updated_at' => $mission->updated_at?->toISOString(),
             'completed_at' => $mission->completed_at?->toISOString(),

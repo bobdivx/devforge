@@ -411,6 +411,17 @@ class ApplicationSourceService
     /**
      * @return array{github_app_uuid: string, owner: string, repo: string, ref: string, initial_path: string}
      */
+    public function sourceContext(Team $team, Application $application): array
+    {
+        // Ensure the application belongs to the team (throws if not).
+        $this->applicationForTeam($team, $application->uuid);
+
+        return $this->resolveGithubContext($application);
+    }
+
+    /**
+     * @return array{github_app_uuid: string, owner: string, repo: string, ref: string, initial_path: string}
+     */
     private function resolveGithubContext(Application $application): array
     {
         $application->loadMissing('source');

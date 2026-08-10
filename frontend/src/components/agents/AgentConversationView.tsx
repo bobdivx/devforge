@@ -265,23 +265,24 @@ export function AgentConversationView({
     };
 
     return (
-        <div class="flex min-h-0 flex-1 flex-col">
-            <div class="flex shrink-0 items-center justify-between gap-2 border-b border-base-300 bg-base-100 px-4 py-2.5">
-                <p class="text-xs text-base-content/60">
-                    Historique des conversations
+        <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div class="flex shrink-0 items-center justify-between gap-2 border-b border-base-300 bg-base-100 px-3 py-2 sm:px-4 sm:py-2.5">
+                <p class="min-w-0 truncate text-xs text-base-content/60">
+                    Conversations
                 </p>
-                <div class="flex items-center gap-1">
+                <div class="flex shrink-0 items-center gap-1">
                     <button
-                        class="btn btn-ghost btn-sm gap-2"
+                        class="btn btn-ghost btn-sm btn-square size-9 min-h-9 p-0 sm:w-auto sm:min-w-0 sm:gap-2 sm:px-3"
                         type="button"
+                        title="Actualiser"
                         onClick={() => void refreshSessions()}
                         disabled={loadingSessions}
                     >
                         <RefreshCw class="size-4" aria-hidden />
-                        Actualiser
+                        <span class="hidden sm:inline">Actualiser</span>
                     </button>
                     <button
-                        class="btn btn-primary btn-sm gap-2"
+                        class="btn btn-primary btn-sm gap-1.5 px-2.5 sm:gap-2 sm:px-3"
                         type="button"
                         disabled={creating || loadingSessions}
                         onClick={() => void handleCreate()}
@@ -289,13 +290,13 @@ export function AgentConversationView({
                         {creating
                             ? <span class="loading loading-spinner loading-sm" aria-hidden />
                             : <MessageSquarePlus class="size-4" aria-hidden />}
-                        Nouvelle
+                        <span class="sm:inline">Nouvelle</span>
                     </button>
                 </div>
             </div>
 
-            <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
-                <aside class="shrink-0 border-b border-base-300 bg-base-200/20 lg:w-80 lg:max-w-[40%] lg:border-b-0 lg:border-e lg:overflow-y-auto">
+            <div class="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+                <aside class="max-h-[min(32vh,14rem)] shrink-0 overflow-y-auto border-b border-base-300 bg-base-200/20 lg:max-h-none lg:w-80 lg:max-w-[40%] lg:border-b-0 lg:border-e">
                     {loadingSessions ? (
                         <div class="flex items-center justify-center px-4 py-10 text-xs text-base-content/50">
                             <span class="loading loading-spinner loading-sm me-2" />

@@ -132,10 +132,10 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
         : agentDetailPath(agent.uuid, { view: 'runs' });
 
     return (
-        <div class="flex h-[calc(100dvh-3.75rem)] min-h-[28rem] flex-col overflow-hidden rounded-xl border border-base-300 bg-base-100 sm:h-[calc(100dvh-4.5rem)] sm:min-h-[32rem]">
+        <div class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-base-300 bg-base-100 sm:rounded-xl sm:border">
             <header class="grid shrink-0 grid-cols-[auto_auto_minmax(0,1fr)_auto] grid-rows-[auto_auto] gap-x-2 gap-y-2 border-b border-base-300 px-3 py-2.5 sm:gap-x-3 sm:px-4 sm:py-3">
                 <button
-                    class="btn btn-ghost btn-sm btn-square col-start-1 row-start-1"
+                    class="btn btn-ghost btn-sm btn-square col-start-1 row-start-1 size-9 min-h-9 shrink-0 p-0"
                     type="button"
                     title="Retour aux agents"
                     onClick={onBack}
@@ -154,7 +154,7 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
                     </p>
                 </div>
                 <button
-                    class={`btn btn-ghost btn-sm btn-square col-start-4 row-start-1 ${settingsOpen ? 'bg-base-300' : ''}`}
+                    class={`btn btn-ghost btn-sm btn-square col-start-4 row-start-1 size-9 min-h-9 shrink-0 p-0 ${settingsOpen ? 'bg-base-300' : ''}`}
                     type="button"
                     title="Configuration"
                     onClick={() => toggleSettings(!settingsOpen)}
@@ -199,7 +199,7 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
                 onChange={(mode) => switchView(mode, focusedRunUuid ?? agent.latest_run?.uuid ?? null)}
             />
 
-            <div class="flex min-h-0 flex-1">
+            <div class="flex min-h-0 min-w-0 flex-1">
                 {viewMode === 'runs' ? (
                     <AgentRunsView
                         agent={agent}

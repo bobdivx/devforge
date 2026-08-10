@@ -27,7 +27,7 @@ export function AgentsPage() {
         : null;
 
     return (
-        <>
+        <div class="grid min-w-0 gap-5">
             <PageHeader
                 title="Agents IA"
                 description="Votre équipe d'agents autonomes qui surveille et améliore la plateforme."
@@ -46,7 +46,7 @@ export function AgentsPage() {
             />
 
             {continuePath && continueName && (
-                <div class="mb-4 flex flex-col gap-3 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div class="mb-0 flex flex-col gap-3 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div class="min-w-0">
                         <p class="text-sm font-semibold">Continuer le chat</p>
                         <p class="truncate text-xs text-base-content/60">
@@ -67,7 +67,7 @@ export function AgentsPage() {
 
             <AgentUserRequestsInbox />
 
-            <div class="mb-5">
+            <div class="min-w-0">
                 <MissionBoardPanel />
             </div>
 
@@ -77,7 +77,7 @@ export function AgentsPage() {
                 onRetry={() => void query.reload()}
             >
                 {isEmpty && !query.loading ? (
-                    <div class="flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-base-300 p-12 text-center">
+                    <div class="flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-base-300 p-8 text-center sm:p-12">
                         <div class="grid size-14 place-items-center rounded-2xl bg-primary/10 text-primary">
                             <Bot class="size-7" aria-hidden />
                         </div>
@@ -93,7 +93,7 @@ export function AgentsPage() {
                         </button>
                     </div>
                 ) : (
-                    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    <div class="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                         {agents.map((agent) => (
                             <AgentCard
                                 key={agent.uuid}
@@ -114,6 +114,6 @@ export function AgentsPage() {
                     void query.reload();
                 }}
             />
-        </>
+        </div>
     );
 }

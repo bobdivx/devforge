@@ -117,6 +117,11 @@ class AgentPromptBuilder
             - Si kind=bug : diagnostique, corrige, teste, mission_update(done).
             - Secret/token manquant : request_user_input (jamais inventer de credentials).
             - Termine par mission_update(status=done|blocked) avec blocked_reason si besoin.
+            - Si workflow=feature_delivery (ou force_pull_request) :
+              * TOUJOURS write_application_source mode=pull_request (jamais commit direct sur main).
+              * Après la PR : get_application_preview pour récupérer l’URL preview Coolify.
+              * INTERDIT merge_pull_request / merge GitHub — l’humain valide via l’UI « Valider & merger ».
+              * Quand la PR est prête : mission_update(status=blocked, blocked_reason=« En attente de validation preview »).
             RULES,
             'user_input_resolved' => <<<'RULES'
 
@@ -235,6 +240,21 @@ class AgentPromptBuilder
             $title = (string) ($context['mission_title'] ?? 'mission');
             $kind = (string) ($context['mission_kind'] ?? 'other');
             $resource = (string) ($context['resource_uuid'] ?? $context['application_uuid'] ?? '');
+            $isFeatureDelivery = ($context['workflow'] ?? null) === AgentFeatureDelivery::WORKFLOW
+                || ($context['force_pull_request'] ?? false) === true;
+            $workflowLabel = (string) ($context['workflow'] ?? 'standard');
+
+            $deliverySteps = $isFeatureDelivery
+                ? <<<'STEPS'
+            2. Implémente via write_application_source (mode=pull_request forcé)
+            3. get_application_preview + run_application_tests si possible
+            4. NE MERGE PAS — mission_update(status=blocked, blocked_reason="En attente de validation preview")
+            STEPS
+                : <<<'STEPS'
+            2. Agis avec les outils jusqu'à résolution
+            3. run_application_tests si code modifié
+            4. mission_update(status=done) ou blocked + request_user_input si secret manquant
+            STEPS;
 
             return trim(<<<CONTEXT
             MISSION WORK — exécute maintenant
@@ -242,11 +262,10 @@ class AgentPromptBuilder
             Titre : {$title}
             Kind : {$kind}
             Resource : {$resource}
+            Workflow : {$workflowLabel}
 
             1. mission_show(mission_uuid="{$missionUuid}")
-            2. Agis avec les outils jusqu'à résolution
-            3. run_application_tests si code modifié
-            4. mission_update(status=done) ou blocked + request_user_input si secret manquant
+            {$deliverySteps}
             CONTEXT);
         }
 
