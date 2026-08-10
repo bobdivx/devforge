@@ -11,6 +11,7 @@ use App\Actions\Service\StartService;
 use App\Actions\Service\StopService;
 use App\Models\Application;
 use App\Models\Service;
+use App\Services\DevForge\Application\ApplicationDesiredRuntimeState;
 use Illuminate\Database\Eloquent\Model;
 use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -18,6 +19,10 @@ use Visus\Cuid2\Cuid2;
 
 class CoreResourceAction
 {
+    public function __construct(
+        private readonly ApplicationDesiredRuntimeState $desiredRuntimeState,
+    ) {}
+
     /**
      * @param  array<string, mixed>  $options
      * @return array<string, mixed>
@@ -53,6 +58,8 @@ class CoreResourceAction
     private function application(Application $application, string $action, array $options): array
     {
         if ($action === 'stop') {
+            $this->desiredRuntimeState->markDesiredStopped($application);
+
             StopApplication::dispatch(
                 $application,
                 false,
@@ -61,6 +68,8 @@ class CoreResourceAction
 
             return ['queued' => true, 'message' => 'Application stopping request queued.'];
         }
+
+        $this->desiredRuntimeState->markDesiredRunning($application);
 
         $deploymentUuid = new Cuid2;
         $result = queue_application_deployment(

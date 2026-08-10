@@ -106,6 +106,29 @@ it('exposes the application boot sequence contract', function () {
         ->assertJsonPath('data.items.0.phase', 'starting');
 });
 
+it('can force-start the application boot sequence for the team', function () {
+    $this->application->update(['status' => 'exited:unhealthy']);
+
+    $this->mock(CoreResourceAction::class, function (MockInterface $mock): void {
+        $mock->shouldReceive('execute')
+            ->once()
+            ->andReturn([
+                'queued' => true,
+                'deployment_uuid' => 'deploy-start-all',
+                'message' => 'Application deployment request queued.',
+            ]);
+    });
+
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->postJson('/api/devforge/v1/core/applications/boot-sequence/start')
+        ->assertAccepted()
+        ->assertJsonPath('data.active', true)
+        ->assertJsonPath('data.total', 1)
+        ->assertJsonPath('data.items.0.uuid', $this->application->uuid)
+        ->assertJsonPath('data.items.0.phase', 'starting');
+});
+
 it('returns list and detail contracts scoped to the current team', function () {
     $this->actingAs($this->user)
         ->withSession(['currentTeam' => $this->team])

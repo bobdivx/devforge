@@ -71,6 +71,21 @@ return [
         'poll_interval_ms' => (int) env('DEVFORGE_APPLICATION_BOOT_SEQUENCE_POLL_MS', 2500),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Keep-alive applications
+    |--------------------------------------------------------------------------
+    |
+    | Vérifie régulièrement que les applications censées tourner sont bien
+    | démarrées. Un arrêt manuel (stop) désactive le redémarrage auto pour
+    | cette app jusqu’au prochain start / « Démarrer toutes ».
+    |
+    */
+    'application_keep_alive' => [
+        'enabled' => env('DEVFORGE_APPLICATION_KEEP_ALIVE', true),
+        'desired_ttl_seconds' => (int) env('DEVFORGE_APPLICATION_KEEP_ALIVE_TTL', 60 * 60 * 24 * 30),
+    ],
+
     'agents_monitor_build_enabled' => env(
         'DEVFORGE_AGENTS_MONITOR_BUILD_ENABLED',
         env('DEVFORGE_AGENTS_WEBHOOK_BUILD_ENABLED', true),

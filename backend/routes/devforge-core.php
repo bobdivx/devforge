@@ -7,8 +7,10 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('core')->name('core.')->group(function () {
     Route::get('/resources', [ResourceController::class, 'catalog'])->name('resources.index');
     Route::get('/configuration', [ResourceController::class, 'configuration'])->name('configuration');
-    Route::get('/applications/boot-sequence', ApplicationBootSequenceController::class)
+    Route::get('/applications/boot-sequence', [ApplicationBootSequenceController::class, 'show'])
         ->name('applications.boot-sequence');
+    Route::post('/applications/boot-sequence/start', [ApplicationBootSequenceController::class, 'start'])
+        ->name('applications.boot-sequence.start');
 
     Route::get('/{type}', [ResourceController::class, 'index'])
         ->whereIn('type', ['servers', 'applications', 'databases', 'services'])

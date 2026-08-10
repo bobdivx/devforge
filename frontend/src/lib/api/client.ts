@@ -13,12 +13,13 @@ export class ApiError extends Error {
 function extractApiMessage(status: number, payload: unknown): string {
     if (payload && typeof payload === 'object') {
         const record = payload as Record<string, unknown>;
+        // Prefer field errors: Laravel validation often sets a generic `message`.
+        const firstError = Object.values(record.errors ?? {})[0];
+        if (Array.isArray(firstError) && typeof firstError[0] === 'string' && firstError[0] !== '') {
+            return firstError[0];
+        }
         if (typeof record.message === 'string' && record.message !== '') {
             return record.message;
-        }
-        const firstError = Object.values(record.errors ?? {})[0];
-        if (Array.isArray(firstError) && typeof firstError[0] === 'string') {
-            return firstError[0];
         }
     }
 

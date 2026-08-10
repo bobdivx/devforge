@@ -192,6 +192,8 @@ class GithubRunnerInventory
         $validated = validator($input, [
             'auth_mode' => ['nullable', 'string', 'in:registration,pat'],
             'access_token' => ['nullable', 'string', 'max:512'],
+            'use_saved_pat' => ['nullable', 'boolean'],
+            'save_pat' => ['nullable', 'boolean'],
             'github_app_uuid' => ['nullable', 'string', 'max:64'],
             'owner' => ['required', 'string', 'max:100', 'regex:/^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/'],
             'repo' => ['required', 'string', 'max:100', 'regex:/^[A-Za-z0-9._-]+$/'],
@@ -212,15 +214,30 @@ class GithubRunnerInventory
         ])->validate();
 
         $authMode = (string) ($validated['auth_mode'] ?? 'registration');
-        if ($authMode === 'pat') {
-            if (! filled($validated['access_token'] ?? null)) {
-                throw ValidationException::withMessages([
-                    'access_token' => ['Un Personal Access Token GitHub est requis.'],
-                ]);
-            }
-        } elseif (! filled($validated['github_app_uuid'] ?? null)) {
+        $useSavedPat = (bool) ($validated['use_saved_pat'] ?? false);
+        $savePat = (bool) ($validated['save_pat'] ?? false);
+
+        if ($authMode === 'pat' && $useSavedPat && ! filled($validated['github_app_uuid'] ?? null)) {
+            throw ValidationException::withMessages([
+                'github_app_uuid' => ['Choisissez une GitHub App pour réutiliser son PAT enregistré.'],
+            ]);
+        }
+
+        if ($authMode === 'pat' && ! $useSavedPat && ! filled($validated['access_token'] ?? null)) {
+            throw ValidationException::withMessages([
+                'access_token' => ['Un Personal Access Token GitHub est requis, ou réutilisez un PAT enregistré.'],
+            ]);
+        }
+
+        if ($authMode === 'registration' && ! filled($validated['github_app_uuid'] ?? null)) {
             throw ValidationException::withMessages([
                 'github_app_uuid' => ['Une GitHub App est requise pour générer un jeton d’enregistrement.'],
+            ]);
+        }
+
+        if ($savePat && ! filled($validated['github_app_uuid'] ?? null)) {
+            throw ValidationException::withMessages([
+                'github_app_uuid' => ['Choisissez une GitHub App pour y enregistrer le PAT.'],
             ]);
         }
 
@@ -284,7 +301,23 @@ class GithubRunnerInventory
         }
 
         if ($authMode === 'pat') {
-            $authToken = trim((string) $validated['access_token']);
+            if ($useSavedPat) {
+                $savedPat = trim((string) ($githubApp?->packages_token ?? ''));
+                if ($savedPat === '') {
+                    throw ValidationException::withMessages([
+                        'use_saved_pat' => [
+                            'Aucun PAT enregistré sur cette GitHub App. Collez-en un, ou enregistrez-le dans Sources → GitHub.',
+                        ],
+                    ]);
+                }
+                $authToken = $savedPat;
+            } else {
+                $authToken = trim((string) $validated['access_token']);
+                if ($savePat && $githubApp) {
+                    $this->githubAppCatalog->updatePackagesToken($githubApp, $authToken);
+                    $githubApp->refresh();
+                }
+            }
         } else {
             $registration = $this->githubAppCatalog->registrationToken(
                 $githubApp,
@@ -331,9 +364,33 @@ class GithubRunnerInventory
 
         Cache::forget('devforge.github.runners.list.'.$team->id);
 
+        try {
+            $runner = $this->show($team, $server->uuid, $containerName);
+        } catch (\Throwable) {
+            // Container was started; discovery can lag — don't fail the whole create.
+            $runner = [
+                'id' => $server->uuid.':'.$containerName,
+                'name' => $containerName,
+                'container_id' => null,
+                'image' => $image,
+                'state' => 'created',
+                'status' => 'Créé (inventaire en cours de synchronisation)',
+                'created' => null,
+                'server_uuid' => $server->uuid,
+                'server_name' => $server->name,
+                'repo_url' => $repoUrl,
+                'runner_name' => $validated['runner_name'],
+                'github_status' => null,
+                'github_busy' => null,
+                'github_runner_id' => null,
+                'github_repo' => $validated['owner'].'/'.$validated['repo'],
+                'source' => 'docker',
+            ];
+        }
+
         return [
             'message' => 'Runner créé et démarré.',
-            'runner' => $this->show($team, $server->uuid, $containerName),
+            'runner' => $runner,
         ];
     }
 

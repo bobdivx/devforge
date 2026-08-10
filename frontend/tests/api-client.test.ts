@@ -74,7 +74,30 @@ describe('client API DevForge', () => {
         );
 
         await expect(apiFetch('/api/example')).rejects.toEqual(
-            expect.objectContaining({ status: 403 }),
+            expect.objectContaining({ status: 403, message: 'Interdit' }),
+        );
+    });
+
+    it('préfère le détail de validation au message générique Laravel', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(JSON.stringify({
+                message: 'The given data was invalid.',
+                errors: {
+                    github_app_uuid: [
+                        'Permission insuffisante pour créer un runner sur bobdivx/popcorn-client.',
+                    ],
+                },
+            }), {
+                status: 422,
+                headers: { 'content-type': 'application/json' },
+            }),
+        );
+
+        await expect(apiFetch('/api/example')).rejects.toEqual(
+            expect.objectContaining({
+                status: 422,
+                message: 'Permission insuffisante pour créer un runner sur bobdivx/popcorn-client.',
+            }),
         );
     });
 });

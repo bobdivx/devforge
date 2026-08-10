@@ -299,7 +299,42 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
     ));
     const [search, setSearch] = useState('');
     const [createModalOpen, setCreateModalOpen] = useState(false);
+    const [startAllOpen, setStartAllOpen] = useState(false);
+    const [startAllLoading, setStartAllLoading] = useState(false);
+    const [startAllError, setStartAllError] = useState<string | null>(null);
     const resources = query.data?.data ?? [];
+
+    const stoppedApplicationsCount = useMemo(() => {
+        if (type !== 'applications') {
+            return 0;
+        }
+
+        return resources.filter((resource) => {
+            const tone = parseResourceStatus(resource.status).tone;
+            const raw = typeof resource.status === 'string' ? resource.status.toLowerCase() : '';
+
+            return tone === 'error' && (
+                raw.startsWith('exited')
+                || raw.startsWith('stopped')
+                || raw.startsWith('dead')
+            );
+        }).length;
+    }, [resources, type]);
+
+    const runStartAll = async () => {
+        setStartAllLoading(true);
+        setStartAllError(null);
+        try {
+            await domainApi.startApplicationBootSequence();
+            bootSequence.reload();
+            await query.reload({ silent: true });
+            setStartAllOpen(false);
+        } catch {
+            setStartAllError('Impossible de démarrer toutes les applications.');
+        } finally {
+            setStartAllLoading(false);
+        }
+    };
 
     useEffect(() => {
         if (type !== 'applications' || !bootSequence.active) {
@@ -414,6 +449,20 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                     description="Données et actions fournies par l’API core."
                     actions={(
                         <>
+                            {type === 'applications' && permissions.create_resources && resources.length > 0 && (
+                                <button
+                                    class="btn btn-secondary btn-sm"
+                                    type="button"
+                                    disabled={bootSequence.active || startAllLoading}
+                                    onClick={() => {
+                                        setStartAllError(null);
+                                        setStartAllOpen(true);
+                                    }}
+                                >
+                                    <Play class="size-3.5" aria-hidden />
+                                    {bootSequence.active ? 'Démarrage en cours…' : 'Démarrer toutes'}
+                                </button>
+                            )}
                             {type === 'applications' && permissions.create_resources && (
                                 <button class="btn btn-primary btn-sm" type="button" onClick={() => setCreateModalOpen(true)}>
                                     <Plus class="size-3.5" aria-hidden />
@@ -490,7 +539,19 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                     )}
 
                     {type === 'applications' && bootSequence.active && (
-                        <ApplicationBootSequenceBanner sequence={bootSequence} />
+                        <ApplicationBootSequenceBanner
+                            sequence={{
+                                active: bootSequence.active,
+                                status: bootSequence.status,
+                                started_at: bootSequence.started_at,
+                                finished_at: bootSequence.finished_at,
+                                current_uuid: bootSequence.current_uuid,
+                                completed: bootSequence.completed,
+                                total: bootSequence.total,
+                                poll_interval_ms: bootSequence.poll_interval_ms,
+                                items: bootSequence.items,
+                            }}
+                        />
                     )}
 
                     <DataState
@@ -582,6 +643,32 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                         void query.reload();
                         openApplication(applicationUuid);
                     }}
+                />
+            )}
+            {type === 'applications' && (
+                <ConfirmDialog
+                    open={startAllOpen}
+                    title="Démarrer toutes les applications"
+                    message={
+                        <>
+                            <p>
+                                {stoppedApplicationsCount > 0
+                                    ? `Lancer le démarrage séquentiel de toutes les applications ? ${stoppedApplicationsCount} application${stoppedApplicationsCount > 1 ? 's' : ''} actuellement arrêtée${stoppedApplicationsCount > 1 ? 's' : ''} seront redémarrées.`
+                                    : 'Lancer le démarrage séquentiel de toutes les applications ? Les applications déjà en cours seront vérifiées, les autres démarrées une par une.'}
+                            </p>
+                            {startAllError && <p class="text-error" role="alert">{startAllError}</p>}
+                        </>
+                    }
+                    confirmLabel="Démarrer toutes"
+                    tone="primary"
+                    loading={startAllLoading}
+                    onCancel={() => {
+                        if (!startAllLoading) {
+                            setStartAllOpen(false);
+                            setStartAllError(null);
+                        }
+                    }}
+                    onConfirm={() => void runStartAll()}
                 />
             )}
             {type === 'databases' && (

@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Validation\ValidationException;
 
 class GithubAppCatalog
 {
@@ -281,7 +282,13 @@ class GithubAppCatalog
     public function registrationToken(GithubApp $githubApp, string $owner, string $repo): array
     {
         $candidates = $this->tokenCandidatesForRunnerRegistration($githubApp);
-        abort_unless($candidates !== [], 400, 'Impossible de générer un jeton GitHub.');
+        if ($candidates === []) {
+            throw ValidationException::withMessages([
+                'github_app_uuid' => [
+                    'Impossible de générer un jeton GitHub. Vérifiez la GitHub App (installation token) ou ajoutez un packages token avec droit Administration sur le dépôt.',
+                ],
+            ]);
+        }
 
         $lastStatus = 0;
         $lastMessage = 'Impossible de créer un jeton d’enregistrement runner.';
@@ -314,7 +321,30 @@ class GithubAppCatalog
             ];
         }
 
-        abort($lastStatus > 0 ? $lastStatus : 502, $lastMessage);
+        throw ValidationException::withMessages([
+            'github_app_uuid' => [
+                $this->registrationTokenFailureMessage($owner, $repo, $lastStatus, $lastMessage),
+            ],
+        ]);
+    }
+
+    private function registrationTokenFailureMessage(
+        string $owner,
+        string $repo,
+        int $status,
+        string $githubMessage,
+    ): string {
+        $repoLabel = $owner.'/'.$repo;
+
+        return match (true) {
+            $status === 401 => "GitHub a refusé l’authentification pour {$repoLabel}. Vérifiez le packages token ou la GitHub App.",
+            $status === 403 => "Permission insuffisante pour créer un runner sur {$repoLabel}. La GitHub App (ou le packages token) doit avoir le droit Administration (écriture) sur le dépôt.",
+            $status === 404 => "Dépôt {$repoLabel} introuvable, ou la GitHub App n’y a pas accès.",
+            $status === 422 => "GitHub a rejeté la demande de jeton pour {$repoLabel}".($githubMessage !== '' ? " : {$githubMessage}" : '.'),
+            default => trim($githubMessage) !== ''
+                ? "Impossible d’obtenir un jeton d’enregistrement pour {$repoLabel} (HTTP {$status}) : {$githubMessage}"
+                : "Impossible d’obtenir un jeton d’enregistrement pour {$repoLabel} (HTTP {$status}).",
+        };
     }
 
     /**

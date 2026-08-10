@@ -17,6 +17,9 @@ const idleSequence: ApplicationBootSequence = {
 export function useApplicationBootSequence(enabled: boolean) {
     const { revision } = useTeamContext();
     const [sequence, setSequence] = useState<ApplicationBootSequence>(idleSequence);
+    const [reloadToken, setReloadToken] = useState(0);
+
+    const reload = () => setReloadToken((value) => value + 1);
 
     useEffect(() => {
         if (!enabled) {
@@ -62,7 +65,7 @@ export function useApplicationBootSequence(enabled: boolean) {
                 window.clearTimeout(timer);
             }
         };
-    }, [enabled, revision]);
+    }, [enabled, revision, reloadToken]);
 
-    return sequence;
+    return { ...sequence, reload };
 }

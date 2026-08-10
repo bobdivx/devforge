@@ -15,6 +15,7 @@ describe('API métiers DevForge', () => {
         await domainApi.coreResources('applications');
         await domainApi.coreResource('applications', 'app-uuid-1234');
         await domainApi.applicationBootSequence();
+        await domainApi.startApplicationBootSequence();
         await domainApi.deployments(2);
         await domainApi.deploymentLogs('deployment-1', 12);
 
@@ -22,6 +23,8 @@ describe('API métiers DevForge', () => {
             '/api/devforge/v1/core/applications',
             '/api/devforge/v1/core/applications/app-uuid-1234',
             '/api/devforge/v1/core/applications/boot-sequence',
+            '/sanctum/csrf-cookie',
+            '/api/devforge/v1/core/applications/boot-sequence/start',
             '/api/devforge/v1/deployments?page=2&per_page=25',
             '/api/devforge/v1/deployments/deployment-1/logs?after=12',
         ]);

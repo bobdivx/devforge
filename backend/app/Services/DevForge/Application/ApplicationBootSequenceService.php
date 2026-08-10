@@ -27,6 +27,7 @@ class ApplicationBootSequenceService
     public function __construct(
         private readonly CoreResourceCatalog $catalog,
         private readonly CoreResourceAction $resourceAction,
+        private readonly ApplicationDesiredRuntimeState $desiredRuntimeState,
     ) {}
 
     public function enabled(): bool
@@ -90,6 +91,71 @@ class ApplicationBootSequenceService
                 $this->ensureForTeam($team);
                 $this->tickTeam($team);
             });
+    }
+
+    /**
+     * Force le démarrage séquentiel de toutes les applications de l’équipe
+     * (y compris une minorité volontairement arrêtée).
+     *
+     * @return array{
+     *     active: bool,
+     *     status: string,
+     *     started_at: string|null,
+     *     finished_at: string|null,
+     *     current_uuid: string|null,
+     *     completed: int,
+     *     total: int,
+     *     poll_interval_ms: int,
+     *     items: list<array<string, mixed>>
+     * }
+     */
+    public function startAllForTeam(Team $team): array
+    {
+        if (! $this->enabled()) {
+            return $this->inactivePayload();
+        }
+
+        $applications = $this->catalog->resources($team, 'applications')->all();
+        if ($applications === []) {
+            return $this->inactivePayload();
+        }
+
+        $existing = $this->readState($team->id);
+        if ($existing !== null && ($existing['status'] ?? null) === 'running') {
+            foreach ($applications as $application) {
+                if ($application instanceof Application) {
+                    $this->desiredRuntimeState->markDesiredRunning($application);
+                }
+            }
+
+            $this->tickTeam($team);
+
+            $state = $this->readState($team->id);
+
+            return $state === null ? $this->inactivePayload() : $this->present($state);
+        }
+
+        foreach ($applications as $application) {
+            if ($application instanceof Application) {
+                $this->desiredRuntimeState->markDesiredRunning($application);
+            }
+        }
+
+        $this->begin($team, $applications);
+
+        $maxTicks = count($applications) + 1;
+        for ($i = 0; $i < $maxTicks; $i++) {
+            $this->tickTeam($team);
+            $state = $this->readState($team->id);
+            if ($state === null || ($state['status'] ?? null) !== 'running') {
+                break;
+            }
+            if (($state['current_uuid'] ?? null) !== null) {
+                break;
+            }
+        }
+
+        return $this->statusForTeam($team, ensure: false);
     }
 
     public function ensureForTeam(Team $team): void
@@ -290,6 +356,7 @@ class ApplicationBootSequenceService
                 }
 
                 if ($this->isStoppedStatus($liveStatus)) {
+                    $this->desiredRuntimeState->markDesiredRunning($application);
                     $startResult = $this->startApplication($application);
                     $items[$nextIndex]['phase'] = self::PHASE_STARTING;
                     $items[$nextIndex]['started_at'] = now()->toIso8601String();

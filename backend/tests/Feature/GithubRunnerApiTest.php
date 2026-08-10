@@ -255,6 +255,93 @@ it('creates a github runner with a personal access token', function () {
         ->assertJsonPath('data.name', 'github-runner-client');
 });
 
+it('creates a github runner using a saved pat on the github app', function () {
+    $fake = Mockery::mock(GithubRunnerInventory::class);
+    $fake->shouldReceive('create')
+        ->once()
+        ->with(
+            Mockery::type(Team::class),
+            Mockery::on(fn (array $input): bool => ($input['auth_mode'] ?? null) === 'pat'
+                && ($input['use_saved_pat'] ?? null) === true
+                && ($input['github_app_uuid'] ?? null) === 'app-uuid-saved-pat'
+                && ! array_key_exists('access_token', $input)),
+        )
+        ->andReturn([
+            'message' => 'Runner créé et démarré.',
+            'runner' => [
+                'id' => $this->server->uuid.':github-runner-client',
+                'name' => 'github-runner-client',
+                'state' => 'running',
+                'server_uuid' => $this->server->uuid,
+            ],
+        ]);
+
+    $this->app->instance(GithubRunnerInventory::class, $fake);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/github/runners', [
+            'auth_mode' => 'pat',
+            'use_saved_pat' => true,
+            'github_app_uuid' => 'app-uuid-saved-pat',
+            'owner' => 'bobdivx',
+            'repo' => 'popcorn-client',
+            'server_uuid' => $this->server->uuid,
+            'runner_name' => 'casaos-runner-popcorn-client',
+            'container_name' => 'github-runner-client',
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.name', 'github-runner-client');
+});
+
+it('surfaces validation errors when runner creation fails', function () {
+    $fake = Mockery::mock(GithubRunnerInventory::class);
+    $fake->shouldReceive('create')
+        ->once()
+        ->andThrow(Illuminate\Validation\ValidationException::withMessages([
+            'github_app_uuid' => [
+                'Permission insuffisante pour créer un runner sur bobdivx/popcorn-client. La GitHub App (ou le packages token) doit avoir le droit Administration (écriture) sur le dépôt.',
+            ],
+        ]));
+
+    $this->app->instance(GithubRunnerInventory::class, $fake);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/github/runners', [
+            'auth_mode' => 'registration',
+            'github_app_uuid' => 'app-uuid-test123',
+            'owner' => 'bobdivx',
+            'repo' => 'popcorn-client',
+            'server_uuid' => $this->server->uuid,
+            'runner_name' => 'devforge-runner-popcorn-client',
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['github_app_uuid']);
+});
+
+it('surfaces unexpected create failures with the underlying message', function () {
+    $fake = Mockery::mock(GithubRunnerInventory::class);
+    $fake->shouldReceive('create')
+        ->once()
+        ->andThrow(new RuntimeException('ssh: connection refused'));
+
+    $this->app->instance(GithubRunnerInventory::class, $fake);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/github/runners', [
+            'auth_mode' => 'registration',
+            'github_app_uuid' => 'app-uuid-test123',
+            'owner' => 'bobdivx',
+            'repo' => 'popcorn-client',
+            'server_uuid' => $this->server->uuid,
+            'runner_name' => 'devforge-runner-popcorn-client',
+        ])
+        ->assertStatus(500)
+        ->assertJsonPath('message', 'Impossible de créer le runner : ssh: connection refused');
+});
+
 it('deletes a github runner', function () {
     $fake = Mockery::mock(GithubRunnerInventory::class);
     $fake->shouldReceive('destroy')

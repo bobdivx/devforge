@@ -23,6 +23,7 @@ function makeBootService(?CoreResourceCatalog $catalog = null, ?CoreResourceActi
     return new ApplicationBootSequenceService(
         $catalog ?? Mockery::mock(CoreResourceCatalog::class),
         $action ?? Mockery::mock(CoreResourceAction::class),
+        new \App\Services\DevForge\Application\ApplicationDesiredRuntimeState,
     );
 }
 
@@ -129,4 +130,33 @@ it('does not auto-start a single stopped app while others are already running', 
 
     expect($status['active'])->toBeFalse()
         ->and($status['status'])->toBe('idle');
+});
+
+it('force-starts all stopped applications including a minority', function () {
+    $team = Team::factory()->make(['id' => 14]);
+    $running = makeApplication('app-1', 'Alpha', 'running:healthy');
+    $stopped = makeApplication('app-2', 'Beta', 'exited:unhealthy');
+
+    $catalog = Mockery::mock(CoreResourceCatalog::class);
+    $catalog->shouldReceive('resources')
+        ->with($team, 'applications')
+        ->andReturn(new Collection([$running, $stopped]));
+
+    $action = Mockery::mock(CoreResourceAction::class);
+    $action->shouldReceive('execute')
+        ->once()
+        ->with($stopped, 'applications', 'deploy', Mockery::on(fn (array $options): bool => ($options['instant_deploy'] ?? false) === true))
+        ->andReturn([
+            'queued' => true,
+            'deployment_uuid' => 'deploy-2',
+            'message' => 'Application deployment request queued.',
+        ]);
+
+    $status = makeBootService($catalog, $action)->startAllForTeam($team);
+
+    expect($status['active'])->toBeTrue()
+        ->and($status['total'])->toBe(2)
+        ->and($status['current_uuid'])->toBe('app-2')
+        ->and($status['items'][0]['phase'])->toBe('running')
+        ->and($status['items'][1]['phase'])->toBe('starting');
 });

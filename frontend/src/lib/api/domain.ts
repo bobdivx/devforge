@@ -1150,6 +1150,8 @@ export type GithubRunnerAuthMode = 'registration' | 'pat';
 export type GithubRunnerCreateInput = {
     auth_mode?: GithubRunnerAuthMode;
     access_token?: string;
+    use_saved_pat?: boolean;
+    save_pat?: boolean;
     github_app_uuid?: string;
     owner: string;
     repo: string;
@@ -2203,6 +2205,10 @@ export const domainApi = {
     coreResources: (type?: CoreResourceType) => apiFetch<ApiListResponse<CoreResource>>(`${API_BASE}/core/${type ?? 'resources'}`),
     coreResource: (type: CoreResourceType, uuid: string) => apiFetch<ApiResponse<CoreResource>>(`${API_BASE}/core/${type}/${encodeURIComponent(uuid)}`),
     applicationBootSequence: () => apiFetch<ApiResponse<ApplicationBootSequence>>(`${API_BASE}/core/applications/boot-sequence`),
+    startApplicationBootSequence: () => mutate<ApiResponse<ApplicationBootSequence>>('/core/applications/boot-sequence/start', {
+        method: 'POST',
+        body: JSON.stringify({}),
+    }),
     coreAction: (type: Exclude<CoreResourceType, 'servers'>, uuid: string, action: CoreAction, payload?: { force?: boolean }) => mutate<ApiResponse<CoreActionResult>>(`/core/${type}/${encodeURIComponent(uuid)}/${action}`, {
         method: 'POST',
         body: JSON.stringify({ action, ...payload }),

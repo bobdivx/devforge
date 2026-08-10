@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 class GithubRunnerController extends Controller
 {
@@ -65,12 +66,27 @@ class GithubRunnerController extends Controller
             throw $e;
         } catch (ModelNotFoundException) {
             return response()->json(['message' => 'Ressource introuvable.'], 404);
+        } catch (HttpExceptionInterface $e) {
+            $status = $e->getStatusCode();
+            $message = trim($e->getMessage());
+
+            return response()->json([
+                'message' => $message !== ''
+                    ? $message
+                    : 'Impossible de créer le runner.',
+            ], $status >= 400 ? $status : 500);
         } catch (\Throwable $e) {
             Log::error('github_runner.create_failed', [
                 'message' => $e->getMessage(),
             ]);
 
-            return response()->json(['message' => 'Impossible de créer le runner.'], 500);
+            $detail = trim($e->getMessage());
+
+            return response()->json([
+                'message' => $detail !== ''
+                    ? 'Impossible de créer le runner : '.$detail
+                    : 'Impossible de créer le runner.',
+            ], 500);
         }
 
         return response()->json([
