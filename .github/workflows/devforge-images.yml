@@ -95,7 +95,32 @@ jobs:
             echo "component=${COMPONENT}"
           } >> "$GITHUB_OUTPUT"
 
+          # Primary Hub tags stay component-scoped for web/realtime/helper.
+          # For api (the main NAS image), also publish plain :latest / :{version}
+          # so compose can use bobdivx/devforge:latest instead of :api.
+          {
+            echo "tags<<EOF"
+            echo "${HUB}:${COMPONENT}"
+            echo "${HUB}:${COMPONENT}-latest"
+            echo "${HUB}:${COMPONENT}-sha-${SHORT_SHA}"
+            echo "${HUB}:${COMPONENT}-${VERSION}"
+            if [ "${COMPONENT}" = "api" ]; then
+              echo "${HUB}:latest"
+              echo "${HUB}:${VERSION}"
+              echo "${HUB}:sha-${SHORT_SHA}"
+            fi
+            echo "${GHCR}:latest"
+            echo "${GHCR}:sha-${SHORT_SHA}"
+            echo "${GHCR}:${VERSION}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
           echo "Docker Hub tags:"
+          if [ "${COMPONENT}" = "api" ]; then
+            echo "  ${HUB}:latest   ← tag principal (compose NAS)"
+            echo "  ${HUB}:${VERSION}"
+            echo "  ${HUB}:sha-${SHORT_SHA}"
+          fi
           echo "  ${HUB}:${COMPONENT}"
           echo "  ${HUB}:${COMPONENT}-latest"
           echo "  ${HUB}:${COMPONENT}-sha-${SHORT_SHA}"
@@ -109,14 +134,7 @@ jobs:
           platforms: linux/amd64
           push: true
           provenance: false
-          tags: |
-            ${{ steps.meta.outputs.hub }}:${{ steps.meta.outputs.component }}
-            ${{ steps.meta.outputs.hub }}:${{ steps.meta.outputs.component }}-latest
-            ${{ steps.meta.outputs.hub }}:${{ steps.meta.outputs.component }}-sha-${{ steps.meta.outputs.sha }}
-            ${{ steps.meta.outputs.hub }}:${{ steps.meta.outputs.component }}-${{ steps.meta.outputs.version }}
-            ${{ steps.meta.outputs.ghcr }}:latest
-            ${{ steps.meta.outputs.ghcr }}:sha-${{ steps.meta.outputs.sha }}
-            ${{ steps.meta.outputs.ghcr }}:${{ steps.meta.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha,scope=devforge-${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=devforge-${{ matrix.name }}
 
@@ -127,14 +145,12 @@ jobs:
       - name: Print image refs
         run: |
           echo "Docker Hub (https://hub.docker.com/r/bobdivx/devforge):"
-          echo "  bobdivx/devforge:api"
-          echo "  bobdivx/devforge:api-latest"
+          echo "  bobdivx/devforge:latest          ← API (principal)"
+          echo "  bobdivx/devforge:<version>       ← API versionnée"
+          echo "  bobdivx/devforge:api             ← alias rétrocompat"
           echo "  bobdivx/devforge:web"
-          echo "  bobdivx/devforge:web-latest"
           echo "  bobdivx/devforge:realtime"
-          echo "  bobdivx/devforge:realtime-latest"
           echo "  bobdivx/devforge:helper"
-          echo "  bobdivx/devforge:helper-latest"
           echo "GHCR mirrors:"
           echo "  ghcr.io/bobdivx/devforge-api:latest"
           echo "  ghcr.io/bobdivx/devforge-web:latest"

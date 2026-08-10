@@ -12,7 +12,7 @@ services:
       - ./:/data/devforge
 
   api:
-    image: ${DEVFORGE_API_IMAGE:-bobdivx/devforge:api}
+    image: ${DEVFORGE_API_IMAGE:-bobdivx/devforge:latest}
     pull_policy: always
     container_name: devforge-api
     restart: always

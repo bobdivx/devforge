@@ -2,7 +2,7 @@
 # Import : Apps → Installer une app personnalisée
 #
 # Images Docker Hub :
-#   bobdivx/devforge:api
+#   bobdivx/devforge:latest
 #   bobdivx/devforge:realtime
 #   bobdivx/devforge:helper   ← requis pour les déploiements (pull à la demande, pas un service compose)
 #
@@ -53,7 +53,8 @@ services:
       - REDIS_HOST=127.0.0.1
       - SESSION_SECURE_COOKIE=true
       - SSH_AUTH_SOCK=/ssh-agent
-    image: ${DEVFORGE_API_IMAGE:-bobdivx/devforge:api}
+    image: ${DEVFORGE_API_IMAGE:-bobdivx/devforge:latest}
+    pull_policy: always
     labels:
       icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/docker.png
     logging:
@@ -158,6 +159,7 @@ services:
       - SOKETI_DEFAULT_APP_SECRET=${PUSHER_APP_SECRET:-devforge}
       - SOKETI_HOST=0.0.0.0
     image: ${DEVFORGE_REALTIME_IMAGE:-bobdivx/devforge:realtime}
+    pull_policy: always
     labels:
       icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/docker.png
     logging:
@@ -229,7 +231,9 @@ x-casaos:
   developer: DevForge
   tip: |
     1. Définir APP_KEY et DB_PASSWORD avant le premier démarrage.
-    2. Images : bobdivx/devforge:api et bobdivx/devforge:realtime (Docker Hub).
+    2. Images : bobdivx/devforge:latest et bobdivx/devforge:realtime (Docker Hub).
     3. Données sous /media/Docker/AppData/devforge/
     4. Surveiller l'espace /media/Docker (builds + images) — un disque plein fait planter Postgres.
     5. Cleanup Docker forcé toutes les heures sur le serveur localhost (seuil 70%).
+    6. Mise à jour : docker pull bobdivx/devforge:latest && docker pull bobdivx/devforge:realtime
+       puis Update CasaOS / compose up -d --force-recreate (un redémarrage seul ne suffit pas).

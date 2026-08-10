@@ -20,7 +20,7 @@ services:
       retries: 10
 
   api:
-    image: ${DEVFORGE_API_IMAGE:-bobdivx/devforge:api}
+    image: ${DEVFORGE_API_IMAGE:-bobdivx/devforge:latest}
     build:
       context: .
       dockerfile: docker/devforge-api/Dockerfile
