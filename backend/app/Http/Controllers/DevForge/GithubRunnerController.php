@@ -246,4 +246,93 @@ class GithubRunnerController extends Controller
             return response()->json(['message' => 'Impossible de supprimer le runner.'], 500);
         }
     }
+
+    public function attachApplication(Request $request, string $serverUuid, string $containerName): JsonResponse
+    {
+        $team = $this->currentTeamContext->resolve($request->user());
+
+        try {
+            $server = Server::query()
+                ->where('team_id', $team->id)
+                ->where('uuid', $serverUuid)
+                ->firstOrFail();
+        } catch (ModelNotFoundException) {
+            return response()->json(['message' => 'Serveur introuvable.'], 404);
+        }
+
+        $this->authorize('update', $server);
+
+        $validated = $request->validate([
+            'application_uuid' => ['required', 'string', 'max:64'],
+            'role' => ['nullable', 'string', 'max:32'],
+        ]);
+
+        try {
+            $link = $this->githubRunnerInventory->attachApplication(
+                $team,
+                $serverUuid,
+                $containerName,
+                $validated['application_uuid'],
+                $validated['role'] ?? null,
+            );
+
+            return response()->json([
+                'data' => $link,
+                'message' => 'Runner lié à l’application.',
+            ], 201);
+        } catch (ModelNotFoundException) {
+            return response()->json(['message' => 'Runner introuvable.'], 404);
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            Log::error('github_runner.attach_failed', [
+                'server_uuid' => $serverUuid,
+                'container' => $containerName,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json(['message' => 'Impossible de lier le runner à l’application.'], 500);
+        }
+    }
+
+    public function detachApplication(Request $request, string $serverUuid, string $containerName, string $applicationUuid): JsonResponse
+    {
+        $team = $this->currentTeamContext->resolve($request->user());
+
+        try {
+            $server = Server::query()
+                ->where('team_id', $team->id)
+                ->where('uuid', $serverUuid)
+                ->firstOrFail();
+        } catch (ModelNotFoundException) {
+            return response()->json(['message' => 'Serveur introuvable.'], 404);
+        }
+
+        $this->authorize('update', $server);
+
+        try {
+            $result = $this->githubRunnerInventory->detachApplication(
+                $team,
+                $serverUuid,
+                $containerName,
+                $applicationUuid,
+            );
+
+            return response()->json([
+                'data' => $result,
+                'message' => $result['message'],
+            ]);
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            Log::error('github_runner.detach_failed', [
+                'server_uuid' => $serverUuid,
+                'container' => $containerName,
+                'application_uuid' => $applicationUuid,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json(['message' => 'Impossible de supprimer le lien.'], 500);
+        }
+    }
 }

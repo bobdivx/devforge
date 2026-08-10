@@ -32,9 +32,11 @@ import {
     coherenceLabel,
     coherenceTone,
     dockerActionAvailability,
+    linkableApplications,
     linkedAppsForRunner,
     runnerCoherence,
     runnerRepoKey,
+    runnerRoleLabel,
     type LinkedApplication,
     type RunnerCoherence,
 } from '../../lib/runners/runner-coherence';
@@ -107,6 +109,11 @@ export function RunnersPage() {
         action: GithubRunnerAction;
     } | null>(null);
     const [pendingDelete, setPendingDelete] = useState<GithubRunner | null>(null);
+    const [logsEnabled, setLogsEnabled] = useState(false);
+    const [detailEnabled, setDetailEnabled] = useState(false);
+    const [linkAppUuid, setLinkAppUuid] = useState('');
+    const [linkRole, setLinkRole] = useState('frontend');
+    const [linkBusy, setLinkBusy] = useState(false);
     const logsEndRef = useRef<HTMLDivElement | null>(null);
     const stickLogsToBottom = useRef(true);
 
@@ -189,13 +196,32 @@ export function RunnersPage() {
         }
     }, [filteredRunners, selectedId, listFilter]);
 
+    // Stagger detail / logs so the list can paint before heavier SSH calls.
+    useEffect(() => {
+        setDetailEnabled(false);
+        setLogsEnabled(false);
+        if (!selected || listFilter === 'gaps') {
+            return;
+        }
+
+        const detailTimer = window.setTimeout(() => setDetailEnabled(true), 150);
+        const logsTimer = window.setTimeout(() => setLogsEnabled(true), 600);
+
+        return () => {
+            window.clearTimeout(detailTimer);
+            window.clearTimeout(logsTimer);
+        };
+    }, [selected?.id, listFilter]);
+
     const detail = useApiQuery(
-        selected && listFilter !== 'gaps' ? `github-runner:${selected.server_uuid}:${selected.name}` : null,
+        detailEnabled && selected && listFilter !== 'gaps'
+            ? `github-runner:${selected.server_uuid}:${selected.name}`
+            : null,
         () => domainApi.githubRunner(selected!.server_uuid, selected!.name),
     );
 
     const logs = useApiQuery(
-        selected && listFilter !== 'gaps'
+        logsEnabled && selected && listFilter !== 'gaps'
             ? `github-runner-logs:${selected.server_uuid}:${selected.name}:${lines}`
             : null,
         () => domainApi.githubRunnerLogs(selected!.server_uuid, selected!.name, lines),
@@ -207,18 +233,17 @@ export function RunnersPage() {
     detailReloadRef.current = detail.reload;
 
     useEffect(() => {
-        if (!selected || listFilter === 'gaps') {
+        if (!selected || listFilter === 'gaps' || !logsEnabled) {
             return;
         }
 
         const interval = window.setInterval(() => {
             setLogsRefreshing(true);
             void logsReloadRef.current({ silent: true }).finally(() => setLogsRefreshing(false));
-            void detailReloadRef.current({ silent: true });
-        }, 8000);
+        }, 15_000);
 
         return () => window.clearInterval(interval);
-    }, [selected?.id, lines, listFilter]);
+    }, [selected?.id, lines, listFilter, logsEnabled]);
 
     useEffect(() => {
         if (stickLogsToBottom.current) {
@@ -278,6 +303,56 @@ export function RunnersPage() {
         }
     }
 
+    async function attachSelectedApp() {
+        if (!selected || !linkAppUuid) {
+            return;
+        }
+        setLinkBusy(true);
+        setFeedback(null);
+        setError(null);
+        try {
+            const result = await domainApi.attachGithubRunnerApplication(selected.server_uuid, selected.name, {
+                application_uuid: linkAppUuid,
+                role: linkRole || null,
+            });
+            setFeedback(result.message ?? 'Runner lié.');
+            setLinkAppUuid('');
+            await Promise.all([
+                runners.reload({ silent: true }),
+                detailEnabled ? detail.reload({ silent: true }) : Promise.resolve(),
+            ]);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Liaison impossible.');
+        } finally {
+            setLinkBusy(false);
+        }
+    }
+
+    async function detachLinkedApp(applicationUuid: string) {
+        if (!selected) {
+            return;
+        }
+        setLinkBusy(true);
+        setFeedback(null);
+        setError(null);
+        try {
+            const result = await domainApi.detachGithubRunnerApplication(
+                selected.server_uuid,
+                selected.name,
+                applicationUuid,
+            );
+            setFeedback(result.message ?? 'Lien supprimé.');
+            await Promise.all([
+                runners.reload({ silent: true }),
+                detailEnabled ? detail.reload({ silent: true }) : Promise.resolve(),
+            ]);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Suppression du lien impossible.');
+        } finally {
+            setLinkBusy(false);
+        }
+    }
+
     function openCreate(prefill?: CreateRunnerPrefill | null) {
         setCreatePrefill(prefill ?? null);
         setCreateOpen(true);
@@ -287,8 +362,12 @@ export function RunnersPage() {
     const logData = logs.data?.data;
     const detailGithub = detailRunner ? githubStatusLabel(detailRunner) : null;
     const selectedMeta = selected ? runnerMeta.get(selected.id) : null;
+    const attachCandidates = useMemo(
+        () => linkableApplications(linkedApps, selectedMeta?.apps ?? []),
+        [linkedApps, selectedMeta?.apps],
+    );
     const actions = dockerActionAvailability(detailRunner?.state ?? selected?.state);
-    const pageLoading = (runners.loading && !runners.data) || (applications.loading && !applications.data);
+    const pageLoading = runners.loading && !runners.data;
 
     return (
         <>
@@ -561,27 +640,38 @@ export function RunnersPage() {
                                             <p class="mb-2 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
                                                 Applications liées
                                             </p>
+                                            <p class="mb-3 text-xs text-base-content/55">
+                                                Une app peut avoir plusieurs runners (frontend, backend, desktop…).
+                                                Le match auto par dépôt reste actif ; vous pouvez aussi lier manuellement.
+                                            </p>
                                             {(selectedMeta?.apps.length ?? 0) === 0 ? (
                                                 <p class="rounded-xl border border-warning/25 bg-warning/5 px-3 py-2 text-xs text-base-content/65">
-                                                    Aucune application DevForge n’utilise ce dépôt.
-                                                    Créez l’app ou vérifiez <code class="text-[11px]">git_repository</code>.
+                                                    Aucune application liée. Reliez manuellement ci-dessous, ou créez une app
+                                                    avec le même <code class="text-[11px]">git_repository</code>.
                                                 </p>
                                             ) : (
                                                 <ul class="grid gap-2">
                                                     {selectedMeta!.apps.map((app) => (
-                                                        <li key={app.uuid}>
+                                                        <li key={app.uuid} class="flex items-stretch gap-2">
                                                             <button
                                                                 type="button"
-                                                                class="flex w-full items-center justify-between gap-3 rounded-xl border border-base-300/70 bg-base-200/30 px-3 py-2 text-start transition-colors hover:border-primary/40 hover:bg-primary/5"
+                                                                class="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-xl border border-base-300/70 bg-base-200/30 px-3 py-2 text-start transition-colors hover:border-primary/40 hover:bg-primary/5"
                                                                 onClick={() => navigateTo(applicationPath(app.uuid))}
                                                             >
                                                                 <span class="min-w-0">
-                                                                    <span class="flex items-center gap-1.5 text-sm font-medium">
+                                                                    <span class="flex flex-wrap items-center gap-1.5 text-sm font-medium">
                                                                         <Link2 class="size-3.5 shrink-0 text-primary" aria-hidden />
                                                                         <span class="truncate">{app.name}</span>
+                                                                        {runnerRoleLabel(app.role) && (
+                                                                            <StatusBadge label={runnerRoleLabel(app.role)!} tone="neutral" />
+                                                                        )}
+                                                                        <StatusBadge
+                                                                            label={app.link_source === 'manual' ? 'manuel' : 'auto'}
+                                                                            tone={app.link_source === 'manual' ? 'success' : 'neutral'}
+                                                                        />
                                                                     </span>
                                                                     <span class="mt-0.5 block truncate font-mono text-[11px] text-base-content/45">
-                                                                        {app.repo_key}
+                                                                        {app.repo_key || 'repo non défini'}
                                                                         {app.git_branch ? ` · ${app.git_branch}` : ''}
                                                                     </span>
                                                                 </span>
@@ -590,10 +680,64 @@ export function RunnersPage() {
                                                                     tone={runnerStateTone(app.status.split(':')[0] || '')}
                                                                 />
                                                             </button>
+                                                            {app.link_source === 'manual' && (
+                                                                <button
+                                                                    type="button"
+                                                                    class="btn btn-ghost btn-sm text-error"
+                                                                    disabled={linkBusy}
+                                                                    title="Retirer le lien manuel"
+                                                                    onClick={() => void detachLinkedApp(app.uuid)}
+                                                                >
+                                                                    <Trash2 class="size-3.5" aria-hidden />
+                                                                </button>
+                                                            )}
                                                         </li>
                                                     ))}
                                                 </ul>
                                             )}
+
+                                            <div class="mt-3 grid gap-2 rounded-xl border border-base-300/70 bg-base-200/20 p-3 sm:grid-cols-[1fr_8rem_auto]">
+                                                <label class="grid gap-1 text-xs">
+                                                    <span class="text-base-content/45">Lier une application</span>
+                                                    <select
+                                                        class="select select-bordered select-sm w-full"
+                                                        value={linkAppUuid}
+                                                        onChange={(event) => setLinkAppUuid((event.target as HTMLSelectElement).value)}
+                                                    >
+                                                        <option value="">Choisir…</option>
+                                                        {attachCandidates.map((app) => (
+                                                            <option key={app.uuid} value={app.uuid}>
+                                                                {app.name} ({app.repo_key})
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </label>
+                                                <label class="grid gap-1 text-xs">
+                                                    <span class="text-base-content/45">Rôle</span>
+                                                    <select
+                                                        class="select select-bordered select-sm w-full"
+                                                        value={linkRole}
+                                                        onChange={(event) => setLinkRole((event.target as HTMLSelectElement).value)}
+                                                    >
+                                                        <option value="frontend">Frontend</option>
+                                                        <option value="backend">Backend</option>
+                                                        <option value="desktop">Desktop</option>
+                                                        <option value="ci">CI</option>
+                                                        <option value="other">Autre</option>
+                                                    </select>
+                                                </label>
+                                                <div class="flex items-end">
+                                                    <button
+                                                        type="button"
+                                                        class="btn btn-primary btn-sm w-full"
+                                                        disabled={linkBusy || !linkAppUuid}
+                                                        onClick={() => void attachSelectedApp()}
+                                                    >
+                                                        <Link2 class="size-3.5" aria-hidden />
+                                                        Lier
+                                                    </button>
+                                                </div>
+                                            </div>
                                         </div>
 
                                         {(detailRunner?.environment?.length ?? 0) > 0 && (
@@ -619,7 +763,7 @@ export function RunnersPage() {
                                             <div>
                                                 <p class="text-sm font-semibold">Logs</p>
                                                 <p class="text-xs text-base-content/50">
-                                                    {logsRefreshing ? 'Mise à jour…' : 'stdout / stderr · refresh auto 8s'}
+                                                    {logsRefreshing ? 'Mise à jour…' : 'stdout / stderr · refresh auto 15s'}
                                                 </p>
                                             </div>
                                         </div>

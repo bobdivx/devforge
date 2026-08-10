@@ -1122,6 +1122,13 @@ export type GithubAppSummary = {
     has_packages_token?: boolean;
 };
 
+export type GithubRunnerLinkedApplication = {
+    uuid: string;
+    name: string;
+    role?: string | null;
+    link_source?: 'manual' | 'auto';
+};
+
 export type GithubRunner = {
     id: string;
     name: string;
@@ -1141,6 +1148,7 @@ export type GithubRunner = {
     github_labels?: string[];
     github_repo?: string | null;
     source?: 'docker' | 'github' | 'both';
+    linked_applications?: GithubRunnerLinkedApplication[];
 };
 
 export type GithubRunnerAction = 'start' | 'stop' | 'restart';
@@ -1167,6 +1175,7 @@ export type GithubRunnerCreateInput = {
     pull_image?: boolean;
     volumes?: string[];
     extra_env?: Array<{ key: string; value: string }>;
+    application_links?: Array<{ application_uuid: string; role?: string | null }>;
 };
 
 export type GithubRunnerActionResult = {
@@ -2542,19 +2551,33 @@ export const domainApi = {
     ),
     githubRepositories: (githubAppUuid: string) => apiFetch<ApiResponse<GithubRepository[]>>(`${API_BASE}/github/apps/${encodeURIComponent(githubAppUuid)}/repositories`),
     githubBranches: (githubAppUuid: string, owner: string, repo: string) => apiFetch<ApiResponse<GithubBranch[]>>(`${API_BASE}/github/apps/${encodeURIComponent(githubAppUuid)}/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`),
-    githubRunners: () => apiFetch<ApiResponse<GithubRunner[]>>(`${API_BASE}/github/runners`, {}, 60_000),
     createGithubRunner: (input: GithubRunnerCreateInput) => mutate<ApiResponse<GithubRunner> & { message?: string }>(
         '/github/runners',
         {
             method: 'POST',
             body: JSON.stringify(input),
         },
-        60_000,
+        180_000,
     ),
     deleteGithubRunner: (serverUuid: string, containerName: string) => mutate<ApiResponse<{ ok: boolean; container: string }> & { message?: string }>(
         `/github/runners/${encodeURIComponent(serverUuid)}/${encodeURIComponent(containerName)}`,
         { method: 'DELETE' },
         45_000,
+    ),
+    attachGithubRunnerApplication: (
+        serverUuid: string,
+        containerName: string,
+        input: { application_uuid: string; role?: string | null },
+    ) => mutate<ApiResponse<GithubRunnerLinkedApplication> & { message?: string }>(
+        `/github/runners/${encodeURIComponent(serverUuid)}/${encodeURIComponent(containerName)}/applications`,
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+    ),
+    detachGithubRunnerApplication: (serverUuid: string, containerName: string, applicationUuid: string) => mutate<ApiResponse<{ ok: boolean }> & { message?: string }>(
+        `/github/runners/${encodeURIComponent(serverUuid)}/${encodeURIComponent(containerName)}/applications/${encodeURIComponent(applicationUuid)}`,
+        { method: 'DELETE' },
     ),
     githubRunner: (serverUuid: string, containerName: string) => apiFetch<ApiResponse<GithubRunner>>(
         `${API_BASE}/github/runners/${encodeURIComponent(serverUuid)}/${encodeURIComponent(containerName)}`,
@@ -2571,6 +2594,7 @@ export const domainApi = {
         { method: 'POST' },
         45_000,
     ),
+    githubRunners: () => apiFetch<ApiResponse<GithubRunner[]>>(`${API_BASE}/github/runners`, {}, 45_000),
     createApplication: (input: CreateApplicationInput) => mutate<ApiResponse<CoreResource>>('/applications', {
         method: 'POST',
         body: JSON.stringify(input),

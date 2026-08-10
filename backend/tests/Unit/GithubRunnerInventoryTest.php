@@ -4,7 +4,7 @@ use App\Services\DevForge\Github\GithubAppCatalog;
 use App\Services\DevForge\Github\GithubRunnerInventory;
 
 it('detects github runner containers by name image and labels', function (array $container, bool $expected) {
-    $inventory = new GithubRunnerInventory(Mockery::mock(GithubAppCatalog::class));
+    $inventory = new GithubRunnerInventory(Mockery::mock(GithubAppCatalog::class), Mockery::mock(App\Services\DevForge\Github\GithubRunnerApplicationLinker::class));
 
     expect($inventory->isGithubRunnerContainer($container))->toBe($expected);
 })->with([
@@ -51,16 +51,27 @@ it('detects github runner containers by name image and labels', function (array 
 ]);
 
 it('parses github repository urls', function (?string $url, ?array $expected) {
-    $inventory = new GithubRunnerInventory(Mockery::mock(GithubAppCatalog::class));
+    $inventory = new GithubRunnerInventory(Mockery::mock(GithubAppCatalog::class), Mockery::mock(App\Services\DevForge\Github\GithubRunnerApplicationLinker::class));
 
     expect($inventory->parseRepoUrl($url))->toBe($expected);
 })->with([
-    'https url' => ['https://github.com/bobdivx/popcorn-client', ['owner' => 'bobdivx', 'repo' => 'popcorn-client']],
+    'https url ending with t' => ['https://github.com/bobdivx/popcorn-client', ['owner' => 'bobdivx', 'repo' => 'popcorn-client']],
+    'https url ending with i' => ['https://github.com/bobdivx/popcorn-tauri', ['owner' => 'bobdivx', 'repo' => 'popcorn-tauri']],
     'git suffix' => ['https://github.com/bobdivx/popcorn-server.git', ['owner' => 'bobdivx', 'repo' => 'popcorn-server']],
     'ssh style' => ['git@github.com:bobdivx/popcorn-tauri.git', ['owner' => 'bobdivx', 'repo' => 'popcorn-tauri']],
     'empty' => [null, null],
     'invalid' => ['https://example.com/nope', null],
 ]);
+
+it('uses a lean docker discovery command set', function () {
+    $inventory = new GithubRunnerInventory(Mockery::mock(GithubAppCatalog::class), Mockery::mock(App\Services\DevForge\Github\GithubRunnerApplicationLinker::class));
+
+    $commands = $inventory->discoveryDockerCommands();
+
+    expect($commands)->toHaveCount(1)
+        ->and($commands[0])->toContain('name=github-runner')
+        ->and(implode("\n", $commands))->not->toContain('com.casaos.app_id=github-runners');
+});
 
 it('enriches docker runners with github online busy offline status', function () {
     Illuminate\Support\Facades\Cache::flush();
@@ -81,7 +92,7 @@ it('enriches docker runners with github online busy offline status', function ()
             ],
         ]);
 
-    $inventory = new GithubRunnerInventory($catalog);
+    $inventory = new GithubRunnerInventory($catalog, Mockery::mock(App\Services\DevForge\Github\GithubRunnerApplicationLinker::class));
 
     $enriched = $inventory->enrichWithGithubStatus(
         Mockery::mock(\App\Models\Team::class),
@@ -108,7 +119,7 @@ it('skips cold github api fetches when listing', function () {
     $catalog->shouldReceive('appsForTeam')->once()->andReturn(collect([(object) ['uuid' => 'app-1']]));
     $catalog->shouldReceive('runners')->never();
 
-    $inventory = new GithubRunnerInventory($catalog);
+    $inventory = new GithubRunnerInventory($catalog, Mockery::mock(App\Services\DevForge\Github\GithubRunnerApplicationLinker::class));
 
     $enriched = $inventory->enrichWithGithubStatus(
         Mockery::mock(\App\Models\Team::class),
@@ -128,7 +139,7 @@ it('skips cold github api fetches when listing', function () {
 });
 
 it('builds docker run commands with volumes network and timezone', function () {
-    $inventory = new GithubRunnerInventory(Mockery::mock(GithubAppCatalog::class));
+    $inventory = new GithubRunnerInventory(Mockery::mock(GithubAppCatalog::class), Mockery::mock(App\Services\DevForge\Github\GithubRunnerApplicationLinker::class));
 
     $command = $inventory->buildDockerRunCommand(
         containerName: 'github-runner-client',
@@ -164,7 +175,7 @@ it('builds docker run commands with volumes network and timezone', function () {
 });
 
 it('builds host network mode for server runners', function () {
-    $inventory = new GithubRunnerInventory(Mockery::mock(GithubAppCatalog::class));
+    $inventory = new GithubRunnerInventory(Mockery::mock(GithubAppCatalog::class), Mockery::mock(App\Services\DevForge\Github\GithubRunnerApplicationLinker::class));
 
     $command = $inventory->buildDockerRunCommand(
         containerName: 'github-runner-server',
@@ -180,7 +191,7 @@ it('builds host network mode for server runners', function () {
 });
 
 it('builds pat auth without runner_token env', function () {
-    $inventory = new GithubRunnerInventory(Mockery::mock(GithubAppCatalog::class));
+    $inventory = new GithubRunnerInventory(Mockery::mock(GithubAppCatalog::class), Mockery::mock(App\Services\DevForge\Github\GithubRunnerApplicationLinker::class));
 
     $command = $inventory->buildDockerRunCommand(
         containerName: 'github-runner-client',

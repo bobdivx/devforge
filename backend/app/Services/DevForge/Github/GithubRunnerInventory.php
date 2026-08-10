@@ -27,6 +27,7 @@ class GithubRunnerInventory
 
     public function __construct(
         private readonly GithubAppCatalog $githubAppCatalog,
+        private readonly GithubRunnerApplicationLinker $applicationLinker,
     ) {}
 
     /**
@@ -37,13 +38,16 @@ class GithubRunnerInventory
         $cacheKey = 'devforge.github.runners.list.'.$team->id;
 
         /** @var array<int, array<string, mixed>> $cached */
-        $cached = Cache::remember($cacheKey, now()->addSeconds(30), function () use ($team): array {
+        $cached = Cache::remember($cacheKey, now()->addSeconds(45), function () use ($team): array {
             $runners = $this->serversForTeam($team)
                 ->flatMap(fn (Server $server): Collection => $this->runnersOnServer($server, enrichEnv: false))
                 ->values();
 
             // List stays fast: GitHub status only from existing cache entries (no cold API calls).
-            return $this->enrichWithGithubStatus($team, $runners, allowColdFetch: false)
+            return $this->applicationLinker->enrichRunners(
+                $team,
+                $this->enrichWithGithubStatus($team, $runners, allowColdFetch: false),
+            )
                 ->sortBy([
                     ['server_name', 'asc'],
                     ['name', 'asc'],
@@ -61,28 +65,46 @@ class GithubRunnerInventory
     public function show(Team $team, string $serverUuid, string $containerName): array
     {
         $server = $this->serverForTeam($team, $serverUuid);
-        $runner = $this->findRunner($server, $containerName);
-        $environment = $this->safeEnvironment($server, $containerName);
+        $this->assertValidContainerName($containerName);
 
-        $repoUrl = $runner['repo_url']
-            ?? $this->envValue($environment, 'REPO_URL');
-        $runnerName = $this->envValue($environment, 'RUNNER_NAME')
-            ?? $runner['runner_name'];
+        if (! $server->isFunctional()) {
+            throw ValidationException::withMessages([
+                'server' => ['Le serveur n’est pas joignable.'],
+            ]);
+        }
 
-        $presented = [
-            ...$runner,
-            'repo_url' => $repoUrl,
-            'runner_name' => $runnerName,
-            'environment' => $environment,
-        ];
+        // One docker inspect for state + labels + env (avoids ps listing + separate env SSH).
+        $inspected = $this->inspectRunnerDetails($server, $containerName);
+        if ($inspected === null) {
+            // Fallback for older discovery edge cases.
+            $runner = $this->findRunner($server, $containerName);
+            $environment = $this->safeEnvironment($server, $containerName);
+            $presented = [
+                ...$runner,
+                'repo_url' => $runner['repo_url'] ?? $this->envValue($environment, 'REPO_URL'),
+                'runner_name' => $this->envValue($environment, 'RUNNER_NAME') ?? $runner['runner_name'],
+                'environment' => $environment,
+            ];
+        } else {
+            $presented = $inspected;
+        }
 
+        // Prefer cached GitHub status — cold API fetches made every detail view feel stuck.
         try {
-            $enriched = $this->enrichWithGithubStatus($team, collect([$presented]), allowColdFetch: true)->first();
+            $enriched = $this->enrichWithGithubStatus($team, collect([$presented]), allowColdFetch: false)->first();
         } catch (\Throwable) {
             $enriched = null;
         }
 
-        return is_array($enriched) ? $enriched : $this->withEmptyGithubFields($presented);
+        return is_array($enriched)
+            ? [
+                ...$enriched,
+                'linked_applications' => $this->applicationLinker->linksForRunner($team, $serverUuid, $containerName),
+            ]
+            : [
+                ...$this->withEmptyGithubFields($presented),
+                'linked_applications' => $this->applicationLinker->linksForRunner($team, $serverUuid, $containerName),
+            ];
     }
 
     /**
@@ -104,8 +126,6 @@ class GithubRunnerInventory
 
         // Prefer inventory match, but still attempt docker logs by name when discovery is flaky.
         try {
-            $this->findRunner($server, $containerName);
-        } catch (ModelNotFoundException) {
             if (! $this->containerExistsByName($server, $containerName)) {
                 throw (new ModelNotFoundException)->setModel('GithubRunner', [$containerName]);
             }
@@ -167,7 +187,7 @@ class GithubRunnerInventory
             'restart' => $server->restartUnmanaged($containerName),
         };
 
-        Cache::forget('devforge.github.runners.list.'.$team->id);
+        $this->forgetRunnerCaches($team, $server);
 
         $runner = $this->show($team, $serverUuid, $containerName);
 
@@ -212,6 +232,9 @@ class GithubRunnerInventory
             'extra_env' => ['nullable', 'array', 'max:30'],
             'extra_env.*.key' => ['required', 'string', 'max:128', 'regex:/^[A-Z][A-Z0-9_]*$/'],
             'extra_env.*.value' => ['nullable', 'string', 'max:2048'],
+            'application_links' => ['nullable', 'array', 'max:20'],
+            'application_links.*.application_uuid' => ['required', 'string', 'max:64'],
+            'application_links.*.role' => ['nullable', 'string', 'max:32'],
         ])->validate();
 
         $authMode = (string) ($validated['auth_mode'] ?? 'registration');
@@ -378,7 +401,7 @@ class GithubRunnerInventory
         // Allow docker a moment before listing the new container.
         usleep(400_000);
 
-        Cache::forget('devforge.github.runners.list.'.$team->id);
+        $this->forgetRunnerCaches($team, $server);
 
         try {
             $runner = $this->show($team, $server->uuid, $containerName);
@@ -406,7 +429,41 @@ class GithubRunnerInventory
 
         return [
             'message' => 'Runner créé et démarré.',
-            'runner' => $runner,
+            'runner' => $this->attachCreateLinks($team, $server->uuid, $containerName, $validated['application_links'] ?? [], $runner),
+        ];
+    }
+
+    /**
+     * @param  array<int, array{application_uuid?: string, role?: string|null}>  $links
+     * @param  array<string, mixed>  $runner
+     * @return array<string, mixed>
+     */
+    private function attachCreateLinks(Team $team, string $serverUuid, string $containerName, array $links, array $runner): array
+    {
+        $attached = [];
+        foreach ($links as $link) {
+            $uuid = trim((string) ($link['application_uuid'] ?? ''));
+            if ($uuid === '') {
+                continue;
+            }
+            try {
+                $attached[] = $this->applicationLinker->attach(
+                    $team,
+                    $serverUuid,
+                    $containerName,
+                    $uuid,
+                    isset($link['role']) ? (string) $link['role'] : null,
+                );
+            } catch (\Throwable) {
+                // Runner is up — linking failures should not roll back create.
+            }
+        }
+
+        return [
+            ...$runner,
+            'linked_applications' => $attached !== []
+                ? $attached
+                : $this->applicationLinker->linksForRunner($team, $serverUuid, $containerName),
         ];
     }
 
@@ -426,12 +483,54 @@ class GithubRunnerInventory
         }
 
         $this->removeContainer($server, $containerName);
-        Cache::forget('devforge.github.runners.list.'.$team->id);
+        $this->applicationLinker->detachAllForRunner($team, $serverUuid, $containerName);
+        $this->forgetRunnerCaches($team, $server);
 
         return [
             'ok' => true,
             'message' => 'Runner supprimé.',
             'container' => $containerName,
+        ];
+    }
+
+    /**
+     * @return array{uuid: string, name: string, role: string|null, link_source: string}
+     */
+    public function attachApplication(
+        Team $team,
+        string $serverUuid,
+        string $containerName,
+        string $applicationUuid,
+        ?string $role = null,
+    ): array {
+        $server = $this->serverForTeam($team, $serverUuid);
+        $this->assertValidContainerName($containerName);
+        $this->findRunner($server, $containerName);
+
+        $link = $this->applicationLinker->attach($team, $serverUuid, $containerName, $applicationUuid, $role);
+        $this->forgetRunnerCaches($team, $server);
+
+        return $link;
+    }
+
+    /**
+     * @return array{ok: bool, message: string}
+     */
+    public function detachApplication(
+        Team $team,
+        string $serverUuid,
+        string $containerName,
+        string $applicationUuid,
+    ): array {
+        $server = $this->serverForTeam($team, $serverUuid);
+        $this->assertValidContainerName($containerName);
+
+        $this->applicationLinker->detach($team, $serverUuid, $containerName, $applicationUuid);
+        $this->forgetRunnerCaches($team, $server);
+
+        return [
+            'ok' => true,
+            'message' => 'Lien runner ↔ application supprimé.',
         ];
     }
 
@@ -517,13 +616,19 @@ class GithubRunnerInventory
         }
 
         $value = trim((string) $repoUrl);
-        if (preg_match('#(?:github\.com[:/]|/)(?P<owner>[^/\s]+)(?:/|:)(?P<repo>[^/\s#?]+?)(?:\.git)?/?$#i', $value, $matches) !== 1) {
+        if (preg_match('~(?:github\.com[:/]|/)(?P<owner>[^/\s]+)(?:/|:)(?P<repo>[^/\s#?]+)/?$~i', $value, $matches) !== 1) {
             return null;
+        }
+
+        $repo = $matches['repo'];
+        // Do not use rtrim(..., '.git'): it strips any trailing char in {.,g,i,t}.
+        if (str_ends_with(strtolower($repo), '.git')) {
+            $repo = substr($repo, 0, -4);
         }
 
         return [
             'owner' => $matches['owner'],
-            'repo' => rtrim($matches['repo'], '.git'),
+            'repo' => $repo,
         ];
     }
 
@@ -747,20 +852,57 @@ class GithubRunnerInventory
      */
     private function loadRunnerContainers(Server $server): Collection
     {
-        $command = implode(' ; ', [
-            "docker ps -a --filter name=github-runner --format '{{json .}}'",
-            "docker ps -a --filter name=actions-runner --format '{{json .}}'",
-            "docker ps -a --filter label=com.casaos.app_id=github-runners --format '{{json .}}'",
-            "docker ps -a --filter label=com.devforge.runner=true --format '{{json .}}'",
-        ]);
+        $cacheKey = 'devforge.github.runners.containers.'.$server->uuid;
 
-        $raw = instant_remote_process([$command], $server, false, false, 12);
+        /** @var array<int, array<string, mixed>>|null $cached */
+        $cached = Cache::get($cacheKey);
+        if (is_array($cached)) {
+            return collect($cached);
+        }
+
+        // Do not wrap in `{ ... }`: SSH command wrapping breaks brace groups and returns null.
+        // Two filters cover DevForge + CasaOS runners without tripling docker ps latency.
+        $command = implode(' ; ', $this->discoveryDockerCommands());
+
+        $raw = instant_remote_process([$command], $server, false, false, 20);
         $containers = format_docker_command_output_to_json(is_string($raw) ? $raw : '');
 
-        return collect($containers)
+        $normalized = collect($containers)
             ->filter(fn ($container): bool => is_array($container))
             ->unique(fn (array $container): string => (string) data_get($container, 'ID', data_get($container, 'Id', data_get($container, 'Names', ''))))
-            ->values();
+            ->values()
+            ->all();
+
+        Cache::put($cacheKey, $normalized, now()->addSeconds(20));
+
+        return collect($normalized);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function discoveryDockerCommands(): array
+    {
+        // Single filter: DevForge create() prefixes containers with github-runner-,
+        // and CasaOS runners use the same naming. Extra docker ps calls doubled SSH latency.
+        return [
+            "docker ps -a --filter name=github-runner --format '{{json .}}'",
+        ];
+    }
+
+    private function forgetRunnerCaches(Team $team, ?Server $server = null): void
+    {
+        Cache::forget('devforge.github.runners.list.'.$team->id);
+
+        if ($server !== null) {
+            Cache::forget('devforge.github.runners.containers.'.$server->uuid);
+
+            return;
+        }
+
+        foreach ($this->serversForTeam($team) as $teamServer) {
+            Cache::forget('devforge.github.runners.containers.'.$teamServer->uuid);
+        }
     }
 
     /**
@@ -776,21 +918,22 @@ class GithubRunnerInventory
             ]);
         }
 
-        try {
-            $match = $this->loadRunnerContainers($server)->first(function ($container) use ($containerName): bool {
-                if (! is_array($container)) {
-                    return false;
-                }
-
-                return $this->containerNamesMatch($container, $containerName)
-                    && $this->isGithubRunnerContainer($container);
-            });
-        } catch (\Throwable) {
-            $match = null;
-        }
+        // Prefer a targeted inspect — listing every runner via docker ps is much slower.
+        $match = $this->inspectRunnerContainer($server, $containerName);
 
         if (! is_array($match)) {
-            $match = $this->inspectRunnerContainer($server, $containerName);
+            try {
+                $match = $this->loadRunnerContainers($server)->first(function ($container) use ($containerName): bool {
+                    if (! is_array($container)) {
+                        return false;
+                    }
+
+                    return $this->containerNamesMatch($container, $containerName)
+                        && $this->isGithubRunnerContainer($container);
+                });
+            } catch (\Throwable) {
+                $match = null;
+            }
         }
 
         if (! is_array($match)) {
@@ -853,6 +996,92 @@ class GithubRunnerInventory
         });
 
         return is_array($match) ? $match : null;
+    }
+
+    /**
+     * Single SSH round-trip: container metadata + environment for the detail panel.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function inspectRunnerDetails(Server $server, string $containerName): ?array
+    {
+        try {
+            $raw = instant_remote_process([
+                'docker inspect '.escapeshellarg($containerName).' --format "{{json .}}"',
+            ], $server, false, false, 12);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if (! is_string($raw) || blank(trim($raw))) {
+            return null;
+        }
+
+        try {
+            /** @var array<string, mixed>|null $inspect */
+            $inspect = json_decode(trim($raw), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if (! is_array($inspect)) {
+            return null;
+        }
+
+        $name = $this->normalizeContainerName((string) data_get($inspect, 'Name', $containerName));
+        $state = strtolower((string) data_get($inspect, 'State.Status', ''));
+        $status = (string) data_get($inspect, 'State.Status', $state);
+        if (data_get($inspect, 'State.Running') === true && $state === '') {
+            $state = 'running';
+        }
+
+        $labelMap = data_get($inspect, 'Config.Labels', []);
+        $labels = '';
+        if (is_array($labelMap)) {
+            $labels = collect($labelMap)
+                ->map(fn ($value, $key): string => $key.'='.$value)
+                ->implode(',');
+        }
+
+        $pseudo = [
+            'Names' => $name,
+            'ID' => (string) data_get($inspect, 'Id', ''),
+            'Image' => (string) data_get($inspect, 'Config.Image', data_get($inspect, 'Image', '')),
+            'State' => $state,
+            'Status' => $status,
+            'CreatedAt' => (string) data_get($inspect, 'Created', ''),
+            'Labels' => $labels,
+        ];
+
+        if (! $this->isGithubRunnerContainer($pseudo)) {
+            return null;
+        }
+
+        $presented = $this->presentContainer($server, $pseudo);
+
+        $envLines = data_get($inspect, 'Config.Env', []);
+        $environment = [];
+        if (is_array($envLines)) {
+            foreach ($envLines as $line) {
+                if (! is_string($line) || ! str_contains($line, '=')) {
+                    continue;
+                }
+                [$key, $value] = explode('=', $line, 2);
+                $environment[] = [
+                    'key' => $key,
+                    'value' => $this->isSensitiveEnvKey($key)
+                        ? '••••••••'
+                        : (function_exists('sanitize_utf8_text') ? sanitize_utf8_text($value) : $value),
+                ];
+            }
+        }
+
+        return [
+            ...$presented,
+            'repo_url' => $presented['repo_url'] ?? $this->envValue($environment, 'REPO_URL'),
+            'runner_name' => $this->envValue($environment, 'RUNNER_NAME') ?? $presented['runner_name'],
+            'environment' => $environment,
+        ];
     }
 
     /**
