@@ -124,7 +124,7 @@ export function coherenceTone(coherence: RunnerCoherence): 'success' | 'warning'
         linked: 'success',
         orphan: 'warning',
         unsynced: 'neutral',
-    })[coherence];
+    } as const)[coherence];
 }
 
 export function isRunnerRunning(state: string | null | undefined): boolean {
