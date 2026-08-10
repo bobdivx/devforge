@@ -76,6 +76,41 @@ it('allows spawn depth 1 when max spawn depth is 2', function () {
         ]))->toBeFalse();
 });
 
+it('maps researcher alias to research tool profile', function () {
+    $tools = AgentSubagentCapabilities::leafAllowedTools([
+        'subagent_role' => 'leaf',
+        'leaf_profile' => 'researcher',
+    ]);
+
+    expect($tools)->toContain('web_search')
+        ->and($tools)->toContain('mission_create')
+        ->and($tools)->not->toContain('spawn_task');
+});
+
+it('gives researcher and implementer distinct tool allowlists', function () {
+    $researcher = AgentSubagentCapabilities::leafAllowedTools([
+        'subagent_role' => 'leaf',
+        'role_slug' => 'researcher',
+    ]);
+    $implementer = AgentSubagentCapabilities::leafAllowedTools([
+        'subagent_role' => 'leaf',
+        'role_slug' => 'implementer',
+    ]);
+    $writer = AgentSubagentCapabilities::leafAllowedTools([
+        'subagent_role' => 'leaf',
+        'role_slug' => 'writer',
+    ]);
+
+    expect($researcher)->toContain('web_search')
+        ->and($researcher)->not->toContain('write_application_source')
+        ->and($implementer)->toContain('write_application_source')
+        ->and($implementer)->not->toContain('web_search')
+        ->and($writer)->toContain('memory_write')
+        ->and($writer)->toContain('mission_update')
+        ->and($writer)->not->toContain('mission_create')
+        ->and($writer)->not->toContain('write_application_source');
+});
+
 it('marks orchestration tools correctly', function () {
     expect(AgentSubagentCapabilities::isOrchestrationTool('spawn_task'))->toBeTrue()
         ->and(AgentSubagentCapabilities::isOrchestrationTool('yield_wait'))->toBeTrue()

@@ -129,6 +129,10 @@ class AgentDelegator
      *
      * @return array<string, mixed>
      */
+    /**
+     * @param  array{role_slug?: string|null, role_system_prompt?: string|null}  $roleMeta
+     * @return array<string, mixed>
+     */
     public function spawnEphemeral(
         AiAgent $parent,
         AiAgentRun $parentRun,
@@ -136,6 +140,7 @@ class AgentDelegator
         ?string $difficulty = 'auto',
         bool $wait = false,
         ?string $leafProfile = null,
+        array $roleMeta = [],
     ): array {
         $guard = $this->assertCanSpawn($parent, $parentRun);
         if ($guard !== null) {
@@ -147,23 +152,60 @@ class AgentDelegator
             return ['error' => 'Objectif de sous-tâche vide.'];
         }
 
-        $tier = TaskModelTier::tryFromLoose($difficulty)
-            ?? $this->taskModelRouter->classify($goal, 'ephemeral', $parent->type, ['event' => 'delegated']);
+        $roleFactory = app(AgentRoleFactory::class);
+        $roleSlug = isset($roleMeta['role_slug']) ? trim((string) $roleMeta['role_slug']) : '';
+        $rolePrompt = isset($roleMeta['role_system_prompt']) ? trim((string) $roleMeta['role_system_prompt']) : '';
+        if ($roleSlug !== '') {
+            $roleSlug = $roleFactory->normalizeSlug($roleSlug);
+            $leafProfile = $leafProfile ?: $roleFactory->resolveLeafProfile($roleSlug);
+            if ($rolePrompt === '') {
+                $rolePrompt = $roleFactory->defaultSystemPrompt($roleSlug);
+            }
+        } elseif ($leafProfile) {
+            $leafProfile = $roleFactory->resolveLeafProfile($leafProfile);
+        }
 
+        $tier = TaskModelTier::tryFromLoose($difficulty)
+            ?? $this->taskModelRouter->tierForRole($roleSlug !== '' ? $roleSlug : $leafProfile)
+            ?? $this->taskModelRouter->classify($goal, 'ephemeral', $parent->type, [
+                'event' => 'delegated',
+                'ephemeral' => true,
+                'role_slug' => $roleSlug !== '' ? $roleSlug : null,
+                'leaf_profile' => $leafProfile,
+            ]);
+
+        $routingReason = $this->taskModelRouter->reason(
+            $goal,
+            'ephemeral',
+            $parent->type,
+            [
+                'ephemeral' => true,
+                'event' => 'delegated',
+                'role_slug' => $roleSlug !== '' ? $roleSlug : null,
+                'leaf_profile' => $leafProfile,
+            ],
+            $tier,
+        );
         $routing = $this->taskModelRouter->routingPayload(
             $tier,
-            $this->taskModelRouter->reason($goal, 'ephemeral', $parent->type, ['ephemeral' => true], $tier),
+            $routingReason,
+            $roleSlug !== '' ? $roleSlug : $leafProfile,
         );
+        $modelOverride = [
+            'tier' => $tier->value,
+            'source' => $roleSlug !== '' ? 'role:'.$roleSlug : ($leafProfile ? 'profile:'.$leafProfile : 'auto'),
+        ];
 
         $parentDepth = AgentSubagentCapabilities::resolveDepth(
             array_merge($parentRun->metadata ?? [], ['spawn_depth' => $parentRun->metadata['spawn_depth'] ?? 0]),
         );
         $leafDepth = $parentDepth + 1;
 
+        $roleLabel = $roleSlug !== '' ? $roleSlug : $leafProfile;
         $parentRun->appendLog(
             '  ↳ Sous-tâche éphémère — '.$routing['display']
             .($wait ? ' [sync]' : ' [async]')
-            .($leafProfile ? " [{$leafProfile}]" : '')
+            .($roleLabel ? " [{$roleLabel}]" : '')
             .' : '.mb_substr($goal, 0, 120),
         );
 
@@ -177,6 +219,9 @@ class AgentDelegator
             'subagent_role' => AgentSubagentCapabilities::ROLE_LEAF,
             'spawn_depth' => $leafDepth,
             'leaf_profile' => $leafProfile,
+            'role_slug' => $roleSlug !== '' ? $roleSlug : null,
+            'role_system_prompt' => $rolePrompt !== '' ? $rolePrompt : null,
+            'model_override' => $modelOverride,
             'awaiting_parent_yield' => ! $wait,
         ];
 
@@ -188,10 +233,14 @@ class AgentDelegator
                 'ephemeral' => true,
                 'parent_run_uuid' => $parentRun->uuid,
                 'model_routing' => $routing,
+                'model_override' => $modelOverride,
+                'task_tier' => $tier->value,
                 'delegated_goal' => mb_substr($goal, 0, 500),
                 'subagent_role' => AgentSubagentCapabilities::ROLE_LEAF,
                 'spawn_depth' => $leafDepth,
                 'leaf_profile' => $leafProfile,
+                'role_slug' => $roleSlug !== '' ? $roleSlug : null,
+                'role_system_prompt' => $rolePrompt !== '' ? mb_substr($rolePrompt, 0, 4000) : null,
                 'awaiting_parent_yield' => ! $wait,
             ],
         ]);
@@ -207,7 +256,10 @@ class AgentDelegator
             'display' => $routing['display'],
             'status' => $wait ? 'running' : 'queued',
             'summary' => null,
+            'contribution' => null,
             'leaf_profile' => $leafProfile,
+            'role_slug' => $roleSlug !== '' ? $roleSlug : null,
+            'model_override' => $modelOverride,
             'async' => ! $wait,
         ];
         $existing = $parentRun->metadata['ephemeral_tasks'] ?? [];
@@ -233,6 +285,9 @@ class AgentDelegator
                         'success' => false,
                         'ephemeral_run_uuid' => $childRun->uuid,
                         'model_routing' => $routing,
+                        'model_override' => $modelOverride,
+                        'role_slug' => $roleSlug !== '' ? $roleSlug : null,
+                        'leaf_profile' => $leafProfile,
                         'error' => $childRun->summary,
                     ];
                 }
@@ -243,6 +298,9 @@ class AgentDelegator
                     'success' => true,
                     'ephemeral_run_uuid' => $childRun->uuid,
                     'model_routing' => $routing,
+                    'model_override' => $modelOverride,
+                    'role_slug' => $roleSlug !== '' ? $roleSlug : null,
+                    'leaf_profile' => $leafProfile,
                     'summary' => $childRun->summary ?? 'Sous-tâche terminée.',
                 ];
             } catch (\Throwable $exception) {
@@ -266,9 +324,59 @@ class AgentDelegator
             'run_uuid' => $childRun->uuid,
             'ephemeral_run_uuid' => $childRun->uuid,
             'model_routing' => $routing,
+            'model_override' => $modelOverride,
             'leaf_profile' => $leafProfile,
+            'role_slug' => $roleSlug !== '' ? $roleSlug : null,
             'hint' => 'Appelez yield_wait pour dispatcher et attendre les leafs.',
         ];
+    }
+
+    /**
+     * Spawn une équipe de rôles (auto ou explicite) — P5.0.
+     *
+     * @param  list<string>|null  $roles
+     * @param  array<string, mixed>  $hints
+     * @return array<string, mixed>
+     */
+    public function spawnDynamicRoles(
+        AiAgent $parent,
+        AiAgentRun $parentRun,
+        string $goal,
+        ?array $roles = null,
+        array $hints = [],
+        bool $wait = false,
+    ): array {
+        $factory = app(AgentRoleFactory::class);
+        if (! $factory->enabled()) {
+            return ['error' => 'Rôles dynamiques désactivés (agents_dynamic_roles_enabled).'];
+        }
+
+        $proposed = $factory->propose($goal, $roles, array_merge([
+            'agent_type' => $parent->type,
+            'event' => $parentRun->metadata['event'] ?? null,
+            'mission_kind' => $parentRun->metadata['mission_kind'] ?? null,
+        ], $hints));
+
+        if ($proposed === []) {
+            return ['error' => 'Aucun rôle proposé pour cette tâche.'];
+        }
+
+        $parentRun->appendLog('  ↳ Rôles dynamiques : '.implode(', ', array_column($proposed, 'slug')));
+        $parentRun->mergeMetadata([
+            'dynamic_roles' => array_map(fn (array $role): array => [
+                'slug' => $role['slug'],
+                'leaf_profile' => $role['leaf_profile'],
+                'label' => $role['label'],
+            ], $proposed),
+        ]);
+
+        $result = $this->spawnMany($parent, $parentRun, $factory->toSpawnTasks($proposed, $wait));
+
+        return array_merge($result, [
+            'mode' => ($result['mode'] ?? 'batch').'_dynamic_roles',
+            'roles' => array_column($proposed, 'slug'),
+            'role_specs' => $proposed,
+        ]);
     }
 
     /**
@@ -329,7 +437,7 @@ class AgentDelegator
     /**
      * Batch de sous-tâches éphémères en parallèle (queue) — plus de batch_sequential.
      *
-     * @param  list<array{goal?: string, difficulty?: string, leaf_profile?: string, wait?: bool}>  $tasks
+     * @param  list<array{goal?: string, difficulty?: string, leaf_profile?: string, role_slug?: string, role_system_prompt?: string, wait?: bool}>  $tasks
      * @return array<string, mixed>
      */
     public function spawnMany(AiAgent $parent, AiAgentRun $parentRun, array $tasks): array
@@ -355,10 +463,14 @@ class AgentDelegator
                 $allWait = false;
             }
             $leafProfile = isset($task['leaf_profile']) ? (string) $task['leaf_profile'] : null;
+            $roleMeta = [
+                'role_slug' => isset($task['role_slug']) ? (string) $task['role_slug'] : null,
+                'role_system_prompt' => isset($task['role_system_prompt']) ? (string) $task['role_system_prompt'] : null,
+            ];
             $parentRun->appendLog('  ↳ Batch spawn #'.($index + 1).'/'.count($slice));
             $results[] = array_merge(
                 ['index' => $index],
-                $this->spawnEphemeral($parent, $parentRun, $goal, $difficulty, $wait, $leafProfile),
+                $this->spawnEphemeral($parent, $parentRun, $goal, $difficulty, $wait, $leafProfile, $roleMeta),
             );
         }
 

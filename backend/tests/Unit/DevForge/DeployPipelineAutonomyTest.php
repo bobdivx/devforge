@@ -25,3 +25,15 @@ it('defines orchestrator and leaf deploy profiles', function () {
     expect($redeploy)->toContain('control_resource')
         ->and($redeploy)->not->toContain('write_application_source');
 });
+
+it('forbids collab orchestration on deployment failure events', function () {
+    $orchestrator = app(\App\Services\DevForge\Agent\AgentCollabOrchestrator::class);
+
+    expect($orchestrator->isAllowed([
+        'event' => 'deployment_failed',
+        'orchestration' => 'collab',
+        'force_collab' => true,
+    ]))->toBeFalse()
+        ->and(app(\App\Services\DevForge\Agent\AgentStandingOrders::class)->defaultDeployFailureBody())
+        ->not->toContain('orchestration=collab');
+});

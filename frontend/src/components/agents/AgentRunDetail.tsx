@@ -5,6 +5,7 @@ import { AgentModelRoutingBadge } from './AgentModelRoutingBadge';
 import { AgentRunLog } from './AgentRunLog';
 import { AgentRunProgress } from './AgentRunProgress';
 import { AgentRunStatusBadge } from './AgentRunStatusBadge';
+import { AgentTeamContributionsPanel } from './AgentTeamContributionsPanel';
 
 type Props = {
     run: AgentRun;
@@ -67,7 +68,9 @@ export function AgentRunDetail({ run, agentUuid, tracking = false, onResolved }:
 
             {isActive && <AgentRunProgress run={run} />}
 
-            {(run.metadata?.ephemeral_tasks?.length ?? 0) > 0 && (
+            <AgentTeamContributionsPanel report={run.metadata?.team_report} />
+
+            {(run.metadata?.ephemeral_tasks?.length ?? 0) > 0 && !run.metadata?.team_report && (
                 <div class="rounded-lg border border-base-300 bg-base-200/40 p-3">
                     <p class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-base-content/50">
                         Sous-tâches éphémères
@@ -83,6 +86,9 @@ export function AgentRunDetail({ run, agentUuid, tracking = false, onResolved }:
                                         reason: task.goal,
                                         display: task.display,
                                     }} compact ephemeral />
+                                    {task.role_slug && (
+                                        <span class="text-base-content/60">{task.role_slug}</span>
+                                    )}
                                     <span class="text-base-content/50">{task.status}</span>
                                 </div>
                                 <p class="mt-1 text-base-content/70">{task.goal}</p>

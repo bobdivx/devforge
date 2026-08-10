@@ -19,6 +19,7 @@ import { AgentMemoryPanel } from './AgentMemoryPanel';
 import { AgentStandingOrdersPanel } from './AgentStandingOrdersPanel';
 import { AgentSubAgentsPanel } from './AgentSubAgentsPanel';
 import { AgentProviderModelFields } from './AgentProviderModelFields';
+import { AgentTeamContributionsPanel } from './AgentTeamContributionsPanel';
 import { useAgentRunTracker } from '../../lib/use-agent-run-tracker';
 import { isInFlightAgentRunStatus, shouldTrackAgentLatestRun } from '../../lib/agent-run-tracker';
 
@@ -317,7 +318,8 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
                 {selectedRun && (
                     <div class="mt-3 space-y-3">
                         <AgentModelRoutingBadge routing={selectedRun.metadata?.model_routing} />
-                        {(selectedRun.metadata?.ephemeral_tasks?.length ?? 0) > 0 && (
+                        <AgentTeamContributionsPanel report={selectedRun.metadata?.team_report} />
+                        {(selectedRun.metadata?.ephemeral_tasks?.length ?? 0) > 0 && !selectedRun.metadata?.team_report && (
                             <div class="rounded-lg border border-base-300 bg-base-200/40 p-3">
                                 <p class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-base-content/50">
                                     Sous-tâches éphémères
@@ -333,6 +335,9 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
                                                     reason: task.goal,
                                                     display: task.display,
                                                 }} compact ephemeral />
+                                                {task.role_slug && (
+                                                    <span class="text-base-content/60">{task.role_slug}</span>
+                                                )}
                                                 <span class="text-base-content/50">{task.status}</span>
                                             </div>
                                             <p class="mt-1 text-base-content/70">{task.goal}</p>

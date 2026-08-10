@@ -8,6 +8,7 @@ use App\Models\AiAgentSession;
 use App\Services\DevForge\Agent\AgentChatService;
 use App\Services\DevForge\Agent\AgentRunner;
 use App\Services\DevForge\Agent\AgentSubagentHandoff;
+use App\Services\DevForge\Agent\AgentTeamReporter;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -33,7 +34,7 @@ class ResumeAgentAfterSubagentsJob implements ShouldQueue
         $this->onQueue('default');
     }
 
-    public function handle(AgentRunner $runner, AgentSubagentHandoff $handoff, AgentChatService $chatService): void
+    public function handle(AgentRunner $runner, AgentSubagentHandoff $handoff, AgentChatService $chatService, AgentTeamReporter $teamReporter): void
     {
         $parentRun = AiAgentRun::query()->whereKey($this->parentRunId)->first();
         if ($parentRun === null) {
@@ -50,7 +51,11 @@ class ResumeAgentAfterSubagentsJob implements ShouldQueue
         }
 
         $completions = $handoff->collectCompletions($parentRun);
+        $teamReport = $teamReporter->persist($parentRun, $completions);
         $handoffMessage = $handoff->buildHandoffUserMessage($completions);
+        if (! empty($teamReport['markdown'])) {
+            $handoffMessage = trim($handoffMessage."\n\n[Team Report]\n".$teamReport['markdown']);
+        }
 
         $baseContext = is_array($parentRun->metadata['resume_context'] ?? null)
             ? $parentRun->metadata['resume_context']
@@ -58,11 +63,13 @@ class ResumeAgentAfterSubagentsJob implements ShouldQueue
 
         $parentRun->mergeMetadata([
             'subagent_completions' => $completions,
+            'team_report' => $teamReport,
         ]);
         $parentRun->update([
             'status' => 'completed',
             'summary' => mb_substr(
-                'Yield terminé — reprise ('.count($completions).' leaf(s)).',
+                'Yield terminé — '.$teamReport['succeeded'].'/'.$teamReport['leaf_count']
+                .' leaf(s) OK. Reprise orchestrateur.',
                 0,
                 1000,
             ),
@@ -80,6 +87,7 @@ class ResumeAgentAfterSubagentsJob implements ShouldQueue
                 $chatService->queueMessage($agent, $session, $handoffMessage, array_merge($baseContext, [
                     'resume_after_subagents' => true,
                     'subagent_completions' => $completions,
+                    'team_report' => $teamReport,
                     'chat_mode' => $baseContext['chat_mode'] ?? $session->chat_mode ?? 'build',
                 ]));
             } catch (\Throwable $exception) {
@@ -96,6 +104,7 @@ class ResumeAgentAfterSubagentsJob implements ShouldQueue
         $context = array_merge($baseContext, [
             'subagent_completions' => $completions,
             'subagent_handoff_message' => $handoffMessage,
+            'team_report' => $teamReport,
             'resume_after_subagents' => true,
             'subagent_role' => $baseContext['subagent_role'] ?? 'orchestrator',
             'spawn_depth' => (int) ($baseContext['spawn_depth'] ?? 0),
@@ -109,6 +118,7 @@ class ResumeAgentAfterSubagentsJob implements ShouldQueue
             'metadata' => [
                 'resumed_from_run_uuid' => $parentRun->uuid,
                 'subagent_completions' => $completions,
+                'team_report' => $teamReport,
                 'subagent_role' => $context['subagent_role'],
                 'spawn_depth' => $context['spawn_depth'],
                 'resume_after_subagents' => true,

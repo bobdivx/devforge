@@ -904,8 +904,35 @@ export type AgentEphemeralTask = {
     display: string;
     status: string;
     summary: string | null;
+    contribution?: string | null;
     leaf_profile?: string | null;
+    role_slug?: string | null;
     async?: boolean;
+};
+
+export type AgentTeamContribution = {
+    role_slug: string | null;
+    leaf_profile: string | null;
+    run_uuid: string | null;
+    status: string;
+    tier: string | null;
+    model_label: string | null;
+    goal: string | null;
+    contribution: string | null;
+    tools_used: string[];
+    risks: string[];
+};
+
+export type AgentTeamReport = {
+    generated_at: string;
+    leaf_count: number;
+    succeeded: number;
+    failed: number;
+    roles: string[];
+    contributions: AgentTeamContribution[];
+    decisions: string[];
+    risks: string[];
+    markdown: string;
 };
 
 export type AgentRunPendingApproval = {
@@ -923,6 +950,10 @@ export type AgentRunMetadata = {
     ephemeral?: boolean;
     parent_run_uuid?: string | null;
     ephemeral_tasks?: AgentEphemeralTask[];
+    team_report?: AgentTeamReport;
+    orchestration?: 'pipeline' | 'collab' | string;
+    speaker_selection?: 'auto' | 'round_robin' | string;
+    collab_transcript?: Array<Record<string, unknown>>;
     pending_leaf_spawns?: Array<Record<string, unknown>>;
     subagent_role?: 'main' | 'orchestrator' | 'leaf' | string;
     spawn_depth?: number;

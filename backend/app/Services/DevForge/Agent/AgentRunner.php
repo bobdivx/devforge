@@ -44,6 +44,7 @@ class AgentRunner
         $this->correctionNudgeUsed = false;
         $this->anyToolUsed = false;
         $this->harnessUsed = false;
+        $context = $this->hydrateContextFromRunMetadata($run, $context);
         $providerConfig = $agent->effectiveProviderConfig();
 
         if (! $providerConfig) {
@@ -60,20 +61,38 @@ class AgentRunner
         $taskMessage = (string) ($context['delegated_goal'] ?? $context['user_message'] ?? '');
         $tier = $context['task_tier'] ?? null;
         if (! $tier instanceof TaskModelTier) {
-            $tier = $this->taskModelRouter->classify($taskMessage, $run->trigger, $agent->type, $context);
+            $tier = TaskModelTier::tryFromLoose(is_string($tier) ? $tier : null)
+                ?? $this->taskModelRouter->classify($taskMessage, $run->trigger, $agent->type, $context);
         }
 
+        $roleSlug = trim((string) ($context['role_slug'] ?? ''));
         $reason = $this->taskModelRouter->reason($taskMessage, $run->trigger, $agent->type, $context, $tier);
-        $routing = $this->taskModelRouter->routingPayload($tier, $reason);
+        $routing = $this->taskModelRouter->routingPayload(
+            $tier,
+            $reason,
+            $roleSlug !== '' ? $roleSlug : (isset($context['leaf_profile']) ? (string) $context['leaf_profile'] : null),
+        );
         $role = AgentSubagentCapabilities::resolveRole($context);
         $depth = AgentSubagentCapabilities::resolveDepth($context);
+        $modelOverride = is_array($context['model_override'] ?? null)
+            ? $context['model_override']
+            : [
+                'tier' => $tier->value,
+                'source' => $roleSlug !== '' ? 'role:'.$roleSlug : 'auto',
+            ];
         $run->mergeMetadata([
             'model_routing' => $routing,
+            'model_override' => $modelOverride,
+            'task_tier' => $tier->value,
             'ephemeral' => (bool) ($context['ephemeral'] ?? false),
             'parent_run_uuid' => $context['parent_run_uuid'] ?? null,
             'subagent_role' => $role,
             'spawn_depth' => $depth,
             'leaf_profile' => $context['leaf_profile'] ?? null,
+            'role_slug' => $context['role_slug'] ?? null,
+            'role_system_prompt' => isset($context['role_system_prompt'])
+                ? mb_substr((string) $context['role_system_prompt'], 0, 4000)
+                : null,
         ]);
 
         // Marquer running avant l'init provider (peut être lent : healthcheck Ollama, etc.)
@@ -916,5 +935,40 @@ class AgentRunner
         }
 
         $run->appendLog($successLog.(isset($result['redeploy']) ? ' + redeploy lancé' : ''));
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     * @return array<string, mixed>
+     */
+    private function hydrateContextFromRunMetadata(AiAgentRun $run, array $context): array
+    {
+        $metadata = is_array($run->metadata) ? $run->metadata : [];
+
+        foreach ([
+            'leaf_profile',
+            'role_slug',
+            'role_system_prompt',
+            'spawn_depth',
+            'subagent_role',
+            'ephemeral',
+            'parent_run_uuid',
+            'parent_agent_uuid',
+            'delegated_goal',
+            'mission_kind',
+            'mission_uuid',
+            'model_override',
+            'task_tier',
+        ] as $key) {
+            $current = $context[$key] ?? null;
+            if ($current !== null && $current !== '') {
+                continue;
+            }
+            if (array_key_exists($key, $metadata) && $metadata[$key] !== null && $metadata[$key] !== '') {
+                $context[$key] = $metadata[$key];
+            }
+        }
+
+        return $context;
     }
 }

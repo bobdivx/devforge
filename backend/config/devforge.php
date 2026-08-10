@@ -145,6 +145,31 @@ return [
     /** Profondeur max de spawn (0 = main, 1 = leaf, 2 = orchestrateur→implement→test). */
     'agents_max_spawn_depth' => (int) env('DEVFORGE_AGENTS_MAX_SPAWN_DEPTH', 2),
 
+    /** P5.0 — génération dynamique de rôles (spawn_task auto_roles / roles[]). */
+    'agents_dynamic_roles_enabled' => filter_var(
+        env('DEVFORGE_AGENTS_DYNAMIC_ROLES_ENABLED', true),
+        FILTER_VALIDATE_BOOLEAN,
+    ),
+
+    /** Cap de rôles dynamiques par spawn auto_roles / roles[]. */
+    'agents_max_dynamic_roles' => (int) env('DEVFORGE_AGENTS_MAX_DYNAMIC_ROLES', 4),
+
+    /** P5.1 — routage LLM (tier) selon role_slug / leaf_profile des leafs. */
+    'agents_role_model_routing' => filter_var(
+        env('DEVFORGE_AGENTS_ROLE_MODEL_ROUTING', true),
+        FILTER_VALIDATE_BOOLEAN,
+    ),
+
+    /** P5.2 — mode collab (speaker selection), interdit sur deploy/CI. */
+    'agents_collab_enabled' => filter_var(
+        env('DEVFORGE_AGENTS_COLLAB_ENABLED', true),
+        FILTER_VALIDATE_BOOLEAN,
+    ),
+
+    'agents_max_collab_rounds' => (int) env('DEVFORGE_AGENTS_MAX_COLLAB_ROUNDS', 8),
+
+    'agents_collab_speaker_selection' => (string) env('DEVFORGE_AGENTS_COLLAB_SPEAKER_SELECTION', 'auto'),
+
     /** Cooldown entre deux dispatches mission_work pour la même mission (minutes). */
     'agents_mission_work_cooldown_minutes' => (int) env('DEVFORGE_AGENTS_MISSION_WORK_COOLDOWN_MINUTES', 10),
 

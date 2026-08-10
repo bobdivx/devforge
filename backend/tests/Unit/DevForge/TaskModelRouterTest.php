@@ -54,3 +54,40 @@ it('builds ux friendly routing payload', function () {
         ->and($payload['tier_label'])->toBe('Standard')
         ->and($payload['reason'])->toBe('Diagnostic infra.');
 });
+
+it('maps business roles to distinct model tiers', function () {
+    $router = new TaskModelRouter;
+
+    expect($router->tierForRole('researcher'))->toBe(TaskModelTier::Heavy)
+        ->and($router->tierForRole('writer'))->toBe(TaskModelTier::Standard)
+        ->and($router->tierForRole('tester'))->toBe(TaskModelTier::Light)
+        ->and($router->tierForRole('implementer'))->toBe(TaskModelTier::Standard);
+});
+
+it('classifies ephemeral leafs by role slug when role model routing is on', function () {
+    config(['devforge.agents_role_model_routing' => true]);
+    $router = new TaskModelRouter;
+
+    $researcher = $router->classify('Objectif quelconque', 'ephemeral', 'devforge', [
+        'ephemeral' => true,
+        'event' => 'delegated',
+        'role_slug' => 'researcher',
+    ]);
+    $tester = $router->classify('Objectif quelconque', 'ephemeral', 'devforge', [
+        'ephemeral' => true,
+        'event' => 'delegated',
+        'role_slug' => 'tester',
+    ]);
+
+    expect($researcher)->toBe(TaskModelTier::Heavy)
+        ->and($tester)->toBe(TaskModelTier::Light)
+        ->and($researcher)->not->toBe($tester);
+});
+
+it('includes role in routing display payload', function () {
+    $router = new TaskModelRouter;
+    $payload = $router->routingPayload(TaskModelTier::Heavy, 'Rôle researcher', 'researcher');
+
+    expect($payload['display'])->toBe('Rôle researcher · Pro')
+        ->and($payload['role_slug'])->toBe('researcher');
+});

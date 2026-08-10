@@ -941,11 +941,11 @@ class AgentToolkit
         if ($this->canSpawnEphemeral()) {
             $tools[] = [
                 'name' => 'spawn_task',
-                'description' => 'Lance une sous-tâche leaf (async par défaut). Retourne run_uuid immédiatement ; appeler yield_wait pour attendre. wait=true pour sync. Batch via tasks[].',
+                'description' => 'Lance une sous-tâche leaf (async par défaut). Retourne run_uuid immédiatement ; appeler yield_wait pour attendre. wait=true pour sync. Batch via tasks[]. auto_roles=true ou roles[] pour équipe dynamique. orchestration=collab pour débat multi-rôles borné (interdit sur deploy/CI).',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
-                        'goal' => ['type' => 'string', 'description' => 'Objectif précis et autonome pour la sous-tâche'],
+                        'goal' => ['type' => 'string', 'description' => 'Objectif précis et autonome pour la sous-tâche (ou tâche parent si auto_roles/collab)'],
                         'difficulty' => [
                             'type' => 'string',
                             'enum' => ['auto', 'light', 'standard', 'heavy'],
@@ -957,19 +957,54 @@ class AgentToolkit
                         ],
                         'leaf_profile' => [
                             'type' => 'string',
-                            'enum' => ['diagnose', 'fix', 'redeploy'],
-                            'description' => 'Profil d’outils leaf (pipeline deploy).',
+                            'enum' => [
+                                'diagnose', 'fix', 'redeploy', 'fix-ci', 'implement', 'test', 'research',
+                                'researcher', 'analyst', 'writer', 'reviewer', 'implementer', 'tester',
+                            ],
+                            'description' => 'Profil / rôle leaf (pipeline deploy ou rôles métier).',
+                        ],
+                        'orchestration' => [
+                            'type' => 'string',
+                            'enum' => ['pipeline', 'collab'],
+                            'description' => 'pipeline = spawn/yield classique. collab = tours séquentiels multi-rôles (tech-watch/design).',
+                        ],
+                        'speaker_selection' => [
+                            'type' => 'string',
+                            'enum' => ['auto', 'round_robin'],
+                            'description' => 'Collab seulement : auto (NEXT_SPEAKER) ou round_robin.',
+                        ],
+                        'auto_roles' => [
+                            'type' => 'boolean',
+                            'description' => 'Si true, propose 2–N rôles adaptés à goal et les spawn en parallèle (puis yield_wait).',
+                        ],
+                        'roles' => [
+                            'type' => 'array',
+                            'description' => 'Rôles explicites (ex. researcher, analyst, writer). Ignore l’inférence auto si fourni.',
+                            'items' => [
+                                'type' => 'string',
+                                'enum' => [
+                                    'researcher', 'analyst', 'writer', 'reviewer', 'implementer', 'tester',
+                                    'diagnose', 'fix', 'redeploy', 'fix-ci', 'implement', 'test', 'research',
+                                ],
+                            ],
                         ],
                         'tasks' => [
                             'type' => 'array',
-                            'description' => 'Batch parallèle async : [{goal, difficulty?, leaf_profile?, wait?}, ...]',
+                            'description' => 'Batch parallèle async : [{goal, difficulty?, leaf_profile?, role_slug?, wait?}, ...]',
                             'items' => [
                                 'type' => 'object',
                                 'properties' => [
                                     'goal' => ['type' => 'string'],
                                     'difficulty' => ['type' => 'string', 'enum' => ['auto', 'light', 'standard', 'heavy']],
                                     'wait' => ['type' => 'boolean'],
-                                    'leaf_profile' => ['type' => 'string', 'enum' => ['diagnose', 'fix', 'redeploy']],
+                                    'leaf_profile' => [
+                                        'type' => 'string',
+                                        'enum' => [
+                                            'diagnose', 'fix', 'redeploy', 'fix-ci', 'implement', 'test', 'research',
+                                            'researcher', 'analyst', 'writer', 'reviewer', 'implementer', 'tester',
+                                        ],
+                                    ],
+                                    'role_slug' => ['type' => 'string'],
                                 ],
                                 'required' => ['goal'],
                             ],
@@ -2027,6 +2062,67 @@ class AgentToolkit
             return ['error' => 'Sous-tâches éphémères non disponibles pour cet agent.'];
         }
 
+        $wait = ($arguments['wait'] ?? false) === true
+            || ($arguments['wait'] ?? null) === 'true'
+            || ($arguments['wait'] ?? null) === 1;
+
+        $orchestration = strtolower(trim((string) ($arguments['orchestration'] ?? 'pipeline')));
+        $autoRoles = ($arguments['auto_roles'] ?? false) === true
+            || ($arguments['auto_roles'] ?? null) === 'true'
+            || ($arguments['auto_roles'] ?? null) === 1;
+
+        $explicitRoles = null;
+        if (isset($arguments['roles']) && is_array($arguments['roles']) && $arguments['roles'] !== []) {
+            $explicitRoles = array_values(array_filter(
+                $arguments['roles'],
+                fn ($role): bool => is_string($role) || is_numeric($role),
+            ));
+            $explicitRoles = array_map(fn ($role): string => (string) $role, $explicitRoles);
+        }
+
+        if ($orchestration === AgentCollabOrchestrator::MODE_COLLAB
+            || ($arguments['collab'] ?? false) === true) {
+            $goal = trim((string) ($arguments['goal'] ?? ''));
+            if ($goal === '') {
+                return ['error' => 'Objectif parent requis pour orchestration=collab (goal).'];
+            }
+
+            $selection = isset($arguments['speaker_selection'])
+                ? (string) $arguments['speaker_selection']
+                : (string) config('devforge.agents_collab_speaker_selection', 'auto');
+
+            return app(AgentCollabOrchestrator::class)->run(
+                $this->agent,
+                $this->run,
+                $goal,
+                $explicitRoles,
+                $selection,
+                [
+                    'event' => $this->runContext['event'] ?? $this->run->metadata['event'] ?? null,
+                    'mission_kind' => $this->runContext['mission_kind'] ?? $this->run->metadata['mission_kind'] ?? null,
+                ],
+            );
+        }
+
+        if ($autoRoles || $explicitRoles !== null) {
+            $goal = trim((string) ($arguments['goal'] ?? ''));
+            if ($goal === '') {
+                return ['error' => 'Objectif parent requis pour auto_roles / roles[] (goal).'];
+            }
+
+            return $this->delegator->spawnDynamicRoles(
+                $this->agent,
+                $this->run,
+                $goal,
+                $explicitRoles,
+                [
+                    'event' => $this->runContext['event'] ?? null,
+                    'mission_kind' => $this->runContext['mission_kind'] ?? $this->run->metadata['mission_kind'] ?? null,
+                ],
+                $wait,
+            );
+        }
+
         if (isset($arguments['tasks']) && is_array($arguments['tasks']) && $arguments['tasks'] !== []) {
             return $this->delegator->spawnMany($this->agent, $this->run, $arguments['tasks']);
         }
@@ -2036,9 +2132,11 @@ class AgentToolkit
             return ['error' => 'Objectif de sous-tâche vide (goal ou tasks[]).'];
         }
 
-        $wait = ($arguments['wait'] ?? false) === true
-            || ($arguments['wait'] ?? null) === 'true'
-            || ($arguments['wait'] ?? null) === 1;
+        $leafProfile = isset($arguments['leaf_profile']) ? (string) $arguments['leaf_profile'] : null;
+        $roleMeta = [];
+        if ($leafProfile !== null && $leafProfile !== '') {
+            $roleMeta['role_slug'] = $leafProfile;
+        }
 
         return $this->delegator->spawnEphemeral(
             $this->agent,
@@ -2046,7 +2144,8 @@ class AgentToolkit
             $goal,
             isset($arguments['difficulty']) ? (string) $arguments['difficulty'] : 'auto',
             $wait,
-            isset($arguments['leaf_profile']) ? (string) $arguments['leaf_profile'] : null,
+            $leafProfile,
+            $roleMeta,
         );
     }
 

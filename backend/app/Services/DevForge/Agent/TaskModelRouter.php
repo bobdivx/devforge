@@ -34,6 +34,13 @@ class TaskModelRouter
      */
     public function classify(string $message, string $trigger, string $agentType, array $context = []): TaskModelTier
     {
+        if (filter_var(config('devforge.agents_role_model_routing', true), FILTER_VALIDATE_BOOLEAN)) {
+            $roleTier = $this->tierForRole((string) ($context['role_slug'] ?? $context['leaf_profile'] ?? ''));
+            if ($roleTier !== null && (($context['ephemeral'] ?? false) === true || ($context['event'] ?? '') === 'delegated')) {
+                return $roleTier;
+            }
+        }
+
         $event = (string) ($context['event'] ?? '');
         $lower = mb_strtolower(trim($message));
 
@@ -69,11 +76,46 @@ class TaskModelRouter
     }
 
     /**
+     * Override de tier LLM par rôle métier / leaf profile (P5.1).
+     */
+    public function tierForRole(?string $roleSlug): ?TaskModelTier
+    {
+        if ($roleSlug === null || trim($roleSlug) === '') {
+            return null;
+        }
+
+        $slug = strtolower(trim($roleSlug));
+        $slug = str_replace(['_', ' '], '-', $slug);
+        $slug = match ($slug) {
+            'research' => 'researcher',
+            'analyse', 'analysis' => 'analyst',
+            'write', 'reporter' => 'writer',
+            'review', 'critique', 'diagnose' => 'reviewer',
+            'implement', 'developer', 'coder', 'dev' => 'implementer',
+            'test', 'qa' => 'tester',
+            'fix_ci', 'fixci' => 'fix-ci',
+            default => $slug,
+        };
+
+        return match ($slug) {
+            'researcher', 'analyst', 'fix-ci' => TaskModelTier::Heavy,
+            'writer', 'reviewer', 'implementer', 'implement', 'fix' => TaskModelTier::Standard,
+            'tester', 'test', 'redeploy' => TaskModelTier::Light,
+            default => null,
+        };
+    }
+
+    /**
      * @param  array<string, mixed>  $context
      */
     public function reason(string $message, string $trigger, string $agentType, array $context, TaskModelTier $tier): string
     {
         $event = (string) ($context['event'] ?? '');
+        $role = trim((string) ($context['role_slug'] ?? $context['leaf_profile'] ?? ''));
+
+        if ($role !== '') {
+            return 'Rôle '.$role.' — '.$tier->label().' ('.$tier->modelLabel().').';
+        }
 
         return match (true) {
             $event === 'deployment_failed' => 'Échec de déploiement — diagnostic logs (Flash).',
@@ -86,16 +128,23 @@ class TaskModelRouter
         };
     }
 
-    /** @return array{tier: string, tier_label: string, model_label: string, reason: string, display: string} */
-    public function routingPayload(TaskModelTier $tier, string $reason): array
+    /** @return array{tier: string, tier_label: string, model_label: string, reason: string, display: string, role_slug?: string|null} */
+    public function routingPayload(TaskModelTier $tier, string $reason, ?string $roleSlug = null): array
     {
-        return [
+        $payload = [
             'tier' => $tier->value,
             'tier_label' => $tier->label(),
             'model_label' => $tier->modelLabel(),
             'reason' => $reason,
             'display' => 'Auto · '.$tier->modelLabel(),
         ];
+
+        if ($roleSlug !== null && $roleSlug !== '') {
+            $payload['role_slug'] = $roleSlug;
+            $payload['display'] = 'Rôle '.$roleSlug.' · '.$tier->modelLabel();
+        }
+
+        return $payload;
     }
 
     /**

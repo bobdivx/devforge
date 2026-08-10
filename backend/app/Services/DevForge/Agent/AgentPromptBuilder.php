@@ -150,8 +150,23 @@ class AgentPromptBuilder
             default => <<<'RULES'
 
             Sous-tâches : préférer spawn_task (async) puis yield_wait plutôt que tout faire en une passe.
+            Pour une équipe multi-rôles parallèle : spawn_task(goal=…, auto_roles=true) ou roles=[researcher,analyst,…].
+            Pour un débat / synthèse collaborative (veille, design) : spawn_task(goal=…, orchestration=collab, speaker_selection=auto).
+            INTERDIT orchestration=collab sur échec deploy / fix-CI (rester pipeline diagnose→fix→redeploy).
             RULES,
         };
+
+        $dynamicRoleBlock = '';
+        $rolePrompt = trim((string) ($context['role_system_prompt'] ?? ''));
+        $roleSlug = trim((string) ($context['role_slug'] ?? ''));
+        if ($rolePrompt !== '' || $roleSlug !== '') {
+            $label = $roleSlug !== '' ? $roleSlug : 'spécialisé';
+            $dynamicRoleBlock = trim(<<<ROLE
+
+            Rôle dynamique ({$label}) :
+            {$rolePrompt}
+            ROLE);
+        }
 
         $autonomyRules = AgentDirectives::autonomyRules();
         $memoryBlock = $this->memoryPromptBlock($agent, $context);
@@ -179,6 +194,8 @@ class AgentPromptBuilder
         {$eventRules}
 
         {$roleRules}
+
+        {$dynamicRoleBlock}
 
         {$autonomyRules}
         PROMPT);
@@ -575,9 +592,15 @@ class AgentPromptBuilder
     {
         $goal = (string) ($context['delegated_goal'] ?? '');
         $parentUuid = (string) ($context['parent_agent_uuid'] ?? 'inconnu');
+        $roleSlug = trim((string) ($context['role_slug'] ?? ''));
+        $leafProfile = trim((string) ($context['leaf_profile'] ?? ''));
+        $roleLine = $roleSlug !== '' || $leafProfile !== ''
+            ? 'Rôle / profil : '.trim($roleSlug.' / '.$leafProfile, ' /')
+            : 'Rôle / profil : leaf';
 
         return trim(<<<CONTEXT
         DÉLÉGATION depuis agent parent ({$parentUuid}).
+        {$roleLine}
 
         Objectif :
         {$goal}

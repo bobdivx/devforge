@@ -144,7 +144,11 @@ class AgentSubagentHandoff
                 'goal' => $task['goal'] ?? null,
                 'status' => $status,
                 'summary' => $task['summary'] ?? null,
+                'contribution' => $task['contribution'] ?? $task['summary'] ?? null,
                 'leaf_profile' => $task['leaf_profile'] ?? null,
+                'role_slug' => $task['role_slug'] ?? null,
+                'tier' => $task['tier'] ?? null,
+                'model_label' => $task['model_label'] ?? null,
             ];
         }
 
@@ -165,9 +169,17 @@ class AgentSubagentHandoff
             $lines[] = '- goal: '.((string) ($item['goal'] ?? '—'));
             $lines[] = '- status: '.((string) ($item['status'] ?? '—'));
             $lines[] = '- run_uuid: '.((string) ($item['run_uuid'] ?? '—'));
+            if (! empty($item['role_slug'])) {
+                $lines[] = '- role: '.((string) $item['role_slug']);
+            }
             if (! empty($item['leaf_profile'])) {
                 $lines[] = '- profile: '.((string) $item['leaf_profile']);
             }
+            if (! empty($item['model_label']) || ! empty($item['tier'])) {
+                $lines[] = '- model: '.trim(((string) ($item['model_label'] ?? '')).' / '.((string) ($item['tier'] ?? '')), ' /');
+            }
+            $contribution = (string) ($item['contribution'] ?? $item['summary'] ?? '—');
+            $lines[] = '- contribution: '.mb_substr($contribution, 0, 500);
             $lines[] = '- summary: '.mb_substr((string) ($item['summary'] ?? '—'), 0, 2000);
             $lines[] = '';
         }
@@ -222,6 +234,12 @@ class AgentSubagentHandoff
             if (($task['run_uuid'] ?? null) === $leafRun->uuid) {
                 $tasks[$i]['status'] = $leafRun->status;
                 $tasks[$i]['summary'] = $leafRun->summary;
+                $tasks[$i]['contribution'] = mb_substr((string) ($leafRun->summary ?? ''), 0, 500);
+                $tasks[$i]['role_slug'] = $tasks[$i]['role_slug'] ?? ($leafRun->metadata['role_slug'] ?? null);
+                $tasks[$i]['leaf_profile'] = $tasks[$i]['leaf_profile'] ?? ($leafRun->metadata['leaf_profile'] ?? null);
+                $tasks[$i]['tier'] = $tasks[$i]['tier'] ?? ($leafRun->metadata['task_tier'] ?? null);
+                $tasks[$i]['model_label'] = $tasks[$i]['model_label']
+                    ?? ($leafRun->metadata['model_routing']['model_label'] ?? null);
                 $updated = true;
             }
         }
@@ -232,7 +250,11 @@ class AgentSubagentHandoff
                 'goal' => mb_substr((string) ($leafRun->metadata['delegated_goal'] ?? ''), 0, 200),
                 'status' => $leafRun->status,
                 'summary' => $leafRun->summary,
+                'contribution' => mb_substr((string) ($leafRun->summary ?? ''), 0, 500),
                 'leaf_profile' => $leafRun->metadata['leaf_profile'] ?? null,
+                'role_slug' => $leafRun->metadata['role_slug'] ?? null,
+                'tier' => $leafRun->metadata['task_tier'] ?? null,
+                'model_label' => $leafRun->metadata['model_routing']['model_label'] ?? null,
             ];
         }
 
