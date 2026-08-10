@@ -44,6 +44,7 @@ type FormState = {
     timezone: string;
     replace_existing: boolean;
     recreate: boolean;
+    pull_image: boolean;
     volumes: string;
     extra_env: string;
 };
@@ -74,13 +75,16 @@ const defaultForm = (): FormState => ({
     timezone: 'Europe/Paris',
     replace_existing: true,
     recreate: false,
+    pull_image: true,
     volumes: '',
     extra_env: '',
 });
 
 const POPCORN_IMAGE_PRESETS: Array<{ label: string; image: string }> = [
-    { label: 'Popcorn client', image: 'ghcr.io/bobdivx/popcorn-github-runner-client:latest' },
-    { label: 'Popcorn server / tauri', image: 'ghcr.io/bobdivx/popcorn-github-runner-server:latest' },
+    { label: 'Popcorn client (GHCR)', image: 'ghcr.io/bobdivx/popcorn-github-runner-client:latest' },
+    { label: 'Popcorn server (GHCR)', image: 'ghcr.io/bobdivx/popcorn-github-runner-server:latest' },
+    { label: 'Popcorn client (Docker Hub)', image: 'bobdivx/popcorn-github-runner-client:latest' },
+    { label: 'Popcorn server (Docker Hub)', image: 'bobdivx/popcorn-github-runner-server:latest' },
     { label: 'myoung34 (générique)', image: 'myoung34/github-runner:latest' },
 ];
 
@@ -360,6 +364,7 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
             timezone: form.timezone.trim() || undefined,
             replace_existing: form.replace_existing,
             recreate: form.recreate,
+            pull_image: form.pull_image,
             volumes: volumes.length > 0 ? volumes : undefined,
             extra_env: extraEnv.length > 0 ? extraEnv : undefined,
         };
@@ -873,6 +878,24 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
                                         </button>
                                     ))}
                                 </div>
+                                <label class="mt-1 flex items-start gap-2 text-xs">
+                                    <input
+                                        type="checkbox"
+                                        class="checkbox checkbox-sm mt-0.5"
+                                        checked={form.pull_image}
+                                        onChange={(event) => setForm((current) => ({
+                                            ...current,
+                                            pull_image: (event.target as HTMLInputElement).checked,
+                                        }))}
+                                    />
+                                    <span>
+                                        <span class="font-medium">Tirer la dernière image (`docker pull`)</span>
+                                        <span class="mt-0.5 block text-base-content/55">
+                                            Avec <code class="text-[11px]">:latest</code>, sans pull le NAS réutilise souvent l’ancienne image en cache.
+                                            Vérifie aussi le registry : Docker Hub (<code class="text-[11px]">bobdivx/…</code>) ≠ GHCR (<code class="text-[11px]">ghcr.io/bobdivx/…</code>).
+                                        </span>
+                                    </span>
+                                </label>
                             </div>
                         </div>
 

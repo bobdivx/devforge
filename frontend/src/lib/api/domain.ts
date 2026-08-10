@@ -1164,6 +1164,7 @@ export type GithubRunnerCreateInput = {
     timezone?: string;
     replace_existing?: boolean;
     recreate?: boolean;
+    pull_image?: boolean;
     volumes?: string[];
     extra_env?: Array<{ key: string; value: string }>;
 };

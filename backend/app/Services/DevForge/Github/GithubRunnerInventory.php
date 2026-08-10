@@ -206,6 +206,7 @@ class GithubRunnerInventory
             'timezone' => ['nullable', 'string', 'max:64', 'regex:/^[A-Za-z0-9_\\/+-]+$/'],
             'replace_existing' => ['nullable', 'boolean'],
             'recreate' => ['nullable', 'boolean'],
+            'pull_image' => ['nullable', 'boolean'],
             'volumes' => ['nullable', 'array', 'max:20'],
             'volumes.*' => ['string', 'max:512'],
             'extra_env' => ['nullable', 'array', 'max:30'],
@@ -335,6 +336,21 @@ class GithubRunnerInventory
         $replaceExisting = array_key_exists('replace_existing', $validated)
             ? (bool) $validated['replace_existing']
             : true;
+        $pullImage = array_key_exists('pull_image', $validated)
+            ? (bool) $validated['pull_image']
+            : true;
+
+        if ($pullImage) {
+            try {
+                instant_remote_process([
+                    'docker pull '.escapeshellarg($image),
+                ], $server);
+            } catch (\Throwable $e) {
+                throw ValidationException::withMessages([
+                    'image' => ['Échec du pull de l’image Docker : '.$e->getMessage()],
+                ]);
+            }
+        }
 
         $command = $this->buildDockerRunCommand(
             containerName: $containerName,
