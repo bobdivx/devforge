@@ -45,7 +45,7 @@ Faire de DevForge un agent autonome opérationnel sur le PaaS Coolify : observer
 10. ~~Mission board bugs / features / veille~~ **fait** (`ai_agent_missions`, outils `mission_*`, UI Agents)  
 11. ~~Watchers GitHub PR~~ **fait** · ~~tech-watch → demandes~~ **fait** (`agents:watch-tech`)  
 12. ~~Providers OpenAI / Anthropic / OpenRouter~~ **fait**  
-13. ~~Todo agent~~ **fait** · ~~web_search~~ **fait** · ~~délégation parallèle~~ **fait** (`tasks[]` + queue) · cron libre · MCP client → **P6**  
+13. ~~Todo agent~~ **fait** · ~~web_search~~ **fait** · ~~délégation parallèle~~ **fait** (`tasks[]` + queue) · cron libre · ~~MCP client~~ **fait** (P6)  
 14. **P5** collaboration multi-rôles (inspiration HERCULES, natif — voir section P5) 
 
 ### Hors scope (ne pas porter depuis Forge)
@@ -142,8 +142,8 @@ frontend/src/pages/agents/
 | P5.1 Collaboration multi-rôles (tools + LLM par rôle) | fait (allowlists distinctes + tierForRole + model_override) |
 | P5.2 Mode débat / speaker selection | fait (`AgentCollabOrchestrator`, orchestration=collab) |
 | P5.3 Team report + timeline contributions | fait (`AgentTeamReporter`, panneau Contributions) |
-| P5.4 Sandbox code-exec (Docker) | fait (`AgentCodeSandbox` / `execute_code`, opt-in) |
-| P6 MCP client dans la boucle | optionnel |
+| P5.4 Sandbox code-exec (Docker) | fait (`AgentCodeSandbox` / `execute_code`, UI Paramètres) |
+| P6 MCP client dans la boucle | fait (`AgentMcpClientRegistry` / `mcp__*`, UI Paramètres) |
 
 ## P3 — Patterns OpenClaw (natifs, sans runtime OpenClaw)
 
@@ -333,9 +333,12 @@ P6 MCP client     →  seulement si besoin d’outils externes non couverts
 - Speaker selection « manual » interactif type notebook (le HITL DevForge suffit)
 - Remplacer le pipeline deploy orchestrator→leafs (il reste le chemin critique)
 
-## P6 — MCP client (optionnel)
+## P6 — MCP client (optionnel) — **fait**
 
-- Client MCP **dans** la boucle agent (outils distants déclarés)
-- Hors chemin critique : l’équipe native (P3–P5) doit fonctionner sans MCP
+- Client MCP **dans** la boucle agent (`AgentMcpHttpClient` + `AgentMcpClientRegistry`)
+- Outils distants exposés comme `mcp__{server}__{tool}` + meta `mcp_list_servers` / `mcp_list_remote_tools`
+- **Réglages UI** : Paramètres → Avancé → Agents (`agents_features` sur `InstanceSettings`) — défauts **on**
+- Fallback ops uniquement : `DEVFORGE_AGENTS_*` (pas le chemin nominal)
+- Hors chemin critique : l’équipe native (P3–P5) fonctionne sans serveurs MCP distants configurés
 - Serveur `DevForgeServer` (repair) déjà opt-in — ne pas confondre avec le client
-
+- Leafs : outils MCP bloqués ; mode Plan : `mcp__*` bloqués (listes meta OK)

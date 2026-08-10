@@ -118,6 +118,11 @@ class AgentToolkit
             $tools[] = $this->customTools->definitionFromTool($customTool);
         }
 
+        $mcpRegistry = app(AgentMcpClientRegistry::class);
+        if ($mcpRegistry->enabled()) {
+            $tools = [...$tools, ...$mcpRegistry->toolDefinitions($this->agent)];
+        }
+
         $chatMode = AgentChatMode::parse($this->runContext['chat_mode'] ?? 'build');
         $leafAllowed = AgentSubagentCapabilities::leafAllowedTools($this->runContext);
         $role = AgentSubagentCapabilities::resolveRole($this->runContext);
@@ -131,6 +136,10 @@ class AgentToolkit
                 }
                 if ($role === AgentSubagentCapabilities::ROLE_LEAF
                     && AgentSubagentCapabilities::isOrchestrationTool($name)) {
+                    return false;
+                }
+                if ($role === AgentSubagentCapabilities::ROLE_LEAF
+                    && (str_starts_with($name, 'mcp__') || str_starts_with($name, 'mcp_'))) {
                     return false;
                 }
                 if ($leafAllowed !== null && ! in_array($name, $leafAllowed, true)) {
@@ -429,6 +438,27 @@ class AgentToolkit
                         ],
                     ],
                     'required' => ['language', 'code'],
+                ],
+            ];
+        }
+
+        if (app(AgentMcpClientRegistry::class)->enabled()) {
+            $tools[] = [
+                'name' => 'mcp_list_servers',
+                'description' => 'Liste les serveurs MCP distants configurés pour cet agent (client P6).',
+                'parameters' => ['type' => 'object', 'properties' => (object) []],
+            ];
+            $tools[] = [
+                'name' => 'mcp_list_remote_tools',
+                'description' => 'Liste (et rafraîchit) les outils exposés par les serveurs MCP distants.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'refresh' => [
+                            'type' => 'boolean',
+                            'description' => 'Si true, invalide le cache et re-interroge les serveurs.',
+                        ],
+                    ],
                 ],
             ];
         }
@@ -1469,6 +1499,14 @@ class AgentToolkit
             ];
         }
 
+        if ($role === AgentSubagentCapabilities::ROLE_LEAF
+            && (str_starts_with($toolName, 'mcp__') || in_array($toolName, ['mcp_list_servers', 'mcp_list_remote_tools'], true))) {
+            return [
+                'error' => 'Outils MCP distants interdits pour un leaf.',
+                'denied' => true,
+            ];
+        }
+
         $permissionResult = $this->checkPermission($toolName, $arguments);
         if ($permissionResult !== null) {
             return $this->enrichSourceWriteApproval($toolName, $arguments, $permissionResult);
@@ -1513,6 +1551,8 @@ class AgentToolkit
             'request_user_input' => $this->requestUserInput($arguments),
             'run_application_tests' => $this->runApplicationTests($arguments),
             'execute_code' => $this->executeCode($arguments),
+            'mcp_list_servers' => $this->mcpListServers(),
+            'mcp_list_remote_tools' => $this->mcpListRemoteTools($arguments),
             'list_github_apps' => $this->githubTools->listApps(),
             'list_github_repos' => $this->githubTools->listRepos((string) ($arguments['github_app_uuid'] ?? '')),
             'list_github_branches' => $this->githubTools->listBranches(
@@ -1773,7 +1813,9 @@ class AgentToolkit
             'spawn_task' => $this->spawnTask($arguments),
             'yield_wait' => $this->yieldWait($arguments),
             'propose_plan' => $this->proposePlan(is_array($arguments) ? $arguments : []),
-            default => $this->executeCustomTool($toolName, $arguments),
+            default => str_starts_with($toolName, 'mcp__')
+                ? $this->executeMcpTool($toolName, $arguments)
+                : $this->executeCustomTool($toolName, $arguments),
         };
 
         $this->run->appendLog('  ← Résultat: '.mb_substr(json_encode($result), 0, 200));
@@ -2432,6 +2474,75 @@ class AgentToolkit
             ($ok ? '  ✓' : '  ✗').' execute_code '.$language
             .' exit='.(string) ($result['exit_code'] ?? '?'),
         );
+
+        return $result;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function mcpListServers(): array
+    {
+        $registry = app(AgentMcpClientRegistry::class);
+        if (! $registry->enabled()) {
+            return ['error' => 'Client MCP désactivé (Paramètres → Avancé → Agents).'];
+        }
+
+        $servers = $registry->listServers($this->agent);
+
+        return [
+            'ok' => true,
+            'servers' => $servers,
+            'count' => count($servers),
+            'hint' => $servers === []
+                ? 'Aucun serveur — ajoute-en dans Paramètres → Avancé → Agents (JSON) ou metadata.mcp_servers.'
+                : 'Les outils distants apparaissent comme mcp__{server}__{tool}.',
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function mcpListRemoteTools(array $arguments): array
+    {
+        $registry = app(AgentMcpClientRegistry::class);
+        if (! $registry->enabled()) {
+            return ['error' => 'Client MCP désactivé (Paramètres → Avancé → Agents).'];
+        }
+
+        if (($arguments['refresh'] ?? false) === true) {
+            $registry->refresh($this->agent);
+        }
+
+        $defs = $registry->toolDefinitions($this->agent);
+
+        return [
+            'ok' => true,
+            'tools' => array_map(static fn (array $tool): array => [
+                'name' => $tool['name'],
+                'description' => $tool['description'],
+                'mcp_server' => $tool['mcp_server'],
+                'mcp_tool' => $tool['mcp_tool'],
+            ], $defs),
+            'count' => count($defs),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function executeMcpTool(string $toolName, array $arguments): array
+    {
+        $registry = app(AgentMcpClientRegistry::class);
+        $result = $registry->callEncodedTool($toolName, $arguments, $this->agent);
+
+        if (isset($result['error'])) {
+            $this->run->appendLog('  ✗ '.$toolName.': '.mb_substr((string) $result['error'], 0, 200));
+        } else {
+            $this->run->appendLog('  ✓ '.$toolName);
+        }
 
         return $result;
     }

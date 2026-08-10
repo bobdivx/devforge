@@ -2277,9 +2277,11 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
         }
         if (isset($fqdn) && filled($fqdn)) {
             // Multi-domain FQDNs are comma-separated; Url::fromString only accepts one URL.
-            $primaryFqdn = str($fqdn)->explode(',')->map(fn ($part) => trim((string) $part))->first(
-                fn ($part) => $part !== ''
-            );
+            // Prefer the custom domain over the auto-generated / sslip managed URL.
+            $resourceUuid = $this->pull_request_id === 0
+                ? $this->application->uuid
+                : null;
+            $primaryFqdn = preferred_fqdn($fqdn, $resourceUuid);
             if (filled($primaryFqdn)) {
                 $url = Url::fromString($primaryFqdn);
                 $host = $url->getHost();

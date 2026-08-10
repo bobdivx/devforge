@@ -21,7 +21,7 @@ Le cœur PaaS reste **Laravel** (models, jobs, SSH, Docker, policies).
 
 ### DevForge
 - **[Migration Livewire → DevForge](devforge/migration.md)** — phases, checklist domaines, monorepo
-- **[Agents autonomes — plan](devforge/agents-autonomy-plan.md)** — P0–P4 livrés ; P5 collab multi-rôles (natif) ; P6 MCP optionnel
+- **[Agents autonomes — plan](devforge/agents-autonomy-plan.md)** — P0–P6 livrés (P6 MCP client opt-in)
 - **[Auth Fortify](devforge/authentication.md)** — login hors SPA
 - **[Cutover Livewire](devforge/cutover-livewire.md)** — retrait domaine par domaine
 - **[Monorepo backend/frontend](devforge/monorepo.md)** — layout `backend/` + `frontend/`

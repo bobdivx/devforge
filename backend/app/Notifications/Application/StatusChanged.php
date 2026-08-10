@@ -30,10 +30,7 @@ class StatusChanged extends CustomEmailNotification
         $this->project_uuid = data_get($resource, 'environment.project.uuid');
         $this->environment_uuid = data_get($resource, 'environment.uuid');
         $this->environment_name = data_get($resource, 'environment.name');
-        $this->fqdn = data_get($resource, 'fqdn', null);
-        if (str($this->fqdn)->explode(',')->count() > 1) {
-            $this->fqdn = str($this->fqdn)->explode(',')->first();
-        }
+        $this->fqdn = preferred_fqdn(data_get($resource, 'fqdn', null), $resource->uuid);
         $this->resource_url = base_url()."/project/{$this->project_uuid}/environment/{$this->environment_uuid}/application/{$this->resource->uuid}";
     }
 
@@ -46,7 +43,7 @@ class StatusChanged extends CustomEmailNotification
     {
         $mail = new MailMessage;
         $fqdn = $this->fqdn;
-        $mail->subject("Coolify: {$this->resource_name} has been stopped");
+        $mail->subject(product_name().": {$this->resource_name} has been stopped");
         $mail->view('emails.application-status-changes', [
             'name' => $this->resource_name,
             'fqdn' => $fqdn,
@@ -60,7 +57,7 @@ class StatusChanged extends CustomEmailNotification
     {
         return new DiscordMessage(
             title: ':cross_mark: Application stopped',
-            description: '[Open Application in Coolify]('.$this->resource_url.')',
+            description: '[Open Application in '.product_name().']('.$this->resource_url.')',
             color: DiscordMessage::errorColor(),
             isCritical: true,
         );
@@ -68,13 +65,13 @@ class StatusChanged extends CustomEmailNotification
 
     public function toTelegram(): array
     {
-        $message = 'Coolify: '.$this->resource_name.' has been stopped.';
+        $message = product_name().': '.$this->resource_name.' has been stopped.';
 
         return [
             'message' => $message,
             'buttons' => [
                 [
-                    'text' => 'Open Application in Coolify',
+                    'text' => 'Open Application in '.product_name(),
                     'url' => $this->resource_url,
                 ],
             ],
@@ -91,7 +88,7 @@ class StatusChanged extends CustomEmailNotification
             message: $message,
             buttons: [
                 [
-                    'text' => 'Open Application in Coolify',
+                    'text' => 'Open Application in '.product_name(),
                     'url' => $this->resource_url,
                 ],
             ],
@@ -105,7 +102,10 @@ class StatusChanged extends CustomEmailNotification
 
         $description .= "\n\n*Project:* ".data_get($this->resource, 'environment.project.name');
         $description .= "\n*Environment:* {$this->environment_name}";
-        $description .= "\n*Application URL:* {$this->resource_url}";
+        if ($this->fqdn) {
+            $description .= "\n*Application URL:* {$this->fqdn}";
+        }
+        $description .= "\n*<{$this->resource_url}|Open in ".product_name().'>*';
 
         return new SlackMessage(
             title: $title,

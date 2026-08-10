@@ -3,6 +3,7 @@
 namespace App\Services\DevForge\Agent\Tool;
 
 use App\Models\AiAgent;
+use App\Services\DevForge\Agent\AgentRuntimeSettings;
 
 /**
  * Moteur de permissions agent — porté depuis forge-permission-engine.ts (Forge).
@@ -57,11 +58,21 @@ class AgentPermissionEngine
         }
 
         if ($toolName === 'execute_code'
-            && ! filter_var(config('devforge.agents_code_sandbox_enabled', false), FILTER_VALIDATE_BOOLEAN)) {
+            && ! app(AgentRuntimeSettings::class)->codeSandboxEnabled()) {
             return [
                 'decision' => self::DECISION_DENY,
-                'reason' => 'Sandbox code désactivée (agents_code_sandbox_enabled=false).',
+                'reason' => 'Sandbox code désactivée (Paramètres → Avancé → Agents).',
                 'rule_id' => 'sandbox:disabled',
+            ];
+        }
+
+        if ((str_starts_with($toolName, 'mcp__')
+                || in_array($toolName, ['mcp_list_servers', 'mcp_list_remote_tools'], true))
+            && ! app(AgentRuntimeSettings::class)->mcpClientEnabled()) {
+            return [
+                'decision' => self::DECISION_DENY,
+                'reason' => 'Client MCP désactivé (Paramètres → Avancé → Agents).',
+                'rule_id' => 'mcp:disabled',
             ];
         }
 

@@ -1,4 +1,4 @@
-import { Bot, Plus, RefreshCw } from 'lucide-preact';
+import { Bot, MessageSquare, Plus, RefreshCw } from 'lucide-preact';
 import { useState } from 'preact/hooks';
 import { AgentCard } from '../../components/agents/AgentCard';
 import { AgentUserRequestsInbox } from '../../components/agents/AgentUserRequestsInbox';
@@ -7,6 +7,8 @@ import { MissionBoardPanel } from '../../components/agents/MissionBoardPanel';
 import { PageHeader } from '../../components/PageHeader';
 import { DataState } from '../../components/ui/DataState';
 import { domainApi } from '../../lib/domain-api';
+import { agentDetailPath, resolveContinueChatAgent } from '../../lib/agent-routes';
+import { routeHref } from '../../lib/routes';
 import { useApiQuery } from '../../lib/use-api-query';
 import { useNavigate } from '../../lib/use-navigate';
 import { useTeamContext } from '../../lib/team-context';
@@ -18,6 +20,11 @@ export function AgentsPage() {
     const query = useApiQuery(agentsEnabled ? 'agents' : null, () => domainApi.agents());
     const agents = query.data?.data ?? [];
     const isEmpty = agents.length === 0;
+    const continueAgent = resolveContinueChatAgent(agents);
+    const continuePath = continueAgent ? agentDetailPath(continueAgent.uuid) : null;
+    const continueName = continueAgent
+        ? (agents.find((agent) => agent.uuid === continueAgent.uuid)?.name ?? 'agent')
+        : null;
 
     return (
         <>
@@ -37,6 +44,26 @@ export function AgentsPage() {
                     </>
                 )}
             />
+
+            {continuePath && continueName && (
+                <div class="mb-4 flex flex-col gap-3 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div class="min-w-0">
+                        <p class="text-sm font-semibold">Continuer le chat</p>
+                        <p class="truncate text-xs text-base-content/60">
+                            {continueAgent?.is_primary_chat ? 'Chat principal · ' : 'Dernier ouvert · '}
+                            {continueName}
+                        </p>
+                    </div>
+                    <a
+                        class="btn btn-primary btn-sm gap-1.5 shrink-0"
+                        href={routeHref(continuePath)}
+                        onClick={(e) => onNavigate(e, continuePath)}
+                    >
+                        <MessageSquare class="size-3.5" aria-hidden />
+                        Ouvrir le chat
+                    </a>
+                </div>
+            )}
 
             <AgentUserRequestsInbox />
 
@@ -82,7 +109,10 @@ export function AgentsPage() {
             <CreateAgentModal
                 open={createOpen}
                 onClose={() => setCreateOpen(false)}
-                onCreated={() => void query.reload()}
+                onCreated={() => {
+                    setCreateOpen(false);
+                    void query.reload();
+                }}
             />
         </>
     );

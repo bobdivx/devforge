@@ -413,6 +413,20 @@ export type InstanceSettings = {
         disable_two_step_confirmation: boolean;
         is_wire_navigate_enabled: boolean;
         is_mcp_server_enabled: boolean;
+        agents: {
+            dynamic_roles_enabled: boolean;
+            role_model_routing: boolean;
+            collab_enabled: boolean;
+            code_sandbox_enabled: boolean;
+            mcp_client_enabled: boolean;
+            mcp_servers: Array<{
+                id: string;
+                url: string;
+                label?: string;
+                token_env?: string;
+                timeout?: number;
+            }>;
+        };
     };
     email: {
         smtp_enabled: boolean;
@@ -459,6 +473,20 @@ export type InstanceAdvancedUpdateInput = {
     disable_two_step_confirmation?: boolean;
     is_wire_navigate_enabled?: boolean;
     is_mcp_server_enabled?: boolean;
+    agents?: {
+        dynamic_roles_enabled?: boolean;
+        role_model_routing?: boolean;
+        collab_enabled?: boolean;
+        code_sandbox_enabled?: boolean;
+        mcp_client_enabled?: boolean;
+        mcp_servers?: Array<{
+            id: string;
+            url: string;
+            label?: string;
+            token_env?: string;
+            timeout?: number;
+        }>;
+    };
     confirmation_password?: string;
 };
 
@@ -997,6 +1025,7 @@ export type Agent = {
     is_event_only?: boolean;
     is_active: boolean;
     status: AgentStatus;
+    is_primary_chat?: boolean;
     llm_available?: boolean;
     last_run_at: string | null;
     provider: { id: number; name: string; provider: LlmProvider; model: string; model_label?: string; base_url?: string | null } | null;
@@ -1035,6 +1064,7 @@ export type AgentInput = {
     schedule_cron?: string | null;
     heartbeat_enabled?: boolean;
     is_active?: boolean;
+    is_primary_chat?: boolean;
 };
 
 export type AgentStandingOrder = {

@@ -79,6 +79,8 @@ export type PageKey =
 
     | 'agents'
 
+    | 'agents-chat'
+
     | 'agents-settings'
 
     | 'agent-detail'
@@ -132,6 +134,8 @@ export const appRoutes: AppRoute[] = [
     { path: '/settings', label: 'Paramètres', description: 'Projets, serveurs, équipe et configuration.', icon: Settings, page: 'settings' },
 
     { path: '/agents', label: 'Agents IA', description: "Équipe d'agents autonomes DevForge.", icon: Bot, page: 'agents' },
+
+    { path: '/agents/chat', label: 'Chat', description: 'Chat principal avec votre agent.', icon: Bot, page: 'agents-chat' },
 
     { path: '/agents/settings', label: 'Paramètres AI', description: 'Providers LLM, Ollama et instructions agents.', icon: Bot, page: 'agents-settings' },
 
@@ -617,6 +621,8 @@ const dynamicRoutes: Array<{ pattern: RegExp; route: AppRoute }> = [
     { pattern: /^\/security\/[^/]+(?:\/.*)?$/, route: settingsRoute },
 
     { pattern: /^\/agents\/settings$/, route: { ...agentsRoute, path: '/agents/settings', label: 'Paramètres AI', description: 'Providers LLM, Ollama et instructions agents.', page: 'agents-settings' } },
+
+    { pattern: /^\/agents\/chat$/, route: { ...agentsRoute, path: '/agents/chat', label: 'Chat', description: 'Chat principal avec votre agent.', page: 'agents-chat' } },
 
     { pattern: /^\/agents\/[^/]+(?:\/.*)?$/, route: { ...agentsRoute, page: 'agent-detail' } },
 

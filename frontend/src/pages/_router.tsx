@@ -4,6 +4,7 @@ import { extractApplicationUuid } from '../lib/routes';
 import { extractGithubAppUuid } from '../lib/settings-tabs';
 import { AgentDetailPage } from './agents/_AgentDetailPage';
 import { AgentsPage } from './agents/_AgentsPage';
+import { AgentsChatRedirectPage } from './agents/_AgentsChatRedirectPage';
 import { AgentsSettingsPage } from './agents/_AgentsSettingsPage';
 import { CoreResourcesPage } from './resources/_CoreResourcesPage';
 import { DeploymentsPage } from './deployments/_DeploymentsPage';
@@ -150,6 +151,19 @@ export function DomainPage({ bootstrap, route, onSwitchTeam }: DomainPageProps) 
                         <Card title="Agents désactivés">
                             <p class="text-sm text-base-content/65">
                                 Activez <code class="text-xs">DEVFORGE_AGENTS_ENABLED=true</code> et exécutez les migrations pour utiliser les agents IA.
+                            </p>
+                        </Card>
+                    </>
+                );
+        case 'agents-chat':
+            return (bootstrap.features?.agents_enabled ?? false)
+                ? <AgentsChatRedirectPage />
+                : (
+                    <>
+                        <PageHeader title="Chat" description="Fonctionnalité désactivée sur cette instance." eyebrow="Indisponible" />
+                        <Card title="Agents désactivés">
+                            <p class="text-sm text-base-content/65">
+                                Activez <code class="text-xs">DEVFORGE_AGENTS_ENABLED=true</code> pour utiliser le chat agents.
                             </p>
                         </Card>
                     </>

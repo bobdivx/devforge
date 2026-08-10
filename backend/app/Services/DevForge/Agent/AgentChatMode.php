@@ -102,6 +102,11 @@ class AgentChatMode
             return true;
         }
 
+        // Outils MCP distants : mutations possibles → interdits en plan.
+        if (str_starts_with($toolName, 'mcp__')) {
+            return false;
+        }
+
         return ! in_array($toolName, self::PLAN_BLOCKED, true);
     }
 }

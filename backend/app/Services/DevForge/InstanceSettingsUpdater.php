@@ -8,12 +8,17 @@ use App\Models\OauthSetting;
 use App\Models\Server;
 use App\Rules\ValidDnsServers;
 use App\Rules\ValidIpOrCidr;
+use App\Services\DevForge\Agent\AgentRuntimeSettings;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
 class InstanceSettingsUpdater
 {
+    public function __construct(
+        private readonly AgentRuntimeSettings $agentRuntime = new AgentRuntimeSettings,
+    ) {}
+
     /**
      * @param  array<string, mixed>  $input
      * @return array<string, mixed>
@@ -102,6 +107,13 @@ class InstanceSettingsUpdater
             'disable_two_step_confirmation' => ['sometimes', 'boolean'],
             'is_wire_navigate_enabled' => ['sometimes', 'boolean'],
             'is_mcp_server_enabled' => ['sometimes', 'boolean'],
+            'agents' => ['sometimes', 'array'],
+            'agents.dynamic_roles_enabled' => ['sometimes', 'boolean'],
+            'agents.role_model_routing' => ['sometimes', 'boolean'],
+            'agents.collab_enabled' => ['sometimes', 'boolean'],
+            'agents.code_sandbox_enabled' => ['sometimes', 'boolean'],
+            'agents.mcp_client_enabled' => ['sometimes', 'boolean'],
+            'agents.mcp_servers' => ['sometimes'],
             'confirmation_password' => ['sometimes', 'nullable', 'string'],
         ])->validate();
 
@@ -135,6 +147,11 @@ class InstanceSettingsUpdater
             if (array_key_exists($field, $validated)) {
                 $settings->{$field} = (bool) $validated[$field];
             }
+        }
+
+        if (array_key_exists('agents', $validated) && is_array($validated['agents'])) {
+            $current = is_array($settings->agents_features) ? $settings->agents_features : [];
+            $settings->agents_features = $this->agentRuntime->mergeStored($current, $validated['agents']);
         }
 
         $settings->save();

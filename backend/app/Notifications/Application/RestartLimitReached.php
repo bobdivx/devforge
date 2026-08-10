@@ -35,12 +35,9 @@ class RestartLimitReached extends CustomEmailNotification
         $this->project_uuid = data_get($resource, 'environment.project.uuid');
         $this->environment_uuid = data_get($resource, 'environment.uuid');
         $this->environment_name = data_get($resource, 'environment.name');
-        $this->fqdn = data_get($resource, 'fqdn', null);
+        $this->fqdn = preferred_fqdn(data_get($resource, 'fqdn', null), $resource->uuid);
         $this->restart_count = $resource->restart_count;
         $this->max_restart_count = $resource->max_restart_count;
-        if (str($this->fqdn)->explode(',')->count() > 1) {
-            $this->fqdn = str($this->fqdn)->explode(',')->first();
-        }
         $this->resource_url = $this->resource->link() ?? base_url()."/project/{$this->project_uuid}/environment/{$this->environment_uuid}/application/{$this->resource->uuid}";
     }
 
@@ -52,7 +49,7 @@ class RestartLimitReached extends CustomEmailNotification
     public function toMail(): MailMessage
     {
         $mail = new MailMessage;
-        $mail->subject("Coolify: {$this->resource_name} stopped - restart limit reached ({$this->restart_count}/{$this->max_restart_count})");
+        $mail->subject(product_name().": {$this->resource_name} stopped - restart limit reached ({$this->restart_count}/{$this->max_restart_count})");
         $mail->view('emails.application-restart-limit-reached', [
             'name' => $this->resource_name,
             'fqdn' => $this->fqdn,
@@ -68,7 +65,7 @@ class RestartLimitReached extends CustomEmailNotification
     {
         return new DiscordMessage(
             title: ':warning: Restart limit reached',
-            description: "{$this->resource_name} has been stopped after {$this->restart_count} restarts (limit: {$this->max_restart_count}).\n\n[Open Application in Coolify]({$this->resource_url})",
+            description: "{$this->resource_name} has been stopped after {$this->restart_count} restarts (limit: {$this->max_restart_count}).\n\n[Open Application in ".product_name()."]({$this->resource_url})",
             color: DiscordMessage::errorColor(),
             isCritical: true,
         );
@@ -76,13 +73,13 @@ class RestartLimitReached extends CustomEmailNotification
 
     public function toTelegram(): array
     {
-        $message = "Coolify: {$this->resource_name} has been stopped after {$this->restart_count} restarts (limit: {$this->max_restart_count}).";
+        $message = product_name().": {$this->resource_name} has been stopped after {$this->restart_count} restarts (limit: {$this->max_restart_count}).";
 
         return [
             'message' => $message,
             'buttons' => [
                 [
-                    'text' => 'Open Application in Coolify',
+                    'text' => 'Open Application in '.product_name(),
                     'url' => $this->resource_url,
                 ],
             ],
@@ -99,7 +96,7 @@ class RestartLimitReached extends CustomEmailNotification
             message: $message,
             buttons: [
                 [
-                    'text' => 'Open Application in Coolify',
+                    'text' => 'Open Application in '.product_name(),
                     'url' => $this->resource_url,
                 ],
             ],
@@ -113,7 +110,10 @@ class RestartLimitReached extends CustomEmailNotification
 
         $description .= "\n\n*Project:* ".data_get($this->resource, 'environment.project.name');
         $description .= "\n*Environment:* {$this->environment_name}";
-        $description .= "\n*Application URL:* {$this->resource_url}";
+        if ($this->fqdn) {
+            $description .= "\n*Application URL:* {$this->fqdn}";
+        }
+        $description .= "\n*<{$this->resource_url}|Open in ".product_name().'>*';
 
         return new SlackMessage(
             title: $title,

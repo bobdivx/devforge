@@ -46,6 +46,7 @@ class InstanceSettings extends Model
         'dev_helper_version',
         'is_wire_navigate_enabled',
         'is_mcp_server_enabled',
+        'agents_features',
     ];
 
     protected $casts = [
@@ -69,6 +70,7 @@ class InstanceSettings extends Model
         'sentinel_token' => 'encrypted',
         'is_wire_navigate_enabled' => 'boolean',
         'is_mcp_server_enabled' => 'boolean',
+        'agents_features' => 'array',
     ];
 
     protected static function booted(): void

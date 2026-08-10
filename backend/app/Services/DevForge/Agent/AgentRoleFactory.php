@@ -49,7 +49,7 @@ class AgentRoleFactory
 
     public function enabled(): bool
     {
-        return filter_var(config('devforge.agents_dynamic_roles_enabled', true), FILTER_VALIDATE_BOOLEAN);
+        return app(AgentRuntimeSettings::class)->dynamicRolesEnabled();
     }
 
     public function maxRoles(): int

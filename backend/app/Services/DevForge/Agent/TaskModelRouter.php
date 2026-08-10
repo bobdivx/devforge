@@ -34,7 +34,7 @@ class TaskModelRouter
      */
     public function classify(string $message, string $trigger, string $agentType, array $context = []): TaskModelTier
     {
-        if (filter_var(config('devforge.agents_role_model_routing', true), FILTER_VALIDATE_BOOLEAN)) {
+        if (app(AgentRuntimeSettings::class)->roleModelRoutingEnabled()) {
             $roleTier = $this->tierForRole((string) ($context['role_slug'] ?? $context['leaf_profile'] ?? ''));
             if ($roleTier !== null && (($context['ephemeral'] ?? false) === true || ($context['event'] ?? '') === 'delegated')) {
                 return $roleTier;

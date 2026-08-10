@@ -24,7 +24,7 @@ class HighDiskUsage extends CustomEmailNotification
     public function toMail(): MailMessage
     {
         $mail = new MailMessage;
-        $mail->subject("Coolify: Server ({$this->server->name}) high disk usage detected!");
+        $mail->subject(product_name().": Server ({$this->server->name}) high disk usage detected!");
         $mail->view('emails.high-disk-usage', [
             'name' => $this->server->name,
             'disk_usage' => $this->disk_usage,
@@ -54,7 +54,7 @@ class HighDiskUsage extends CustomEmailNotification
     public function toTelegram(): array
     {
         return [
-            'message' => "Coolify: Server '{$this->server->name}' high disk usage detected!\nDisk usage: {$this->disk_usage}%. Threshold: {$this->server_disk_usage_notification_threshold}%.\nPlease cleanup your disk to prevent data-loss.\nHere are some tips: https://coolify.io/docs/knowledge-base/server/automated-cleanup.",
+            'message' => product_name().": Server '{$this->server->name}' high disk usage detected!\nDisk usage: {$this->disk_usage}%. Threshold: {$this->server_disk_usage_notification_threshold}%.\nPlease cleanup your disk to prevent data-loss.\nHere are some tips: https://coolify.io/docs/knowledge-base/server/automated-cleanup.",
         ];
     }
 

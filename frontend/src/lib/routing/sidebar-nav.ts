@@ -131,10 +131,16 @@ export const sidebarNav: SidebarNavEntry[] = [
         requiresAgents: true,
         items: [
             {
+                id: 'agents-chat',
+                label: 'Chat',
+                path: '/agents/chat',
+                pages: ['agents-chat', 'agent-detail'],
+            },
+            {
                 id: 'agents-manage',
-                label: 'Gérer',
+                label: 'Équipe',
                 path: '/agents',
-                pages: ['agents', 'agent-detail'],
+                pages: ['agents'],
             },
             {
                 id: 'agents-settings',

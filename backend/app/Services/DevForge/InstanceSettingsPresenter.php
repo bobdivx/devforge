@@ -3,11 +3,13 @@
 namespace App\Services\DevForge;
 
 use App\Models\InstanceSettings;
+use App\Services\DevForge\Agent\AgentRuntimeSettings;
 
 class InstanceSettingsPresenter
 {
     public function __construct(
         private readonly InstanceSettings $settings,
+        private readonly AgentRuntimeSettings $agentRuntime = new AgentRuntimeSettings,
     ) {}
 
     public static function from(InstanceSettings $settings): self
@@ -52,6 +54,8 @@ class InstanceSettingsPresenter
      */
     private function advanced(): array
     {
+        $agents = $this->agentRuntime->resolved($this->settings);
+
         return [
             'is_registration_enabled' => (bool) $this->settings->is_registration_enabled,
             'do_not_track' => (bool) $this->settings->do_not_track,
@@ -63,6 +67,14 @@ class InstanceSettingsPresenter
             'disable_two_step_confirmation' => (bool) $this->settings->disable_two_step_confirmation,
             'is_wire_navigate_enabled' => (bool) ($this->settings->is_wire_navigate_enabled ?? true),
             'is_mcp_server_enabled' => (bool) $this->settings->is_mcp_server_enabled,
+            'agents' => [
+                'dynamic_roles_enabled' => $agents['dynamic_roles_enabled'],
+                'role_model_routing' => $agents['role_model_routing'],
+                'collab_enabled' => $agents['collab_enabled'],
+                'code_sandbox_enabled' => $agents['code_sandbox_enabled'],
+                'mcp_client_enabled' => $agents['mcp_client_enabled'],
+                'mcp_servers' => $agents['mcp_servers'],
+            ],
         ];
     }
 

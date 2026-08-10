@@ -555,6 +555,77 @@ function getFqdnWithoutPort(string $fqdn)
         return $fqdn;
     }
 }
+
+/**
+ * Product display name (DevForge, Coolify, …) from APP_NAME.
+ */
+function product_name(): string
+{
+    return (string) config('app.name', 'DevForge');
+}
+
+/**
+ * Whether a domain looks auto-generated / provisional (sslip, nip, UUID host).
+ */
+function is_provisional_fqdn(string $domain, ?string $resourceUuid = null): bool
+{
+    $normalized = strtolower(trim($domain));
+    if ($normalized === '') {
+        return false;
+    }
+
+    if (str_contains($normalized, 'sslip.io') || str_contains($normalized, 'nip.io')) {
+        return true;
+    }
+
+    if (! filled($resourceUuid)) {
+        return false;
+    }
+
+    $uuid = strtolower((string) $resourceUuid);
+
+    try {
+        $host = strtolower(Url::fromString($domain)->getHost());
+
+        return str_contains($host, $uuid);
+    } catch (Throwable) {
+        return str_contains($normalized, $uuid);
+    }
+}
+
+/**
+ * Best public URL from a comma-separated FQDN list.
+ * Prefers custom domains over auto-generated / sslip / UUID-based managed domains.
+ */
+function preferred_fqdn(?string $fqdn, ?string $resourceUuid = null): ?string
+{
+    if (! filled($fqdn)) {
+        return null;
+    }
+
+    $domains = str($fqdn)
+        ->explode(',')
+        ->map(fn (string $domain): string => trim($domain))
+        ->filter()
+        ->values();
+
+    if ($domains->isEmpty()) {
+        return null;
+    }
+
+    $custom = $domains
+        ->reject(fn (string $domain): bool => is_provisional_fqdn($domain, $resourceUuid))
+        ->values();
+
+    $candidates = $custom->isNotEmpty() ? $custom : $domains;
+
+    $https = $candidates->first(
+        fn (string $domain): bool => str_starts_with(strtolower($domain), 'https://')
+    );
+
+    return $https ?? $candidates->first();
+}
+
 /**
  * If fqdn is set, return it, otherwise return public ip.
  */

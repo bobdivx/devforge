@@ -1,4 +1,4 @@
-import { Play, Trash2, CheckCircle2 } from 'lucide-preact';
+import { Play, Trash2, CheckCircle2, Star } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
 import type { Agent, AgentInput, AiProviderConfig } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
@@ -34,6 +34,7 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
     const [form, setForm] = useState<Partial<AgentInput>>({});
     const [saving, setSaving] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [primaryBusy, setPrimaryBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [runs, setRuns] = useState<Awaited<ReturnType<typeof domainApi.agentRuns>>['data']>([]);
     const [selectedRunUuid, setSelectedRunUuid] = useState<string | null>(null);
@@ -136,9 +137,43 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
         }
     };
 
+    const handleTogglePrimaryChat = async () => {
+        setPrimaryBusy(true);
+        setError(null);
+        try {
+            await domainApi.updateAgent(agent.uuid, {
+                is_primary_chat: !agent.is_primary_chat,
+            });
+            onUpdated();
+        } catch (err) {
+            setError(err instanceof ApiError ? err.message : 'Impossible de définir le chat principal.');
+        } finally {
+            setPrimaryBusy(false);
+        }
+    };
+
     return (
         <div class="grid gap-4 p-4">
             {error && <p class="rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">{error}</p>}
+
+            <label class="flex items-center justify-between gap-3 rounded-xl border border-base-300/70 px-3 py-2 text-sm">
+                <span class="grid gap-0.5">
+                    <span class="flex items-center gap-1.5 font-medium">
+                        <Star class={`size-3.5 ${agent.is_primary_chat ? 'fill-current text-primary' : ''}`} aria-hidden />
+                        Chat principal
+                    </span>
+                    <span class="text-xs font-normal text-base-content/55">
+                        Ouvert depuis la sidebar Chat et le raccourci mobile.
+                    </span>
+                </span>
+                <input
+                    class="toggle toggle-sm shrink-0"
+                    type="checkbox"
+                    checked={Boolean(agent.is_primary_chat)}
+                    disabled={primaryBusy}
+                    onChange={() => void handleTogglePrimaryChat()}
+                />
+            </label>
 
             {showProgress && activeRun && <AgentRunProgress run={activeRun} />}
 

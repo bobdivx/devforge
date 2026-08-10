@@ -170,9 +170,9 @@ return [
 
     'agents_collab_speaker_selection' => (string) env('DEVFORGE_AGENTS_COLLAB_SPEAKER_SELECTION', 'auto'),
 
-    /** P5.4 — sandbox execute_code (Docker éphémère). DÉSACTIVÉ par défaut. */
+    /** P5.4 — sandbox execute_code (Docker éphémère). Défaut on ; gérable en Paramètres. */
     'agents_code_sandbox_enabled' => filter_var(
-        env('DEVFORGE_AGENTS_CODE_SANDBOX_ENABLED', false),
+        env('DEVFORGE_AGENTS_CODE_SANDBOX_ENABLED', true),
         FILTER_VALIDATE_BOOLEAN,
     ),
     'agents_code_sandbox_memory' => (string) env('DEVFORGE_AGENTS_CODE_SANDBOX_MEMORY', '256m'),
@@ -182,6 +182,19 @@ return [
     'agents_code_sandbox_image_php' => (string) env('DEVFORGE_AGENTS_CODE_SANDBOX_IMAGE_PHP', 'php:8.4-cli'),
     'agents_code_sandbox_image_node' => (string) env('DEVFORGE_AGENTS_CODE_SANDBOX_IMAGE_NODE', 'node:22-alpine'),
     'agents_code_sandbox_image_python' => (string) env('DEVFORGE_AGENTS_CODE_SANDBOX_IMAGE_PYTHON', 'python:3.12-alpine'),
+
+    /** P6 — client MCP dans la boucle agent. Défaut on ; serveurs via Paramètres. */
+    'agents_mcp_client_enabled' => filter_var(
+        env('DEVFORGE_AGENTS_MCP_CLIENT_ENABLED', true),
+        FILTER_VALIDATE_BOOLEAN,
+    ),
+    'agents_mcp_client_timeout' => (int) env('DEVFORGE_AGENTS_MCP_CLIENT_TIMEOUT', 30),
+    /**
+     * Liste JSON de serveurs MCP distants (fallback ops).
+     * Préférer Paramètres avancés → agents_features.mcp_servers.
+     * Exemple: [{"id":"docs","url":"https://example.com/mcp","token_env":"MCP_DOCS_TOKEN","label":"Docs"}]
+     */
+    'agents_mcp_servers' => json_decode((string) env('DEVFORGE_AGENTS_MCP_SERVERS', '[]'), true) ?: [],
 
     /** Cooldown entre deux dispatches mission_work pour la même mission (minutes). */
     'agents_mission_work_cooldown_minutes' => (int) env('DEVFORGE_AGENTS_MISSION_WORK_COOLDOWN_MINUTES', 10),

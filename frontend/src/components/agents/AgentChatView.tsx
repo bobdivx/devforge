@@ -1,4 +1,4 @@
-import { ArrowLeft, PanelRightOpen, Settings2 } from 'lucide-preact';
+import { ArrowLeft, PanelRightOpen, Settings2, Users } from 'lucide-preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { AgentAvatar } from './AgentAvatar';
 import { AgentSettingsPanel } from './AgentSettingsPanel';
@@ -9,14 +9,17 @@ import { AgentViewSwitcher } from './AgentViewSwitcher';
 import type { Agent, AgentModelRouting } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
 import {
+    agentDetailPath,
     agentDetailRunUuid,
     agentDetailSessionUuid,
     agentDetailView,
+    rememberLastAgentChatUuid,
     shouldOpenAgentSettings,
     syncAgentDetailQuery,
 } from '../../lib/agent-routes';
 import { formatAgentProviderDisplay } from '../../lib/llm-models';
 import { AgentModelRoutingBadge } from './AgentModelRoutingBadge';
+import { routeHref } from '../../lib/routes';
 
 type Props = {
     agent: Agent;
@@ -60,6 +63,10 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
     };
 
     useEffect(() => {
+        rememberLastAgentChatUuid(agent.uuid);
+    }, [agent.uuid]);
+
+    useEffect(() => {
         setSettingsOpen(shouldOpenAgentSettings(window.location.search));
         setViewMode(agentDetailView(window.location.search));
         setFocusedRunUuid(agentDetailRunUuid(window.location.search));
@@ -72,7 +79,11 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
                 setRunsCount(response.data.length);
                 setRunsActive(
                     agent.status === 'running'
-                    || response.data.some((run) => run.status === 'running' || run.status === 'pending'),
+                    || response.data.some((run) => (
+                        run.status === 'running'
+                        || run.status === 'pending'
+                        || run.status === 'waiting_for_subagents'
+                    )),
                 );
             })
             .catch(() => {});
@@ -105,8 +116,23 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
         }
     }, [agent.uuid, agent.status, agent.latest_run?.status, agent.latest_run?.uuid]);
 
+    const latestRun = agent.latest_run;
+    const waitingForTeam = latestRun?.status === 'waiting_for_subagents'
+        || (latestRun?.status === 'running' && Array.isArray(latestRun.metadata?.ephemeral_tasks) && (latestRun.metadata?.ephemeral_tasks?.length ?? 0) > 0);
+    const teamRoles = Array.isArray(latestRun?.metadata?.ephemeral_tasks)
+        ? latestRun!.metadata!.ephemeral_tasks!
+            .map((task) => (typeof task.role_slug === 'string' && task.role_slug !== ''
+                ? task.role_slug
+                : (typeof task.leaf_profile === 'string' ? task.leaf_profile : null)))
+            .filter((role): role is string => Boolean(role))
+        : [];
+    const uniqueRoles = [...new Set(teamRoles)];
+    const teamRunPath = latestRun?.uuid
+        ? agentDetailPath(agent.uuid, { view: 'runs', run: latestRun.uuid })
+        : agentDetailPath(agent.uuid, { view: 'runs' });
+
     return (
-        <div class="flex h-[calc(100dvh-4.5rem)] min-h-[32rem] flex-col overflow-hidden rounded-xl border border-base-300 bg-base-100">
+        <div class="flex h-[calc(100dvh-3.75rem)] min-h-[28rem] flex-col overflow-hidden rounded-xl border border-base-300 bg-base-100 sm:h-[calc(100dvh-4.5rem)] sm:min-h-[32rem]">
             <header class="grid shrink-0 grid-cols-[auto_auto_minmax(0,1fr)_auto] grid-rows-[auto_auto] gap-x-2 gap-y-2 border-b border-base-300 px-3 py-2.5 sm:gap-x-3 sm:px-4 sm:py-3">
                 <button
                     class="btn btn-ghost btn-sm btn-square col-start-1 row-start-1"
@@ -140,6 +166,30 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
                     <AgentModelRoutingBadge routing={activeRouting} compact />
                 </div>
             </header>
+
+            {waitingForTeam && (
+                <div class="flex shrink-0 items-start gap-2 border-b border-info/20 bg-info/10 px-3 py-2 text-xs text-info sm:px-4">
+                    <Users class="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                    <div class="min-w-0 flex-1">
+                        <p class="font-medium">Équipe en cours…</p>
+                        <p class="text-info/80">
+                            {uniqueRoles.length > 0
+                                ? `Rôles : ${uniqueRoles.join(', ')}`
+                                : 'Sous-agents au travail — le handoff arrivera dans le chat.'}
+                        </p>
+                    </div>
+                    <a
+                        class="btn btn-ghost btn-xs shrink-0 text-info"
+                        href={routeHref(teamRunPath)}
+                        onClick={(event) => {
+                            event.preventDefault();
+                            switchView('runs', latestRun?.uuid ?? null);
+                        }}
+                    >
+                        Voir
+                    </a>
+                </div>
+            )}
 
             <AgentViewSwitcher
                 mode={viewMode}

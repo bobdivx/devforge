@@ -48,7 +48,7 @@ class AgentCollabOrchestrator
 
     public function enabled(): bool
     {
-        return filter_var(config('devforge.agents_collab_enabled', true), FILTER_VALIDATE_BOOLEAN);
+        return app(AgentRuntimeSettings::class)->collabEnabled();
     }
 
     public function maxRounds(): int

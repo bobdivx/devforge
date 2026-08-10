@@ -140,7 +140,8 @@ class ApplicationDomainService
             ->reject(fn (string $domain): bool => $this->isManagedDomain($domain, $application))
             ->values();
 
-        $application->fqdn = collect([$managed])->merge($custom)->unique()->implode(',');
+        // Custom domains first so notifications / COOLIFY_URL prefer the real URL.
+        $application->fqdn = $custom->merge([$managed])->unique()->implode(',');
         $application->save();
         $this->refreshLabels($application, force: true);
         $application->refresh();
@@ -243,7 +244,8 @@ class ApplicationDomainService
             ->reject(fn (string $domain): bool => $this->isManagedDomain($domain, $application))
             ->values();
 
-        return collect([$preserved])->merge($custom)->unique()->implode(',');
+        // Custom domains first so notifications / COOLIFY_URL prefer the real URL.
+        return $custom->merge([$preserved])->unique()->implode(',');
     }
 
     /**

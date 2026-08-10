@@ -22,7 +22,7 @@ class AgentCodeSandbox
 
     public function enabled(): bool
     {
-        return filter_var(config('devforge.agents_code_sandbox_enabled', false), FILTER_VALIDATE_BOOLEAN);
+        return app(AgentRuntimeSettings::class)->codeSandboxEnabled();
     }
 
     /**
@@ -32,7 +32,7 @@ class AgentCodeSandbox
     {
         if (! $this->enabled()) {
             return [
-                'error' => 'Sandbox code désactivée (DEVFORGE_AGENTS_CODE_SANDBOX_ENABLED=false). '
+                'error' => 'Sandbox code désactivée (Paramètres → Avancé → Agents). '
                     .'Utilise run_application_tests ou exec_command SSH pour le code applicatif.',
             ];
         }

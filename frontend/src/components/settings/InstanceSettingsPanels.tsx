@@ -201,6 +201,17 @@ function InstanceForm({
     );
 }
 
+function defaultAgentsSettings(): InstanceSettings['advanced']['agents'] {
+    return {
+        dynamic_roles_enabled: true,
+        role_model_routing: true,
+        collab_enabled: true,
+        code_sandbox_enabled: true,
+        mcp_client_enabled: true,
+        mcp_servers: [],
+    };
+}
+
 function AdvancedForm({
     data,
     canEdit,
@@ -210,14 +221,22 @@ function AdvancedForm({
     canEdit: boolean;
     onSaved: () => Promise<void>;
 }) {
-    const [form, setForm] = useState(data);
+    const [form, setForm] = useState({
+        ...data,
+        agents: data.agents ?? defaultAgentsSettings(),
+    });
+    const [mcpServersJson, setMcpServersJson] = useState(
+        () => JSON.stringify((data.agents ?? defaultAgentsSettings()).mcp_servers ?? [], null, 2),
+    );
     const [confirmationPassword, setConfirmationPassword] = useState('');
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        setForm(data);
+        const agents = data.agents ?? defaultAgentsSettings();
+        setForm({ ...data, agents });
+        setMcpServersJson(JSON.stringify(agents.mcp_servers ?? [], null, 2));
         setConfirmationPassword('');
     }, [data]);
 
@@ -229,8 +248,25 @@ function AdvancedForm({
         setMessage(null);
         setError(null);
         try {
+            let mcpServers = form.agents.mcp_servers;
+            try {
+                const parsed = JSON.parse(mcpServersJson || '[]');
+                if (!Array.isArray(parsed)) {
+                    throw new Error('mcp_servers doit être un tableau JSON');
+                }
+                mcpServers = parsed;
+            } catch (parseError) {
+                setError(parseError instanceof Error ? parseError.message : 'JSON serveurs MCP invalide.');
+                setSaving(false);
+                return;
+            }
+
             await domainApi.updateAdvancedSettings({
                 ...form,
+                agents: {
+                    ...form.agents,
+                    mcp_servers: mcpServers,
+                },
                 confirmation_password: needsPassword ? confirmationPassword : undefined,
             });
             await onSaved();
@@ -240,6 +276,16 @@ function AdvancedForm({
         } finally {
             setSaving(false);
         }
+    };
+
+    const setAgentFlag = (key: keyof InstanceSettings['advanced']['agents'], value: boolean) => {
+        setForm((current) => ({
+            ...current,
+            agents: {
+                ...current.agents,
+                [key]: value,
+            },
+        }));
     };
 
     return (
@@ -320,6 +366,61 @@ function AdvancedForm({
                 disabled={!canEdit || saving}
                 onChange={(value) => setForm((current) => ({ ...current, is_mcp_server_enabled: value }))}
             />
+
+            <div class="mt-2 grid gap-2 rounded-xl border border-base-300/70 p-3">
+                <p class="text-sm font-medium">Agents autonomes</p>
+                <p class="text-xs text-base-content/55">
+                    Activés par défaut. Pas besoin de variables Docker Compose — coupe ici si besoin.
+                </p>
+                <ToggleField
+                    label="Rôles dynamiques"
+                    description="spawn_task avec auto_roles / roles[]"
+                    checked={form.agents.dynamic_roles_enabled}
+                    disabled={!canEdit || saving}
+                    onChange={(value) => setAgentFlag('dynamic_roles_enabled', value)}
+                />
+                <ToggleField
+                    label="Routage modèle par rôle"
+                    description="Tier LLM selon researcher / implementer / …"
+                    checked={form.agents.role_model_routing}
+                    disabled={!canEdit || saving}
+                    onChange={(value) => setAgentFlag('role_model_routing', value)}
+                />
+                <ToggleField
+                    label="Mode collaboration"
+                    description="orchestration=collab (speaker selection)"
+                    checked={form.agents.collab_enabled}
+                    disabled={!canEdit || saving}
+                    onChange={(value) => setAgentFlag('collab_enabled', value)}
+                />
+                <ToggleField
+                    label="Sandbox execute_code"
+                    description="Conteneurs Docker éphémères (php/node/python)"
+                    checked={form.agents.code_sandbox_enabled}
+                    disabled={!canEdit || saving}
+                    onChange={(value) => setAgentFlag('code_sandbox_enabled', value)}
+                />
+                <ToggleField
+                    label="Client MCP (outils distants)"
+                    description="Expose mcp__serveur__outil dans la boucle agent"
+                    checked={form.agents.mcp_client_enabled}
+                    disabled={!canEdit || saving}
+                    onChange={(value) => setAgentFlag('mcp_client_enabled', value)}
+                />
+                <Field label="Serveurs MCP clients (JSON)">
+                    <textarea
+                        class="textarea textarea-bordered textarea-sm min-h-28 w-full rounded-xl font-mono text-xs"
+                        value={mcpServersJson}
+                        disabled={!canEdit || saving || !form.agents.mcp_client_enabled}
+                        placeholder='[{"id":"docs","url":"https://example.com/mcp","label":"Docs","token_env":"MCP_DOCS_TOKEN"}]'
+                        onInput={(event) => setMcpServersJson(event.currentTarget.value)}
+                    />
+                    <span class="text-xs text-base-content/55">
+                        Les secrets restent hors JSON : utilise token_env (nom de variable d’environnement).
+                    </span>
+                </Field>
+            </div>
+
             {needsPassword && (
                 <Field label="Mot de passe de confirmation">
                     <input

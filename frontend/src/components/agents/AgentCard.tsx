@@ -1,4 +1,4 @@
-import { CheckCircle2, Play, Settings2, Pause, RefreshCw, Zap } from 'lucide-preact';
+import { CheckCircle2, MessageSquare, Play, Settings2, Pause, RefreshCw, Star, Zap } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
 import type { Agent } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
@@ -115,9 +115,22 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
         }
     };
 
+    const handleSetPrimaryChat = async (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+            await domainApi.updateAgent(agent.uuid, {
+                is_primary_chat: !agent.is_primary_chat,
+            });
+            onRefresh();
+        } catch {
+            // ignore
+        }
+    };
+
     return (
         <article
-            class="card border border-base-300 bg-base-100 transition-shadow hover:shadow-md cursor-pointer"
+            class={`card border bg-base-100 transition-shadow hover:shadow-md cursor-pointer ${agent.is_primary_chat ? 'border-primary/40' : 'border-base-300'}`}
             onClick={(e) => {
                 const target = e.target as HTMLElement;
                 if (target.closest('button, a')) {
@@ -138,6 +151,9 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                             >
                                 {agent.name}
                             </a>
+                            {agent.is_primary_chat && (
+                                <span class="badge badge-xs border-primary/30 bg-primary/10 text-primary">Chat</span>
+                            )}
                             {agent.sub_agents_count > 0 && (
                                 <span class="badge badge-xs border-base-300 bg-base-200 text-base-content/50">
                                     +{agent.sub_agents_count}
@@ -210,6 +226,23 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                         </span>
                     </div>
                     <ActionToolbar>
+                        <a
+                            class="btn btn-primary btn-xs gap-1"
+                            href={routeHref(detailPath)}
+                            title="Ouvrir le chat"
+                            onClick={(e) => onNavigate(e as unknown as MouseEvent, detailPath)}
+                        >
+                            <MessageSquare class="size-3" aria-hidden />
+                            Chat
+                        </a>
+                        <button
+                            class={`btn btn-ghost btn-xs gap-1 ${agent.is_primary_chat ? 'text-primary' : ''}`}
+                            type="button"
+                            title={agent.is_primary_chat ? 'Retirer du chat principal' : 'Définir comme chat principal'}
+                            onClick={handleSetPrimaryChat}
+                        >
+                            <Star class={`size-3 ${agent.is_primary_chat ? 'fill-current' : ''}`} aria-hidden />
+                        </button>
                         <button
                             class="btn btn-ghost btn-xs gap-1"
                             type="button"

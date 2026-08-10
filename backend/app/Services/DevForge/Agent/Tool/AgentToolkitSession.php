@@ -3,6 +3,7 @@
 namespace App\Services\DevForge\Agent\Tool;
 
 use App\Models\AiAgent;
+use App\Services\DevForge\Agent\AgentRuntimeSettings;
 
 /**
  * État des paquets et outils custom pour un run agent.
@@ -69,6 +70,15 @@ class AgentToolkitSession
     public function isToolEnabled(string $toolName): bool
     {
         if (in_array($toolName, AgentToolPackage::META_TOOLS, true)) {
+            if (in_array($toolName, ['mcp_list_servers', 'mcp_list_remote_tools'], true)) {
+                return app(AgentRuntimeSettings::class)->mcpClientEnabled();
+            }
+
+            return true;
+        }
+
+        if (str_starts_with($toolName, 'mcp__')
+            && app(AgentRuntimeSettings::class)->mcpClientEnabled()) {
             return true;
         }
 

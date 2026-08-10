@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
+import { MessageSquare } from 'lucide-preact';
 import { getBootstrap, switchTeam } from '../lib/api-client';
 import type { BootstrapData } from '../lib/bootstrap';
 import { findRoute, normalizeRoutePath, resolveResourceCanonicalLocation, routeHref } from '../lib/routes';
@@ -16,6 +17,7 @@ import { AuthGuard } from './AuthGuard';
 import { Sidebar } from './Sidebar';
 import { ToastRegion, type Toast } from './ToastRegion';
 import { Topbar } from './Topbar';
+import { AGENTS_CHAT_PATH } from '../lib/agent-routes';
 
 type AppProps = {
     initialPath: string;
@@ -33,6 +35,11 @@ export function App({ initialPath }: AppProps) {
     const [toasts, setToasts] = useState<Toast[]>([]);
     const [teamRevision, setTeamRevision] = useState(0);
     const route = useMemo(() => findRoute(pathname), [pathname]);
+    const showChatFab = Boolean(
+        bootstrap?.features?.agents_enabled
+        && route.page !== 'agent-detail'
+        && route.page !== 'agents-chat',
+    );
 
     const loadBootstrap = useCallback(async () => {
         setLoading(true);
@@ -193,6 +200,19 @@ export function App({ initialPath }: AppProps) {
                                 toasts={toasts}
                                 onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))}
                             />
+
+                            {showChatFab && (
+                                <a
+                                    class="btn btn-primary btn-circle fixed end-4 z-40 size-12 shadow-lg lg:hidden"
+                                    style={{ bottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+                                    href={routeHref(AGENTS_CHAT_PATH)}
+                                    aria-label="Ouvrir le chat agent"
+                                    title="Chat agent"
+                                    onClick={(event) => navigate(event, AGENTS_CHAT_PATH)}
+                                >
+                                    <MessageSquare class="size-5" aria-hidden />
+                                </a>
+                            )}
                         </TeamContext.Provider>
                     );
                 }}

@@ -148,7 +148,8 @@ it('preserves the managed domain when it is omitted from an update', function ()
     $domains = $response->json('data.domains');
 
     expect($response->json('data.managed_domain'))->toBe($managed);
-    expect($domains[0])->toBe($managed);
+    expect($domains[0])->toBe('https://custom.example.com');
+    expect($domains)->toContain($managed);
     expect($domains)->toContain('https://custom.example.com');
     expect($domains)->toContain('https://autre.example.com');
     expect($this->application->fresh()->fqdn)->toContain($managed);

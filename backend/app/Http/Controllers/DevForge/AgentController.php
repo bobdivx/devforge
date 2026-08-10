@@ -166,6 +166,7 @@ class AgentController extends Controller
             'schedule_cron' => ['sometimes', 'nullable', 'string', 'max:120'],
             'heartbeat_enabled' => ['sometimes', 'boolean'],
             'is_active' => ['sometimes', 'boolean'],
+            'is_primary_chat' => ['sometimes', 'boolean'],
             'status' => ['sometimes', 'string', Rule::in(['idle', 'paused'])],
         ]);
 
@@ -174,7 +175,16 @@ class AgentController extends Controller
             return response()->json(['message' => 'Expression cron invalide.', 'errors' => ['schedule_cron' => ['Expression cron invalide.']]], 422);
         }
 
-        $agent->update($this->normalizeAgentInput($validated, $agent));
+        if (array_key_exists('is_primary_chat', $validated)) {
+            $this->setPrimaryChat($agent, (bool) $validated['is_primary_chat']);
+            unset($validated['is_primary_chat']);
+        }
+
+        if ($validated !== []) {
+            $agent->update($this->normalizeAgentInput($validated, $agent));
+        } else {
+            $agent->refresh();
+        }
 
         return response()->json(['data' => $this->present($agent->fresh($this->agentRelations(false)))]);
     }
@@ -261,6 +271,7 @@ class AgentController extends Controller
             'is_event_only' => $agent->isEventOnly(),
             'is_active' => $agent->is_active,
             'status' => $agent->status,
+            'is_primary_chat' => (bool) ($agent->metadata['is_primary_chat'] ?? false),
             'llm_available' => $agent->hasLlmProvider(),
             'last_run_at' => $agent->last_run_at?->toISOString(),
             'preferred_model' => $agent->preferredLlmModel(),
@@ -410,5 +421,34 @@ class AgentController extends Controller
         }
 
         return $fields;
+    }
+
+    private function setPrimaryChat(AiAgent $agent, bool $enabled): void
+    {
+        if ($enabled) {
+            $siblings = AiAgent::query()
+                ->where('team_id', $agent->team_id)
+                ->where('id', '!=', $agent->id)
+                ->get();
+
+            foreach ($siblings as $sibling) {
+                $meta = is_array($sibling->metadata) ? $sibling->metadata : [];
+                if (! ($meta['is_primary_chat'] ?? false)) {
+                    continue;
+                }
+                unset($meta['is_primary_chat']);
+                $sibling->metadata = $meta === [] ? null : $meta;
+                $sibling->save();
+            }
+        }
+
+        $metadata = is_array($agent->metadata) ? $agent->metadata : [];
+        if ($enabled) {
+            $metadata['is_primary_chat'] = true;
+        } else {
+            unset($metadata['is_primary_chat']);
+        }
+        $agent->metadata = $metadata === [] ? null : $metadata;
+        $agent->save();
     }
 }

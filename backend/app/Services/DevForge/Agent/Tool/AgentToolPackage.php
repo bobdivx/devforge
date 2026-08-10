@@ -31,6 +31,8 @@ class AgentToolPackage
         'mission_update',
         'run_application_tests',
         'execute_code',
+        'mcp_list_servers',
+        'mcp_list_remote_tools',
     ];
 
     /**

@@ -89,6 +89,8 @@ class AgentToolClassification
             'request_user_input' => $neutral,
             'run_application_tests' => $destructive,
             'execute_code' => $destructive,
+            'mcp_list_servers' => $readOnly,
+            'mcp_list_remote_tools' => $readOnly,
             'list_github_apps' => $readOnly,
             'list_github_repos' => $readOnly,
             'list_github_branches' => $readOnly,
@@ -123,6 +125,14 @@ class AgentToolClassification
 
     public static function forTool(string $toolName): self
     {
+        if (str_starts_with($toolName, 'mcp__')) {
+            return self::resolve([
+                'isReadOnly' => false,
+                'isDestructive' => false,
+                'runtimeProfile' => 'worker',
+            ]);
+        }
+
         return self::builtinMap()[$toolName] ?? self::resolve();
     }
 }

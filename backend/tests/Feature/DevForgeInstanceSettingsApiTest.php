@@ -84,6 +84,37 @@ it('updates advanced settings and requires password to enable registration', fun
         ->assertJsonPath('data.advanced.custom_dns_servers', '1.1.1.1,8.8.8.8');
 });
 
+it('updates agent feature toggles from advanced settings', function () {
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson('/api/devforge/v1/settings/advanced', [
+            'agents' => [
+                'dynamic_roles_enabled' => true,
+                'role_model_routing' => false,
+                'collab_enabled' => true,
+                'code_sandbox_enabled' => false,
+                'mcp_client_enabled' => true,
+                'mcp_servers' => [
+                    [
+                        'id' => 'docs',
+                        'url' => 'https://mcp.example.test/mcp',
+                        'label' => 'Docs',
+                        'token_env' => 'MCP_DOCS_TOKEN',
+                    ],
+                ],
+            ],
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.advanced.agents.code_sandbox_enabled', false)
+        ->assertJsonPath('data.advanced.agents.mcp_client_enabled', true)
+        ->assertJsonPath('data.advanced.agents.role_model_routing', false)
+        ->assertJsonPath('data.advanced.agents.mcp_servers.0.id', 'docs');
+
+    $stored = InstanceSettings::get()->agents_features;
+    expect($stored['code_sandbox_enabled'])->toBeFalse()
+        ->and($stored['mcp_servers'][0]['url'])->toBe('https://mcp.example.test/mcp');
+});
+
 it('updates email settings without leaking secrets', function () {
     $response = $this->actingAs($this->user)
         ->withSession($this->session)

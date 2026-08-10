@@ -28,6 +28,88 @@ export function agentDetailPath(uuid: string, options?: {
     return query ? `${base}?${query}` : base;
 }
 
+export const AGENTS_CHAT_PATH = '/agents/chat';
+
+export const LAST_AGENT_CHAT_STORAGE_KEY = 'devforge.last_agent_chat_uuid';
+
+export type AgentChatCandidate = {
+    uuid: string;
+    is_active?: boolean;
+    is_primary_chat?: boolean;
+};
+
+export function rememberLastAgentChatUuid(uuid: string): void {
+    try {
+        window.localStorage.setItem(LAST_AGENT_CHAT_STORAGE_KEY, uuid);
+    } catch {
+        // ignore quota / private mode
+    }
+}
+
+export function readLastAgentChatUuid(): string | null {
+    try {
+        const value = window.localStorage.getItem(LAST_AGENT_CHAT_STORAGE_KEY);
+        return value && value.trim() !== '' ? value : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Résout le chat principal : primary → last opened → premier actif → premier.
+ * Retourne null si la liste est vide.
+ */
+export function resolvePrimaryAgentChatPath(
+    agents: AgentChatCandidate[],
+    lastUuid: string | null = typeof window !== 'undefined' ? readLastAgentChatUuid() : null,
+): string | null {
+    if (agents.length === 0) {
+        return null;
+    }
+
+    const primary = agents.find((agent) => agent.is_primary_chat === true);
+    if (primary) {
+        return agentDetailPath(primary.uuid);
+    }
+
+    if (lastUuid) {
+        const last = agents.find((agent) => agent.uuid === lastUuid);
+        if (last) {
+            return agentDetailPath(last.uuid);
+        }
+    }
+
+    const active = agents.find((agent) => agent.is_active !== false);
+    if (active) {
+        return agentDetailPath(active.uuid);
+    }
+
+    return agentDetailPath(agents[0]!.uuid);
+}
+
+export function resolveContinueChatAgent(
+    agents: AgentChatCandidate[],
+    lastUuid: string | null = typeof window !== 'undefined' ? readLastAgentChatUuid() : null,
+): AgentChatCandidate | null {
+    if (agents.length === 0) {
+        return null;
+    }
+
+    const primary = agents.find((agent) => agent.is_primary_chat === true);
+    if (primary) {
+        return primary;
+    }
+
+    if (lastUuid) {
+        const last = agents.find((agent) => agent.uuid === lastUuid);
+        if (last) {
+            return last;
+        }
+    }
+
+    return agents.find((agent) => agent.is_active !== false) ?? agents[0] ?? null;
+}
+
 export function shouldOpenAgentSettings(search: string): boolean {
     const value = new URLSearchParams(search).get('settings');
 

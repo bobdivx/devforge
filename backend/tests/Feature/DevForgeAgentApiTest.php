@@ -80,6 +80,28 @@ it('updates an agent preferred model', function () {
     expect($agent->fresh()->preferredLlmModel())->toBe('llama3.1:8b');
 });
 
+it('marks a single agent as primary chat per team', function () {
+    $first = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'metadata' => ['is_primary_chat' => true],
+    ]);
+    $second = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'metadata' => [],
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson("/api/devforge/v1/agents/{$second->uuid}", [
+            'is_primary_chat' => true,
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.is_primary_chat', true);
+
+    expect($second->fresh()->metadata['is_primary_chat'] ?? false)->toBeTrue()
+        ->and($first->fresh()->metadata['is_primary_chat'] ?? false)->toBeFalse();
+});
+
 it('lists agents when the session team was not initialized yet', function () {
     AiAgent::factory()->create(['team_id' => $this->team->id]);
 

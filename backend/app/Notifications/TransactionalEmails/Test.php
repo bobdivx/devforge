@@ -23,7 +23,7 @@ class Test extends CustomEmailNotification
     public function toMail(): MailMessage
     {
         $mail = new MailMessage;
-        $mail->subject('Coolify: Test Email');
+        $mail->subject(product_name().': Test Email');
         $mail->view('emails.test');
 
         return $mail;
