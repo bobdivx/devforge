@@ -9,6 +9,7 @@ use App\Services\DevForge\Application\ApplicationScheduledTaskCatalog;
 use App\Services\DevForge\Core\CoreResourceCatalog;
 use App\Services\DevForge\CurrentTeamContext;
 use App\Services\DevForge\Service\ServiceEnvironmentVariableCatalog;
+use App\Services\DevForge\Service\ServiceSettingsCatalog;
 use App\Services\DevForge\Service\ServiceStorageCatalog;
 use App\Services\DevForge\Service\ServiceWebhookService;
 use Illuminate\Http\JsonResponse;
@@ -21,9 +22,36 @@ class ServiceController extends Controller
         private readonly CoreResourceCatalog $coreResourceCatalog,
         private readonly ApplicationScheduledTaskCatalog $applicationScheduledTaskCatalog,
         private readonly ServiceEnvironmentVariableCatalog $serviceEnvironmentVariableCatalog,
+        private readonly ServiceSettingsCatalog $serviceSettingsCatalog,
         private readonly ServiceStorageCatalog $serviceStorageCatalog,
         private readonly ServiceWebhookService $serviceWebhookService,
     ) {}
+
+    public function settings(Request $request, string $serviceUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $service = $this->resolveService($user, $serviceUuid);
+        $this->authorize('view', $service);
+
+        return response()->json([
+            'data' => $this->serviceSettingsCatalog->show($service),
+        ]);
+    }
+
+    public function updateSettings(Request $request, string $serviceUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $service = $this->resolveService($user, $serviceUuid);
+        $this->authorize('update', $service);
+
+        return response()->json([
+            'data' => $this->serviceSettingsCatalog->update($service, $request->all()),
+        ]);
+    }
 
     public function scheduledTasks(Request $request, string $serviceUuid): JsonResponse
     {

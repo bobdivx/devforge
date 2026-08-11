@@ -26,6 +26,7 @@ describe('ApplicationAdvancedSettingsPanel', () => {
                         include_source_commit_in_build: false,
                         is_consistent_container_name_enabled: false,
                         is_auto_deploy_enabled: true,
+                        is_image_auto_update_enabled: false,
                         is_git_submodules_enabled: false,
                         is_git_lfs_enabled: false,
                         is_git_shallow_clone_enabled: false,
@@ -40,6 +41,7 @@ describe('ApplicationAdvancedSettingsPanel', () => {
                         capabilities: {
                             git_based: true,
                             dockercompose: false,
+                            dockerimage: true,
                             log_drain_server: false,
                         },
                     },
@@ -54,8 +56,10 @@ describe('ApplicationAdvancedSettingsPanel', () => {
         await waitFor(() => {
             expect(screen.getByText('Paramètres avancés')).toBeTruthy();
             expect(screen.getByText('Désactiver le cache de build')).toBeTruthy();
+            expect(screen.getByText('Auto-update image Docker Hub')).toBeTruthy();
             expect(screen.getByDisplayValue('30')).toBeTruthy();
             expect(screen.getByDisplayValue('10')).toBeTruthy();
         });
     });
 });
+

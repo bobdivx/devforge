@@ -6,6 +6,7 @@ use App\Models\AiAgent;
 use App\Models\AiAgentRun;
 use App\Models\AiAgentKeyRequest;
 use App\Models\Application;
+use App\Models\Service;
 use App\Models\Team;
 use App\Services\DevForge\Agent\AgentFeatureDelivery;
 use App\Services\DevForge\Agent\Tool\AgentCustomTools;
@@ -26,6 +27,7 @@ use App\Services\DevForge\Application\ApplicationSourceService;
 use App\Services\DevForge\Core\CoreResourceAction;
 use App\Services\DevForge\Core\CoreResourceCatalog;
 use App\Services\DevForge\DeploymentData;
+use App\Services\DevForge\Docker\DockerImageAutoUpdater;
 use App\Services\DevForge\Docker\DockerImageUpdateChecker;
 use App\Services\DevForge\Github\GithubAppCatalog;
 use App\Services\DevForge\Server\ServerPathValidator;
@@ -599,13 +601,17 @@ class AgentToolkit
             ],
             [
                 'name' => 'check_docker_image_update',
-                'description' => 'Vérifie si une image Docker (app dockerimage ou image=repo:tag) est à jour vs Docker Hub/Quay. Compare tags semver et digests ; inspecte le conteneur running si possible.',
+                'description' => 'Vérifie si une image Docker (app dockerimage, service Coolify, ou image=repo:tag) est à jour vs Docker Hub/Quay. Compare tags semver et digests ; inspecte le conteneur running si possible.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
                         'application_uuid' => [
                             'type' => 'string',
                             'description' => 'UUID d\'une application (idéal build_pack=dockerimage).',
+                        ],
+                        'service_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID d\'un service Coolify (vérifie les images ServiceApplication).',
                         ],
                         'image' => [
                             'type' => 'string',
@@ -614,6 +620,29 @@ class AgentToolkit
                         'inspect_running' => [
                             'type' => 'boolean',
                             'description' => 'Inspecter le conteneur running pour comparer les digests (défaut: true si application_uuid).',
+                        ],
+                    ],
+                    'required' => [],
+                ],
+            ],
+            [
+                'name' => 'apply_docker_image_update',
+                'description' => 'Applique une mise à jour d\'image Docker détectée (pull + redeploy) pour une application dockerimage ou un service. Sans force, n\'agit que si le digest running diffère du registry.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID d\'une application build_pack=dockerimage.',
+                        ],
+                        'service_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID d\'un service Coolify.',
+                        ],
+                        'force' => [
+                            'type' => 'boolean',
+                            'description' => 'Si true, tente l\'apply dès que update_available=true (pas seulement running_digest). Défaut: false.',
+                            'default' => false,
                         ],
                     ],
                     'required' => [],
@@ -1800,6 +1829,7 @@ class AgentToolkit
                 (int) ($arguments['log_lines'] ?? 80),
             ),
             'check_docker_image_update' => $this->checkDockerImageUpdate($arguments),
+            'apply_docker_image_update' => $this->applyDockerImageUpdate($arguments),
             'control_resource' => $this->controlResource(
                 (string) ($arguments['uuid'] ?? ''),
                 (string) ($arguments['type'] ?? ''),
@@ -3565,6 +3595,7 @@ class AgentToolkit
         $applicationUuid = isset($arguments['application_uuid'])
             ? (string) $arguments['application_uuid']
             : ($this->assignedResourceUuid ?? (is_string($this->runContext['application_uuid'] ?? null) ? $this->runContext['application_uuid'] : null));
+        $serviceUuid = isset($arguments['service_uuid']) ? (string) $arguments['service_uuid'] : null;
         $image = isset($arguments['image']) ? (string) $arguments['image'] : null;
         $inspectRunning = array_key_exists('inspect_running', $arguments)
             ? (bool) $arguments['inspect_running']
@@ -3575,7 +3606,44 @@ class AgentToolkit
             applicationUuid: is_string($applicationUuid) && $applicationUuid !== '' ? $applicationUuid : null,
             image: is_string($image) && $image !== '' ? $image : null,
             inspectRunning: $inspectRunning,
+            serviceUuid: is_string($serviceUuid) && $serviceUuid !== '' ? $serviceUuid : null,
         );
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function applyDockerImageUpdate(array $arguments): array
+    {
+        $applicationUuid = isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null;
+        $serviceUuid = isset($arguments['service_uuid']) ? (string) $arguments['service_uuid'] : null;
+        $force = (bool) ($arguments['force'] ?? false);
+        $updater = app(DockerImageAutoUpdater::class);
+
+        if (is_string($serviceUuid) && $serviceUuid !== '') {
+            $service = $this->catalog->find($this->team, 'services', $serviceUuid);
+            if (! $service instanceof Service) {
+                return ['error' => "Service {$serviceUuid} introuvable."];
+            }
+
+            return $updater->applyForService($service, force: $force);
+        }
+
+        $resolvedUuid = is_string($applicationUuid) && $applicationUuid !== ''
+            ? $applicationUuid
+            : ($this->assignedResourceUuid ?? (is_string($this->runContext['application_uuid'] ?? null) ? $this->runContext['application_uuid'] : null));
+
+        if (! is_string($resolvedUuid) || $resolvedUuid === '') {
+            return ['error' => 'application_uuid ou service_uuid requis.'];
+        }
+
+        $application = $this->catalog->find($this->team, 'applications', $resolvedUuid);
+        if (! $application instanceof Application) {
+            return ['error' => "Application {$resolvedUuid} introuvable."];
+        }
+
+        return $updater->applyForApplication($application, force: $force);
     }
 
     /** @return array<string, mixed> */

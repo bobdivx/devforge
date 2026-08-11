@@ -2132,6 +2132,7 @@ export type ApplicationAdvancedSettings = {
     include_source_commit_in_build: boolean;
     is_consistent_container_name_enabled: boolean;
     is_auto_deploy_enabled: boolean;
+    is_image_auto_update_enabled: boolean;
     is_git_submodules_enabled: boolean;
     is_git_lfs_enabled: boolean;
     is_git_shallow_clone_enabled: boolean;
@@ -2146,8 +2147,14 @@ export type ApplicationAdvancedSettings = {
     capabilities: {
         git_based: boolean;
         dockercompose: boolean;
+        dockerimage: boolean;
         log_drain_server: boolean;
     };
+    message?: string;
+};
+
+export type ServiceSettings = {
+    is_image_auto_update_enabled: boolean;
     message?: string;
 };
 
@@ -2882,6 +2889,19 @@ export const domainApi = {
     ),
     serviceStorages: (serviceUuid: string) => apiFetch<ApiResponse<ServiceStoragesPayload>>(
         `${API_BASE}/services/${encodeURIComponent(serviceUuid)}/storages`,
+    ),
+    serviceSettings: (serviceUuid: string) => apiFetch<ApiResponse<ServiceSettings>>(
+        `${API_BASE}/services/${encodeURIComponent(serviceUuid)}/settings`,
+    ),
+    updateServiceSettings: (
+        serviceUuid: string,
+        input: Partial<Omit<ServiceSettings, 'message'>>,
+    ) => mutate<ApiResponse<ServiceSettings>>(
+        `/services/${encodeURIComponent(serviceUuid)}/settings`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(input),
+        },
     ),
     createResourceStorage: (
         resourceType: 'applications' | 'databases',
@@ -3721,6 +3741,20 @@ export const domainApi = {
         blocked_reason: string | null;
     }>) => mutate<ApiResponse<AgentMission>>(`/ai/missions/${encodeURIComponent(uuid)}`, {
         method: 'PATCH',
+        body: JSON.stringify(input),
+    }),
+    bulkUpdateAgentMissions: (input: {
+        from_status: 'open' | 'in_progress' | 'blocked';
+        to_status: 'done' | 'cancelled' | 'open';
+    }) => mutate<{
+        ok: boolean;
+        meta: {
+            updated: number;
+            from_status: string;
+            to_status: string;
+        };
+    }>('/ai/missions/bulk-status', {
+        method: 'POST',
         body: JSON.stringify(input),
     }),
     createApplicationFeatureRequest: (applicationUuid: string, input: {

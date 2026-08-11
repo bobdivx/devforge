@@ -5,6 +5,12 @@ use Illuminate\Support\Facades\Route;
 
 $cuid = '[A-Za-z0-9-]{8,64}';
 
+Route::get('/services/{serviceUuid}/settings', [ServiceController::class, 'settings'])
+    ->where('serviceUuid', $cuid)
+    ->name('services.settings.show');
+Route::put('/services/{serviceUuid}/settings', [ServiceController::class, 'updateSettings'])
+    ->where('serviceUuid', $cuid)
+    ->name('services.settings.update');
 Route::get('/services/{serviceUuid}/scheduled-tasks', [ServiceController::class, 'scheduledTasks'])
     ->where('serviceUuid', $cuid)
     ->name('services.scheduled-tasks.index');

@@ -139,6 +139,8 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
         Route::put('/instructions', [AgentInstructionsController::class, 'update'])->name('instructions.update');
         Route::get('/missions', [AgentMissionController::class, 'index'])->name('missions.index');
         Route::post('/missions', [AgentMissionController::class, 'store'])->name('missions.store');
+        Route::post('/missions/bulk-status', [AgentMissionController::class, 'bulkStatus'])
+            ->name('missions.bulk-status');
         Route::patch('/missions/{uuid}', [AgentMissionController::class, 'update'])
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->name('missions.update');

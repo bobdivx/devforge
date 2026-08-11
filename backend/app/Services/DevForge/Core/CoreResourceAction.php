@@ -146,7 +146,11 @@ class CoreResourceAction
                 $service,
                 (bool) ($options['latest'] ?? false),
             ),
-            'start', 'deploy' => StartService::dispatch($service),
+            'start' => StartService::dispatch($service),
+            'deploy' => StartService::dispatch(
+                $service,
+                (bool) ($options['latest'] ?? true),
+            ),
         };
 
         return [

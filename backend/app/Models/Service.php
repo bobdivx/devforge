@@ -59,10 +59,18 @@ class Service extends BaseModel
         'config_hash',
         'compose_parsing_version',
         'is_container_label_escape_enabled',
+        'is_image_auto_update_enabled',
         'environment_id',
         'server_id',
         'destination_id',
         'destination_type',
+    ];
+
+    protected $casts = [
+        'connect_to_docker_network' => 'boolean',
+        'is_container_label_escape_enabled' => 'boolean',
+        'is_container_label_readonly_enabled' => 'boolean',
+        'is_image_auto_update_enabled' => 'boolean',
     ];
 
     protected $appends = ['server_status', 'status'];

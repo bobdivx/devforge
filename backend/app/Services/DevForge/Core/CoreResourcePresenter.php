@@ -151,6 +151,7 @@ class CoreResourcePresenter
             ...$this->resourceBase($service, 'service'),
             'configuration' => [
                 'service_type' => $service->service_type,
+                'is_image_auto_update_enabled' => (bool) ($service->is_image_auto_update_enabled ?? false),
                 'domains' => $service->applications
                     ->flatMap(fn ($application): array => $this->domains($application->fqdn))
                     ->filter()

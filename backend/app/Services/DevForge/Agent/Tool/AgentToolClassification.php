@@ -45,6 +45,7 @@ class AgentToolClassification
             'get_resource_status' => $readOnly,
             'get_deployment_logs' => $readOnly,
             'check_docker_image_update' => $readOnly,
+            'apply_docker_image_update' => $destructive,
             'get_application_source_info' => $readOnly,
             'list_application_source' => $readOnly,
             'read_application_source' => $readOnly,

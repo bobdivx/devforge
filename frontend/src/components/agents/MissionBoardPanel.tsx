@@ -1,4 +1,4 @@
-import { CheckCircle, ChevronDown, ChevronUp, Circle, KeyRound, Plus, RefreshCw, RotateCcw } from 'lucide-preact';
+import { CheckCircle, CheckCheck, ChevronDown, ChevronUp, Circle, KeyRound, Plus, RefreshCw, RotateCcw } from 'lucide-preact';
 import { useMemo, useState } from 'preact/hooks';
 import type { AgentMission, AgentMissionStatus } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
@@ -154,16 +154,21 @@ function MissionColumn({
     onStatus,
     onFocusInbox,
     onReload,
+    onBulkComplete,
+    bulkCompleting = false,
 }: {
     column: (typeof columns)[number];
     missions: AgentMission[];
     onStatus: (mission: AgentMission, status: AgentMissionStatus) => void;
     onFocusInbox: () => void;
     onReload: () => void;
+    onBulkComplete?: () => void;
+    bulkCompleting?: boolean;
 }) {
     const [expanded, setExpanded] = useState(false);
     const { visible, hiddenCount, limit } = visibleMissionsForColumn(missions, column.status, expanded);
     const canCollapse = expanded && missions.length > limit;
+    const showBulkComplete = column.status === 'in_progress' && missions.length > 0 && Boolean(onBulkComplete);
 
     return (
         <div class="flex min-h-0 min-w-0 flex-col rounded-lg bg-base-200/40 p-2">
@@ -175,6 +180,20 @@ function MissionColumn({
                     </h4>
                     <p class="text-[10px] text-base-content/45">{column.hint}</p>
                 </div>
+                {showBulkComplete && (
+                    <button
+                        type="button"
+                        class="btn btn-ghost btn-xs h-7 min-h-7 shrink-0 gap-1 text-success"
+                        title="Terminer toutes les missions en cours"
+                        disabled={bulkCompleting}
+                        onClick={onBulkComplete}
+                    >
+                        {bulkCompleting
+                            ? <span class="loading loading-spinner loading-xs" aria-hidden />
+                            : <CheckCheck class="size-3.5" aria-hidden />}
+                        <span class="hidden sm:inline">Tout terminer</span>
+                    </button>
+                )}
             </div>
             <ul class="grid max-h-[22rem] gap-1.5 overflow-y-auto">
                 {missions.length === 0 ? (
@@ -218,6 +237,7 @@ export function MissionBoardPanel() {
     const [title, setTitle] = useState('');
     const [kind, setKind] = useState('other');
     const [submitting, setSubmitting] = useState(false);
+    const [bulkCompleting, setBulkCompleting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     const query = useApiQuery(
@@ -271,6 +291,37 @@ export function MissionBoardPanel() {
         }
     };
 
+    const completeInProgress = async () => {
+        const count = byStatus.in_progress.length;
+        if (count === 0) {
+            return;
+        }
+
+        if (!window.confirm(
+            `Terminer les ${count} mission${count > 1 ? 's' : ''} « En cours » ?\n`
+            + 'Utile pour les claims fantômes (runs déjà finis).',
+        )) {
+            return;
+        }
+
+        setBulkCompleting(true);
+        setError(null);
+        try {
+            const response = await domainApi.bulkUpdateAgentMissions({
+                from_status: 'in_progress',
+                to_status: 'done',
+            });
+            await query.reload({ silent: true });
+            if (response.meta.updated === 0) {
+                setError('Aucune mission en cours à terminer.');
+            }
+        } catch (err) {
+            setError(err instanceof ApiError ? err.message : 'Clôture en masse impossible.');
+        } finally {
+            setBulkCompleting(false);
+        }
+    };
+
     if (!agentsEnabled) {
         return null;
     }
@@ -293,9 +344,24 @@ export function MissionBoardPanel() {
                         </p>
                     )}
                 </div>
-                <button class="btn btn-ghost btn-xs btn-square size-8 min-h-8 p-0" type="button" onClick={() => void query.reload()}>
-                    <RefreshCw class="size-3.5" aria-hidden />
-                </button>
+                <div class="flex shrink-0 items-center gap-1">
+                    {inProgressCount > 0 && (
+                        <button
+                            class="btn btn-ghost btn-xs h-8 min-h-8 gap-1 text-success"
+                            type="button"
+                            disabled={bulkCompleting}
+                            onClick={() => void completeInProgress()}
+                        >
+                            {bulkCompleting
+                                ? <span class="loading loading-spinner loading-xs" aria-hidden />
+                                : <CheckCheck class="size-3.5" aria-hidden />}
+                            Terminer les en cours ({inProgressCount})
+                        </button>
+                    )}
+                    <button class="btn btn-ghost btn-xs btn-square size-8 min-h-8 p-0" type="button" onClick={() => void query.reload()}>
+                        <RefreshCw class="size-3.5" aria-hidden />
+                    </button>
+                </div>
             </div>
 
             <form class="mb-4 flex min-w-0 flex-wrap gap-2" onSubmit={handleCreate}>
@@ -335,6 +401,8 @@ export function MissionBoardPanel() {
                             onStatus={(m, s) => void setStatus(m, s)}
                             onFocusInbox={focusInbox}
                             onReload={() => void query.reload({ silent: true })}
+                            onBulkComplete={column.status === 'in_progress' ? () => void completeInProgress() : undefined}
+                            bulkCompleting={bulkCompleting}
                         />
                     ))}
                 </div>

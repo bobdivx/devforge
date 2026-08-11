@@ -16,6 +16,7 @@ type Draft = {
     include_source_commit_in_build: boolean;
     is_consistent_container_name_enabled: boolean;
     is_auto_deploy_enabled: boolean;
+    is_image_auto_update_enabled: boolean;
     is_git_submodules_enabled: boolean;
     is_git_lfs_enabled: boolean;
     is_git_shallow_clone_enabled: boolean;
@@ -36,6 +37,7 @@ function toDraft(data: ApplicationAdvancedSettings): Draft {
         include_source_commit_in_build: data.include_source_commit_in_build,
         is_consistent_container_name_enabled: data.is_consistent_container_name_enabled,
         is_auto_deploy_enabled: data.is_auto_deploy_enabled,
+        is_image_auto_update_enabled: data.is_image_auto_update_enabled,
         is_git_submodules_enabled: data.is_git_submodules_enabled,
         is_git_lfs_enabled: data.is_git_lfs_enabled,
         is_git_shallow_clone_enabled: data.is_git_shallow_clone_enabled,
@@ -124,6 +126,7 @@ export function ApplicationAdvancedSettingsPanel({ applicationUuid, canAct }: Pr
                 include_source_commit_in_build: draft.include_source_commit_in_build,
                 is_consistent_container_name_enabled: draft.is_consistent_container_name_enabled,
                 is_auto_deploy_enabled: draft.is_auto_deploy_enabled,
+                is_image_auto_update_enabled: draft.is_image_auto_update_enabled,
                 is_git_submodules_enabled: draft.is_git_submodules_enabled,
                 is_git_lfs_enabled: draft.is_git_lfs_enabled,
                 is_git_shallow_clone_enabled: draft.is_git_shallow_clone_enabled,
@@ -202,6 +205,12 @@ export function ApplicationAdvancedSettingsPanel({ applicationUuid, canAct }: Pr
     ];
 
     const opsToggles: ToggleField[] = [
+        {
+            key: 'is_image_auto_update_enabled',
+            label: 'Auto-update image Docker Hub',
+            help: 'Vérifie chaque heure le digest du tag configuré (Docker Hub / Quay) et redéploie si une nouvelle image est disponible. Tags flottants (latest/stable) recommandés ; pas de bump semver automatique.',
+            visible: caps?.dockerimage === true,
+        },
         {
             key: 'is_log_drain_enabled',
             label: 'Log drain',

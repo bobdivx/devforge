@@ -89,6 +89,7 @@ it('casts all boolean fields correctly', function () {
         'is_container_label_readonly_enabled',
         'use_build_secrets',
         'is_auto_deploy_enabled',
+        'is_image_auto_update_enabled',
         'is_force_https_enabled',
         'is_debug_enabled',
         'is_preview_deployments_enabled',

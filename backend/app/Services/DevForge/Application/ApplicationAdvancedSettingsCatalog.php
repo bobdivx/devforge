@@ -14,6 +14,7 @@ class ApplicationAdvancedSettingsCatalog
      *     include_source_commit_in_build: bool,
      *     is_consistent_container_name_enabled: bool,
      *     is_auto_deploy_enabled: bool,
+     *     is_image_auto_update_enabled: bool,
      *     is_git_submodules_enabled: bool,
      *     is_git_lfs_enabled: bool,
      *     is_git_shallow_clone_enabled: bool,
@@ -28,6 +29,7 @@ class ApplicationAdvancedSettingsCatalog
      *     capabilities: array{
      *         git_based: bool,
      *         dockercompose: bool,
+     *         dockerimage: bool,
      *         log_drain_server: bool
      *     }
      * }
@@ -45,6 +47,7 @@ class ApplicationAdvancedSettingsCatalog
      *     include_source_commit_in_build: bool,
      *     is_consistent_container_name_enabled: bool,
      *     is_auto_deploy_enabled: bool,
+     *     is_image_auto_update_enabled: bool,
      *     is_git_submodules_enabled: bool,
      *     is_git_lfs_enabled: bool,
      *     is_git_shallow_clone_enabled: bool,
@@ -59,6 +62,7 @@ class ApplicationAdvancedSettingsCatalog
      *     capabilities: array{
      *         git_based: bool,
      *         dockercompose: bool,
+     *         dockerimage: bool,
      *         log_drain_server: bool
      *     },
      *     message: string
@@ -75,6 +79,7 @@ class ApplicationAdvancedSettingsCatalog
             'include_source_commit_in_build' => ['sometimes', 'boolean'],
             'is_consistent_container_name_enabled' => ['sometimes', 'boolean'],
             'is_auto_deploy_enabled' => ['sometimes', 'boolean'],
+            'is_image_auto_update_enabled' => ['sometimes', 'boolean'],
             'is_git_submodules_enabled' => ['sometimes', 'boolean'],
             'is_git_lfs_enabled' => ['sometimes', 'boolean'],
             'is_git_shallow_clone_enabled' => ['sometimes', 'boolean'],
@@ -126,6 +131,7 @@ class ApplicationAdvancedSettingsCatalog
             'include_source_commit_in_build',
             'is_consistent_container_name_enabled',
             'is_auto_deploy_enabled',
+            'is_image_auto_update_enabled',
             'is_git_submodules_enabled',
             'is_git_lfs_enabled',
             'is_git_shallow_clone_enabled',
@@ -169,6 +175,7 @@ class ApplicationAdvancedSettingsCatalog
      *     include_source_commit_in_build: bool,
      *     is_consistent_container_name_enabled: bool,
      *     is_auto_deploy_enabled: bool,
+     *     is_image_auto_update_enabled: bool,
      *     is_git_submodules_enabled: bool,
      *     is_git_lfs_enabled: bool,
      *     is_git_shallow_clone_enabled: bool,
@@ -183,6 +190,7 @@ class ApplicationAdvancedSettingsCatalog
      *     capabilities: array{
      *         git_based: bool,
      *         dockercompose: bool,
+     *         dockerimage: bool,
      *         log_drain_server: bool
      *     }
      * }
@@ -200,6 +208,7 @@ class ApplicationAdvancedSettingsCatalog
             'include_source_commit_in_build' => (bool) ($settings->include_source_commit_in_build ?? false),
             'is_consistent_container_name_enabled' => (bool) $settings->is_consistent_container_name_enabled,
             'is_auto_deploy_enabled' => (bool) $settings->is_auto_deploy_enabled,
+            'is_image_auto_update_enabled' => (bool) ($settings->is_image_auto_update_enabled ?? false),
             'is_git_submodules_enabled' => (bool) $settings->is_git_submodules_enabled,
             'is_git_lfs_enabled' => (bool) $settings->is_git_lfs_enabled,
             'is_git_shallow_clone_enabled' => (bool) ($settings->is_git_shallow_clone_enabled ?? false),
@@ -216,6 +225,7 @@ class ApplicationAdvancedSettingsCatalog
             'capabilities' => [
                 'git_based' => $application->git_based(),
                 'dockercompose' => $application->build_pack === 'dockercompose',
+                'dockerimage' => $application->build_pack === 'dockerimage',
                 'log_drain_server' => $server ? $server->isLogDrainEnabled() : false,
             ],
         ];

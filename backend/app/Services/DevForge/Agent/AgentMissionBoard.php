@@ -259,6 +259,60 @@ class AgentMissionBoard
     }
 
     /**
+     * Transition en masse (ex. nettoyer les claims fantômes in_progress → done).
+     *
+     * @return array{updated: int}|array{error: string}
+     */
+    public function bulkTransition(Team $team, string $fromStatus, string $toStatus): array
+    {
+        if (! $this->available()) {
+            return ['error' => 'Table missions indisponible.'];
+        }
+
+        $from = $this->normalizeStatus($fromStatus);
+        $to = $this->normalizeStatus($toStatus);
+
+        if (! in_array($from, ['open', 'in_progress', 'blocked'], true)) {
+            return ['error' => 'Statut source non autorisé pour un bulk.'];
+        }
+
+        if (! in_array($to, ['done', 'cancelled', 'open'], true)) {
+            return ['error' => 'Statut cible non autorisé pour un bulk.'];
+        }
+
+        $missions = AiAgentMission::query()
+            ->where('team_id', $team->id)
+            ->where('status', $from)
+            ->orderBy('id')
+            ->limit(200)
+            ->get();
+
+        $updated = 0;
+
+        foreach ($missions as $mission) {
+            $input = [
+                'status' => $to,
+                'metadata' => [
+                    'bulk_closed_at' => now()->toISOString(),
+                    'bulk_closed_from' => $from,
+                    'bulk_closed_to' => $to,
+                ],
+            ];
+
+            if ($to === 'open') {
+                $input['blocked_reason'] = '';
+            }
+
+            $result = $this->update($team, $mission->uuid, $input);
+            if ($result instanceof AiAgentMission) {
+                $updated++;
+            }
+        }
+
+        return ['updated' => $updated];
+    }
+
+    /**
      * Claim atomique : open → in_progress + assignee = agent courant.
      *
      * @return AiAgentMission|array{error: string}

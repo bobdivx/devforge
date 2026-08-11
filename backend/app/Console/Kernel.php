@@ -12,6 +12,7 @@ use App\Jobs\CleanupStaleMultiplexedConnections;
 use App\Jobs\DevForge\ApplicationBootSequenceJob;
 use App\Jobs\DevForge\ApplicationKeepAliveJob;
 use App\Jobs\DevForge\ApplicationReadinessWatchdogJob;
+use App\Jobs\DevForge\CheckDockerImageUpdatesJob;
 use App\Jobs\DevForge\InstanceHostDiskGuardJob;
 use App\Jobs\PullChangelog;
 use App\Jobs\PullTemplatesFromCDN;
@@ -88,6 +89,10 @@ class Kernel extends ConsoleKernel
                 ->everyFiveMinutes()
                 ->onOneServer();
 
+            $this->scheduleInstance->job(new CheckDockerImageUpdatesJob)
+                ->hourly()
+                ->onOneServer();
+
             $this->scheduleInstance->command('uploads:clear')->everyTwoMinutes();
 
         } else {
@@ -129,6 +134,10 @@ class Kernel extends ConsoleKernel
 
             $this->scheduleInstance->job(new InstanceHostDiskGuardJob)
                 ->everyFiveMinutes()
+                ->onOneServer();
+
+            $this->scheduleInstance->job(new CheckDockerImageUpdatesJob)
+                ->hourly()
                 ->onOneServer();
 
             $this->scheduleInstance->job(new RegenerateSslCertJob)->twiceDaily()->onOneServer();

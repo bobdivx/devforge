@@ -76,3 +76,29 @@ test('check_docker_image_update marks floating latest as inconclusive without ru
         ->and($result['up_to_date'])->toBeNull()
         ->and($result['latest_tag'])->toBe('1.27.1');
 });
+
+test('check_docker_image_update prefers configured tag digest as target_digest', function () {
+    Http::fake([
+        'https://hub.docker.com/v2/repositories/library/nginx/tags*' => Http::response([
+            'results' => [
+                ['name' => 'stable', 'digest' => 'sha256:stable'],
+                ['name' => 'latest', 'digest' => 'sha256:latest'],
+                ['name' => '1.27.1', 'digest' => 'sha256:semver'],
+            ],
+        ], 200),
+    ]);
+
+    $checker = new DockerImageUpdateChecker(app(CoreResourceCatalog::class));
+    $result = $checker->check(
+        team: new Team(['name' => 't']),
+        image: 'nginx:stable',
+        inspectRunning: false,
+    );
+
+    expect($result['ok'])->toBeTrue()
+        ->and($result['configured_tag'])->toBe('stable')
+        ->and($result['configured_digest'])->toBe('sha256:stable')
+        ->and($result['target_digest'])->toBe('sha256:stable')
+        ->and($result['latest_digest'])->toBe('sha256:latest');
+});
+

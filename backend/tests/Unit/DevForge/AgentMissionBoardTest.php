@@ -69,3 +69,23 @@ it('stores assignee_type in metadata when no agent of that type exists', functio
         ->and($mission->assignee_agent_id)->toBeNull()
         ->and($mission->metadata['assignee_type'] ?? null)->toBe('devforge');
 });
+
+it('bulk transitions in_progress missions to done', function () {
+    $team = Team::factory()->create();
+    $board = app(AgentMissionBoard::class);
+
+    $first = $board->create($team, ['title' => 'Ghost A', 'kind' => 'bug', 'status' => 'in_progress']);
+    $second = $board->create($team, ['title' => 'Ghost B', 'kind' => 'ops', 'status' => 'in_progress']);
+    $open = $board->create($team, ['title' => 'Still open', 'kind' => 'bug', 'status' => 'open']);
+
+    expect($first)->toBeInstanceOf(AiAgentMission::class)
+        ->and($second)->toBeInstanceOf(AiAgentMission::class)
+        ->and($open)->toBeInstanceOf(AiAgentMission::class);
+
+    $result = $board->bulkTransition($team, 'in_progress', 'done');
+
+    expect($result['updated'] ?? 0)->toBe(2)
+        ->and($first->fresh()->status)->toBe('done')
+        ->and($second->fresh()->status)->toBe('done')
+        ->and($open->fresh()->status)->toBe('open');
+});

@@ -125,7 +125,8 @@ it('enables env var and spawn_task tools from the core package', function () {
         ->and(AgentToolPackage::toolNames(AgentToolPackage::PACKAGE_CORE))->toContain('update_application_git_branch')
         ->and(AgentToolPackage::toolNames(AgentToolPackage::PACKAGE_CORE))->toContain('update_application_runtime_settings')
         ->and(AgentToolPackage::toolNames(AgentToolPackage::PACKAGE_CORE))->toContain('fix_application_host_permissions')
-        ->and(AgentToolPackage::toolNames(AgentToolPackage::PACKAGE_CORE))->toContain('fix_coolify_base_config_path');
+        ->and(AgentToolPackage::toolNames(AgentToolPackage::PACKAGE_CORE))->toContain('fix_coolify_base_config_path')
+        ->and(AgentToolPackage::toolNames(AgentToolPackage::PACKAGE_CORE))->toContain('apply_docker_image_update');
 
     foreach (['list_application_env_vars', 'upsert_application_env_var', 'update_application_git_branch', 'update_application_runtime_settings', 'fix_application_host_permissions', 'fix_coolify_base_config_path', 'spawn_task'] as $toolName) {
         $result = $toolkit->execute($toolName, []);

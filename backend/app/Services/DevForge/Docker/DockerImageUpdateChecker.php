@@ -3,6 +3,8 @@
 namespace App\Services\DevForge\Docker;
 
 use App\Models\Application;
+use App\Models\Service;
+use App\Models\ServiceApplication;
 use App\Models\Team;
 use App\Services\DevForge\Agent\Tool\AgentServerExecutor;
 use App\Services\DevForge\Core\CoreResourceCatalog;
@@ -26,7 +28,12 @@ class DockerImageUpdateChecker
         ?string $applicationUuid = null,
         ?string $image = null,
         bool $inspectRunning = true,
+        ?string $serviceUuid = null,
     ): array {
+        if (is_string($serviceUuid) && $serviceUuid !== '') {
+            return $this->checkService($team, $serviceUuid, $inspectRunning);
+        }
+
         $application = null;
         if (is_string($applicationUuid) && $applicationUuid !== '') {
             $resource = $this->catalog->find($team, 'applications', $applicationUuid);
@@ -68,7 +75,9 @@ class DockerImageUpdateChecker
         $tags = $remote['tags'];
         $configuredDigest = $this->digestForTag($tags, $configuredTag);
         $latestSemver = $this->latestSemanticTag($tags);
-        $latestDigest = $this->digestForTag($tags, 'latest') ?? ($latestSemver !== null ? $this->digestForTag($tags, $latestSemver) : null);
+        $latestDigest = $this->digestForTag($tags, 'latest')
+            ?? ($latestSemver !== null ? $this->digestForTag($tags, $latestSemver) : null);
+        $targetDigest = $configuredDigest ?? $latestDigest;
 
         $running = null;
         if ($inspectRunning && $application !== null) {
@@ -80,6 +89,7 @@ class DockerImageUpdateChecker
             configuredDigest: $configuredDigest,
             latestSemver: $latestSemver,
             latestDigest: $latestDigest,
+            targetDigest: $targetDigest,
             runningDigest: is_string($running['digest'] ?? null) ? $running['digest'] : null,
         );
 
@@ -91,6 +101,7 @@ class DockerImageUpdateChecker
             'configured_image' => $configuredImage,
             'configured_tag' => $configuredTag,
             'configured_digest' => $configuredDigest,
+            'target_digest' => $targetDigest,
             'latest_tag' => $latestSemver,
             'latest_image' => $latestSemver !== null ? $repository.':'.$latestSemver : null,
             'latest_digest' => $latestDigest,
@@ -100,6 +111,133 @@ class DockerImageUpdateChecker
             'update_available' => $comparison['update_available'],
             'notes' => $comparison['notes'],
             'running' => $running,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function checkService(Team $team, string $serviceUuid, bool $inspectRunning = true): array
+    {
+        $resource = $this->catalog->find($team, 'services', $serviceUuid);
+        if (! $resource instanceof Service) {
+            return ['error' => "Service {$serviceUuid} introuvable."];
+        }
+
+        $service = $resource->loadMissing('applications');
+        $images = [];
+        $anyUpdate = false;
+        $anyOk = false;
+
+        foreach ($service->applications as $serviceApplication) {
+            if (! $serviceApplication instanceof ServiceApplication) {
+                continue;
+            }
+
+            $imageRef = trim((string) ($serviceApplication->image ?? ''));
+            if ($imageRef === '') {
+                continue;
+            }
+
+            $resolved = $this->resolveConfiguredImage(null, $imageRef);
+            if (isset($resolved['error'])) {
+                $images[] = [
+                    'service_application_uuid' => $serviceApplication->uuid,
+                    'service_application_name' => $serviceApplication->name,
+                    'ok' => false,
+                    'error' => $resolved['error'],
+                ];
+
+                continue;
+            }
+
+            /** @var string $configuredImage */
+            $configuredImage = $resolved['configured_image'];
+            /** @var string $repository */
+            $repository = $resolved['repository'];
+            /** @var string $configuredTag */
+            $configuredTag = $resolved['configured_tag'];
+            /** @var string $registry */
+            $registry = $resolved['registry'];
+
+            $remote = $this->fetchRemoteTags($repository, $registry);
+            if (isset($remote['error'])) {
+                $images[] = [
+                    'service_application_uuid' => $serviceApplication->uuid,
+                    'service_application_name' => $serviceApplication->name,
+                    'ok' => false,
+                    'configured_image' => $configuredImage,
+                    'configured_tag' => $configuredTag,
+                    'registry' => $registry,
+                    'error' => $remote['error'],
+                    'hint' => $remote['hint'] ?? null,
+                ];
+
+                continue;
+            }
+
+            /** @var list<array{name: string, digest?: string|null}> $tags */
+            $tags = $remote['tags'];
+            $configuredDigest = $this->digestForTag($tags, $configuredTag);
+            $latestSemver = $this->latestSemanticTag($tags);
+            $latestDigest = $this->digestForTag($tags, 'latest')
+                ?? ($latestSemver !== null ? $this->digestForTag($tags, $latestSemver) : null);
+            $targetDigest = $configuredDigest ?? $latestDigest;
+
+            $running = null;
+            if ($inspectRunning) {
+                $running = $this->inspectRunningServiceApplication($team, $service, $serviceApplication);
+            }
+
+            $comparison = $this->compare(
+                configuredTag: $configuredTag,
+                configuredDigest: $configuredDigest,
+                latestSemver: $latestSemver,
+                latestDigest: $latestDigest,
+                targetDigest: $targetDigest,
+                runningDigest: is_string($running['digest'] ?? null) ? $running['digest'] : null,
+            );
+
+            $entry = [
+                'service_application_uuid' => $serviceApplication->uuid,
+                'service_application_name' => $serviceApplication->name,
+                'ok' => true,
+                'configured_image' => $configuredImage,
+                'configured_tag' => $configuredTag,
+                'configured_digest' => $configuredDigest,
+                'target_digest' => $targetDigest,
+                'latest_tag' => $latestSemver,
+                'latest_digest' => $latestDigest,
+                'registry' => $registry,
+                'up_to_date' => $comparison['up_to_date'],
+                'comparison' => $comparison['mode'],
+                'update_available' => $comparison['update_available'],
+                'notes' => $comparison['notes'],
+                'running' => $running,
+            ];
+            $images[] = $entry;
+            $anyOk = true;
+            if ($comparison['update_available'] === true && $comparison['mode'] === 'running_digest') {
+                $anyUpdate = true;
+            }
+        }
+
+        if ($images === []) {
+            return [
+                'ok' => false,
+                'service_uuid' => $service->uuid,
+                'service_name' => $service->name,
+                'error' => 'Aucune image ServiceApplication à vérifier.',
+            ];
+        }
+
+        return [
+            'ok' => $anyOk,
+            'service_uuid' => $service->uuid,
+            'service_name' => $service->name,
+            'images' => $images,
+            'update_available' => $anyUpdate,
+            'comparison' => $anyUpdate ? 'running_digest' : null,
         ];
     }
 
@@ -127,7 +265,7 @@ class DockerImageUpdateChecker
                 ];
             }
 
-            return ['error' => 'Paramètre image ou application_uuid (dockerimage) requis.'];
+            return ['error' => 'Paramètre image, application_uuid (dockerimage) ou service_uuid requis.'];
         }
 
         $parser = (new DockerImageParser)->parse($raw);
@@ -311,15 +449,16 @@ class DockerImageUpdateChecker
         ?string $configuredDigest,
         ?string $latestSemver,
         ?string $latestDigest,
+        ?string $targetDigest,
         ?string $runningDigest,
     ): array {
         $notes = [];
 
-        if ($runningDigest !== null && $latestDigest !== null) {
-            $match = hash_equals($runningDigest, $latestDigest);
+        if ($runningDigest !== null && $targetDigest !== null) {
+            $match = hash_equals($runningDigest, $targetDigest);
             $notes[] = $match
-                ? 'Le digest du conteneur running correspond au digest registry (latest).'
-                : 'Le digest running diffère du digest registry (latest) — mise à jour probable.';
+                ? "Le digest du conteneur running correspond au digest registry du tag « {$configuredTag} »."
+                : "Le digest running diffère du digest registry du tag « {$configuredTag} » — mise à jour disponible.";
 
             return [
                 'up_to_date' => $match,
@@ -388,7 +527,7 @@ class DockerImageUpdateChecker
     }
 
     /**
-     * @return array{image?: string, digest?: string, error?: string}|null
+     * @return array{image?: string|null, digest?: string|null, error?: string, raw?: string}|null
      */
     private function inspectRunningImage(Team $team, Application $application): ?array
     {
@@ -410,9 +549,44 @@ class DockerImageUpdateChecker
             return ['error' => (string) ($result['error'] ?? 'docker inspect a échoué.')];
         }
 
-        $output = trim((string) ($result['output'] ?? ''));
+        return $this->parseInspectOutput(trim((string) ($result['output'] ?? '')));
+    }
+
+    /**
+     * @return array{image?: string|null, digest?: string|null, error?: string, raw?: string}|null
+     */
+    private function inspectRunningServiceApplication(
+        Team $team,
+        Service $service,
+        ServiceApplication $serviceApplication,
+    ): ?array {
+        $server = $service->server;
+        if ($server === null) {
+            return ['error' => 'Aucun serveur associé à ce service.'];
+        }
+
+        $containerName = $serviceApplication->name.'-'.$service->uuid;
+        $format = '{{.Config.Image}}|{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}|{{.Image}}';
+        $command = 'docker inspect --format '.escapeshellarg($format).' '.escapeshellarg($containerName).' 2>/dev/null'
+            .' || docker ps -a --filter '.escapeshellarg('name='.$containerName)
+            .' --format '.escapeshellarg('{{.Image}}|{{.ID}}').' | head -1';
+
+        $executor = new AgentServerExecutor($team, $this->catalog);
+        $result = $executor->execOnServer($server->uuid, $command, 45);
+        if (! ($result['success'] ?? false)) {
+            return ['error' => (string) ($result['error'] ?? 'docker inspect a échoué.')];
+        }
+
+        return $this->parseInspectOutput(trim((string) ($result['output'] ?? '')));
+    }
+
+    /**
+     * @return array{image?: string|null, digest?: string|null, error?: string, raw?: string}
+     */
+    private function parseInspectOutput(string $output): array
+    {
         if ($output === '') {
-            return ['error' => 'Conteneur introuvable pour cette application.'];
+            return ['error' => 'Conteneur introuvable.'];
         }
 
         $parts = explode('|', $output);

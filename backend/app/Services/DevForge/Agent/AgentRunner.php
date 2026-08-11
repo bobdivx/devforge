@@ -53,6 +53,7 @@ class AgentRunner
                 'summary' => 'Aucun provider LLM configuré pour cet agent.',
                 'finished_at' => now(),
             ]);
+            $this->finalizeLinkedMission($run->fresh() ?? $run);
             $agent->update(['status' => 'error']);
 
             return;
@@ -168,6 +169,7 @@ class AgentRunner
                 app(AgentRunCorrectionSummarizer::class)->finalize($run->fresh() ?? $run);
                 app(ApplicationReadinessService::class)->handleAgentOutcome($run->fresh() ?? $run);
                 $this->publishOverviewInterventionReport($agent, $run->fresh() ?? $run, $context);
+                $this->finalizeLinkedMission($run->fresh() ?? $run);
                 $agent->update(['status' => 'idle', 'last_run_at' => now()]);
                 broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'completed'));
                 $this->notifyLeafFinished($agent, $run->fresh() ?? $run, $context);
@@ -455,6 +457,7 @@ class AgentRunner
                     'summary' => mb_substr($summary !== '' ? $summary : 'Run annulé.', 0, 1000),
                     'finished_at' => $run->finished_at ?? now(),
                 ]);
+                $this->finalizeLinkedMission($run->fresh() ?? $run);
                 $agent->update(['status' => 'idle', 'last_run_at' => now()]);
                 broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'cancelled'));
                 $this->notifyLeafFinished($agent, $run->fresh() ?? $run, $context);
@@ -471,6 +474,7 @@ class AgentRunner
             app(AgentRunCorrectionSummarizer::class)->finalize($run->fresh() ?? $run);
             app(ApplicationReadinessService::class)->handleAgentOutcome($run->fresh() ?? $run);
             $this->publishOverviewInterventionReport($agent, $run->fresh() ?? $run, $context);
+            $this->finalizeLinkedMission($run->fresh() ?? $run);
 
             $agent->update(['status' => 'idle', 'last_run_at' => now()]);
             broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'completed'));
@@ -479,6 +483,7 @@ class AgentRunner
         } catch (\Throwable $e) {
             $run->refresh();
             if ($run->status === AgentRunCancellation::STATUS) {
+                $this->finalizeLinkedMission($run);
                 $agent->update(['status' => 'idle', 'last_run_at' => now()]);
                 broadcast(new AgentRunUpdated($agent, $run, 'cancelled'));
 
@@ -494,9 +499,19 @@ class AgentRunner
             app(AgentRunCorrectionSummarizer::class)->finalize($run->fresh() ?? $run);
             app(ApplicationReadinessService::class)->handleAgentOutcome($run->fresh() ?? $run);
             $this->publishOverviewInterventionReport($agent, $run->fresh() ?? $run, $context);
+            $this->finalizeLinkedMission($run->fresh() ?? $run);
             $agent->update(['status' => 'error', 'last_run_at' => now()]);
             broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'failed'));
             $this->notifyLeafFinished($agent, $run->fresh() ?? $run, $context);
+        }
+    }
+
+    private function finalizeLinkedMission(AiAgentRun $run): void
+    {
+        try {
+            app(AgentMissionRunFinalizer::class)->finalizeFromRun($run);
+        } catch (\Throwable) {
+            // Ne jamais casser le cycle de vie du run pour une clôture de mission.
         }
     }
 

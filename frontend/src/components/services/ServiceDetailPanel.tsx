@@ -15,6 +15,7 @@ import { DataState } from '../ui/DataState';
 import { ResourceStatusIcon } from '../ui/ResourceStatusIcon';
 import { StatusBadge } from '../ui/StatusBadge';
 import { Tabs } from '../ui/Tabs';
+import { ServiceImageAutoUpdateToggle } from './ServiceImageAutoUpdateToggle';
 
 const actionLabels: Record<CoreAction, string> = {
     start: 'Démarrer',
@@ -165,6 +166,16 @@ export function ServiceDetailPanel({
                         )}
 
                         {actionError && <p class="text-xs text-error" role="alert">{actionError}</p>}
+
+                        <ServiceImageAutoUpdateToggle
+                            serviceUuid={resource.uuid}
+                            canAct={canAct}
+                            initialEnabled={Boolean(resource.configuration?.is_image_auto_update_enabled)}
+                            onChanged={async () => {
+                                await query.reload();
+                                await onChanged();
+                            }}
+                        />
 
                         <ActionToolbar>
                             {canAct && resolveCoreResourceActions(resource).map((action) => {

@@ -102,6 +102,36 @@ class AgentMissionController extends Controller
         return response()->json(['data' => $this->present($result)]);
     }
 
+    public function bulkStatus(Request $request): JsonResponse
+    {
+        $team = $this->currentTeam($request);
+        $this->authorize('create', \App\Models\AiAgent::class);
+
+        $validated = $request->validate([
+            'from_status' => ['required', 'string', Rule::in(['open', 'in_progress', 'blocked'])],
+            'to_status' => ['required', 'string', Rule::in(['done', 'cancelled', 'open'])],
+        ]);
+
+        $result = $this->missionBoard->bulkTransition(
+            $team,
+            $validated['from_status'],
+            $validated['to_status'],
+        );
+
+        if (isset($result['error'])) {
+            abort(422, $result['error']);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'meta' => [
+                'updated' => $result['updated'],
+                'from_status' => $validated['from_status'],
+                'to_status' => $validated['to_status'],
+            ],
+        ]);
+    }
+
     private function currentTeam(Request $request): Team
     {
         $user = $request->user();

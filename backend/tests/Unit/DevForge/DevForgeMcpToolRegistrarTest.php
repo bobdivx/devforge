@@ -20,6 +20,7 @@ test('DevForge MCP registrar exposes Coolify reads plus toolkit proxies', functi
         'control_resource',
         'get_deployment_logs',
         'check_docker_image_update',
+        'apply_docker_image_update',
         'exec_command',
         'list_github_apps',
         'sync_application_proxy_labels',
