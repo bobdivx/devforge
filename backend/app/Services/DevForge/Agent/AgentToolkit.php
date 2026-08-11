@@ -261,6 +261,87 @@ class AgentToolkit
                 ],
             ],
             [
+                'name' => 'skill_list',
+                'description' => 'Liste les skills procéduraux disponibles (catalogue compact). Filtre optionnel par query.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'query' => ['type' => 'string', 'description' => 'Filtre texte (slug, nom, tags)'],
+                        'limit' => ['type' => 'integer', 'description' => 'Max résultats (défaut 40)'],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'skill_load',
+                'description' => 'Charge le corps complet d’un skill (procédure étape par étape). À appeler avant d’exécuter une procédure connue.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'slug' => ['type' => 'string', 'description' => 'Slug du skill (ex: fix-deploy-502)'],
+                    ],
+                    'required' => ['slug'],
+                ],
+            ],
+            [
+                'name' => 'skill_write',
+                'description' => 'Crée ou met à jour un skill après une procédure validée. Progressive memory pour les prochains runs.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'slug' => ['type' => 'string', 'description' => 'Slug kebab-case unique'],
+                        'name' => ['type' => 'string', 'description' => 'Titre court'],
+                        'description' => ['type' => 'string', 'description' => 'Résumé 1 ligne pour le catalogue'],
+                        'body' => ['type' => 'string', 'description' => 'Procédure markdown complète'],
+                        'tags' => [
+                            'type' => 'array',
+                            'items' => ['type' => 'string'],
+                            'description' => 'Tags (deploy, proxy, …)',
+                        ],
+                    ],
+                    'required' => ['slug', 'name', 'description', 'body'],
+                ],
+            ],
+            [
+                'name' => 'browser_fetch',
+                'description' => 'Fetch HTTP d’une URL publique : status, titre, extrait texte. Smoke / diagnostic post-deploy sans navigateur lourd.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'url' => ['type' => 'string', 'description' => 'URL absolue (https://…)'],
+                        'method' => ['type' => 'string', 'enum' => ['GET', 'HEAD'], 'description' => 'Méthode (défaut GET)'],
+                        'max_chars' => ['type' => 'integer', 'description' => 'Taille max extrait texte (défaut 4000)'],
+                    ],
+                    'required' => ['url'],
+                ],
+            ],
+            [
+                'name' => 'browser_smoke',
+                'description' => 'Smoke test du domaine public d’une application Coolify (FQDN). Vérifie HTTP + absence page nginx défaut.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => ['type' => 'string', 'description' => 'UUID application (sinon ressource assignée)'],
+                        'path' => ['type' => 'string', 'description' => 'Chemin (défaut /)'],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'checkpoint_list',
+                'description' => 'Liste les checkpoints (snapshots) créés avant mutations fichiers dans ce run.',
+                'parameters' => ['type' => 'object', 'properties' => (object) []],
+            ],
+            [
+                'name' => 'checkpoint_rollback',
+                'description' => 'Restaure le contenu d’un checkpoint (fichier application / GitHub / remote).',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'checkpoint_id' => ['type' => 'string', 'description' => 'Id du checkpoint'],
+                    ],
+                    'required' => ['checkpoint_id'],
+                ],
+            ],
+            [
                 'name' => 'todo_read',
                 'description' => 'Lit la todo list de la tâche / run en cours.',
                 'parameters' => ['type' => 'object', 'properties' => (object) []],
@@ -1552,6 +1633,17 @@ class AgentToolkit
             ),
             'memory_read' => $this->memoryRead($arguments),
             'memory_write' => $this->memoryWrite($arguments),
+            'skill_list' => $this->skillList($arguments),
+            'skill_load' => $this->skillLoad($arguments),
+            'skill_write' => $this->skillWrite($arguments),
+            'browser_fetch' => app(AgentBrowserService::class)->fetch(
+                (string) ($arguments['url'] ?? ''),
+                strtoupper((string) ($arguments['method'] ?? 'GET')),
+                (int) ($arguments['max_chars'] ?? 4000),
+            ),
+            'browser_smoke' => $this->browserSmoke($arguments),
+            'checkpoint_list' => app(AgentCheckpointService::class)->listForRun($this->run),
+            'checkpoint_rollback' => $this->checkpointRollback($arguments),
             'todo_read' => $this->todoRead(),
             'todo_write' => $this->todoWrite($arguments),
             'web_search' => app(AgentWebSearchService::class)->search(
@@ -1665,16 +1757,7 @@ class AgentToolkit
                 (string) ($arguments['branch_name'] ?? ''),
                 (string) ($arguments['sha'] ?? ''),
             ),
-            'write_github_file' => $this->githubTools->writeFile(
-                (string) ($arguments['github_app_uuid'] ?? ''),
-                (string) ($arguments['owner'] ?? ''),
-                (string) ($arguments['repo'] ?? ''),
-                (string) ($arguments['path'] ?? ''),
-                (string) ($arguments['content'] ?? ''),
-                (string) ($arguments['message'] ?? ''),
-                isset($arguments['sha']) ? (string) $arguments['sha'] : null,
-                isset($arguments['branch']) ? (string) $arguments['branch'] : null,
-            ),
+            'write_github_file' => $this->writeGithubFileWithCheckpoint($arguments),
             'create_github_pull_request' => $this->githubTools->createPullRequest(
                 (string) ($arguments['github_app_uuid'] ?? ''),
                 (string) ($arguments['owner'] ?? ''),
@@ -1749,11 +1832,7 @@ class AgentToolkit
                 $arguments['body'] ?? null,
                 is_array($arguments['headers'] ?? null) ? $arguments['headers'] : [],
             ),
-            'write_remote_file' => $this->serverExecutor->writeRemoteFile(
-                (string) ($arguments['server_uuid'] ?? ''),
-                (string) ($arguments['path'] ?? ''),
-                $arguments['content'] ?? '',
-            ),
+            'write_remote_file' => $this->writeRemoteFileWithCheckpoint($arguments),
             'search_remote_files' => $this->searchRemoteFiles(
                 (string) ($arguments['server_uuid'] ?? ''),
                 (string) ($arguments['pattern'] ?? ''),
@@ -2915,6 +2994,258 @@ class AgentToolkit
      * @param  array<string, mixed>  $arguments
      * @return array<string, mixed>
      */
+    private function skillList(array $arguments): array
+    {
+        $service = app(AgentSkillService::class);
+        $query = isset($arguments['query']) ? trim((string) $arguments['query']) : null;
+        $limit = max(1, min(100, (int) ($arguments['limit'] ?? 40)));
+        $rows = $service->catalog($this->team, $this->agent, $query, $limit);
+
+        return [
+            'count' => $rows->count(),
+            'skills' => $service->formatToolOutput($rows, includeBody: false),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function skillLoad(array $arguments): array
+    {
+        $service = app(AgentSkillService::class);
+        $slug = trim((string) ($arguments['slug'] ?? ''));
+        if ($slug === '') {
+            return ['error' => 'slug requis'];
+        }
+
+        $skill = $service->findBySlug($this->team, $slug, $this->agent);
+        if ($skill === null) {
+            return ['error' => "skill « {$slug} » introuvable", 'hint' => 'Utilise skill_list pour voir le catalogue.'];
+        }
+
+        return [
+            'slug' => $skill->slug,
+            'name' => $skill->name,
+            'description' => $skill->description,
+            'tags' => $skill->tags ?? [],
+            'body' => $skill->body,
+            'is_builtin' => (bool) $skill->is_builtin,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function skillWrite(array $arguments): array
+    {
+        $service = app(AgentSkillService::class);
+        $tags = is_array($arguments['tags'] ?? null)
+            ? array_map('strval', $arguments['tags'])
+            : null;
+
+        $result = $service->write(
+            team: $this->team,
+            slug: (string) ($arguments['slug'] ?? ''),
+            name: (string) ($arguments['name'] ?? ''),
+            description: (string) ($arguments['description'] ?? ''),
+            body: (string) ($arguments['body'] ?? ''),
+            agent: $this->agent,
+            tags: $tags,
+        );
+
+        if (is_array($result)) {
+            return $result;
+        }
+
+        return [
+            'ok' => true,
+            'slug' => $result->slug,
+            'id' => $result->id,
+            'message' => "Skill « {$result->slug} » enregistré.",
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function browserSmoke(array $arguments): array
+    {
+        $application = $this->resolveApplication(
+            isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
+        );
+        if (is_array($application)) {
+            return $application;
+        }
+
+        return app(AgentBrowserService::class)->smokeApplication(
+            $application,
+            (string) ($arguments['path'] ?? '/'),
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function checkpointRollback(array $arguments): array
+    {
+        $id = trim((string) ($arguments['checkpoint_id'] ?? ''));
+        if ($id === '') {
+            return ['error' => 'checkpoint_id requis'];
+        }
+
+        return app(AgentCheckpointService::class)->rollback(
+            run: $this->run,
+            team: $this->team,
+            checkpointId: $id,
+            catalog: $this->catalog,
+            githubTools: $this->githubTools,
+            serverExecutor: $this->serverExecutor,
+        );
+    }
+
+    /**
+     * @return array{id: string, created_at: string, kind: string, target: array<string, mixed>, content: string|null, existed: bool}|null
+     */
+    private function captureApplicationSourceCheckpoint(Application $application, string $path): ?array
+    {
+        try {
+            $previous = $this->applicationSourceService()->readFile($this->team, $application, $path);
+            $content = is_string($previous['content'] ?? null) ? $previous['content'] : null;
+            $sha = isset($previous['sha']) ? (string) $previous['sha'] : null;
+
+            return app(AgentCheckpointService::class)->capture(
+                $this->run,
+                'application_source',
+                [
+                    'application_uuid' => $application->uuid,
+                    'path' => $path,
+                    'sha' => $sha,
+                ],
+                $content,
+                existed: $content !== null,
+            );
+        } catch (\Throwable) {
+            return app(AgentCheckpointService::class)->capture(
+                $this->run,
+                'application_source',
+                [
+                    'application_uuid' => $application->uuid,
+                    'path' => $path,
+                ],
+                null,
+                existed: false,
+            );
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function writeGithubFileWithCheckpoint(array $arguments): array
+    {
+        $appUuid = (string) ($arguments['github_app_uuid'] ?? '');
+        $owner = (string) ($arguments['owner'] ?? '');
+        $repo = (string) ($arguments['repo'] ?? '');
+        $path = (string) ($arguments['path'] ?? '');
+        $branch = isset($arguments['branch']) ? (string) $arguments['branch'] : null;
+        $previousContent = null;
+        $previousSha = isset($arguments['sha']) ? (string) $arguments['sha'] : null;
+        $existed = false;
+
+        try {
+            $read = $this->githubTools->readFile($appUuid, $owner, $repo, $path, $branch);
+            if (! isset($read['error'])) {
+                $previousContent = is_string($read['content'] ?? null) ? $read['content'] : null;
+                $previousSha = isset($read['sha']) ? (string) $read['sha'] : $previousSha;
+                $existed = true;
+            }
+        } catch (\Throwable) {
+            // nouveau fichier
+        }
+
+        $checkpoint = app(AgentCheckpointService::class)->capture(
+            $this->run,
+            'github_file',
+            [
+                'github_app_uuid' => $appUuid,
+                'owner' => $owner,
+                'repo' => $repo,
+                'path' => $path,
+                'branch' => $branch,
+                'sha' => $previousSha,
+            ],
+            $previousContent,
+            existed: $existed,
+        );
+
+        $result = $this->githubTools->writeFile(
+            $appUuid,
+            $owner,
+            $repo,
+            $path,
+            (string) ($arguments['content'] ?? ''),
+            (string) ($arguments['message'] ?? ''),
+            $previousSha,
+            $branch,
+        );
+        $result['checkpoint_id'] = $checkpoint['id'];
+
+        return $result;
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function writeRemoteFileWithCheckpoint(array $arguments): array
+    {
+        $serverUuid = (string) ($arguments['server_uuid'] ?? '');
+        $path = (string) ($arguments['path'] ?? '');
+        $previousContent = null;
+        $existed = false;
+
+        try {
+            $read = $this->serverExecutor->readRemoteFile($serverUuid, $path);
+            if (($read['success'] ?? false) && is_string($read['output'] ?? null)) {
+                $previousContent = $read['output'];
+                $existed = true;
+            }
+        } catch (\Throwable) {
+            // nouveau fichier
+        }
+
+        $checkpoint = app(AgentCheckpointService::class)->capture(
+            $this->run,
+            'remote_file',
+            [
+                'server_uuid' => $serverUuid,
+                'path' => $path,
+            ],
+            $previousContent,
+            existed: $existed,
+        );
+
+        $result = $this->serverExecutor->writeRemoteFile(
+            $serverUuid,
+            $path,
+            (string) ($arguments['content'] ?? ''),
+        );
+        if (is_array($result)) {
+            $result['checkpoint_id'] = $checkpoint['id'];
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
     private function memoryRead(array $arguments): array
     {
         $service = app(AgentMemoryService::class);
@@ -3484,6 +3815,8 @@ class AgentToolkit
             $options['pr_body'] = $prBody;
         }
 
+        $checkpoint = $this->captureApplicationSourceCheckpoint($application, $path);
+
         try {
             $result = $this->applicationSourceService()->writeFile(
                 $this->team,
@@ -3495,6 +3828,9 @@ class AgentToolkit
                 $options,
             );
             $this->syncMissionPullRequestFromWrite($result);
+            if ($checkpoint !== null) {
+                $result['checkpoint_id'] = $checkpoint['id'];
+            }
 
             return $result;
         } catch (ValidationException $exception) {

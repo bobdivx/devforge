@@ -144,6 +144,26 @@ frontend/src/pages/agents/
 | P5.3 Team report + timeline contributions | fait (`AgentTeamReporter`, panneau Contributions) |
 | P5.4 Sandbox code-exec (Docker) | fait (`AgentCodeSandbox` / `execute_code`, UI Paramètres) |
 | P6 MCP client dans la boucle | fait (`AgentMcpClientRegistry` / `mcp__*`, UI Paramètres) |
+| P7 Skills (Hermes / agentskills) | fait (`AgentSkillService`, `skill_*`, builtins, UI) |
+| P8 Browser smoke / fetch | fait (`AgentBrowserService`, `browser_fetch` / `browser_smoke`) |
+| P9 Checkpoints / rollback | fait (`AgentCheckpointService`, auto-capture writes, `checkpoint_*`) |
+
+## P7 — Skills procéduraux (inspiration Hermes)
+
+- Table `ai_agent_skills` + builtins Coolify (502, publish_directory, permissions, readiness)
+- Progressive disclosure : catalogue dans le prompt, corps via `skill_load`
+- Outils `skill_list` / `skill_load` / `skill_write` + API `ai/skills` + panel agent
+
+## P8 — Browser léger (post-deploy)
+
+- `browser_fetch` : HTTP status + titre + extrait + détection nginx default
+- `browser_smoke` : smoke sur FQDN application
+- Pas de CDP / Playwright (hors scope PaaS) — deploy Hermes service pour automation lourde
+
+## P9 — Checkpoints
+
+- Snapshot avant `write_application_source` / `write_github_file` / `write_remote_file`
+- Stockage `run.metadata.checkpoints` + `checkpoint_list` / `checkpoint_rollback`
 
 ## P3 — Patterns OpenClaw (natifs, sans runtime OpenClaw)
 

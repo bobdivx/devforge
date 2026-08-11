@@ -1,4 +1,4 @@
-import { ChevronRight, Clock, MessageSquare, MessagesSquare } from 'lucide-preact';
+import { ChevronRight, Clock, MessageSquare, MessagesSquare, Trash2 } from 'lucide-preact';
 import type { AgentChatSession } from '../../lib/domain-api';
 
 function formatSessionDate(iso: string | null): string {
@@ -26,9 +26,17 @@ type Props = {
     sessions: AgentChatSession[];
     selectedUuid: string | null;
     onSelect: (uuid: string) => void;
+    onDelete?: (uuid: string) => void;
+    deletingUuid?: string | null;
 };
 
-export function SessionHistoryList({ sessions, selectedUuid, onSelect }: Props) {
+export function SessionHistoryList({
+    sessions,
+    selectedUuid,
+    onSelect,
+    onDelete,
+    deletingUuid = null,
+}: Props) {
     if (sessions.length === 0) {
         return (
             <div class="flex flex-col items-center gap-3 px-6 py-10 text-center">
@@ -49,11 +57,13 @@ export function SessionHistoryList({ sessions, selectedUuid, onSelect }: Props) 
         <ul class="space-y-2 p-2">
             {sessions.map((session) => {
                 const selected = selectedUuid === session.uuid;
+                const canDelete = Boolean(onDelete) && !session.is_legacy;
+                const deleting = deletingUuid === session.uuid;
 
                 return (
-                    <li key={session.uuid}>
+                    <li key={session.uuid} class="relative">
                         <button
-                            class={`group flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition-all ${
+                            class={`group flex w-full items-start gap-3 rounded-xl border px-3 py-3 pe-10 text-left transition-all ${
                                 selected
                                     ? 'border-primary/40 bg-primary/10 shadow-sm ring-1 ring-primary/20'
                                     : 'border-base-300/80 bg-base-100 hover:border-base-content/20 hover:bg-base-200/50'
@@ -84,6 +94,24 @@ export function SessionHistoryList({ sessions, selectedUuid, onSelect }: Props) 
                             </div>
                             <ChevronRight class={`mt-2 size-4 shrink-0 ${selected ? 'text-primary' : 'text-base-content/30'}`} aria-hidden />
                         </button>
+                        {canDelete && (
+                            <button
+                                type="button"
+                                class="btn btn-ghost btn-xs absolute end-2 top-2 size-8 min-h-8 p-0 text-error/80 hover:bg-error/10 hover:text-error"
+                                title="Supprimer la conversation"
+                                aria-label={`Supprimer ${session.title}`}
+                                disabled={deleting}
+                                onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    onDelete?.(session.uuid);
+                                }}
+                            >
+                                {deleting
+                                    ? <span class="loading loading-spinner loading-xs" aria-hidden />
+                                    : <Trash2 class="size-3.5" aria-hidden />}
+                            </button>
+                        )}
                     </li>
                 );
             })}

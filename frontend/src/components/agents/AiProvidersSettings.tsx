@@ -1,5 +1,5 @@
-import { CheckCircle, Pencil, Plus, RefreshCw, Trash2, Wifi, XCircle } from 'lucide-preact';
-import { useEffect, useState } from 'preact/hooks';
+import { CheckCircle, ChevronDown, Pencil, Plus, RefreshCw, Trash2, Wifi, XCircle, Zap } from 'lucide-preact';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import { ActionToolbar } from '../ui/ActionToolbar';
 import { HiddenUsernameField } from '../ui/HiddenUsernameField';
 import type { AiProviderConfig, LlmModelOption, LlmProvider } from '../../lib/domain-api';
@@ -7,6 +7,16 @@ import { domainApi } from '../../lib/domain-api';
 import { AUTO_MODEL_VALUE, CUSTOM_MODEL_VALUE, formatModelLabel, isAutoModel, modelSelectValue } from '../../lib/llm-models';
 import { useApiQuery } from '../../lib/use-api-query';
 import { useTeamContext } from '../../lib/team-context';
+
+const PROVIDER_ORDER: LlmProvider[] = ['gemini', 'openai', 'anthropic', 'openrouter', 'ollama'];
+
+const providerLabels: Record<LlmProvider, string> = {
+    gemini: 'Gemini',
+    openai: 'OpenAI',
+    anthropic: 'Anthropic',
+    openrouter: 'OpenRouter',
+    ollama: 'Ollama',
+};
 
 const providerDefaults: Record<LlmProvider, { needsKey: boolean; needsUrl: boolean; defaultUrl: string }> = {
     gemini: {
@@ -96,10 +106,28 @@ export function AiProvidersSettings() {
     } | null>>({});
     const [testing, setTesting] = useState<Record<number, boolean>>({});
     const [deleting, setDeleting] = useState<Record<number, boolean>>({});
+    const [expanded, setExpanded] = useState<LlmProvider | null>('gemini');
+    const [didAutoExpand, setDidAutoExpand] = useState(false);
 
     const providers = query.data?.data ?? [];
     const editingProvider = editingId ? providers.find((provider) => provider.id === editingId) ?? null : null;
     const isEditing = editingId !== null;
+    const configuredCount = providers.length;
+    const typesWithKeys = useMemo(
+        () => new Set(providers.map((provider) => provider.provider)),
+        [providers],
+    );
+
+    useEffect(() => {
+        if (didAutoExpand || providers.length === 0) {
+            return;
+        }
+        const firstConfigured = PROVIDER_ORDER.find((type) => typesWithKeys.has(type));
+        if (firstConfigured) {
+            setExpanded(firstConfigured);
+            setDidAutoExpand(true);
+        }
+    }, [typesWithKeys, providers.length, didAutoExpand]);
 
     const closeForm = () => {
         setShowForm(false);
@@ -258,9 +286,9 @@ export function AiProvidersSettings() {
         <div class="grid gap-4">
             <div class="toolbar-row">
                 <div>
-                    <h3 class="text-sm font-semibold">Providers LLM</h3>
+                    <h3 class="text-sm font-semibold">LLM providers</h3>
                     <p class="text-xs text-base-content/60">
-                        Gemini, Ollama, etc. Plusieurs Ollama possibles (ex. PC 3090 + NAS A2000) = un provider par URL.
+                        {configuredCount} sur {PROVIDER_ORDER.length} types configurés. Plusieurs entrées possibles par type (ex. 2 Ollama).
                     </p>
                 </div>
                 <div class="card-toolbar w-full sm:w-auto">
@@ -271,100 +299,152 @@ export function AiProvidersSettings() {
                 </div>
             </div>
 
-            {providers.length === 0 && ! showForm && (
-                <div class="rounded-xl border border-dashed border-base-300 py-10 text-center">
-                    <p class="text-xs text-base-content/50">Aucun provider configuré.</p>
-                </div>
-            )}
+            <ul class="overflow-hidden rounded-xl border border-base-300 bg-base-100">
+                {PROVIDER_ORDER.map((type) => {
+                    const rows = providers.filter((provider) => provider.provider === type);
+                    const isOpen = expanded === type;
+                    const keysSet = rows.filter((row) => row.has_api_key || type === 'ollama').length;
 
-            {providers.length > 0 && (
-                <ul class="divide-y divide-base-300 rounded-xl border border-base-300 bg-base-100">
-                    {providers.map((provider) => (
-                        <li key={provider.id} class="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:gap-3">
-                            <div class="min-w-0 flex-1">
-                                <div class="flex items-center gap-2">
-                                    <p class="text-sm font-medium">{provider.name}</p>
-                                    {provider.is_default && (
-                                        <span class="badge badge-xs border-primary/30 bg-primary/10 text-primary">Défaut</span>
-                                    )}
-                                </div>
-                                <p class="text-[11px] text-base-content/50">
-                                    {provider.provider} · {formatModelLabel(provider.model, provider.model_label)}
-                                    {provider.base_url && ` · ${provider.base_url}`}
-                                    {provider.has_api_key && ' · Clé API configurée'}
-                                </p>
-                                {testResults[provider.id] && (
-                                    <div class={`mt-1 space-y-1 text-[11px] ${testResults[provider.id]!.success ? 'text-success' : 'text-error'}`}>
-                                        <div class="flex items-center gap-1">
-                                            {testResults[provider.id]!.success
-                                                ? <CheckCircle class="size-3" aria-hidden />
-                                                : <XCircle class="size-3" aria-hidden />}
-                                            <span>{testResults[provider.id]!.message}</span>
+                    return (
+                        <li key={type} class="border-b border-base-300 last:border-b-0">
+                            <button
+                                type="button"
+                                class="flex w-full items-center gap-3 px-4 py-3 text-start hover:bg-base-200/40"
+                                aria-expanded={isOpen}
+                                onClick={() => setExpanded(isOpen ? null : type)}
+                            >
+                                <Zap class="size-4 shrink-0 text-base-content/45" aria-hidden />
+                                <span class="min-w-0 flex-1">
+                                    <span class="block text-sm font-medium">{providerLabels[type]}</span>
+                                    <span class="block text-[11px] text-base-content/50">
+                                        {rows.length === 0
+                                            ? 'Aucune configuration'
+                                            : `${rows.length} config · ${keysSet} clé${keysSet > 1 ? 's' : ''}`}
+                                    </span>
+                                </span>
+                                {rows.length > 0 && (
+                                    <span class="badge badge-sm border-info/30 bg-info/10 font-normal text-info">
+                                        {rows.length} set
+                                    </span>
+                                )}
+                                <ChevronDown
+                                    class={`size-4 shrink-0 text-base-content/40 transition ${isOpen ? 'rotate-180' : ''}`}
+                                    aria-hidden
+                                />
+                            </button>
+
+                            {isOpen && (
+                                <div class="space-y-2 border-t border-base-300/70 bg-base-200/20 px-3 py-3 sm:px-4">
+                                    {rows.length === 0 ? (
+                                        <div class="rounded-lg border border-dashed border-base-300 px-3 py-4 text-center">
+                                            <p class="text-xs text-base-content/50">Pas encore configuré.</p>
+                                            <button
+                                                class="btn btn-ghost btn-xs mt-2"
+                                                type="button"
+                                                onClick={() => {
+                                                    setEditingId(null);
+                                                    setForm({
+                                                        ...emptyForm(),
+                                                        provider: type,
+                                                        base_url: providerDefaults[type].defaultUrl
+                                                            || (type === 'ollama' ? 'http://localhost:11434' : ''),
+                                                    });
+                                                    setAvailableModels([]);
+                                                    setModelsError(null);
+                                                    setShowForm(true);
+                                                }}
+                                            >
+                                                Configurer {providerLabels[type]}
+                                            </button>
                                         </div>
-                                        {(testResults[provider.id]!.models_working?.length ?? 0) > 0 && (
-                                            <p class="text-base-content/60">
-                                                OK : {testResults[provider.id]!.models_working!.join(', ')}
-                                            </p>
-                                        )}
-                                        {(testResults[provider.id]!.models_failed?.length ?? 0) > 0 && (
-                                            <p class="text-error/80">
-                                                KO : {testResults[provider.id]!.models_failed!
-                                                    .map((row) => row.id)
-                                                    .join(', ')}
-                                            </p>
-                                        )}
-                                        {(testResults[provider.id]!.recommended?.length ?? 0) > 0 && (
-                                            <p class="text-base-content/60">
-                                                Recommandés : {testResults[provider.id]!.recommended!.slice(0, 4).join(', ')}
-                                            </p>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                            <ActionToolbar class="shrink-0">
-                                <button
-                                    class="btn btn-ghost btn-xs"
-                                    type="button"
-                                    title="Modifier"
-                                    disabled={showForm && editingId === provider.id}
-                                    onClick={() => openEditForm(provider)}
-                                >
-                                    <Pencil class="size-3.5" aria-hidden />
-                                </button>
-                                {! provider.is_default && (
-                                    <button
-                                        class="btn btn-ghost btn-xs text-[11px]"
-                                        type="button"
-                                        onClick={() => void handleSetDefault(provider.id)}
-                                    >
-                                        Par défaut
-                                    </button>
-                                )}
-                                <button
-                                    class="btn btn-ghost btn-xs"
-                                    type="button"
-                                    title="Tester la connexion"
-                                    disabled={testing[provider.id]}
-                                    onClick={() => void handleTest(provider.id)}
-                                >
-                                    {testing[provider.id]
-                                        ? <span class="loading loading-spinner loading-xs" />
-                                        : <Wifi class="size-3.5" aria-hidden />}
-                                </button>
-                                <button
-                                    class="btn btn-ghost btn-xs text-error"
-                                    type="button"
-                                    title="Supprimer"
-                                    disabled={deleting[provider.id]}
-                                    onClick={() => void handleDelete(provider.id)}
-                                >
-                                    <Trash2 class="size-3.5" aria-hidden />
-                                </button>
-                            </ActionToolbar>
+                                    ) : rows.map((provider) => (
+                                        <div
+                                            key={provider.id}
+                                            class="rounded-xl border border-base-300 bg-base-100 px-3 py-3"
+                                        >
+                                            <div class="flex flex-col gap-3 sm:flex-row sm:items-start">
+                                                <div class="min-w-0 flex-1">
+                                                    <div class="flex flex-wrap items-center gap-2">
+                                                        <p class="text-sm font-medium">{provider.name}</p>
+                                                        {provider.is_default && (
+                                                            <span class="badge badge-xs border-primary/30 bg-primary/10 text-primary">Défaut</span>
+                                                        )}
+                                                        {provider.has_api_key && (
+                                                            <span class="inline-flex items-center gap-1 text-[11px] text-success">
+                                                                <CheckCircle class="size-3" aria-hidden />
+                                                                Clé définie
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p class="mt-1 text-[11px] text-base-content/55">
+                                                        Modèle : {formatModelLabel(provider.model, provider.model_label)}
+                                                        {provider.base_url ? ` · ${provider.base_url}` : ''}
+                                                    </p>
+                                                    {provider.has_api_key && (
+                                                        <p class="mt-1 font-mono text-[11px] text-base-content/45">
+                                                            API_KEY · •••••• (masquée)
+                                                        </p>
+                                                    )}
+                                                    {testResults[provider.id] && (
+                                                        <div class={`mt-2 space-y-1 text-[11px] ${testResults[provider.id]!.success ? 'text-success' : 'text-error'}`}>
+                                                            <div class="flex items-center gap-1">
+                                                                {testResults[provider.id]!.success
+                                                                    ? <CheckCircle class="size-3" aria-hidden />
+                                                                    : <XCircle class="size-3" aria-hidden />}
+                                                                <span>{testResults[provider.id]!.message}</span>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <ActionToolbar class="shrink-0">
+                                                    <button
+                                                        class="btn btn-ghost btn-xs"
+                                                        type="button"
+                                                        title="Modifier"
+                                                        disabled={showForm && editingId === provider.id}
+                                                        onClick={() => openEditForm(provider)}
+                                                    >
+                                                        <Pencil class="size-3.5" aria-hidden />
+                                                    </button>
+                                                    {!provider.is_default && (
+                                                        <button
+                                                            class="btn btn-ghost btn-xs text-[11px]"
+                                                            type="button"
+                                                            onClick={() => void handleSetDefault(provider.id)}
+                                                        >
+                                                            Par défaut
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        class="btn btn-ghost btn-xs"
+                                                        type="button"
+                                                        title="Tester la connexion"
+                                                        disabled={testing[provider.id]}
+                                                        onClick={() => void handleTest(provider.id)}
+                                                    >
+                                                        {testing[provider.id]
+                                                            ? <span class="loading loading-spinner loading-xs" />
+                                                            : <Wifi class="size-3.5" aria-hidden />}
+                                                    </button>
+                                                    <button
+                                                        class="btn btn-ghost btn-xs text-error"
+                                                        type="button"
+                                                        title="Supprimer"
+                                                        disabled={deleting[provider.id]}
+                                                        onClick={() => void handleDelete(provider.id)}
+                                                    >
+                                                        <Trash2 class="size-3.5" aria-hidden />
+                                                    </button>
+                                                </ActionToolbar>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </li>
-                    ))}
-                </ul>
-            )}
+                    );
+                })}
+            </ul>
 
             {showForm && (
                 <form class="rounded-xl border border-primary/30 bg-base-100 p-4" onSubmit={handleSubmit}>

@@ -129,4 +129,69 @@ describe('DeploymentAgentCard', () => {
         expect(screen.getByText('Intervention agent en cours…')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Logs' })).toBeInTheDocument();
     });
+
+    it('affiche un message de redéploiement long sans élargir le conteneur', async () => {
+        const longCommitMessage = 'fix(deploy): forcer Node 24 pour Astro 7 sur Nixpacks/DevForgeCoolify-astro-site';
+
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+            const url = String(input);
+
+            if (url.includes('/sanctum/csrf-cookie')) {
+                return new Response(null, { status: 204 });
+            }
+
+            if (url.includes('/deployments/dep-2/monitoring')) {
+                return jsonResponse({
+                    data: {
+                        deployment: {
+                            uuid: 'dep-2',
+                            status: 'failed',
+                            commit: 'def5678',
+                            commit_message: 'build failed',
+                            created_at: '2026-07-30T21:11:00.000Z',
+                            finished_at: '2026-07-30T21:12:00.000Z',
+                        },
+                        agent_runs: [],
+                        redeployments: [{
+                            uuid: 'dep-redeploy',
+                            status: 'in_progress',
+                            commit: 'abc1234',
+                            commit_message: longCommitMessage,
+                            created_at: '2026-07-30T21:13:00.000Z',
+                            finished_at: null,
+                        }],
+                        agents: {
+                            enabled: true,
+                            auto_fix_deployments: true,
+                            monitor_build: true,
+                            webhook_build: true,
+                        },
+                        diagnostics: {
+                            blockers: [],
+                            eligible_agents_count: 1,
+                            active_agents_count: 1,
+                            agents_with_provider_count: 1,
+                            agents_busy_count: 0,
+                            team_has_llm_provider: true,
+                        },
+                    },
+                });
+            }
+
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(<DeploymentAgentCard deploymentUuid="dep-2" pollWhileActive={false} />);
+
+        const message = await screen.findByText(longCommitMessage);
+        expect(message.className).toContain('break-words');
+        expect(message.className).toContain('[overflow-wrap:anywhere]');
+
+        const redeployButton = message.closest('button');
+        expect(redeployButton).not.toBeNull();
+        expect(redeployButton?.className).toContain('min-w-0');
+        expect(redeployButton?.className).toContain('max-w-full');
+        expect(redeployButton?.className).toContain('overflow-hidden');
+        expect(screen.getByText('Redéploiements')).toBeInTheDocument();
+    });
 });

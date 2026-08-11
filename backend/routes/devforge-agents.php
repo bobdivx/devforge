@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\DevForge\AgentSkillController;
 use App\Http\Controllers\DevForge\AgentStandingOrderController;
 use App\Http\Controllers\DevForge\AgentController;
 use App\Http\Controllers\DevForge\AgentInstructionsController;
@@ -56,6 +57,10 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->where('sessionUuid', '[A-Za-z0-9-]{8,64}')
             ->name('sessions.update');
+        Route::delete('/{uuid}/sessions/{sessionUuid}', [AgentSessionController::class, 'destroy'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->where('sessionUuid', '[A-Za-z0-9-]{8,64}')
+            ->name('sessions.destroy');
         Route::post('/{uuid}/sessions/{sessionUuid}/activate', [AgentSessionController::class, 'activate'])
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->where('sessionUuid', '[A-Za-z0-9-]{8,64}')
@@ -100,6 +105,11 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->where('runUuid', '[A-Za-z0-9-]{8,64}')
             ->name('runs.approval');
+        Route::post('/{uuid}/runs/{runUuid}/cancel', [AgentRunController::class, 'cancel'])
+            ->middleware('throttle:devforge-agent-run')
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->where('runUuid', '[A-Za-z0-9-]{8,64}')
+            ->name('runs.cancel');
     });
 
     Route::prefix('ai')->name('ai.')->group(function () {
@@ -149,5 +159,13 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
         Route::delete('/standing-orders/{id}', [AgentStandingOrderController::class, 'destroy'])
             ->whereNumber('id')
             ->name('standing-orders.destroy');
+        Route::get('/skills', [AgentSkillController::class, 'index'])->name('skills.index');
+        Route::post('/skills', [AgentSkillController::class, 'store'])->name('skills.store');
+        Route::put('/skills/{id}', [AgentSkillController::class, 'update'])
+            ->whereNumber('id')
+            ->name('skills.update');
+        Route::delete('/skills/{id}', [AgentSkillController::class, 'destroy'])
+            ->whereNumber('id')
+            ->name('skills.destroy');
     });
 });

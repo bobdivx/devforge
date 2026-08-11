@@ -123,6 +123,55 @@ it('rejects updates on automatically managed variables', function () {
         ->assertJsonPath('message', 'Cette variable est gérée automatiquement et ne peut pas être modifiée.');
 });
 
+it('allows deleting buildpack control variables while keeping them non-editable', function () {
+    $variable = $this->application->environment_variables()
+        ->where('key', 'NIXPACKS_NODE_VERSION')
+        ->where('is_preview', false)
+        ->firstOrFail();
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson("/api/devforge/v1/applications/{$this->application->uuid}/environment-variables")
+        ->assertSuccessful()
+        ->assertJsonPath('data.production.0.key', 'NIXPACKS_NODE_VERSION')
+        ->assertJsonPath('data.production.0.is_buildpack_control', true)
+        ->assertJsonPath('data.production.0.is_editable', false)
+        ->assertJsonPath('data.production.0.is_deletable', true);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson("/api/devforge/v1/applications/{$this->application->uuid}/environment-variables/{$variable->uuid}", [
+            'value' => '20',
+        ])
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'Cette variable est gérée automatiquement et ne peut pas être modifiée.');
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->deleteJson("/api/devforge/v1/applications/{$this->application->uuid}/environment-variables/{$variable->uuid}")
+        ->assertSuccessful()
+        ->assertJsonPath('message', 'Variable d’environnement supprimée.');
+
+    expect(EnvironmentVariable::query()->where('uuid', $variable->uuid)->exists())->toBeFalse();
+});
+
+it('rejects deleting database-linked automatically managed variables', function () {
+    $variable = $this->application->environment_variables()->create([
+        'key' => 'DATABASE_URL',
+        'value' => 'postgres://example',
+        'comment' => 'devforge:database:'.fake()->uuid(),
+        'is_preview' => false,
+        'is_runtime' => true,
+        'is_buildtime' => true,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->deleteJson("/api/devforge/v1/applications/{$this->application->uuid}/environment-variables/{$variable->uuid}")
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'Cette variable est gérée automatiquement et ne peut pas être supprimée.');
+});
+
 it('reveals a stored application environment variable value on demand', function () {
     $variable = $this->application->environment_variables()->create([
         'key' => 'API_TOKEN',

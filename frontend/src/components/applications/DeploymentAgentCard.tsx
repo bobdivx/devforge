@@ -165,20 +165,20 @@ export function DeploymentAgentCard({
                             ))}
 
                             {monitoring.redeployments.length > 0 && (
-                                <div class="rounded-xl border border-primary/20 bg-primary/5 p-3 sm:p-4">
+                                <div class="min-w-0 overflow-hidden rounded-xl border border-primary/20 bg-primary/5 p-3 sm:p-4">
                                     <p class="mb-2 text-sm font-semibold text-primary sm:mb-3">Redéploiements</p>
-                                    <ul class="grid gap-2">
+                                    <ul class="grid min-w-0 gap-2">
                                         {monitoring.redeployments.map((deployment) => (
-                                            <li key={deployment.uuid}>
+                                            <li class="min-w-0" key={deployment.uuid}>
                                                 <button
-                                                    class="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-base-300/70 bg-base-100 px-3 py-2.5 text-left text-sm transition hover:border-primary/40"
+                                                    class="flex w-full min-w-0 max-w-full items-start justify-between gap-2 overflow-hidden rounded-lg border border-base-300/70 bg-base-100 px-3 py-2.5 text-left text-sm transition hover:border-primary/40"
                                                     type="button"
                                                     onClick={() => onSelectDeployment?.(deployment.uuid)}
                                                 >
-                                                    <span class="min-w-0 truncate">
+                                                    <span class="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">
                                                         {deployment.commit_message ?? 'Nouveau déploiement'}
                                                     </span>
-                                                    <span class="flex shrink-0 items-center gap-2">
+                                                    <span class="flex shrink-0 items-center gap-2 pt-0.5">
                                                         <DeploymentStatusIcon status={deployment.status} />
                                                         <ArrowRight class="size-3.5 text-base-content/35" aria-hidden />
                                                     </span>

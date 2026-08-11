@@ -406,6 +406,8 @@ export function ApplicationEnvironmentVariablesPanel({
                 >
                     {filtered.map((variable) => {
                         const flags = variableFlags(variable);
+                        const canDelete = variable.is_deletable ?? variable.is_editable;
+                        const canManage = variable.is_editable || canDelete;
 
                         return (
                             <tr key={variable.uuid}>
@@ -429,26 +431,33 @@ export function ApplicationEnvironmentVariablesPanel({
                                 </td>
                                 {canAct && (
                                     <td class="w-0 whitespace-nowrap text-end">
-                                        {variable.is_editable ? (
+                                        {canManage ? (
                                             <ActionToolbar>
-                                                <button
-                                                    class="btn btn-ghost btn-xs btn-square"
-                                                    type="button"
-                                                    aria-label={`Modifier ${variable.key}`}
-                                                    title="Modifier"
-                                                    onClick={() => openEdit(variable)}
-                                                >
-                                                    <Pencil class="size-3.5" aria-hidden />
-                                                </button>
-                                                <button
-                                                    class="btn btn-ghost btn-xs btn-square text-error"
-                                                    type="button"
-                                                    aria-label={`Supprimer ${variable.key}`}
-                                                    title="Supprimer"
-                                                    onClick={() => setPendingDelete(variable)}
-                                                >
-                                                    <Trash2 class="size-3.5" aria-hidden />
-                                                </button>
+                                                {variable.is_editable && (
+                                                    <button
+                                                        class="btn btn-ghost btn-xs btn-square"
+                                                        type="button"
+                                                        aria-label={`Modifier ${variable.key}`}
+                                                        title="Modifier"
+                                                        onClick={() => openEdit(variable)}
+                                                    >
+                                                        <Pencil class="size-3.5" aria-hidden />
+                                                    </button>
+                                                )}
+                                                {canDelete && (
+                                                    <button
+                                                        class="btn btn-ghost btn-xs btn-square text-error"
+                                                        type="button"
+                                                        aria-label={`Supprimer ${variable.key}`}
+                                                        title="Supprimer"
+                                                        onClick={() => setPendingDelete(variable)}
+                                                    >
+                                                        <Trash2 class="size-3.5" aria-hidden />
+                                                    </button>
+                                                )}
+                                                {!variable.is_editable && canDelete && (
+                                                    <span class="text-xs text-base-content/40">Auto</span>
+                                                )}
                                             </ActionToolbar>
                                         ) : (
                                             <span class="text-xs text-base-content/40">Auto</span>

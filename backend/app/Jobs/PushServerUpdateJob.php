@@ -13,15 +13,7 @@ use App\Models\ApplicationPreview;
 use App\Models\Server;
 use App\Models\ServiceApplication;
 use App\Models\ServiceDatabase;
-use App\Models\StandaloneClickhouse;
 use App\Models\StandaloneDocker;
-use App\Models\StandaloneDragonfly;
-use App\Models\StandaloneKeydb;
-use App\Models\StandaloneMariadb;
-use App\Models\StandaloneMongodb;
-use App\Models\StandaloneMysql;
-use App\Models\StandalonePostgresql;
-use App\Models\StandaloneRedis;
 use App\Models\SwarmDocker;
 use App\Notifications\Container\ContainerRestarted;
 use App\Services\ContainerStatusAggregator;
@@ -434,21 +426,14 @@ class PushServerUpdateJob implements ShouldBeEncrypted, ShouldQueue, Silenced
             'last_restart_type',
         ];
 
-        return collect([
-            StandalonePostgresql::class,
-            StandaloneRedis::class,
-            StandaloneMongodb::class,
-            StandaloneMysql::class,
-            StandaloneMariadb::class,
-            StandaloneKeydb::class,
-            StandaloneDragonfly::class,
-            StandaloneClickhouse::class,
-        ])->flatMap(function (string $databaseClass) use ($databaseColumns, $standaloneDockerIds, $swarmDockerIds) {
-            return $databaseClass::query()
-                ->select($databaseColumns)
-                ->where(fn ($query) => $this->scopeDestination($query, $standaloneDockerIds, $swarmDockerIds))
-                ->get();
-        })->filter(fn ($database) => data_get($database, 'name') !== 'coolify-db')->values();
+        return collect(STANDALONE_DATABASE_MODELS)
+            ->values()
+            ->flatMap(function (string $databaseClass) use ($databaseColumns, $standaloneDockerIds, $swarmDockerIds) {
+                return $databaseClass::query()
+                    ->select($databaseColumns)
+                    ->where(fn ($query) => $this->scopeDestination($query, $standaloneDockerIds, $swarmDockerIds))
+                    ->get();
+            })->filter(fn ($database) => data_get($database, 'name') !== 'coolify-db')->values();
     }
 
     private function serverDestinationIds(): array

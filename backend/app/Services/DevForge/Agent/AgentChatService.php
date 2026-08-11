@@ -148,6 +148,26 @@ class AgentChatService
 
             $reply = $this->generateReply($agent, $run, $userMessage);
 
+            $run->refresh();
+            if ($run->status === AgentRunCancellation::STATUS || ! empty($reply['cancelled'])) {
+                $assistantMessage = AiAgentMessage::create([
+                    'agent_id' => $agent->id,
+                    'session_id' => $userMessage->session_id,
+                    'run_id' => $run->id,
+                    'role' => 'assistant',
+                    'content' => (string) ($reply['text'] ?? 'Run annulé.'),
+                    'metadata' => [
+                        'tokens_used' => $reply['tokens_used'] ?? 0,
+                        'iterations' => $reply['iterations'] ?? 0,
+                        'steps' => $reply['steps'] ?? [],
+                        'cancelled' => true,
+                    ],
+                ]);
+                $agent->update(['status' => 'idle', 'last_run_at' => now()]);
+
+                return $assistantMessage;
+            }
+
             $metadata = [
 
                 'tokens_used' => $reply['tokens_used'],
@@ -201,6 +221,11 @@ class AgentChatService
                 : (! empty($reply['waiting_for_subagents']) ? 'waiting_for_subagents' : 'completed');
 
             $run->refresh();
+            if ($run->status === AgentRunCancellation::STATUS) {
+                $agent->update(['status' => 'idle', 'last_run_at' => now()]);
+
+                return $assistantMessage;
+            }
             if ($run->status === 'waiting_for_subagents' && ! empty($reply['waiting_for_subagents'])) {
                 // yield_wait a déjà posé le statut — ne pas écraser en completed
                 $run->update([
@@ -233,6 +258,13 @@ class AgentChatService
             return $assistantMessage;
 
         } catch (\Throwable $exception) {
+
+            $run->refresh();
+            if ($run->status === AgentRunCancellation::STATUS) {
+                $agent->update(['status' => 'idle', 'last_run_at' => now()]);
+
+                throw $exception;
+            }
 
             $run->appendLog('Erreur: '.$exception->getMessage());
 
@@ -552,6 +584,18 @@ class AgentChatService
 
         while ($budget->consume()) {
 
+            if (app(AgentRunCancellation::class)->wasRequested($run)) {
+                $run->appendLog('Arrêt chat : annulation demandée.');
+
+                return [
+                    'text' => 'Run annulé.',
+                    'tokens_used' => $tokensUsed,
+                    'iterations' => $budget->getUsed(),
+                    'steps' => $steps,
+                    'cancelled' => true,
+                ];
+            }
+
             $iterations = $budget->getUsed();
 
             $run->appendLog("Itération chat #{$iterations}...");
@@ -564,6 +608,15 @@ class AgentChatService
             if ($response->text) {
 
                 $summary = $response->text;
+                $run->mergeMetadata([
+                    'live_assistant_text' => mb_substr($summary, 0, 4000),
+                    'steps' => $steps,
+                ]);
+                $run->update([
+                    'summary' => mb_substr($summary, 0, 1000),
+                    'iterations' => $iterations,
+                    'tokens_used' => $tokensUsed,
+                ]);
 
             }
 

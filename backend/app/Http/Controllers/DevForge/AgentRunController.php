@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AiAgent;
 use App\Models\AiAgentRun;
 use App\Models\User;
+use App\Services\DevForge\Agent\AgentRunCancellation;
 use App\Services\DevForge\Agent\AgentRunLauncher;
 use App\Services\DevForge\Core\CurrentTeamContext;
 use Illuminate\Http\JsonResponse;
@@ -16,6 +17,7 @@ class AgentRunController extends Controller
     public function __construct(
         private readonly CurrentTeamContext $currentTeamContext,
         private readonly AgentRunLauncher $runLauncher,
+        private readonly AgentRunCancellation $cancellation,
     ) {}
 
     public function index(Request $request, string $agentUuid): JsonResponse
@@ -53,6 +55,46 @@ class AgentRunController extends Controller
         abort_unless($run, 404, 'Run introuvable.');
 
         return response()->json(['data' => $this->presentRun($run, withLogs: true)]);
+    }
+
+    public function cancel(Request $request, string $agentUuid, string $runUuid): JsonResponse
+    {
+        $agent = $this->findAgent($request, $agentUuid);
+        $this->authorize('chat', $agent);
+
+        $run = AiAgentRun::query()
+            ->where('agent_id', $agent->id)
+            ->where('uuid', $runUuid)
+            ->first();
+
+        abort_unless($run, 404, 'Run introuvable.');
+
+        $validated = $request->validate([
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        if (in_array($run->status, ['completed', 'failed', AgentRunCancellation::STATUS], true)) {
+            return response()->json([
+                'data' => [
+                    'cancelled' => $run->status === AgentRunCancellation::STATUS,
+                    'already_finished' => true,
+                    'run' => $this->presentRun($run),
+                ],
+            ]);
+        }
+
+        $run = $this->cancellation->request(
+            $run,
+            is_string($validated['reason'] ?? null) ? $validated['reason'] : 'Run annulé par l’utilisateur.',
+        );
+
+        return response()->json([
+            'data' => [
+                'cancelled' => true,
+                'already_finished' => false,
+                'run' => $this->presentRun($run),
+            ],
+        ]);
     }
 
     public function resolveApproval(Request $request, string $agentUuid, string $runUuid): JsonResponse
@@ -138,6 +180,7 @@ class AgentRunController extends Controller
     /** @return array<string, mixed> */
     private function presentRun(AiAgentRun $run, bool $withLogs = false): array
     {
+        $metadata = is_array($run->metadata) ? $run->metadata : [];
         $data = [
             'uuid' => $run->uuid,
             'status' => $run->status,
@@ -147,7 +190,11 @@ class AgentRunController extends Controller
             'tokens_used' => $run->tokens_used,
             'iterations' => $run->iterations,
             'duration_seconds' => $run->duration_in_seconds,
-            'metadata' => $run->metadata ?? [],
+            'metadata' => $metadata,
+            'active_subagent_count' => $this->cancellation->activeSubagentCount($run),
+            'live_assistant_text' => is_string($metadata['live_assistant_text'] ?? null)
+                ? $metadata['live_assistant_text']
+                : (is_string($run->summary) ? $run->summary : null),
             'started_at' => $run->started_at?->toISOString(),
             'finished_at' => $run->finished_at?->toISOString(),
             'created_at' => $run->created_at->toISOString(),

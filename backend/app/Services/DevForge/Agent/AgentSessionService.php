@@ -140,6 +140,30 @@ class AgentSessionService
         return $session->user_id === null || $session->user_id === $user->id;
     }
 
+    public function deleteForUser(AiAgent $agent, User $user, string $sessionUuid): void
+    {
+        $session = $this->findForUser($agent, $user, $sessionUuid);
+
+        if ($session->isLegacyShared()) {
+            throw new \InvalidArgumentException('La session historique partagée ne peut pas être supprimée.');
+        }
+
+        if ($session->user_id !== $user->id) {
+            throw new \InvalidArgumentException('Vous ne pouvez pas supprimer cette session.');
+        }
+
+        $sessionId = $session->id;
+        $session->delete();
+
+        if (Schema::hasTable('ai_agent_session_preferences')) {
+            AiAgentSessionPreference::query()
+                ->where('user_id', $user->id)
+                ->where('agent_id', $agent->id)
+                ->where('session_id', $sessionId)
+                ->delete();
+        }
+    }
+
     public function updateTitle(AiAgentSession $session, User $user, string $title): AiAgentSession
     {
         if ($session->user_id !== null && $session->user_id !== $user->id) {

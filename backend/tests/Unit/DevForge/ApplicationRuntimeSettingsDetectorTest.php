@@ -2,7 +2,7 @@
 
 use App\Services\DevForge\Application\ApplicationRuntimeSettingsDetector;
 
-it('detects Astro SSR with node adapter as non-static', function () {
+it('detects Astro SSR with node adapter as non-static with Coolify defaults', function () {
     $detector = app(ApplicationRuntimeSettingsDetector::class);
 
     $result = $detector->inferFromContents([
@@ -17,16 +17,76 @@ it('detects Astro SSR with node adapter as non-static', function () {
             ],
         ], JSON_THROW_ON_ERROR),
         'astro.config.mjs' => "export default { output: 'server', adapter: node() };",
+        'package-lock.json' => '{}',
         '.env.example' => "PORT=4321\n",
     ]);
 
     expect($result['available'])->toBeTrue()
         ->and($result['suggestions']['is_static'])->toBeFalse()
         ->and($result['suggestions']['ports_exposes'])->toBe('4321')
-        ->and($result['suggestions']['publish_directory'])->toBe('/')
+        ->and($result['suggestions']['publish_directory'])->toBe('/dist')
         ->and($result['suggestions']['start_command'])->toBe('node ./dist/server/entry.mjs')
+        ->and($result['suggestions']['build_command'])->toBe('astro build')
+        ->and($result['suggestions']['install_command'])->toBe('npm ci')
+        ->and($result['suggestions']['health_check_enabled'])->toBeTrue()
+        ->and($result['suggestions']['health_check_path'])->toBe('/')
+        ->and($result['suggestions']['health_check_port'])->toBe('4321')
         ->and($result['suggestions']['framework'])->toBe('astro-ssr')
         ->and($result['suggestions']['framework_label'])->toBe('Astro SSR');
+});
+
+it('detects Astro SSR from @astrojs/node alone without readable config', function () {
+    $detector = app(ApplicationRuntimeSettingsDetector::class);
+
+    $result = $detector->inferFromContents([
+        'package.json' => json_encode([
+            'scripts' => ['build' => 'astro build'],
+            'dependencies' => [
+                'astro' => '^5.0.0',
+                '@astrojs/node' => '^9.0.0',
+            ],
+        ], JSON_THROW_ON_ERROR),
+    ]);
+
+    expect($result['suggestions']['is_static'])->toBeFalse()
+        ->and($result['suggestions']['ports_exposes'])->toBe('4321')
+        ->and($result['suggestions']['start_command'])->toBe('node ./dist/server/entry.mjs')
+        ->and($result['suggestions']['publish_directory'])->toBe('/dist')
+        ->and($result['suggestions']['framework'])->toBe('astro-ssr');
+});
+
+it('detects Astro SSR from entry.mjs start script even without adapter dep listed', function () {
+    $detector = app(ApplicationRuntimeSettingsDetector::class);
+
+    $result = $detector->inferFromContents([
+        'package.json' => json_encode([
+            'scripts' => [
+                'build' => 'astro build',
+                'start' => 'node ./dist/server/entry.mjs',
+            ],
+            'dependencies' => ['astro' => '^5.0.0'],
+        ], JSON_THROW_ON_ERROR),
+        'astro.config.mjs' => "import node from '@astrojs/node';\nexport default { output: 'server', adapter: node({ mode: 'standalone' }) };",
+    ]);
+
+    expect($result['suggestions']['is_static'])->toBeFalse()
+        ->and($result['suggestions']['start_command'])->toBe('node ./dist/server/entry.mjs')
+        ->and($result['suggestions']['framework'])->toBe('astro-ssr');
+});
+
+it('detects Astro from astro.config alone as static when no SSR signals', function () {
+    $detector = app(ApplicationRuntimeSettingsDetector::class);
+
+    $result = $detector->inferFromContents([
+        'astro.config.mjs' => "export default { output: 'static' };",
+    ]);
+
+    expect($result['available'])->toBeTrue()
+        ->and($result['suggestions']['is_static'])->toBeTrue()
+        ->and($result['suggestions']['ports_exposes'])->toBe('80')
+        ->and($result['suggestions']['publish_directory'])->toBe('/dist')
+        ->and($result['suggestions']['build_command'])->toBe('astro build')
+        ->and($result['suggestions']['framework'])->toBe('astro-static');
 });
 
 it('detects Astro static output as nginx static site', function () {
@@ -47,6 +107,25 @@ it('detects Astro static output as nginx static site', function () {
         ->and($result['suggestions']['start_command'])->toBeNull()
         ->and($result['suggestions']['framework'])->toBe('astro-static')
         ->and($result['suggestions']['framework_label'])->toBe('Astro static');
+});
+
+it('prefers SSR when output static conflicts with node adapter', function () {
+    $detector = app(ApplicationRuntimeSettingsDetector::class);
+
+    $result = $detector->inferFromContents([
+        'package.json' => json_encode([
+            'scripts' => ['build' => 'astro build'],
+            'dependencies' => [
+                'astro' => '^5.0.0',
+                '@astrojs/node' => '^9.0.0',
+            ],
+        ], JSON_THROW_ON_ERROR),
+        'astro.config.mjs' => "export default { output: 'static' };",
+    ]);
+
+    expect($result['suggestions']['is_static'])->toBeFalse()
+        ->and($result['suggestions']['framework'])->toBe('astro-ssr')
+        ->and($result['suggestions']['ports_exposes'])->toBe('4321');
 });
 
 it('detects Next.js as node runtime', function () {

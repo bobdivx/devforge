@@ -176,6 +176,12 @@ class AgentRunner
             }
 
             while ($budget->consume()) {
+                if (app(AgentRunCancellation::class)->wasRequested($run)) {
+                    $run->appendLog('Arrêt autonome : annulation demandée.');
+                    $summary = 'Run annulé.';
+                    break;
+                }
+
                 $iterations = $budget->getUsed();
                 $run->appendLog("Itération #{$iterations}...");
 
@@ -192,6 +198,10 @@ class AgentRunner
                 if ($response->text) {
                     $run->appendLog("Raisonnement: {$response->text}");
                     $summary = $response->text;
+                    $run->mergeMetadata([
+                        'live_assistant_text' => mb_substr($summary, 0, 4000),
+                    ]);
+                    $run->update(['summary' => mb_substr($summary, 0, 1000)]);
                 }
 
                 if (! $response->hasToolCalls()) {
@@ -439,6 +449,19 @@ class AgentRunner
                 return;
             }
 
+            if ($run->status === AgentRunCancellation::STATUS || app(AgentRunCancellation::class)->wasRequested($run)) {
+                $run->update([
+                    'status' => AgentRunCancellation::STATUS,
+                    'summary' => mb_substr($summary !== '' ? $summary : 'Run annulé.', 0, 1000),
+                    'finished_at' => $run->finished_at ?? now(),
+                ]);
+                $agent->update(['status' => 'idle', 'last_run_at' => now()]);
+                broadcast(new AgentRunUpdated($agent, $run->fresh() ?? $run, 'cancelled'));
+                $this->notifyLeafFinished($agent, $run->fresh() ?? $run, $context);
+
+                return;
+            }
+
             $run->update([
                 'status' => 'completed',
                 'summary' => mb_substr($summary, 0, 1000),
@@ -454,6 +477,14 @@ class AgentRunner
             $this->notifyLeafFinished($agent, $run->fresh() ?? $run, $context);
 
         } catch (\Throwable $e) {
+            $run->refresh();
+            if ($run->status === AgentRunCancellation::STATUS) {
+                $agent->update(['status' => 'idle', 'last_run_at' => now()]);
+                broadcast(new AgentRunUpdated($agent, $run, 'cancelled'));
+
+                return;
+            }
+
             $run->appendLog('Erreur: '.$e->getMessage());
             $run->update([
                 'status' => 'failed',

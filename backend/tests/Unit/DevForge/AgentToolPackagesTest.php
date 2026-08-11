@@ -40,6 +40,13 @@ it('always exposes meta tools for self-provisioning', function () {
         ->and($names)->toContain('list_tool_packages')
         ->and($names)->toContain('memory_read')
         ->and($names)->toContain('memory_write')
+        ->and($names)->toContain('skill_list')
+        ->and($names)->toContain('skill_load')
+        ->and($names)->toContain('skill_write')
+        ->and($names)->toContain('browser_fetch')
+        ->and($names)->toContain('browser_smoke')
+        ->and($names)->toContain('checkpoint_list')
+        ->and($names)->toContain('checkpoint_rollback')
         ->and($names)->toContain('todo_read')
         ->and($names)->toContain('todo_write')
         ->and($names)->toContain('web_search');

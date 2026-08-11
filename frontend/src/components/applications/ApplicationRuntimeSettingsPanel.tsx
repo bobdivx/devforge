@@ -142,6 +142,10 @@ export function ApplicationRuntimeSettingsPanel({
                     start_command: suggestions.start_command ?? current.start_command,
                     build_command: suggestions.build_command ?? current.build_command,
                     install_command: suggestions.install_command ?? current.install_command,
+                    health_check_enabled: typeof suggestions.health_check_enabled === 'boolean'
+                        ? suggestions.health_check_enabled
+                        : current.health_check_enabled,
+                    health_check_path: suggestions.health_check_path ?? current.health_check_path,
                     health_check_port: suggestions.health_check_port ?? current.health_check_port,
                     detected_framework: suggestions.framework ?? current.detected_framework,
                 };

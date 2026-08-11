@@ -43,3 +43,13 @@ test('every STANDALONE_DATABASE_MODELS entry is an Eloquent model with whereUuid
             ->toBeTrue("{$modelClass} is missing team() accessor required by queryDatabaseByUuidWithinTeam()");
     }
 });
+
+test('PushServerUpdateJob and ResourceStatusData iterate STANDALONE_DATABASE_MODELS', function () {
+    $jobSource = file_get_contents(dirname(__DIR__, 2).'/app/Jobs/PushServerUpdateJob.php');
+    $statusSource = file_get_contents(dirname(__DIR__, 2).'/app/Services/DevForge/ResourceStatusData.php');
+
+    expect($jobSource)->toContain('STANDALONE_DATABASE_MODELS');
+    expect($statusSource)->toContain('STANDALONE_DATABASE_MODELS');
+    expect($jobSource)->not->toContain('StandalonePostgresql::class,');
+    expect($statusSource)->not->toContain('StandalonePostgresql::class,');
+});

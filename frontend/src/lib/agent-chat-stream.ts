@@ -5,11 +5,13 @@ import { isTerminalAgentRunStatus } from './agent-run-tracker';
 
 const API_BASE = '/api/devforge/v1';
 
-type StreamStatusPayload = {
+export type StreamStatusPayload = {
     status?: string;
     iterations?: number;
     tokens_used?: number;
     summary?: string | null;
+    live_assistant_text?: string | null;
+    active_subagent_count?: number;
     steps?: AgentChatStep[];
     model_routing?: AgentModelRouting | null;
 };
@@ -64,7 +66,7 @@ export async function waitForChatReply(
     try {
         await waitViaSse(agentUuid, runUuid, sessionUuid, onMessages, onRouting, onProgress);
     } catch {
-        await waitViaPolling(agentUuid, runUuid, sessionUuid, onMessages, onRouting);
+        await waitViaPolling(agentUuid, runUuid, sessionUuid, onMessages, onRouting, onProgress);
     }
 }
 
@@ -153,6 +155,7 @@ async function waitViaPolling(
     sessionUuid: string,
     onMessages: (messages: AgentChatMessage[]) => void,
     onRouting?: (routing: AgentModelRouting) => void,
+    onProgress?: (payload: StreamStatusPayload) => void,
 ): Promise<void> {
     for (let attempt = 0; attempt < 120; attempt += 1) {
         await new Promise((resolve) => window.setTimeout(resolve, 1500));
@@ -161,6 +164,17 @@ async function waitViaPolling(
         if (run.data.metadata?.model_routing) {
             onRouting?.(run.data.metadata.model_routing);
         }
+        onProgress?.({
+            status: run.data.status,
+            iterations: run.data.iterations,
+            tokens_used: run.data.tokens_used,
+            summary: run.data.summary,
+            live_assistant_text: run.data.live_assistant_text ?? run.data.summary,
+            active_subagent_count: run.data.active_subagent_count ?? 0,
+            steps: run.data.metadata?.steps,
+            model_routing: run.data.metadata?.model_routing ?? null,
+        });
+
         if (run.data.status === 'failed') {
             throw new ApiError(502, { message: run.data.summary ?? 'La réponse de l\'agent a échoué.' });
         }

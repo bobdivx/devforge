@@ -175,6 +175,7 @@ class AgentPromptBuilder
 
         $autonomyRules = AgentDirectives::autonomyRules();
         $memoryBlock = $this->memoryPromptBlock($agent, $context);
+        $skillsBlock = $this->skillsPromptBlock($agent, $context);
         $layeredBlock = $this->layeredInstructionsBlock($agent, $context);
         $standingBlock = $this->standingOrdersBlock($agent, $context);
         if (! empty($context['standing_order_hint']) && is_string($context['standing_order_hint'])) {
@@ -193,6 +194,8 @@ class AgentPromptBuilder
         {$layeredBlock}
 
         {$standingBlock}
+
+        {$skillsBlock}
 
         {$memoryBlock}
 
@@ -329,6 +332,7 @@ class AgentPromptBuilder
             : '';
         $applicationBlock = $this->chatApplicationContextBlock($applicationContext);
         $memoryBlock = $this->memoryPromptBlock($agent, $applicationContext);
+        $skillsBlock = $this->skillsPromptBlock($agent, $applicationContext);
         $mode = AgentChatMode::parse($applicationContext['chat_mode'] ?? 'build');
         $modeBlock = AgentChatMode::systemAddon($mode);
         $layeredBlock = $this->layeredInstructionsBlock($agent, $applicationContext);
@@ -342,6 +346,8 @@ class AgentPromptBuilder
         {$applicationBlock}
 
         {$layeredBlock}
+
+        {$skillsBlock}
 
         {$memoryBlock}
 
@@ -410,6 +416,25 @@ class AgentPromptBuilder
         try {
             $service = app(AgentMemoryService::class);
             $rows = $service->listForPrompt($agent->team, $agent, $resourceUuid);
+
+            return $service->formatPromptBlock($rows);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return '';
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $applicationContext
+     */
+    private function skillsPromptBlock(AiAgent $agent, array $applicationContext = []): string
+    {
+        $agent->loadMissing('team');
+
+        try {
+            $service = app(AgentSkillService::class);
+            $rows = $service->listForPrompt($agent->team, $agent);
 
             return $service->formatPromptBlock($rows);
         } catch (\Throwable $e) {

@@ -136,6 +136,40 @@ class AgentSessionController extends Controller
         ]);
     }
 
+    public function destroy(Request $request, string $uuid, string $sessionUuid): JsonResponse
+    {
+        $agent = $this->findAgent($request, $uuid);
+        $this->authorize('chat', $agent);
+
+        if (! Schema::hasTable('ai_agent_sessions')) {
+            abort(503, 'Les sessions nécessitent la migration ai_agent_sessions.');
+        }
+
+        $user = $this->currentUser($request);
+
+        try {
+            $this->sessionService->deleteForUser($agent, $user, $sessionUuid);
+        } catch (\InvalidArgumentException $exception) {
+            $message = $exception->getMessage();
+            abort(str_contains(mb_strtolower($message), 'introuvable') ? 404 : 422, $message);
+        }
+
+        $remaining = $this->sessionService->listForUser($agent, $user);
+        $next = $remaining->first();
+        if ($next instanceof AiAgentSession) {
+            $this->sessionService->rememberActive($agent, $user, $next);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'meta' => [
+                'deleted_session_uuid' => $sessionUuid,
+                'active_session_uuid' => $next?->uuid,
+                'remaining_count' => $remaining->count(),
+            ],
+        ]);
+    }
+
     public function messages(Request $request, string $uuid, string $sessionUuid): JsonResponse
     {
         $agent = $this->findAgent($request, $uuid);

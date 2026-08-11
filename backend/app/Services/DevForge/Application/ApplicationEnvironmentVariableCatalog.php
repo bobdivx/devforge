@@ -141,7 +141,7 @@ class ApplicationEnvironmentVariableCatalog
     public function destroy(Application $application, string $envUuid): void
     {
         $variable = $this->findVariable($application, $envUuid);
-        $this->assertEditable($variable);
+        $this->assertDeletable($variable);
 
         $variable->forceDelete();
     }
@@ -194,12 +194,37 @@ class ApplicationEnvironmentVariableCatalog
         }
     }
 
+    private function assertDeletable(EnvironmentVariable $variable): void
+    {
+        if (! $this->isDeletable($variable)) {
+            throw new HttpException(422, 'Cette variable est gérée automatiquement et ne peut pas être supprimée.');
+        }
+    }
+
     private function isEditable(EnvironmentVariable $variable): bool
     {
         if ($variable->is_coolify || $variable->is_buildpack_control) {
             return false;
         }
 
+        return $this->isUserManaged($variable);
+    }
+
+    /**
+     * Les variables buildpack (NIXPACKS_*, RAILPACK_*) restent non éditables
+     * mais peuvent être supprimées manuellement.
+     */
+    private function isDeletable(EnvironmentVariable $variable): bool
+    {
+        if ($variable->is_coolify) {
+            return false;
+        }
+
+        return $this->isUserManaged($variable);
+    }
+
+    private function isUserManaged(EnvironmentVariable $variable): bool
+    {
         if ($variable->is_shared) {
             return false;
         }
@@ -239,6 +264,7 @@ class ApplicationEnvironmentVariableCatalog
             'is_coolify' => (bool) $variable->is_coolify,
             'is_buildpack_control' => (bool) $variable->is_buildpack_control,
             'is_editable' => $this->isEditable($variable),
+            'is_deletable' => $this->isDeletable($variable),
             'updated_at' => $variable->updated_at?->toIso8601String(),
         ];
     }

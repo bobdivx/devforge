@@ -8,7 +8,15 @@ import {
 } from '../../lib/application-agent-chat';
 import { agentDetailPath } from '../../lib/agent-routes';
 import { ApiError } from '../../lib/api-client';
-import { domainApi, type Agent, type AgentChatMessage, type AgentChatSession, type CoreResource } from '../../lib/domain-api';
+import {
+    domainApi,
+    type Agent,
+    type AgentChatAttachment,
+    type AgentChatMessage,
+    type AgentChatSession,
+    type AgentChatStep,
+    type CoreResource,
+} from '../../lib/domain-api';
 
 type Props = {
     application: CoreResource;
@@ -20,12 +28,27 @@ export function ApplicationAgentChatCard({ application }: Props) {
     const [messages, setMessages] = useState<AgentChatMessage[]>([]);
     const [loading, setLoading] = useState(true);
     const [sending, setSending] = useState(false);
+    const [stopping, setStopping] = useState(false);
+    const [activeRunUuid, setActiveRunUuid] = useState<string | null>(null);
+    const [activeSubagentCount, setActiveSubagentCount] = useState(0);
+    const [liveSteps, setLiveSteps] = useState<AgentChatStep[]>([]);
+    const [liveAssistantText, setLiveAssistantText] = useState<string | null>(null);
     const [approvingMessageUuid, setApprovingMessageUuid] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [draft, setDraft] = useState('');
+    const [chatMode, setChatMode] = useState<'plan' | 'build' | 'debug'>('build');
+    const [attachments, setAttachments] = useState<AgentChatAttachment[]>([]);
     const [setupMessage, setSetupMessage] = useState<string | null>(null);
 
     const sessionTitle = applicationAgentSessionTitle(application.name);
+
+    const resetLiveProgress = () => {
+        setActiveRunUuid(null);
+        setActiveSubagentCount(0);
+        setLiveSteps([]);
+        setLiveAssistantText(null);
+        setStopping(false);
+    };
 
     useEffect(() => {
         let cancelled = false;
@@ -107,6 +130,7 @@ export function ApplicationAgentChatCard({ application }: Props) {
                 }
 
                 setSession(active);
+                setChatMode(active.chat_mode ?? 'build');
                 const history = await domainApi.agentSessionMessages(selected.uuid, active.uuid);
                 if (!cancelled) {
                     setMessages(history.data);
@@ -164,14 +188,14 @@ export function ApplicationAgentChatCard({ application }: Props) {
         }
 
         const trimmed = content.trim();
-        if (!trimmed) {
+        if (!trimmed && attachments.length === 0) {
             return;
         }
 
         const optimisticUser: AgentChatMessage = {
             uuid: `local-${Date.now()}`,
             role: 'user',
-            content: trimmed,
+            content: trimmed || '(captures jointes)',
             metadata: null,
             run_uuid: null,
             session_uuid: session.uuid,
@@ -181,33 +205,70 @@ export function ApplicationAgentChatCard({ application }: Props) {
         setSending(true);
         setError(null);
         setDraft('');
+        resetLiveProgress();
+        const pendingAttachments = attachments;
+        setAttachments([]);
         setMessages((current) => [...current, optimisticUser]);
 
         try {
             const response = await domainApi.sendAgentSessionMessage(
                 agent.uuid,
                 session.uuid,
-                trimmed,
-                { application_uuid: application.uuid },
+                trimmed || 'Voir les captures jointes.',
+                {
+                    application_uuid: application.uuid,
+                    chat_mode: chatMode,
+                    ...(pendingAttachments.length > 0 ? { attachments: pendingAttachments } : {}),
+                },
             );
 
             setMessages((current) => [
                 ...current.filter((message) => message.uuid !== optimisticUser.uuid),
                 response.data.user,
             ]);
+            setSession((current) => current ? { ...current, chat_mode: chatMode } : current);
+            setActiveRunUuid(response.data.run_uuid);
 
             await waitForChatReply(
                 agent.uuid,
                 response.data.run_uuid,
                 session.uuid,
                 (nextMessages) => setMessages(nextMessages),
+                undefined,
+                (progress) => {
+                    setActiveSubagentCount(progress.active_subagent_count ?? 0);
+                    if (Array.isArray(progress.steps)) {
+                        setLiveSteps(progress.steps);
+                    }
+                    if (typeof progress.live_assistant_text === 'string' && progress.live_assistant_text.trim() !== '') {
+                        setLiveAssistantText(progress.live_assistant_text);
+                    } else if (typeof progress.summary === 'string' && progress.summary.trim() !== '') {
+                        setLiveAssistantText(progress.summary);
+                    }
+                },
             );
         } catch (err) {
             setMessages((current) => current.filter((message) => message.uuid !== optimisticUser.uuid));
             setError(err instanceof ApiError ? err.message : 'Échec de l\'envoi du message.');
             setDraft(trimmed);
+            setAttachments(pendingAttachments);
         } finally {
             setSending(false);
+            resetLiveProgress();
+        }
+    };
+
+    const stopRun = async () => {
+        if (!agent || !activeRunUuid || stopping) {
+            return;
+        }
+        setStopping(true);
+        setError(null);
+        try {
+            await domainApi.cancelAgentRun(agent.uuid, activeRunUuid, 'Arrêt demandé depuis le chat application.');
+        } catch (err) {
+            setError(err instanceof ApiError ? err.message : 'Impossible d\'arrêter le run.');
+            setStopping(false);
         }
     };
 
@@ -219,6 +280,7 @@ export function ApplicationAgentChatCard({ application }: Props) {
         setApprovingMessageUuid(messageUuid);
         setSending(true);
         setError(null);
+        resetLiveProgress();
 
         try {
             const response = await domainApi.resolveAgentToolApproval(agent.uuid, messageUuid, decision);
@@ -248,17 +310,29 @@ export function ApplicationAgentChatCard({ application }: Props) {
                 response.data.user,
             ]);
 
+            setActiveRunUuid(response.data.run_uuid);
             await waitForChatReply(
                 agent.uuid,
                 response.data.run_uuid,
                 session.uuid,
                 (nextMessages) => setMessages(nextMessages),
+                undefined,
+                (progress) => {
+                    setActiveSubagentCount(progress.active_subagent_count ?? 0);
+                    if (Array.isArray(progress.steps)) {
+                        setLiveSteps(progress.steps);
+                    }
+                    if (typeof progress.live_assistant_text === 'string' && progress.live_assistant_text.trim() !== '') {
+                        setLiveAssistantText(progress.live_assistant_text);
+                    }
+                },
             );
         } catch (err) {
             setError(err instanceof ApiError ? err.message : 'Impossible d\'enregistrer la décision.');
         } finally {
             setApprovingMessageUuid(null);
             setSending(false);
+            resetLiveProgress();
         }
     };
 
@@ -287,7 +361,7 @@ export function ApplicationAgentChatCard({ application }: Props) {
                 )}
             </div>
 
-            <div class="flex h-[min(22rem,60dvh)] min-h-[16rem] flex-col sm:h-[26rem]">
+            <div class="flex h-[min(28rem,70dvh)] min-h-[18rem] flex-col sm:h-[30rem]">
                 {loading && (
                     <div class="flex flex-1 items-center justify-center gap-2 text-xs text-base-content/50">
                         <span class="loading loading-spinner loading-sm" />
@@ -315,8 +389,22 @@ export function ApplicationAgentChatCard({ application }: Props) {
                         draft={draft}
                         onDraftChange={setDraft}
                         onSend={(content) => void handleSend(content)}
+                        onStop={() => void stopRun()}
+                        stopping={stopping}
                         onResolveApproval={(messageUuid, decision) => void resolveApproval(messageUuid, decision)}
                         approvingMessageUuid={approvingMessageUuid}
+                        chatMode={chatMode}
+                        onChatModeChange={(mode) => {
+                            setChatMode(mode);
+                            void domainApi.updateAgentSession(agent.uuid, session.uuid, { chat_mode: mode })
+                                .then((response) => setSession(response.data))
+                                .catch(() => {});
+                        }}
+                        attachments={attachments}
+                        onAttachmentsChange={setAttachments}
+                        activeSubagentCount={activeSubagentCount}
+                        liveSteps={liveSteps}
+                        liveAssistantText={liveAssistantText}
                         placeholder="Écrire un message…"
                         hideSessionHeader
                     />

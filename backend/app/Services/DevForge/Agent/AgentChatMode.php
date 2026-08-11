@@ -39,6 +39,8 @@ class AgentChatMode
         'spawn_task',
         'delegate_task',
         'yield_wait',
+        'checkpoint_rollback',
+        'skill_write',
     ];
 
     public static function parse(mixed $raw): string

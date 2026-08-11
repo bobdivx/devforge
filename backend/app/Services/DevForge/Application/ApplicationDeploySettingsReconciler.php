@@ -86,7 +86,14 @@ class ApplicationDeploySettingsReconciler
             $changes[] = 'is_static=true';
         }
 
-        if ($suggestedStatic && $publishUnset && $suggestedPublish !== '/') {
+        // Critical: wrongly-enabled nginx static breaks Astro/Next SSR healthchecks (port 80 vs 4321).
+        $ssrFrameworks = ['astro-ssr', 'next', 'nuxt', 'node'];
+        if (! $suggestedStatic && $currentStatic && in_array($framework, $ssrFrameworks, true)) {
+            $payload['is_static'] = false;
+            $changes[] = 'is_static=false';
+        }
+
+        if ($publishUnset && $suggestedPublish !== '/') {
             $payload['publish_directory'] = $suggestedPublish;
             $changes[] = "publish_directory={$suggestedPublish}";
         }
@@ -126,6 +133,17 @@ class ApplicationDeploySettingsReconciler
             $changes[] = "{$commandKey} set";
         }
 
+        // When switching away from static, clear a missing start command with the SSR default.
+        if (! $suggestedStatic && isset($payload['is_static']) && $payload['is_static'] === false) {
+            $suggestedStart = $suggestions['start_command'] ?? null;
+            if (is_string($suggestedStart) && trim($suggestedStart) !== '' && ! filled($application->start_command) && ! isset($payload['start_command'])) {
+                $payload['start_command'] = $suggestedStart;
+                $changes[] = 'start_command set';
+            }
+        }
+
+        $this->applyHealthcheckDefaults($application, $suggestions, $suggestedStatic, $payload, $changes);
+
         if ($payload !== []) {
             $payload['redeploy'] = false;
             $this->runtimeSettings->update($application, $payload);
@@ -136,6 +154,53 @@ class ApplicationDeploySettingsReconciler
             'framework' => $framework,
             'changes' => $changes,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $suggestions
+     * @param  array<string, mixed>  $payload
+     * @param  list<string>  $changes
+     */
+    private function applyHealthcheckDefaults(
+        Application $application,
+        array $suggestions,
+        bool $suggestedStatic,
+        array &$payload,
+        array &$changes,
+    ): void {
+        $suggestedPort = is_string($suggestions['health_check_port'] ?? null)
+            ? trim((string) $suggestions['health_check_port'])
+            : (is_string($suggestions['ports_exposes'] ?? null) ? trim((string) $suggestions['ports_exposes']) : null);
+        if ($suggestedStatic) {
+            $suggestedPort = $suggestedPort ?: '80';
+        }
+
+        $currentHealthPort = filled($application->health_check_port)
+            ? trim((string) $application->health_check_port)
+            : '';
+        $healthPortLooksDefault = $currentHealthPort === '' || in_array($currentHealthPort, ['80', '3000'], true);
+
+        if ($suggestedPort !== null && $suggestedPort !== '' && $healthPortLooksDefault && $suggestedPort !== $currentHealthPort) {
+            $payload['health_check_port'] = $suggestedPort;
+            $changes[] = "health_check_port={$suggestedPort}";
+        }
+
+        $suggestedPath = is_string($suggestions['health_check_path'] ?? null)
+            ? trim((string) $suggestions['health_check_path'])
+            : null;
+        $currentPath = trim((string) ($application->health_check_path ?: ''));
+        if ($suggestedPath !== null && $suggestedPath !== '' && $currentPath === '') {
+            $payload['health_check_path'] = $suggestedPath;
+            $changes[] = "health_check_path={$suggestedPath}";
+        }
+
+        if (array_key_exists('health_check_enabled', $suggestions)) {
+            $suggestedEnabled = (bool) $suggestions['health_check_enabled'];
+            if ($suggestedEnabled && ! (bool) $application->health_check_enabled) {
+                $payload['health_check_enabled'] = true;
+                $changes[] = 'health_check_enabled=true';
+            }
+        }
     }
 
     private function publishLooksUnset(?string $publishDirectory): bool

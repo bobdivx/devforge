@@ -5,14 +5,6 @@ namespace App\Services\DevForge;
 use App\Models\Application;
 use App\Models\Environment;
 use App\Models\Service;
-use App\Models\StandaloneClickhouse;
-use App\Models\StandaloneDragonfly;
-use App\Models\StandaloneKeydb;
-use App\Models\StandaloneMariadb;
-use App\Models\StandaloneMongodb;
-use App\Models\StandaloneMysql;
-use App\Models\StandalonePostgresql;
-use App\Models\StandaloneRedis;
 use App\Models\Team;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -72,18 +64,7 @@ class ResourceStatusData
      */
     private function databases(Collection $environmentIds): array
     {
-        $databaseModels = [
-            StandalonePostgresql::class,
-            StandaloneMysql::class,
-            StandaloneMariadb::class,
-            StandaloneMongodb::class,
-            StandaloneRedis::class,
-            StandaloneKeydb::class,
-            StandaloneDragonfly::class,
-            StandaloneClickhouse::class,
-        ];
-
-        return collect($databaseModels)
+        return collect(STANDALONE_DATABASE_MODELS)->values()
             ->flatMap(fn (string $model): Collection => $model::query()
                 ->whereIn('environment_id', $environmentIds)
                 ->get(['uuid', 'name', 'status', 'updated_at'])

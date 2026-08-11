@@ -102,11 +102,13 @@ it('applies Astro SSR listen port when still on Coolify default 3000', function 
         'suggestions' => [
             'is_static' => false,
             'ports_exposes' => '4321',
-            'publish_directory' => '/',
+            'publish_directory' => '/dist',
             'base_directory' => '/',
             'start_command' => 'node ./dist/server/entry.mjs',
             'build_command' => 'astro build',
             'install_command' => 'npm ci',
+            'health_check_enabled' => true,
+            'health_check_path' => '/',
             'health_check_port' => '4321',
             'framework' => 'astro-ssr',
             'framework_label' => 'Astro SSR',
@@ -122,5 +124,54 @@ it('applies Astro SSR listen port when still on Coolify default 3000', function 
     expect($result['applied'])->toBeTrue()
         ->and($result['framework'])->toBe('astro-ssr')
         ->and((string) $this->application->ports_exposes)->toBe('4321')
+        ->and($this->application->publish_directory)->toBe('/dist')
+        ->and($this->application->start_command)->toBe('node ./dist/server/entry.mjs')
+        ->and($this->application->build_command)->toBe('astro build')
+        ->and($this->application->install_command)->toBe('npm ci')
+        ->and((string) $this->application->health_check_port)->toBe('4321')
         ->and($this->application->settings->is_static)->toBeFalse();
+});
+
+it('corrects wrongly-enabled static mode for Astro SSR', function () {
+    $this->application->update([
+        'ports_exposes' => '80',
+        'publish_directory' => '/dist',
+        'health_check_port' => '80',
+        'start_command' => null,
+    ]);
+    $this->application->settings()->update(['is_static' => true]);
+
+    $detection = [
+        'available' => true,
+        'reason' => null,
+        'sources' => ['package.json'],
+        'suggestions' => [
+            'is_static' => false,
+            'ports_exposes' => '4321',
+            'publish_directory' => '/dist',
+            'base_directory' => '/',
+            'start_command' => 'node ./dist/server/entry.mjs',
+            'build_command' => 'astro build',
+            'install_command' => 'npm ci',
+            'health_check_enabled' => true,
+            'health_check_path' => '/',
+            'health_check_port' => '4321',
+            'framework' => 'astro-ssr',
+            'framework_label' => 'Astro SSR',
+        ],
+        'reasons' => ['Astro SSR détecté'],
+    ];
+
+    $reconciler = app(ApplicationDeploySettingsReconciler::class);
+    $result = $reconciler->applyDetection($this->application->fresh(['settings']), $detection);
+
+    $this->application->refresh();
+    $this->application->load('settings');
+
+    expect($result['applied'])->toBeTrue()
+        ->and($this->application->settings->is_static)->toBeFalse()
+        ->and((string) $this->application->ports_exposes)->toBe('4321')
+        ->and($this->application->start_command)->toBe('node ./dist/server/entry.mjs')
+        ->and((string) $this->application->health_check_port)->toBe('4321')
+        ->and($result['changes'])->toContain('is_static=false');
 });

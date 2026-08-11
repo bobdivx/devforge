@@ -16,6 +16,7 @@ import { AgentRunLog } from './AgentRunLog';
 import { AgentModelRoutingBadge } from './AgentModelRoutingBadge';
 import { AgentRunProgress } from './AgentRunProgress';
 import { AgentMemoryPanel } from './AgentMemoryPanel';
+import { AgentSkillsPanel } from './AgentSkillsPanel';
 import { AgentStandingOrdersPanel } from './AgentStandingOrdersPanel';
 import { AgentSubAgentsPanel } from './AgentSubAgentsPanel';
 import { AgentProviderModelFields } from './AgentProviderModelFields';
@@ -220,6 +221,7 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
             </ActionToolbar>
 
             <AgentMemoryPanel agent={agent} />
+            <AgentSkillsPanel agent={agent} />
             <AgentStandingOrdersPanel agent={agent} />
             <AgentSubAgentsPanel agent={agent} onUpdated={onUpdated} />
 

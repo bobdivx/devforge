@@ -74,13 +74,26 @@ class ApplicationRuntimeSettingsDetector
         $deps = $this->dependencyNames($package);
         $scripts = is_array($package['scripts'] ?? null) ? $package['scripts'] : [];
 
-        $hasAstro = isset($deps['astro']);
-        $hasNodeAdapter = $this->hasAnyDep($deps, [
-            '@astrojs/node',
+        $buildScript = isset($scripts['build']) && is_string($scripts['build']) ? $scripts['build'] : null;
+        $startScript = isset($scripts['start']) && is_string($scripts['start']) ? $scripts['start'] : null;
+
+        $hasAstroDep = isset($deps['astro']);
+        $hasAstroBuildScript = is_string($buildScript) && preg_match('/\bastro\s+build\b/', $buildScript) === 1;
+        $hasAstro = $hasAstroDep || is_string($astroConfig) || $hasAstroBuildScript;
+
+        $hasNodeAdapterDep = $this->hasAnyDep($deps, ['@astrojs/node']);
+        $hasServerlessAstroAdapter = $this->hasAnyDep($deps, [
             '@astrojs/vercel',
             '@astrojs/cloudflare',
             '@astrojs/netlify',
         ]);
+        $astroConfigUsesNodeAdapter = is_string($astroConfig) && (
+            str_contains($astroConfig, '@astrojs/node')
+            || preg_match('/\badapter\s*:\s*node\s*\(/', $astroConfig) === 1
+        );
+        $astroHasServerEntryScript = $this->scriptLooksLikeAstroServerEntry($startScript)
+            || $this->scriptLooksLikeAstroServerEntry(isset($scripts['preview']) && is_string($scripts['preview']) ? $scripts['preview'] : null);
+
         $hasNext = isset($deps['next']);
         $hasNuxt = isset($deps['nuxt']);
         $hasVite = isset($deps['vite']) && ! $hasAstro && ! $hasNext;
@@ -97,33 +110,45 @@ class ApplicationRuntimeSettingsDetector
         $startCommand = null;
         $buildCommand = null;
         $installCommand = null;
+        $healthCheckEnabled = true;
+        $healthCheckPath = '/';
         $framework = 'unknown';
         $frameworkLabel = 'Inconnu';
 
         if ($hasAstro) {
-            if ($astroOutputServer || $hasNodeAdapter) {
-                $isStatic = false;
-                $portsExposes = '4321';
-                $publishDirectory = '/';
-                $framework = 'astro-ssr';
-                $frameworkLabel = 'Astro SSR';
-                $reasons[] = 'Astro SSR détecté (adapter Node / output server|hybrid) → pas de site statique nginx.';
-                if (isset($scripts['start']) && is_string($scripts['start'])) {
-                    $startCommand = $scripts['start'];
-                } elseif (isset($scripts['preview']) && is_string($scripts['preview'])) {
-                    $startCommand = 'npm run preview';
-                }
-            } elseif ($astroOutputStatic || ! $hasNodeAdapter) {
+            // Node/server signals always win. Static only when explicitly static, or Astro
+            // with no adapter / output server / entry.mjs (classic static site).
+            $astroSsrSignals = $astroOutputServer
+                || $hasNodeAdapterDep
+                || $astroConfigUsesNodeAdapter
+                || $astroHasServerEntryScript
+                || $hasServerlessAstroAdapter;
+            $treatAsStatic = ! $astroSsrSignals && ($astroOutputStatic || ! $astroOutputServer);
+
+            if ($treatAsStatic) {
                 $isStatic = true;
                 $portsExposes = '80';
                 $publishDirectory = '/dist';
                 $framework = 'astro-static';
                 $frameworkLabel = 'Astro static';
                 $reasons[] = 'Astro static détecté → nginx + publish_directory=/dist.';
+            } else {
+                $isStatic = false;
+                $portsExposes = '4321';
+                $publishDirectory = '/dist';
+                $framework = 'astro-ssr';
+                $frameworkLabel = 'Astro SSR';
+                $reasons[] = 'Astro SSR détecté (adapter Node / output server|hybrid / entry.mjs) → Nixpacks Node, port 4321, pas de site statique nginx.';
+                if ($this->scriptLooksLikeAstroServerEntry($startScript)) {
+                    $startCommand = $startScript;
+                } else {
+                    $startCommand = 'node ./dist/server/entry.mjs';
+                }
             }
-            if (isset($scripts['build']) && is_string($scripts['build'])) {
-                $buildCommand = $scripts['build'];
-            }
+
+            $buildCommand = ($hasAstroBuildScript || $hasAstroDep || is_string($astroConfig))
+                ? 'astro build'
+                : $buildScript;
         } elseif ($hasNext) {
             $isStatic = false;
             $portsExposes = '3000';
@@ -213,6 +238,11 @@ class ApplicationRuntimeSettingsDetector
             $installCommand = 'pnpm install --frozen-lockfile';
         } elseif (isset($files['yarn.lock'])) {
             $installCommand = 'yarn install --frozen-lockfile';
+        } elseif ($hasAstro) {
+            // Astro defaults (screenshot): npm ci — lockfile is almost always present; partial GitHub reads may omit it.
+            $installCommand = 'npm ci';
+        } elseif ($package !== null) {
+            $installCommand = 'npm install';
         }
 
         if ($isStatic) {
@@ -234,6 +264,8 @@ class ApplicationRuntimeSettingsDetector
             'start_command' => $startCommand,
             'build_command' => $buildCommand,
             'install_command' => $installCommand,
+            'health_check_enabled' => $healthCheckEnabled,
+            'health_check_path' => $healthCheckPath,
             'health_check_port' => $isStatic ? '80' : $portsExposes,
             'framework' => $framework,
             'framework_label' => $frameworkLabel,
@@ -363,5 +395,14 @@ class ApplicationRuntimeSettingsDetector
         }
 
         return null;
+    }
+
+    private function scriptLooksLikeAstroServerEntry(?string $script): bool
+    {
+        if ($script === null || $script === '') {
+            return false;
+        }
+
+        return preg_match('/dist\/server\/entry\.(mjs|js)\b/', $script) === 1;
     }
 }

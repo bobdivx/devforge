@@ -168,6 +168,8 @@ type Props = {
     draft: string;
     onDraftChange: (value: string) => void;
     onSend: (content: string) => void;
+    onStop?: () => void;
+    stopping?: boolean;
     onResolveApproval?: (messageUuid: string, decision: 'approve' | 'deny') => void;
     approvingMessageUuid?: string | null;
     onRoutingChange?: (routing: AgentModelRouting | null) => void;
@@ -181,6 +183,9 @@ type Props = {
     hideSessionHeader?: boolean;
     /** Nombre de leafs async en cours (spawn + yield). */
     activeSubagentCount?: number;
+    /** Progression live pendant l’envoi (SSE). */
+    liveSteps?: AgentChatStep[];
+    liveAssistantText?: string | null;
 };
 
 export function AgentChatPanel({
@@ -193,6 +198,8 @@ export function AgentChatPanel({
     draft,
     onDraftChange,
     onSend,
+    onStop,
+    stopping = false,
     onResolveApproval,
     approvingMessageUuid = null,
     chatMode = 'build',
@@ -203,13 +210,15 @@ export function AgentChatPanel({
     placeholder = 'Écrire un message…',
     hideSessionHeader = false,
     activeSubagentCount = 0,
+    liveSteps = [],
+    liveAssistantText = null,
 }: Props) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     useEffect(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-    }, [messages, sending, session?.uuid]);
+    }, [messages, sending, session?.uuid, liveAssistantText, liveSteps.length, activeSubagentCount]);
 
     useEffect(() => {
         const el = textareaRef.current;
@@ -471,8 +480,21 @@ export function AgentChatPanel({
                                 <div class="mt-0.5 hidden size-7 shrink-0 place-items-center rounded-lg bg-base-300 text-base-content/70 sm:grid">
                                     <Bot class="size-3.5" aria-hidden />
                                 </div>
-                                <div class="min-w-0 max-w-[min(100%,28rem)] flex-1 sm:max-w-[90%]">
-                                    <IdeActionsCard steps={[]} running title="Exécution" />
+                                <div class="min-w-0 max-w-[min(100%,28rem)] flex-1 space-y-2 sm:max-w-[90%]">
+                                    <IdeActionsCard
+                                        steps={liveSteps}
+                                        running
+                                        title={activeSubagentCount > 0 ? 'Équipe en cours' : 'Exécution'}
+                                    />
+                                    {liveAssistantText && (
+                                        <div class="rounded-2xl border border-base-300 bg-base-200/60 px-3 py-2 text-sm leading-relaxed text-base-content/80 sm:px-3.5 sm:py-2.5">
+                                            <div
+                                                class="prose prose-sm max-w-none break-words text-start text-inherit [&_strong]:font-semibold"
+                                                dangerouslySetInnerHTML={{ __html: renderContent(sanitizeAssistantContent(liveAssistantText, liveSteps)) }}
+                                            />
+                                            <span class="mt-1 inline-block animate-pulse text-[10px] text-base-content/40">en cours…</span>
+                                        </div>
+                                    )}
                                 </div>
                             </article>
                         )}
@@ -549,14 +571,27 @@ export function AgentChatPanel({
                     />
                     <button
                         type="button"
-                        class="btn btn-primary btn-sm size-10 shrink-0 rounded-xl p-0"
-                        disabled={sending || !agent.provider || (draft.trim() === '' && attachments.length === 0)}
-                        aria-label="Envoyer"
-                        onClick={() => onSend(draft)}
+                        class={`btn btn-sm size-10 shrink-0 rounded-xl p-0 ${sending ? 'btn-error' : 'btn-primary'}`}
+                        disabled={
+                            stopping
+                            || !agent.provider
+                            || (!sending && draft.trim() === '' && attachments.length === 0)
+                        }
+                        aria-label={sending ? 'Arrêter' : 'Envoyer'}
+                        title={sending ? 'Arrêter le run' : 'Envoyer'}
+                        onClick={() => {
+                            if (sending) {
+                                onStop?.();
+                                return;
+                            }
+                            onSend(draft);
+                        }}
                     >
-                        {sending
-                            ? <Square class="size-4" aria-hidden />
-                            : <Send class="size-4" aria-hidden />}
+                        {stopping
+                            ? <Loader2 class="size-4 animate-spin" aria-hidden />
+                            : sending
+                                ? <Square class="size-4" aria-hidden />
+                                : <Send class="size-4" aria-hidden />}
                     </button>
                     </div>
                 </div>

@@ -5,6 +5,7 @@ use App\Models\Environment;
 use App\Models\Project;
 use App\Models\Server;
 use App\Models\StandaloneDocker;
+use App\Models\StandaloneLibsql;
 use App\Models\StandalonePostgresql;
 use App\Models\Team;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -99,6 +100,37 @@ test('database is not marked exited when containers list is empty', function () 
     expect($database->status)->toBe('running:healthy');
 });
 
+test('libsql database status is updated when container status changes', function () {
+    $team = Team::factory()->create();
+    $database = createPushUpdateLibsql($team, [
+        'status' => 'exited',
+    ]);
+
+    $server = $database->destination->server;
+
+    $data = [
+        'containers' => [
+            [
+                'name' => $database->uuid,
+                'state' => 'running',
+                'health_status' => 'healthy',
+                'labels' => [
+                    'coolify.managed' => 'true',
+                    'coolify.type' => 'database',
+                    'com.docker.compose.service' => $database->uuid,
+                ],
+            ],
+        ],
+    ];
+
+    $job = new PushServerUpdateJob($server, $data);
+    $job->handle();
+
+    $database->refresh();
+
+    expect($database->status)->toBe('running:healthy');
+});
+
 function createPushUpdatePostgresql(Team $team, array $attributes = []): StandalonePostgresql
 {
     $lastOnlineAt = $attributes['last_online_at'] ?? null;
@@ -125,4 +157,24 @@ function createPushUpdatePostgresql(Team $team, array $attributes = []): Standal
     }
 
     return $database;
+}
+
+function createPushUpdateLibsql(Team $team, array $attributes = []): StandaloneLibsql
+{
+    $server = Server::factory()->create(['team_id' => $team->id]);
+    $destination = StandaloneDocker::where('server_id', $server->id)->first()
+        ?? StandaloneDocker::factory()->create(['server_id' => $server->id]);
+    $project = Project::factory()->create(['team_id' => $team->id]);
+    $environment = Environment::factory()->create(['project_id' => $project->id]);
+
+    return StandaloneLibsql::withoutEvents(fn () => StandaloneLibsql::create(array_merge([
+        'uuid' => (string) str()->uuid(),
+        'name' => 'libsql-'.str()->random(8),
+        'libsql_auth_user' => 'libsql',
+        'libsql_auth_token' => 'secret-token',
+        'status' => 'exited',
+        'destination_id' => $destination->id,
+        'destination_type' => $destination->getMorphClass(),
+        'environment_id' => $environment->id,
+    ], $attributes)));
 }

@@ -227,3 +227,74 @@ it('auto titles a session from the first user message', function () {
 
     expect($session->fresh()->title)->toBe('Analyser les logs du déploiement menu');
 });
+
+it('deletes an owned chat session and cascades messages', function () {
+    $user = User::factory()->create();
+    $team = $user->teams()->firstOrFail();
+    $agent = AiAgent::factory()->create(['team_id' => $team->id]);
+
+    $keep = AiAgentSession::factory()->create([
+        'agent_id' => $agent->id,
+        'user_id' => $user->id,
+        'title' => 'À garder',
+    ]);
+    $delete = AiAgentSession::factory()->create([
+        'agent_id' => $agent->id,
+        'user_id' => $user->id,
+        'title' => 'À supprimer',
+    ]);
+
+    \App\Models\AiAgentMessage::factory()->user()->create([
+        'agent_id' => $agent->id,
+        'session_id' => $delete->id,
+        'content' => 'Message à effacer',
+    ]);
+
+    app(AgentSessionService::class)->activate($agent, $user, $delete->uuid);
+
+    $this->actingAs($user)
+        ->withSession(['currentTeam' => $team])
+        ->deleteJson("/api/devforge/v1/agents/{$agent->uuid}/sessions/{$delete->uuid}")
+        ->assertSuccessful()
+        ->assertJsonPath('ok', true)
+        ->assertJsonPath('meta.deleted_session_uuid', $delete->uuid)
+        ->assertJsonPath('meta.active_session_uuid', $keep->uuid)
+        ->assertJsonPath('meta.remaining_count', 1);
+
+    expect(AiAgentSession::query()->whereKey($delete->id)->exists())->toBeFalse()
+        ->and(\App\Models\AiAgentMessage::query()->where('session_id', $delete->id)->exists())->toBeFalse()
+        ->and(AiAgentSession::query()->whereKey($keep->id)->exists())->toBeTrue();
+});
+
+it('rejects deleting a legacy shared session', function () {
+    $user = User::factory()->create();
+    $team = $user->teams()->firstOrFail();
+    $agent = AiAgent::factory()->create(['team_id' => $team->id]);
+    $legacy = AiAgentSession::factory()->legacy()->create([
+        'agent_id' => $agent->id,
+    ]);
+
+    $this->actingAs($user)
+        ->withSession(['currentTeam' => $team])
+        ->deleteJson("/api/devforge/v1/agents/{$agent->uuid}/sessions/{$legacy->uuid}")
+        ->assertStatus(422);
+});
+
+it('rejects deleting another user session', function () {
+    $user = User::factory()->create();
+    $otherUser = User::factory()->create();
+    $team = $user->teams()->firstOrFail();
+    $otherUser->teams()->attach($team, ['role' => 'member']);
+
+    $agent = AiAgent::factory()->create(['team_id' => $team->id]);
+    $otherSession = AiAgentSession::factory()->create([
+        'agent_id' => $agent->id,
+        'user_id' => $otherUser->id,
+        'title' => 'Session autre',
+    ]);
+
+    $this->actingAs($user)
+        ->withSession(['currentTeam' => $team])
+        ->deleteJson("/api/devforge/v1/agents/{$agent->uuid}/sessions/{$otherSession->uuid}")
+        ->assertNotFound();
+});

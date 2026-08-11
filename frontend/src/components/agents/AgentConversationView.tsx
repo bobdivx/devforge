@@ -1,6 +1,6 @@
 import { MessageSquarePlus, RefreshCw } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
-import type { Agent, AgentChatAttachment, AgentChatMessage, AgentChatSession, AgentModelRouting } from '../../lib/domain-api';
+import type { Agent, AgentChatAttachment, AgentChatMessage, AgentChatSession, AgentChatStep, AgentModelRouting } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
 import { ApiError } from '../../lib/api-client';
 import { agentDetailSessionUuid, shouldOpenAgentSettings, syncAgentDetailQuery } from '../../lib/agent-routes';
@@ -28,12 +28,26 @@ export function AgentConversationView({
     const [loadingSessions, setLoadingSessions] = useState(true);
     const [loadingMessages, setLoadingMessages] = useState(false);
     const [creating, setCreating] = useState(false);
+    const [deletingUuid, setDeletingUuid] = useState<string | null>(null);
     const [sending, setSending] = useState(false);
+    const [stopping, setStopping] = useState(false);
+    const [activeRunUuid, setActiveRunUuid] = useState<string | null>(null);
+    const [activeSubagentCount, setActiveSubagentCount] = useState(0);
+    const [liveSteps, setLiveSteps] = useState<AgentChatStep[]>([]);
+    const [liveAssistantText, setLiveAssistantText] = useState<string | null>(null);
     const [approvingMessageUuid, setApprovingMessageUuid] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [draft, setDraft] = useState('');
     const [chatMode, setChatMode] = useState<'plan' | 'build' | 'debug'>('build');
     const [attachments, setAttachments] = useState<AgentChatAttachment[]>([]);
+
+    const resetLiveProgress = () => {
+        setActiveRunUuid(null);
+        setActiveSubagentCount(0);
+        setLiveSteps([]);
+        setLiveAssistantText(null);
+        setStopping(false);
+    };
 
     const syncSessionQuery = (sessionUuid: string | null) => {
         syncAgentDetailQuery({
@@ -108,6 +122,49 @@ export function AgentConversationView({
         }
     };
 
+    const handleDelete = async (sessionUuid: string) => {
+        const session = sessions.find((item) => item.uuid === sessionUuid);
+        if (!session || session.is_legacy) {
+            return;
+        }
+
+        const label = session.title?.trim() || 'cette conversation';
+        if (!window.confirm(`Supprimer « ${label} » ? Les messages seront effacés.`)) {
+            return;
+        }
+
+        setDeletingUuid(sessionUuid);
+        setError(null);
+
+        try {
+            const response = await domainApi.deleteAgentSession(agent.uuid, sessionUuid);
+            const remaining = sessions.filter((item) => item.uuid !== sessionUuid);
+            setSessions(remaining);
+
+            if (selectedSessionUuid !== sessionUuid) {
+                return;
+            }
+
+            const nextUuid = response.meta.active_session_uuid;
+            const next = nextUuid
+                ? remaining.find((item) => item.uuid === nextUuid) ?? remaining[0] ?? null
+                : remaining[0] ?? null;
+
+            if (next) {
+                await selectSession(next);
+            } else {
+                setSelectedSessionUuid(null);
+                setActiveSession(null);
+                setMessages([]);
+                syncSessionQuery(null);
+            }
+        } catch (err) {
+            setError(err instanceof ApiError ? err.message : 'Impossible de supprimer la conversation.');
+        } finally {
+            setDeletingUuid(null);
+        }
+    };
+
     useEffect(() => {
         setLoadingSessions(true);
         setError(null);
@@ -163,6 +220,7 @@ export function AgentConversationView({
         setSending(true);
         setError(null);
         setDraft('');
+        resetLiveProgress();
         const pendingAttachments = attachments;
         setAttachments([]);
 
@@ -186,6 +244,7 @@ export function AgentConversationView({
                 response.data.user,
             ]);
             setActiveSession((current) => current ? { ...current, chat_mode: chatMode } : current);
+            setActiveRunUuid(response.data.run_uuid);
 
             await waitForChatReply(
                 agent.uuid,
@@ -196,6 +255,17 @@ export function AgentConversationView({
                     void refreshSessions();
                 },
                 (routing) => onRoutingChange?.(routing),
+                (progress) => {
+                    setActiveSubagentCount(progress.active_subagent_count ?? 0);
+                    if (Array.isArray(progress.steps)) {
+                        setLiveSteps(progress.steps);
+                    }
+                    if (typeof progress.live_assistant_text === 'string' && progress.live_assistant_text.trim() !== '') {
+                        setLiveAssistantText(progress.live_assistant_text);
+                    } else if (typeof progress.summary === 'string' && progress.summary.trim() !== '') {
+                        setLiveAssistantText(progress.summary);
+                    }
+                },
             );
             onAgentUpdated();
         } catch (err) {
@@ -205,6 +275,21 @@ export function AgentConversationView({
             setAttachments(pendingAttachments);
         } finally {
             setSending(false);
+            resetLiveProgress();
+        }
+    };
+
+    const stopRun = async () => {
+        if (!activeRunUuid || stopping) {
+            return;
+        }
+        setStopping(true);
+        setError(null);
+        try {
+            await domainApi.cancelAgentRun(agent.uuid, activeRunUuid, 'Arrêt demandé depuis le chat.');
+        } catch (err) {
+            setError(err instanceof ApiError ? err.message : 'Impossible d\'arrêter le run.');
+            setStopping(false);
         }
     };
 
@@ -245,6 +330,7 @@ export function AgentConversationView({
                 response.data.user,
             ]);
 
+            setActiveRunUuid(response.data.run_uuid);
             await waitForChatReply(
                 agent.uuid,
                 response.data.run_uuid,
@@ -254,6 +340,15 @@ export function AgentConversationView({
                     void refreshSessions();
                 },
                 (routing) => onRoutingChange?.(routing),
+                (progress) => {
+                    setActiveSubagentCount(progress.active_subagent_count ?? 0);
+                    if (Array.isArray(progress.steps)) {
+                        setLiveSteps(progress.steps);
+                    }
+                    if (typeof progress.live_assistant_text === 'string' && progress.live_assistant_text.trim() !== '') {
+                        setLiveAssistantText(progress.live_assistant_text);
+                    }
+                },
             );
             onAgentUpdated();
         } catch (err) {
@@ -261,6 +356,7 @@ export function AgentConversationView({
         } finally {
             setApprovingMessageUuid(null);
             setSending(false);
+            resetLiveProgress();
         }
     };
 
@@ -307,6 +403,8 @@ export function AgentConversationView({
                             sessions={sessions}
                             selectedUuid={selectedSessionUuid}
                             onSelect={handleSelectUuid}
+                            onDelete={(uuid) => void handleDelete(uuid)}
+                            deletingUuid={deletingUuid}
                         />
                     )}
                 </aside>
@@ -322,6 +420,8 @@ export function AgentConversationView({
                         draft={draft}
                         onDraftChange={setDraft}
                         onSend={(content) => void sendMessage(content)}
+                        onStop={() => void stopRun()}
+                        stopping={stopping}
                         onResolveApproval={(messageUuid, decision) => void resolveApproval(messageUuid, decision)}
                         approvingMessageUuid={approvingMessageUuid}
                         chatMode={chatMode}
@@ -340,6 +440,9 @@ export function AgentConversationView({
                         }}
                         attachments={attachments}
                         onAttachmentsChange={setAttachments}
+                        activeSubagentCount={activeSubagentCount}
+                        liveSteps={liveSteps}
+                        liveAssistantText={liveAssistantText}
                     />
                 </div>
             </div>

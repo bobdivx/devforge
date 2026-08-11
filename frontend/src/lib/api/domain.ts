@@ -748,7 +748,7 @@ export type SharedVariables = Record<'team' | 'project' | 'environment' | 'serve
 
 export type AgentType = 'debug' | 'tech-watch' | 'github' | 'github-actions' | 'devforge' | 'deployment' | 'security';
 export type AgentStatus = 'idle' | 'running' | 'error' | 'paused';
-export type AgentRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'awaiting_approval' | 'waiting_for_input' | 'waiting_for_subagents';
+export type AgentRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'awaiting_approval' | 'waiting_for_input' | 'waiting_for_subagents';
 export type AgentTrigger = 'scheduled' | 'manual' | 'event' | 'chat' | 'ephemeral' | 'delegation';
 
 export type AgentChatStep = {
@@ -1025,6 +1025,8 @@ export type AgentRun = {
     iterations: number;
     duration_seconds: number | null;
     metadata?: AgentRunMetadata;
+    active_subagent_count?: number;
+    live_assistant_text?: string | null;
     started_at: string | null;
     finished_at: string | null;
     created_at: string;
@@ -1104,6 +1106,21 @@ export type AgentStandingOrder = {
     body: string;
     priority: number;
     is_active: boolean;
+    created_at: string | null;
+    updated_at: string | null;
+};
+
+export type AgentSkill = {
+    id: number;
+    slug: string;
+    name: string;
+    description: string;
+    body: string;
+    tags: string[];
+    agent_id: number | null;
+    is_active: boolean;
+    is_builtin: boolean;
+    priority: number;
     created_at: string | null;
     updated_at: string | null;
 };
@@ -1486,6 +1503,8 @@ export type ApplicationRuntimeSettingsDetection = {
         start_command: string | null;
         build_command: string | null;
         install_command: string | null;
+        health_check_enabled: boolean;
+        health_check_path: string;
         health_check_port: string;
         framework: string;
         framework_label: string;
@@ -1829,6 +1848,8 @@ export type ApplicationEnvironmentVariable = {
     is_coolify: boolean;
     is_buildpack_control: boolean;
     is_editable: boolean;
+    /** Absent sur certains endpoints legacy : fallback = is_editable. */
+    is_deletable?: boolean;
     updated_at: string | null;
 };
 
@@ -3513,6 +3534,16 @@ export const domainApi = {
         method: 'PATCH',
         body: JSON.stringify(typeof payload === 'string' ? { title: payload } : payload),
     }),
+    deleteAgentSession: (uuid: string, sessionUuid: string) => mutate<{
+        ok: boolean;
+        meta: {
+            deleted_session_uuid: string;
+            active_session_uuid: string | null;
+            remaining_count: number;
+        };
+    }>(`/agents/${encodeURIComponent(uuid)}/sessions/${encodeURIComponent(sessionUuid)}`, {
+        method: 'DELETE',
+    }),
     agentSessionMessages: (uuid: string, sessionUuid: string) => apiFetch<ApiListResponse<AgentChatMessage>>(`${API_BASE}/agents/${encodeURIComponent(uuid)}/sessions/${encodeURIComponent(sessionUuid)}/messages`),
     sendAgentSessionMessage: (
         uuid: string,
@@ -3618,6 +3649,42 @@ export const domainApi = {
     deleteAgentStandingOrder: (id: number) => mutate<{ ok: boolean }>(`/ai/standing-orders/${id}`, {
         method: 'DELETE',
     }),
+    agentSkills: (options?: { agent_uuid?: string; q?: string }) => {
+        const params = new URLSearchParams();
+        if (options?.agent_uuid) params.set('agent_uuid', options.agent_uuid);
+        if (options?.q) params.set('q', options.q);
+        const qs = params.toString();
+        return apiFetch<ApiListResponse<AgentSkill>>(
+            `${API_BASE}/ai/skills${qs ? `?${qs}` : ''}`,
+        );
+    },
+    createAgentSkill: (input: {
+        slug: string;
+        name: string;
+        description: string;
+        body: string;
+        tags?: string[];
+        agent_uuid?: string;
+        is_active?: boolean;
+        priority?: number;
+    }) => mutate<ApiResponse<AgentSkill>>('/ai/skills', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    }),
+    updateAgentSkill: (id: number, input: Partial<{
+        name: string;
+        description: string;
+        body: string;
+        tags: string[];
+        is_active: boolean;
+        priority: number;
+    }>) => mutate<ApiResponse<AgentSkill>>(`/ai/skills/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(input),
+    }),
+    deleteAgentSkill: (id: number) => mutate<{ ok: boolean }>(`/ai/skills/${id}`, {
+        method: 'DELETE',
+    }),
     agentMissions: (options?: { status?: string; kind?: string; q?: string; limit?: number }) => {
         const params = new URLSearchParams();
         if (options?.status) params.set('status', options.status);
@@ -3698,6 +3765,14 @@ export const domainApi = {
     }),
     agentRuns: (agentUuid: string, page = 1) => apiFetch<ApiListResponse<AgentRun>>(`${API_BASE}/agents/${encodeURIComponent(agentUuid)}/runs?page=${page}`),
     agentRun: (agentUuid: string, runUuid: string) => apiFetch<ApiResponse<AgentRun>>(`${API_BASE}/agents/${encodeURIComponent(agentUuid)}/runs/${encodeURIComponent(runUuid)}`),
+    cancelAgentRun: (agentUuid: string, runUuid: string, reason?: string) => mutate<ApiResponse<{
+        cancelled: boolean;
+        already_finished: boolean;
+        run: AgentRun;
+    }>>(`/agents/${encodeURIComponent(agentUuid)}/runs/${encodeURIComponent(runUuid)}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify(reason ? { reason } : {}),
+    }),
 
     // Providers IA
     aiProviders: () => apiFetch<ApiResponse<AiProviderConfig[]>>(`${API_BASE}/ai/providers`),
