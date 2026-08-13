@@ -13,6 +13,7 @@ use App\Jobs\DevForge\ApplicationBootSequenceJob;
 use App\Jobs\DevForge\ApplicationKeepAliveJob;
 use App\Jobs\DevForge\ApplicationReadinessWatchdogJob;
 use App\Jobs\DevForge\CheckDockerImageUpdatesJob;
+use App\Jobs\DevForge\DatabaseKeepAliveJob;
 use App\Jobs\DevForge\InstanceHostDiskGuardJob;
 use App\Jobs\PullChangelog;
 use App\Jobs\PullTemplatesFromCDN;
@@ -85,6 +86,10 @@ class Kernel extends ConsoleKernel
                 ->everyTwoMinutes()
                 ->onOneServer();
 
+            $this->scheduleInstance->job(new DatabaseKeepAliveJob)
+                ->everyTwoMinutes()
+                ->onOneServer();
+
             $this->scheduleInstance->job(new InstanceHostDiskGuardJob)
                 ->everyFiveMinutes()
                 ->onOneServer();
@@ -129,6 +134,10 @@ class Kernel extends ConsoleKernel
                 ->onOneServer();
 
             $this->scheduleInstance->job(new ApplicationKeepAliveJob)
+                ->everyTwoMinutes()
+                ->onOneServer();
+
+            $this->scheduleInstance->job(new DatabaseKeepAliveJob)
                 ->everyTwoMinutes()
                 ->onOneServer();
 

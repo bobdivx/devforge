@@ -12,6 +12,7 @@ use App\Actions\Service\StopService;
 use App\Models\Application;
 use App\Models\Service;
 use App\Services\DevForge\Application\ApplicationDesiredRuntimeState;
+use App\Services\DevForge\Database\DatabaseDesiredRuntimeState;
 use Illuminate\Database\Eloquent\Model;
 use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -21,6 +22,7 @@ class CoreResourceAction
 {
     public function __construct(
         private readonly ApplicationDesiredRuntimeState $desiredRuntimeState,
+        private readonly DatabaseDesiredRuntimeState $databaseDesiredRuntimeState,
     ) {}
 
     /**
@@ -115,6 +117,12 @@ class CoreResourceAction
             };
         } catch (RuntimeException $exception) {
             throw new HttpException(422, $exception->getMessage(), previous: $exception);
+        }
+
+        if ($action === 'stop') {
+            $this->databaseDesiredRuntimeState->markDesiredStopped($database);
+        } else {
+            $this->databaseDesiredRuntimeState->markDesiredRunning($database);
         }
 
         return [

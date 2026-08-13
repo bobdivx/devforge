@@ -86,6 +86,21 @@ return [
         'desired_ttl_seconds' => (int) env('DEVFORGE_APPLICATION_KEEP_ALIVE_TTL', 60 * 60 * 24 * 30),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Keep-alive bases de données
+    |--------------------------------------------------------------------------
+    |
+    | Redémarre les bases standalone arrêtées involontairement (crash / host).
+    | Un stop manuel désactive le redémarrage auto jusqu’au prochain start.
+    | Les bases rattachées à une app encore en cours sont aussi relancées.
+    |
+    */
+    'database_keep_alive' => [
+        'enabled' => env('DEVFORGE_DATABASE_KEEP_ALIVE', true),
+        'desired_ttl_seconds' => (int) env('DEVFORGE_DATABASE_KEEP_ALIVE_TTL', 60 * 60 * 24 * 30),
+    ],
+
     'agents_monitor_build_enabled' => env(
         'DEVFORGE_AGENTS_MONITOR_BUILD_ENABLED',
         env('DEVFORGE_AGENTS_WEBHOOK_BUILD_ENABLED', true),
