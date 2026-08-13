@@ -39,16 +39,20 @@ describe('SessionHistoryList', () => {
         expect(onSelect).not.toHaveBeenCalled();
     });
 
-    it('n’affiche pas le bouton supprimer pour une session legacy', () => {
+    it('affiche le bouton supprimer pour une session partagée (App · …)', () => {
+        const onDelete = vi.fn();
+
         render(
             <SessionHistoryList
-                sessions={[session({ uuid: 'legacy-1', title: 'Historique', is_legacy: true })]}
+                sessions={[session({ uuid: 'legacy-1', title: 'App · starbasefr', is_legacy: true })]}
                 selectedUuid={null}
                 onSelect={() => {}}
-                onDelete={() => {}}
+                onDelete={onDelete}
             />,
         );
 
-        expect(screen.queryByRole('button', { name: /Supprimer/i })).toBeNull();
+        fireEvent.click(screen.getByRole('button', { name: 'Supprimer App · starbasefr' }));
+        expect(onDelete).toHaveBeenCalledWith('legacy-1');
+        expect(screen.getByText('Partagé')).toBeTruthy();
     });
 });

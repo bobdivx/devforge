@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Jobs\DeleteResourceJob;
 use App\Models\Application;
 use App\Models\User;
+use App\Rules\ValidGitBranch;
 use App\Services\DevForge\Application\ApplicationAdvancedSettingsCatalog;
 use App\Services\DevForge\Application\ApplicationContainerLogs;
 use App\Services\DevForge\Application\ApplicationDatabaseConnector;
@@ -614,6 +615,42 @@ class ApplicationController extends Controller
 
         return response()->json([
             'data' => $this->applicationSourceService->info($application),
+        ]);
+    }
+
+    public function gitSync(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->applicationSourceService->applicationForUser($user, $applicationUuid);
+        $this->authorize('view', $application);
+        $team = $this->currentTeamContext->resolve($user);
+
+        return response()->json([
+            'data' => $this->applicationSourceService->gitSyncStatus($team, $application),
+        ]);
+    }
+
+    public function updateGitBranch(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $validated = $request->validate([
+            'git_branch' => ['required', 'string', 'max:255', new ValidGitBranch],
+        ]);
+
+        $application = $this->applicationSourceService->applicationForUser($user, $applicationUuid);
+        $this->authorize('update', $application);
+
+        $result = $this->applicationSourceService->updateGitBranch($application, $validated['git_branch']);
+
+        return response()->json([
+            'data' => [
+                ...$result,
+                'application' => $this->presenter->present($application->fresh(), 'applications'),
+            ],
         ]);
     }
 

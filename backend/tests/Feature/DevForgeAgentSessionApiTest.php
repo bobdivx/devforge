@@ -266,18 +266,30 @@ it('deletes an owned chat session and cascades messages', function () {
         ->and(AiAgentSession::query()->whereKey($keep->id)->exists())->toBeTrue();
 });
 
-it('rejects deleting a legacy shared session', function () {
+it('deletes a legacy shared session (App overview chat)', function () {
     $user = User::factory()->create();
     $team = $user->teams()->firstOrFail();
     $agent = AiAgent::factory()->create(['team_id' => $team->id]);
     $legacy = AiAgentSession::factory()->legacy()->create([
         'agent_id' => $agent->id,
+        'title' => 'App · starbasefr',
+    ]);
+
+    \App\Models\AiAgentMessage::factory()->assistant()->create([
+        'agent_id' => $agent->id,
+        'session_id' => $legacy->id,
+        'content' => 'Rapport d\'intervention',
     ]);
 
     $this->actingAs($user)
         ->withSession(['currentTeam' => $team])
         ->deleteJson("/api/devforge/v1/agents/{$agent->uuid}/sessions/{$legacy->uuid}")
-        ->assertStatus(422);
+        ->assertSuccessful()
+        ->assertJsonPath('ok', true)
+        ->assertJsonPath('meta.deleted_session_uuid', $legacy->uuid);
+
+    expect(AiAgentSession::query()->whereKey($legacy->id)->exists())->toBeFalse()
+        ->and(\App\Models\AiAgentMessage::query()->where('session_id', $legacy->id)->exists())->toBeFalse();
 });
 
 it('rejects deleting another user session', function () {

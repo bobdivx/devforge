@@ -132,6 +132,12 @@ Route::delete('/applications/{applicationUuid}/environment-variables/{envUuid}',
 Route::get('/applications/{applicationUuid}/source', [ApplicationController::class, 'sourceInfo'])
     ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
     ->name('applications.source.info');
+Route::get('/applications/{applicationUuid}/git-sync', [ApplicationController::class, 'gitSync'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.git-sync');
+Route::put('/applications/{applicationUuid}/git-branch', [ApplicationController::class, 'updateGitBranch'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.git-branch');
 Route::get('/applications/{applicationUuid}/source/list', [ApplicationController::class, 'sourceList'])
     ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
     ->name('applications.source.list');

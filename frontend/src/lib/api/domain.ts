@@ -2198,6 +2198,22 @@ export type ApplicationSourceInfo = {
     html_url: string | null;
 };
 
+export type ApplicationGitSyncStatus = {
+    available: boolean;
+    reason: string | null;
+    git_branch: string | null;
+    git_repository: string | null;
+    owner: string | null;
+    repo: string | null;
+    github_app_uuid: string | null;
+    deployed_commit: string | null;
+    deployed_commit_message: string | null;
+    deployed_at: string | null;
+    remote_head_sha: string | null;
+    up_to_date: boolean | null;
+    remote_error: string | null;
+};
+
 export type ApplicationSourceEntry = {
     name: string;
     path: string;
@@ -3190,6 +3206,23 @@ export const domainApi = {
     ),
     applicationSourceInfo: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationSourceInfo>>(
         `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/source`,
+    ),
+    applicationGitSync: (applicationUuid: string) => apiFetch<ApiResponse<ApplicationGitSyncStatus>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/git-sync`,
+    ),
+    updateApplicationGitBranch: (applicationUuid: string, gitBranch: string) => mutate<ApiResponse<{
+        ok: boolean;
+        unchanged: boolean;
+        application_uuid: string;
+        git_branch: string;
+        previous_git_branch: string;
+        application: CoreResource;
+    }>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/git-branch`,
+        {
+            method: 'PUT',
+            body: JSON.stringify({ git_branch: gitBranch }),
+        },
     ),
     listApplicationSourceDirectory: (applicationUuid: string, path?: string) => apiFetch<ApiResponse<ApplicationSourceListing>>(
         `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/source/list${path ? `?path=${encodeURIComponent(path)}` : ''}`,

@@ -124,6 +124,10 @@ body {
     justify-content: center;
 }
 
+.action-toolbar-label {
+    display: none;
+}
+
 @media (min-width: 640px) {
     .action-toolbar {
         display: flex;
@@ -135,6 +139,10 @@ body {
     .action-toolbar > .btn,
     .action-toolbar > a.btn {
         width: auto;
+    }
+
+    .action-toolbar-label {
+        display: inline;
     }
 }
 
@@ -170,6 +178,17 @@ body {
         min-height: 2.25rem;
     }
 
+    .action-toolbar > .btn,
+    .action-toolbar > a.btn {
+        width: 2.75rem;
+        min-width: 2.75rem;
+        height: 2.75rem;
+        min-height: 2.75rem;
+        padding-inline: 0;
+        padding-block: 0;
+        gap: 0;
+    }
+
     .modal-action,
     .form-actions {
         display: grid;
@@ -203,6 +222,7 @@ body {
 
     .action-toolbar {
         grid-template-columns: repeat(auto-fit, minmax(2.75rem, 1fr));
+        justify-items: center;
     }
 }
 

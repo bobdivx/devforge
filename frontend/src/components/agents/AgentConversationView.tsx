@@ -124,12 +124,15 @@ export function AgentConversationView({
 
     const handleDelete = async (sessionUuid: string) => {
         const session = sessions.find((item) => item.uuid === sessionUuid);
-        if (!session || session.is_legacy) {
+        if (!session) {
             return;
         }
 
         const label = session.title?.trim() || 'cette conversation';
-        if (!window.confirm(`Supprimer « ${label} » ? Les messages seront effacés.`)) {
+        const confirmLabel = session.is_legacy
+            ? `Supprimer « ${label} » (session partagée) ? Les messages seront effacés.`
+            : `Supprimer « ${label} » ? Les messages seront effacés.`;
+        if (!window.confirm(confirmLabel)) {
             return;
         }
 

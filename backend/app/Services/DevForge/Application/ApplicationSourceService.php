@@ -5,10 +5,12 @@ namespace App\Services\DevForge\Application;
 use App\Models\Application;
 use App\Models\Team;
 use App\Models\User;
+use App\Rules\ValidGitBranch;
 use App\Services\DevForge\Agent\Tool\AgentGithubTools;
 use App\Services\DevForge\Core\CoreResourceAction;
 use App\Services\DevForge\CurrentTeamResources;
 use App\Services\DevForge\Github\GithubAppCatalog;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -54,6 +56,103 @@ class ApplicationSourceService
             'html_url' => $repository
                 ? "https://github.com/{$repository['owner']}/{$repository['repo']}/tree/".rawurlencode((string) $application->git_branch).($baseDirectory !== '' ? '/'.str_replace('%2F', '/', rawurlencode($baseDirectory)) : '')
                 : null,
+        ];
+    }
+
+    /**
+     * Compare le dernier déploiement réussi avec le HEAD GitHub de la branche configurée.
+     *
+     * @return array<string, mixed>
+     */
+    public function gitSyncStatus(Team $team, Application $application): array
+    {
+        $info = $this->info($application);
+        $lastDeployment = $application->get_last_successful_deployment();
+        $deployedCommit = is_string($lastDeployment?->commit) && $lastDeployment->commit !== ''
+            ? $lastDeployment->commit
+            : null;
+        $configuredCommit = is_string($application->git_commit_sha) && $application->git_commit_sha !== '' && strtoupper((string) $application->git_commit_sha) !== 'HEAD'
+            ? (string) $application->git_commit_sha
+            : null;
+        $effectiveDeployedCommit = $deployedCommit ?? $configuredCommit;
+
+        $remoteHeadSha = null;
+        $remoteError = null;
+        $upToDate = null;
+
+        if ($info['available'] === true) {
+            $head = $this->githubTools($team)->getBranchHeadSha(
+                (string) $info['github_app_uuid'],
+                (string) $info['owner'],
+                (string) $info['repo'],
+                (string) ($info['git_branch'] ?: 'main'),
+            );
+
+            if (isset($head['error'])) {
+                $remoteError = (string) $head['error'];
+            } else {
+                $remoteHeadSha = is_string($head['sha'] ?? null) && $head['sha'] !== ''
+                    ? (string) $head['sha']
+                    : null;
+            }
+
+            $upToDate = $this->commitsMatch($effectiveDeployedCommit, $remoteHeadSha);
+        }
+
+        return [
+            'available' => $info['available'],
+            'reason' => $info['reason'],
+            'git_branch' => $info['git_branch'],
+            'git_repository' => $info['git_repository'],
+            'owner' => $info['owner'],
+            'repo' => $info['repo'],
+            'github_app_uuid' => $info['github_app_uuid'],
+            'deployed_commit' => $effectiveDeployedCommit,
+            'deployed_commit_message' => is_string($lastDeployment?->commit_message) ? $lastDeployment->commit_message : null,
+            'deployed_at' => $lastDeployment?->finished_at?->toISOString()
+                ?? $lastDeployment?->updated_at?->toISOString()
+                ?? $lastDeployment?->created_at?->toISOString(),
+            'remote_head_sha' => $remoteHeadSha,
+            'up_to_date' => $upToDate,
+            'remote_error' => $remoteError,
+        ];
+    }
+
+    /**
+     * Met à jour la branche Git de l’application (sans redéploiement).
+     *
+     * @return array<string, mixed>
+     */
+    public function updateGitBranch(Application $application, string $gitBranch): array
+    {
+        $branch = trim($gitBranch);
+
+        $validator = Validator::make(
+            ['git_branch' => $branch],
+            ['git_branch' => ['required', 'string', 'max:255', new ValidGitBranch]],
+        );
+
+        if ($validator->fails()) {
+            throw ValidationException::withMessages([
+                'git_branch' => $validator->errors()->first('git_branch') ?? 'Branche Git invalide.',
+            ]);
+        }
+
+        $previousBranch = (string) ($application->git_branch ?? '');
+        $unchanged = $previousBranch === $branch;
+
+        if (! $unchanged) {
+            $application->git_branch = $branch;
+            $application->git_commit_sha = 'HEAD';
+            $application->save();
+        }
+
+        return [
+            'ok' => true,
+            'unchanged' => $unchanged,
+            'application_uuid' => $application->uuid,
+            'git_branch' => $branch,
+            'previous_git_branch' => $previousBranch,
         ];
     }
 
@@ -468,5 +567,25 @@ class ApplicationSourceService
             app(\App\Services\DevForge\Core\CoreResourceCatalog::class),
             $this->githubAppCatalog,
         );
+    }
+
+    private function commitsMatch(?string $deployed, ?string $remote): ?bool
+    {
+        if ($deployed === null || $remote === null) {
+            return null;
+        }
+
+        $left = strtolower(trim($deployed));
+        $right = strtolower(trim($remote));
+
+        if ($left === '' || $right === '' || $left === 'head' || $right === 'head') {
+            return null;
+        }
+
+        if ($left === $right) {
+            return true;
+        }
+
+        return str_starts_with($left, $right) || str_starts_with($right, $left);
     }
 }

@@ -144,11 +144,9 @@ class AgentSessionService
     {
         $session = $this->findForUser($agent, $user, $sessionUuid);
 
-        if ($session->isLegacyShared()) {
-            throw new \InvalidArgumentException('La session historique partagée ne peut pas être supprimée.');
-        }
-
-        if ($session->user_id !== $user->id) {
+        // Sessions App · … (user_id null) : accessibles à l’équipe ; les sessions
+        // personnelles restent limitées au propriétaire (findForUser + check).
+        if (! $session->isLegacyShared() && $session->user_id !== $user->id) {
             throw new \InvalidArgumentException('Vous ne pouvez pas supprimer cette session.');
         }
 
@@ -157,7 +155,6 @@ class AgentSessionService
 
         if (Schema::hasTable('ai_agent_session_preferences')) {
             AiAgentSessionPreference::query()
-                ->where('user_id', $user->id)
                 ->where('agent_id', $agent->id)
                 ->where('session_id', $sessionId)
                 ->delete();

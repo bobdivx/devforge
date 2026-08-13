@@ -57,7 +57,7 @@ export function SessionHistoryList({
         <ul class="space-y-2 p-2">
             {sessions.map((session) => {
                 const selected = selectedUuid === session.uuid;
-                const canDelete = Boolean(onDelete) && !session.is_legacy;
+                const canDelete = Boolean(onDelete);
                 const deleting = deletingUuid === session.uuid;
 
                 return (
@@ -92,12 +92,14 @@ export function SessionHistoryList({
                                     <span>{sessionPreview(session)}</span>
                                 </p>
                             </div>
-                            <ChevronRight class={`mt-2 size-4 shrink-0 ${selected ? 'text-primary' : 'text-base-content/30'}`} aria-hidden />
+                            {!canDelete && (
+                                <ChevronRight class={`mt-2 size-4 shrink-0 ${selected ? 'text-primary' : 'text-base-content/30'}`} aria-hidden />
+                            )}
                         </button>
                         {canDelete && (
                             <button
                                 type="button"
-                                class="btn btn-ghost btn-xs absolute end-2 top-2 size-8 min-h-8 p-0 text-error/80 hover:bg-error/10 hover:text-error"
+                                class="btn btn-ghost btn-xs absolute end-1.5 top-1.5 z-10 size-8 min-h-8 p-0 text-error hover:bg-error/15 hover:text-error"
                                 title="Supprimer la conversation"
                                 aria-label={`Supprimer ${session.title}`}
                                 disabled={deleting}

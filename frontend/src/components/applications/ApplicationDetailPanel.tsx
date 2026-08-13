@@ -65,7 +65,7 @@ import {
 } from '../../lib/application-config';
 import { applicationTabs, parseApplicationTab, type ApplicationTabId } from '../../lib/application-tabs';
 import { canVisitApplication, resolveCoreResourceActions } from '../../lib/core-resource-actions';
-import { domainApi, type ApplicationReadiness, type CoreAction } from '../../lib/domain-api';
+import { domainApi, type ApplicationReadiness, type CoreAction, type GithubBranch } from '../../lib/domain-api';
 import { isDeploymentActive, isDeploymentCancellable } from '../../lib/deployment-status';
 import { pickFocusedDeployment } from '../../lib/pick-focused-deployment';
 import { partitionDeploymentAttempts } from '../../lib/partition-deployment-attempts';
@@ -86,6 +86,19 @@ const actionIcons = {
     restart: RotateCw,
     deploy: Rocket,
 };
+
+function gitSyncLabel(upToDate: boolean | null, available: boolean): { text: string; tone: 'success' | 'warning' | 'neutral' } {
+    if (!available) {
+        return { text: 'Sync Git indisponible', tone: 'neutral' };
+    }
+    if (upToDate === true) {
+        return { text: 'À jour avec GitHub', tone: 'success' };
+    }
+    if (upToDate === false) {
+        return { text: 'Nouvelle version sur GitHub', tone: 'warning' };
+    }
+    return { text: 'Statut Git inconnu', tone: 'neutral' };
+}
 
 type DetailRowProps = {
     label: string;
@@ -404,6 +417,7 @@ export function ApplicationDetailPanel({
     const resourceQuery = useApiQuery(`core:applications:${uuid}`, () => domainApi.coreResource('applications', uuid));
     const deploymentsQuery = useApiQuery(`deployments:${uuid}`, () => domainApi.deployments(1, uuid, 8));
     const readinessQuery = useApiQuery(`readiness:${uuid}`, () => domainApi.applicationReadiness(uuid));
+    const gitSyncQuery = useApiQuery(`git-sync:${uuid}`, () => domainApi.applicationGitSync(uuid));
     const [activeTab, setActiveTab] = useState<ApplicationTabId>(initialTab);
     const [acting, setActing] = useState<CoreAction | null>(null);
     const [pendingAction, setPendingAction] = useState<CoreAction | null>(null);
@@ -418,6 +432,10 @@ export function ApplicationDetailPanel({
     const [renaming, setRenaming] = useState(false);
     const [renameError, setRenameError] = useState<string | null>(null);
     const [featureRequestOpen, setFeatureRequestOpen] = useState(false);
+    const [deployBranch, setDeployBranch] = useState<string>('');
+    const [deployBranches, setDeployBranches] = useState<GithubBranch[]>([]);
+    const [deployBranchesLoading, setDeployBranchesLoading] = useState(false);
+    const [deployBranchesError, setDeployBranchesError] = useState<string | null>(null);
 
     const resource = resourceQuery.data?.data;
     const status = resource?.status ?? 'unknown';
@@ -433,6 +451,10 @@ export function ApplicationDetailPanel({
     const attemptBuckets = partitionDeploymentAttempts(deployments, focusedDeploymentUuid);
     const hasActiveDeployment = deployments.some((deployment) => isDeploymentActive(deployment.status));
     const readiness = readinessQuery.data?.data ?? null;
+    const gitSync = gitSyncQuery.data?.data ?? null;
+    const syncBadge = gitSync
+        ? gitSyncLabel(gitSync.up_to_date, gitSync.available)
+        : null;
 
     const focusDeployment = (deploymentUuid: string, pinned = false) => {
         setFocusedDeploymentUuid(deploymentUuid);
@@ -449,7 +471,65 @@ export function ApplicationDetailPanel({
         setPendingCancelUuid(null);
         setCancellingUuid(null);
         setCancelError(null);
+        setDeployBranch('');
+        setDeployBranches([]);
+        setDeployBranchesError(null);
     }, [uuid, initialTab]);
+
+    useEffect(() => {
+        if (pendingAction !== 'deploy' || !resource) {
+            return;
+        }
+
+        let cancelled = false;
+        setDeployBranchesLoading(true);
+        setDeployBranchesError(null);
+        setDeployBranch(config?.git_branch ?? '');
+
+        void (async () => {
+            try {
+                const source = await domainApi.applicationSourceInfo(resource.uuid);
+                const info = source.data;
+                if (cancelled) {
+                    return;
+                }
+
+                const currentBranch = info.git_branch ?? config?.git_branch ?? '';
+                setDeployBranch(currentBranch);
+
+                if (!info.available || !info.github_app_uuid || !info.owner || !info.repo) {
+                    setDeployBranches(currentBranch ? [{ name: currentBranch, protected: false }] : []);
+                    return;
+                }
+
+                const branchesResponse = await domainApi.githubBranches(info.github_app_uuid, info.owner, info.repo);
+                if (cancelled) {
+                    return;
+                }
+
+                const branches = branchesResponse.data ?? [];
+                if (currentBranch && !branches.some((branch) => branch.name === currentBranch)) {
+                    setDeployBranches([{ name: currentBranch, protected: false }, ...branches]);
+                } else {
+                    setDeployBranches(branches);
+                }
+            } catch {
+                if (!cancelled) {
+                    setDeployBranchesError('Impossible de charger les branches GitHub.');
+                    const fallback = config?.git_branch ?? '';
+                    setDeployBranches(fallback ? [{ name: fallback, protected: false }] : []);
+                }
+            } finally {
+                if (!cancelled) {
+                    setDeployBranchesLoading(false);
+                }
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [pendingAction, resource?.uuid, config?.git_branch]);
 
     useEffect(() => {
         const syncTabFromUrl = () => {
@@ -481,23 +561,25 @@ export function ApplicationDetailPanel({
             void deploymentsQuery.reload({ silent: true });
             void resourceQuery.reload({ silent: true });
             void readinessQuery.reload({ silent: true });
+            void gitSyncQuery.reload({ silent: true });
         };
 
         refreshStatus();
         const interval = window.setInterval(refreshStatus, 3000);
 
         return () => window.clearInterval(interval);
-    }, [hasActiveDeployment, uuid, deploymentsQuery.reload, resourceQuery.reload, readinessQuery.reload]);
+    }, [hasActiveDeployment, uuid, deploymentsQuery.reload, resourceQuery.reload, readinessQuery.reload, gitSyncQuery.reload]);
 
     useEffect(() => {
         if (hadActiveDeploymentRef.current && !hasActiveDeployment) {
             void deploymentsQuery.reload({ silent: true });
             void resourceQuery.reload({ silent: true });
             void readinessQuery.reload({ silent: true });
+            void gitSyncQuery.reload({ silent: true });
         }
 
         hadActiveDeploymentRef.current = hasActiveDeployment;
-    }, [hasActiveDeployment, deploymentsQuery.reload, resourceQuery.reload, readinessQuery.reload]);
+    }, [hasActiveDeployment, deploymentsQuery.reload, resourceQuery.reload, readinessQuery.reload, gitSyncQuery.reload]);
 
     useEffect(() => {
         if (!readiness || !shouldPollApplicationReadiness(readiness.status)) {
@@ -517,7 +599,12 @@ export function ApplicationDetailPanel({
     };
 
     const reload = async () => {
-        await Promise.all([resourceQuery.reload(), deploymentsQuery.reload(), readinessQuery.reload()]);
+        await Promise.all([
+            resourceQuery.reload(),
+            deploymentsQuery.reload(),
+            readinessQuery.reload(),
+            gitSyncQuery.reload(),
+        ]);
     };
 
     const runAction = async (action: CoreAction, payload?: { force?: boolean }) => {
@@ -528,6 +615,10 @@ export function ApplicationDetailPanel({
         setActing(action);
         setActionError(null);
         try {
+            if (action === 'deploy' && deployBranch.trim() !== '' && deployBranch !== (config?.git_branch ?? '')) {
+                await domainApi.updateApplicationGitBranch(resource.uuid, deployBranch.trim());
+            }
+
             const response = await domainApi.coreAction('applications', resource.uuid, action, payload);
             const deploymentUuid = typeof response.data?.deployment_uuid === 'string'
                 ? response.data.deployment_uuid
@@ -722,24 +813,34 @@ export function ApplicationDetailPanel({
                         </div>
                         <ActionToolbar class="w-full min-w-0 sm:w-auto">
                             {visit && (
-                                <a class="btn btn-primary btn-sm rounded-full" href={visit} rel="noreferrer" target="_blank">
+                                <a
+                                    class="btn btn-primary btn-sm rounded-full"
+                                    href={visit}
+                                    rel="noreferrer"
+                                    target="_blank"
+                                    aria-label="Visiter"
+                                    title="Visiter"
+                                >
                                     <ExternalLink class="size-3.5" aria-hidden />
-                                    Visiter
+                                    <span class="action-toolbar-label">Visiter</span>
                                 </a>
                             )}
                             {canAct && (
                                 <button
                                     class="btn btn-ghost btn-sm rounded-full border border-base-300/80"
                                     type="button"
+                                    aria-label="Nouvelle fonctionnalité"
+                                    title="Nouvelle fonctionnalité"
                                     onClick={() => setFeatureRequestOpen(true)}
                                 >
                                     <Sparkles class="size-3.5" aria-hidden />
-                                    Nouvelle fonctionnalité
+                                    <span class="action-toolbar-label">Nouvelle fonctionnalité</span>
                                 </button>
                             )}
                             {canAct && availableActions.map((action) => {
                                 const Icon = actionIcons[action];
                                 const primary = action === 'deploy';
+                                const label = acting === action ? 'En cours…' : actionLabels[action];
 
                                 return (
                                     <button
@@ -747,6 +848,8 @@ export function ApplicationDetailPanel({
                                         type="button"
                                         disabled={acting !== null}
                                         key={action}
+                                        aria-label={label}
+                                        title={label}
                                         onClick={() => {
                                             if (['stop', 'restart', 'deploy'].includes(action)) {
                                                 setPendingAction(action);
@@ -756,13 +859,19 @@ export function ApplicationDetailPanel({
                                         }}
                                     >
                                         <Icon class="size-3.5" aria-hidden />
-                                        {acting === action ? 'En cours…' : actionLabels[action]}
+                                        <span class="action-toolbar-label">{label}</span>
                                     </button>
                                 );
                             })}
-                            <button class="btn btn-ghost btn-sm rounded-full border border-base-300/80" type="button" onClick={() => void reload()}>
+                            <button
+                                class="btn btn-ghost btn-sm rounded-full border border-base-300/80"
+                                type="button"
+                                aria-label="Actualiser"
+                                title="Actualiser"
+                                onClick={() => void reload()}
+                            >
                                 <RefreshCw class="size-3.5" aria-hidden />
-                                Actualiser
+                                <span class="action-toolbar-label">Actualiser</span>
                             </button>
                         </ActionToolbar>
                     </div>
@@ -792,8 +901,11 @@ export function ApplicationDetailPanel({
                                         <p class="text-sm font-semibold">Production</p>
                                         <p class="text-xs text-base-content/50">
                                             Aperçu, domaines et source
-                                            {latest
-                                                ? ` · dernier déploiement ${relativeUpdatedAt(latest.finished_at ?? latest.created_at)}`
+                                            {gitSync?.deployed_at || latest
+                                                ? ` · dernier déploiement ${relativeUpdatedAt(gitSync?.deployed_at ?? latest?.finished_at ?? latest?.created_at ?? null)}`
+                                                : ''}
+                                            {syncBadge && gitSync?.available
+                                                ? ` · ${syncBadge.text}`
                                                 : ''}
                                         </p>
                                     </div>
@@ -836,20 +948,58 @@ export function ApplicationDetailPanel({
                                             )}
                                         </DetailRow>
                                         <DetailRow label="Source">
-                                            <div class="grid gap-1">
-                                                <span class="inline-flex items-center gap-2">
-                                                    <GitBranch class="size-3.5 text-base-content/45" aria-hidden />
-                                                    <span class="font-medium">{config.git_branch ?? 'branche inconnue'}</span>
+                                            <div class="grid gap-1.5">
+                                                <span class="inline-flex min-w-0 flex-wrap items-center gap-2">
+                                                    <GitBranch class="size-3.5 shrink-0 text-base-content/45" aria-hidden />
+                                                    <span class="font-medium">{gitSync?.git_branch ?? config.git_branch ?? 'branche inconnue'}</span>
                                                     {config.git_repository && (
                                                         <span class="truncate text-xs text-base-content/50">
                                                             {repositoryLabel(config.git_repository)}
                                                         </span>
                                                     )}
                                                 </span>
-                                                {latest?.commit && (
+                                                {(gitSync?.deployed_at || latest) && (
+                                                    <span class="text-xs text-base-content/55">
+                                                        Dernier déploiement
+                                                        {' '}
+                                                        {relativeUpdatedAt(gitSync?.deployed_at ?? latest?.finished_at ?? latest?.created_at ?? null)}
+                                                        {(gitSync?.deployed_at || latest?.finished_at || latest?.created_at)
+                                                            ? ` · ${formatDateTime(gitSync?.deployed_at ?? latest?.finished_at ?? latest?.created_at ?? null)}`
+                                                            : ''}
+                                                    </span>
+                                                )}
+                                                {(gitSync?.deployed_commit || latest?.commit) && (
                                                     <span class="break-words font-mono text-xs text-base-content/55">
-                                                        {shortCommit(latest.commit)}
-                                                        {latest.commit_message ? ` · ${latest.commit_message}` : ''}
+                                                        {shortCommit(gitSync?.deployed_commit ?? latest?.commit ?? null)}
+                                                        {(gitSync?.deployed_commit_message || latest?.commit_message)
+                                                            ? ` · ${gitSync?.deployed_commit_message ?? latest?.commit_message}`
+                                                            : ''}
+                                                    </span>
+                                                )}
+                                                {syncBadge && (
+                                                    <span
+                                                        class={`inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                                                            syncBadge.tone === 'success'
+                                                                ? 'border-success/30 bg-success/10 text-success'
+                                                                : syncBadge.tone === 'warning'
+                                                                    ? 'border-warning/30 bg-warning/10 text-warning'
+                                                                    : 'border-base-300/80 bg-base-200/70 text-base-content/55'
+                                                        }`}
+                                                        title={gitSync?.remote_error ?? undefined}
+                                                    >
+                                                        {syncBadge.tone === 'success' ? (
+                                                            <Check class="size-3.5" aria-hidden />
+                                                        ) : syncBadge.tone === 'warning' ? (
+                                                            <CircleAlert class="size-3.5" aria-hidden />
+                                                        ) : (
+                                                            <GitBranch class="size-3.5" aria-hidden />
+                                                        )}
+                                                        {gitSyncQuery.loading && !gitSync ? 'Vérification GitHub…' : syncBadge.text}
+                                                        {gitSync?.remote_head_sha && gitSync.up_to_date === false && (
+                                                            <span class="font-mono font-normal opacity-80">
+                                                                {shortCommit(gitSync.remote_head_sha)}
+                                                            </span>
+                                                        )}
                                                     </span>
                                                 )}
                                             </div>
@@ -1195,6 +1345,37 @@ export function ApplicationDetailPanel({
                                         <span class="font-medium text-base-content">{resource.name}</span>
                                         » ?
                                     </p>
+                                    <label class="grid gap-1.5">
+                                        <span class="text-xs font-medium uppercase tracking-wide text-base-content/45">
+                                            Branche GitHub
+                                        </span>
+                                        <select
+                                            class="select select-bordered w-full"
+                                            value={deployBranch}
+                                            disabled={deployBranchesLoading || acting === 'deploy'}
+                                            onChange={(event) => setDeployBranch((event.target as HTMLSelectElement).value)}
+                                        >
+                                            {deployBranchesLoading && deployBranches.length === 0 && (
+                                                <option value={deployBranch || config?.git_branch || ''}>
+                                                    Chargement des branches…
+                                                </option>
+                                            )}
+                                            {deployBranches.map((branch) => (
+                                                <option key={branch.name} value={branch.name}>
+                                                    {branch.name}
+                                                    {branch.protected ? ' (protégée)' : ''}
+                                                </option>
+                                            ))}
+                                            {!deployBranchesLoading && deployBranches.length === 0 && (
+                                                <option value={deployBranch || config?.git_branch || ''}>
+                                                    {deployBranch || config?.git_branch || 'Branche inconnue'}
+                                                </option>
+                                            )}
+                                        </select>
+                                        {deployBranchesError && (
+                                            <span class="text-xs text-warning">{deployBranchesError}</span>
+                                        )}
+                                    </label>
                                     <ul class="list-disc space-y-1 pl-5 text-base-content/65">
                                         <li>
                                             <span class="font-medium text-base-content">Reconstruire l’image</span>

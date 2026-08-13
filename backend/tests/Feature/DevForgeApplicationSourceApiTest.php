@@ -257,3 +257,67 @@ it('blocks cross-team application source write', function () {
         ])
         ->assertNotFound();
 });
+
+it('returns git sync status against github head', function () {
+    Http::fake([
+        'https://api.github.com/zen' => Http::response('Keep it logically awesome.', 200, [
+            'Date' => now()->toRfc7231String(),
+        ]),
+        'https://api.github.com/app/installations/67890/access_tokens' => Http::response([
+            'token' => 'fake-installation-token',
+        ], 201),
+        'https://api.github.com/repos/acme/demo-app/git/ref/heads/main' => Http::response([
+            'ref' => 'refs/heads/main',
+            'object' => ['sha' => 'abcdef1234567890abcdef1234567890abcdef12'],
+        ], 200),
+    ]);
+
+    \App\Models\ApplicationDeploymentQueue::create([
+        'application_id' => $this->application->id,
+        'deployment_uuid' => 'deploy-sync-1',
+        'server_id' => $this->server->id,
+        'status' => \App\Enums\ApplicationDeploymentStatus::FINISHED->value,
+        'pull_request_id' => 0,
+        'commit' => 'abcdef1234567890abcdef1234567890abcdef12',
+        'commit_message' => 'feat: sync check',
+        'finished_at' => now(),
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/applications/'.$this->application->uuid.'/git-sync')
+        ->assertSuccessful()
+        ->assertJsonPath('data.available', true)
+        ->assertJsonPath('data.git_branch', 'main')
+        ->assertJsonPath('data.deployed_commit', 'abcdef1234567890abcdef1234567890abcdef12')
+        ->assertJsonPath('data.remote_head_sha', 'abcdef1234567890abcdef1234567890abcdef12')
+        ->assertJsonPath('data.up_to_date', true);
+});
+
+it('updates application git branch without redeploying', function () {
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson('/api/devforge/v1/applications/'.$this->application->uuid.'/git-branch', [
+            'git_branch' => 'feature/deploy-picker',
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.ok', true)
+        ->assertJsonPath('data.unchanged', false)
+        ->assertJsonPath('data.git_branch', 'feature/deploy-picker')
+        ->assertJsonPath('data.previous_git_branch', 'main')
+        ->assertJsonPath('data.application.configuration.git_branch', 'feature/deploy-picker');
+
+    expect($this->application->fresh()->git_branch)->toBe('feature/deploy-picker');
+    expect($this->application->fresh()->git_commit_sha)->toBe('HEAD');
+});
+
+it('rejects an invalid git branch update', function () {
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson('/api/devforge/v1/applications/'.$this->application->uuid.'/git-branch', [
+            'git_branch' => 'bad;branch',
+        ])
+        ->assertUnprocessable();
+
+    expect($this->application->fresh()->git_branch)->toBe('main');
+});

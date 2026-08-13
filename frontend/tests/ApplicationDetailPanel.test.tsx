@@ -142,6 +142,51 @@ describe('ApplicationDetailPanel', () => {
             if (url.includes('/api/devforge/v1/agents')) {
                 return jsonResponse({ data: [] });
             }
+            if (url.includes('/git-sync')) {
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        reason: null,
+                        git_branch: 'dev',
+                        git_repository: 'https://github.com/example/popcorn-web',
+                        owner: 'example',
+                        repo: 'popcorn-web',
+                        github_app_uuid: 'gh-app-1',
+                        deployed_commit: '84f8e3ef12ab',
+                        deployed_commit_message: 'fix(auth): allow registration',
+                        deployed_at: '2026-04-27T10:05:00.000Z',
+                        remote_head_sha: '84f8e3ef12ab999',
+                        up_to_date: true,
+                        remote_error: null,
+                    },
+                });
+            }
+            if (/\/applications\/[^/]+\/source$/.test(url)) {
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        reason: null,
+                        git_repository: 'https://github.com/example/popcorn-web',
+                        git_branch: 'dev',
+                        git_commit_sha: 'HEAD',
+                        base_directory: '',
+                        initial_path: '',
+                        owner: 'example',
+                        repo: 'popcorn-web',
+                        github_app_uuid: 'gh-app-1',
+                        github_app_name: 'DevForge GitHub',
+                        html_url: 'https://github.com/example/popcorn-web/tree/dev',
+                    },
+                });
+            }
+            if (url.includes('/branches')) {
+                return jsonResponse({
+                    data: [
+                        { name: 'dev', protected: false },
+                        { name: 'main', protected: false },
+                    ],
+                });
+            }
             throw new Error(`URL inattendue : ${url}`);
         });
 
@@ -169,6 +214,7 @@ describe('ApplicationDetailPanel', () => {
         );
         expect(screen.getByText('Production')).toBeInTheDocument();
         expect(screen.getByText(/84f8e3e · fix\(auth\): allow registration/)).toBeInTheDocument();
+        expect(await screen.findByText('À jour avec GitHub')).toBeInTheDocument();
         expect(screen.getByRole('link', { name: 'Visiter' })).toHaveAttribute('href', 'https://popcornn.app');
         expect(screen.getByRole('button', { name: 'Déployer' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Arrêter' })).toBeInTheDocument();
@@ -237,6 +283,51 @@ describe('ApplicationDetailPanel', () => {
             }
             if (url.includes('/api/devforge/v1/agents')) {
                 return jsonResponse({ data: [] });
+            }
+            if (url.includes('/git-sync')) {
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        reason: null,
+                        git_branch: 'dev',
+                        git_repository: 'https://github.com/example/popcorn-web',
+                        owner: 'example',
+                        repo: 'popcorn-web',
+                        github_app_uuid: 'gh-app-1',
+                        deployed_commit: '84f8e3ef12ab',
+                        deployed_commit_message: 'fix(auth): allow registration',
+                        deployed_at: '2026-04-27T10:05:00.000Z',
+                        remote_head_sha: '84f8e3ef12ab999',
+                        up_to_date: true,
+                        remote_error: null,
+                    },
+                });
+            }
+            if (/\/applications\/[^/]+\/source$/.test(url)) {
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        reason: null,
+                        git_repository: 'https://github.com/example/popcorn-web',
+                        git_branch: 'dev',
+                        git_commit_sha: 'HEAD',
+                        base_directory: '',
+                        initial_path: '',
+                        owner: 'example',
+                        repo: 'popcorn-web',
+                        github_app_uuid: 'gh-app-1',
+                        github_app_name: 'DevForge GitHub',
+                        html_url: 'https://github.com/example/popcorn-web/tree/dev',
+                    },
+                });
+            }
+            if (url.includes('/branches')) {
+                return jsonResponse({
+                    data: [
+                        { name: 'dev', protected: false },
+                        { name: 'main', protected: false },
+                    ],
+                });
             }
             throw new Error(`URL inattendue : ${url}`);
         });
@@ -321,6 +412,51 @@ describe('ApplicationDetailPanel', () => {
             }
             if (url.includes('/api/devforge/v1/agents')) {
                 return jsonResponse({ data: [] });
+            }
+            if (url.includes('/git-sync')) {
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        reason: null,
+                        git_branch: 'dev',
+                        git_repository: 'https://github.com/example/popcorn-web',
+                        owner: 'example',
+                        repo: 'popcorn-web',
+                        github_app_uuid: 'gh-app-1',
+                        deployed_commit: '84f8e3ef12ab',
+                        deployed_commit_message: 'fix(auth): allow registration',
+                        deployed_at: '2026-04-27T10:05:00.000Z',
+                        remote_head_sha: '84f8e3ef12ab999',
+                        up_to_date: true,
+                        remote_error: null,
+                    },
+                });
+            }
+            if (/\/applications\/[^/]+\/source$/.test(url)) {
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        reason: null,
+                        git_repository: 'https://github.com/example/popcorn-web',
+                        git_branch: 'dev',
+                        git_commit_sha: 'HEAD',
+                        base_directory: '',
+                        initial_path: '',
+                        owner: 'example',
+                        repo: 'popcorn-web',
+                        github_app_uuid: 'gh-app-1',
+                        github_app_name: 'DevForge GitHub',
+                        html_url: 'https://github.com/example/popcorn-web/tree/dev',
+                    },
+                });
+            }
+            if (url.includes('/branches')) {
+                return jsonResponse({
+                    data: [
+                        { name: 'dev', protected: false },
+                        { name: 'main', protected: false },
+                    ],
+                });
             }
             throw new Error(`URL inattendue : ${url}`);
         });
@@ -455,6 +591,51 @@ describe('ApplicationDetailPanel', () => {
             if (url.includes('/api/devforge/v1/agents')) {
                 return jsonResponse({ data: [] });
             }
+            if (url.includes('/git-sync')) {
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        reason: null,
+                        git_branch: 'dev',
+                        git_repository: 'https://github.com/example/popcorn-web',
+                        owner: 'example',
+                        repo: 'popcorn-web',
+                        github_app_uuid: 'gh-app-1',
+                        deployed_commit: '84f8e3ef12ab',
+                        deployed_commit_message: 'fix(auth): allow registration',
+                        deployed_at: '2026-04-27T10:05:00.000Z',
+                        remote_head_sha: '84f8e3ef12ab999',
+                        up_to_date: true,
+                        remote_error: null,
+                    },
+                });
+            }
+            if (/\/applications\/[^/]+\/source$/.test(url)) {
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        reason: null,
+                        git_repository: 'https://github.com/example/popcorn-web',
+                        git_branch: 'dev',
+                        git_commit_sha: 'HEAD',
+                        base_directory: '',
+                        initial_path: '',
+                        owner: 'example',
+                        repo: 'popcorn-web',
+                        github_app_uuid: 'gh-app-1',
+                        github_app_name: 'DevForge GitHub',
+                        html_url: 'https://github.com/example/popcorn-web/tree/dev',
+                    },
+                });
+            }
+            if (url.includes('/branches')) {
+                return jsonResponse({
+                    data: [
+                        { name: 'dev', protected: false },
+                        { name: 'main', protected: false },
+                    ],
+                });
+            }
             throw new Error(`URL inattendue : ${url}`);
         });
 
@@ -582,6 +763,51 @@ describe('ApplicationDetailPanel', () => {
             if (url.includes('/api/devforge/v1/agents')) {
                 return jsonResponse({ data: [] });
             }
+            if (url.includes('/git-sync')) {
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        reason: null,
+                        git_branch: 'dev',
+                        git_repository: 'https://github.com/example/popcorn-web',
+                        owner: 'example',
+                        repo: 'popcorn-web',
+                        github_app_uuid: 'gh-app-1',
+                        deployed_commit: '84f8e3ef12ab',
+                        deployed_commit_message: 'fix(auth): allow registration',
+                        deployed_at: '2026-04-27T10:05:00.000Z',
+                        remote_head_sha: '84f8e3ef12ab999',
+                        up_to_date: true,
+                        remote_error: null,
+                    },
+                });
+            }
+            if (/\/applications\/[^/]+\/source$/.test(url)) {
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        reason: null,
+                        git_repository: 'https://github.com/example/popcorn-web',
+                        git_branch: 'dev',
+                        git_commit_sha: 'HEAD',
+                        base_directory: '',
+                        initial_path: '',
+                        owner: 'example',
+                        repo: 'popcorn-web',
+                        github_app_uuid: 'gh-app-1',
+                        github_app_name: 'DevForge GitHub',
+                        html_url: 'https://github.com/example/popcorn-web/tree/dev',
+                    },
+                });
+            }
+            if (url.includes('/branches')) {
+                return jsonResponse({
+                    data: [
+                        { name: 'dev', protected: false },
+                        { name: 'main', protected: false },
+                    ],
+                });
+            }
             throw new Error(`URL inattendue : ${url}`);
         });
 
@@ -599,5 +825,161 @@ describe('ApplicationDetailPanel', () => {
 
         expect(await screen.findByText('Sélection')).toBeInTheDocument();
         expect(screen.getAllByLabelText('Déploiement en cours')).toHaveLength(1);
+    });
+
+    it('permet de choisir la branche GitHub avant de déployer', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+            const url = String(input);
+            const method = String(init?.method ?? 'GET').toUpperCase();
+
+            if (method === 'PUT' && url.includes('/git-branch')) {
+                return jsonResponse({
+                    data: {
+                        ok: true,
+                        unchanged: false,
+                        application_uuid: application.uuid,
+                        git_branch: 'main',
+                        previous_git_branch: 'dev',
+                        application: {
+                            ...application,
+                            configuration: { ...application.configuration, git_branch: 'main' },
+                        },
+                    },
+                });
+            }
+
+            if (method === 'POST' && url.includes('/deploy')) {
+                return jsonResponse({
+                    data: {
+                        resource_uuid: application.uuid,
+                        resource_type: 'application',
+                        action: 'deploy',
+                        queued: true,
+                        deployment_uuid: 'deploy-new-1',
+                    },
+                });
+            }
+
+            if (url.includes('/api/devforge/v1/core/applications/app-uuid-1234')) {
+                return jsonResponse({ data: application });
+            }
+            if (url.includes('/api/devforge/v1/deployments')) {
+                return jsonResponse({ data: [], meta: { total: 0 } });
+            }
+            if (url.includes('/linkable-databases')) {
+                return jsonResponse({ data: [], meta: { connections: [] } });
+            }
+            if (url.includes('/readiness')) {
+                return jsonResponse({
+                    data: {
+                        uuid: 'readiness-1',
+                        status: 'idle',
+                        autonomous_enabled: true,
+                        last_probe_at: null,
+                        last_probe_ok: null,
+                        last_probe_error: null,
+                        last_http_status: null,
+                        round: 0,
+                        max_rounds: 5,
+                        last_deployment_uuid: null,
+                        probe_url: 'https://popcornn.app',
+                        intervention: null,
+                    },
+                });
+            }
+            if (url.includes('/api/devforge/v1/agents')) {
+                return jsonResponse({ data: [] });
+            }
+            if (url.includes('/git-sync')) {
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        reason: null,
+                        git_branch: 'dev',
+                        git_repository: 'https://github.com/example/popcorn-web',
+                        owner: 'example',
+                        repo: 'popcorn-web',
+                        github_app_uuid: 'gh-app-1',
+                        deployed_commit: '84f8e3ef12ab',
+                        deployed_commit_message: 'fix(auth): allow registration',
+                        deployed_at: '2026-04-27T10:05:00.000Z',
+                        remote_head_sha: 'aaaaaaaaaaaa',
+                        up_to_date: false,
+                        remote_error: null,
+                    },
+                });
+            }
+            if (/\/applications\/[^/]+\/source$/.test(url)) {
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        reason: null,
+                        git_repository: 'https://github.com/example/popcorn-web',
+                        git_branch: 'dev',
+                        git_commit_sha: 'HEAD',
+                        base_directory: '',
+                        initial_path: '',
+                        owner: 'example',
+                        repo: 'popcorn-web',
+                        github_app_uuid: 'gh-app-1',
+                        github_app_name: 'DevForge GitHub',
+                        html_url: 'https://github.com/example/popcorn-web/tree/dev',
+                    },
+                });
+            }
+            if (url.includes('/branches')) {
+                return jsonResponse({
+                    data: [
+                        { name: 'dev', protected: false },
+                        { name: 'main', protected: false },
+                    ],
+                });
+            }
+            if (url.includes('/sanctum/csrf-cookie')) {
+                return new Response(null, { status: 204 });
+            }
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(
+            <ApplicationDetailPanel
+                uuid="app-uuid-1234"
+                canAct
+                onClose={() => undefined}
+                onChanged={async () => undefined}
+            />,
+        );
+
+        expect(await screen.findByText('Nouvelle version sur GitHub')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Déployer' }));
+
+        const branchSelect = await screen.findByLabelText('Branche GitHub') as HTMLSelectElement;
+        await waitFor(() => {
+            expect(branchSelect).toHaveValue('dev');
+            expect(branchSelect.options.length).toBeGreaterThan(1);
+        });
+
+        await act(async () => {
+            branchSelect.value = 'main';
+            fireEvent.change(branchSelect);
+        });
+        expect(branchSelect).toHaveValue('main');
+
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: 'Reconstruire l’image' }));
+        });
+
+        await waitFor(() => {
+            expect(fetchMock.mock.calls.some(([requestUrl, init]) => (
+                String(requestUrl).includes('/git-branch')
+                && String(init?.method ?? '').toUpperCase() === 'PUT'
+            ))).toBe(true);
+        });
+        await waitFor(() => {
+            expect(fetchMock.mock.calls.some(([requestUrl, init]) => (
+                String(requestUrl).includes('/deploy')
+                && String(init?.method ?? '').toUpperCase() === 'POST'
+            ))).toBe(true);
+        });
     });
 });
