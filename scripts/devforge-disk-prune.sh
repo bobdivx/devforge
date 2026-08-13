@@ -23,8 +23,14 @@ else
   echo "builder prune: skipped (permission or unsupported)"
 fi
 
-# Stopped containers
-docker container prune -f || true
+# Stopped Coolify/DevForge managed ephemerals ONLY.
+# Never unfiltered container prune: that deletes stopped platform DBs (ENOSPC recovery).
+docker container prune -f \
+  --filter "label=coolify.managed=true" \
+  --filter "label!=coolify.proxy=true" \
+  --filter "label!=coolify.type=database" \
+  --filter "label!=coolify.type=application" \
+  --filter "label!=coolify.type=service" || true
 
 df -h "${DISK_PATH}" || true
 

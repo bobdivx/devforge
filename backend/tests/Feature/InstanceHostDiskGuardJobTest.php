@@ -21,6 +21,15 @@ it('exposes critical and emergency thresholds', function () {
         ->toBeGreaterThan(InstanceHostDiskGuardJob::CRITICAL_THRESHOLD);
 });
 
+it('never runs an unfiltered container prune in emergency mode', function () {
+    $source = file_get_contents(app_path('Jobs/DevForge/InstanceHostDiskGuardJob.php'));
+
+    expect($source)
+        ->toContain('label=coolify.managed=true')
+        ->toContain('label!=coolify.type=database')
+        ->not->toContain('docker container prune -f 2>/dev/null || true');
+});
+
 it('does nothing when localhost server is missing', function () {
     Queue::fake();
 

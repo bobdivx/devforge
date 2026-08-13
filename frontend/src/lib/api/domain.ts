@@ -1250,7 +1250,9 @@ export type GithubRunner = {
     github_runner_id?: number | null;
     github_labels?: string[];
     github_repo?: string | null;
-    source?: 'docker' | 'github' | 'both';
+    source?: 'docker' | 'github' | 'both' | 'managed';
+    managed?: boolean;
+    managed_uuid?: string | null;
     linked_applications?: GithubRunnerLinkedApplication[];
 };
 

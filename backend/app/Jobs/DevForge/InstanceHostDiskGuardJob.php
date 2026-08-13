@@ -85,16 +85,18 @@ class InstanceHostDiskGuardJob implements ShouldBeUnique, ShouldQueue, Silenced
     }
 
     /**
-     * Prune build cache only — never docker image prune -af here:
-     * that can delete postgres/redis while containers are restarting.
+     * Emergency prune must stay safe when Postgres is near ENOSPC.
+     * Never run unfiltered `docker container prune -f` — that can delete
+     * stopped platform containers (devforge-db) and make outages worse.
      */
     private function runEmergencyPrune(Server $server): void
     {
         $commands = [
             'docker builder prune -af 2>/dev/null || true',
             'sudo DOCKER_CONFIG=/DATA/.docker docker buildx prune -af 2>/dev/null || true',
-            'docker container prune -f 2>/dev/null || true',
             'docker image prune -f 2>/dev/null || true',
+            // Same filters as CleanupDocker — managed ephemerals only.
+            'docker container prune -f --filter "label=coolify.managed=true" --filter "label!=coolify.proxy=true" --filter "label!=coolify.type=database" --filter "label!=coolify.type=application" --filter "label!=coolify.type=service" 2>/dev/null || true',
         ];
 
         foreach ($commands as $command) {

@@ -331,6 +331,21 @@ it('protects current infrastructure images from any registry even when no applic
     expect(preg_match($pattern, 'nginx:alpine'))->toBe(0);
 });
 
+it('protects github runner images from prune pattern', function () {
+    $helperVersion = 'helper';
+    $realtimeVersion = 'realtime';
+    $escapedHelperVersion = preg_replace('/([.\\\\+*?\[\]^$(){}|])/', '\\\\$1', $helperVersion);
+    $escapedRealtimeVersion = preg_replace('/([.\\\\+*?\[\]^$(){}|])/', '\\\\$1', $realtimeVersion);
+
+    $infraPattern = "(^|\\/)bobdivx\\/devforge:{$escapedHelperVersion}$|(^|\\/)bobdivx\\/devforge:{$escapedRealtimeVersion}$|(^|\\/)bobdivx\\/devforge-(helper|realtime)(:|$)|(^|\\/)postgres(:|$)|(^|\\/)redis(:|$)|(^|\\/)redis\\/redis-stack(:|$)|(^|\\/)[^\\/]*popcorn-github-runner[^:]*(:|$)|(^|\\/)myoung34\\/github-runner(:|$)";
+    $pattern = "/{$infraPattern}/";
+
+    expect(preg_match($pattern, 'ghcr.io/bobdivx/popcorn-github-runner-client:latest'))->toBe(1);
+    expect(preg_match($pattern, 'ghcr.io/bobdivx/popcorn-github-runner-server:latest'))->toBe(1);
+    expect(preg_match($pattern, 'myoung34/github-runner:latest'))->toBe(1);
+    expect(preg_match($pattern, 'nginx:alpine'))->toBe(0);
+});
+
 it('deletes build images not matching retained regular images', function () {
     // Simulates the Nixpacks scenario from issue #8765:
     // Many -build images accumulate because they were excluded from both cleanup paths

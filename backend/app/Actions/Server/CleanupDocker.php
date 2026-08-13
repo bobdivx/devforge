@@ -110,7 +110,8 @@ class CleanupDocker
         $escapedRealtimeVersion = preg_replace('/([.\\\\+*?\[\]^$(){}|])/', '\\\\$1', $realtimeImageVersion);
         // Also protect platform DB/cache images so a prune never removes them
         // while containers are briefly stopped/recreating (ENOSPC recovery).
-        $infraExcludePattern = "(^|/)bobdivx/devforge:{$escapedHelperVersion}$|(^|/)bobdivx/devforge:{$escapedRealtimeVersion}$|(^|/)bobdivx/devforge-(helper|realtime)(:|$)|(^|/)postgres(:|$)|(^|/)redis(:|$)|(^|/)redis/redis-stack(:|$)";
+        // Protect self-hosted GitHub runner images similarly.
+        $infraExcludePattern = "(^|/)bobdivx/devforge:{$escapedHelperVersion}$|(^|/)bobdivx/devforge:{$escapedRealtimeVersion}$|(^|/)bobdivx/devforge-(helper|realtime)(:|$)|(^|/)postgres(:|$)|(^|/)redis(:|$)|(^|/)redis/redis-stack(:|$)|(^|/)[^/]*popcorn-github-runner[^:]*(:|$)|(^|/)myoung34/github-runner(:|$)";
 
         // Delete unused images that:
         // - Are not application images (don't match app repos)
@@ -130,7 +131,7 @@ class CleanupDocker
 
         $commands[] = "docker images --format '{{.Repository}}:{{.Tag}}' | ".
             $grepCommands.' | '.
-            "xargs -r -I {} sh -c 'docker inspect --format \"{{{{index .Config.Labels \\\"coolify.managed\\\"}}}}\" \"{}\" 2>/dev/null | grep -q true || docker rmi \"{}\" 2>/dev/null' || true";
+            "xargs -r -I {} sh -c 'docker inspect --format \"{{{{index .Config.Labels \\\"coolify.managed\\\"}}}} {{{{index .Config.Labels \\\"com.devforge.runner\\\"}}}}\" \"{}\" 2>/dev/null | grep -Eq \"true\" || docker rmi \"{}\" 2>/dev/null' || true";
 
         return implode(' && ', $commands);
     }

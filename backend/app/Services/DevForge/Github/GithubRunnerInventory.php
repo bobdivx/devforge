@@ -2,6 +2,7 @@
 
 namespace App\Services\DevForge\Github;
 
+use App\Models\GithubManagedRunner;
 use App\Models\Server;
 use App\Models\Team;
 use App\Support\ValidationPatterns;
@@ -44,10 +45,12 @@ class GithubRunnerInventory
                 ->values();
 
             // List stays fast: GitHub status only from existing cache entries (no cold API calls).
-            return $this->applicationLinker->enrichRunners(
+            $enriched = $this->applicationLinker->enrichRunners(
                 $team,
                 $this->enrichWithGithubStatus($team, $runners, allowColdFetch: false),
-            )
+            );
+
+            return $this->mergeManagedDesiredState($team, $enriched)
                 ->sortBy([
                     ['server_name', 'asc'],
                     ['name', 'asc'],
@@ -427,6 +430,24 @@ class GithubRunnerInventory
             ];
         }
 
+        $this->persistManagedRunner($team, $server, [
+            'container_name' => $containerName,
+            'runner_name' => $validated['runner_name'],
+            'owner' => $validated['owner'],
+            'repo' => $validated['repo'],
+            'repo_url' => $repoUrl,
+            'image' => $image,
+            'labels' => $labels,
+            'network_mode' => $networkMode,
+            'timezone' => $timezone,
+            'replace_existing' => $replaceExisting,
+            'pull_image' => $pullImage,
+            'volumes' => $volumes,
+            'extra_env' => $extraEnv,
+            'auth_mode' => $authMode,
+            'github_app_id' => $githubApp?->id,
+        ]);
+
         return [
             'message' => 'Runner créé et démarré.',
             'runner' => $this->attachCreateLinks($team, $server->uuid, $containerName, $validated['application_links'] ?? [], $runner),
@@ -484,6 +505,11 @@ class GithubRunnerInventory
 
         $this->removeContainer($server, $containerName);
         $this->applicationLinker->detachAllForRunner($team, $serverUuid, $containerName);
+        GithubManagedRunner::query()
+            ->where('team_id', $team->id)
+            ->where('server_uuid', $serverUuid)
+            ->where('container_name', $containerName)
+            ->delete();
         $this->forgetRunnerCaches($team, $server);
 
         return [
@@ -600,10 +626,206 @@ class GithubRunnerInventory
             '--label '.escapeshellarg('com.devforge.runner.name='.$runnerName),
             '--label '.escapeshellarg('com.devforge.runner.auth_mode='.$authMode),
             '--label '.escapeshellarg('com.casaos.app_id=github-runners'),
+            '--label '.escapeshellarg('coolify.managed=true'),
+            '--label '.escapeshellarg('coolify.type=service'),
             escapeshellarg($image),
         ];
 
         return implode(' ', $parts);
+    }
+
+    public function isContainerRunning(Server $server, string $containerName): bool
+    {
+        $this->assertValidContainerName($containerName);
+
+        try {
+            $state = trim((string) instant_remote_process([
+                'docker inspect -f {{.State.Running}} '.escapeshellarg($containerName).' 2>/dev/null || true',
+            ], $server));
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return $state === 'true';
+    }
+
+    public function recreateFromManaged(Team $team, Server $server, GithubManagedRunner $managed): void
+    {
+        $this->assertValidContainerName($managed->container_name);
+
+        $auth = $this->resolveManagedAuth($managed);
+        $volumes = is_array($managed->volumes) ? $managed->volumes : [];
+        $extraEnv = is_array($managed->extra_env) ? $managed->extra_env : [];
+
+        if ($this->containerExistsByName($server, $managed->container_name)) {
+            $this->removeContainer($server, $managed->container_name);
+        }
+
+        if ($managed->pull_image) {
+            instant_remote_process([
+                'docker pull '.escapeshellarg($managed->image),
+            ], $server);
+        }
+
+        $command = $this->buildDockerRunCommand(
+            containerName: $managed->container_name,
+            image: $managed->image,
+            repoUrl: $managed->repo_url,
+            runnerName: $managed->runner_name,
+            authToken: $auth['token'],
+            authMode: $auth['mode'],
+            labels: (string) ($managed->labels ?: 'self-hosted,devforge'),
+            networkMode: (string) ($managed->network_mode ?: 'bridge'),
+            timezone: (string) ($managed->timezone ?: 'UTC'),
+            replaceExisting: (bool) $managed->replace_existing,
+            volumes: $volumes,
+            extraEnv: $extraEnv,
+        );
+
+        instant_remote_process([$command], $server);
+        $this->forgetRunnerCaches($team, $server);
+    }
+
+    /**
+     * @param  array{
+     *     container_name: string,
+     *     runner_name: string,
+     *     owner: string,
+     *     repo: string,
+     *     repo_url: string,
+     *     image: string,
+     *     labels: string,
+     *     network_mode: string,
+     *     timezone: string,
+     *     replace_existing: bool,
+     *     pull_image: bool,
+     *     volumes: array<int, string>,
+     *     extra_env: array<int, array{key: string, value: string}>,
+     *     auth_mode: string,
+     *     github_app_id: int|null
+     * }  $attributes
+     */
+    public function persistManagedRunner(Team $team, Server $server, array $attributes): GithubManagedRunner
+    {
+        return GithubManagedRunner::query()->updateOrCreate(
+            [
+                'team_id' => $team->id,
+                'server_uuid' => $server->uuid,
+                'container_name' => $attributes['container_name'],
+            ],
+            [
+                'runner_name' => $attributes['runner_name'],
+                'owner' => $attributes['owner'],
+                'repo' => $attributes['repo'],
+                'repo_url' => $attributes['repo_url'],
+                'image' => $attributes['image'],
+                'labels' => $attributes['labels'],
+                'network_mode' => $attributes['network_mode'],
+                'timezone' => $attributes['timezone'],
+                'replace_existing' => $attributes['replace_existing'],
+                'pull_image' => $attributes['pull_image'],
+                'volumes' => $attributes['volumes'],
+                'extra_env' => $attributes['extra_env'],
+                'auth_mode' => $attributes['auth_mode'],
+                'github_app_id' => $attributes['github_app_id'],
+                'enabled' => true,
+                'last_reconcile_error' => null,
+            ],
+        );
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $runners
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function mergeManagedDesiredState(Team $team, Collection $runners): Collection
+    {
+        $byKey = $runners->keyBy(fn (array $runner): string => (string) ($runner['server_uuid'] ?? '').':'.(string) ($runner['name'] ?? ''));
+
+        $managed = GithubManagedRunner::query()
+            ->where('team_id', $team->id)
+            ->where('enabled', true)
+            ->get();
+
+        foreach ($managed as $desired) {
+            $key = $desired->runnerKey();
+            if ($byKey->has($key)) {
+                $existing = $byKey->get($key);
+                $byKey->put($key, [
+                    ...$existing,
+                    'managed' => true,
+                    'managed_uuid' => $desired->uuid,
+                ]);
+
+                continue;
+            }
+
+            $serverName = Server::query()->where('uuid', $desired->server_uuid)->value('name');
+
+            $byKey->put($key, [
+                'id' => $key,
+                'name' => $desired->container_name,
+                'container_id' => null,
+                'image' => $desired->image,
+                'state' => 'missing',
+                'status' => 'Absent — relance prévue',
+                'created' => null,
+                'server_uuid' => $desired->server_uuid,
+                'server_name' => $serverName ?: $desired->server_uuid,
+                'repo_url' => $desired->repo_url,
+                'runner_name' => $desired->runner_name,
+                'github_status' => null,
+                'github_busy' => null,
+                'github_runner_id' => null,
+                'github_repo' => $desired->owner.'/'.$desired->repo,
+                'source' => 'managed',
+                'managed' => true,
+                'managed_uuid' => $desired->uuid,
+                'linked_applications' => $this->applicationLinker->linksForRunner(
+                    $team,
+                    $desired->server_uuid,
+                    $desired->container_name,
+                ),
+            ]);
+        }
+
+        return $byKey->values();
+    }
+
+    /**
+     * @return array{token: string, mode: string}
+     */
+    private function resolveManagedAuth(GithubManagedRunner $managed): array
+    {
+        $app = $managed->github_app_id
+            ? \App\Models\GithubApp::query()->find($managed->github_app_id)
+            : null;
+
+        if ($managed->auth_mode === 'pat') {
+            $pat = trim((string) ($app?->packages_token ?? ''));
+            if ($pat === '') {
+                throw ValidationException::withMessages([
+                    'auth' => ['PAT manquant sur la GitHub App liée au runner.'],
+                ]);
+            }
+
+            return ['token' => $pat, 'mode' => 'pat'];
+        }
+
+        if ($app) {
+            $pat = trim((string) ($app->packages_token ?? ''));
+            if ($pat !== '') {
+                return ['token' => $pat, 'mode' => 'pat'];
+            }
+
+            $registration = $this->githubAppCatalog->registrationToken($app, $managed->owner, $managed->repo);
+
+            return ['token' => (string) $registration['token'], 'mode' => 'registration'];
+        }
+
+        throw ValidationException::withMessages([
+            'auth' => ['Impossible de résoudre l’authentification du runner géré.'],
+        ]);
     }
 
     /**
