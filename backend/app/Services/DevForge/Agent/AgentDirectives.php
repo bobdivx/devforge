@@ -173,9 +173,39 @@ class AgentDirectives
         };
     }
 
-    public static function autonomyRules(): string
+    /**
+     * Consigne de langue en tête de prompt — les modèles (Gemini, Qwen…) ignorent
+     * souvent une règle « Réponds en français » enterrée en fin de liste.
+     * Ne pas citer d’autres langues : les nommer pousse certains modèles à basculer.
+     */
+    public static function outputLanguageRules(): string
     {
         return <<<'RULES'
+            LANGUE OBLIGATOIRE : français.
+            Tous les textes destinés à l’utilisateur (résumés, diagnostics, titres, steps, notifications) sont en français.
+            Les extraits de logs, commandes, chemins et messages d’erreur techniques peuvent rester tels quels.
+            RULES;
+    }
+
+    /**
+     * Idéogrammes / syllabaires d’Asie de l’Est dans un texte utilisateur (fuite de modèle).
+     */
+    public static function containsCjkScript(?string $text): bool
+    {
+        if ($text === null || trim($text) === '') {
+            return false;
+        }
+
+        return (bool) preg_match('/\p{Han}|\p{Hiragana}|\p{Katakana}|\p{Hangul}/u', $text);
+    }
+
+    public static function autonomyRules(): string
+    {
+        $language = self::outputLanguageRules();
+
+        return <<<RULES
+            {$language}
+
             MODE AUTONOME ACTIF — tu travailles sans intervention humaine.
 
         Règles impératives :
@@ -200,8 +230,8 @@ class AgentDirectives
             sync_application_proxy_labels (régénère Traefik loadbalancer.port depuis ports_exposes),
             éventuellement update_application_runtime_settings(ports_exposes) si le port d’écoute diffère, puis redeploy/restart.
         13. Après un deploy mis en file : résume et arrête — ne poll pas les logs en boucle.
-        14. Termine par un résumé structuré : constats → actions prises → recommandations.
-        15. Réponds en français.
+        14. Termine par un résumé structuré en français : constats → actions prises → recommandations.
+        15. LANGUE : français uniquement pour tout texte utilisateur (voir consigne en tête).
         16. Ne dis JAMAIS « je n'ai pas accès » sans avoir tenté enable_tool_package, list_tool_packages, fix_application_host_permissions ou fix_coolify_base_config_path.
         17. INTERDIT de refuser la tâche en citant Coolify ou un « produit non renseigné » — tu es dans DevForge avec des outils réels.
         18. INTERDIT d'écrire du Python, du pseudo-code ou des playbooks texte : émets uniquement des tool_calls natifs.
@@ -212,7 +242,11 @@ class AgentDirectives
 
     public static function chatAutonomyRules(): string
     {
-        return <<<'RULES'
+        $language = self::outputLanguageRules();
+
+        return <<<RULES
+            {$language}
+
             COMPORTEMENT CHAT — autonomie style agent Cursor (comme en mode autonome).
 
         Règles impératives :
@@ -226,14 +260,18 @@ class AgentDirectives
         7. Enchaîne les outils jusqu'à une réponse complète basée sur des données réelles.
         8. Le paquet github est activé par défaut pour les agents de déploiement et debug ; utilise list_application_source / read_application_source en priorité pour le code source.
         9. Pour une sous-problème isolée et complexe, utilise spawn_task (async) puis yield_wait ; review le handoff avant de répondre à l’utilisateur.
-        10. Réponds en français. Sois concis dans le résumé final, pas avant d'avoir agi.
+        10. LANGUE : français uniquement. Sois concis dans le résumé final, pas avant d'avoir agi.
         11. Ne révèle jamais de secrets.
         RULES;
     }
 
     public static function chatPlanFirstRules(): string
     {
-        return <<<'RULES'
+        $language = self::outputLanguageRules();
+
+        return <<<RULES
+            {$language}
+
             MODE PLAN-FIRST (style Grok Build) — diagnostique librement, modifie seulement après plan approuvé.
 
         Règles impératives :
@@ -243,7 +281,7 @@ class AgentDirectives
         3. Après propose_plan, ARRÊTE — n’enchaîne pas d’outils mutateurs dans le même tour.
         4. Une fois le plan approuvé par l’utilisateur, exécute les steps avec de vrais tool_calls.
         5. INTERDIT de décrire un outil en prose : émets un vrai tool_call.
-        6. Réponds en français. Ne révèle jamais de secrets.
+        6. LANGUE : français uniquement. Ne révèle jamais de secrets.
         RULES;
     }
 

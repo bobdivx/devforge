@@ -342,6 +342,42 @@ it('surfaces unexpected create failures with the underlying message', function (
         ->assertJsonPath('message', 'Impossible de créer le runner : ssh: connection refused');
 });
 
+it('recreates a github runner', function () {
+    $fake = Mockery::mock(GithubRunnerInventory::class);
+    $fake->shouldReceive('action')
+        ->once()
+        ->with(
+            Mockery::type(Team::class),
+            $this->server->uuid,
+            'github-runner-server',
+            'recreate',
+        )
+        ->andReturn([
+            'ok' => true,
+            'action' => 'recreate',
+            'message' => 'Runner recréé (image tirée). Vérifiez « Version: 2.336.0 » dans les logs.',
+            'runner' => [
+                'id' => $this->server->uuid.':github-runner-server',
+                'name' => 'github-runner-server',
+                'state' => 'running',
+                'server_uuid' => $this->server->uuid,
+                'server_name' => 'zimacube',
+                'runner_version' => '2.336.0',
+                'node24_ready' => true,
+            ],
+        ]);
+
+    $this->app->instance(GithubRunnerInventory::class, $fake);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/github/runners/'.$this->server->uuid.'/github-runner-server/recreate')
+        ->assertSuccessful()
+        ->assertJsonPath('data.ok', true)
+        ->assertJsonPath('data.action', 'recreate')
+        ->assertJsonPath('message', 'Runner recréé (image tirée). Vérifiez « Version: 2.336.0 » dans les logs.');
+});
+
 it('deletes a github runner', function () {
     $fake = Mockery::mock(GithubRunnerInventory::class);
     $fake->shouldReceive('destroy')

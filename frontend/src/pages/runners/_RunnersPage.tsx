@@ -3,6 +3,7 @@ import {
     Play,
     Square,
     RotateCcw,
+    Download,
     Terminal,
     Plus,
     Trash2,
@@ -32,11 +33,14 @@ import {
     coherenceLabel,
     coherenceTone,
     dockerActionAvailability,
+    isRunnerVersionLogLine,
     linkableApplications,
     linkedAppsForRunner,
+    parseRunnerVersion,
     runnerCoherence,
     runnerRepoKey,
     runnerRoleLabel,
+    runnerSupportsNode24,
     type LinkedApplication,
     type RunnerCoherence,
 } from '../../lib/runners/runner-coherence';
@@ -78,6 +82,7 @@ function actionLabel(action: GithubRunnerAction): string {
         start: 'Démarrer',
         stop: 'Arrêter',
         restart: 'Redémarrer',
+        recreate: 'Recréer',
     })[action];
 }
 
@@ -367,13 +372,23 @@ export function RunnersPage() {
         [linkedApps, selectedMeta?.apps],
     );
     const actions = dockerActionAvailability(detailRunner?.state ?? selected?.state);
+    const detectedVersion = detailRunner?.runner_version
+        ?? logData?.runner_version
+        ?? parseRunnerVersion((logData?.items ?? []).map((line) => line.message).join('\n'));
+    const node24Ready = detailRunner?.node24_ready
+        ?? logData?.node24_ready
+        ?? (detectedVersion ? runnerSupportsNode24(detectedVersion) : null);
+    const recommendedVersion = detailRunner?.recommended_runner_version
+        ?? logData?.recommended_runner_version
+        ?? '2.336.0';
+    const minNode24 = detailRunner?.node24_min_version ?? logData?.node24_min_version ?? '2.327.1';
     const pageLoading = runners.loading && !runners.data;
 
     return (
         <>
             <PageHeader
                 title="Runners GitHub"
-                description="Liez vos runners self-hosted aux applications DevForge, suivez la cohérence Docker ↔ GitHub, et pilotez les conteneurs."
+                description="Liez vos runners self-hosted aux applications DevForge, suivez la cohérence Docker ↔ GitHub, et recréez un conteneur (pull image) quand le binaire est trop ancien pour Node 24."
                 eyebrow="CI / CD"
                 actions={(
                     <>
@@ -580,6 +595,16 @@ export function RunnersPage() {
                                             Redémarrer
                                         </button>
                                         <button
+                                            class="btn btn-primary btn-sm"
+                                            type="button"
+                                            disabled={actionBusy || !actions.canRecreate}
+                                            title="Pull l’image et recrée le conteneur (un redémarrage ne change pas le binaire)"
+                                            onClick={() => setPendingAction({ runner: selected, action: 'recreate' })}
+                                        >
+                                            <Download class="size-3.5" aria-hidden />
+                                            Recréer
+                                        </button>
+                                        <button
                                             class="btn btn-ghost btn-sm text-error"
                                             type="button"
                                             disabled={actionBusy}
@@ -634,7 +659,43 @@ export function RunnersPage() {
                                                 <dt class="text-base-content/45">Nom GitHub</dt>
                                                 <dd class="mt-1 font-mono text-[11px]">{detailRunner?.runner_name || '—'}</dd>
                                             </div>
+                                            <div>
+                                                <dt class="text-base-content/45">Binaire runner</dt>
+                                                <dd class="mt-1 flex flex-wrap items-center gap-1.5">
+                                                    {detectedVersion
+                                                        ? <StatusBadge label={detectedVersion} tone={node24Ready ? 'success' : 'error'} />
+                                                        : <span class="text-base-content/45">Non détecté</span>}
+                                                    {node24Ready === true && (
+                                                        <StatusBadge label="Node 24 OK" tone="success" />
+                                                    )}
+                                                    {node24Ready === false && (
+                                                        <StatusBadge label={`Node 24 ≥ ${minNode24}`} tone="error" />
+                                                    )}
+                                                </dd>
+                                            </div>
                                         </dl>
+
+                                        {node24Ready === false && (
+                                            <p class="mt-4 flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+                                                <AlertTriangle class="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                                                <span>
+                                                    Ce runner ({detectedVersion}) est trop ancien pour les actions Node 24
+                                                    (`checkout@v5`, `login-action@v4`, …). Un redémarrage ne suffit pas :
+                                                    utilisez <strong>Recréer</strong> pour tirer l’image et réinstaller
+                                                    le binaire {recommendedVersion}.
+                                                </span>
+                                            </p>
+                                        )}
+
+                                        {detailRunner?.last_reconcile_error && (
+                                            <p class="mt-4 flex items-start gap-2 rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">
+                                                <AlertTriangle class="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                                                <span>
+                                                    <span class="font-medium">Échec de relance automatique : </span>
+                                                    {detailRunner.last_reconcile_error}
+                                                </span>
+                                            </p>
+                                        )}
 
                                         <div class="mt-4">
                                             <p class="mb-2 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
@@ -763,7 +824,11 @@ export function RunnersPage() {
                                             <div>
                                                 <p class="text-sm font-semibold">Logs</p>
                                                 <p class="text-xs text-base-content/50">
-                                                    {logsRefreshing ? 'Mise à jour…' : 'stdout / stderr · refresh auto 15s'}
+                                                    {logsRefreshing
+                                                        ? 'Mise à jour…'
+                                                        : detectedVersion
+                                                            ? `stdout / stderr · binaire ${detectedVersion} · refresh auto 15s`
+                                                            : 'stdout / stderr · cherchez « Version: 2.336.0 » après recréation'}
                                                 </p>
                                             </div>
                                         </div>
@@ -819,7 +884,10 @@ export function RunnersPage() {
                                                         {logData.items.length === 0 ? (
                                                             <p class="text-zinc-500">Aucune ligne de log.</p>
                                                         ) : logData.items.map((line) => (
-                                                            <div key={line.cursor}>
+                                                            <div
+                                                                key={line.cursor}
+                                                                class={isRunnerVersionLogLine(line.message) ? 'text-emerald-300' : undefined}
+                                                            >
                                                                 <span class="me-2 select-none text-zinc-600">{line.cursor}</span>
                                                                 {line.message}
                                                             </div>
@@ -846,7 +914,9 @@ export function RunnersPage() {
                 open={pendingAction !== null}
                 title={pendingAction ? `${actionLabel(pendingAction.action)} ${pendingAction.runner.name}` : ''}
                 message={pendingAction
-                    ? `Confirmer l’action « ${pendingAction.action} » sur le runner ${pendingAction.runner.name} (${pendingAction.runner.server_name}).`
+                    ? (pendingAction.action === 'recreate'
+                        ? `Un redémarrage garde l’ancien binaire. Recréer « ${pendingAction.runner.name} » va : 1) docker pull de l’image, 2) supprimer le conteneur, 3) le relancer avec RUNNER_VERSION ${recommendedVersion}. Vérifiez ensuite « Version: ${recommendedVersion} » dans les logs.`
+                        : `Confirmer l’action « ${pendingAction.action} » sur le runner ${pendingAction.runner.name} (${pendingAction.runner.server_name}).`)
                     : ''}
                 confirmLabel={pendingAction ? actionLabel(pendingAction.action) : 'Confirmer'}
                 tone={pendingAction?.action === 'stop' ? 'danger' : 'primary'}

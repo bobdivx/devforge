@@ -92,22 +92,23 @@ class GithubRunnerInventory
             $presented = $inspected;
         }
 
-        // Prefer cached GitHub status — cold API fetches made every detail view feel stuck.
+        // Detail view: one repo fetch is cheap and is what the GitHub badge is for.
         try {
-            $enriched = $this->enrichWithGithubStatus($team, collect([$presented]), allowColdFetch: false)->first();
+            $enriched = $this->enrichWithGithubStatus($team, collect([$presented]), allowColdFetch: true)->first();
         } catch (\Throwable) {
             $enriched = null;
         }
 
-        return is_array($enriched)
-            ? [
-                ...$enriched,
+        $base = is_array($enriched)
+            ? $enriched
+            : $this->withEmptyGithubFields($presented);
+
+        return $this->withCompatibility(
+            [
+                ...$base,
                 'linked_applications' => $this->applicationLinker->linksForRunner($team, $serverUuid, $containerName),
-            ]
-            : [
-                ...$this->withEmptyGithubFields($presented),
-                'linked_applications' => $this->applicationLinker->linksForRunner($team, $serverUuid, $containerName),
-            ];
+            ],
+        );
     }
 
     /**
@@ -151,6 +152,11 @@ class GithubRunnerInventory
             ];
         }
 
+        $items = $this->parseLines(is_string($rawLogs) ? $rawLogs : '');
+        $version = GithubRunnerCompatibility::parseVersion(
+            collect($items)->pluck('message')->implode("\n"),
+        );
+
         return [
             'available' => true,
             'reason' => null,
@@ -158,7 +164,8 @@ class GithubRunnerInventory
             'container' => $containerName,
             'container_status' => $status,
             'line_count' => $lines,
-            'items' => $this->parseLines(is_string($rawLogs) ? $rawLogs : ''),
+            'items' => $items,
+            ...GithubRunnerCompatibility::payload($version),
         ];
     }
 
@@ -168,21 +175,26 @@ class GithubRunnerInventory
     public function action(Team $team, string $serverUuid, string $containerName, string $action): array
     {
         $action = strtolower($action);
-        if (! in_array($action, ['start', 'stop', 'restart'], true)) {
+        if (! in_array($action, ['start', 'stop', 'restart', 'recreate'], true)) {
             throw ValidationException::withMessages([
-                'action' => ['Action invalide. Utilisez start, stop ou restart.'],
+                'action' => ['Action invalide. Utilisez start, stop, restart ou recreate.'],
             ]);
         }
 
         $server = $this->serverForTeam($team, $serverUuid);
         $this->assertValidContainerName($containerName);
-        $this->findRunner($server, $containerName);
 
         if (! $server->isFunctional()) {
             throw ValidationException::withMessages([
                 'server' => ['Le serveur n’est pas joignable.'],
             ]);
         }
+
+        if ($action === 'recreate') {
+            return $this->recreate($team, $server, $containerName);
+        }
+
+        $this->findRunner($server, $containerName);
 
         match ($action) {
             'start' => $server->startUnmanaged($containerName),
@@ -202,6 +214,63 @@ class GithubRunnerInventory
                 'stop' => 'Runner arrêté.',
                 'restart' => 'Runner redémarré.',
             },
+            'runner' => $runner,
+        ];
+    }
+
+    /**
+     * Pull the image and recreate the container. A restart keeps the old runner binary.
+     *
+     * @return array{ok: bool, action: string, message: string, runner: array<string, mixed>}
+     */
+    public function recreate(Team $team, Server $server, string $containerName): array
+    {
+        $managed = GithubManagedRunner::query()
+            ->where('team_id', $team->id)
+            ->where('server_uuid', $server->uuid)
+            ->where('container_name', $containerName)
+            ->first();
+
+        try {
+            if ($managed) {
+                $managed->forceFill([
+                    'pull_image' => true,
+                    'extra_env' => GithubRunnerCompatibility::withCompatibleExtraEnv(
+                        is_array($managed->extra_env) ? $managed->extra_env : [],
+                    ),
+                ])->save();
+
+                $this->recreateFromManaged($team, $server, $managed);
+            } else {
+                $this->recreateFromInspect($team, $server, $containerName);
+            }
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            throw ValidationException::withMessages([
+                'container' => ['Impossible de recréer le runner : '.$e->getMessage()],
+            ]);
+        }
+
+        usleep(400_000);
+        $this->forgetRunnerCaches($team, $server);
+
+        try {
+            $runner = $this->show($team, $server->uuid, $containerName);
+        } catch (\Throwable) {
+            $runner = [
+                'id' => $server->uuid.':'.$containerName,
+                'name' => $containerName,
+                'state' => 'created',
+                'server_uuid' => $server->uuid,
+                'server_name' => $server->name,
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'action' => 'recreate',
+            'message' => 'Runner recréé (image tirée). Vérifiez « Version: '.GithubRunnerCompatibility::DEFAULT_RUNNER_VERSION.' » dans les logs.',
             'runner' => $runner,
         ];
     }
@@ -315,6 +384,7 @@ class GithubRunnerInventory
             ], true))
             ->values()
             ->all();
+        $extraEnv = GithubRunnerCompatibility::withCompatibleExtraEnv($extraEnv);
 
         $exists = $this->containerExists($server, $containerName);
         if ($exists && ! ($validated['recreate'] ?? false)) {
@@ -615,6 +685,7 @@ class GithubRunnerInventory
             $parts[] = '-e '.escapeshellarg('PAT_TOKEN='.$authToken);
         }
 
+        $extraEnv = GithubRunnerCompatibility::withCompatibleExtraEnv($extraEnv);
         foreach ($extraEnv as $entry) {
             $parts[] = '-e '.escapeshellarg($entry['key'].'='.$entry['value']);
         }
@@ -657,9 +728,13 @@ class GithubRunnerInventory
         $volumes = is_array($managed->volumes) ? $managed->volumes : [];
         $extraEnv = is_array($managed->extra_env) ? $managed->extra_env : [];
 
+        $networkMode = (string) ($managed->network_mode ?: 'bridge');
+
         if ($this->containerExistsByName($server, $managed->container_name)) {
             $this->removeContainer($server, $managed->container_name);
         }
+
+        $this->forgetStaleNetworkEndpoint($server, $managed->container_name, $networkMode);
 
         if ($managed->pull_image) {
             instant_remote_process([
@@ -675,15 +750,183 @@ class GithubRunnerInventory
             authToken: $auth['token'],
             authMode: $auth['mode'],
             labels: (string) ($managed->labels ?: 'self-hosted,devforge'),
-            networkMode: (string) ($managed->network_mode ?: 'bridge'),
+            networkMode: $networkMode,
             timezone: (string) ($managed->timezone ?: 'UTC'),
             replaceExisting: (bool) $managed->replace_existing,
             volumes: $volumes,
             extraEnv: $extraEnv,
         );
 
-        instant_remote_process([$command], $server);
+        try {
+            instant_remote_process([$command], $server);
+        } catch (\Throwable $e) {
+            $this->removeContainerQuietly($server, $managed->container_name);
+            $this->forgetStaleNetworkEndpoint($server, $managed->container_name, $networkMode);
+
+            throw $e;
+        }
+
         $this->forgetRunnerCaches($team, $server);
+    }
+
+    /**
+     * Recreate a CasaOS / unmanaged runner from docker inspect (pull + rm + run).
+     */
+    public function recreateFromInspect(Team $team, Server $server, string $containerName): void
+    {
+        $this->assertValidContainerName($containerName);
+
+        try {
+            $raw = instant_remote_process([
+                'docker inspect '.escapeshellarg($containerName).' --format "{{json .}}"',
+            ], $server, false, false, 20);
+        } catch (\Throwable $e) {
+            throw ValidationException::withMessages([
+                'container' => ['Impossible d’inspecter le conteneur : '.$e->getMessage()],
+            ]);
+        }
+
+        if (! is_string($raw) || blank(trim($raw))) {
+            throw ValidationException::withMessages([
+                'container' => ['Conteneur introuvable. Un redémarrage ne suffit pas : recréez-le depuis DevForge ou CasaOS.'],
+            ]);
+        }
+
+        try {
+            /** @var array<string, mixed>|null $inspect */
+            $inspect = json_decode(trim($raw), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\Throwable) {
+            throw ValidationException::withMessages([
+                'container' => ['Inspect Docker illisible.'],
+            ]);
+        }
+
+        if (! is_array($inspect)) {
+            throw ValidationException::withMessages([
+                'container' => ['Inspect Docker illisible.'],
+            ]);
+        }
+
+        $command = $this->buildDockerRunFromInspect($inspect, $containerName);
+        $image = (string) data_get($inspect, 'Config.Image', '');
+        $networkMode = (string) data_get($inspect, 'HostConfig.NetworkMode', 'bridge');
+
+        if ($image !== '') {
+            try {
+                instant_remote_process([
+                    'docker pull '.escapeshellarg($image),
+                ], $server);
+            } catch (\Throwable $e) {
+                throw ValidationException::withMessages([
+                    'image' => ['Échec du pull de l’image Docker : '.$e->getMessage()],
+                ]);
+            }
+        }
+
+        if ($this->containerExistsByName($server, $containerName)) {
+            $this->removeContainer($server, $containerName);
+        }
+
+        $this->forgetStaleNetworkEndpoint($server, $containerName, $networkMode);
+
+        try {
+            instant_remote_process([$command], $server);
+        } catch (\Throwable $e) {
+            $this->removeContainerQuietly($server, $containerName);
+            $this->forgetStaleNetworkEndpoint($server, $containerName, $networkMode);
+
+            throw $e;
+        }
+
+        $this->forgetRunnerCaches($team, $server);
+    }
+
+    /**
+     * Rebuild `docker run` from inspect, bumping RUNNER_VERSION for Node 24.
+     *
+     * @param  array<string, mixed>  $inspect
+     */
+    public function buildDockerRunFromInspect(array $inspect, string $containerName): string
+    {
+        $this->assertValidContainerName($containerName);
+
+        $image = (string) data_get($inspect, 'Config.Image', data_get($inspect, 'Image', ''));
+        if ($image === '' || preg_match('/^[A-Za-z0-9][A-Za-z0-9._\/:-]*$/', $image) !== 1) {
+            throw ValidationException::withMessages([
+                'image' => ['Image Docker invalide pour la recréation.'],
+            ]);
+        }
+
+        $networkMode = (string) data_get($inspect, 'HostConfig.NetworkMode', 'bridge');
+        if ($networkMode === '' || preg_match('/^[A-Za-z0-9][A-Za-z0-9._:-]*$/', $networkMode) !== 1) {
+            $networkMode = 'bridge';
+        }
+
+        $restart = (string) data_get($inspect, 'HostConfig.RestartPolicy.Name', 'unless-stopped');
+        if (! in_array($restart, ['no', 'always', 'unless-stopped', 'on-failure'], true)) {
+            $restart = 'unless-stopped';
+        }
+
+        $parts = [
+            'docker run -d',
+            '--name '.escapeshellarg($containerName),
+            '--restart '.escapeshellarg($restart),
+            '--network '.escapeshellarg($networkMode),
+        ];
+
+        if ((bool) data_get($inspect, 'HostConfig.Privileged', true)) {
+            $parts[] = '--privileged';
+        }
+
+        foreach ($this->inspectBinds($inspect) as $bind) {
+            if (! $this->isDockerSocketBind($bind)) {
+                $this->assertSafeVolumeMount($bind, 'volumes');
+            }
+            $parts[] = '-v '.escapeshellarg($bind);
+        }
+
+        $envLines = data_get($inspect, 'Config.Env', []);
+        $envLines = is_array($envLines) ? $envLines : [];
+        foreach (GithubRunnerCompatibility::withCompatibleRunnerVersion($envLines) as $line) {
+            if (! is_string($line) || ! str_contains($line, '=')) {
+                continue;
+            }
+            [$key] = explode('=', $line, 2);
+            if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key) !== 1) {
+                continue;
+            }
+            $parts[] = '-e '.escapeshellarg($line);
+        }
+
+        $labels = data_get($inspect, 'Config.Labels', []);
+        if (is_array($labels)) {
+            foreach ($labels as $key => $value) {
+                if (! is_string($key) || $key === '') {
+                    continue;
+                }
+                $parts[] = '--label '.escapeshellarg($key.'='.(string) $value);
+            }
+        }
+
+        $parts[] = escapeshellarg($image);
+
+        return implode(' ', $parts);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function staleNetworkCleanupCommands(string $containerName, string $networkMode = 'bridge'): array
+    {
+        $this->assertValidContainerName($containerName);
+
+        return collect([$networkMode, 'bridge', 'host'])
+            ->map(fn (string $network): string => trim($network))
+            ->filter(fn (string $network): bool => $network !== '' && $network !== 'none')
+            ->unique()
+            ->values()
+            ->map(fn (string $network): string => 'docker network disconnect -f '.escapeshellarg($network).' '.escapeshellarg($containerName).' >/dev/null 2>&1 || true')
+            ->all();
     }
 
     /**
@@ -755,6 +998,8 @@ class GithubRunnerInventory
                     ...$existing,
                     'managed' => true,
                     'managed_uuid' => $desired->uuid,
+                    'last_reconcile_error' => $desired->last_reconcile_error,
+                    'last_reconciled_at' => optional($desired->last_reconciled_at)?->toIso8601String(),
                 ]);
 
                 continue;
@@ -781,6 +1026,8 @@ class GithubRunnerInventory
                 'source' => 'managed',
                 'managed' => true,
                 'managed_uuid' => $desired->uuid,
+                'last_reconcile_error' => $desired->last_reconcile_error,
+                'last_reconciled_at' => optional($desired->last_reconciled_at)?->toIso8601String(),
                 'linked_applications' => $this->applicationLinker->linksForRunner(
                     $team,
                     $desired->server_uuid,
@@ -1298,12 +1545,12 @@ class GithubRunnerInventory
             }
         }
 
-        return [
+        return $this->withCompatibility([
             ...$presented,
             'repo_url' => $presented['repo_url'] ?? $this->envValue($environment, 'REPO_URL'),
             'runner_name' => $this->envValue($environment, 'RUNNER_NAME') ?? $presented['runner_name'],
             'environment' => $environment,
-        ];
+        ], $this->envValue($environment, 'RUNNER_VERSION'));
     }
 
     /**
@@ -1539,6 +1786,31 @@ class GithubRunnerInventory
         }
     }
 
+    private function removeContainerQuietly(Server $server, string $containerName): void
+    {
+        try {
+            instant_remote_process([
+                'docker rm -f '.escapeshellarg($containerName).' >/dev/null 2>&1 || true',
+            ], $server);
+        } catch (\Throwable) {
+            // Best-effort cleanup after a failed docker run that left a "created" container.
+        }
+    }
+
+    private function forgetStaleNetworkEndpoint(Server $server, string $containerName, string $networkMode): void
+    {
+        $commands = $this->staleNetworkCleanupCommands($containerName, $networkMode);
+        if ($commands === []) {
+            return;
+        }
+
+        try {
+            instant_remote_process($commands, $server);
+        } catch (\Throwable) {
+            // Leftover endpoints must not block recreate; docker run will surface a real failure.
+        }
+    }
+
     /**
      * @return array<int, array{cursor: int, message: string}>
      */
@@ -1570,6 +1842,64 @@ class GithubRunnerInventory
             'container_status' => null,
             'line_count' => 0,
             'items' => [],
+            ...GithubRunnerCompatibility::payload(null),
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $runner
+     * @return array<string, mixed>
+     */
+    private function withCompatibility(array $runner, ?string $version = null): array
+    {
+        $resolved = $version
+            ?? $this->envValue(is_array($runner['environment'] ?? null) ? $runner['environment'] : [], 'RUNNER_VERSION')
+            ?? GithubRunnerCompatibility::parseVersion((string) ($runner['status'] ?? ''));
+
+        return [
+            ...$runner,
+            ...GithubRunnerCompatibility::payload($resolved),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $inspect
+     * @return array<int, string>
+     */
+    private function inspectBinds(array $inspect): array
+    {
+        $binds = data_get($inspect, 'HostConfig.Binds', []);
+        if (is_array($binds) && $binds !== []) {
+            return collect($binds)
+                ->filter(fn ($bind): bool => is_string($bind) && trim($bind) !== '')
+                ->values()
+                ->all();
+        }
+
+        $mounts = data_get($inspect, 'Mounts', []);
+        if (! is_array($mounts)) {
+            return [];
+        }
+
+        $fromMounts = [];
+        foreach ($mounts as $mount) {
+            if (! is_array($mount) || (string) ($mount['Type'] ?? '') !== 'bind') {
+                continue;
+            }
+            $source = (string) ($mount['Source'] ?? '');
+            $destination = (string) ($mount['Destination'] ?? '');
+            if ($source === '' || $destination === '') {
+                continue;
+            }
+            $mode = ($mount['RW'] ?? true) === false ? 'ro' : 'rw';
+            $fromMounts[] = $source.':'.$destination.':'.$mode;
+        }
+
+        return $fromMounts;
+    }
+
+    private function isDockerSocketBind(string $volume): bool
+    {
+        return str_contains($volume, 'docker.sock');
     }
 }

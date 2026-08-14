@@ -227,5 +227,41 @@ it('replaces noisy llm summaries', function () {
     expect($this->summarizer->shouldReplaceSummary('', 'ok'))->toBeTrue()
         ->and($this->summarizer->shouldReplaceSummary(str_repeat('x', 400), 'ok'))->toBeTrue()
         ->and($this->summarizer->shouldReplaceSummary("ligne1\nligne2\nligne3\nligne4", 'ok'))->toBeTrue()
-        ->and($this->summarizer->shouldReplaceSummary('Build corrigé.', 'ok'))->toBeFalse();
+        ->and($this->summarizer->shouldReplaceSummary('Build corrigé.', 'ok'))->toBeFalse()
+        ->and($this->summarizer->shouldReplaceSummary('从日志信息来看，构建过程在 astro build 步骤时失败了', 'ok'))->toBeTrue();
+});
+
+it('does not surface cjk llm dumps as correction diagnosis', function () {
+    $run = AiAgentRun::factory()->create([
+        'agent_id' => $this->agent->id,
+        'status' => 'failed',
+        'summary' => '从日志信息来看，构建过程在 astro build 步骤时失败了，因为 Node.js 版本不被 Astro 支持。',
+        'metadata' => [
+            'correction_actions' => [[
+                'kind' => 'attempt_failed',
+                'label' => 'fix_coolify_base_config_path',
+                'detail' => 'Error response from daemon: No such container: coolify',
+                'ok' => false,
+            ]],
+        ],
+    ]);
+
+    $summary = $this->summarizer->summarize($run);
+
+    expect($summary['outcome'])->toBe('failed')
+        ->and($summary['headline'])->toBe('Échec de l’intervention agent.')
+        ->and($summary['diagnosis'])->toBeNull();
+});
+
+it('strips cjk diagnosis from a persisted correction payload', function () {
+    $sanitized = $this->summarizer->sanitizePersistedCorrection([
+        'outcome' => 'failed',
+        'headline' => 'Échec de l’intervention agent.',
+        'diagnosis' => '从日志信息来看，构建过程在 astro build 步骤时失败了。',
+        'steps' => ['Mettre à jour Node.js', '检查版本'],
+    ]);
+
+    expect($sanitized['diagnosis'])->toBeNull()
+        ->and($sanitized['headline'])->toBe('Échec de l’intervention agent.')
+        ->and($sanitized['steps'])->toBe(['Mettre à jour Node.js']);
 });

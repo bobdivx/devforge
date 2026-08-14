@@ -171,6 +171,7 @@ it('builds docker run commands with volumes network and timezone', function () {
         ->toContain('-e '.escapeshellarg('RUNNER_TOKEN=REGISTRATION_TOKEN'))
         ->toContain('-e '.escapeshellarg('ACCESS_TOKEN=REGISTRATION_TOKEN'))
         ->toContain('-e '.escapeshellarg('RUNNER_LABELS=self-hosted,popcorn'))
+        ->toContain('-e '.escapeshellarg('RUNNER_VERSION=2.336.0'))
         ->toContain('--label '.escapeshellarg('coolify.managed=true'))
         ->toContain('--label '.escapeshellarg('coolify.type=service'))
         ->toContain(escapeshellarg('ghcr.io/bobdivx/popcorn-github-runner-client:latest'));
@@ -209,4 +210,56 @@ it('builds pat auth without runner_token env', function () {
         ->toContain('-e '.escapeshellarg('PAT_TOKEN=ghp_exampletoken'))
         ->toContain('--label '.escapeshellarg('com.devforge.runner.auth_mode=pat'))
         ->not->toContain('RUNNER_TOKEN=');
+});
+
+it('disconnects leftover docker network endpoints before recreate', function () {
+    $inventory = new GithubRunnerInventory(Mockery::mock(GithubAppCatalog::class), Mockery::mock(App\Services\DevForge\Github\GithubRunnerApplicationLinker::class));
+
+    $commands = $inventory->staleNetworkCleanupCommands('github-runner-popcorn-server', 'host');
+
+    expect($commands)->toHaveCount(2)
+        ->and($commands[0])->toContain('docker network disconnect -f '.escapeshellarg('host'))
+        ->and($commands[0])->toContain(escapeshellarg('github-runner-popcorn-server'))
+        ->and($commands[1])->toContain('docker network disconnect -f '.escapeshellarg('bridge'));
+});
+
+it('rebuilds docker run from inspect and bumps an old RUNNER_VERSION', function () {
+    $inventory = new GithubRunnerInventory(Mockery::mock(GithubAppCatalog::class), Mockery::mock(App\Services\DevForge\Github\GithubRunnerApplicationLinker::class));
+
+    $command = $inventory->buildDockerRunFromInspect([
+        'Config' => [
+            'Image' => 'ghcr.io/bobdivx/popcorn-github-runner-server:latest',
+            'Env' => [
+                'REPO_URL=https://github.com/bobdivx/popcorn-server',
+                'RUNNER_NAME=casaos-runner-popcorn-server',
+                'RUNNER_VERSION=2.321.0',
+                'ACCESS_TOKEN=ghp_secret',
+                'TZ=Europe/Paris',
+            ],
+            'Labels' => [
+                'com.casaos.app_id' => 'github-runners',
+            ],
+        ],
+        'HostConfig' => [
+            'NetworkMode' => 'host',
+            'Privileged' => true,
+            'RestartPolicy' => ['Name' => 'unless-stopped'],
+            'Binds' => [
+                '/var/run/docker.sock:/var/run/docker.sock',
+                '/media/Docker/AppData/runner/buildx:/home/runner/.docker/buildx',
+            ],
+        ],
+    ], 'github-runner-server');
+
+    expect($command)
+        ->toContain('--name '.escapeshellarg('github-runner-server'))
+        ->toContain('--network '.escapeshellarg('host'))
+        ->toContain('--privileged')
+        ->toContain('-v '.escapeshellarg('/var/run/docker.sock:/var/run/docker.sock'))
+        ->toContain('-v '.escapeshellarg('/media/Docker/AppData/runner/buildx:/home/runner/.docker/buildx'))
+        ->toContain('-e '.escapeshellarg('RUNNER_VERSION=2.336.0'))
+        ->not->toContain('RUNNER_VERSION=2.321.0')
+        ->toContain('-e '.escapeshellarg('ACCESS_TOKEN=ghp_secret'))
+        ->toContain('--label '.escapeshellarg('com.casaos.app_id=github-runners'))
+        ->toContain(escapeshellarg('ghcr.io/bobdivx/popcorn-github-runner-server:latest'));
 });

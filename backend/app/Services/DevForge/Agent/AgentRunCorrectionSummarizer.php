@@ -43,6 +43,33 @@ class AgentRunCorrectionSummarizer
     }
 
     /**
+     * @param  array<string, mixed>  $correction
+     * @return array<string, mixed>
+     */
+    public function sanitizePersistedCorrection(array $correction): array
+    {
+        $diagnosis = $correction['diagnosis'] ?? null;
+        if (is_string($diagnosis) && AgentDirectives::containsCjkScript($diagnosis)) {
+            $correction['diagnosis'] = null;
+        }
+
+        $headline = $correction['headline'] ?? null;
+        if (is_string($headline) && AgentDirectives::containsCjkScript($headline)) {
+            $correction['headline'] = 'Intervention agent terminée.';
+        }
+
+        $steps = $correction['steps'] ?? null;
+        if (is_array($steps)) {
+            $correction['steps'] = array_values(array_filter(
+                $steps,
+                static fn ($step): bool => is_string($step) && ! AgentDirectives::containsCjkScript($step),
+            ));
+        }
+
+        return $correction;
+    }
+
+    /**
      * Persist correction metadata and a concise summary when the LLM dump is noisy.
      */
     public function finalize(AiAgentRun $run): void
@@ -89,6 +116,10 @@ class AgentRunCorrectionSummarizer
         }
 
         if ($current === '') {
+            return true;
+        }
+
+        if (AgentDirectives::containsCjkScript($current)) {
             return true;
         }
 
@@ -712,14 +743,23 @@ class AgentRunCorrectionSummarizer
     {
         $summary = trim((string) ($run->summary ?? ''));
 
-        if ($summary !== '' && $summary !== $headline && mb_strlen($summary) <= self::USELESS_SUMMARY_CHARS) {
+        if (
+            $summary !== ''
+            && $summary !== $headline
+            && mb_strlen($summary) <= self::USELESS_SUMMARY_CHARS
+            && ! AgentDirectives::containsCjkScript($summary)
+        ) {
             return $summary;
         }
 
         $logs = (string) ($run->logs ?? '');
         if (preg_match('/Raisonnement:\s*(.+)$/mu', $logs, $match) === 1) {
             $snippet = trim($match[1]);
-            if ($snippet !== '' && mb_strlen($snippet) <= 220) {
+            if (
+                $snippet !== ''
+                && mb_strlen($snippet) <= 220
+                && ! AgentDirectives::containsCjkScript($snippet)
+            ) {
                 return $snippet;
             }
         }

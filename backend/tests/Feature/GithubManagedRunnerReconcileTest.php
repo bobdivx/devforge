@@ -55,7 +55,8 @@ it('merges managed desired-state runners missing from docker inventory', functio
         ->and($merged->first()['name'])->toBe('github-runner-popcorn-client')
         ->and($merged->first()['state'])->toBe('missing')
         ->and($merged->first()['managed'])->toBeTrue()
-        ->and($merged->first()['repo_url'])->toBe('https://github.com/bobdivx/popcorn-client');
+        ->and($merged->first()['repo_url'])->toBe('https://github.com/bobdivx/popcorn-client')
+        ->and($merged->first())->toHaveKey('last_reconcile_error');
 });
 
 it('marks already running managed runners without recreation', function () {

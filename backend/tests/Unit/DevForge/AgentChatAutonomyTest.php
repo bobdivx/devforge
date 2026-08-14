@@ -361,6 +361,7 @@ it('includes chat autonomy rules and action hint in chat system prompt', functio
     );
 
     expect($prompt)->toContain('autonomie style agent Cursor')
+        ->and($prompt)->toContain('LANGUE OBLIGATOIRE : français.')
         ->and($prompt)->toContain('enable_tool_package')
         ->and($prompt)->toContain('bp68rd8g7pka4g9h0m8nl275');
 });

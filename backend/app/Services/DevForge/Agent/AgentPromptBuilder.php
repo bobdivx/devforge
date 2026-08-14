@@ -173,6 +173,7 @@ class AgentPromptBuilder
             ROLE);
         }
 
+        $languageRules = AgentDirectives::outputLanguageRules();
         $autonomyRules = AgentDirectives::autonomyRules();
         $memoryBlock = $this->memoryPromptBlock($agent, $context);
         $skillsBlock = $this->skillsPromptBlock($agent, $context);
@@ -183,6 +184,8 @@ class AgentPromptBuilder
         }
 
         return trim(<<<PROMPT
+        {$languageRules}
+
         {$basePrompt}
 
         Tu es un agent IA autonome intégré dans DevForge.
@@ -336,8 +339,11 @@ class AgentPromptBuilder
         $mode = AgentChatMode::parse($applicationContext['chat_mode'] ?? 'build');
         $modeBlock = AgentChatMode::systemAddon($mode);
         $layeredBlock = $this->layeredInstructionsBlock($agent, $applicationContext);
+        $languageRules = AgentDirectives::outputLanguageRules();
 
         return trim(<<<PROMPT
+        {$languageRules}
+
         {$basePrompt}
 
         Tu es un agent IA intégré dans DevForge (PaaS auto-hébergé).

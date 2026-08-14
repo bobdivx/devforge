@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
     applicationsWithGit,
+    isRunnerVersionLogLine,
     linkedAppsForRunner,
     normalizeRepoKey,
+    parseRunnerVersion,
     runnerCoherence,
     runnerRepoKey,
+    runnerSupportsNode24,
+    dockerActionAvailability,
 } from '../src/lib/runners/runner-coherence';
 import type { CoreResource, GithubRunner } from '../src/lib/domain-api';
 
@@ -133,5 +137,28 @@ describe('runner-coherence', () => {
 
         expect(linked).toHaveLength(0);
         expect(runnerCoherence(orphanRunner, linked)).toBe('orphan');
+    });
+
+    it('détecte une version runner trop ancienne pour Node 24', () => {
+        expect(parseRunnerVersion('   Version: 2.321.0')).toBe('2.321.0');
+        expect(parseRunnerVersion("Current runner version: '2.336.0'")).toBe('2.336.0');
+        expect(runnerSupportsNode24('2.321.0')).toBe(false);
+        expect(runnerSupportsNode24('2.327.1')).toBe(true);
+        expect(runnerSupportsNode24('2.336.0')).toBe(true);
+        expect(isRunnerVersionLogLine('Runner v2.336.0 pret')).toBe(true);
+        expect(isRunnerVersionLogLine('Listening for Jobs')).toBe(false);
+    });
+
+    it('autorise la recréation même si le runner tourne déjà', () => {
+        expect(dockerActionAvailability('running')).toMatchObject({
+            canStart: false,
+            canStop: true,
+            canRestart: true,
+            canRecreate: true,
+        });
+        expect(dockerActionAvailability('missing')).toMatchObject({
+            canStart: false,
+            canRecreate: true,
+        });
     });
 });

@@ -61,6 +61,25 @@ it('requires tool usage in autonomy rules', function () {
     expect(AgentDirectives::autonomyRules())->toContain('première action DOIT être un appel d\'outil');
 });
 
+it('locks agent output language to french at the start of prompts', function () {
+    $agent = AiAgent::factory()->debug()->make([
+        'name' => 'Debug Test',
+        'team_id' => 1,
+    ]);
+    $agent->setRelation('team', Team::factory()->make(['name' => 'Equipe Test']));
+
+    $rules = AgentDirectives::outputLanguageRules();
+    $system = app(AgentPromptBuilder::class)->autonomousSystemPrompt($agent, [
+        'event' => 'deployment_failed',
+    ]);
+
+    expect($rules)->toContain('LANGUE OBLIGATOIRE : français.')
+        ->and(ltrim(AgentDirectives::autonomyRules()))->toStartWith('LANGUE OBLIGATOIRE : français.')
+        ->and(ltrim($system))->toStartWith('LANGUE OBLIGATOIRE : français.')
+        ->and(AgentDirectives::containsCjkScript('Échec de l’intervention agent.'))->toBeFalse()
+        ->and(AgentDirectives::containsCjkScript('从日志信息来看，构建过程在 astro build 步骤时失败了'))->toBeTrue();
+});
+
 it('requires immediate tool usage in chat autonomy rules', function () {
     expect(AgentDirectives::chatAutonomyRules())->toContain('première réponse à une demande actionnable DOIT inclure');
 });

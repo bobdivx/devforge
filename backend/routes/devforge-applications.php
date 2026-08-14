@@ -221,7 +221,7 @@ Route::prefix('github')->name('github.')->group(function () {
         ->where([
             'serverUuid' => '[A-Za-z0-9-]{8,64}',
             'containerName' => '[A-Za-z0-9][A-Za-z0-9._-]{0,254}',
-            'action' => 'start|stop|restart',
+            'action' => 'start|stop|restart|recreate',
         ])
         ->name('runners.action');
 });

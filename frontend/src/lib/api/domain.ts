@@ -1253,10 +1253,16 @@ export type GithubRunner = {
     source?: 'docker' | 'github' | 'both' | 'managed';
     managed?: boolean;
     managed_uuid?: string | null;
+    last_reconcile_error?: string | null;
+    last_reconciled_at?: string | null;
     linked_applications?: GithubRunnerLinkedApplication[];
+    runner_version?: string | null;
+    node24_ready?: boolean | null;
+    node24_min_version?: string;
+    recommended_runner_version?: string;
 };
 
-export type GithubRunnerAction = 'start' | 'stop' | 'restart';
+export type GithubRunnerAction = 'start' | 'stop' | 'restart' | 'recreate';
 
 export type GithubRunnerAuthMode = 'registration' | 'pat';
 
@@ -1298,6 +1304,10 @@ export type GithubRunnerLogs = {
     container_status: string | null;
     line_count: number;
     items: Array<{ cursor: number; message: string }>;
+    runner_version?: string | null;
+    node24_ready?: boolean | null;
+    node24_min_version?: string;
+    recommended_runner_version?: string;
 };
 
 export type GithubRepository = {
@@ -2724,7 +2734,7 @@ export const domainApi = {
     githubRunnerAction: (serverUuid: string, containerName: string, action: GithubRunnerAction) => mutate<ApiResponse<GithubRunnerActionResult> & { message?: string }>(
         `/github/runners/${encodeURIComponent(serverUuid)}/${encodeURIComponent(containerName)}/${action}`,
         { method: 'POST' },
-        45_000,
+        action === 'recreate' ? 180_000 : 45_000,
     ),
     githubRunners: () => apiFetch<ApiResponse<GithubRunner[]>>(`${API_BASE}/github/runners`, {}, 45_000),
     createApplication: (input: CreateApplicationInput) => mutate<ApiResponse<CoreResource>>('/applications', {

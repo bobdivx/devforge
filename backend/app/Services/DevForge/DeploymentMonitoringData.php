@@ -185,6 +185,8 @@ class DeploymentMonitoringData
             ? $metadata['correction']
             : $this->correctionSummarizer->summarize($run);
 
+        $correction = $this->correctionSummarizer->sanitizePersistedCorrection($correction);
+
         $belongsTo = is_string($correction['belongs_to_deployment_uuid'] ?? null)
             ? $correction['belongs_to_deployment_uuid']
             : null;

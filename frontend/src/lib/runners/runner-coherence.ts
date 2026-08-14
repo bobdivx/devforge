@@ -211,16 +211,53 @@ export function dockerActionAvailability(state: string | null | undefined): {
     canStart: boolean;
     canStop: boolean;
     canRestart: boolean;
+    canRecreate: boolean;
 } {
     const running = isRunnerRunning(state);
     const stopped = isRunnerStopped(state);
     const restarting = (state ?? '').toLowerCase() === 'restarting';
+    const missing = (state ?? '').toLowerCase() === 'missing';
 
     return {
-        canStart: !running && !restarting,
+        canStart: !running && !restarting && !missing,
         canStop: running,
         canRestart: (running || stopped) && !restarting,
+        canRecreate: !restarting,
     };
+}
+
+export function parseRunnerVersion(text: string | null | undefined): string | null {
+    if (!text) {
+        return null;
+    }
+
+    const match = text.match(/(?:Version:\s*|Runner v|actions-runner-linux-x64-|Current runner version:\s*['"]?)(\d+\.\d+\.\d+)/i);
+    return match?.[1] ?? null;
+}
+
+export function isRunnerVersionLogLine(message: string): boolean {
+    return /Version:\s*\d+\.\d+\.\d+|Runner v\d+\.\d+\.\d+|Current runner version/i.test(message);
+}
+
+export function runnerSupportsNode24(version: string | null | undefined, minVersion = '2.327.1'): boolean {
+    if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
+        return false;
+    }
+
+    const parts = version.split('.').map(Number);
+    const min = minVersion.split('.').map(Number);
+    for (let index = 0; index < 3; index += 1) {
+        const left = parts[index] ?? 0;
+        const right = min[index] ?? 0;
+        if (left > right) {
+            return true;
+        }
+        if (left < right) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 export type { GithubRunnerLinkedApplication };
