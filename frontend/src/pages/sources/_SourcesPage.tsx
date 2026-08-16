@@ -83,7 +83,7 @@ export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
             setRequestDrafts((current) => ({ ...current, [uuid]: '' }));
             await agentRequests.reload();
             // Also reload the shared variables since we just added one
-            window.dispatchEvent(new CustomEvent('coolify-reload-shared-variables'));
+            window.dispatchEvent(new CustomEvent('devforge-reload-shared-variables'));
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Enregistrement impossible.');
         } finally {

@@ -43,7 +43,7 @@
                     @endif
                     <div class="md:w-96">
                         <x-forms.checkbox instantSave id="do_not_track"
-                            helper="Opt out of anonymous usage tracking. When enabled, this instance will not report to coolify.io's installation count and will not send error reports to help improve DevForge."
+                            helper="Opt out of anonymous usage tracking. When enabled, this instance will not report to the anonymous installation count and will not send error reports to help improve DevForge."
                             label="Do Not Track" />
                     </div>
                     <h4 class="pt-4">DNS Settings</h4>

@@ -32,9 +32,9 @@ class CaSslCertSeeder extends Seeder
                     "mkdir -p $caCertPath",
                     "chown -R 9999:root $caCertPath",
                     "chmod -R 700 $caCertPath",
-                    "rm -rf $caCertPath/coolify-ca.crt",
-                    "echo '{$base64Cert}' | base64 -d | tee $caCertPath/coolify-ca.crt > /dev/null",
-                    "chmod 644 $caCertPath/coolify-ca.crt",
+                    "rm -rf $caCertPath/ca.crt",
+                    "echo '{$base64Cert}' | base64 -d | tee $caCertPath/ca.crt > /dev/null",
+                    "chmod 644 $caCertPath/ca.crt",
                 ]);
 
                 remote_process($commands, $server);

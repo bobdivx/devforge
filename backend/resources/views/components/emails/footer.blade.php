@@ -3,4 +3,4 @@
 Thank you,<br>
 {{ config('app.name') ?? 'DevForge' }}
 
-{{ Illuminate\Mail\Markdown::parse('[Contact Support](https://coolify.io/docs/contact)') }}
+{{ Illuminate\Mail\Markdown::parse('[Contact Support](https://github.com/bobdivx/devforge') }}

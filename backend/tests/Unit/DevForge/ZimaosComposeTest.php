@@ -49,6 +49,8 @@ it('starts DevForge on ZimaOS with web, proxy, and AppData paths', function (str
         expect($service['image'])->not->toContain('${');
     }
 
+    expect($services['api']['extra_hosts'] ?? [])->toContain('host.docker.internal:host-gateway');
+
     expect($services['proxy']['ports'][0]['published'])->toBe('8080')
         ->and($services['proxy']['volumes'][0]['source'])->toBe('/media/Docker/AppData/devforge/nginx/default.conf')
         ->and($services['web']['image'])->toBe('bobdivx/devforge:web')
@@ -75,3 +77,52 @@ it('starts DevForge on ZimaOS with web, proxy, and AppData paths', function (str
     'import yaml' => 'devforge.zimaos.yaml',
     'canonical yaml' => 'docker'.DIRECTORY_SEPARATOR.'zimaos'.DIRECTORY_SEPARATOR.'devforge.yaml',
 ]);
+
+it('ships a ZimaOS App Store compose with pinned tags and /DATA/AppData volumes', function () {
+    $path = dirname(base_path()).DIRECTORY_SEPARATOR.'docker'.DIRECTORY_SEPARATOR.'zimaos'.DIRECTORY_SEPARATOR.'appstore'.DIRECTORY_SEPARATOR.'DevForge'.DIRECTORY_SEPARATOR.'docker-compose.yml';
+    $compose = zimaosCompose($path);
+    $services = $compose['services'];
+    $casaos = $compose['x-casaos'];
+
+    expect($compose['name'])->toBe('devforge')
+        ->and($services)->toHaveKeys(['proxy', 'web', 'api', 'db', 'redis', 'realtime'])
+        ->and($services['proxy']['image'])->toBe('nginx:1.27.5-alpine')
+        ->and($services['web']['image'])->toBe('bobdivx/devforge:web-4.1.2')
+        ->and($services['api']['image'])->toBe('bobdivx/devforge:4.1.2')
+        ->and($services['realtime']['image'])->toBe('bobdivx/devforge:realtime-4.1.2')
+        ->and($services['db']['image'])->toBe('postgres:15.14-alpine')
+        ->and($services['redis']['image'])->toBe('redis:7.4.5-alpine');
+
+    foreach ($services as $service) {
+        expect($service['image'])->not->toEndWith(':latest')
+            ->and($service['image'])->not->toContain('${')
+            ->and($service['deploy']['resources'] ?? [])->not->toHaveKey('limits');
+    }
+
+    $env = $services['api']['environment'];
+
+    expect(zimaosEnv($env, 'APP_URL'))->toBe('http://localhost:8080')
+        ->and(zimaosEnv($env, 'APP_URL'))->not->toContain('10.1.0.58')
+        ->and(zimaosEnv($env, 'DB_PASSWORD'))->toBe('devforge')
+        ->and(zimaosEnv($env, 'DB_PASSWORD'))->not->toBe('aBVGheEhcY8E8INxMcq063RYhwG6oeM1')
+        ->and(zimaosEnv($env, 'APP_KEY'))->toStartWith('base64:')
+        ->and(strlen((string) base64_decode(substr((string) zimaosEnv($env, 'APP_KEY'), 7), true)))->toBe(32)
+        ->and(zimaosEnv($env, 'APP_KEY'))->not->toContain('kgGufqsNEXfgu1P9CreNMKFdyxxizRyDZxkOUVuuZuE=')
+        ->and(zimaosEnv($env, 'BASE_CONFIG_PATH'))->toBe('/DATA/AppData/$AppID/data')
+        ->and($services['api']['volumes'][0]['source'])->toBe('/var/run/docker.sock')
+        ->and($services['db']['volumes'][0]['source'])->toBe('/DATA/AppData/$AppID/postgres')
+        ->and($services['proxy']['command'][0])->toContain('bobdivx/devforge')
+        ->and($services['proxy']['command'][0])->toContain('nginx.conf');
+
+    expect($casaos['id'])->toBe('io.github.bobdivx.devforge')
+        ->and($casaos['main'])->toBe('proxy')
+        ->and($casaos['category'])->toBe('Developer')
+        ->and($casaos['architectures'])->toBe(['amd64'])
+        ->and($casaos['version'])->toBe('4.1.2')
+        ->and($casaos['port_map'])->toBe('8080')
+        ->and($casaos['title']['en_US'])->toBe('DevForge')
+        ->and($casaos['tagline'])->toHaveKeys(['en_US', 'fr_FR', 'zh_CN'])
+        ->and($casaos['tips']['before_install']['en_US'])->toContain('APP_URL')
+        ->and($casaos['tips']['before_install']['fr_FR'])->toContain('APP_URL')
+        ->and($casaos['icon'])->toContain('frontend/public/brand/logo.png');
+});

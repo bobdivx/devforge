@@ -127,9 +127,9 @@ class RestartProxyJob implements ShouldBeEncrypted, ShouldQueue
                 "mkdir -p $proxy_path/dynamic",
                 "cd $proxy_path",
                 "echo 'Creating required Docker Compose file.'",
-                "echo 'Starting coolify-proxy.'",
+                "echo 'Starting proxy.'",
                 'docker stack deploy --detach=true -c docker-compose.yml coolify-proxy',
-                "echo 'Successfully started coolify-proxy.'",
+                "echo 'Successfully started proxy.'",
             ]);
         } else {
             if (isDev() && $proxyType === ProxyTypes::CADDY->value) {
@@ -148,9 +148,9 @@ class RestartProxyJob implements ShouldBeEncrypted, ShouldQueue
             // Ensure required networks exist BEFORE docker compose up
             $commands = $commands->merge(ensureProxyNetworksExist($this->server));
             $commands = $commands->merge([
-                "echo 'Starting coolify-proxy.'",
+                "echo 'Starting proxy.'",
                 'docker compose up -d --wait --remove-orphans',
-                "echo 'Successfully started coolify-proxy.'",
+                "echo 'Successfully started proxy.'",
             ]);
             $commands = $commands->merge(connectProxyToNetworks($this->server));
         }

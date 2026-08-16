@@ -19,16 +19,16 @@
     <meta name="Description" content="DevForge: An open-source & self-hostable Heroku / Netlify / Vercel alternative" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@coolifyio" />
+    <meta name="twitter:site" content="@devforge" />
     <meta name="twitter:title" content="DevForge" />
     <meta name="twitter:description" content="An open-source & self-hostable Heroku / Netlify / Vercel alternative." />
-    <meta name="twitter:image" content="https://cdn.coollabs.io/assets/coolify/og-image.png" />
+    <meta name="twitter:image" content="/brand/logo.png" />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://coolify.io" />
+    <meta property="og:url" content="https://github.com/bobdivx/devforge" />
     <meta property="og:title" content="DevForge" />
     <meta property="og:description" content="An open-source & self-hostable Heroku / Netlify / Vercel alternative." />
     <meta property="og:site_name" content="DevForge" />
-    <meta property="og:image" content="https://cdn.coollabs.io/assets/coolify/og-image.png" />
+    <meta property="og:image" content="/brand/logo.png" />
     @use('App\Models\InstanceSettings')
     @php
 
@@ -45,9 +45,9 @@
     @endphp
     <title>{{ $name }}{{ $title ?? 'DevForge' }}</title>
     @env('local')
-        <link rel="icon" href="{{ asset('coolify-logo-dev-transparent.png') }}" type="image/png" />
+        <link rel="icon" href="{{ asset('brand/logo.png') }}" type="image/png" />
     @else
-        <link rel="icon" href="{{ asset('coolify-logo.svg') }}" type="image/svg+xml" />
+        <link rel="icon" href="{{ asset('brand/logo.png') }}" type="image/png" />
     @endenv
     <meta name="csrf-token" content="{{ csrf_token() }}">
     @vite(['resources/js/app.js', 'resources/css/app.css'])
@@ -63,7 +63,7 @@
         }
     </style>
     @if (config('app.name') == 'DevForge Cloud')
-        <script defer data-domain="app.coolify.io" src="https://analytics.coollabs.io/js/plausible.js"></script>
+        <script defer data-domain="" src="https://analytics.coollabs.io/js/plausible.js"></script>
         <script src="https://js.sentry-cdn.com/0f8593910512b5cdd48c6da78d4093be.min.js" crossorigin="anonymous"></script>
     @endif
     @auth
@@ -176,7 +176,7 @@
             window.Echo = new EchoConstructor({
                 broadcaster: 'pusher',
                 cluster: "{{ config('constants.pusher.host') }}" || window.location.hostname,
-                key: "{{ config('constants.pusher.app_key') }}" || 'coolify',
+                key: "{{ config('constants.pusher.app_key') }}" || 'devforge',
                 wsHost: "{{ config('constants.pusher.host') }}" || window.location.hostname,
                 wsPort: "{{ getRealtime() }}",
                 wssPort: "{{ getRealtime() }}",

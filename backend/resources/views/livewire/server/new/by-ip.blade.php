@@ -15,7 +15,7 @@
             <x-forms.input id="user" label="User" required />
             <div class="text-xs dark:text-warning text-coollabs ">Non-root user is experimental: <a
                     class="font-bold underline" target="_blank"
-                    href="https://coolify.io/docs/knowledge-base/server/non-root-user">docs</a>.</div>
+                    href="https://github.com/bobdivx/devforge">docs</a>.</div>
             <x-forms.select label="Private Key" id="private_key_id">
                 <option disabled>Select a private key</option>
                 @foreach ($private_keys as $key)

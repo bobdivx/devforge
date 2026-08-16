@@ -43,9 +43,9 @@ class StartProxy
                 "mkdir -p $proxy_path/dynamic",
                 "cd $proxy_path",
                 "echo 'Creating required Docker Compose file.'",
-                "echo 'Starting coolify-proxy.'",
+                "echo 'Starting proxy.'",
                 'docker stack deploy --detach=true -c docker-compose.yml coolify-proxy',
-                "echo 'Successfully started coolify-proxy.'",
+                "echo 'Successfully started proxy.'",
             ]);
         } else {
             if (isDev()) {
@@ -62,7 +62,7 @@ class StartProxy
                 "echo 'Pulling docker image.'",
                 'docker compose pull',
                 'if docker ps -a --format "{{.Names}}" | grep -q "^coolify-proxy$"; then',
-                "    echo 'Stopping and removing existing coolify-proxy.'",
+                "    echo 'Stopping and removing existing proxy.'",
                 '    docker stop coolify-proxy 2>/dev/null || true',
                 '    docker rm -f coolify-proxy 2>/dev/null || true',
                 '    # Wait for container to be fully removed',
@@ -70,18 +70,18 @@ class StartProxy
                 '        if ! docker ps -a --format "{{.Names}}" | grep -q "^coolify-proxy$"; then',
                 '            break',
                 '        fi',
-                '        echo "Waiting for coolify-proxy to be removed... ($i/10)"',
+                '        echo "Waiting for proxy to be removed... ($i/10)"',
                 '        sleep 1',
                 '    done',
-                "    echo 'Successfully stopped and removed existing coolify-proxy.'",
+                "    echo 'Successfully stopped and removed existing proxy.'",
                 'fi',
             ]);
             // Ensure required networks exist BEFORE docker compose up (networks are declared as external)
             $commands = $commands->merge(ensureProxyNetworksExist($server));
             $commands = $commands->merge([
-                "echo 'Starting coolify-proxy.'",
+                "echo 'Starting proxy.'",
                 'docker compose up -d --wait --remove-orphans',
-                "echo 'Successfully started coolify-proxy.'",
+                "echo 'Successfully started proxy.'",
             ]);
             $commands = $commands->merge(connectProxyToNetworks($server));
         }

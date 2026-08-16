@@ -83,28 +83,27 @@ class ProductionSeeder extends Seeder
         }
 
         if (! isCloud() && config('constants.coolify.is_windows_docker_desktop') == false) {
-            $coolify_key_name = '@host.docker.internal';
+            $host_key_name = '@host.docker.internal';
             $ssh_keys_directory = Storage::disk('ssh-keys')->files();
-            $coolify_key = collect($ssh_keys_directory)->firstWhere(fn ($item) => str($item)->contains($coolify_key_name));
+            $host_key = collect($ssh_keys_directory)->firstWhere(fn ($item) => str($item)->contains($host_key_name));
 
             $private_key_found = PrivateKey::find(0);
             if (! $private_key_found) {
-                if ($coolify_key) {
-                    $user = str($coolify_key)->before('@')->after('id.');
-                    $coolify_key = Storage::disk('ssh-keys')->get($coolify_key);
+                if ($host_key) {
+                    $user = str($host_key)->before('@')->after('id.');
+                    $host_key = Storage::disk('ssh-keys')->get($host_key);
                     PrivateKey::create([
                         'id' => 0,
                         'team_id' => 0,
                         'name' => 'localhost\'s key',
                         'description' => 'The private key for the DevForge host machine (localhost).',
-                        'private_key' => $coolify_key,
+                        'private_key' => $host_key,
                     ]);
                     echo "SSH key found for the DevForge host machine (localhost).\n";
                 } else {
                     echo "No SSH key found for the DevForge host machine (localhost).\n";
-                    echo "Please read the following documentation (point 3) to fix it: https://coolify.
-                io/docs/knowledge-base/server/openssh/\n";
-                    echo "Your localhost connection won't work until then.";
+                    echo "On ZimaOS, run scripts/zimaos-bootstrap-localhost-ssh.sh on the NAS, then reseed.\n";
+                    echo "Your localhost connection won't work until then.\n";
                 }
             }
         }

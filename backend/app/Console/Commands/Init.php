@@ -264,20 +264,14 @@ class Init extends Command
                     }
                 }
             } catch (\Throwable $e) {
-                echo "Error in restoring coolify db backup: {$e->getMessage()}\n";
+                echo "Error in restoring instance db backup: {$e->getMessage()}\n";
             }
         }
     }
 
     private function sendAliveSignal()
     {
-        $id = config('app.id');
-        $version = config('constants.coolify.version');
-        try {
-            Http::get("https://undead.coolify.io/v4/alive?appId=$id&version=$version");
-        } catch (\Throwable $e) {
-            echo "Error in sending live signal: {$e->getMessage()}\n";
-        }
+        // DevForge does not phone home.
     }
 
     private function replaceSlashInEnvironmentName()

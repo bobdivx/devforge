@@ -19,10 +19,10 @@
                     <div class="flex flex-wrap items-end gap-2">
                         <div class="flex gap-2 md:flex-row flex-col w-full">
                             <x-forms.input canGate="update" :canResource="$settings" id="fqdn" label="URL"
-                                helper="Enter the full URL of the instance (for example, https://dashboard.example.com).<br><br>
+                                helper="Enter the full URL of the instance (for example, https://devforge.jeser.me).<br><br>
                                 <span class='dark:text-warning text-coollabs'>Important: </span>
                                 If you want the dashboard to be accessible over HTTPS, you must include <b>https://</b> at the start of the URL. Without it, the dashboard will use HTTP and won’t be secured."
-                                placeholder="https://coolify.yourdomain.com" />
+                                placeholder="https://devforge.jeser.me" />
                             <x-forms.input canGate="update" :canResource="$settings" id="instance_name" label="Name" placeholder="DevForge"
                                 helper="Custom name for your DevForge instance, shown in the URL." />
                             <div class="w-full" x-data="{

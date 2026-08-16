@@ -81,7 +81,7 @@ class GithubPrivateRepositoryDeployKey extends Component
     public function mount()
     {
         if (isDev()) {
-            $this->repository_url = 'https://github.com/coollabsio/coolify-examples/tree/v4.x';
+            $this->repository_url = 'https://github.com/bobdivx/devforge-examples/tree/v4.x';
         }
         $this->parameters = get_route_parameters();
         $this->query = request()->query();

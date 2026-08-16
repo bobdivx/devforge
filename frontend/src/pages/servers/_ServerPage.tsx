@@ -164,8 +164,8 @@ export function ServerPage({
                                         <p class="text-sm font-semibold">Wildcard Domain</p>
                                         <p class="text-xs text-base-content/55">
                                             Utilisé pour générer les URLs des nouvelles applications
-                                            (ex. <span class="font-mono">https://apps.example.com</span>
-                                            → <span class="font-mono">https://&#123;uuid&#125;.apps.example.com</span>).
+                                            (ex. <span class="font-mono">https://apps.jeser.me</span>
+                                            → <span class="font-mono">https://&#123;uuid&#125;.apps.jeser.me</span>).
                                             Ce n’est pas l’URL de l’instance DevForge.
                                         </p>
                                     </div>
@@ -181,7 +181,7 @@ export function ServerPage({
                                             <input
                                                 class="input input-bordered input-sm w-full font-mono"
                                                 type="url"
-                                                placeholder="https://apps.example.com"
+                                                placeholder="https://apps.jeser.me"
                                                 value={wildcardDomain}
                                                 disabled={savingWildcard}
                                                 onInput={(event) => setWildcardDomain((event.target as HTMLInputElement).value)}

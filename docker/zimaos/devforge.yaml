@@ -1,5 +1,6 @@
 # DevForge — compose ZimaOS / CasaOS
 # Import : Apps → Installer une app personnalisée
+# Paquet App Store : docker/zimaos/appstore/DevForge/
 #
 # Images Docker Hub :
 #   bobdivx/devforge:latest
@@ -138,6 +139,8 @@ services:
       - REDIS_HOST=redis
       - SESSION_SECURE_COOKIE=false
       - SSH_AUTH_SOCK=/ssh-agent
+    extra_hosts:
+      - host.docker.internal:host-gateway
     image: bobdivx/devforge:latest
     pull_policy: always
     labels:
@@ -355,3 +358,7 @@ x-casaos:
        && docker pull bobdivx/devforge:realtime
        puis recréer les conteneurs (CasaOS Update / compose up -d --force-recreate).
        Un simple redémarrage ne tire PAS la nouvelle version.
+    8. default.conf nginx doit être un FICHIER (un dossier fait échouer le proxy).
+    9. Clé SSH localhost : sudo sh scripts/zimaos-bootstrap-localhost-ssh.sh
+       puis php artisan db:seed --class=Database\\Seeders\\ProductionSeeder --force
+       (utilisateur SSH : bobdivx, PermitRootLogin est off sur ZimaOS).

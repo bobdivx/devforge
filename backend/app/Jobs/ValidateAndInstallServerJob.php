@@ -46,7 +46,7 @@ class ValidateAndInstallServerJob implements ShouldBeEncrypted, ShouldQueue
             ['uptime' => $uptime, 'error' => $error] = $this->server->validateConnection();
             if (! $uptime) {
                 $sanitizedError = htmlspecialchars($error ?? '', ENT_QUOTES, 'UTF-8');
-                $errorMessage = 'Server is not reachable. Please validate your configuration and connection.<br>Check this <a target="_blank" class="underline" href="https://coolify.io/docs/knowledge-base/server/openssh">documentation</a> for further help. <br><br>Error: '.$sanitizedError;
+                $errorMessage = 'Server is not reachable. Please validate your configuration and connection.<br>Check this <a target="_blank" class="underline" href="https://github.com/bobdivx/devforge">documentation</a> for further help. <br><br>Error: '.$sanitizedError;
                 $this->server->update([
                     'validation_logs' => $errorMessage,
                     'is_validating' => false,

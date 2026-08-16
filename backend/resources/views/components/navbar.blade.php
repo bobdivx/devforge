@@ -112,7 +112,7 @@
             <a href="/" {{ wireNavigate() }}
                 class="hover:opacity-80 transition-opacity"
                 title="DevForge">
-                <img src="/coolify-logo.svg" alt="DevForge" class="w-6 h-6" />
+                <img src="/brand/logo.png" alt="DevForge" class="w-6 h-6" />
             </a>
             <x-version class="text-[10px]" />
         </div>
@@ -467,7 +467,7 @@
                         </a>
                     </li> --}}
                     <li>
-                        <a title="Sponsor us" class="menu-item" href="https://coolify.io/sponsorships"
+                        <a title="Sponsor us" class="menu-item" href="https://github.com/bobdivx/devforge/sponsorships"
                             target="_blank">
                             <svg class="text-pink-500 menu-item-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                 <g fill="none" stroke="currentColor" stroke-linecap="round"

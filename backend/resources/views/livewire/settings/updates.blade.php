@@ -39,10 +39,10 @@
                 @if (is_null(config('constants.coolify.autoupdate', null)) && $is_auto_update_enabled)
                     <x-forms.input required id="auto_update_frequency" label="Frequency (cron expression)"
                         placeholder="0 0 * * *"
-                        helper="Frequency (cron expression) (automatically update coolify).<br>You can use every_minute, hourly, daily, weekly, monthly, yearly.<br><br>Default is every day at 00:00" />
+                        helper="Frequency (cron expression) (automatically update DevForge).<br>You can use every_minute, hourly, daily, weekly, monthly, yearly.<br><br>Default is every day at 00:00" />
                 @else
                     <x-forms.input required label="Frequency (cron expression)" disabled placeholder="disabled"
-                        helper="Frequency (cron expression) (automatically update coolify).<br>You can use every_minute, hourly, daily, weekly, monthly, yearly.<br><br>Default is every day at 00:00" />
+                        helper="Frequency (cron expression) (automatically update DevForge).<br>You can use every_minute, hourly, daily, weekly, monthly, yearly.<br><br>Default is every day at 00:00" />
                 @endif
             </div>
 

@@ -5,7 +5,7 @@
         @if (!$healthCheckEnabled)
             <x-modal-confirmation title="Confirm Healthcheck Enable?" buttonTitle="Enable Healthcheck"
                 submitAction="toggleHealthcheck" :actions="['Enable healthcheck for this database.']"
-                warningMessage="If the health check fails, this database will be marked unhealthy. Please review the <a href='https://coolify.io/docs/knowledge-base/health-checks' target='_blank' class='underline text-white'>Health Checks</a> guide before proceeding!"
+                warningMessage="If the health check fails, this database will be marked unhealthy. Please review the <a href='https://github.com/bobdivx/devforge' target='_blank' class='underline text-white'>Health Checks</a> guide before proceeding!"
                 step2ButtonText="Enable Healthcheck" :confirmWithText="false" :confirmWithPassword="false"
                 isHighlightedButton>
             </x-modal-confirmation>

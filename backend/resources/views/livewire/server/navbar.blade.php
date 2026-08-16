@@ -145,7 +145,7 @@
                                 <x-modal-confirmation title="Confirm Proxy Restart?" buttonTitle="Restart Proxy"
                                     submitAction="restart" :actions="[
                             'This proxy will be stopped and started again.',
-                            'All resources hosted on coolify will be unavailable during the restart.',
+                            'All resources hosted on DevForge will be unavailable during the restart.',
                         ]" :confirmWithText="false" :confirmWithPassword="false" step2ButtonText="Restart Proxy"
                                     :dispatchEvent="true" dispatchEventType="restartEvent">
                                     <x-slot:button-title>
@@ -162,8 +162,8 @@
                                 </x-modal-confirmation>
                                 <x-modal-confirmation title="Confirm Proxy Stopping?" buttonTitle="Stop Proxy"
                                     submitAction="stop(true)" :actions="[
-                            'The coolify proxy will be stopped.',
-                            'All resources hosted on coolify will be unavailable.',
+                            'The proxy will be stopped.',
+                            'All resources hosted on DevForge will be unavailable.',
                         ]" :confirmWithText="false"
                                     :confirmWithPassword="false" step2ButtonText="Stop Proxy" :dispatchEvent="true"
                                     dispatchEventType="stopEvent">

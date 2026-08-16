@@ -138,7 +138,7 @@ describe('ApplicationDomainsPanel', () => {
         fireEvent.click(await screen.findByRole('button', { name: 'Ajouter' }));
 
         await waitFor(() => {
-            expect(screen.getAllByPlaceholderText('https://mon-app.example.com')).toHaveLength(3);
+            expect(screen.getAllByPlaceholderText('https://mon-app.jeser.me')).toHaveLength(3);
         });
         expect(screen.getByLabelText('Domaine DevForge')).toBeDisabled();
     });

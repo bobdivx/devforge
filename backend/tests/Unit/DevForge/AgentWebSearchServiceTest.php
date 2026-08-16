@@ -8,21 +8,21 @@ it('searches via duckduckgo when no brave key', function () {
 
     Http::fake([
         'api.duckduckgo.com/*' => Http::response([
-            'Heading' => 'Coolify',
+            'Heading' => 'DevForge',
             'AbstractText' => 'Self-hostable PaaS',
-            'AbstractURL' => 'https://coolify.io',
+            'AbstractURL' => 'https://github.com/bobdivx/devforge',
             'RelatedTopics' => [
-                ['Text' => 'Coolify docs', 'FirstURL' => 'https://coolify.io/docs'],
+                ['Text' => 'DevForge repo', 'FirstURL' => 'https://github.com/bobdivx/devforge'],
             ],
         ], 200),
     ]);
 
-    $result = (new AgentWebSearchService)->search('coolify', 5);
+    $result = (new AgentWebSearchService)->search('devforge', 5);
 
     expect($result['ok'])->toBeTrue()
         ->and($result['provider'])->toBe('duckduckgo')
         ->and($result['results'])->not->toBeEmpty()
-        ->and($result['results'][0]['url'])->toContain('coolify');
+        ->and($result['results'][0]['url'])->toContain('devforge');
 });
 
 it('rejects empty query', function () {

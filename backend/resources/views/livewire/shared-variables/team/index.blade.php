@@ -13,7 +13,7 @@
     </div>
     <div class="flex items-center gap-1 subtitle">You can use these variables anywhere with <span
             class="dark:text-warning text-coollabs">@{{ team.VARIABLENAME }}</span> <x-helper
-            helper="More info <a class='underline dark:text-white' href='https://coolify.io/docs/knowledge-base/environment-variables#shared-variables' target='_blank'>here</a>."></x-helper>
+            helper="More info <a class='underline dark:text-white' href='https://github.com/bobdivx/devforge' target='_blank'>here</a>."></x-helper>
     </div>
 
     @if ($view === 'normal')

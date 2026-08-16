@@ -4,7 +4,7 @@ info:
   version: '0.1'
 servers:
   -
-    url: 'https://app.coolify.io/api/v1'
+    url: 'https://example.com/api/v1'
     description: 'Coolify Cloud API. Change the host to your own instance if you are self-hosting.'
 paths:
   /applications:
@@ -257,7 +257,7 @@ paths:
                 docker_compose_domains:
                   type: array
                   description: 'Array of URLs to be applied to containers of a dockercompose application.'
-                  items: { properties: { name: { type: string, description: 'The service name as defined in docker-compose.' }, domain: { type: string, description: 'Comma-separated list of URLs (e.g. "https://app.coolify.io,https://app2.coolify.io")' } }, type: object }
+                  items: { properties: { name: { type: string, description: 'The service name as defined in docker-compose.' }, domain: { type: string, description: 'Comma-separated list of URLs (e.g. "https://example.com,https://app2.coolify.io")' } }, type: object }
                 watch_paths:
                   type: string
                   description: 'The watch paths.'
@@ -544,7 +544,7 @@ paths:
                 docker_compose_domains:
                   type: array
                   description: 'Array of URLs to be applied to containers of a dockercompose application.'
-                  items: { properties: { name: { type: string, description: 'The service name as defined in docker-compose.' }, domain: { type: string, description: 'Comma-separated list of URLs (e.g. "https://app.coolify.io,https://app2.coolify.io")' } }, type: object }
+                  items: { properties: { name: { type: string, description: 'The service name as defined in docker-compose.' }, domain: { type: string, description: 'Comma-separated list of URLs (e.g. "https://example.com,https://app2.coolify.io")' } }, type: object }
                 watch_paths:
                   type: string
                   description: 'The watch paths.'
@@ -831,7 +831,7 @@ paths:
                 docker_compose_domains:
                   type: array
                   description: 'Array of URLs to be applied to containers of a dockercompose application.'
-                  items: { properties: { name: { type: string, description: 'The service name as defined in docker-compose.' }, domain: { type: string, description: 'Comma-separated list of URLs (e.g. "https://app.coolify.io,https://app2.coolify.io")' } }, type: object }
+                  items: { properties: { name: { type: string, description: 'The service name as defined in docker-compose.' }, domain: { type: string, description: 'Comma-separated list of URLs (e.g. "https://example.com,https://app2.coolify.io")' } }, type: object }
                 watch_paths:
                   type: string
                   description: 'The watch paths.'
@@ -1642,7 +1642,7 @@ paths:
                 docker_compose_domains:
                   type: array
                   description: 'Array of URLs to be applied to containers of a dockercompose application.'
-                  items: { properties: { name: { type: string, description: 'The service name as defined in docker-compose.' }, domain: { type: string, description: 'Comma-separated list of URLs (e.g. "https://app.coolify.io,https://app2.coolify.io")' } }, type: object }
+                  items: { properties: { name: { type: string, description: 'The service name as defined in docker-compose.' }, domain: { type: string, description: 'Comma-separated list of URLs (e.g. "https://example.com,https://app2.coolify.io")' } }, type: object }
                 watch_paths:
                   type: string
                   description: 'The watch paths.'
@@ -6920,7 +6920,7 @@ paths:
                 urls:
                   type: array
                   description: 'Array of URLs to be applied to containers of a service.'
-                  items: { properties: { name: { type: string, description: 'The service name as defined in docker-compose.' }, url: { type: string, description: 'Comma-separated list of URLs (e.g. "https://app.coolify.io,https://app2.coolify.io").' } }, type: object }
+                  items: { properties: { name: { type: string, description: 'The service name as defined in docker-compose.' }, url: { type: string, description: 'Comma-separated list of URLs (e.g. "https://example.com,https://app2.coolify.io").' } }, type: object }
                 force_domain_override:
                   type: boolean
                   default: false
@@ -7109,7 +7109,7 @@ paths:
                 urls:
                   type: array
                   description: 'Array of URLs to be applied to containers of a service.'
-                  items: { properties: { name: { type: string, description: 'The service name as defined in docker-compose.' }, url: { type: string, description: 'Comma-separated list of URLs (e.g. "https://app.coolify.io,https://app2.coolify.io").' } }, type: object }
+                  items: { properties: { name: { type: string, description: 'The service name as defined in docker-compose.' }, url: { type: string, description: 'Comma-separated list of URLs (e.g. "https://example.com,https://app2.coolify.io").' } }, type: object }
                 force_domain_override:
                   type: boolean
                   default: false

@@ -14,7 +14,7 @@
             </div>
             <div>
                 For example application deployments, checkout <a class="underline dark:text-white"
-                    href="https://github.com/coollabsio/coolify-examples/" target="_blank">DevForge
+                    href="https://github.com/bobdivx/devforge-examples/" target="_blank">DevForge
                     Examples</a>.
             </div>
         </div>

@@ -129,7 +129,7 @@ function InstanceForm({
                         class="input input-bordered input-sm w-full rounded-xl"
                         value={form.fqdn ?? ''}
                         disabled={!canEdit || saving}
-                        placeholder="https://devforge.example.com"
+                        placeholder="https://devforge.jeser.me"
                         onInput={(event) => setForm((current) => ({ ...current, fqdn: event.currentTarget.value || null }))}
                     />
                 </Field>

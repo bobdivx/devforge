@@ -45,7 +45,7 @@ class LlmProviderFactory
                 label: $config->provider,
                 extraHeaders: $config->provider === 'openrouter'
                     ? [
-                        'HTTP-Referer' => (string) config('app.url', 'https://coolify.io'),
+                        'HTTP-Referer' => (string) config('app.url', 'https://github.com/bobdivx/devforge'),
                         'X-Title' => 'DevForge',
                     ]
                     : [],

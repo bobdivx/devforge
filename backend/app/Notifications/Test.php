@@ -87,7 +87,7 @@ class Test extends Notification implements ShouldQueue
             'buttons' => [
                 [
                     'text' => 'Go to your dashboard',
-                    'url' => isDev() ? 'https://staging-but-dev.coolify.io' : base_url(),
+                    'url' => isDev() ? 'http://127.0.0.1' : base_url(),
                 ],
             ],
         ];

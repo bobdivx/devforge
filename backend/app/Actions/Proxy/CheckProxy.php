@@ -102,7 +102,7 @@ class CheckProxy
             foreach ($conflicts as $port => $conflict) {
                 if ($conflict) {
                     if ($fromUI) {
-                        throw new \Exception("Port $port is in use.<br>You must stop the process using this port.<br><br>Docs: <a target='_blank' class='dark:text-white hover:underline' href='https://coolify.io/docs'>https://coolify.io/docs</a><br>Discord: <a target='_blank' class='dark:text-white hover:underline' href='https://coolify.io/discord'>https://coolify.io/discord</a>");
+                        throw new \Exception("Port $port is in use.<br>You must stop the process using this port.<br><br>Docs: <a target='_blank' class='dark:text-white hover:underline' href='https://github.com/bobdivx/devforge'>https://github.com/bobdivx/devforge</a><br>Discord: <a target='_blank' class='dark:text-white hover:underline' href='https://github.com/bobdivx/devforge'>https://github.com/bobdivx/devforge</a>");
                     } else {
                         return false;
                     }

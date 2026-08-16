@@ -17,6 +17,7 @@ on:
       - docker/devforge-web/**
       - docker/devforge-realtime/**
       - docker/devforge-helper/**
+      - docker/devforge-proxy/**
       - docker/production/**
       - scripts/**
       - package.json
@@ -48,6 +49,8 @@ jobs:
             file: docker/devforge-realtime/Dockerfile
           - name: helper
             file: docker/devforge-helper/Dockerfile
+          - name: proxy
+            file: docker/devforge-proxy/Dockerfile
     steps:
       - uses: actions/checkout@v5
         with:
@@ -151,8 +154,10 @@ jobs:
           echo "  bobdivx/devforge:web"
           echo "  bobdivx/devforge:realtime"
           echo "  bobdivx/devforge:helper"
+          echo "  bobdivx/devforge:proxy"
           echo "GHCR mirrors:"
           echo "  ghcr.io/bobdivx/devforge-api:latest"
           echo "  ghcr.io/bobdivx/devforge-web:latest"
           echo "  ghcr.io/bobdivx/devforge-realtime:latest"
           echo "  ghcr.io/bobdivx/devforge-helper:latest"
+          echo "  ghcr.io/bobdivx/devforge-proxy:latest"

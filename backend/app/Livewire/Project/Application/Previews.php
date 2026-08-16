@@ -127,7 +127,7 @@ class Previews extends Component
                     $this->previewFqdns[$previewKey] = $fqdn;
 
                     if (! validateDNSEntry($fqdn, $this->application->destination->server)) {
-                        $this->dispatch('error', 'Validating DNS failed.', "Make sure you have added the DNS records correctly.<br><br>$fqdn->{$this->application->destination->server->ip}<br><br>Check this <a target='_blank' class='underline dark:text-white' href='https://coolify.io/docs/knowledge-base/dns-configuration'>documentation</a> for further help.");
+                        $this->dispatch('error', 'Validating DNS failed.', "Make sure you have added the DNS records correctly.<br><br>$fqdn->{$this->application->destination->server->ip}<br><br>Check this <a target='_blank' class='underline dark:text-white' href='https://github.com/bobdivx/devforge'>documentation</a> for further help.");
                         $success = false;
                     }
 

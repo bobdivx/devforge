@@ -64,7 +64,7 @@ class Show extends Component
                 $this->dispatch('refreshServerShow');
             } else {
                 $sanitizedError = htmlspecialchars($error ?? '', ENT_QUOTES, 'UTF-8');
-                $this->dispatch('error', 'Server is not reachable.<br><br>Check this <a target="_blank" class="underline" href="https://coolify.io/docs/knowledge-base/server/openssh">documentation</a> for further help.<br><br>Error: '.$sanitizedError);
+                $this->dispatch('error', 'Server is not reachable.<br><br>Check this <a target="_blank" class="underline" href="https://github.com/bobdivx/devforge">documentation</a> for further help.<br><br>Error: '.$sanitizedError);
 
                 return;
             }

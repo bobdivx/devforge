@@ -289,7 +289,7 @@
                                 <div x-cloak x-show="useCustomWebhookEndpoint">
                                     <x-forms.input canGate="create" :canResource="$github_app"
                                         x-model="customWebhookEndpoint" id="custom_webhook_endpoint" type="url"
-                                        label="Custom endpoint" placeholder="https://coolify.example.com"
+                                        label="Custom endpoint" placeholder="https://git.example.com"
                                         helper="GitHub will use this custom public URL. Do not include /webhooks." />
                                 </div>
                             @else

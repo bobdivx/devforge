@@ -15,7 +15,7 @@ class InstallDocker
     {
         $supported_os_type = $server->validateOS();
         if (! $supported_os_type) {
-            throw new \Exception('Server OS type is not supported for automated installation. Please install Docker manually before continuing: <a target="_blank" class="underline" href="https://coolify.io/docs/installation#manually">documentation</a>.');
+            throw new \Exception('Server OS type is not supported for automated installation. Please install Docker manually before continuing: <a target="_blank" class="underline" href="https://github.com/bobdivx/devforge">documentation</a>.');
         }
 
         if (! $server->sslCertificates()->where('is_ca_certificate', true)->exists()) {

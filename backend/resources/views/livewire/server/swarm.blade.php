@@ -15,30 +15,30 @@
                     {{ config('deprecations.swarm') }}
                 </x-callout>
                 <div class="pb-4">Read the docs <a class='underline dark:text-white'
-                        href='https://coolify.io/docs/knowledge-base/docker/swarm' target='_blank'>here</a>.
+                        href='https://github.com/bobdivx/devforge' target='_blank'>here</a>.
                 </div>
             </div>
 
             <div class="w-96">
                 @if ($server->settings->is_swarm_worker)
                     <x-forms.checkbox disabled instantSave type="checkbox" id="isSwarmManager"
-                        helper="For more information, please read the documentation <a class='dark:text-white' href='https://coolify.io/docs/knowledge-base/docker/swarm' target='_blank'>here</a>."
+                        helper="For more information, please read the documentation <a class='dark:text-white' href='https://github.com/bobdivx/devforge' target='_blank'>here</a>."
                         label="Is it a Swarm Manager?" />
                 @else
                     <x-forms.checkbox canGate="update" :canResource="$server" instantSave
                         type="checkbox" id="isSwarmManager"
-                        helper="For more information, please read the documentation <a class='dark:text-white' href='https://coolify.io/docs/knowledge-base/docker/swarm' target='_blank'>here</a>."
+                        helper="For more information, please read the documentation <a class='dark:text-white' href='https://github.com/bobdivx/devforge' target='_blank'>here</a>."
                         label="Is it a Swarm Manager?" />
                 @endif
 
                 @if ($server->settings->is_swarm_manager)
                     <x-forms.checkbox disabled instantSave type="checkbox" id="isSwarmWorker"
-                        helper="For more information, please read the documentation <a class='dark:text-white' href='https://coolify.io/docs/knowledge-base/docker/swarm' target='_blank'>here</a>."
+                        helper="For more information, please read the documentation <a class='dark:text-white' href='https://github.com/bobdivx/devforge' target='_blank'>here</a>."
                         label="Is it a Swarm Worker?" />
                 @else
                     <x-forms.checkbox canGate="update" :canResource="$server" instantSave
                         type="checkbox" id="isSwarmWorker"
-                        helper="For more information, please read the documentation <a class='dark:text-white' href='https://coolify.io/docs/knowledge-base/docker/swarm' target='_blank'>here</a>."
+                        helper="For more information, please read the documentation <a class='dark:text-white' href='https://github.com/bobdivx/devforge' target='_blank'>here</a>."
                         label="Is it a Swarm Worker?" />
                 @endif
             </div>

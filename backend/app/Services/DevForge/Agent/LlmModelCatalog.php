@@ -107,7 +107,7 @@ class LlmModelCatalog
         ];
 
         if ($provider === 'openrouter') {
-            $headers['HTTP-Referer'] = (string) config('app.url', 'https://coolify.io');
+            $headers['HTTP-Referer'] = (string) config('app.url', 'https://github.com/bobdivx/devforge');
             $headers['X-Title'] = 'DevForge';
         }
 

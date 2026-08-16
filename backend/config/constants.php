@@ -20,8 +20,8 @@ return [
     ],
 
     'urls' => [
-        'docs' => 'https://coolify.io/docs',
-        'contact' => 'https://coolify.io/docs/contact',
+        'docs' => 'https://github.com/bobdivx/devforge',
+        'contact' => 'https://github.com/bobdivx/devforge',
     ],
 
     'services' => [

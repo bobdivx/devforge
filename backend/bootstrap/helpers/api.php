@@ -23,7 +23,7 @@ function getTeamIdFromToken()
 }
 function invalidTokenResponse()
 {
-    return response()->json(['message' => 'Invalid token.', 'docs' => 'https://coolify.io/docs/api-reference/authorization'], 400);
+    return response()->json(['message' => 'Invalid token.', 'docs' => 'https://github.com/bobdivx/devforge'], 400);
 }
 
 function serializeApiResponse($data)

@@ -33,12 +33,12 @@ return [
     | MCP DevForge (/mcp/devforge) — surface complète (reads + writes)
     |--------------------------------------------------------------------------
     |
-    | Distinct du MCP Coolify lecture seule (/mcp). Expose les outils Coolify
+    | Distinct du MCP lecture seule (/mcp). Expose les outils DevForge
     | + AgentToolkit core/GitHub (hors missions/todos/délégation). Défaut false
     | jusqu'à activation explicite. Requiert aussi is_mcp_server_enabled.
     |
     | Checklist NAS :
-    | 1. Déployer Coolify + rebuild UI DevForge si besoin
+    | 1. Déployer DevForge + rebuild UI si besoin
     | 2. DEVFORGE_AGENTS_ENABLED=true, DEVFORGE_AGENTS_AUTO_FALLBACK=true
     | 3. DEVFORGE_MCP_ENABLED=true + activer MCP instance (UI / API)
     | 4. Token Sanctum team avec abilities read+write
@@ -318,7 +318,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | When a provider uses localhost:11434, DevForge rewrites it to this URL
-    | so the Coolify container can reach Ollama on the host (Forge pattern).
+    | so the API container can reach Ollama on the host.
     |
     */
     'ollama_url' => env('DEVFORGE_OLLAMA_URL', ''),

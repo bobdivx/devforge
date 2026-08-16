@@ -180,7 +180,7 @@
                                                 :src='service.logo'
                                                 x-on:error.window="$event.target.src = service.logo_github_url"
                                                 onerror="this.onerror=null; this.src=this.getAttribute('data-fallback');"
-                                                x-on:error="$event.target.src = '/coolify-logo.svg'"
+                                                x-on:error="$event.target.src = '/brand/logo.png'"
                                                 :data-fallback='service.logo_github_url' />
                                         </template>
                                     </x-slot:logo>
@@ -214,7 +214,7 @@
                                     </div>
                                 </template>
                                 <template x-if="shouldShowDocIcon(service)">
-                                    <a :href="getDocLink(service) || coolifyDocsUrl(service.name)" target="_blank"
+                                    <a :href="getDocLink(service) || serviceDocsUrl(service.name)" target="_blank"
                                         @click.stop @mouseenter="resolveDocLink(service)"
                                         class="absolute top-2 right-2 p-1.5 rounded hover:bg-neutral-200 dark:hover:bg-coolgray-300 transition-colors"
                                         :class="{ 'opacity-50': docCheckInProgress[service.name] }"
@@ -287,9 +287,8 @@
                             // Remove flavor suffixes: -with-*, -without-*
                             return normalized.replace(/-(with|without)-.+$/, '');
                         },
-                        coolifyDocsUrl(serviceName) {
-                            const baseName = this.extractBaseServiceName(serviceName);
-                            return 'https://coolify.io/docs/services/' + baseName;
+                        serviceDocsUrl(serviceName) {
+                            return 'https://github.com/bobdivx/devforge';
                         },
                         officialDocsUrl(service) {
                             return service.documentation || null;
@@ -322,13 +321,13 @@
                             this.docCheckInProgress[serviceName] = true;
 
                             // 1. Try DevForge docs first
-                            const coolifyUrl = this.coolifyDocsUrl(serviceName);
-                            const coolifyExists = await this.checkUrlExists(coolifyUrl);
+                            const docsUrl = this.serviceDocsUrl(serviceName);
+                            const docsExist = await this.checkUrlExists(docsUrl);
 
-                            if (coolifyExists) {
-                                this.docLinkCache[serviceName] = coolifyUrl;
+                            if (docsExist) {
+                                this.docLinkCache[serviceName] = docsUrl;
                                 this.docCheckInProgress[serviceName] = false;
-                                return coolifyUrl;
+                                return docsUrl;
                             }
 
                             // 2. Fall back to official docs
@@ -459,7 +458,7 @@
         <h2>Select a destination</h2>
         <div class="pb-4">Destinations are used to segregate resources by network. If you are unsure, select the
             default
-            Standalone Docker (coolify).</div>
+            Standalone Docker.</div>
         <div class="flex flex-col justify-center gap-4 text-left xl:flex-row xl:flex-wrap">
             @if ($server->isSwarm())
                 @foreach ($swarmDockers as $swarmDocker)

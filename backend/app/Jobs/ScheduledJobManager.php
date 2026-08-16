@@ -50,7 +50,7 @@ class ScheduledJobManager implements ShouldQueue
     {
         // Self-healing: clear any stale lock before WithoutOverlapping tries to acquire it.
         // Stale locks (TTL = -1) can occur during upgrades, Redis restarts, or edge cases.
-        // @see https://github.com/coollabsio/coolify/issues/8327
+        // @see https://github.com/bobdivx/devforge/issues/8327
         self::clearStaleLockIfPresent();
 
         return [

@@ -116,8 +116,8 @@
 
         {{-- BYOS Notice + Support --}}
         <div class="mt-6 pt-6 border-t dark:border-coolgray-400 border-neutral-200 text-sm dark:text-neutral-400">
-            <p>You need to bring your own servers from any cloud provider (<a class="underline" href="https://coolify.io/hetzner" target="_blank">Hetzner</a>, DigitalOcean, AWS, etc.) or connect any device running a <a class="underline" href="https://coolify.io/docs/installation#supported-operating-systems" target="_blank">supported OS</a>.</p>
-            <p class="mt-3">Need official support for your self-hosted instance? <a class="underline dark:text-white" href="https://coolify.io/docs/contact" target="_blank">Contact Us</a></p>
+            <p>You need to bring your own servers from any cloud provider (<a class="underline" href="https://www.hetzner.com" target="_blank">Hetzner</a>, DigitalOcean, AWS, etc.) or connect any device running a <a class="underline" href="https://github.com/bobdivx/devforge" target="_blank">supported OS</a>.</p>
+            <p class="mt-3">Need official support for your self-hosted instance? <a class="underline dark:text-white" href="https://github.com/bobdivx/devforge" target="_blank">Contact Us</a></p>
         </div>
     </div>
 </div>
