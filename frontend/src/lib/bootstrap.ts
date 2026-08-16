@@ -45,6 +45,12 @@ export type BootstrapData = {
         required: boolean;
         user_enabled: boolean;
         team_enabled: boolean;
+        steps: {
+            account: boolean;
+            github: boolean;
+            s3: boolean;
+            server: boolean;
+        };
     };
     cloud: {
         enabled: boolean;

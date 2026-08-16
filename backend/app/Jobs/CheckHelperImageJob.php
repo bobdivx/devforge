@@ -29,7 +29,7 @@ class CheckHelperImageJob implements ShouldBeEncrypted, ShouldQueue
             $helperTag = getHelperVersion();
             $helperImage = config('constants.coolify.helper_image').':'.$helperTag;
 
-            // Pull DevForge helper from our registry (no Coolify CDN / coolify-helper).
+            // Pull DevForge helper from our registry (no DevForge CDN / coolify-helper).
             instant_remote_process(["docker pull {$helperImage}"], $server);
 
             instanceSettings()->update(['helper_version' => $helperTag]);

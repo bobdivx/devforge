@@ -206,4 +206,27 @@ describe('API métiers DevForge', () => {
 
         expect(fetchMock.mock.calls[1][0]).toBe('/api/devforge/v1/server-storage/server-1/disk');
     });
+
+    it('termine l’onboarding et démarre une GitHub App', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce(new Response(null, { status: 204 }))
+            .mockResolvedValueOnce(jsonResponse({ data: {} }))
+            .mockResolvedValueOnce(new Response(null, { status: 204 }))
+            .mockResolvedValueOnce(jsonResponse({ data: { launch: { action_url: 'https://github.com' } } }))
+            .mockResolvedValueOnce(jsonResponse({ data: { url: 'https://github.com/apps/x/installations/new' } }));
+
+        await domainApi.completeOnboarding();
+        await domainApi.startGithubApp({ name: 'DevForge', from_onboarding: true });
+        await domainApi.githubAppInstallUrl('app-1');
+
+        const requests = fetchMock.mock.calls
+            .filter(([input]) => String(input) !== '/sanctum/csrf-cookie')
+            .map(([input, init]) => [String(input), init?.method]);
+
+        expect(requests).toEqual([
+            ['/api/devforge/v1/onboarding/complete', 'POST'],
+            ['/api/devforge/v1/github/apps', 'POST'],
+            ['/api/devforge/v1/github/apps/app-1/install-url', undefined],
+        ]);
+    });
 });

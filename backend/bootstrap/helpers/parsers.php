@@ -429,7 +429,7 @@ function applicationParser(Application $resource, int $pull_request_id = 0, ?int
         // convert environment variables to one format
         $environment = convertToKeyValueCollection($environment);
 
-        // Add Coolify defined environments
+        // Add DevForge defined environments
         $allEnvironments = $resource->environment_variables()->get(['key', 'value']);
 
         $allEnvironments = $allEnvironments->mapWithKeys(function ($item) {
@@ -509,7 +509,7 @@ function applicationParser(Application $resource, int $pull_request_id = 0, ?int
 
         $allMagicEnvironments = $allMagicEnvironments->merge($magicEnvironments);
         if ($magicEnvironments->count() > 0) {
-            // Generate Coolify environment variables
+            // Generate DevForge environment variables
             foreach ($magicEnvironments as $key => $value) {
                 $key = str($key);
                 $value = replaceVariables($value);
@@ -1417,7 +1417,7 @@ function applicationParser(Application $resource, int $pull_request_id = 0, ?int
         if ($depends_on->count() > 0) {
             $payload['depends_on'] = $depends_on;
         }
-        // Auto-inject .env file so Coolify environment variables are available inside containers
+        // Auto-inject .env file so DevForge environment variables are available inside containers
         // This makes Applications behave consistently with manual .env file usage
         $existingEnvFiles = data_get($service, 'env_file');
         $envFiles = collect(is_null($existingEnvFiles) ? [] : (is_array($existingEnvFiles) ? $existingEnvFiles : [$existingEnvFiles]))
@@ -1471,7 +1471,7 @@ function applicationParser(Application $resource, int $pull_request_id = 0, ?int
 
     // Update docker_compose_raw to remove content: from volumes only
     // This keeps the original user input clean while preventing content reapplication
-    // Parse the original compose again to create a clean version without Coolify additions
+    // Parse the original compose again to create a clean version without DevForge additions
     try {
         $originalYaml = Yaml::parse($originalCompose);
         // Remove content, isDirectory, and is_directory from all volume definitions
@@ -1704,7 +1704,7 @@ function serviceParser(Service $resource): Collection
         // convert environment variables to one format
         $environment = convertToKeyValueCollection($environment);
 
-        // Add Coolify defined environments
+        // Add DevForge defined environments
         $allEnvironments = $resource->environment_variables()->get(['key', 'value']);
 
         $allEnvironments = $allEnvironments->mapWithKeys(function ($item) {
@@ -2691,7 +2691,7 @@ function serviceParser(Service $resource): Collection
         if ($depends_on->count() > 0) {
             $payload['depends_on'] = $depends_on;
         }
-        // Auto-inject .env file so Coolify environment variables are available inside containers
+        // Auto-inject .env file so DevForge environment variables are available inside containers
         // This makes Services behave consistently with Applications
         $existingEnvFiles = data_get($service, 'env_file');
         $envFiles = collect(is_null($existingEnvFiles) ? [] : (is_array($existingEnvFiles) ? $existingEnvFiles : [$existingEnvFiles]))
@@ -2728,7 +2728,7 @@ function serviceParser(Service $resource): Collection
 
     // Update docker_compose_raw to remove content: from volumes only
     // This keeps the original user input clean while preventing content reapplication
-    // Parse the original compose again to create a clean version without Coolify additions
+    // Parse the original compose again to create a clean version without DevForge additions
     try {
         $originalYaml = Yaml::parse($originalCompose);
         // Remove content, isDirectory, and is_directory from all volume definitions

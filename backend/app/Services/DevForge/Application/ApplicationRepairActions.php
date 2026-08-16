@@ -209,7 +209,7 @@ class ApplicationRepairActions
             return ['error' => mb_substr($exception->getMessage(), 0, 300)];
         }
 
-        $this->appendRunLog("  ✓ Branche Coolify {$previousBranch} → {$branch} sur {$application->uuid}");
+        $this->appendRunLog("  ✓ Branche DevForge {$previousBranch} → {$branch} sur {$application->uuid}");
 
         $this->recordAction([
             'tool' => 'update_application_git_branch',
@@ -312,7 +312,7 @@ class ApplicationRepairActions
                 'path' => $hostPath,
                 'server_uuid' => $serverUuid,
                 'exit_code' => $result['exit_code'] ?? null,
-                'hint' => 'Vérifie que le terminal SSH Coolify peut chown ce chemin (sudo/non-root).',
+                'hint' => 'Vérifie que le terminal SSH DevForge peut chown ce chemin (sudo/non-root).',
             ];
         }
 
@@ -429,7 +429,7 @@ class ApplicationRepairActions
     }
 
     /**
-     * Recharge BASE_CONFIG_PATH dans Coolify (config:clear + horizon:terminate) quand
+     * Recharge BASE_CONFIG_PATH dans DevForge (config:clear + horizon:terminate) quand
      * les déploiements écrivent encore sous /data/coolify alors que CasaOS expose /media/Docker/...
      *
      * @return array<string, mixed>
@@ -453,7 +453,7 @@ class ApplicationRepairActions
         $serverUuid = (string) $serverResolution['server_uuid'];
         $containerName = is_string($container) && trim($container) !== '' ? trim($container) : 'coolify';
         if (preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/', $containerName) !== 1) {
-            return ['error' => 'Nom de conteneur Coolify invalide.'];
+            return ['error' => 'Nom de conteneur DevForge invalide.'];
         }
 
         $escapedContainer = escapeshellarg($containerName);
@@ -502,14 +502,14 @@ class ApplicationRepairActions
             ];
         }
 
-        $this->appendRunLog("  ✓ Coolify BASE_CONFIG_PATH rechargé (config:clear + horizon:terminate) sur {$containerName}");
+        $this->appendRunLog("  ✓ DevForge BASE_CONFIG_PATH rechargé (config:clear + horizon:terminate) sur {$containerName}");
 
         $this->recordAction([
             'tool' => 'fix_coolify_base_config_path',
             'uuid' => $application->uuid,
             'type' => 'applications',
             'action' => 'fix_coolify_base_config_path',
-            'reason' => $reason !== '' ? $reason : 'Read-only /data Coolify path',
+            'reason' => $reason !== '' ? $reason : 'Read-only /data DevForge path',
             'container' => $containerName,
             'server_uuid' => $serverUuid,
             'at' => now()->toISOString(),

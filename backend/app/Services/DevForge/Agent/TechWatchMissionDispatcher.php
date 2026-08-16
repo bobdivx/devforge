@@ -111,8 +111,8 @@ class TechWatchMissionDispatcher
             $team,
             $agent,
             $latest === 'newer'
-                ? 'Mise à jour Coolify disponible'
-                : "Mise à jour Coolify disponible ({$latest})",
+                ? 'Mise à jour DevForge disponible'
+                : "Mise à jour DevForge disponible ({$latest})",
             $latest === 'newer'
                 ? "La version actuelle est {$current}. Une mise à jour est signalée. Vérifier les notes de version et planifier."
                 : "La version actuelle est {$current}. Une mise à jour vers {$latest} est disponible. Vérifier les notes de version et planifier la mise à jour.",
@@ -124,7 +124,7 @@ class TechWatchMissionDispatcher
         );
 
         if ($mission !== null) {
-            Log::info('DevForge: mission tech-watch Coolify update.', [
+            Log::info('DevForge: mission tech-watch instance update.', [
                 'mission_uuid' => $mission->uuid,
                 'agent_uuid' => $agent->uuid,
             ]);

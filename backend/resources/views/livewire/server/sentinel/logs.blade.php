@@ -1,6 +1,6 @@
 <div>
     <x-slot:title>
-        Sentinel Logs | Coolify
+        Sentinel Logs | DevForge
     </x-slot>
     <livewire:server.navbar :server="$server" />
     <div class="flex flex-col h-full gap-8 sm:flex-row">

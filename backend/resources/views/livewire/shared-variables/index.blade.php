@@ -1,6 +1,6 @@
 <div>
     <x-slot:title>
-        Shared Variables | Coolify
+        Shared Variables | DevForge
     </x-slot>
     <div class="flex items-start gap-2">
         <h1>Shared Variables</h1>

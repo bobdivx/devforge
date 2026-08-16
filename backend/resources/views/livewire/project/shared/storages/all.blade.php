@@ -2,7 +2,7 @@
     <div class="flex flex-col gap-4">
         @if ($resource->type() === 'service' || data_get($resource, 'build_pack') === 'dockercompose')
             <div class="w-full p-2 text-sm rounded bg-warning/10 text-warning">
-                For docker compose based applications Volume mounts are read-only in the Coolify dashboard. To add, modify, or manage volumes, you must edit your Docker Compose file and reload the compose file.
+                For docker compose based applications Volume mounts are read-only in the DevForge dashboard. To add, modify, or manage volumes, you must edit your Docker Compose file and reload the compose file.
             </div>
         @endif
         @foreach ($resource->persistentStorages as $storage)

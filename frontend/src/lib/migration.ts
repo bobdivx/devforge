@@ -1,5 +1,5 @@
 /**
- * Construit une URL vers l'interface Coolify d'origine (Livewire).
+ * Construit une URL vers l'interface Livewire d'origine.
  * Le paramètre `legacy=1` contourne la redirection DevForge côté serveur.
  */
 export function legacyCoolifyUrl(baseUrl: string, path = '/'): string {

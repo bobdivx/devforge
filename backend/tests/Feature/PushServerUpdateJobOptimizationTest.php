@@ -132,7 +132,7 @@ it('rate-limits ConnectProxyToNetworksJob dispatch to every 10 minutes', functio
             'name' => 'coolify-proxy',
             'state' => 'running',
             'health_status' => 'healthy',
-            'labels' => ['coolify.managed' => true],
+            'labels' => ['devforge.managed' => true],
         ],
     ];
 
@@ -164,7 +164,7 @@ it('dispatches ConnectProxyToNetworksJob again after cache expires', function ()
             'name' => 'coolify-proxy',
             'state' => 'running',
             'health_status' => 'healthy',
-            'labels' => ['coolify.managed' => true],
+            'labels' => ['devforge.managed' => true],
         ],
     ];
 
@@ -206,7 +206,7 @@ it('respects the configured proxy connect interval', function () {
                 'name' => 'coolify-proxy',
                 'state' => 'running',
                 'health_status' => 'healthy',
-                'labels' => ['coolify.managed' => true],
+                'labels' => ['devforge.managed' => true],
             ],
         ],
         'filesystem_usage_root' => ['used_percentage' => 10],

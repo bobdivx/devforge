@@ -13,7 +13,7 @@ use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Tool;
 
 #[Name('get_deployment_logs')]
-#[Description('List recent deployments and optional log lines for a Coolify application.')]
+#[Description('List recent deployments and optional log lines for a DevForge application.')]
 class GetDeploymentLogs extends Tool
 {
     use BuildsResponse;

@@ -225,7 +225,7 @@
                 <h3>Build</h3>
                 @if ($application->build_pack === 'dockerimage')
                     <x-forms.input
-                        helper="You can add custom docker run options that will be used when your container is started.<br>Note: Not all options are supported, as they could mess up Coolify's automation and could cause bad experience for users.<br><br>Check the <a class='underline dark:text-white' href='https://coolify.io/docs/knowledge-base/docker/custom-commands'>docs.</a>"
+                        helper="You can add custom docker run options that will be used when your container is started.<br>Note: Not all options are supported, as they could mess up DevForge's automation and could cause bad experience for users.<br><br>Check the <a class='underline dark:text-white' href='https://coolify.io/docs/knowledge-base/docker/custom-commands'>docs.</a>"
                         placeholder="--cap-add SYS_ADMIN --device=/dev/fuse --security-opt apparmor:unconfined --ulimit nofile=1024:1024 --tmpfs /run:rw,noexec,nosuid,size=65536k --hostname=myapp"
                         id="customDockerRunOptions" label="Custom Docker Options" x-bind:disabled="!canUpdate" />
                 @else
@@ -384,7 +384,7 @@
                                 </div>
                             @endif
                             <x-forms.input
-                                helper="You can add custom docker run options that will be used when your container is started.<br>Note: Not all options are supported, as they could mess up Coolify's automation and could cause bad experience for users.<br><br>Check the <a class='underline dark:text-white' href='https://coolify.io/docs/knowledge-base/docker/custom-commands'>docs.</a>"
+                                helper="You can add custom docker run options that will be used when your container is started.<br>Note: Not all options are supported, as they could mess up DevForge's automation and could cause bad experience for users.<br><br>Check the <a class='underline dark:text-white' href='https://coolify.io/docs/knowledge-base/docker/custom-commands'>docs.</a>"
                                 placeholder="--cap-add SYS_ADMIN --device=/dev/fuse --security-opt apparmor:unconfined --ulimit nofile=1024:1024 --tmpfs /run:rw,noexec,nosuid,size=65536k --hostname=myapp"
                                 id="customDockerRunOptions" label="Custom Docker Options"
                                 x-bind:disabled="!canUpdate" />
@@ -436,7 +436,7 @@
                             id="isContainerLabelEscapeEnabled" instantSave
                             x-bind:disabled="!canUpdate"></x-forms.checkbox>
                         {{-- <x-forms.checkbox label="Readonly labels"
-                            helper="Labels are readonly by default. Readonly means that edits you do to the labels could be lost and Coolify will autogenerate the labels for you. If you want to edit the labels directly, disable this option. <br><br>Be careful, it could break the proxy configuration after you restart the container as Coolify will now NOT autogenerate the labels for you (ofc you can always reset the labels to the coolify defaults manually)."
+                            helper="Labels are readonly by default. Readonly means that edits you do to the labels could be lost and DevForge will autogenerate the labels for you. If you want to edit the labels directly, disable this option. <br><br>Be careful, it could break the proxy configuration after you restart the container as DevForge will now NOT autogenerate the labels for you (ofc you can always reset the labels to the coolify defaults manually)."
                             id="isContainerLabelReadonlyEnabled" instantSave></x-forms.checkbox> --}}
                     </div>
                 </div>
@@ -560,7 +560,7 @@
                 @endif
                 <div class="w-full sm:w-96">
                     <x-forms.checkbox label="Readonly labels"
-                        helper="Labels are readonly by default. Readonly means that edits you do to the labels could be lost and Coolify will autogenerate the labels for you. If you want to edit the labels directly, disable this option. <br><br>Be careful, it could break the proxy configuration after you restart the container as Coolify will now NOT autogenerate the labels for you (ofc you can always reset the labels to the coolify defaults manually)."
+                        helper="Labels are readonly by default. Readonly means that edits you do to the labels could be lost and DevForge will autogenerate the labels for you. If you want to edit the labels directly, disable this option. <br><br>Be careful, it could break the proxy configuration after you restart the container as DevForge will now NOT autogenerate the labels for you (ofc you can always reset the labels to the coolify defaults manually)."
                         id="isContainerLabelReadonlyEnabled" instantSave
                         x-bind:disabled="!canUpdate"></x-forms.checkbox>
                     <x-forms.checkbox label="Escape special characters in labels?"
@@ -569,7 +569,7 @@
                         x-bind:disabled="!canUpdate"></x-forms.checkbox>
                 </div>
                 @can('update', $application)
-                    <x-modal-confirmation title="Confirm Labels Reset to Coolify Defaults?"
+                    <x-modal-confirmation title="Confirm Labels Reset to DevForge Defaults?"
                         buttonTitle="Reset Labels to Defaults" buttonFullWidth submitAction="resetDefaultLabels(true)"
                         :actions="[
                             'All your custom proxy labels will be lost.',

@@ -154,13 +154,13 @@ class StripeProcessJob implements ShouldBeEncrypted, ShouldQueue
 
                     $subscription = Subscription::where('stripe_customer_id', $customerId)->first();
                     if (! $subscription) {
-                        // send_internal_notification('invoice.payment_failed failed but no subscription found in Coolify for customer: '.$customerId);
+                        // send_internal_notification('invoice.payment_failed failed but no subscription found in DevForge for customer: '.$customerId);
                         break;
                     }
                     $team = data_get($subscription, 'team');
                     if (! $team) {
-                        // send_internal_notification('invoice.payment_failed failed but no team found in Coolify for customer: '.$customerId);
-                        throw new \RuntimeException("No team found in Coolify for customer: {$customerId}");
+                        // send_internal_notification('invoice.payment_failed failed but no team found in DevForge for customer: '.$customerId);
+                        throw new \RuntimeException("No team found in DevForge for customer: {$customerId}");
                     }
 
                     // Verify payment status with Stripe API before sending failure notification
@@ -190,7 +190,7 @@ class StripeProcessJob implements ShouldBeEncrypted, ShouldQueue
                     $customerId = data_get($data, 'customer');
                     $subscription = Subscription::where('stripe_customer_id', $customerId)->first();
                     if (! $subscription) {
-                        // send_internal_notification('payment_intent.payment_failed, no subscription found in Coolify for customer: '.$customerId);
+                        // send_internal_notification('payment_intent.payment_failed, no subscription found in DevForge for customer: '.$customerId);
                         break;
                     }
                     if ($subscription->stripe_invoice_paid) {
@@ -301,8 +301,8 @@ class StripeProcessJob implements ShouldBeEncrypted, ShouldQueue
                         if ($team) {
                             $team->subscriptionEnded();
                         } else {
-                            // send_internal_notification('Subscription unpaid but no team found in Coolify for customer: '.$customerId);
-                            throw new \RuntimeException("No team found in Coolify for customer: {$customerId}");
+                            // send_internal_notification('Subscription unpaid but no team found in DevForge for customer: '.$customerId);
+                            throw new \RuntimeException("No team found in DevForge for customer: {$customerId}");
                         }
                     }
                     if ($status === 'active') {
@@ -330,11 +330,11 @@ class StripeProcessJob implements ShouldBeEncrypted, ShouldQueue
                         if ($team) {
                             $team->subscriptionEnded();
                         } else {
-                            // send_internal_notification('Subscription deleted but no team found in Coolify for customer: '.$customerId);
-                            throw new \RuntimeException("No team found in Coolify for customer: {$customerId}");
+                            // send_internal_notification('Subscription deleted but no team found in DevForge for customer: '.$customerId);
+                            throw new \RuntimeException("No team found in DevForge for customer: {$customerId}");
                         }
                     } else {
-                        // send_internal_notification('Subscription deleted but no subscription found in Coolify for customer: '.$customerId);
+                        // send_internal_notification('Subscription deleted but no subscription found in DevForge for customer: '.$customerId);
                         break;
                     }
                     break;

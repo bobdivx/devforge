@@ -29,6 +29,57 @@ class GithubController extends Controller
         ]);
     }
 
+    public function store(Request $request): JsonResponse
+    {
+        $this->authorize('createAnyResource');
+        $team = $this->currentTeamContext->resolve($request->user());
+
+        $validated = $request->validate([
+            'name' => ['nullable', 'string', 'max:30'],
+            'organization' => ['nullable', 'string', 'max:255'],
+            'preview_deployments' => ['sometimes', 'boolean'],
+            'administration' => ['sometimes', 'boolean'],
+            'from_onboarding' => ['sometimes', 'boolean'],
+        ]);
+
+        $githubApp = $this->githubAppCatalog->createDraftForTeam($team, [
+            'name' => $validated['name'] ?? null,
+            'organization' => $validated['organization'] ?? null,
+        ]);
+
+        if (($validated['from_onboarding'] ?? false) === true) {
+            session(['devforge_onboarding_github' => true]);
+        }
+
+        return response()->json([
+            'data' => [
+                'app' => $this->githubAppCatalog->presentApp($githubApp),
+                'launch' => $this->githubAppCatalog->manifestLaunch(
+                    $githubApp,
+                    (bool) ($validated['preview_deployments'] ?? true),
+                    (bool) ($validated['administration'] ?? false),
+                ),
+            ],
+        ], 201);
+    }
+
+    public function installUrl(Request $request, string $githubAppUuid): JsonResponse
+    {
+        $team = $this->currentTeamContext->resolve($request->user());
+
+        try {
+            $githubApp = $this->githubAppCatalog->appForTeam($team, $githubAppUuid);
+        } catch (ModelNotFoundException) {
+            return response()->json(['message' => 'GitHub app not found.'], 404);
+        }
+
+        return response()->json([
+            'data' => [
+                'url' => $this->githubAppCatalog->installationUrl($githubApp),
+            ],
+        ]);
+    }
+
     public function repositories(Request $request, string $githubAppUuid): JsonResponse
     {
         $team = $this->currentTeamContext->resolve($request->user());

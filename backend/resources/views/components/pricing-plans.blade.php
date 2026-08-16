@@ -306,7 +306,7 @@
                     <div class="text-2xl font-semibold dark:text-white">Server Automations</div>
                 </div>
                 <div class="mt-1 text-base leading-7 text-gray-300">
-                    Once you connected your server, Coolify will start managing it and do a
+                    Once you connected your server, DevForge will start managing it and do a
                     lot of administrative tasks for you. You can also write your own scripts to
                     automate your server<span class="dark:text-warning">*</span>.
                 </div>
@@ -329,7 +329,7 @@
                 </div>
                 <div class="mt-1 text-base leading-7 text-gray-300">
                     You own your own data. All configurations saved on your own servers, so if
-                    you decide to stop using Coolify, you can still continue to manage your
+                    you decide to stop using DevForge, you can still continue to manage your
                     deployed resources.
                 </div>
             </div>
@@ -351,7 +351,7 @@
                     <div class="text-2xl font-semibold dark:text-white">Monitoring</div>
                 </div>
                 <div class="mt-1 text-base leading-7 text-gray-300">
-                    Coolify will automatically monitor your configured servers and deployed
+                    DevForge will automatically monitor your configured servers and deployed
                     resources. Notifies you if something goes wrong on your favourite
                     channels, like Discord, Telegram, via Email and more...
                 </div>

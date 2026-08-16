@@ -1,6 +1,6 @@
 <div>
     <x-slot:title>
-        {{ data_get_str($server, 'name')->limit(10) }} > Cloudflare Tunnel | Coolify
+        {{ data_get_str($server, 'name')->limit(10) }} > Cloudflare Tunnel | DevForge
     </x-slot>
     <livewire:server.navbar :server="$server" />
     <div class="flex flex-col h-full gap-8 sm:flex-row">
@@ -10,7 +10,7 @@
                 <div class="flex gap-2 items-center">
                     <h2>Cloudflare Tunnel</h2>
                     <x-helper class="inline-flex"
-                        helper="If you are using Cloudflare Tunnel, enable this. It will proxy all SSH requests to your server through Cloudflare.<br> You then can close your server's SSH port in the firewall of your hosting provider.<br><span class='dark:text-warning'>If you choose manual configuration, Coolify does not install or set up Cloudflare (cloudflared) on your server.</span>" />
+                        helper="If you are using Cloudflare Tunnel, enable this. It will proxy all SSH requests to your server through Cloudflare.<br> You then can close your server's SSH port in the firewall of your hosting provider.<br><span class='dark:text-warning'>If you choose manual configuration, DevForge does not install or set up Cloudflare (cloudflared) on your server.</span>" />
                     @if ($isCloudflareTunnelsEnabled)
                         <span
                             class="px-2 py-1 text-xs font-semibold text-green-800 bg-green-100 rounded dark:text-green-100 dark:bg-green-800">

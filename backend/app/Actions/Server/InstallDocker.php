@@ -20,7 +20,7 @@ class InstallDocker
 
         if (! $server->sslCertificates()->where('is_ca_certificate', true)->exists()) {
             $serverCert = SslHelper::generateSslCertificate(
-                commonName: 'Coolify CA Certificate',
+                commonName: 'DevForge CA Certificate',
                 serverId: $server->id,
                 isCaCertificate: true,
                 validityDays: 10 * 365
@@ -49,11 +49,7 @@ class InstallDocker
           }');
         $found = StandaloneDocker::where('server_id', $server->id);
         if ($found->count() == 0 && $server->id) {
-            StandaloneDocker::create([
-                'name' => 'coolify',
-                'network' => 'coolify',
-                'server_id' => $server->id,
-            ]);
+            StandaloneDocker::create($server->defaultStandaloneDockerAttributes());
         }
         $command = collect([]);
         if (isDev() && $server->id === 0) {

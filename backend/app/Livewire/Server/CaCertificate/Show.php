@@ -94,7 +94,7 @@ class Show extends Component
         try {
             $this->authorize('manageCaCertificate', $this->server);
             SslHelper::generateSslCertificate(
-                commonName: 'Coolify CA Certificate',
+                commonName: 'DevForge CA Certificate',
                 serverId: $this->server->id,
                 isCaCertificate: true,
                 validityDays: 10 * 365

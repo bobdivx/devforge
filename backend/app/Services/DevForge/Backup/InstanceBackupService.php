@@ -76,7 +76,7 @@ class InstanceBackupService
             'migration' => [
                 'legacy_container_detected' => $this->detectLegacyCoolifyContainer($server),
                 'container_candidates' => self::CONTAINER_CANDIDATES,
-                'notes' => 'Importez un dump Coolify (.sql / .sql.gz) ou initialisez depuis le conteneur coolify-db / devforge-db pour basculer vers DevForge.',
+                'notes' => 'Importez un dump SQL (.sql / .sql.gz) ou initialisez depuis le conteneur Postgres d’instance.',
             ],
         ];
     }
@@ -127,7 +127,7 @@ class InstanceBackupService
     }
 
     /**
-     * Detect Coolify container and initialize (or refresh credentials) for DevForge cutover.
+     * Detect DevForge container and initialize (or refresh credentials) for DevForge cutover.
      *
      * @return array<string, mixed>
      */
@@ -138,7 +138,7 @@ class InstanceBackupService
         if (! $this->detectLegacyCoolifyContainer($server) && ! $this->containerExists($server, 'devforge-db')) {
             throw new HttpException(
                 422,
-                'Aucun conteneur coolify-db ou devforge-db détecté. Importez un dump Coolify à la place.',
+                'Aucun conteneur Postgres d’instance détecté. Importez un dump SQL à la place.',
             );
         }
 
@@ -346,7 +346,7 @@ class InstanceBackupService
             'imported' => true,
             'from_coolify' => $fromCoolify,
             'message' => $fromCoolify
-                ? 'Dump Coolify importé dans la base DevForge.'
+                ? 'Dump importé dans la base DevForge.'
                 : 'Sauvegarde d’instance importée.',
             'database' => $this->presentDatabase($database->fresh()),
         ];
@@ -495,7 +495,7 @@ class InstanceBackupService
         $database = $this->requireInstanceDatabase();
 
         $database->update([
-            'description' => $database->description ?: 'Base de données DevForge (migrée depuis Coolify)',
+            'description' => $database->description ?: 'Base de données DevForge',
             'postgres_user' => $envs['POSTGRES_USER'] ?? $database->postgres_user,
             'postgres_password' => $envs['POSTGRES_PASSWORD'] ?? $database->postgres_password,
             'postgres_db' => $envs['POSTGRES_DB'] ?? $database->postgres_db,
@@ -504,7 +504,7 @@ class InstanceBackupService
 
         return array_merge($this->show(), [
             'migrated' => true,
-            'message' => 'Identifiants synchronisés depuis le conteneur Coolify/DevForge.',
+            'message' => 'Identifiants synchronisés depuis le conteneur Postgres d’instance.',
         ]);
     }
 }

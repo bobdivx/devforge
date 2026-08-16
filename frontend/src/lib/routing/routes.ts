@@ -366,7 +366,7 @@ export function servicePath(uuid: string, tab: ServiceDetailTabId = 'overview'):
 }
 
 /**
- * Réécrit les URLs Coolify `/project/.../application|database|service/...` vers les chemins DevForge canoniques.
+ * Réécrit les URLs Livewire `/project/.../application|database|service/...` vers les chemins DevForge canoniques.
  * Retourne null si aucune réécriture n’est nécessaire.
  */
 export function resolveResourceCanonicalLocation(pathname: string): string | null {
@@ -541,7 +541,7 @@ const onboardingRoute: AppRoute = {
 const storagesRoute: AppRoute = {
     path: '/storages',
     label: 'Sauvegarde & S3',
-    description: 'Sauvegarde DevForge, migration Coolify et destinations S3.',
+    description: 'Sauvegarde DevForge et destinations S3.',
     icon: Cloud,
     page: 'storages',
 };

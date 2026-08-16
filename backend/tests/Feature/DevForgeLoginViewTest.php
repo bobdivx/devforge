@@ -46,13 +46,14 @@ it('renders the DevForge register page when DevForge is enabled', function () {
         ->assertDontSee('>Coolify<', false);
 });
 
-it('renders the legacy Coolify login page when DevForge is disabled', function () {
+it('renders the legacy login page without Coolify branding when DevForge is disabled', function () {
     config()->set('devforge.enabled', false);
 
     User::factory()->create();
 
     $this->get('/login')
         ->assertOk()
-        ->assertSee('Coolify', false)
+        ->assertSee('DevForge', false)
+        ->assertDontSee('Coolify', false)
         ->assertDontSee('Connectez-vous pour accéder à votre espace', false);
 });

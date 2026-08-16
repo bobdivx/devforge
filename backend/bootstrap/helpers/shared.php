@@ -557,7 +557,7 @@ function getFqdnWithoutPort(string $fqdn)
 }
 
 /**
- * Product display name (DevForge, Coolify, …) from APP_NAME.
+ * Product display name (DevForge, DevForge, …) from APP_NAME.
  */
 function product_name(): string
 {
@@ -2154,7 +2154,7 @@ function parseDockerComposeFile(Service|Application $resource, bool $isNew = fal
                 $savedService->save();
 
                 if (! $hasValidNetworkMode) {
-                    // Add Coolify specific networks
+                    // Add DevForge specific networks
                     $definedNetworkExists = $topLevelNetworks->contains(function ($value, $_) use ($definedNetwork) {
                         return $value == $definedNetwork;
                     });

@@ -104,15 +104,15 @@
     <div class="flex pt-4 pb-4 pl-2 pr-3 items-start gap-3"
         :class="collapsed ? 'lg:flex-col lg:items-center lg:pl-0 lg:pr-0 lg:gap-3 lg:pt-7' : 'lg:pt-6'">
         <div class="flex min-w-0 flex-1 flex-col" :class="collapsed && 'lg:hidden'">
-            <a href="/" {{ wireNavigate() }} class="text-2xl font-bold tracking-tight dark:text-white hover:opacity-80 transition-opacity">Coolify</a>
+            <a href="/" {{ wireNavigate() }} class="text-2xl font-bold tracking-tight dark:text-white hover:opacity-80 transition-opacity">DevForge</a>
             <x-version />
         </div>
         <div class="hidden flex-col items-center w-full gap-1"
             :class="collapsed && 'lg:flex'">
             <a href="/" {{ wireNavigate() }}
                 class="hover:opacity-80 transition-opacity"
-                title="Coolify">
-                <img src="/coolify-logo.svg" alt="Coolify" class="w-6 h-6" />
+                title="DevForge">
+                <img src="/coolify-logo.svg" alt="DevForge" class="w-6 h-6" />
             </a>
             <x-version class="text-[10px]" />
         </div>

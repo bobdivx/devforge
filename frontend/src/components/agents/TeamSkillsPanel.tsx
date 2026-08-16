@@ -60,7 +60,7 @@ export function TeamSkillsPanel() {
     return (
         <div class="grid gap-3">
             <p class="text-xs text-base-content/55">
-                Procédures équipe (catalogue prompt + corps via skill_load). Les builtins Coolify sont inclus automatiquement.
+                Procédures équipe (catalogue prompt + corps via skill_load). Les procédures intégrées sont incluses automatiquement.
             </p>
             {error && <p class="text-xs text-error">{error}</p>}
             <ul class="grid gap-2">

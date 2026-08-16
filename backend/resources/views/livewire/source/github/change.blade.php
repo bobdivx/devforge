@@ -91,12 +91,12 @@
                         @if (!isCloud())
                             <div class="w-48">
                                 <x-forms.checkbox canGate="update" :canResource="$github_app" label="System Wide?"
-                                    helper="If checked, this GitHub App will be available for everyone in this Coolify instance."
+                                    helper="If checked, this GitHub App will be available for everyone in this DevForge instance."
                                     instantSave id="isSystemWide" />
                             </div>
                             @if ($isSystemWide)
                                 <x-callout type="warning" title="Not Recommended">
-                                    System-wide GitHub Apps are shared across all teams on this Coolify instance. This means any team can use this GitHub App to deploy applications from your repositories. For better security and isolation, it's recommended to create team-specific GitHub Apps instead.
+                                    System-wide GitHub Apps are shared across all teams on this DevForge instance. This means any team can use this GitHub App to deploy applications from your repositories. For better security and isolation, it's recommended to create team-specific GitHub Apps instead.
                                 </x-callout>
                             @endif
                         @endif
@@ -266,7 +266,7 @@
                                 <x-forms.checkbox canGate="create" :canResource="$github_app"
                                     x-model="useCustomWebhookEndpoint" id="use_custom_webhook_endpoint"
                                     label="Use custom webhook endpoint"
-                                    helper="Enable this when the public URL GitHub should call differs from Coolify's configured URL, for example behind Cloudflare Tunnel." />
+                                    helper="Enable this when the public URL GitHub should call differs from DevForge's configured URL, for example behind Cloudflare Tunnel." />
                                 <div x-show="!useCustomWebhookEndpoint">
                                     <x-forms.select canGate="create" :canResource="$github_app"
                                         wire:model.live='webhook_endpoint' x-model="webhookEndpoint"

@@ -50,7 +50,7 @@ class ApplicationDomainProbe
             $ok = $status >= 200 && $status < 400;
             $body = (string) $response->body();
 
-            // Static Coolify apps with empty publish_directory often serve the
+            // Static DevForge apps with empty publish_directory often serve the
             // stock nginx welcome page (HTTP 200) instead of the built site.
             if ($ok && $this->looksLikeStockNginxWelcome($body)) {
                 return [

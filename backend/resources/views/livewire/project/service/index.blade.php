@@ -24,7 +24,7 @@
             @if ($resourceType === 'application')
                 <x-slot:title>
                     {{ data_get_str($service, 'name')->limit(10) }} >
-                    {{ data_get_str($serviceApplication, 'name')->limit(10) }} | Coolify
+                    {{ data_get_str($serviceApplication, 'name')->limit(10) }} | DevForge
                 </x-slot>
                 @if ($currentRoute === 'project.service.index.advanced')
                     <h2>Advanced</h2>
@@ -180,7 +180,7 @@
             @elseif ($resourceType === 'database')
                 <x-slot:title>
                     {{ data_get_str($service, 'name')->limit(10) }} >
-                    {{ data_get_str($serviceDatabase, 'name')->limit(10) }} | Coolify
+                    {{ data_get_str($serviceDatabase, 'name')->limit(10) }} | DevForge
                 </x-slot>
                 @if ($currentRoute === 'project.service.database.import')
                     <livewire:project.database.import :resource="$serviceDatabase" :key="'import-' . $serviceDatabase->uuid" />

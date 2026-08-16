@@ -46,7 +46,7 @@ class CleanupStaleMultiplexedConnections implements ShouldQueue
                 continue;
             }
 
-            // Only ever touch ssh processes pointing at Coolify's mux directory.
+            // Only ever touch ssh processes pointing at DevForge's mux directory.
             if (! preg_match('#ControlPath=('.preg_quote($muxDir, '#').'/\S+)#', $process['args'], $pathMatch)) {
                 continue;
             }

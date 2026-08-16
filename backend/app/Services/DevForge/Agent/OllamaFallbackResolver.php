@@ -6,7 +6,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 
 /**
- * Détecte un serveur Ollama joignable depuis le conteneur Coolify (fallback agents).
+ * Détecte un serveur Ollama joignable depuis le conteneur DevForge (fallback agents).
  */
 class OllamaFallbackResolver
 {

@@ -456,7 +456,7 @@ class LibsqlDatabaseTransferService
     }
 
     /**
-     * Prefer Coolify's instant_scp (single round-trip). Fall back to chunked base64 with retries.
+     * Prefer DevForge's instant_scp (single round-trip). Fall back to chunked base64 with retries.
      *
      * @param  (callable(int $done, int $total, string $method): void)|null  $onProgress
      * @return self::TRANSFER_METHOD_*
@@ -484,7 +484,7 @@ class LibsqlDatabaseTransferService
 
                 return self::TRANSFER_METHOD_SCP;
             } catch (\Throwable) {
-                // Non-root / tunnel / scp path issues → known Coolify fallback.
+                // Non-root / tunnel / scp path issues → known DevForge fallback.
                 return $this->writeRemoteFileChunked($server, $remotePath, $contents, $onProgress);
             }
         } finally {

@@ -218,7 +218,7 @@ class PushServerUpdateJob implements ShouldBeEncrypted, ShouldQueue, Silenced
                 $containerStatus = "$containerStatus:$containerHealth";
             }
             $labels = collect(data_get($container, 'labels'));
-            $coolify_managed = $labels->has('coolify.managed');
+            $coolify_managed = $labels->has('devforge.managed');
 
             if (! $coolify_managed) {
                 continue;
@@ -228,9 +228,9 @@ class PushServerUpdateJob implements ShouldBeEncrypted, ShouldQueue, Silenced
             if ($name === 'coolify-log-drain' && $this->isRunning($containerStatus)) {
                 $this->foundLogDrainContainer = true;
             }
-            if ($labels->has('coolify.applicationId')) {
-                $applicationId = $labels->get('coolify.applicationId');
-                $pullRequestId = $labels->get('coolify.pullRequestId', '0');
+            if ($labels->has('devforge.applicationId')) {
+                $applicationId = $labels->get('devforge.applicationId');
+                $pullRequestId = $labels->get('devforge.pullRequestId', '0');
                 try {
                     if ($pullRequestId === '0') {
                         if ($this->allApplicationIds->contains($applicationId)) {
@@ -253,10 +253,10 @@ class PushServerUpdateJob implements ShouldBeEncrypted, ShouldQueue, Silenced
                     }
                 } catch (\Exception $e) {
                 }
-            } elseif ($labels->has('coolify.serviceId')) {
-                $serviceId = $labels->get('coolify.serviceId');
-                $subType = $labels->get('coolify.service.subType');
-                $subId = $labels->get('coolify.service.subId');
+            } elseif ($labels->has('devforge.serviceId')) {
+                $serviceId = $labels->get('devforge.serviceId');
+                $subType = $labels->get('devforge.service.subType');
+                $subId = $labels->get('devforge.service.subId');
                 if (empty(trim((string) $subId))) {
                     continue;
                 }
@@ -285,7 +285,7 @@ class PushServerUpdateJob implements ShouldBeEncrypted, ShouldQueue, Silenced
                 }
             } else {
                 $uuid = $labels->get('com.docker.compose.service');
-                $type = $labels->get('coolify.type');
+                $type = $labels->get('devforge.type');
                 if ($name === 'coolify-proxy' && $this->isRunning($containerStatus)) {
                     $this->foundProxy = true;
                 } elseif ($type === 'service' && $this->isRunning($containerStatus)) {

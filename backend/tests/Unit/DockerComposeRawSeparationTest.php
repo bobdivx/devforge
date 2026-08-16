@@ -61,7 +61,7 @@ YAML;
             if (str_contains($label, 'traefik.')) {
                 $hasTraefikLabels = true;
             }
-            if (str_contains($label, 'coolify.managed')) {
+            if (str_contains($label, 'devforge.managed')) {
                 $hasCoolifyManagedLabel = true;
             }
         }
@@ -69,7 +69,7 @@ YAML;
 
     // docker_compose_raw should NOT have Coolify additions
     expect($hasTraefikLabels)->toBeFalse('docker_compose_raw should not contain Traefik labels');
-    expect($hasCoolifyManagedLabel)->toBeFalse('docker_compose_raw should not contain coolify.managed label');
+    expect($hasCoolifyManagedLabel)->toBeFalse('docker_compose_raw should not contain devforge.managed label');
 
     // But it SHOULD still have the original custom label
     $hasCustomLabel = false;

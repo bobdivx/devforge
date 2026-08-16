@@ -28,7 +28,7 @@
                         Don't have a Hetzner account? <a href='https://coolify.io/hetzner' target='_blank'
                             class='underline dark:text-white'>Sign up here</a>
                         <br>
-                        <span class="text-xs">(Coolify's affiliate link, only new accounts - supports us (€10)
+                        <span class="text-xs">(DevForge's affiliate link, only new accounts - supports us (€10)
                             and gives you €20)</span>
                     @endif
                 </div>
@@ -61,7 +61,7 @@
                         Don't have a Hetzner account? <a href='https://coolify.io/hetzner' target='_blank'
                             class='underline dark:text-white'>Sign up here</a>
                         <br>
-                        <span class="text-xs">(Coolify's affiliate link, only new accounts - supports us (€10)
+                        <span class="text-xs">(DevForge's affiliate link, only new accounts - supports us (€10)
                             and gives you €20)</span>
                     </div>
                 @endif

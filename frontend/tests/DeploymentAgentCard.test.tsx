@@ -62,7 +62,7 @@ describe('DeploymentAgentCard', () => {
                                 source_scope: 'current',
                                 actions: [],
                                 pills: [
-                                    { id: 'env', label: 'Env Coolify', active: false },
+                                    { id: 'env', label: 'Env système', active: false },
                                     { id: 'build', label: 'Build', active: true },
                                 ],
                             },

@@ -78,7 +78,7 @@ class ApplicationEnvironmentVariableCatalog
     }
 
     /**
-     * Crée ou met à jour une variable Coolify (préféré à un fichier .env Git).
+     * Crée ou met à jour une variable DevForge (préféré à un fichier .env Git).
      *
      * @param  array<string, mixed>  $input
      * @return array<string, mixed>

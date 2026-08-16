@@ -13,7 +13,7 @@ use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Tool;
 
 #[Name('control_resource')]
-#[Description('Control a Coolify application. DevForge MCP v1 only allows action=deploy on type=applications.')]
+#[Description('Control a DevForge application. DevForge MCP v1 only allows action=deploy on type=applications.')]
 class ControlResource extends Tool
 {
     use BuildsResponse;

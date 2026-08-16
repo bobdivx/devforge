@@ -5,7 +5,7 @@
         <div class="w-full">
             <x-slot:title>
                 {{ data_get_str($service, 'name')->limit(10) }} >
-                {{ data_get_str($serviceDatabase, 'name')->limit(10) }} > Backups | Coolify
+                {{ data_get_str($serviceDatabase, 'name')->limit(10) }} > Backups | DevForge
             </x-slot>
             <div class="flex gap-2">
                 <h2 class="pb-4">Scheduled Backups</h2>

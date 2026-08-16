@@ -29,7 +29,7 @@ it('creates the root team before seeding the localhost server and predefined sha
     Server::created(function (Server $server) {
         SslCertificate::create([
             'server_id' => $server->id,
-            'common_name' => 'Coolify CA Certificate',
+            'common_name' => 'DevForge CA Certificate',
             'ssl_certificate' => 'certificate',
             'ssl_private_key' => 'private-key',
             'valid_until' => now()->addYear(),
@@ -52,7 +52,7 @@ it('creates the root team before seeding the localhost server and predefined sha
         ->where('team_id', 0)
         ->pluck('key')
         ->all()
-    )->toContain('COOLIFY_SERVER_UUID', 'COOLIFY_SERVER_NAME');
+    )->toContain('DEVFORGE_SERVER_UUID', 'DEVFORGE_SERVER_NAME');
 
     instanceSettings()->update(['is_registration_enabled' => true]);
 

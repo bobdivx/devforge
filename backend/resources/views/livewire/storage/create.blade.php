@@ -1,7 +1,7 @@
 @can('create', App\Models\S3Storage::class)
     <div class="w-full">
         <div class="mb-4">For more details, please visit the <a class="underline dark:text-warning"
-                href="https://coolify.io/docs/knowledge-base/s3/introduction" target="_blank">Coolify Docs</a>.</div>
+                href="https://coolify.io/docs/knowledge-base/s3/introduction" target="_blank">DevForge Docs</a>.</div>
         <form class="flex flex-col gap-2" wire:submit='submit'>
             <div class="flex gap-2">
                 <x-forms.input required label="Name" id="name" />

@@ -201,7 +201,7 @@ export function DomainPage({ bootstrap, route, onSwitchTeam }: DomainPageProps) 
                 <>
                     <PageHeader title={route.label} description={route.description} eyebrow="Erreur 404" />
                     <Card title="Route inconnue">
-                        <p class="text-sm text-base-content/65">Utilisez la navigation DevForge ou revenez à l’interface Coolify.</p>
+                        <p class="text-sm text-base-content/65">Utilisez la navigation DevForge ou revenez à l’accueil.</p>
                     </Card>
                 </>
             );

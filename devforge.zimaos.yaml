@@ -3,57 +3,142 @@
 #
 # Images Docker Hub :
 #   bobdivx/devforge:latest
+#   bobdivx/devforge:web
 #   bobdivx/devforge:realtime
 #   bobdivx/devforge:helper   ← requis pour les déploiements (pull à la demande, pas un service compose)
+#
+# Avant le premier start, copier le proxy nginx :
+#   /media/Docker/AppData/devforge/nginx/default.conf
+#   (source repo : docker/devforge-proxy/nginx.conf)
 #
 # Build / publish : workflow GitHub "DevForge Docker Images"
 # ou : .\scripts\nas-fix-devforge.ps1 -EnableAgents
 
 name: devforge
 services:
-  api:
+  proxy:
     cpu_shares: 90
-    command: []
-    container_name: devforge-api
+    container_name: devforge-proxy
     depends_on:
+      api:
+        condition: service_started
+        required: true
+      web:
+        condition: service_started
+        required: true
       realtime:
         condition: service_started
         required: true
     deploy:
       resources:
-        limits:
-          memory: 33487564800
+        reservations:
+          devices: []
+    image: nginx:1.27-alpine
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/docker.png
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: always
+    ports:
+      - target: 80
+        published: "8080"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: /media/Docker/AppData/devforge/nginx/default.conf
+        target: /etc/nginx/conf.d/default.conf
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - devforge
+    devices: []
+    cap_add: []
+    privileged: false
+
+  web:
+    cpu_shares: 90
+    container_name: devforge-web
+    deploy:
+      resources:
+        reservations:
+          devices: []
+    image: bobdivx/devforge:web
+    pull_policy: always
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/docker.png
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - devforge
+    ports: []
+    devices: []
+    cap_add: []
+    privileged: false
+
+  api:
+    cpu_shares: 90
+    container_name: devforge-api
+    depends_on:
+      db:
+        condition: service_healthy
+        required: true
+      redis:
+        condition: service_healthy
+        required: true
+      realtime:
+        condition: service_started
+        required: true
+    deploy:
+      resources:
         reservations:
           devices: []
     environment:
       - APP_ENV=production
       - APP_ID=1
-      - APP_KEY=${APP_KEY}
+      - APP_KEY=base64:kgGufqsNEXfgu1P9CreNMKFdyxxizRyDZxkOUVuuZuE=
       - APP_NAME=DevForge
-      - APP_URL=${APP_URL:-http://10.1.0.58:8080}
-      - BASE_CONFIG_PATH=${DEVFORGE_PLATFORM_DATA:-/media/Docker/AppData/devforge/data}
+      - APP_URL=http://10.1.0.58:8080
+      - BASE_CONFIG_PATH=/media/Docker/AppData/devforge/data
       - DB_CONNECTION=pgsql
-      - DB_DATABASE=${DB_DATABASE:-devforge}
-      - DB_HOST=127.0.0.1
-      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_DATABASE=devforge
+      - DB_HOST=db
+      - DB_PASSWORD=aBVGheEhcY8E8INxMcq063RYhwG6oeM1
       - DB_PORT=5432
-      - DB_USERNAME=${DB_USERNAME:-devforge}
+      - DB_USERNAME=devforge
       - DEVFORGE_AGENTS_ENABLED=true
       - DEVFORGE_ENABLED=true
-      - DEVFORGE_MCP_ENABLED=${DEVFORGE_MCP_ENABLED:-true}
-      - DEVFORGE_DATA_DIR=${DEVFORGE_PLATFORM_DATA:-/media/Docker/AppData/devforge/data}
-      - HELPER_IMAGE=${HELPER_IMAGE:-bobdivx/devforge}
-      - PUSHER_APP_ID=${PUSHER_APP_ID:-devforge}
-      - PUSHER_APP_KEY=${PUSHER_APP_KEY:-devforge}
-      - PUSHER_APP_SECRET=${PUSHER_APP_SECRET:-devforge}
-      - PUSHER_BACKEND_HOST=127.0.0.1
+      - DEVFORGE_MCP_ENABLED=true
+      - DEVFORGE_DATA_DIR=/media/Docker/AppData/devforge/data
+      - HELPER_IMAGE=bobdivx/devforge
+      - PUSHER_APP_ID=devforge
+      - PUSHER_APP_KEY=devforge
+      - PUSHER_APP_SECRET=devforge
+      - PUSHER_BACKEND_HOST=realtime
       - PUSHER_BACKEND_PORT=6001
       - PUSHER_PORT=6001
       - PUSHER_SCHEME=http
-      - REDIS_HOST=127.0.0.1
-      - SESSION_SECURE_COOKIE=true
+      - REDIS_HOST=redis
+      - SESSION_SECURE_COOKIE=false
       - SSH_AUTH_SOCK=/ssh-agent
-    image: ${DEVFORGE_API_IMAGE:-bobdivx/devforge:latest}
+    image: bobdivx/devforge:latest
     pull_policy: always
     labels:
       icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/docker.png
@@ -70,55 +155,58 @@ services:
         bind:
           create_host_path: true
       - type: bind
-        source: ${DEVFORGE_PLATFORM_DATA:-/media/Docker/AppData/devforge/data}
+        source: /media/Docker/AppData/devforge/data
         target: /data
         bind:
           create_host_path: true
       - type: bind
-        source: ${DEVFORGE_DATA_ROOT:-/media/Docker/AppData/devforge}/ssh
+        source: /media/Docker/AppData/devforge/ssh
         target: /var/www/html/storage/app/ssh
         bind:
           create_host_path: true
       - type: bind
-        source: ${DEVFORGE_DATA_ROOT:-/media/Docker/AppData/devforge}/applications
+        source: /media/Docker/AppData/devforge/applications
         target: /var/www/html/storage/app/applications
         bind:
           create_host_path: true
       - type: bind
-        source: ${DEVFORGE_DATA_ROOT:-/media/Docker/AppData/devforge}/databases
+        source: /media/Docker/AppData/devforge/databases
         target: /var/www/html/storage/app/databases
         bind:
           create_host_path: true
       - type: bind
-        source: ${DEVFORGE_DATA_ROOT:-/media/Docker/AppData/devforge}/services
+        source: /media/Docker/AppData/devforge/services
         target: /var/www/html/storage/app/services
         bind:
           create_host_path: true
       - type: bind
-        source: ${DEVFORGE_DATA_ROOT:-/media/Docker/AppData/devforge}/backups
+        source: /media/Docker/AppData/devforge/backups
         target: /var/www/html/storage/app/backups
         bind:
           create_host_path: true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - devforge
     ports: []
     devices: []
     cap_add: []
-    network_mode: host
     privileged: false
 
   db:
     cpu_shares: 90
-    command: []
     container_name: devforge-db
     deploy:
       resources:
-        limits:
-          memory: 33487564800
         reservations:
           devices: []
     environment:
-      - POSTGRES_DB=${DB_DATABASE:-devforge}
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
-      - POSTGRES_USER=${DB_USERNAME:-devforge}
+      - POSTGRES_DB=devforge
+      - POSTGRES_PASSWORD=aBVGheEhcY8E8INxMcq063RYhwG6oeM1
+      - POSTGRES_USER=devforge
     image: postgres:15-alpine
     labels:
       icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/docker.png
@@ -131,34 +219,37 @@ services:
     user: 0:0
     volumes:
       - type: bind
-        source: ${DEVFORGE_POSTGRES_DATA:-/media/Docker/AppData/devforge/postgres}
+        source: /media/Docker/AppData/devforge/postgres
         target: /var/lib/postgresql/data
         bind:
           create_host_path: true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devforge -d devforge"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - devforge
     ports: []
     devices: []
     cap_add: []
-    network_mode: host
     privileged: false
 
   realtime:
     cpu_shares: 90
-    command: []
     container_name: devforge-realtime
     deploy:
       resources:
-        limits:
-          memory: 33487564800
         reservations:
           devices: []
     environment:
       - APP_NAME=DevForge
       - SOKETI_DEBUG=false
-      - SOKETI_DEFAULT_APP_ID=${PUSHER_APP_ID:-devforge}
-      - SOKETI_DEFAULT_APP_KEY=${PUSHER_APP_KEY:-devforge}
-      - SOKETI_DEFAULT_APP_SECRET=${PUSHER_APP_SECRET:-devforge}
+      - SOKETI_DEFAULT_APP_ID=devforge
+      - SOKETI_DEFAULT_APP_KEY=devforge
+      - SOKETI_DEFAULT_APP_SECRET=devforge
       - SOKETI_HOST=0.0.0.0
-    image: ${DEVFORGE_REALTIME_IMAGE:-bobdivx/devforge:realtime}
+    image: bobdivx/devforge:realtime
     pull_policy: always
     labels:
       icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/docker.png
@@ -168,29 +259,39 @@ services:
         max-size: "20m"
         max-file: "3"
     restart: always
-    ports: []
     volumes:
       - type: bind
-        source: ${DEVFORGE_DATA_ROOT:-/media/Docker/AppData/devforge}/ssh
+        source: /media/Docker/AppData/devforge/ssh
         target: /var/www/html/storage/app/ssh
         bind:
           create_host_path: true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:6001/ready || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - devforge
+    ports: []
     devices: []
     cap_add: []
-    network_mode: host
     privileged: false
 
   redis:
     cpu_shares: 90
-    command: []
+    command:
+      - redis-server
+      - --save
+      - "20"
+      - "1"
+      - --loglevel
+      - warning
     container_name: devforge-redis
     deploy:
       resources:
-        limits:
-          memory: 33487564800
         reservations:
           devices: []
-    image: redis:alpine
+    image: redis:7-alpine
     labels:
       icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/docker.png
     logging:
@@ -201,16 +302,27 @@ services:
     restart: always
     volumes:
       - type: bind
-        source: ${DEVFORGE_REDIS_DATA:-/media/Docker/AppData/devforge/redis}
+        source: /media/Docker/AppData/devforge/redis
         target: /data
         bind:
           create_host_path: true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - devforge
     ports: []
     devices: []
     cap_add: []
     environment: []
-    network_mode: host
     privileged: false
+
+networks:
+  devforge:
+    name: devforge
+    driver: bridge
 
 x-casaos:
   author: self
@@ -230,11 +342,16 @@ x-casaos:
     fr_fr: DevForge PaaS — déploiements, agents IA, ops Docker
   developer: DevForge
   tip: |
-    1. Définir APP_KEY et DB_PASSWORD avant le premier démarrage.
-    2. Images : bobdivx/devforge:latest et bobdivx/devforge:realtime (Docker Hub).
-    3. Données sous /media/Docker/AppData/devforge/
-    4. Surveiller l'espace /media/Docker (builds + images) — un disque plein fait planter Postgres.
-    5. Cleanup Docker forcé toutes les heures sur le serveur localhost (seuil 70%).
-    6. Mise à jour images : docker pull bobdivx/devforge:latest && docker pull bobdivx/devforge:realtime
-       puis recréer les conteneurs (CasaOS Update / compose up -d --force-recreate).
-       Un simple redémarrage ne tire PAS la nouvelle version du tag :api.
+    1. APP_KEY et DB_PASSWORD sont déjà définis dans ce compose (ZimaOS vide ${VAR}).
+    2. Copier docker/devforge-proxy/nginx.conf vers
+       /media/Docker/AppData/devforge/nginx/default.conf
+       (un dossier à la place du fichier fait échouer nginx).
+    3. Images : bobdivx/devforge:latest, :web et :realtime (Docker Hub).
+    4. Données sous /media/Docker/AppData/devforge/ (SSD Docker 512 Go).
+    5. Surveiller l'espace /media/Docker (builds + images) — un disque plein fait planter Postgres.
+    6. HTTP :8080 — SESSION_SECURE_COOKIE doit rester false.
+    7. Mise à jour : docker pull bobdivx/devforge:latest
+       && docker pull bobdivx/devforge:web
+       && docker pull bobdivx/devforge:realtime
+       puis recréer les conteneurs (CasaOS Update / compose up -d --force-recreate).
+       Un simple redémarrage ne tire PAS la nouvelle version.

@@ -71,7 +71,7 @@ Chaque ligne du tableau doit être **cochée** avant de retirer l’UI Livewire 
 | **projects** (routes legacy) | ✅ | ✅ | ✅ | ✅ | ✅ | ➖ | ✅ | ✅ | ✅ | ✅ | ❌ | `/project/*` → settings projets DevForge |
 | **storage** (`/storages`) | ✅ | ✅ | ✅ | ✅ | ✅ | ➖ | ✅ | ⚠️ | ✅ | ✅ | ❌ | Page standalone + CRUD S3 — UI sans bannière |
 | **subscription** | ✅ | ✅ | ⚠️ | ❌ | ❌ | ➖ | ✅ | ❌ | ❌ | ✅ | ❌ | Bootstrap cloud ; Stripe legacy |
-| **onboarding** | ✅ | ✅ | ✅ | ➖ | ✅ | ➖ | ✅ | ❌ | ❌ | ✅ | ❌ | Checklist guidée DevForge |
+| **onboarding** | ✅ | ✅ | ✅ | ➖ | ✅ | ➖ | ✅ | ❌ | ❌ | ✅ | ❌ | Wizard GitHub / S3 / serveur |
 | **authentication** | ⚠️ | ❌ | ⚠️ | ⚠️ | ❌ | ➖ | ✅ | ⚠️ | ⚠️ | ⚠️ | ❌ | Fortify hors shell — `.ai/devforge/authentication.md` |
 | **agents** | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ | ⚠️ | ❌ | Feature flag `DEVFORGE_AGENTS_ENABLED` |
 
@@ -339,7 +339,7 @@ Chaque vague vise le critère **E** (API écriture) + **U** (UI sans bannière) 
 | # | Domaine | Travail | Statut |
 |---|---------|---------|--------|
 | 14 | **subscription** | Lecture cloud + Stripe legacy | Partiel (UI DevForge + bannière Stripe) |
-| 15 | **onboarding** | Wizard multi-étapes DevForge | ✅ Checklist guidée |
+| 15 | **onboarding** | Wizard multi-étapes DevForge | ✅ Compte + GitHub + S3 + serveur |
 | 16 | **authentication** | Fortify hors SPA (décision documentée) | ✅ Voir `.ai/devforge/authentication.md` |
 | 17 | **admin** | Cloud/dev stats | À faire |
 

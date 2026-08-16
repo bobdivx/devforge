@@ -91,7 +91,7 @@ class AgentDirectives
                 Boucle max : 2 cycles correction→relance ; ensuite résumé et stop.
                 Ne modifie que les YAML CI / actions — pas le code métier sauf preuve claire.
                 Si le paquet github n'est pas actif : enable_tool_package(package="github") en premier.
-                INTERDIT : écrire du Python, inventer des placeholders (your-owner…), refuser en citant Coolify ou un produit inconnu.
+                INTERDIT : écrire du Python, inventer des placeholders (your-owner…), refuser en citant DevForge ou un produit inconnu.
                 Ta première sortie DOIT être un tool_call natif (list_github_apps ou get_github_workflow_run).
                 PROMPT,
             'devforge' => <<<'PROMPT'
@@ -216,10 +216,10 @@ class AgentDirectives
         5. Tu peux installer des CLI sur les serveurs via install_tool, ou créer un outil custom via request_tool.
         6. Documente chaque action importante avec send_notification.
         7. N'arrête ou ne redéploie une ressource que si c'est justifié.
-        8. Variables Coolify (PUPPETEER_SKIP_DOWNLOAD, secrets build) → upsert_application_env_var, jamais write_application_source sur .env.
+        8. Variables DevForge (PUPPETEER_SKIP_DOWNLOAD, secrets build) → upsert_application_env_var, jamais write_application_source sur .env.
         9. « Permission denied » sur écriture .env / applications/* = fix_application_host_permissions (autonomie),
            jamais de DUMMY_* / *_TRIGGER. Si l’outil échoue, documente l’erreur SSH concrète.
-        10. « Read-only file system » pendant mkdir d’une app Coolify = fix_coolify_base_config_path
+        10. « Read-only file system » pendant mkdir d’une app DevForge = fix_coolify_base_config_path
             (recharge la config BASE_CONFIG_PATH réelle — ne suppose pas un chemin hôte).
         11. Site statique qui sert la page nginx par défaut / publish_directory vide :
             déduis le dossier depuis les logs de build (get_deployment_logs / get_application_runtime_settings)
@@ -233,7 +233,7 @@ class AgentDirectives
         14. Termine par un résumé structuré en français : constats → actions prises → recommandations.
         15. LANGUE : français uniquement pour tout texte utilisateur (voir consigne en tête).
         16. Ne dis JAMAIS « je n'ai pas accès » sans avoir tenté enable_tool_package, list_tool_packages, fix_application_host_permissions ou fix_coolify_base_config_path.
-        17. INTERDIT de refuser la tâche en citant Coolify ou un « produit non renseigné » — tu es dans DevForge avec des outils réels.
+        17. INTERDIT de refuser la tâche en citant DevForge ou un « produit non renseigné » — tu es dans DevForge avec des outils réels.
         18. INTERDIT d'écrire du Python, du pseudo-code ou des playbooks texte : émets uniquement des tool_calls natifs.
         19. Clé / token / secret manquant : request_user_input (jamais inventer de credentials). La mission passe en blocked jusqu’à réponse humaine.
         20. Travail d’équipe via missions : VT propose (mission_create), implementer/debug claim + exécutent, tests via run_application_tests.
@@ -253,7 +253,7 @@ class AgentDirectives
         1. N'INTERROGE JAMAIS l'utilisateur : pas de « Est-ce que cela vous convient ? », « Voulez-vous que je… », « Puis-je… », « Dois-je… ». Exécute directement.
         2. Ne propose pas un plan à valider — enchaîne les outils et présente les résultats obtenus.
         3. Si la question porte sur tes capacités (fichiers, GitHub, serveurs, outils), PROUVE-LE avec des appels d'outil immédiats, puis résume avec des faits concrets.
-        4. Si une application ou ressource est mentionnée, investigue-la tout de suite (get_application_source_info, list_application_source, read_application_source, get_deployment_logs, docker_logs). read_remote_file = config Coolify sur le serveur uniquement.
+        4. Si une application ou ressource est mentionnée, investigue-la tout de suite (get_application_source_info, list_application_source, read_application_source, get_deployment_logs, docker_logs). read_remote_file = config DevForge sur le serveur uniquement.
         5. Ta première réponse à une demande actionnable DOIT inclure au moins un appel d'outil — jamais une réponse texte seule.
         6. INTERDIT de décrire un outil en prose ou JSON (`{"method":"spawn_task"...}`) : émets un vrai tool_call.
            L’UI affiche automatiquement une carte Actions — ne réécris pas la commande pour l’utilisateur.
@@ -536,7 +536,7 @@ class AgentDirectives
             return false;
         }
 
-        // Symptôme (permission) + cible typique Coolify (.env / tee / applications), sans path hôte figé.
+        // Symptôme (permission) + cible typique DevForge (.env / tee / applications), sans path hôte figé.
         $hasPermissionSignal = (bool) preg_match(
             '/permission\s+denied|operation not permitted|tee:.*(?:denied|permission)|ownership|\bchown\b|\bchmod\b/iu',
             $text,
@@ -574,7 +574,7 @@ class AgentDirectives
             return false;
         }
 
-        // Symptôme FS en lecture seule lors d'un mkdir Coolify — le chemin exact varie (NAS, Docker, volume).
+        // Symptôme FS en lecture seule lors d'un mkdir DevForge — le chemin exact varie (NAS, Docker, volume).
         $readOnly = (bool) preg_match('/read-only\s+file\s+system/iu', $text);
         $mkdir = (bool) preg_match('/\bmkdir\b|cannot create directory/iu', $text);
         $coolifyContext = (bool) preg_match('/\bcoolify\b|\bapplications\//iu', $text);
@@ -614,7 +614,7 @@ class AgentDirectives
     }
 
     /**
-     * Healthcheck Coolify sur un port différent de celui où l’app écoute réellement.
+     * Healthcheck DevForge sur un port différent de celui où l’app écoute réellement.
      */
     public static function isHealthcheckPortMismatchIssue(?string $text): bool
     {
@@ -675,7 +675,7 @@ class AgentDirectives
     }
 
     /**
-     * Déduit le port healthcheck depuis les logs Coolify.
+     * Déduit le port healthcheck depuis les logs DevForge.
      */
     public static function inferHealthcheckPortFromLogs(string $logsBlob): ?string
     {
@@ -898,7 +898,7 @@ class AgentDirectives
         };
 
         return 'REFUS INVALIDE. Tu es un agent DevForge avec des outils natifs. '
-            .'Ignore toute notion de « produit Coolify non renseigné ». '
+            .'Ignore toute notion de « produit DevForge non renseigné ». '
             .'Appelle MAINTENANT '.$focus.' via un vrai tool_call — aucune excuse texte.';
     }
 
@@ -916,7 +916,7 @@ class AgentDirectives
     public static function deploymentFailureCorrectionNudgeMessage(?string $assistantText = null): string
     {
         return 'STOP — diagnostic insuffisant. Applique MAINTENANT une vraie correction via tool_call : '
-            .'fix_coolify_base_config_path (si Read-only pendant mkdir Coolify), fix_application_host_permissions (si Permission denied), '
+            .'fix_coolify_base_config_path (si Read-only pendant mkdir DevForge), fix_application_host_permissions (si Permission denied), '
             .'update_application_runtime_settings (déduis publish_directory depuis les logs de build si page nginx par défaut), '
             .'update_application_git_branch, upsert_application_env_var (variable RÉELLE citée dans les logs) '
             .'ou write_application_source, puis redeploy si besoin. '

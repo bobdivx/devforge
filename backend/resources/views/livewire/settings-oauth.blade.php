@@ -1,6 +1,6 @@
 <div>
     <x-slot:title>
-        Settings | Coolify
+        Settings | DevForge
     </x-slot>
     <x-settings.navbar />
     <form wire:submit='submit' class="flex flex-col">

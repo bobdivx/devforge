@@ -40,7 +40,7 @@ class StartSentinel
             'COLLECTOR_RETENTION_PERIOD_DAYS' => $metricsHistory,
         ];
         $labels = [
-            'coolify.managed' => 'true',
+            'devforge.managed' => 'true',
         ];
         if (isDev()) {
             // data_set($environments, 'DEBUG', 'true');

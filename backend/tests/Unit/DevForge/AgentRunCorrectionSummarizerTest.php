@@ -31,7 +31,7 @@ it('summarizes coolify env upsert and redeploy as fixed', function () {
             'correction_actions' => [
                 [
                     'kind' => 'env_coolify',
-                    'label' => 'Variable Coolify',
+                    'label' => 'Variable DevForge',
                     'detail' => 'PUPPETEER_SKIP_DOWNLOAD',
                     'ok' => true,
                 ],
@@ -66,7 +66,7 @@ it('summarizes coolify env upsert and redeploy as fixed', function () {
     $this->summarizer->finalize($run->fresh());
     $run->refresh();
 
-    expect($run->summary)->toContain('Variables Coolify')
+    expect($run->summary)->toContain('Variables DevForge')
         ->and($run->metadata['correction']['outcome'])->toBe('fixed');
 });
 

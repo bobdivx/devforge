@@ -17,7 +17,7 @@
     <div class="flex flex-col gap-4">
         @if (!$healthCheckEnabled)
             <x-callout type="warning" title="Healthcheck disabled">
-                <p>Docker runs no healthcheck probe for this database and Coolify can no longer report a healthy/unhealthy state.</p>
+                <p>Docker runs no healthcheck probe for this database and DevForge can no longer report a healthy/unhealthy state.</p>
             </x-callout>
         @endif
 

@@ -96,7 +96,7 @@ class InstanceHostDiskGuardJob implements ShouldBeUnique, ShouldQueue, Silenced
             'sudo DOCKER_CONFIG=/DATA/.docker docker buildx prune -af 2>/dev/null || true',
             'docker image prune -f 2>/dev/null || true',
             // Same filters as CleanupDocker — managed ephemerals only.
-            'docker container prune -f --filter "label=coolify.managed=true" --filter "label!=coolify.proxy=true" --filter "label!=coolify.type=database" --filter "label!=coolify.type=application" --filter "label!=coolify.type=service" 2>/dev/null || true',
+            'docker container prune -f --filter "label=devforge.managed=true" --filter "label!=devforge.proxy=true" --filter "label!=devforge.type=database" --filter "label!=devforge.type=application" --filter "label!=devforge.type=service" 2>/dev/null || true',
         ];
 
         foreach ($commands as $command) {

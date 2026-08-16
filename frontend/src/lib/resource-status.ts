@@ -43,7 +43,7 @@ export function classifyResourceStatusTone(status: string): ResourceStatusTone {
             return 'warning';
         }
 
-        // running:unknown = conteneur actif sans healthcheck Docker (état normal Coolify)
+        // running:unknown = conteneur actif sans healthcheck Docker (état normal)
         return 'success';
     }
 

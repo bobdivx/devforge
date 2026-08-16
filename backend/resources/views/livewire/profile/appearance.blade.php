@@ -1,6 +1,6 @@
 <div>
     <x-slot:title>
-        Appearance | Coolify
+        Appearance | DevForge
     </x-slot>
     <x-profile.navbar />
 
@@ -38,7 +38,7 @@
     }" class="flex max-w-2xl flex-col">
         <section class="space-y-1.5">
             <h2>Appearance</h2>
-            <div>Choose how Coolify looks in this browser.</div>
+            <div>Choose how DevForge looks in this browser.</div>
             <div class="flex flex-wrap gap-1.5">
                 <button type="button" @click="setTheme('light')" aria-label="Use light theme"
                     class="flex items-center gap-2 rounded-sm border border-neutral-300 bg-white px-2 py-1 text-left text-sm hover:bg-neutral-100 focus-visible:ring-2 focus-visible:ring-coollabs dark:border-coolgray-300 dark:bg-coolgray-100 dark:hover:bg-coolgray-200 dark:focus-visible:ring-warning"

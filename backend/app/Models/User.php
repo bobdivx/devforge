@@ -283,7 +283,7 @@ class User extends Authenticatable implements SendsEmail
         $mail->view('emails.email-verification', [
             'url' => $url,
         ]);
-        $mail->subject('Coolify: Verify your email.');
+        $mail->subject('DevForge: Verify your email.');
         send_user_an_email($mail, $this->email);
     }
 

@@ -20,7 +20,7 @@ use Illuminate\Support\Facades\Log;
  * This job acts as a safety net for containers that weren't properly cleaned up
  * when a PR was closed (e.g., due to webhook failures, race conditions, etc.).
  *
- * It scans all functional servers for containers with the `coolify.pullRequestId` label
+ * It scans all functional servers for containers with the `devforge.pullRequestId` label
  * and removes any where the corresponding ApplicationPreview record no longer exists.
  */
 class CleanupOrphanedPreviewContainersJob implements ShouldBeEncrypted, ShouldBeUnique, ShouldQueue
@@ -103,7 +103,7 @@ class CleanupOrphanedPreviewContainersJob implements ShouldBeEncrypted, ShouldBe
     {
         try {
             $output = instant_remote_process([
-                "docker ps -a --filter 'label=coolify.pullRequestId' --format '{{json .}}'",
+                "docker ps -a --filter 'label=devforge.pullRequestId' --format '{{json .}}'",
             ], $server, false);
 
             if (empty($output)) {

@@ -50,7 +50,7 @@ class AgentFeatureDelivery
         $body .= "\n\n---\n"
             ."Contraintes DevForge (feature_delivery) :\n"
             ."- Toujours write_application_source en mode=pull_request (jamais commit direct sur la branche principale).\n"
-            ."- Après la PR : note le numéro/URL ; la preview Coolify se crée si les preview deployments sont activés.\n"
+            ."- Après la PR : note le numéro/URL ; la preview DevForge se crée si les preview deployments sont activés.\n"
             ."- Lance run_application_tests si possible.\n"
             ."- Ne merge PAS toi-même : l’utilisateur valide via l’UI « Valider & merger ».\n"
             ."- Termine par mission_update(status=blocked, blocked_reason=« En attente de validation preview ») "

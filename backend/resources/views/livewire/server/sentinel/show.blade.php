@@ -1,6 +1,6 @@
 <div>
     <x-slot:title>
-        Sentinel Configuration | Coolify
+        Sentinel Configuration | DevForge
     </x-slot>
     <livewire:server.navbar :server="$server" />
     @if ($server->isFunctional())

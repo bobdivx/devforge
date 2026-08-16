@@ -28,8 +28,8 @@ test('database last_online_at is not updated when status is unchanged', function
                 'state' => 'running',
                 'health_status' => 'healthy',
                 'labels' => [
-                    'coolify.managed' => 'true',
-                    'coolify.type' => 'database',
+                    'devforge.managed' => 'true',
+                    'devforge.type' => 'database',
                     'com.docker.compose.service' => $database->uuid,
                 ],
             ],
@@ -62,8 +62,8 @@ test('database status is updated when container status changes', function () {
                 'state' => 'running',
                 'health_status' => 'healthy',
                 'labels' => [
-                    'coolify.managed' => 'true',
-                    'coolify.type' => 'database',
+                    'devforge.managed' => 'true',
+                    'devforge.type' => 'database',
                     'com.docker.compose.service' => $database->uuid,
                 ],
             ],
@@ -115,8 +115,8 @@ test('libsql database status is updated when container status changes', function
                 'state' => 'running',
                 'health_status' => 'healthy',
                 'labels' => [
-                    'coolify.managed' => 'true',
-                    'coolify.type' => 'database',
+                    'devforge.managed' => 'true',
+                    'devforge.type' => 'database',
                     'com.docker.compose.service' => $database->uuid,
                 ],
             ],

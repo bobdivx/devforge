@@ -65,7 +65,7 @@ export function AgentSkillsPanel({ agent }: Props) {
         <div class="grid gap-2 rounded-xl border border-base-300 bg-base-200/30 p-3">
             <p class="text-xs font-semibold uppercase tracking-wide text-base-content/60">Skills</p>
             <p class="text-[11px] text-base-content/55">
-                Procédures réutilisables (catalogue dans le prompt, corps via skill_load). Builtins Coolify inclus.
+                Procédures réutilisables (catalogue dans le prompt, corps via skill_load). Les procédures intégrées sont incluses.
             </p>
             {error && <p class="text-xs text-error">{error}</p>}
             <ul class="grid gap-2">

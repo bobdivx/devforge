@@ -172,8 +172,8 @@ it('builds docker run commands with volumes network and timezone', function () {
         ->toContain('-e '.escapeshellarg('ACCESS_TOKEN=REGISTRATION_TOKEN'))
         ->toContain('-e '.escapeshellarg('RUNNER_LABELS=self-hosted,popcorn'))
         ->toContain('-e '.escapeshellarg('RUNNER_VERSION=2.336.0'))
-        ->toContain('--label '.escapeshellarg('coolify.managed=true'))
-        ->toContain('--label '.escapeshellarg('coolify.type=service'))
+        ->toContain('--label '.escapeshellarg('devforge.managed=true'))
+        ->toContain('--label '.escapeshellarg('devforge.type=service'))
         ->toContain(escapeshellarg('ghcr.io/bobdivx/popcorn-github-runner-client:latest'));
 });
 

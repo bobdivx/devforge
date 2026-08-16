@@ -165,6 +165,24 @@ it('blocks rebinding an already configured github app through manifest callback'
         ->and($this->githubApp->webhook_secret)->toBe('existing-webhook-secret');
 });
 
+it('redirects to github installation when onboarding started the manifest', function () {
+    authenticateGithubSetupCallbackTest($this);
+    fakeGithubManifestConversion();
+    cacheGithubAppSetupState('valid-state', 'manifest', $this->githubApp);
+
+    $response = $this->withSession([
+        'currentTeam' => $this->team,
+        'devforge_onboarding_github' => true,
+    ])->get('/webhooks/source/github/redirect?state=valid-state&code=real-code');
+
+    $response->assertRedirect();
+    expect((string) $response->headers->get('Location'))
+        ->toContain('github.com/apps/attacker-controlled-app/installations/new');
+
+    $this->githubApp->refresh();
+    expect($this->githubApp->app_id)->toBe(987654);
+});
+
 it('configures an unbound github app with a valid one-time manifest state', function () {
     authenticateGithubSetupCallbackTest($this);
     fakeGithubManifestConversion();

@@ -27,7 +27,7 @@ class AgentPromptBuilder
             - Si clone Git échoue (Remote branch not found / Could not find remote branch) : get_application_git_info + list_github_branches puis update_application_git_branch (redeploy=true) via leaf fix.
             - Échec de BUILD (nixpacks/npm/yarn/pnpm/tsc/vite/dockerfile) :
               1) get_application_runtime_settings + read_application_source (package.json, Dockerfile, nixpacks.toml…)
-              2) Corrige côté Coolify via update_application_runtime_settings (install_command, build_command, start_command, ports_exposes, base_directory, publish_directory, build_pack) si la config Coolify est en cause
+              2) Corrige côté DevForge via update_application_runtime_settings (install_command, build_command, start_command, ports_exposes, base_directory, publish_directory, build_pack) si la config DevForge est en cause
               3) Ou upsert_application_env_var pour variables de build (PUPPETEER_SKIP_DOWNLOAD, NODE_OPTIONS, NODE_ENV…)
               4) Ou write_application_source pour un fix code évident (package.json scripts, Dockerfile) — jamais .env
               5) Puis redeploy (1 fois) via l’outil qui a corrigé ou control_resource deploy
@@ -36,7 +36,7 @@ class AgentPromptBuilder
               CORRIGE en autonomie avec fix_application_host_permissions (chown/chmod ciblé + redeploy).
               INTERDIT d’inventer une variable env factice (DUMMY_*, *_TRIGGER, FORCE_REDEPLOY…).
               INTERDIT de s’arrêter sur « intervention manuelle ops » sans avoir tenté fix_application_host_permissions.
-            - « Read-only file system » pendant un mkdir Coolify (chemin hôte incorrect ou config cache) :
+            - « Read-only file system » pendant un mkdir DevForge (chemin hôte incorrect ou config cache) :
               CORRIGE avec fix_coolify_base_config_path (recharge BASE_CONFIG_PATH via config:clear + horizon:terminate + redeploy).
               Ne suppose pas un chemin NAS particulier — l’outil lit la config réelle.
             - Site statique qui sert la page nginx par défaut / publish_directory vide :
@@ -50,7 +50,7 @@ class AgentPromptBuilder
               sync_application_proxy_labels (régénère Traefik loadbalancer.port depuis ports_exposes) puis redeploy.
               Cause typique : custom_labels figés sur port=80 alors que ports_exposes=4321.
             - npm E401 / unauthenticated sur npm.pkg.github.com :
-              Coolify injecte NODE_AUTH_TOKEN au build via PAT enregistré (Connexions → token Packages)
+              DevForge injecte NODE_AUTH_TOKEN au build via PAT enregistré (Connexions → token Packages)
               ou token GitHub App si packages:read est accordé.
               Si aucun des deux → needs_user : guider vers DevForge → Connexions (PAT read:packages),
               avec steps numérotées et pill href /connexions.
@@ -119,7 +119,7 @@ class AgentPromptBuilder
             - Termine par mission_update(status=done|blocked) avec blocked_reason si besoin.
             - Si workflow=feature_delivery (ou force_pull_request) :
               * TOUJOURS write_application_source mode=pull_request (jamais commit direct sur main).
-              * Après la PR : get_application_preview pour récupérer l’URL preview Coolify.
+              * Après la PR : get_application_preview pour récupérer l’URL preview DevForge.
               * INTERDIT merge_pull_request / merge GitHub — l’humain valide via l’UI « Valider & merger ».
               * Quand la PR est prête : mission_update(status=blocked, blocked_reason=« En attente de validation preview »).
             RULES,
@@ -190,7 +190,7 @@ class AgentPromptBuilder
 
         Tu es un agent IA autonome intégré dans DevForge.
         Tu as des outils natifs (tool_calls) pour agir sur la plateforme et GitHub.
-        Ne refuse JAMAIS une tâche en prétextant un produit inconnu (Coolify, etc.) — tu es déjà dans DevForge.
+        Ne refuse JAMAIS une tâche en prétextant un produit inconnu (DevForge, etc.) — tu es déjà dans DevForge.
         Équipe : {$agent->team->name}
         Type : {$agent->type}
 
@@ -503,9 +503,9 @@ class AgentPromptBuilder
 
         Application : {$applicationName} ({$applicationUuid})
         Déploiement : {$deploymentUuid}
-        Branche Coolify actuelle : {$gitBranch}
+        Branche DevForge actuelle : {$gitBranch}
         Commit : {$commit}
-        Build Coolify : pack={$buildPack} · install={$installCommand} · build={$buildCommand} · start={$startCommand} · ports={$portsExposes} · base={$baseDirectory}
+        Build DevForge : pack={$buildPack} · install={$installCommand} · build={$buildCommand} · start={$startCommand} · ports={$portsExposes} · base={$baseDirectory}
 
         Logs d'échec :
         {$failureExcerpt}
@@ -522,11 +522,11 @@ class AgentPromptBuilder
         6. Si « Permission denied » / tee Permission denied sur .env ou applications/* :
            fix_application_host_permissions (redeploy=true) IMMÉDIATEMENT — autonomie totale, pas d’attente ops
            INTERDIT : variables factices (DUMMY_*, *_TRIGGER), upsert cosmétique, s’arrêter sans tenter le fix
-        7. Si « Read-only file system » pendant mkdir Coolify (config path incorrecte / cache) :
+        7. Si « Read-only file system » pendant mkdir DevForge (config path incorrecte / cache) :
            fix_coolify_base_config_path (redeploy=true) IMMÉDIATEMENT — recharge BASE_CONFIG_PATH réelle
         8. Si site statique / page nginx par défaut / publish_directory vide :
            déduis le dossier depuis les logs de build puis update_application_runtime_settings(publish_directory=…, redeploy=true)
-        9. write_application_source seulement pour un fix code évident (jamais .env) ; permissions GitHub → bascule runtime/env Coolify
+        9. write_application_source seulement pour un fix code évident (jamais .env) ; permissions GitHub → bascule runtime/env DevForge
         10. control_resource deploy UNE FOIS si correction appliquée (sauf si un autre outil a déjà redeployé), puis STOP
         11. Résumé actionnable (constats → actions outils → suite)
 

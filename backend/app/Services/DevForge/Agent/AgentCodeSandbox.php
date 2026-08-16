@@ -7,7 +7,7 @@ use Illuminate\Support\Str;
 
 /**
  * Exécution de snippets dans un conteneur Docker éphémère (P5.4).
- * Opt-in, jamais sur l’hôte Coolify, jamais de montage docker.sock.
+ * Opt-in, jamais sur l’hôte DevForge, jamais de montage docker.sock.
  */
 class AgentCodeSandbox
 {

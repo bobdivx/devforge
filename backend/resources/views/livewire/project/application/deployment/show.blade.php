@@ -1,6 +1,6 @@
 <div class="flex h-[calc(100vh-10rem)] min-h-[50rem] flex-col overflow-hidden">
     <x-slot:title>
-        {{ data_get_str($application, 'name')->limit(10) }} > Deployment | Coolify
+        {{ data_get_str($application, 'name')->limit(10) }} > Deployment | DevForge
         </x-slot>
         <h1 class="py-0">Deployment</h1>
         <livewire:project.shared.configuration-checker :resource="$application" />

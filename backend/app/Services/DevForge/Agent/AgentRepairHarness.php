@@ -94,7 +94,7 @@ class AgentRepairHarness
         $issue = AgentChatRepairStrategy::detectIssue($issueBlob);
 
         if ($issue === AgentChatRepairStrategy::ISSUE_BASE_CONFIG) {
-            $fixArgs = [...$appArgs, 'redeploy' => true, 'reason' => 'Harness: Read-only Coolify BASE_CONFIG_PATH'];
+            $fixArgs = [...$appArgs, 'redeploy' => true, 'reason' => 'Harness: Read-only DevForge BASE_CONFIG_PATH'];
             $fixResult = $toolkit->execute('fix_coolify_base_config_path', $fixArgs);
             $record('fix_coolify_base_config_path', $fixArgs, $fixResult);
         } elseif ($issue === AgentChatRepairStrategy::ISSUE_HEALTHCHECK_PORT) {
@@ -389,7 +389,7 @@ class AgentRepairHarness
                         'actions' => [$action],
                         'steps' => $diagnosis['steps'] ?? [],
                         'pills' => [
-                            ['id' => 'env', 'label' => 'Env Coolify', 'active' => true, 'href' => null, 'detail' => 'NODE_AUTH_TOKEN (GitHub App)'],
+                            ['id' => 'env', 'label' => 'Env DevForge', 'active' => true, 'href' => null, 'detail' => 'NODE_AUTH_TOKEN (GitHub App)'],
                             ['id' => 'redeploy', 'label' => 'Redeploy', 'active' => true, 'href' => null, 'detail' => 'lancé'],
                         ],
                         'belongs_to_deployment_uuid' => is_string($runContext['deployment_uuid'] ?? null)
@@ -411,7 +411,7 @@ class AgentRepairHarness
             $diagnosisText = 'npm E401 sur registry privé (npm.pkg.github.com). '.(($diagnosis['has_packages_token'] ?? false)
                 ? 'PAT Packages déjà enregistré — un redeploy devrait injecter NODE_AUTH_TOKEN.'
                 : (($diagnosis['has_github_app'] ?? false)
-                    ? 'Créez un PAT GitHub (read:packages), enregistrez-le dans Connexions, puis relancez le déploiement. Coolify injecte NODE_AUTH_TOKEN au build.'
+                    ? 'Créez un PAT GitHub (read:packages), enregistrez-le dans Connexions, puis relancez le déploiement. DevForge injecte NODE_AUTH_TOKEN au build.'
                     : 'Un secret d’auth est requis — l’agent ne peut pas l’inventer.'));
 
             $needsUserAction = [
@@ -644,7 +644,7 @@ class AgentRepairHarness
                     'actions' => [$needsUserAction],
                     'steps' => [
                         'Identifier le dossier de sortie du build (dist, build, out, public…).',
-                        'Dans Coolify → Runtime → publish_directory = /dist (ou le bon dossier).',
+                        'Dans DevForge → Runtime → publish_directory = /dist (ou le bon dossier).',
                         'Redéployer.',
                     ],
                     'pills' => [

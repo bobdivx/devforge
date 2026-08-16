@@ -26,7 +26,7 @@
     @endif
     @if ($stoppedAfterRestartLimit)
         <div class="flex items-center">
-            <span class="text-xs dark:text-warning" title="Container has crashed and Coolify stopped it after {{ $resource->restart_count }} restart attempts.">
+            <span class="text-xs dark:text-warning" title="Container has crashed and DevForge stopped it after {{ $resource->restart_count }} restart attempts.">
                 Stopped after reaching restart limit ({{ $resource->restart_count }}/{{ $resource->max_restart_count }}).
             </span>
         </div>

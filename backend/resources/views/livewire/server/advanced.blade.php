@@ -1,6 +1,6 @@
 <div>
     <x-slot:title>
-        {{ data_get_str($server, 'name')->limit(10) }} > Advanced | Coolify
+        {{ data_get_str($server, 'name')->limit(10) }} > Advanced | DevForge
     </x-slot>
     <livewire:server.navbar :server="$server" />
     <div x-data="{ activeTab: window.location.hash ? window.location.hash.substring(1) : 'general' }" class="flex flex-col h-full gap-8 sm:flex-row">
@@ -24,7 +24,7 @@
                         <x-forms.input canGate="update" :canResource="$server" id="serverDiskUsageNotificationThreshold"
                             type="number" min="1" max="99"
                             label="Server disk usage notification threshold (%)" required
-                            helper="If the server disk usage exceeds this threshold, Coolify will send a notification to the team members." />
+                            helper="If the server disk usage exceeds this threshold, DevForge will send a notification to the team members." />
                     </div>
                 </div>
 

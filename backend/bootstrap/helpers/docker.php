@@ -16,13 +16,13 @@ function getCurrentApplicationContainerStatus(Server $server, int $id, ?int $pul
 {
     $containers = collect([]);
     if (! $server->isSwarm()) {
-        $containers = instant_remote_process(["docker ps -a --filter='label=coolify.applicationId={$id}' --format '{{json .}}' "], $server);
+        $containers = instant_remote_process(["docker ps -a --filter='label=devforge.applicationId={$id}' --format '{{json .}}' "], $server);
         $containers = format_docker_command_output_to_json($containers);
 
         $containers = $containers->map(function ($container) use ($pullRequestId, $includePullrequests) {
             $labels = data_get($container, 'Labels');
             $containerName = data_get($container, 'Names');
-            $hasPrLabel = str($labels)->contains('coolify.pullRequestId=');
+            $hasPrLabel = str($labels)->contains('devforge.pullRequestId=');
             $prLabelValue = null;
 
             if ($hasPrLabel) {
@@ -46,7 +46,7 @@ function getCurrentApplicationContainerStatus(Server $server, int $id, ?int $pul
             if ($includePullrequests) {
                 return $container;
             }
-            if ($pullRequestId !== null && $pullRequestId !== 0 && str($labels)->contains("coolify.pullRequestId={$pullRequestId}")) {
+            if ($pullRequestId !== null && $pullRequestId !== 0 && str($labels)->contains("devforge.pullRequestId={$pullRequestId}")) {
                 return $container;
             }
 
@@ -65,7 +65,7 @@ function getCurrentServiceContainerStatus(Server $server, int $id): Collection
 {
     $containers = collect([]);
     if (! $server->isSwarm()) {
-        $containers = instant_remote_process(["docker ps -a --filter='label=coolify.serviceId={$id}' --format '{{json .}}' "], $server);
+        $containers = instant_remote_process(["docker ps -a --filter='label=devforge.serviceId={$id}' --format '{{json .}}' "], $server);
         $containers = format_docker_command_output_to_json($containers);
 
         return $containers->filter();
@@ -229,14 +229,14 @@ function get_port_from_dockerfile($dockerfile): ?int
 function defaultDatabaseLabels($database)
 {
     $labels = collect([]);
-    $labels->push('coolify.managed=true');
-    $labels->push('coolify.type=database');
-    $labels->push('coolify.databaseId='.$database->id);
-    $labels->push('coolify.resourceName='.Str::slug($database->name));
-    $labels->push('coolify.serviceName='.Str::slug($database->name));
-    $labels->push('coolify.projectName='.Str::slug($database->project()->name));
-    $labels->push('coolify.environmentName='.Str::slug($database->environment->name));
-    $labels->push('coolify.database.subType='.$database->type());
+    $labels->push('devforge.managed=true');
+    $labels->push('devforge.type=database');
+    $labels->push('devforge.databaseId='.$database->id);
+    $labels->push('devforge.resourceName='.Str::slug($database->name));
+    $labels->push('devforge.serviceName='.Str::slug($database->name));
+    $labels->push('devforge.projectName='.Str::slug($database->project()->name));
+    $labels->push('devforge.environmentName='.Str::slug($database->environment->name));
+    $labels->push('devforge.database.subType='.$database->type());
 
     return $labels;
 }
@@ -296,21 +296,21 @@ function libsqlFqdnLabels(StandaloneLibsql $database): Collection
 function defaultLabels($id, $name, string $projectName, string $resourceName, string $environment, $pull_request_id = 0, string $type = 'application', $subType = null, $subId = null, $subName = null)
 {
     $labels = collect([]);
-    $labels->push('coolify.managed=true');
-    $labels->push('coolify.version='.config('constants.coolify.version'));
-    $labels->push('coolify.'.$type.'Id='.$id);
-    $labels->push("coolify.type=$type");
-    $labels->push('coolify.name='.Str::slug($name));
-    $labels->push('coolify.resourceName='.Str::slug($resourceName));
-    $labels->push('coolify.projectName='.Str::slug($projectName));
-    $labels->push('coolify.serviceName='.Str::slug($subName ?? $resourceName));
-    $labels->push('coolify.environmentName='.Str::slug($environment));
+    $labels->push('devforge.managed=true');
+    $labels->push('devforge.version='.config('constants.coolify.version'));
+    $labels->push('devforge.'.$type.'Id='.$id);
+    $labels->push("devforge.type=$type");
+    $labels->push('devforge.name='.Str::slug($name));
+    $labels->push('devforge.resourceName='.Str::slug($resourceName));
+    $labels->push('devforge.projectName='.Str::slug($projectName));
+    $labels->push('devforge.serviceName='.Str::slug($subName ?? $resourceName));
+    $labels->push('devforge.environmentName='.Str::slug($environment));
 
-    $labels->push('coolify.pullRequestId='.$pull_request_id);
+    $labels->push('devforge.pullRequestId='.$pull_request_id);
     if ($type === 'service') {
-        $subId && $labels->push('coolify.service.subId='.$subId);
-        $subType && $labels->push('coolify.service.subType='.$subType);
-        $subName && $labels->push('coolify.service.subName='.Str::slug($subName));
+        $subId && $labels->push('devforge.service.subId='.$subId);
+        $subType && $labels->push('devforge.service.subType='.$subType);
+        $subName && $labels->push('devforge.service.subName='.Str::slug($subName));
     }
 
     return $labels;
@@ -1314,9 +1314,9 @@ function generateCustomDockerRunOptionsForDatabases($docker_run_options, $docker
 }
 
 /**
- * Remove Coolify's custom Docker Compose fields from parsed YAML array
+ * Remove DevForge's custom Docker Compose fields from parsed YAML array
  *
- * Coolify extends Docker Compose with custom fields that are processed during
+ * DevForge extends Docker Compose with custom fields that are processed during
  * parsing and deployment but must be removed before sending to Docker.
  *
  * Custom fields:
@@ -1361,7 +1361,7 @@ function validateComposeFile(string $compose, int $server_id): string|Throwable
         }
         $yaml_compose = Yaml::parse($compose);
 
-        // Remove Coolify's custom fields before Docker validation
+        // Remove DevForge's custom fields before Docker validation
         $yaml_compose = stripCoolifyCustomFields($yaml_compose);
 
         $base64_compose = base64_encode(Yaml::dump($yaml_compose));

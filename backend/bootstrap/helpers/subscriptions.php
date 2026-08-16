@@ -88,6 +88,8 @@ function allowedPathsForBoardingAccounts()
         ...allowedPathsForUnsubscribedAccounts(),
         'onboarding',
         'livewire/update',
+        'webhooks/source/github/redirect',
+        'webhooks/source/github/install',
     ];
 }
 function allowedPathsForInvalidAccounts()

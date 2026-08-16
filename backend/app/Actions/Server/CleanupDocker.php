@@ -37,8 +37,8 @@ class CleanupDocker
         $applicationCleanupLog = $this->cleanupApplicationImages($server, $applications);
         $cleanupLog = array_merge($cleanupLog, $applicationCleanupLog);
 
-        // Build image prune command that excludes application images and current Coolify infrastructure images
-        // This ensures we clean up non-Coolify images while preserving rollback images and current helper/realtime images
+        // Build image prune command that excludes application images and current DevForge infrastructure images
+        // This ensures we clean up non-DevForge images while preserving rollback images and current helper/realtime images
         // Note: Only the current version is protected; old versions will be cleaned up by explicit commands below
         // We pass the version strings so all registry variants are protected (ghcr.io, docker.io, no prefix)
         $imagePruneCmd = $this->buildImagePruneCommand(
@@ -48,7 +48,7 @@ class CleanupDocker
         );
 
         $commands = [
-            'docker container prune -f --filter "label=coolify.managed=true" --filter "label!=coolify.proxy=true" --filter "label!=coolify.type=database" --filter "label!=coolify.type=application" --filter "label!=coolify.type=service"',
+            'docker container prune -f --filter "label=devforge.managed=true" --filter "label!=devforge.proxy=true" --filter "label!=devforge.type=database" --filter "label!=devforge.type=application" --filter "label!=devforge.type=service"',
             $imagePruneCmd,
             'docker builder prune -af',
             'sudo DOCKER_CONFIG=/DATA/.docker docker buildx prune -af 2>/dev/null || docker buildx prune -af 2>/dev/null || true',
@@ -115,8 +115,8 @@ class CleanupDocker
 
         // Delete unused images that:
         // - Are not application images (don't match app repos)
-        // - Are not current Coolify infrastructure images (any registry)
-        // - Don't have coolify.managed=true label
+        // - Are not current DevForge infrastructure images (any registry)
+        // - Don't have devforge.managed=true label
         // Images in use by containers will fail silently with docker rmi
         // Pattern matches both uuid:tag and uuid_servicename:tag (Docker Compose with build)
         $grepCommands = "grep -v '<none>'";
@@ -131,7 +131,7 @@ class CleanupDocker
 
         $commands[] = "docker images --format '{{.Repository}}:{{.Tag}}' | ".
             $grepCommands.' | '.
-            "xargs -r -I {} sh -c 'docker inspect --format \"{{{{index .Config.Labels \\\"coolify.managed\\\"}}}} {{{{index .Config.Labels \\\"com.devforge.runner\\\"}}}}\" \"{}\" 2>/dev/null | grep -Eq \"true\" || docker rmi \"{}\" 2>/dev/null' || true";
+            "xargs -r -I {} sh -c 'docker inspect --format \"{{{{index .Config.Labels \\\"devforge.managed\\\"}}}} {{{{index .Config.Labels \\\"com.devforge.runner\\\"}}}}\" \"{}\" 2>/dev/null | grep -Eq \"true\" || docker rmi \"{}\" 2>/dev/null' || true";
 
         return implode(' && ', $commands);
     }

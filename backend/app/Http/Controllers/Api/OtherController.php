@@ -11,7 +11,7 @@ class OtherController extends Controller
 {
     #[OA\Get(
         summary: 'Version',
-        description: 'Get Coolify version.',
+        description: 'Get DevForge version.',
         path: '/version',
         operationId: 'version',
         security: [

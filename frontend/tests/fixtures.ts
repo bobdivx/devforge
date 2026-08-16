@@ -66,6 +66,12 @@ export const bootstrapData: BootstrapData = {
         required: false,
         user_enabled: true,
         team_enabled: true,
+        steps: {
+            account: true,
+            github: false,
+            s3: false,
+            server: false,
+        },
     },
     cloud: {
         enabled: false,

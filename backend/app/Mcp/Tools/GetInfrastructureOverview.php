@@ -14,7 +14,7 @@ use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Tool;
 
 #[Name('get_infrastructure_overview')]
-#[Description('High-level overview of the authenticated team: Coolify version, all servers, projects with resource counts, and aggregate counts. Start here to understand the setup.')]
+#[Description('High-level overview of the authenticated team: DevForge version, all servers, projects with resource counts, and aggregate counts. Start here to understand the setup.')]
 class GetInfrastructureOverview extends Tool
 {
     use BuildsResponse;

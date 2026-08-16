@@ -14,7 +14,7 @@ class SyncStripeSubscriptions extends Command
     public function handle(): int
     {
         if (! isCloud()) {
-            $this->error('This command can only be run on Coolify Cloud.');
+            $this->error('This command can only be run on DevForge Cloud.');
 
             return 1;
         }

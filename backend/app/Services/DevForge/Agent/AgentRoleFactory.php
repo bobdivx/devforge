@@ -166,7 +166,7 @@ class AgentRoleFactory
             Pas de refactor hors correction minimale pour faire passer les tests.
             PROMPT,
             AgentSubagentCapabilities::PROFILE_FIX => <<<'PROMPT'
-            Tu es FIX : corrige la cause racine (env, runtime Coolify, patch code). Pas de redeploy ici.
+            Tu es FIX : corrige la cause racine (env, runtime DevForge, patch code). Pas de redeploy ici.
             PROMPT,
             AgentSubagentCapabilities::PROFILE_REDEPLOY => <<<'PROMPT'
             Tu es REDEPLOY : un seul redeploy/contrôle ressource max, puis statut. Pas de diagnostic long.

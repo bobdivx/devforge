@@ -497,7 +497,7 @@ class ApplicationSourceService
     private function unavailableReason(Application $application, ?array $repository): ?string
     {
         if (! $application->is_github_based() || $application->source === null) {
-            return 'Cette application n’est pas liée à une GitHub App Coolify.';
+            return 'Cette application n’est pas liée à une GitHub App.';
         }
 
         if ($repository === null) {

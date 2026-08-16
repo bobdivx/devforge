@@ -1,6 +1,6 @@
 <div>
     <x-slot:title>
-        Project Variable | Coolify
+        Project Variable | DevForge
     </x-slot>
     <div class="flex gap-2 items-center">
         <h1>Shared Variables for {{ data_get($project, 'name') }}</h1>

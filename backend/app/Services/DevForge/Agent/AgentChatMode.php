@@ -4,7 +4,7 @@ namespace App\Services\DevForge\Agent;
 
 /**
  * Modes chat Plan / Build / Debug — porté depuis Forge vers DevForge.
- * Forge sera supprimé ; Coolify = DevForge.
+ * Forge sera supprimé ; DevForge = DevForge.
  */
 class AgentChatMode
 {

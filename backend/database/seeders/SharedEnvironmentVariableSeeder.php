@@ -38,7 +38,7 @@ class SharedEnvironmentVariableSeeder extends Seeder
         $servers = Server::all();
         foreach ($servers as $server) {
             SharedEnvironmentVariable::firstOrCreate([
-                'key' => 'COOLIFY_SERVER_UUID',
+                'key' => 'DEVFORGE_SERVER_UUID',
                 'type' => 'server',
                 'server_id' => $server->id,
                 'team_id' => $server->team_id,
@@ -48,7 +48,7 @@ class SharedEnvironmentVariableSeeder extends Seeder
             ]);
 
             SharedEnvironmentVariable::firstOrCreate([
-                'key' => 'COOLIFY_SERVER_NAME',
+                'key' => 'DEVFORGE_SERVER_NAME',
                 'type' => 'server',
                 'server_id' => $server->id,
                 'team_id' => $server->team_id,

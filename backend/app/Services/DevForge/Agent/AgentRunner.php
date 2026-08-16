@@ -614,12 +614,12 @@ class AgentRunner
         }
 
         if (AgentDirectives::failureExcerptHasCoolifyBaseConfigPathIssue($excerpt)) {
-            $run->appendLog('Read-only /data Coolify détecté — correction automatique (fix_coolify_base_config_path).');
+            $run->appendLog('Read-only /data DevForge détecté — correction automatique (fix_coolify_base_config_path).');
 
             $result = $toolkit->execute('fix_coolify_base_config_path', [
                 'application_uuid' => $applicationUuid,
                 'redeploy' => true,
-                'reason' => 'Auto-fix: Read-only /data Coolify path',
+                'reason' => 'Auto-fix: Read-only /data DevForge path',
             ]);
 
             $this->recordAutoFixOutcome(

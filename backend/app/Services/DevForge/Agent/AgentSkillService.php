@@ -322,7 +322,7 @@ class AgentSkillService
                     '1. Confirmer l\'erreur « Permission denied » / tee dans les logs.',
                     '2. `fix_application_host_permissions(redeploy=true)` immédiatement.',
                     '3. INTERDIT : inventer DUMMY_*, *_TRIGGER, FORCE_REDEPLOY.',
-                    '4. Si « Read-only file system » pendant mkdir Coolify : `fix_coolify_base_config_path`.',
+                    '4. Si « Read-only file system » pendant mkdir DevForge : `fix_coolify_base_config_path`.',
                 ]),
             ],
             [

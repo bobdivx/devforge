@@ -1,6 +1,6 @@
 <div>
     <x-slot:title>
-        Server Variable | Coolify
+        Server Variable | DevForge
     </x-slot>
     <div class="flex gap-2 items-center">
         <h1>Shared Variables for {{ data_get($server, 'name') }}</h1>
@@ -19,7 +19,7 @@
     </div>
     @if ($view === 'normal')
         <div class="flex flex-col gap-2">
-            @forelse ($server->environment_variables->whereNotIn('key', ['COOLIFY_SERVER_UUID', 'COOLIFY_SERVER_NAME'])->sortBy('key') as $env)
+            @forelse ($server->environment_variables->whereNotIn('key', ['DEVFORGE_SERVER_UUID', 'DEVFORGE_SERVER_NAME', 'COOLIFY_SERVER_UUID', 'COOLIFY_SERVER_NAME'])->sortBy('key') as $env)
                 <livewire:project.shared.environment-variable.show wire:key="environment-{{ $env->id }}"
                     :env="$env" type="server" />
             @empty

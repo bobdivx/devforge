@@ -1,6 +1,6 @@
 <div>
     <x-slot:title>
-        Server Variables | Coolify
+        Server Variables | DevForge
     </x-slot>
     <div class="flex gap-2">
         <h1>Servers</h1>

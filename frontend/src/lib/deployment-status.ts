@@ -68,7 +68,7 @@ export function isDeploymentActive(status: string): boolean {
         || normalized.includes('rollback');
 }
 
-/** Queued or in-progress deployments can be cancelled (Coolify ApplicationDeploymentStatus). */
+/** Queued or in-progress deployments can be cancelled (ApplicationDeploymentStatus). */
 export function isDeploymentCancellable(status: string): boolean {
     const normalized = status.trim().toLowerCase();
 

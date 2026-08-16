@@ -79,7 +79,7 @@ function breadcrumbSegments(path: string): string[] {
 
 export function ServerFileExplorer({
     serverUuid,
-    initialPath = '/data/coolify',
+    initialPath = '/media/Docker/AppData/devforge',
     terminalEnabled = true,
     canEdit = true,
 }: Props) {

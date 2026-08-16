@@ -50,7 +50,7 @@ export function InstanceBackupPanel({ compact = false }: Props) {
 
     const migrateCoolify = () => withAction('migrate', async () => {
         const response = await domainApi.migrateInstanceFromCoolify();
-        setNotice(response.data.message ?? 'Migration Coolify → DevForge effectuée.');
+        setNotice(response.data.message ?? 'Synchronisation de l’instance effectuée.');
     });
 
     const runNow = () => withAction('run', async () => {
@@ -109,7 +109,7 @@ export function InstanceBackupPanel({ compact = false }: Props) {
                     <h2 class="text-xl font-semibold">Sauvegarde DevForge</h2>
                     <p class="text-sm text-base-content/60">
                         Sauvegardez la base de l’instance (même moteur que les backups S3 des bases), exportez / importez un dump,
-                        ou migrez depuis Coolify.
+                        ou restaurez un dump existant.
                     </p>
                 </div>
             )}
@@ -125,13 +125,13 @@ export function InstanceBackupPanel({ compact = false }: Props) {
                 {settings && (
                     <div class="grid gap-4">
                         {(settings.migration.legacy_container_detected || !settings.database) && (
-                            <Card title="Migration Coolify → DevForge">
+                            <Card title="Instance existante">
                                 <p class="text-sm text-base-content/65">
                                     {settings.migration.notes}
                                 </p>
                                 {settings.migration.legacy_container_detected && (
                                     <p class="mt-2 text-sm text-warning">
-                                        Conteneur <code class="font-mono">coolify-db</code> détecté sur le serveur local.
+                                        Un conteneur Postgres d’instance historique a été détecté sur le serveur local.
                                     </p>
                                 )}
                                 <div class="mt-4 flex flex-wrap gap-2">
@@ -142,16 +142,16 @@ export function InstanceBackupPanel({ compact = false }: Props) {
                                         onClick={() => void migrateCoolify()}
                                     >
                                         {busy === 'migrate' && <span class="loading loading-spinner loading-sm" />}
-                                        Détecter / synchroniser Coolify
+                                        Synchroniser le conteneur d’instance
                                     </button>
                                     {!settings.database && (
                                         <p class="w-full text-xs text-base-content/55">
-                                            Après initialisation, utilisez « Import dump Coolify » dans Export / import.
+                                            Après initialisation, utilisez « Importer un dump » dans Export / import.
                                         </p>
                                     )}
                                     {settings.database && (
                                         <p class="w-full text-xs text-base-content/55">
-                                            Pour un dump fichier, utilisez « Import dump Coolify » ci-dessous.
+                                            Pour un dump fichier, utilisez « Importer un dump » ci-dessous.
                                         </p>
                                     )}
                                 </div>
@@ -162,7 +162,7 @@ export function InstanceBackupPanel({ compact = false }: Props) {
                             <div class="rounded-2xl border border-warning/30 bg-warning/5 p-6 text-center">
                                 <h3 class="mb-2 font-semibold">Aucune configuration trouvée</h3>
                                 <p class="mb-4 text-sm text-base-content/70">
-                                    Initialisez la sauvegarde depuis le conteneur Postgres d’instance (<code class="font-mono">devforge-db</code> ou <code class="font-mono">coolify-db</code>).
+                                    Initialisez la sauvegarde depuis le conteneur Postgres d’instance (<code class="font-mono">devforge-db</code>).
                                 </p>
                                 <button class="btn btn-primary" type="button" onClick={() => void initBackup()} disabled={busy === 'init'}>
                                     {busy === 'init' && <span class="loading loading-spinner loading-sm" />}
@@ -279,7 +279,7 @@ export function InstanceBackupPanel({ compact = false }: Props) {
                                         onClick={() => coolifyImportInputRef.current?.click()}
                                     >
                                         <Upload class="size-4" aria-hidden />
-                                        Import dump Coolify
+                                        Importer un dump
                                     </button>
                                     <input
                                         ref={importInputRef}

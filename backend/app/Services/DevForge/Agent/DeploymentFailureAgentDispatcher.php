@@ -231,7 +231,7 @@ class DeploymentFailureAgentDispatcher
     }
 
     /**
-     * Parse le format brut Coolify ({command,output,type,...}).
+     * Parse le format brut DevForge ({command,output,type,...}).
      *
      * @return Collection<int, array{stream: string, message: string, timestamp: string|null}>
      */

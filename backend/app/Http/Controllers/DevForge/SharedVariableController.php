@@ -158,7 +158,7 @@ class SharedVariableController extends Controller
             return;
         }
 
-        if (in_array($key, ['COOLIFY_SERVER_UUID', 'COOLIFY_SERVER_NAME'], true)) {
+        if (in_array($key, ['DEVFORGE_SERVER_UUID', 'DEVFORGE_SERVER_NAME', 'COOLIFY_SERVER_UUID', 'COOLIFY_SERVER_NAME'], true)) {
             throw ValidationException::withMessages([
                 'key' => ['This predefined server variable cannot be created manually.'],
             ]);

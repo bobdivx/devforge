@@ -1,11 +1,13 @@
 <?php
 
 use App\Http\Controllers\DevForge\BootstrapController;
+use App\Http\Controllers\DevForge\OnboardingController;
 use App\Http\Controllers\DevForge\TeamController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/bootstrap', BootstrapController::class)->name('bootstrap');
 Route::post('/teams/switch', [TeamController::class, 'switch'])->name('teams.switch');
+Route::post('/onboarding/complete', [OnboardingController::class, 'complete'])->name('onboarding.complete');
 
 require __DIR__.'/devforge-simple.php';
 require __DIR__.'/devforge-applications.php';

@@ -6,7 +6,7 @@ use Exception;
 
 /**
  * Exception for expected deployment failures caused by user/application errors.
- * These are not Coolify bugs and should not be logged to laravel.log.
+ * These are not DevForge bugs and should not be logged to laravel.log.
  * Examples: Nixpacks detection failures, missing Dockerfiles, invalid configs, etc.
  */
 class DeploymentException extends Exception

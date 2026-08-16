@@ -40,7 +40,7 @@ test('saveCaCertificate sanitizes injected commands after certificate marker', f
         'is_ca_certificate' => true,
         'ssl_certificate' => $validCert,
         'ssl_private_key' => 'test-key',
-        'common_name' => 'Coolify CA Certificate',
+        'common_name' => 'DevForge CA Certificate',
         'valid_until' => now()->addYears(10),
     ]);
 
@@ -66,7 +66,7 @@ test('saveCaCertificate rejects completely invalid certificate', function () {
         'is_ca_certificate' => true,
         'ssl_certificate' => 'placeholder',
         'ssl_private_key' => 'test-key',
-        'common_name' => 'Coolify CA Certificate',
+        'common_name' => 'DevForge CA Certificate',
         'valid_until' => now()->addYears(10),
     ]);
 
@@ -82,7 +82,7 @@ test('saveCaCertificate rejects empty certificate content', function () {
         'is_ca_certificate' => true,
         'ssl_certificate' => 'placeholder',
         'ssl_private_key' => 'test-key',
-        'common_name' => 'Coolify CA Certificate',
+        'common_name' => 'DevForge CA Certificate',
         'valid_until' => now()->addYears(10),
     ]);
 

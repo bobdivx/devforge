@@ -1,6 +1,6 @@
 <div>
     <x-slot:title>
-        {{ data_get_str($project, 'name')->limit(10) }} > Resources | Coolify
+        {{ data_get_str($project, 'name')->limit(10) }} > Resources | DevForge
     </x-slot>
     <div class="flex flex-col">
         <div class="flex min-w-0 flex-nowrap items-center gap-1">

@@ -220,7 +220,7 @@ class AgentRunCorrectionSummarizer
         return match ($toolName) {
             'upsert_application_env_var' => [[
                 'kind' => 'env_coolify',
-                'label' => 'Variable Coolify',
+                'label' => 'Variable DevForge',
                 'detail' => (string) ($arguments['key'] ?? $result['variable']['key'] ?? ''),
                 'ok' => true,
                 'at' => now()->toISOString(),
@@ -228,7 +228,7 @@ class AgentRunCorrectionSummarizer
             'update_application_runtime_settings' => array_values(array_filter([
                 [
                     'kind' => 'runtime_settings',
-                    'label' => 'Build Coolify',
+                    'label' => 'Build DevForge',
                     'detail' => implode(', ', array_map(
                         static fn ($key): string => (string) $key,
                         is_array($result['updated_keys'] ?? null)
@@ -280,7 +280,7 @@ class AgentRunCorrectionSummarizer
             'fix_coolify_base_config_path' => array_values(array_filter([
                 [
                     'kind' => 'coolify_base_config',
-                    'label' => 'Config Coolify',
+                    'label' => 'Config DevForge',
                     'detail' => (string) ($result['container'] ?? $arguments['container'] ?? 'coolify'),
                     'ok' => true,
                     'at' => now()->toISOString(),
@@ -301,7 +301,7 @@ class AgentRunCorrectionSummarizer
             'update_application_git_branch' => array_values(array_filter([
                 [
                     'kind' => 'git_branch',
-                    'label' => 'Branche Coolify',
+                    'label' => 'Branche DevForge',
                     'detail' => (string) ($arguments['git_branch'] ?? $result['git_branch'] ?? ''),
                     'ok' => true,
                     'at' => now()->toISOString(),
@@ -434,11 +434,11 @@ class AgentRunCorrectionSummarizer
         $lines = preg_split("/\r\n|\n|\r/", $logs) ?: [];
 
         foreach ($lines as $line) {
-            if (str_contains($line, 'Variable Coolify') && str_contains($line, 'mise à jour')) {
-                if (preg_match('/Variable Coolify\s+(\S+)\s+mise à jour/u', $line, $match) === 1) {
+            if (str_contains($line, 'Variable DevForge') && str_contains($line, 'mise à jour')) {
+                if (preg_match('/Variable DevForge\s+(\S+)\s+mise à jour/u', $line, $match) === 1) {
                     $actions[] = [
                         'kind' => 'env_coolify',
-                        'label' => 'Variable Coolify',
+                        'label' => 'Variable DevForge',
                         'detail' => $match[1],
                         'ok' => true,
                     ];
@@ -450,7 +450,7 @@ class AgentRunCorrectionSummarizer
                 if (is_array($args) && is_string($args['key'] ?? null)) {
                     $actions[] = [
                         'kind' => 'env_coolify',
-                        'label' => 'Variable Coolify',
+                        'label' => 'Variable DevForge',
                         'detail' => $args['key'],
                         'ok' => true,
                     ];
@@ -704,32 +704,32 @@ class AgentRunCorrectionSummarizer
             'redeploy_only' => 'Redéploiement lancé sans modification de code ni de variables.',
             'fixed' => match ($sourceScope) {
                 'coolify_only' => $envKeys->isNotEmpty()
-                    ? 'Variables Coolify mises à jour ('.$envKeys->implode(', ').') et redéploiement lancé.'
-                    : 'Variables Coolify mises à jour et redéploiement lancé.',
+                    ? 'Variables DevForge mises à jour ('.$envKeys->implode(', ').') et redéploiement lancé.'
+                    : 'Variables DevForge mises à jour et redéploiement lancé.',
                 'runtime_settings' => $runtimeDetail
-                    ? 'Config build Coolify mise à jour ('.$runtimeDetail.') et redéploiement lancé.'
-                    : 'Config build Coolify mise à jour et redéploiement lancé.',
+                    ? 'Config build DevForge mise à jour ('.$runtimeDetail.') et redéploiement lancé.'
+                    : 'Config build DevForge mise à jour et redéploiement lancé.',
                 'host_permissions' => $hostPath
                     ? 'Permissions host corrigées ('.$hostPath.') et redéploiement lancé.'
                     : 'Permissions host corrigées et redéploiement lancé.',
-                'coolify_base_config' => 'Config Coolify (BASE_CONFIG_PATH) rechargée et redéploiement lancé.',
-                'git_branch' => 'Branche Coolify corrigée et redéploiement lancé.',
+                'coolify_base_config' => 'Config DevForge (BASE_CONFIG_PATH) rechargée et redéploiement lancé.',
+                'git_branch' => 'Branche DevForge corrigée et redéploiement lancé.',
                 'git_committed' => 'Correction commitée sur Git et redéploiement lancé.',
                 'pull_request' => 'Correction proposée via pull request.',
                 default => 'Correction appliquée et redéploiement lancé.',
             },
             'partial' => match ($sourceScope) {
                 'coolify_only' => $envKeys->isNotEmpty()
-                    ? 'Variables Coolify mises à jour ('.$envKeys->implode(', ').') — redéploiement non confirmé.'
-                    : 'Variables Coolify mises à jour — redéploiement non confirmé.',
+                    ? 'Variables DevForge mises à jour ('.$envKeys->implode(', ').') — redéploiement non confirmé.'
+                    : 'Variables DevForge mises à jour — redéploiement non confirmé.',
                 'runtime_settings' => $runtimeDetail
-                    ? 'Config build Coolify mise à jour ('.$runtimeDetail.') — redéploiement non confirmé.'
-                    : 'Config build Coolify mise à jour — redéploiement non confirmé.',
+                    ? 'Config build DevForge mise à jour ('.$runtimeDetail.') — redéploiement non confirmé.'
+                    : 'Config build DevForge mise à jour — redéploiement non confirmé.',
                 'host_permissions' => $hostPath
                     ? 'Permissions host corrigées ('.$hostPath.') — redéploiement non confirmé.'
                     : 'Permissions host corrigées — redéploiement non confirmé.',
-                'coolify_base_config' => 'Config Coolify (BASE_CONFIG_PATH) rechargée — redéploiement non confirmé.',
-                'git_branch' => 'Branche Coolify mise à jour — vérifier le redéploiement.',
+                'coolify_base_config' => 'Config DevForge (BASE_CONFIG_PATH) rechargée — redéploiement non confirmé.',
+                'git_branch' => 'Branche DevForge mise à jour — vérifier le redéploiement.',
                 'git_committed' => 'Commit Git effectué — vérifier le redéploiement.',
                 'pull_request' => 'Pull request ouverte — pas de redéploiement automatique.',
                 'server_side' => 'Actions serveur effectuées — résultat à vérifier.',
@@ -794,10 +794,10 @@ class AgentRunCorrectionSummarizer
         };
 
         return [
-            $pill('env', 'Env Coolify', 'env_coolify'),
+            $pill('env', 'Env DevForge', 'env_coolify'),
             $pill('build', 'Build', 'runtime_settings'),
             $pill('perms', 'Permissions', 'host_permissions'),
-            $pill('basecfg', 'Config Coolify', 'coolify_base_config'),
+            $pill('basecfg', 'Config DevForge', 'coolify_base_config'),
             $pill('branch', 'Branche', 'git_branch'),
             $pill('commit', 'Commit Git', 'git_commit'),
             $pill('pr', 'PR', 'pull_request'),

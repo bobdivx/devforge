@@ -1,6 +1,6 @@
 <div>
     <x-slot:title>
-        Settings | Coolify
+        Settings | DevForge
         </x-slot>
         <x-settings.navbar />
         <div x-data="{ activeTab: window.location.hash ? window.location.hash.substring(1) : 'general' }"
@@ -13,7 +13,7 @@
                         Save
                     </x-forms.button>
                 </div>
-                <div class="pb-4">General configuration for your Coolify instance.</div>
+                <div class="pb-4">General configuration for your DevForge instance.</div>
 
                 <div class="flex flex-col gap-2">
                     <div class="flex flex-wrap items-end gap-2">
@@ -23,8 +23,8 @@
                                 <span class='dark:text-warning text-coollabs'>Important: </span>
                                 If you want the dashboard to be accessible over HTTPS, you must include <b>https://</b> at the start of the URL. Without it, the dashboard will use HTTP and won’t be secured."
                                 placeholder="https://coolify.yourdomain.com" />
-                            <x-forms.input canGate="update" :canResource="$settings" id="instance_name" label="Name" placeholder="Coolify"
-                                helper="Custom name for your Coolify instance, shown in the URL." />
+                            <x-forms.input canGate="update" :canResource="$settings" id="instance_name" label="Name" placeholder="DevForge"
+                                helper="Custom name for your DevForge instance, shown in the URL." />
                             <div class="w-full" x-data="{
                             open: false,
                             search: '{{ $settings->instance_timezone ?: '' }}',
@@ -42,7 +42,7 @@
                                     <label for="instance_timezone">Instance
                                         Timezone</label>
                                     <x-helper class="ml-2"
-                                        helper="Timezone for the Coolify instance. This is used for the update check and automatic update frequency." />
+                                        helper="Timezone for the DevForge instance. This is used for the update check and automatic update frequency." />
                                 </div>
                                 <div class="relative">
                                     <div class="inline-flex relative items-center w-full">
@@ -74,10 +74,10 @@
                         </div>
                         <div class="flex gap-2 md:flex-row flex-col w-full">
                             <x-forms.input canGate="update" :canResource="$settings" id="public_ipv4" type="password" label="Instance's Public IPv4"
-                                helper="Enter the IPv4 address of the instance.<br><br>It is useful if you have several IPv4 addresses and Coolify could not detect the correct one."
+                                helper="Enter the IPv4 address of the instance.<br><br>It is useful if you have several IPv4 addresses and DevForge could not detect the correct one."
                                 placeholder="1.2.3.4" autocomplete="new-password" />
                             <x-forms.input canGate="update" :canResource="$settings" id="public_ipv6" type="password" label="Instance's Public IPv6"
-                                helper="Enter the IPv6 address of the instance.<br><br>It is useful if you have several IPv6 addresses and Coolify could not detect the correct one."
+                                helper="Enter the IPv6 address of the instance.<br><br>It is useful if you have several IPv6 addresses and DevForge could not detect the correct one."
                                 placeholder="2001:db8::1" autocomplete="new-password" />
                         </div>
 
@@ -99,10 +99,10 @@
                 confirmAction="confirmDomainUsage">
                 <x-slot:consequences>
                     <ul class="mt-2 ml-4 list-disc">
-                        <li>The Coolify instance domain will conflict with existing resources</li>
+                        <li>The DevForge instance domain will conflict with existing resources</li>
                         <li>SSL certificates might not work correctly</li>
                         <li>Routing behavior will be unpredictable</li>
-                        <li>You may not be able to access the Coolify dashboard properly</li>
+                        <li>You may not be able to access the DevForge dashboard properly</li>
                     </ul>
                 </x-slot:consequences>
             </x-domain-conflict-modal>

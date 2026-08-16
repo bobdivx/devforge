@@ -544,6 +544,10 @@ class Github extends Controller
         $github_app->private_key_id = $private_key->id;
         $github_app->save();
 
+        if (session('devforge_onboarding_github')) {
+            return redirect(getInstallationPath($github_app));
+        }
+
         return redirect()->route('source.github.show', ['github_app_uuid' => $github_app->uuid]);
     }
 
@@ -573,6 +577,10 @@ class Github extends Controller
 
         $github_app->installation_id = $installation_id;
         $github_app->save();
+
+        if (session()->pull('devforge_onboarding_github')) {
+            return redirect('/devforge/onboarding?pick=repos');
+        }
 
         return redirect()->route('source.github.show', ['github_app_uuid' => $github_app->uuid]);
     }

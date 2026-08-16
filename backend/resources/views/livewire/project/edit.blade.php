@@ -1,6 +1,6 @@
 <div>
     <x-slot:title>
-        {{ data_get_str($project, 'name')->limit(10) }} > Edit | Coolify
+        {{ data_get_str($project, 'name')->limit(10) }} > Edit | DevForge
         </x-slot>
         <form wire:submit='submit' class="flex flex-col pb-10">
             <div class="flex gap-2">

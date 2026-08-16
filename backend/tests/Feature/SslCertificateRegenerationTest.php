@@ -48,7 +48,7 @@ test('CA certificate can be retrieved when it exists on the server', function ()
         'is_ca_certificate' => true,
         'ssl_certificate' => 'test-ca-cert',
         'ssl_private_key' => 'test-ca-key',
-        'common_name' => 'Coolify CA Certificate',
+        'common_name' => 'DevForge CA Certificate',
         'valid_until' => now()->addYears(10),
     ]);
 

@@ -13,7 +13,7 @@ use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Tool;
 
 #[Name('update_application_git_branch')]
-#[Description('Update the Coolify application git branch and optionally redeploy.')]
+#[Description('Update the DevForge application git branch and optionally redeploy.')]
 class UpdateApplicationGitBranch extends Tool
 {
     use BuildsResponse;

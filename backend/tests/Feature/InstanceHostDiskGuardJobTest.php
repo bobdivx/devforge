@@ -25,8 +25,8 @@ it('never runs an unfiltered container prune in emergency mode', function () {
     $source = file_get_contents(app_path('Jobs/DevForge/InstanceHostDiskGuardJob.php'));
 
     expect($source)
-        ->toContain('label=coolify.managed=true')
-        ->toContain('label!=coolify.type=database')
+        ->toContain('label=devforge.managed=true')
+        ->toContain('label!=devforge.type=database')
         ->not->toContain('docker container prune -f 2>/dev/null || true');
 });
 

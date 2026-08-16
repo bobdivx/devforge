@@ -1,6 +1,6 @@
 <div>
     <x-slot:title>
-        Projects | Coolify
+        Projects | DevForge
     </x-slot>
     <div class="flex gap-2 items-center">
         <h1>Projects</h1>

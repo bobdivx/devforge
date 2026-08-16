@@ -41,13 +41,13 @@ class UpdateCoolifyJob implements ShouldBeEncrypted, ShouldQueue
                 return;
             }
 
-            Log::info('Starting Coolify update process...');
+            Log::info('Starting DevForge update process...');
             UpdateCoolify::run(false); // false means it's not a manual update
 
             $settings->update(['new_version_available' => false]);
-            Log::info('Coolify update completed successfully.');
+            Log::info('DevForge update completed successfully.');
         } catch (\Throwable $e) {
-            Log::error('UpdateCoolifyJob failed: '.$e->getMessage());
+            Log::error('Instance update job failed: '.$e->getMessage());
             // Consider implementing a notification to administrators
         }
     }

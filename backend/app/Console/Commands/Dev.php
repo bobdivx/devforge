@@ -61,7 +61,7 @@ class Dev extends Command
         try {
             $updatedTaskCount = ScheduledTaskExecution::where('status', 'running')->update([
                 'status' => 'failed',
-                'message' => 'Marked as failed during Coolify startup - job was interrupted',
+                'message' => 'Marked as failed during DevForge startup - job was interrupted',
                 'finished_at' => Carbon::now(),
             ]);
 
@@ -75,7 +75,7 @@ class Dev extends Command
         try {
             $updatedBackupCount = ScheduledDatabaseBackupExecution::where('status', 'running')->update([
                 'status' => 'failed',
-                'message' => 'Marked as failed during Coolify startup - job was interrupted',
+                'message' => 'Marked as failed during DevForge startup - job was interrupted',
                 'finished_at' => Carbon::now(),
             ]);
 

@@ -184,7 +184,7 @@ function extractCustomProxyCommands(Server $server, string $existing_config): ar
             return $custom_commands;
         }
 
-        // Define default commands that Coolify generates
+        // Define default commands that DevForge generates
         $default_command_prefixes = [
             '--ping=',
             '--api.',
@@ -269,8 +269,8 @@ function generateDefaultProxyConfiguration(Server $server, array $custom_command
             'traefik.http.routers.traefik.entrypoints=http',
             'traefik.http.routers.traefik.service=api@internal',
             'traefik.http.services.traefik.loadbalancer.server.port=8080',
-            'coolify.managed=true',
-            'coolify.proxy=true',
+            'devforge.managed=true',
+            'devforge.proxy=true',
         ];
         $config = [
             'name' => 'coolify-proxy',
@@ -379,8 +379,8 @@ function generateDefaultProxyConfiguration(Server $server, array $custom_command
                         '443:443/udp',
                     ],
                     'labels' => [
-                        'coolify.managed=true',
-                        'coolify.proxy=true',
+                        'devforge.managed=true',
+                        'devforge.proxy=true',
                     ],
                     'volumes' => [
                         '/var/run/docker.sock:/var/run/docker.sock:ro',

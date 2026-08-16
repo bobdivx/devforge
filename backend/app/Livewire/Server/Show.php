@@ -433,7 +433,7 @@ class Show extends Component
                 $this->dispatch('success', 'Server status refreshed: '.ucfirst($this->hetznerServerStatus ?? 'unknown'));
             }
 
-            // If Hetzner server is off but Coolify thinks it's still reachable, update Coolify's state
+            // If Hetzner server is off but DevForge thinks it's still reachable, update DevForge's state
             if ($this->hetznerServerStatus === 'off' && $this->server->settings->is_reachable) {
                 ['uptime' => $uptime, 'error' => $error] = $this->server->validateConnection();
                 if ($uptime) {

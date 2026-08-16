@@ -1,3 +1,4 @@
+import type { BootstrapData } from '../bootstrap';
 import { apiFetch, apiUploadWithProgress, ApiError, ensureCsrfCookie, type UploadProgressHandler } from './client';
 
 const API_BASE = '/api/devforge/v1';
@@ -1223,6 +1224,17 @@ export type GithubAppSummary = {
     html_url: string | null;
     is_system_wide: boolean;
     has_packages_token?: boolean;
+    installation_id?: string | number | null;
+};
+
+export type GithubAppManifestLaunch = {
+    action_url: string;
+    manifest: Record<string, unknown>;
+};
+
+export type GithubAppSetupResult = {
+    app: GithubAppSummary;
+    launch: GithubAppManifestLaunch;
 };
 
 export type GithubRunnerLinkedApplication = {
@@ -2679,7 +2691,24 @@ export const domainApi = {
             body: JSON.stringify({ force }),
         },
     ),
+    completeOnboarding: () => mutate<ApiResponse<BootstrapData> & { message?: string }>(
+        '/onboarding/complete',
+        { method: 'POST' },
+    ),
     githubApps: () => apiFetch<ApiResponse<GithubAppSummary[]>>(`${API_BASE}/github/apps`),
+    startGithubApp: (input: {
+        name?: string;
+        organization?: string;
+        preview_deployments?: boolean;
+        administration?: boolean;
+        from_onboarding?: boolean;
+    } = {}) => mutate<ApiResponse<GithubAppSetupResult>>('/github/apps', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    }),
+    githubAppInstallUrl: (githubAppUuid: string) => apiFetch<ApiResponse<{ url: string }>>(
+        `${API_BASE}/github/apps/${encodeURIComponent(githubAppUuid)}/install-url`,
+    ),
     updateGithubPackagesToken: (githubAppUuid: string, packagesToken: string | null) => mutate<ApiResponse<{
         uuid: string;
         name: string;

@@ -321,7 +321,7 @@
 
                             this.docCheckInProgress[serviceName] = true;
 
-                            // 1. Try Coolify docs first
+                            // 1. Try DevForge docs first
                             const coolifyUrl = this.coolifyDocsUrl(serviceName);
                             const coolifyExists = await this.checkUrlExists(coolifyUrl);
 

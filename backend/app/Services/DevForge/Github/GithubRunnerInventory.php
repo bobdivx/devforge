@@ -697,8 +697,8 @@ class GithubRunnerInventory
             '--label '.escapeshellarg('com.devforge.runner.name='.$runnerName),
             '--label '.escapeshellarg('com.devforge.runner.auth_mode='.$authMode),
             '--label '.escapeshellarg('com.casaos.app_id=github-runners'),
-            '--label '.escapeshellarg('coolify.managed=true'),
-            '--label '.escapeshellarg('coolify.type=service'),
+            '--label '.escapeshellarg('devforge.managed=true'),
+            '--label '.escapeshellarg('devforge.type=service'),
             escapeshellarg($image),
         ];
 

@@ -21,7 +21,7 @@ class InstanceSettingsSeeder extends Seeder
             'smtp_host' => 'coolify-mail',
             'smtp_port' => 1025,
             'smtp_from_address' => 'hi@localhost.com',
-            'smtp_from_name' => 'Coolify',
+            'smtp_from_name' => 'DevForge',
         ]);
         if (! isDev()) {
             try {

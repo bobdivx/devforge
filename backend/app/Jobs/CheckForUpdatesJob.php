@@ -43,7 +43,7 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
 
                 // Check if cache has newer version than CDN
                 if ($existingCoolifyVersion && version_compare($existingCoolifyVersion, $bestVersion, '>')) {
-                    Log::warning('CDN served older Coolify version than cache', [
+                    Log::warning('CDN served older DevForge version than cache', [
                         'cdn_version' => $latest_version,
                         'cached_version' => $existingCoolifyVersion,
                         'current_version' => $current_version,
@@ -73,7 +73,7 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
                 // Invalidate cache to ensure fresh data is loaded
                 invalidate_versions_cache();
 
-                // Only mark new version available if Coolify version actually increased
+                // Only mark new version available if DevForge version actually increased
                 if (version_compare($latest_version, $current_version, '>')) {
                     // New version available
                     $settings->update(['new_version_available' => true]);

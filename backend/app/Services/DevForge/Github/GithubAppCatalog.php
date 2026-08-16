@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class GithubAppCatalog
@@ -153,7 +154,100 @@ class GithubAppCatalog
             'html_url' => $githubApp->html_url,
             'is_system_wide' => (bool) $githubApp->is_system_wide,
             'has_packages_token' => filled($githubApp->packages_token),
+            'installation_id' => $githubApp->installation_id,
         ];
+    }
+
+    /**
+     * @param  array{name?: string, organization?: string|null}  $input
+     */
+    public function createDraftForTeam(Team $team, array $input = []): GithubApp
+    {
+        $name = trim((string) ($input['name'] ?? ''));
+
+        return GithubApp::create([
+            'name' => $name !== '' ? $name : substr(generate_random_name(), 0, 30),
+            'organization' => filled($input['organization'] ?? null) ? $input['organization'] : null,
+            'api_url' => 'https://api.github.com',
+            'html_url' => 'https://github.com',
+            'custom_user' => 'git',
+            'custom_port' => 22,
+            'is_system_wide' => false,
+            'team_id' => $team->id,
+        ]);
+    }
+
+    /**
+     * @return array{action_url: string, manifest: array<string, mixed>}
+     */
+    public function manifestLaunch(
+        GithubApp $githubApp,
+        bool $previewDeployments = true,
+        bool $administration = false,
+    ): array {
+        $state = Str::random(64);
+        Cache::put('github-app-setup-state:'.hash('sha256', $state), [
+            'action' => 'manifest',
+            'github_app_id' => $githubApp->id,
+            'team_id' => $githubApp->team_id,
+        ], now()->addMinutes(60));
+
+        $baseUrl = $this->webhookBaseUrl();
+        $webhookBaseUrl = $baseUrl.'/webhooks';
+        $path = filled($githubApp->organization)
+            ? 'organizations/'.$githubApp->organization.'/settings/apps/new'
+            : 'settings/apps/new';
+
+        $permissions = [
+            'contents' => 'read',
+            'metadata' => 'read',
+            'emails' => 'read',
+            'administration' => $administration ? 'write' : 'read',
+            'packages' => 'read',
+        ];
+        $events = ['push'];
+        if ($previewDeployments) {
+            $permissions['pull_requests'] = 'write';
+            $events[] = 'pull_request';
+        }
+
+        return [
+            'action_url' => rtrim((string) $githubApp->html_url, '/').'/'.$path.'?state='.$state,
+            'manifest' => [
+                'name' => $githubApp->name,
+                'url' => $baseUrl,
+                'hook_attributes' => [
+                    'url' => $webhookBaseUrl.'/source/github/events',
+                    'active' => true,
+                ],
+                'redirect_url' => $webhookBaseUrl.'/source/github/redirect',
+                'callback_urls' => [$baseUrl.'/login/github/app'],
+                'public' => false,
+                'request_oauth_on_install' => false,
+                'setup_url' => $webhookBaseUrl.'/source/github/install',
+                'setup_on_update' => true,
+                'default_permissions' => $permissions,
+                'default_events' => $events,
+            ],
+        ];
+    }
+
+    public function installationUrl(GithubApp $githubApp): string
+    {
+        return getInstallationPath($githubApp);
+    }
+
+    private function webhookBaseUrl(): string
+    {
+        $settings = instanceSettings();
+        $fqdn = is_string($settings->fqdn) ? trim($settings->fqdn) : '';
+        $baseUrl = $fqdn !== '' ? rtrim($fqdn, '/') : request()->getSchemeAndHttpHost();
+
+        if (! str_starts_with($baseUrl, 'http://') && ! str_starts_with($baseUrl, 'https://')) {
+            $baseUrl = 'https://'.$baseUrl;
+        }
+
+        return rtrim($baseUrl, '/');
     }
 
     /**

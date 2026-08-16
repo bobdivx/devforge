@@ -41,7 +41,7 @@ export function StoragesPage({ path, permissions }: StoragesPageProps) {
         <div class="grid gap-5">
             <PageHeader
                 title="Stockage"
-                description="Sauvegarde de l’instance DevForge, destinations S3, et migration depuis Coolify."
+                description="Sauvegarde de l’instance DevForge et destinations S3."
             />
             {permissions.instance_admin && (
                 <InstanceBackupPanel />

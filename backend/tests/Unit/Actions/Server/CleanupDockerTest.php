@@ -442,11 +442,11 @@ it('deletes all build images when retention is disabled', function () {
 it('container prune excludes persistent resource types', function () {
     $sourceFile = file_get_contents(__DIR__.'/../../../../app/Actions/Server/CleanupDocker.php');
 
-    expect($sourceFile)->toContain('label!=coolify.type=database');
-    expect($sourceFile)->toContain('label!=coolify.type=application');
-    expect($sourceFile)->toContain('label!=coolify.type=service');
+    expect($sourceFile)->toContain('label!=devforge.type=database');
+    expect($sourceFile)->toContain('label!=devforge.type=application');
+    expect($sourceFile)->toContain('label!=devforge.type=service');
     expect($sourceFile)->toContain('label!=coolify.proxy=true');
-    expect($sourceFile)->toContain('label=coolify.managed=true');
+    expect($sourceFile)->toContain('label=devforge.managed=true');
 });
 
 it('uses persisted buildx metadata when pruning the railpack builder', function () {

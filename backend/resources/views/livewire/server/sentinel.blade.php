@@ -45,8 +45,8 @@
             @if ($server->isSentinelEnabled())
                 <div class="flex flex-wrap gap-2 sm:flex-nowrap items-end">
                     <x-forms.input canGate="update" :canResource="$server" id="sentinelCustomUrl" required
-                        label="Coolify URL"
-                        helper="URL to your Coolify instance. If it is empty that means you do not have a FQDN set for your Coolify instance." />
+                        label="DevForge URL"
+                        helper="URL to your DevForge instance. If it is empty that means you do not have a FQDN set for your DevForge instance." />
                     <x-forms.input canGate="update" :canResource="$server" type="password" id="sentinelToken"
                         label="Sentinel token" required helper="Token for Sentinel." />
                     <x-forms.button canGate="update" :canResource="$server"

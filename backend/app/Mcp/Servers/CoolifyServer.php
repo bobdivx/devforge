@@ -17,10 +17,10 @@ use Laravel\Mcp\Server\Attributes\Instructions;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Version;
 
-#[Name('Coolify')]
+#[Name('DevForge')]
 #[Version('0.1.0')]
 #[Instructions(<<<'MD'
-Read-only MCP server for Coolify, scoped to the authenticated team token.
+Read-only MCP server for DevForge, scoped to the authenticated team token.
 
 Recommended workflow:
 1. get_infrastructure_overview — start here; single call returns all servers, projects with resource counts, and aggregates.

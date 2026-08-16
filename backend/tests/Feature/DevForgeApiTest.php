@@ -112,7 +112,7 @@ it('returns the authenticated bootstrap contract without sensitive data', functi
                     'auth_endpoint',
                     'channels' => ['team', 'user'],
                 ],
-                'onboarding' => ['required', 'user_enabled', 'team_enabled'],
+                'onboarding' => ['required', 'user_enabled', 'team_enabled', 'steps'],
                 'cloud' => ['enabled', 'subscription_active', 'subscription_grace_period'],
                 'migration' => ['enabled', 'legacy_base_url', 'domains'],
                 'features' => ['agents_enabled'],

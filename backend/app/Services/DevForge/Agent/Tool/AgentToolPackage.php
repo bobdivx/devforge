@@ -44,7 +44,7 @@ class AgentToolPackage
             self::PACKAGE_CORE => [
                 'id' => self::PACKAGE_CORE,
                 'label' => 'Infra DevForge',
-                'description' => 'Ressources Coolify, déploiements, SSH, Docker, HTTP.',
+                'description' => 'Ressources DevForge, déploiements, SSH, Docker, HTTP.',
                 'tools' => [
                     'list_resources',
                     'get_resource_status',

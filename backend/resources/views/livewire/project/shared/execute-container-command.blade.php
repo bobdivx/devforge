@@ -1,6 +1,6 @@
 <div>
     <x-slot:title>
-        {{ data_get_str($resource, 'name')->limit(10) }} > Commands | Coolify
+        {{ data_get_str($resource, 'name')->limit(10) }} > Commands | DevForge
     </x-slot>
     @if ($type === 'application')
         <livewire:project.shared.configuration-checker :resource="$resource" />

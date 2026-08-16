@@ -31,7 +31,7 @@ it('can login with valid credentials', function () {
     $page->fill('email', 'test@example.com')
         ->fill('password', 'password')
         ->click('Login')
-        ->assertSee('Welcome to Coolify')
+        ->assertSee('Welcome to DevForge')
         ->screenshot();
 });
 

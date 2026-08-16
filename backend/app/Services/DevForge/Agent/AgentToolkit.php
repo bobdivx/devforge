@@ -318,7 +318,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'browser_smoke',
-                'description' => 'Smoke test du domaine public d’une application Coolify (FQDN). Vérifie HTTP + absence page nginx défaut.',
+                'description' => 'Smoke test du domaine public d’une application DevForge (FQDN). Vérifie HTTP + absence page nginx défaut.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -380,7 +380,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'web_search',
-                'description' => 'Recherche web (docs, erreurs, changelogs). Préfère pour infos externes à Coolify.',
+                'description' => 'Recherche web (docs, erreurs, changelogs). Préfère pour infos externes à DevForge.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -601,7 +601,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'check_docker_image_update',
-                'description' => 'Vérifie si une image Docker (app dockerimage, service Coolify, ou image=repo:tag) est à jour vs Docker Hub/Quay. Compare tags semver et digests ; inspecte le conteneur running si possible.',
+                'description' => 'Vérifie si une image Docker (app dockerimage, service DevForge, ou image=repo:tag) est à jour vs Docker Hub/Quay. Compare tags semver et digests ; inspecte le conteneur running si possible.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -611,7 +611,7 @@ class AgentToolkit
                         ],
                         'service_uuid' => [
                             'type' => 'string',
-                            'description' => 'UUID d\'un service Coolify (vérifie les images ServiceApplication).',
+                            'description' => 'UUID d\'un service DevForge (vérifie les images ServiceApplication).',
                         ],
                         'image' => [
                             'type' => 'string',
@@ -637,7 +637,7 @@ class AgentToolkit
                         ],
                         'service_uuid' => [
                             'type' => 'string',
-                            'description' => 'UUID d\'un service Coolify.',
+                            'description' => 'UUID d\'un service DevForge.',
                         ],
                         'force' => [
                             'type' => 'boolean',
@@ -712,7 +712,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'read_remote_file',
-                'description' => 'Lit un fichier de configuration de déploiement sur le serveur (docker-compose, .env Coolify). Pour le code source de l\'app, préfère read_application_source.',
+                'description' => 'Lit un fichier de configuration de déploiement sur le serveur (docker-compose, .env DevForge). Pour le code source de l\'app, préfère read_application_source.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -724,7 +724,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'list_remote_dir',
-                'description' => 'Liste un répertoire de déploiement Coolify sur le serveur (applications/{uuid}/). Pour le code source, préfère list_application_source.',
+                'description' => 'Liste un répertoire de déploiement DevForge sur le serveur (applications/{uuid}/). Pour le code source, préfère list_application_source.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -776,7 +776,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'get_application_source_info',
-                'description' => 'Retourne dépôt Git, branche déployée, base_directory et disponibilité du code source d\'une application Coolify.',
+                'description' => 'Retourne dépôt Git, branche déployée, base_directory et disponibilité du code source d\'une application DevForge.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -824,7 +824,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'list_application_env_vars',
-                'description' => 'Liste les variables d\'environnement Coolify d\'une application (pas le .env Git).',
+                'description' => 'Liste les variables d\'environnement DevForge d\'une application (pas le .env Git).',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -837,7 +837,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'upsert_application_env_var',
-                'description' => 'Crée ou met à jour une variable Coolify (build/runtime). Préférer ceci à write_application_source pour .env / PUPPETEER_SKIP_DOWNLOAD / secrets de build.',
+                'description' => 'Crée ou met à jour une variable DevForge (build/runtime). Préférer ceci à write_application_source pour .env / PUPPETEER_SKIP_DOWNLOAD / secrets de build.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -871,7 +871,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'update_application_git_branch',
-                'description' => 'Change la branche Git déployée par Coolify (Application.git_branch), puis redéploie par défaut. À utiliser quand le clone échoue (branche introuvable / Remote branch not found).',
+                'description' => 'Change la branche Git déployée par DevForge (Application.git_branch), puis redéploie par défaut. À utiliser quand le clone échoue (branche introuvable / Remote branch not found).',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -897,7 +897,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'get_application_runtime_settings',
-                'description' => 'Lit la config build/runtime Coolify (build_pack, install/build/start_command, ports_exposes, base/publish_directory, healthcheck). Utile avant de corriger un échec de build.',
+                'description' => 'Lit la config build/runtime DevForge (build_pack, install/build/start_command, ports_exposes, base/publish_directory, healthcheck). Utile avant de corriger un échec de build.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -910,7 +910,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'update_application_runtime_settings',
-                'description' => 'Met à jour la config build Coolify (commandes, ports, répertoires, build_pack, static). À préférer à un commit Git quand l’échec vient de la config Coolify. Redéploie par défaut.',
+                'description' => 'Met à jour la config build DevForge (commandes, ports, répertoires, build_pack, static). À préférer à un commit Git quand l’échec vient de la config DevForge. Redéploie par défaut.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -966,7 +966,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'fix_application_host_permissions',
-                'description' => 'Corrige de façon autonome les Permission denied sur le répertoire Coolify de l’application (chown/chmod ciblé via SSH), puis redéploie par défaut. À utiliser dès que tee/.env/docker-compose.yaml échoue en écriture sur le host.',
+                'description' => 'Corrige de façon autonome les Permission denied sur le répertoire DevForge de l’application (chown/chmod ciblé via SSH), puis redéploie par défaut. À utiliser dès que tee/.env/docker-compose.yaml échoue en écriture sur le host.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -991,7 +991,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'fix_coolify_base_config_path',
-                'description' => 'Recharge BASE_CONFIG_PATH dans Coolify (php artisan config:clear + horizon:terminate via docker exec), puis redéploie. À utiliser si mkdir des dossiers applications Coolify échoue avec Read-only file system (chemin hôte incorrect ou config cache) — sans présumer le chemin NAS.',
+                'description' => 'Recharge BASE_CONFIG_PATH dans DevForge (php artisan config:clear + horizon:terminate via docker exec), puis redéploie. À utiliser si mkdir des dossiers applications DevForge échoue avec Read-only file system (chemin hôte incorrect ou config cache) — sans présumer le chemin NAS.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -1001,7 +1001,7 @@ class AgentToolkit
                         ],
                         'container' => [
                             'type' => 'string',
-                            'description' => 'Nom du conteneur Coolify (défaut: coolify)',
+                            'description' => 'Nom du conteneur DevForge (défaut: coolify)',
                         ],
                         'redeploy' => [
                             'type' => 'boolean',
@@ -1067,7 +1067,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'get_application_preview',
-                'description' => 'Récupère l’URL preview Coolify liée à une PR (après write_application_source mode=pull_request). Retourne fqdn + status.',
+                'description' => 'Récupère l’URL preview DevForge liée à une PR (après write_application_source mode=pull_request). Retourne fqdn + status.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -1302,7 +1302,7 @@ class AgentToolkit
             ],
             [
                 'name' => 'get_application_git_info',
-                'description' => 'Retourne repo, branche, commit et GitHub App liés à une application Coolify.',
+                'description' => 'Retourne repo, branche, commit et GitHub App liés à une application DevForge.',
                 'parameters' => [
                     'type' => 'object',
                     'properties' => [
@@ -3562,12 +3562,12 @@ class AgentToolkit
                 'is_literal' => $isLiteral,
             ]);
 
-            $this->run->appendLog("  ✓ Variable Coolify {$key} mise à jour sur {$application->uuid}");
+            $this->run->appendLog("  ✓ Variable DevForge {$key} mise à jour sur {$application->uuid}");
 
             return [
                 'ok' => true,
                 'variable' => $variable,
-                'hint' => 'Variable Coolify enregistrée. Utilise control_resource deploy pour reconstruire.',
+                'hint' => 'Variable DevForge enregistrée. Utilise control_resource deploy pour reconstruire.',
             ];
         } catch (ValidationException $exception) {
             return ['error' => collect($exception->errors())->flatten()->first() ?? 'Variable invalide.'];
@@ -3718,7 +3718,7 @@ class AgentToolkit
         }
 
         $changedKeys = array_keys(array_diff_key($input, ['redeploy' => true]));
-        $this->run->appendLog('  ✓ Runtime/build Coolify mis à jour ('.implode(', ', $changedKeys).") sur {$application->uuid}");
+        $this->run->appendLog('  ✓ Runtime/build DevForge mis à jour ('.implode(', ', $changedKeys).") sur {$application->uuid}");
 
         $actionsTaken = $this->run->actions_taken ?? [];
         $actionsTaken[] = [
@@ -3726,7 +3726,7 @@ class AgentToolkit
             'uuid' => $application->uuid,
             'type' => 'applications',
             'action' => 'update_runtime_settings',
-            'reason' => $reason !== '' ? $reason : 'Correction config build Coolify',
+            'reason' => $reason !== '' ? $reason : 'Correction config build DevForge',
             'keys' => $changedKeys,
             'at' => now()->toISOString(),
         ];
@@ -3751,7 +3751,7 @@ class AgentToolkit
             $application->uuid,
             'applications',
             'deploy',
-            $reason !== '' ? $reason : 'Redeploy après correction runtime/build Coolify',
+            $reason !== '' ? $reason : 'Redeploy après correction runtime/build DevForge',
         );
 
         if (isset($deploy['error'])) {
@@ -3851,7 +3851,7 @@ class AgentToolkit
 
         if ($this->isEnvFilePath($path)) {
             return [
-                'error' => 'Interdit d’écrire un fichier .env via Git. Utilise upsert_application_env_var (variables Coolify build/runtime), puis control_resource deploy.',
+                'error' => 'Interdit d’écrire un fichier .env via Git. Utilise upsert_application_env_var (variables DevForge build/runtime), puis control_resource deploy.',
                 'hint' => 'upsert_application_env_var',
             ];
         }
@@ -3906,7 +3906,7 @@ class AgentToolkit
             $payload = ['error' => $error];
 
             if ($this->isGithubPermissionError((string) $error)) {
-                $payload['hint'] = 'Si tu voulais une variable Coolify (ex. PUPPETEER_SKIP_DOWNLOAD), utilise upsert_application_env_var puis control_resource deploy. Ne redéploie pas sans correction.';
+                $payload['hint'] = 'Si tu voulais une variable DevForge (ex. PUPPETEER_SKIP_DOWNLOAD), utilise upsert_application_env_var puis control_resource deploy. Ne redéploie pas sans correction.';
             }
 
             return $payload;

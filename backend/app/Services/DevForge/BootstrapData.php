@@ -4,11 +4,14 @@ namespace App\Services\DevForge;
 
 use App\Models\Team;
 use App\Models\User;
+use App\Services\DevForge\Onboarding\OnboardingStatus;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 
 class BootstrapData
 {
+    public function __construct(private readonly OnboardingStatus $onboardingStatus) {}
+
     /**
      * @return array<string, mixed>
      */
@@ -60,6 +63,7 @@ class BootstrapData
                 'required' => showBoarding(),
                 'user_enabled' => (bool) $user->show_boarding,
                 'team_enabled' => (bool) $currentTeam->show_boarding,
+                'steps' => $this->onboardingStatus->steps($currentTeam),
             ],
             'cloud' => [
                 'enabled' => isCloud(),

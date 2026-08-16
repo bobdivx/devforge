@@ -18,7 +18,7 @@ export const COMMON_CRONS = [
 ];
 
 /**
- * Format a cron string (or a coolify alias) into a human readable string in French.
+ * Format a cron string (or a schedule alias) into a human readable string in French.
  */
 export function formatCron(cronOrAlias: string): string {
     if (!cronOrAlias) return '-';

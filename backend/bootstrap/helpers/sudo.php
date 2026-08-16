@@ -8,13 +8,13 @@ function shouldChangeOwnership(string $path): bool
 {
     $path = trim($path);
 
-    // Configured Coolify/DevForge data dir (ZimaOS: /media/.../devforge/data).
+    // Configured DevForge/DevForge data dir (ZimaOS: /media/.../devforge/data).
     $baseConfigPath = rtrim((string) config('constants.coolify.base_config_path', '/data/coolify'), '/');
     if ($baseConfigPath !== '' && ($path === $baseConfigPath || Str::startsWith($path, $baseConfigPath.'/'))) {
         return true;
     }
 
-    // Coolify/DevForge data dirs (incl. NAS mounts under /media/.../{coolify|devforge}/...).
+    // DevForge/DevForge data dirs (incl. NAS mounts under /media/.../{coolify|devforge}/...).
     $isPlatformPath = Str::startsWith($path, '/data/coolify')
         || Str::startsWith($path, '/data/devforge')
         || Str::startsWith($path, '/tmp/coolify')

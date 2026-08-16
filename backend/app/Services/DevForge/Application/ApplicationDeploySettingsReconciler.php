@@ -106,7 +106,7 @@ class ApplicationDeploySettingsReconciler
             }
         }
 
-        // Non-static (SSR/Node): apply detected listen port when unset or still on Coolify default 3000/80.
+        // Non-static (SSR/Node): apply detected listen port when unset or still on DevForge default 3000/80.
         if (! $suggestedStatic) {
             $suggestedPorts = is_string($suggestions['ports_exposes'] ?? null) ? (string) $suggestions['ports_exposes'] : null;
             $currentPorts = trim((string) ($application->ports_exposes ?? ''));

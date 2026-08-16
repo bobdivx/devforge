@@ -47,7 +47,7 @@ class ApplicationDomainService
     {
         if ($application->build_pack === 'dockercompose') {
             throw ValidationException::withMessages([
-                'domains' => 'Les domaines globaux ne s’appliquent pas aux applications dockercompose. Configurez les domaines par service dans Coolify.',
+                'domains' => 'Les domaines globaux ne s’appliquent pas aux applications dockercompose. Configurez les domaines par service dans DevForge.',
             ]);
         }
 
