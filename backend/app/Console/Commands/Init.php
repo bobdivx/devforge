@@ -220,15 +220,14 @@ class Init extends Command
                     $safe = escapeshellarg($network);
                     $out = instant_remote_process(["docker network inspect -f json {$safe} | jq '.[].Containers | if . == {} then null else . end'"], $server, false);
                     if (empty($out)) {
-                        $commands->push("docker network disconnect {$safe} coolify-proxy >/dev/null 2>&1 || true");
+                        $commands = $commands->merge(devforge_proxy_network_disconnect_commands($network));
                         $commands->push("docker network rm {$safe} >/dev/null 2>&1 || true");
                     } else {
                         $data = collect(json_decode($out, true));
                         if ($data->count() === 1) {
-                            // If only coolify-proxy itself is connected to that network (it should not be possible, but who knows)
-                            $isCoolifyProxyItself = data_get($data->first(), 'Name') === 'coolify-proxy';
-                            if ($isCoolifyProxyItself) {
-                                $commands->push("docker network disconnect {$safe} coolify-proxy >/dev/null 2>&1 || true");
+                            $isProxyItself = is_devforge_proxy_container_name((string) data_get($data->first(), 'Name'));
+                            if ($isProxyItself) {
+                                $commands = $commands->merge(devforge_proxy_network_disconnect_commands($network));
                                 $commands->push("docker network rm {$safe} >/dev/null 2>&1 || true");
                             }
                         }

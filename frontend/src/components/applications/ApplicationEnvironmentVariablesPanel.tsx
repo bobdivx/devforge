@@ -1,4 +1,4 @@
-import { Braces, Eye, EyeOff, LoaderCircle, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-preact';
+import { Braces, Eye, EyeOff, LoaderCircle, Pencil, Plus, RefreshCw, Trash2, Upload } from 'lucide-preact';
 import { useMemo, useRef, useState } from 'preact/hooks';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ActionToolbar } from '../ui/ActionToolbar';
@@ -13,6 +13,7 @@ import {
     type ApplicationEnvironmentVariableInput,
 } from '../../lib/domain-api';
 import { useApiQuery } from '../../lib/use-api-query';
+import { readEnvFile } from '../../lib/env-file';
 
 type ScopeTab = 'production' | 'preview';
 
@@ -173,9 +174,12 @@ export function ApplicationEnvironmentVariablesPanel({
     const [submitting, setSubmitting] = useState(false);
     const [formError, setFormError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
+    const [bannerError, setBannerError] = useState<string | null>(null);
     const [pendingDelete, setPendingDelete] = useState<ApplicationEnvironmentVariable | null>(null);
     const [deleting, setDeleting] = useState(false);
+    const [importing, setImporting] = useState(false);
     const editRequestId = useRef(0);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const variables = useMemo(() => {
         const data = query.data?.data;
@@ -327,6 +331,65 @@ export function ApplicationEnvironmentVariablesPanel({
         }
     };
 
+    const importEnvFile = async (file: File) => {
+        if (file.size > 262144) {
+            setSuccess(null);
+            setBannerError('Le fichier .env dépasse 256 Ko.');
+
+            return;
+        }
+
+        setImporting(true);
+        setBannerError(null);
+        setSuccess(null);
+
+        try {
+            const contents = await readEnvFile(file);
+
+            if (contents.trim() === '') {
+                setBannerError('Le fichier .env est vide.');
+
+                return;
+            }
+
+            const response = await domainApi.importApplicationEnvironmentVariables(applicationUuid, {
+                contents,
+                is_preview: scope === 'preview',
+            });
+            const { created, updated, skipped } = response.data;
+            const imported = created + updated;
+            const skippedCount = skipped.length;
+            const parts = [
+                `${imported} variable${imported > 1 ? 's' : ''} importée${imported > 1 ? 's' : ''}`,
+            ];
+
+            if (created > 0) {
+                parts.push(`${created} créée${created > 1 ? 's' : ''}`);
+            }
+
+            if (updated > 0) {
+                parts.push(`${updated} mise${updated > 1 ? 's' : ''} à jour`);
+            }
+
+            if (skippedCount > 0) {
+                parts.push(`${skippedCount} ignorée${skippedCount > 1 ? 's' : ''}`);
+            }
+
+            await query.reload();
+            setSuccess(`${parts.join(' · ')}. Redémarre ou redéploie l’application pour les injecter.`);
+        } catch (error) {
+            setBannerError(error instanceof Error && error.message !== ''
+                ? error.message
+                : 'L’import du fichier .env a échoué. Vérifie le format KEY=VALUE.');
+        } finally {
+            setImporting(false);
+
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
+        }
+    };
+
     const deleteVariable = async () => {
         if (!pendingDelete) {
             return;
@@ -362,10 +425,39 @@ export function ApplicationEnvironmentVariablesPanel({
                         Actualiser
                     </button>
                     {canAct && (
-                        <button class="btn btn-primary btn-sm rounded-full" type="button" onClick={openCreate}>
-                            <Plus class="size-3.5" aria-hidden />
-                            Ajouter
-                        </button>
+                        <>
+                            <input
+                                ref={fileInputRef}
+                                id="application-env-file"
+                                class="sr-only"
+                                type="file"
+                                aria-label="Fichier .env"
+                                accept=".env,.txt,text/plain"
+                                disabled={importing}
+                                onChange={(event) => {
+                                    const file = (event.target as HTMLInputElement).files?.[0];
+
+                                    if (file) {
+                                        void importEnvFile(file);
+                                    }
+                                }}
+                            />
+                            <button
+                                class="btn btn-ghost btn-sm rounded-full"
+                                type="button"
+                                disabled={importing}
+                                onClick={() => fileInputRef.current?.click()}
+                            >
+                                {importing
+                                    ? <LoaderCircle class="size-3.5 animate-spin" aria-hidden />
+                                    : <Upload class="size-3.5" aria-hidden />}
+                                Importer .env
+                            </button>
+                            <button class="btn btn-primary btn-sm rounded-full" type="button" onClick={openCreate}>
+                                <Plus class="size-3.5" aria-hidden />
+                                Ajouter
+                            </button>
+                        </>
                     )}
                 </ActionToolbar>
             </div>
@@ -373,6 +465,11 @@ export function ApplicationEnvironmentVariablesPanel({
             {success && (
                 <p class="rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-sm text-success" role="status">
                     {success}
+                </p>
+            )}
+            {bannerError && (
+                <p class="rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-sm text-error" role="alert">
+                    {bannerError}
                 </p>
             )}
             <Tabs

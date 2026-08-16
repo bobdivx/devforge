@@ -38,6 +38,7 @@ class InstanceSettingsPresenter
         return [
             'instance_name' => $this->settings->instance_name,
             'fqdn' => $this->settings->fqdn,
+            'apps_wildcard_domain' => $this->settings->apps_wildcard_domain,
             'instance_timezone' => $this->settings->instance_timezone,
             'public_ipv4' => $this->settings->public_ipv4,
             'public_ipv6' => $this->settings->public_ipv6,

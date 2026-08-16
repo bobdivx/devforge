@@ -79,7 +79,6 @@ class RestartProxyJob implements ShouldBeEncrypted, ShouldQueue
     private function buildRestartCommands(): array
     {
         $proxyType = $this->server->proxyType();
-        $containerName = $this->server->isSwarm() ? 'coolify-proxy_traefik' : 'coolify-proxy';
         $proxy_path = $this->server->proxyPath();
         $stopTimeout = 30;
 
@@ -95,28 +94,11 @@ class RestartProxyJob implements ShouldBeEncrypted, ShouldQueue
 
         $commands = collect([]);
 
-        // === STOP PHASE ===
         $commands = $commands->merge([
             "echo 'Stopping proxy...'",
-            "docker stop -t=$stopTimeout $containerName 2>/dev/null || true",
-            "docker rm -f $containerName 2>/dev/null || true",
-            '# Wait for container to be fully removed',
-            'for i in {1..15}; do',
-            "    if ! docker ps -a --format \"{{.Names}}\" | grep -q \"^$containerName$\"; then",
-            "        echo 'Container removed successfully.'",
-            '        break',
-            '    fi',
-            '    echo "Waiting for container to be removed... ($i/15)"',
-            '    sleep 1',
-            '    # Force remove on each iteration in case it got stuck',
-            "    docker rm -f $containerName 2>/dev/null || true",
-            'done',
-            '# Final verification and force cleanup',
-            "if docker ps -a --format \"{{.Names}}\" | grep -q \"^$containerName$\"; then",
-            "    echo 'Container still exists after wait, forcing removal...'",
-            "    docker rm -f $containerName 2>/dev/null || true",
-            '    sleep 2',
-            'fi',
+        ]);
+        $commands = $commands->merge(devforge_proxy_stop_commands($this->server, $stopTimeout));
+        $commands = $commands->merge([
             "echo 'Proxy stopped successfully.'",
         ]);
 
@@ -128,7 +110,7 @@ class RestartProxyJob implements ShouldBeEncrypted, ShouldQueue
                 "cd $proxy_path",
                 "echo 'Creating required Docker Compose file.'",
                 "echo 'Starting proxy.'",
-                'docker stack deploy --detach=true -c docker-compose.yml coolify-proxy',
+                'docker stack deploy --detach=true -c docker-compose.yml '.devforge_proxy_stack_name(),
                 "echo 'Successfully started proxy.'",
             ]);
         } else {

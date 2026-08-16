@@ -95,7 +95,7 @@ class CoreResourcePresenter
                 'terminal_enabled' => (bool) $server->settings?->is_terminal_enabled,
                 'wildcard_domain' => filled($server->settings?->wildcard_domain)
                     ? (string) $server->settings->wildcard_domain
-                    : null,
+                    : instance_apps_wildcard_domain(),
             ],
             'actions' => [],
             'created_at' => $server->created_at?->toISOString(),

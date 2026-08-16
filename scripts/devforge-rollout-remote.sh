@@ -76,6 +76,37 @@ tar --warning=no-timestamp -xzf "${ARTIFACT}" -C "${STAGING}"
 log "Copie vers ${CONTAINER}:/var/www/html/"
 docker cp "${STAGING}/." "${CONTAINER}:/var/www/html/"
 
+apply_proxy_nginx() {
+    local src="${1:-}"
+    local dest="/media/Docker/AppData/devforge/nginx/default.conf"
+    if [[ -z "${src}" || ! -f "${src}" ]]; then
+        return 0
+    fi
+    if ! grep -q '|mcp|webhooks)(/|$)' "${src}"; then
+        log "AVERTISSEMENT: nginx.conf sans proxy /webhooks — ignore"
+        return 0
+    fi
+    log "Mise a jour proxy nginx ${dest}"
+    if [[ -f "${dest}" ]] || sudo test -f "${dest}" 2>/dev/null; then
+        if sudo cp -f "${src}" "${dest}" 2>/dev/null || cp -f "${src}" "${dest}"; then
+            docker exec devforge-proxy nginx -t
+            docker exec devforge-proxy nginx -s reload
+            echo "PROXY_NGINX_OK"
+        else
+            log "AVERTISSEMENT: impossible d ecrire ${dest}"
+        fi
+    else
+        log "AVERTISSEMENT: ${dest} introuvable — proxy nginx non mis a jour"
+    fi
+}
+
+BUNDLE_DIR="$(cd "$(dirname "${ARTIFACT}")" && pwd)"
+if [[ -f "${BUNDLE_DIR}/nginx.conf" ]]; then
+    apply_proxy_nginx "${BUNDLE_DIR}/nginx.conf"
+elif [[ -f "${STAGING}/docker/devforge-proxy/nginx.conf" ]]; then
+    apply_proxy_nginx "${STAGING}/docker/devforge-proxy/nginx.conf"
+fi
+
 set_env_in_container() {
     local key="$1"
     local value="$2"

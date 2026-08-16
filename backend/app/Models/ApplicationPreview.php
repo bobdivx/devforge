@@ -53,7 +53,7 @@ class ApplicationPreview extends BaseModel
                         return;
                     }
                     $k = escapeshellarg($key);
-                    instant_remote_process(["docker network disconnect {$k} coolify-proxy"], $server, false);
+                    instant_remote_process(devforge_proxy_network_disconnect_commands($key), $server, false);
                     instant_remote_process(["docker network rm {$k}"], $server, false);
                 });
             } else {

@@ -283,26 +283,14 @@ class AgentRepairHarness
             $fixResult = $toolkit->execute('fix_application_host_permissions', $fixArgs);
             $record('fix_application_host_permissions', $fixArgs, $fixResult);
         } elseif ($issue === AgentChatRepairStrategy::ISSUE_PUPPETEER) {
-            $envArgs = [
+            $settingsArgs = [
                 ...$appArgs,
-                'key' => 'PUPPETEER_SKIP_DOWNLOAD',
-                'value' => 'true',
-                'is_buildtime' => true,
-                'is_runtime' => false,
+                'skip_puppeteer_browser_download' => true,
+                'redeploy' => true,
+                'reason' => 'Harness: Puppeteer — activer le skip Chrome (paramètre avancé)',
             ];
-            $envResult = $toolkit->execute('upsert_application_env_var', $envArgs);
-            $record('upsert_application_env_var', $envArgs, $envResult);
-
-            if (! isset($envResult['error']) && $applicationUuid !== null) {
-                $deployArgs = [
-                    'uuid' => $applicationUuid,
-                    'type' => 'applications',
-                    'action' => 'deploy',
-                    'reason' => 'Harness: Puppeteer/Chromium — redeploy après PUPPETEER_SKIP_DOWNLOAD',
-                ];
-                $deployResult = $toolkit->execute('control_resource', $deployArgs);
-                $record('control_resource', $deployArgs, $deployResult);
-            }
+            $settingsResult = $toolkit->execute('update_application_advanced_settings', $settingsArgs);
+            $record('update_application_advanced_settings', $settingsArgs, $settingsResult);
         } elseif ($issue === AgentChatRepairStrategy::ISSUE_BRANCH) {
             $gitResult = $toolkit->execute('get_application_git_info', $appArgs);
             $record('get_application_git_info', $appArgs, $gitResult);

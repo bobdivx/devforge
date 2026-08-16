@@ -34,6 +34,14 @@ class GetProxyConfiguration
                         'proxy_type' => $proxyType,
                     ]);
                     $proxy_configuration = null;
+                } elseif (proxy_configuration_uses_legacy_container($proxy_configuration)) {
+                    $custom_commands = extractCustomProxyCommands($server, $proxy_configuration);
+                    $proxy_configuration = str(generateDefaultProxyConfiguration($server, $custom_commands))->trim()->value();
+
+                    Log::warning('Legacy coolify-proxy configuration migrated to devforge-traefik', [
+                        'server_id' => $server->id,
+                        'server_name' => $server->name,
+                    ]);
                 }
             }
 

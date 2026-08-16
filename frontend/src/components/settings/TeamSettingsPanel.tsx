@@ -1,4 +1,5 @@
 import { Plus, RefreshCw, Save, Trash2 } from 'lucide-preact';
+import { RestartOnboardingButton } from '../onboarding/RestartOnboardingButton';
 import { useEffect, useState } from 'preact/hooks';
 import { TeamSwitcher } from '../TeamSwitcher';
 import { ActionToolbar } from '../ui/ActionToolbar';
@@ -188,6 +189,18 @@ export function TeamSettingsPanel({
                     onSwitch={onSwitchTeam}
                 />
             </Card>
+
+            {canManage && (
+                <Card title="Assistant de configuration">
+                    <p class="text-sm text-base-content/65">
+                        Relancez le wizard (domaine, GitHub, S3, serveur). Un projet et l’environnement
+                        production sont créés s’ils n’existent pas encore.
+                    </p>
+                    <div class="mt-4">
+                        <RestartOnboardingButton variant="primary" size="sm" />
+                    </div>
+                </Card>
+            )}
 
             {canManage && (
                 <Card title="Informations de l’équipe">

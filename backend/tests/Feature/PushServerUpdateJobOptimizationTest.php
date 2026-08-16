@@ -129,7 +129,7 @@ it('rate-limits ConnectProxyToNetworksJob dispatch to every 10 minutes', functio
     // First push: should dispatch ConnectProxyToNetworksJob
     $containersWithProxy = [
         [
-            'name' => 'coolify-proxy',
+            'name' => 'devforge-traefik',
             'state' => 'running',
             'health_status' => 'healthy',
             'labels' => ['devforge.managed' => true],
@@ -161,7 +161,7 @@ it('dispatches ConnectProxyToNetworksJob again after cache expires', function ()
 
     $containersWithProxy = [
         [
-            'name' => 'coolify-proxy',
+            'name' => 'devforge-traefik',
             'state' => 'running',
             'health_status' => 'healthy',
             'labels' => ['devforge.managed' => true],
@@ -203,7 +203,7 @@ it('respects the configured proxy connect interval', function () {
     $data = [
         'containers' => [
             [
-                'name' => 'coolify-proxy',
+                'name' => 'devforge-traefik',
                 'state' => 'running',
                 'health_status' => 'healthy',
                 'labels' => ['devforge.managed' => true],

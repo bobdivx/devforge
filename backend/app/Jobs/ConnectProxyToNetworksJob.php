@@ -13,7 +13,7 @@ use Illuminate\Queue\SerializesModels;
 use Laravel\Horizon\Contracts\Silenced;
 
 /**
- * Asynchronously connects the coolify-proxy to Docker networks.
+ * Asynchronously connects the DevForge Traefik proxy to Docker networks.
  *
  * This job is dispatched from PushServerUpdateJob when the proxy is found running
  * to ensure it's connected to all required networks without blocking the status update.

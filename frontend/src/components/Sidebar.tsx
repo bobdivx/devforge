@@ -1,4 +1,4 @@
-import { ChevronDown, PanelLeftClose, PanelLeftOpen, X } from 'lucide-preact';
+import { ChevronDown, PanelLeftClose, PanelLeftOpen, Sparkles, X } from 'lucide-preact';
 import { useMemo, useState } from 'preact/hooks';
 import type { BootstrapData } from '../lib/bootstrap';
 import { DEVFORGE_BRAND_NAME, DEVFORGE_LOGO_URL } from '../lib/brand';
@@ -240,6 +240,20 @@ export function Sidebar({
             </nav>
 
             <div class="grid gap-1 border-t border-base-300/70 p-3">
+                {bootstrap.permissions.manage_team && (
+                    <a
+                        class={collapsed
+                            ? 'grid h-10 place-items-center rounded-xl text-base-content/55 hover:bg-base-200/80 hover:text-base-content'
+                            : 'flex h-10 items-center gap-3 rounded-xl px-3 text-sm text-base-content/55 hover:bg-base-200/80 hover:text-base-content'}
+                        href={routeHref('/onboarding')}
+                        title="Assistant de configuration"
+                        aria-label="Assistant de configuration"
+                        onClick={(event) => onNavigate(event, '/onboarding')}
+                    >
+                        <Sparkles class="size-4 shrink-0" aria-hidden />
+                        {!collapsed && <span class="truncate">Assistant de config.</span>}
+                    </a>
+                )}
                 {!collapsed && (
                     <p class="px-2 pb-1 text-[10px] leading-relaxed text-base-content/40">
                         {DEVFORGE_BRAND_NAME}

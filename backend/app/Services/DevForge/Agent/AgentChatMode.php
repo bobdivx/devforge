@@ -24,6 +24,7 @@ class AgentChatMode
         'write_github_file',
         'upsert_application_env_var',
         'update_application_runtime_settings',
+        'update_application_advanced_settings',
         'update_application_git_branch',
         'fix_application_host_permissions',
         'fix_coolify_base_config_path',

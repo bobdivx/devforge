@@ -13,10 +13,72 @@ function jsonResponse(data: unknown, status = 200): Response {
 afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    window.history.replaceState({}, '', window.location.pathname);
 });
 
 describe('OnboardingPage', () => {
-    it('ouvre GitHub en premier quand l’onboarding est requis', async () => {
+    it('demande un domaine pour les applications puis continue sans en définir', async () => {
+        const update = vi.fn();
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+            const url = String(input);
+            if (url === '/sanctum/csrf-cookie') {
+                return new Response(null, { status: 204 });
+            }
+            if (url.includes('/settings/instance') && init?.method === 'PUT') {
+                update(JSON.parse(String(init.body)));
+                return jsonResponse({
+                    data: { instance: { fqdn: window.location.origin, apps_wildcard_domain: null } },
+                });
+            }
+            if (url.includes('/api/devforge/v1/settings') && !url.includes('/settings/')) {
+                return jsonResponse({
+                    data: {
+                        instance: {
+                            fqdn: null,
+                            apps_wildcard_domain: null,
+                            instance_name: 'DevForge',
+                            instance_timezone: 'UTC',
+                        },
+                    },
+                });
+            }
+            if (url.includes('/github/apps') && !url.includes('install-url')) {
+                return jsonResponse({ data: [] });
+            }
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(<OnboardingPage bootstrap={{
+            ...bootstrapData,
+            permissions: { ...bootstrapData.permissions, instance_admin: true },
+            onboarding: {
+                ...bootstrapData.onboarding,
+                required: true,
+                steps: { account: true, domain: false, github: false, s3: false, server: false },
+            },
+        }}
+        />);
+
+        expect(await screen.findByRole('heading', { name: 'Domaine des applications' })).toBeInTheDocument();
+        expect(await screen.findByPlaceholderText('exemple.com')).toBeInTheDocument();
+        expect(await screen.findByText('Avez-vous un domaine pour toutes vos applications ?')).toBeInTheDocument();
+        await waitFor(() => {
+            expect(screen.getByRole('radio', { name: /Non, pas pour le moment/ })).not.toBeDisabled();
+        });
+        fireEvent.click(screen.getByRole('radio', { name: /Non, pas pour le moment/ }));
+        fireEvent.click(screen.getByRole('button', { name: 'Continuer' }));
+        await waitFor(() => {
+            expect(update).toHaveBeenCalledWith({
+                fqdn: window.location.origin,
+                apps_wildcard_domain: null,
+                force_save_domains: true,
+            });
+        });
+        expect(await screen.findByRole('heading', { name: 'Connecter GitHub' })).toBeInTheDocument();
+    });
+
+    it('reprend GitHub après le retour d’installation', async () => {
+        window.history.replaceState({}, '', `${window.location.pathname}?pick=repos`);
         vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
             const url = String(input);
             if (url.includes('/github/apps') && !url.includes('install-url')) {
@@ -30,7 +92,7 @@ describe('OnboardingPage', () => {
             onboarding: {
                 ...bootstrapData.onboarding,
                 required: true,
-                steps: { account: true, github: false, s3: false, server: false },
+                steps: { account: true, domain: true, github: false, s3: false, server: false },
             },
         }}
         />);
@@ -59,7 +121,7 @@ describe('OnboardingPage', () => {
             onboarding: {
                 ...bootstrapData.onboarding,
                 required: true,
-                steps: { account: true, github: true, s3: true, server: true },
+                steps: { account: true, domain: true, github: true, s3: true, server: true },
             },
         }}
         />);
@@ -69,5 +131,54 @@ describe('OnboardingPage', () => {
         await waitFor(() => {
             expect(assign).toHaveBeenCalled();
         });
+    });
+
+    it('affiche le champ de domaine même si l’onboarding est déjà terminé', async () => {
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+            const url = String(input);
+            if (url.includes('/api/devforge/v1/settings') && !url.includes('/settings/')) {
+                return jsonResponse({
+                    data: {
+                        instance: {
+                            fqdn: window.location.origin,
+                            apps_wildcard_domain: null,
+                            instance_name: 'DevForge',
+                            instance_timezone: 'UTC',
+                        },
+                    },
+                });
+            }
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(<OnboardingPage bootstrap={{
+            ...bootstrapData,
+            permissions: { ...bootstrapData.permissions, instance_admin: true },
+            onboarding: {
+                ...bootstrapData.onboarding,
+                required: false,
+                steps: { account: true, domain: false, github: true, s3: true, server: true },
+            },
+        }}
+        />);
+
+        expect(await screen.findByRole('heading', { name: 'Domaine des applications' })).toBeInTheDocument();
+        expect(await screen.findByPlaceholderText('exemple.com')).toBeInTheDocument();
+    });
+
+    it('propose de relancer l’assistant quand l’onboarding est déjà terminé', async () => {
+        render(<OnboardingPage bootstrap={{
+            ...bootstrapData,
+            onboarding: {
+                ...bootstrapData.onboarding,
+                required: false,
+                steps: { account: true, domain: true, github: true, s3: true, server: true },
+            },
+        }}
+        />);
+
+        expect(await screen.findByRole('heading', { name: 'Vous êtes prêt' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Relancer l’assistant' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Entrer dans DevForge' })).not.toBeInTheDocument();
     });
 });

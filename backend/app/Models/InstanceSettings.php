@@ -13,6 +13,7 @@ class InstanceSettings extends Model
         'public_ipv4',
         'public_ipv6',
         'fqdn',
+        'apps_wildcard_domain',
         'public_port_min',
         'public_port_max',
         'do_not_track',

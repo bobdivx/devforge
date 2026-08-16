@@ -112,6 +112,7 @@ CREATE TABLE IF NOT EXISTS "application_settings" (
     "use_build_secrets" INTEGER DEFAULT false NOT NULL,
     "inject_build_args_to_dockerfile" INTEGER DEFAULT true NOT NULL,
     "include_source_commit_in_build" INTEGER DEFAULT false NOT NULL,
+    "skip_puppeteer_browser_download" INTEGER DEFAULT true NOT NULL,
     "docker_images_to_keep" INTEGER DEFAULT 2 NOT NULL
 );
 

@@ -2,6 +2,7 @@
 
 use App\Models\InstanceSettings;
 use App\Models\OauthSetting;
+use App\Models\Server;
 use App\Models\Team;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -199,4 +200,60 @@ it('updates oauth provider settings without leaking client secret', function () 
 
     expect($response->getContent())->not->toContain('new-secret')
         ->and(OauthSetting::query()->where('provider', 'github')->firstOrFail()->client_secret)->toBe('new-secret');
+});
+
+it('stores the apps wildcard domain and copies it to empty servers', function () {
+    $server = Server::factory()->create([
+        'team_id' => $this->rootTeam->id,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson('/api/devforge/v1/settings/instance', [
+            'apps_wildcard_domain' => 'exemple.com',
+            'force_save_domains' => true,
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.instance.apps_wildcard_domain', 'https://exemple.com');
+
+    expect(InstanceSettings::get()->apps_wildcard_domain)->toBe('https://exemple.com')
+        ->and($server->settings->fresh()->wildcard_domain)->toBe('https://exemple.com');
+});
+
+it('rewrites generated application urls when the apps domain is saved', function () {
+    $server = Server::factory()->create([
+        'team_id' => $this->rootTeam->id,
+    ]);
+    $destination = $server->standaloneDockers()->firstOrFail();
+    $project = \App\Models\Project::factory()->create(['team_id' => $this->rootTeam->id]);
+    $environment = \App\Models\Environment::factory()->create(['project_id' => $project->id]);
+    $application = \App\Models\Application::factory()->create([
+        'name' => 'starbasefr',
+        'environment_id' => $environment->id,
+        'destination_id' => $destination->id,
+        'destination_type' => \App\Models\StandaloneDocker::class,
+        'git_repository' => 'acme/starbasefr',
+        'git_branch' => 'main',
+        'build_pack' => 'nixpacks',
+        'fqdn' => 'https://starbasefr.com',
+    ]);
+    $application->update([
+        'fqdn' => 'https://starbasefr.com,http://'.$application->uuid.'.127.0.0.1.sslip.io',
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson('/api/devforge/v1/settings/instance', [
+            'apps_wildcard_domain' => 'exemple.com',
+            'force_save_domains' => true,
+        ])
+        ->assertSuccessful();
+
+    $application->refresh();
+    $domains = str($application->fqdn)->explode(',')->map(fn (string $domain): string => trim($domain))->all();
+
+    expect($domains)->toContain('https://starbasefr.com')
+        ->and($domains)->toContain('https://starbasefr.exemple.com')
+        ->and(collect($domains)->first(fn (string $domain): bool => str_contains($domain, $application->uuid)))->toContain('exemple.com')
+        ->and($application->fqdn)->not->toContain('sslip.io');
 });

@@ -302,7 +302,7 @@ export function ApplicationDomainsPanel({
                                                                     type="url"
                                                                     value={row.url}
                                                                     disabled={!canAct || saving || generating || row.managed}
-                                                                    placeholder="https://mon-app.jeser.me"
+                                                                    placeholder="https://mon-app.example.com"
                                                                     aria-label={row.managed ? 'Domaine DevForge' : `Domaine personnalisé ${index + 1}`}
                                                                     onInput={(event) => updateRow(row.id, (event.currentTarget as HTMLInputElement).value)}
                                                                 />

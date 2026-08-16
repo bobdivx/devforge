@@ -35,6 +35,29 @@ describe('OnboardingGithubStep', () => {
         expect(screen.getByRole('button', { name: 'Plus tard' })).toBeInTheDocument();
     });
 
+    it('permet de relancer la configuration si une app est encore à installer', async () => {
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+            if (String(input).includes('/github/apps') && !String(input).includes('/install-url')) {
+                return jsonResponse({
+                    data: [{
+                        uuid: 'draft-1',
+                        name: 'DevForge',
+                        organization: null,
+                        html_url: 'https://github.com',
+                        is_system_wide: false,
+                        installation_id: null,
+                    }],
+                });
+            }
+            throw new Error(`URL inattendue : ${input}`);
+        });
+
+        render(<OnboardingGithubStep canManage onSkip={() => undefined} onConnected={() => undefined} />);
+
+        expect(await screen.findByRole('button', { name: 'Relancer la configuration GitHub' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Installer sur GitHub' })).toBeInTheDocument();
+    });
+
     it('demande de choisir les dépôts une fois GitHub installé', async () => {
         vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
             const url = String(input);

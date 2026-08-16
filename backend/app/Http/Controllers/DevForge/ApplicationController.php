@@ -76,9 +76,10 @@ class ApplicationController extends Controller
 
         return response()->json([
             'data' => $this->presenter->present($result['application'], 'applications'),
-            'meta' => [
+            'meta' => array_filter([
                 'instant_deploy' => $result['instant_deploy'],
-            ],
+                'env_import' => $result['env_import'],
+            ], fn (mixed $value): bool => $value !== null),
         ], 201);
     }
 
@@ -562,6 +563,19 @@ class ApplicationController extends Controller
         return response()->json([
             'data' => $this->applicationEnvironmentVariableCatalog->store($application, $request->all()),
         ], 201);
+    }
+
+    public function importEnvironmentVariables(Request $request, string $applicationUuid): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        $application = $this->currentTeamResources->application($user, $applicationUuid);
+        $this->authorize('manageEnvironment', $application);
+
+        return response()->json([
+            'data' => $this->applicationEnvironmentVariableCatalog->import($application, $request->all()),
+        ]);
     }
 
     public function updateEnvironmentVariable(Request $request, string $applicationUuid, string $envUuid): JsonResponse

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
 import { MessageSquare } from 'lucide-preact';
 import { getBootstrap, switchTeam } from '../lib/api-client';
 import type { BootstrapData } from '../lib/bootstrap';
+import { laravelGithubAppCallbackPath } from '../lib/github-app-callback';
 import { findRoute, normalizeRoutePath, resolveResourceCanonicalLocation, routeHref } from '../lib/routes';
 import {
     applyStoredAppearance,
@@ -61,6 +62,12 @@ export function App({ initialPath }: AppProps) {
         const resolvedTheme = applyStoredAppearance();
         setTheme(resolvedTheme);
         setAppearance(getAppearancePreferences());
+
+        const githubCallback = laravelGithubAppCallbackPath(window.location.pathname, window.location.search);
+        if (githubCallback) {
+            window.location.replace(githubCallback);
+            return;
+        }
 
         const syncPathname = () => {
             const current = normalizeRoutePath(window.location.pathname);

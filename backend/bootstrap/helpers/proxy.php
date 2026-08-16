@@ -22,6 +22,116 @@ function isDockerPredefinedNetwork(string $network): bool
     return in_array($network, ['default', 'host'], true);
 }
 
+function devforge_proxy_stack_name(): string
+{
+    return 'devforge-traefik';
+}
+
+function devforge_proxy_container_name(?Server $server = null): string
+{
+    if ($server?->isSwarm()) {
+        return 'devforge-traefik_traefik';
+    }
+
+    return 'devforge-traefik';
+}
+
+/**
+ * @return list<string>
+ */
+function devforge_proxy_legacy_container_names(?Server $server = null): array
+{
+    if ($server?->isSwarm()) {
+        return ['coolify-proxy_traefik'];
+    }
+
+    return ['coolify-proxy'];
+}
+
+/**
+ * @return list<string>
+ */
+function devforge_proxy_container_names(?Server $server = null): array
+{
+    return array_values(array_unique([
+        devforge_proxy_container_name($server),
+        ...devforge_proxy_legacy_container_names($server),
+    ]));
+}
+
+function is_managed_devforge_proxy_container_name(string $name): bool
+{
+    $normalized = ltrim($name, '/');
+
+    return in_array($normalized, [
+        'devforge-traefik',
+        'devforge-traefik_traefik',
+    ], true);
+}
+
+function is_devforge_proxy_container_name(string $name): bool
+{
+    $normalized = ltrim($name, '/');
+
+    return in_array($normalized, [
+        'devforge-traefik',
+        'devforge-traefik_traefik',
+        'coolify-proxy',
+        'coolify-proxy_traefik',
+    ], true);
+}
+
+function proxy_configuration_uses_legacy_container(?string $configuration): bool
+{
+    if (blank($configuration)) {
+        return false;
+    }
+
+    return (bool) preg_match('/(?:container_name|name):\s*[\'"]?coolify-proxy(?:_traefik)?[\'"]?/', $configuration);
+}
+
+/**
+ * @return list<string>
+ */
+function devforge_proxy_stop_commands(?Server $server = null, int $timeout = 30): array
+{
+    $commands = [];
+
+    foreach (devforge_proxy_container_names($server) as $name) {
+        $commands = [
+            ...$commands,
+            "if docker ps -a --format \"{{.Names}}\" | grep -q \"^{$name}$\"; then",
+            "    echo 'Stopping and removing existing {$name}.'",
+            "    docker stop -t {$timeout} {$name} 2>/dev/null || true",
+            "    docker rm -f {$name} 2>/dev/null || true",
+            '    for i in {1..10}; do',
+            "        if ! docker ps -a --format \"{{.Names}}\" | grep -q \"^{$name}$\"; then",
+            '            break',
+            '        fi',
+            "        echo \"Waiting for {$name} to be removed... (\$i/10)\"",
+            '        sleep 1',
+            '    done',
+            "    echo 'Successfully stopped and removed existing {$name}.'",
+            'fi',
+        ];
+    }
+
+    return $commands;
+}
+
+/**
+ * @return list<string>
+ */
+function devforge_proxy_network_disconnect_commands(string $network): array
+{
+    $safe = escapeshellarg($network);
+
+    return array_map(
+        fn (string $name): string => "docker network disconnect {$safe} {$name} >/dev/null 2>&1 || true",
+        devforge_proxy_container_names(),
+    );
+}
+
 function collectProxyDockerNetworksByServer(Server $server)
 {
     if (! $server->isFunctional()) {
@@ -31,7 +141,15 @@ function collectProxyDockerNetworksByServer(Server $server)
     if (is_null($proxyType) || $proxyType === 'NONE') {
         return collect();
     }
-    $networks = instant_remote_process(['docker inspect --format="{{json .NetworkSettings.Networks }}" coolify-proxy'], $server, false);
+    $inspect = collect(devforge_proxy_container_names($server))
+        ->map(fn (string $name): ?string => instant_remote_process(
+            ["docker inspect --format=\"{{json .NetworkSettings.Networks }}\" {$name} 2>/dev/null"],
+            $server,
+            false,
+        ))
+        ->first(fn (?string $output): bool => filled($output));
+
+    $networks = $inspect;
 
     return collect($networks)->map(function ($network) {
         return collect(json_decode($network))->keys();
@@ -108,24 +226,25 @@ function collectDockerNetworksByServer(Server $server)
 function connectProxyToNetworks(Server $server)
 {
     ['networks' => $networks] = collectDockerNetworksByServer($server);
+    $proxyContainerName = devforge_proxy_container_name($server);
     if ($server->isSwarm()) {
-        $commands = $networks->map(function ($network) {
+        $commands = $networks->map(function ($network) use ($proxyContainerName) {
             $safe = escapeshellarg($network);
 
             return [
                 "docker network ls --format '{{.Name}}' | grep '^{$network}$' >/dev/null || docker network create --driver overlay --attachable {$safe} >/dev/null",
-                "docker network connect {$safe} coolify-proxy >/dev/null 2>&1 || true",
-                "echo 'Successfully connected coolify-proxy to {$safe} network.'",
+                "docker network connect {$safe} {$proxyContainerName} >/dev/null 2>&1 || true",
+                "echo 'Successfully connected {$proxyContainerName} to {$safe} network.'",
             ];
         });
     } else {
-        $commands = $networks->map(function ($network) {
+        $commands = $networks->map(function ($network) use ($proxyContainerName) {
             $safe = escapeshellarg($network);
 
             return [
                 "docker network ls --format '{{.Name}}' | grep '^{$network}$' >/dev/null || docker network create --attachable {$safe} >/dev/null",
-                "docker network connect {$safe} coolify-proxy >/dev/null 2>&1 || true",
-                "echo 'Successfully connected coolify-proxy to {$safe} network.'",
+                "docker network connect {$safe} {$proxyContainerName} >/dev/null 2>&1 || true",
+                "echo 'Successfully connected {$proxyContainerName} to {$safe} network.'",
             ];
         });
     }
@@ -273,11 +392,11 @@ function generateDefaultProxyConfiguration(Server $server, array $custom_command
             'devforge.proxy=true',
         ];
         $config = [
-            'name' => 'coolify-proxy',
+            'name' => devforge_proxy_stack_name(),
             'networks' => $array_of_networks->toArray(),
             'services' => [
                 'traefik' => [
-                    'container_name' => 'coolify-proxy',
+                    'container_name' => devforge_proxy_container_name(),
                     'image' => 'traefik:v3.6',
                     'restart' => RESTART_MODE,
                     'extra_hosts' => [
@@ -288,7 +407,6 @@ function generateDefaultProxyConfiguration(Server $server, array $custom_command
                         '80:80',
                         '443:443',
                         '443:443/udp',
-                        '8080:8080',
                     ],
                     'healthcheck' => [
                         'test' => 'wget -qO- http://localhost:80/ping || exit 1',
@@ -349,6 +467,10 @@ function generateDefaultProxyConfiguration(Server $server, array $custom_command
         } else {
             $config['services']['traefik']['command'][] = '--providers.docker=true';
             $config['services']['traefik']['command'][] = '--providers.docker.exposedbydefault=false';
+            $primaryNetwork = $filtered_networks->first();
+            if (is_string($primaryNetwork) && $primaryNetwork !== '') {
+                $config['services']['traefik']['command'][] = "--providers.docker.network={$primaryNetwork}";
+            }
         }
 
         // Append custom commands (e.g., trustedIPs for Cloudflare)
@@ -359,10 +481,11 @@ function generateDefaultProxyConfiguration(Server $server, array $custom_command
         }
     } elseif ($proxy_type === 'CADDY') {
         $config = [
+            'name' => devforge_proxy_stack_name(),
             'networks' => $array_of_networks->toArray(),
             'services' => [
                 'caddy' => [
-                    'container_name' => 'coolify-proxy',
+                    'container_name' => devforge_proxy_container_name(),
                     'image' => 'lucaslorentz/caddy-docker-proxy:2.8-alpine',
                     'restart' => RESTART_MODE,
                     'extra_hosts' => [
@@ -407,7 +530,10 @@ function getExactTraefikVersionFromContainer(Server $server): ?string
         Log::debug("getExactTraefikVersionFromContainer: Server '{$server->name}' (ID: {$server->id}) - Checking for exact version");
 
         // Method A: Execute traefik version command (most reliable)
-        $versionCommand = "docker exec coolify-proxy traefik version 2>/dev/null | grep -oP 'Version:\s+\K\d+\.\d+\.\d+'";
+        $versionCommand = collect(devforge_proxy_container_names($server))
+            ->map(fn (string $name): string => "docker exec {$name} traefik version 2>/dev/null")
+            ->implode(' || ')
+            ." | grep -oP 'Version:\\s+\\K\\d+\\.\\d+\\.\\d+'";
         Log::debug("getExactTraefikVersionFromContainer: Server '{$server->name}' (ID: {$server->id}) - Running: {$versionCommand}");
 
         $output = instant_remote_process([$versionCommand], $server, false);
@@ -420,7 +546,9 @@ function getExactTraefikVersionFromContainer(Server $server): ?string
         }
 
         // Method B: Try OCI label as fallback
-        $labelCommand = "docker inspect coolify-proxy --format '{{index .Config.Labels \"org.opencontainers.image.version\"}}' 2>/dev/null";
+        $labelCommand = collect(devforge_proxy_container_names($server))
+            ->map(fn (string $name): string => "docker inspect {$name} --format '{{index .Config.Labels \"org.opencontainers.image.version\"}}' 2>/dev/null")
+            ->implode(' || ');
         Log::debug("getExactTraefikVersionFromContainer: Server '{$server->name}' (ID: {$server->id}) - Trying OCI label");
 
         $label = instant_remote_process([$labelCommand], $server, false);
@@ -460,8 +588,10 @@ function getTraefikVersionFromDockerCompose(Server $server): ?string
         // Fallback: Check image tag (current method)
         Log::debug("getTraefikVersionFromDockerCompose: Server '{$server->name}' (ID: {$server->id}) - Falling back to image tag detection");
 
-        $containerName = 'coolify-proxy';
-        $inspectCommand = "docker inspect {$containerName} --format '{{.Config.Image}}' 2>/dev/null";
+        $containerName = devforge_proxy_container_name($server);
+        $inspectCommand = collect(devforge_proxy_container_names($server))
+            ->map(fn (string $name): string => "docker inspect {$name} --format '{{.Config.Image}}' 2>/dev/null")
+            ->implode(' || ');
 
         $image = instant_remote_process([$inspectCommand], $server, false);
 

@@ -11,6 +11,7 @@ import {
     type InstanceSettings,
     type OauthProviderSettings,
 } from '../../lib/domain-api';
+import { normalizeAppsWildcardDomain, previewDefaultApplicationUrl } from '../../lib/onboarding-steps';
 import { useApiQuery } from '../../lib/use-api-query';
 
 type InstanceSettingsPanelsProps = {
@@ -83,29 +84,53 @@ function InstanceForm({
     onSaved: () => Promise<void>;
 }) {
     const [form, setForm] = useState(data);
+    const [dirty, setDirty] = useState(false);
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
-    useEffect(() => setForm(data), [data]);
+    useEffect(() => {
+        if (!dirty) {
+            setForm(data);
+        }
+    }, [data, dirty]);
+
+    const updateForm = (patch: Partial<InstanceSettings['instance']>) => {
+        setDirty(true);
+        setForm((current) => ({ ...current, ...patch }));
+    };
 
     const save = async () => {
         setSaving(true);
         setMessage(null);
         setError(null);
         try {
+            const appsDomain = form.apps_wildcard_domain?.trim()
+                ? normalizeAppsWildcardDomain(form.apps_wildcard_domain)
+                : null;
+            if (form.apps_wildcard_domain?.trim() && !appsDomain) {
+                setError('Indiquez un domaine valide, par exemple exemple.com');
+                setSaving(false);
+                return;
+            }
+
             await domainApi.updateInstanceSettings({
                 instance_name: form.instance_name,
-                fqdn: form.fqdn,
-                instance_timezone: form.instance_timezone,
+                fqdn: form.fqdn || null,
+                apps_wildcard_domain: appsDomain,
+                instance_timezone: form.instance_timezone || undefined,
                 public_ipv4: form.public_ipv4,
                 public_ipv6: form.public_ipv6,
                 public_port_min: form.public_port_min ?? undefined,
                 public_port_max: form.public_port_max ?? undefined,
                 dev_helper_version: form.dev_helper_version,
+                force_save_domains: true,
             });
+            setDirty(false);
             await onSaved();
-            setMessage('Paramètres enregistrés.');
+            setMessage(appsDomain
+                ? `Domaine des applications enregistré. Les nouvelles URLs ressemblent à ${previewDefaultApplicationUrl('starbasefr', appsDomain)}.`
+                : 'Paramètres enregistrés.');
         } catch (caught) {
             setError(caught instanceof Error ? caught.message : 'Échec de l’enregistrement.');
         } finally {
@@ -121,7 +146,7 @@ function InstanceForm({
                         class="input input-bordered input-sm w-full rounded-xl"
                         value={form.instance_name ?? ''}
                         disabled={!canEdit || saving}
-                        onInput={(event) => setForm((current) => ({ ...current, instance_name: event.currentTarget.value }))}
+                        onInput={(event) => updateForm({ instance_name: event.currentTarget.value })}
                     />
                 </Field>
                 <Field label="URL instance">
@@ -129,16 +154,35 @@ function InstanceForm({
                         class="input input-bordered input-sm w-full rounded-xl"
                         value={form.fqdn ?? ''}
                         disabled={!canEdit || saving}
-                        placeholder="https://devforge.jeser.me"
-                        onInput={(event) => setForm((current) => ({ ...current, fqdn: event.currentTarget.value || null }))}
+                        placeholder="https://devforge.example.com"
+                        onInput={(event) => updateForm({ fqdn: event.currentTarget.value || null })}
                     />
+                </Field>
+                <Field label="Domaine des applications">
+                    <input
+                        class="input input-bordered input-sm w-full rounded-xl"
+                        value={(form.apps_wildcard_domain ?? '').replace(/^https?:\/\//i, '')}
+                        disabled={!canEdit || saving}
+                        placeholder="exemple.com"
+                        inputMode="url"
+                        onInput={(event) => updateForm({
+                            apps_wildcard_domain: event.currentTarget.value || null,
+                        })}
+                    />
+                    <span class="text-xs font-normal text-base-content/55">
+                        Toutes les apps reçoivent par défaut nomdelapp.ce-domaine
+                        {previewDefaultApplicationUrl('starbasefr', form.apps_wildcard_domain ?? '') !== ''
+                            ? `, aperçu : ${previewDefaultApplicationUrl('starbasefr', form.apps_wildcard_domain ?? '')}`
+                            : ', par exemple starbasefr.exemple.com'}
+                        . Les URLs générées des apps déjà déployées sont mises à jour.
+                    </span>
                 </Field>
                 <Field label="Fuseau">
                     <input
                         class="input input-bordered input-sm w-full rounded-xl"
                         value={form.instance_timezone ?? ''}
                         disabled={!canEdit || saving}
-                        onInput={(event) => setForm((current) => ({ ...current, instance_timezone: event.currentTarget.value }))}
+                        onInput={(event) => updateForm({ instance_timezone: event.currentTarget.value })}
                     />
                 </Field>
                 <Field label="IPv4 publique">
@@ -146,7 +190,7 @@ function InstanceForm({
                         class="input input-bordered input-sm w-full rounded-xl"
                         value={form.public_ipv4 ?? ''}
                         disabled={!canEdit || saving}
-                        onInput={(event) => setForm((current) => ({ ...current, public_ipv4: event.currentTarget.value || null }))}
+                        onInput={(event) => updateForm({ public_ipv4: event.currentTarget.value || null })}
                     />
                 </Field>
                 <Field label="IPv6 publique">
@@ -154,7 +198,7 @@ function InstanceForm({
                         class="input input-bordered input-sm w-full rounded-xl"
                         value={form.public_ipv6 ?? ''}
                         disabled={!canEdit || saving}
-                        onInput={(event) => setForm((current) => ({ ...current, public_ipv6: event.currentTarget.value || null }))}
+                        onInput={(event) => updateForm({ public_ipv6: event.currentTarget.value || null })}
                     />
                 </Field>
                 <Field label="Port public min">
@@ -165,10 +209,9 @@ function InstanceForm({
                         max={65535}
                         value={form.public_port_min ?? ''}
                         disabled={!canEdit || saving}
-                        onInput={(event) => setForm((current) => ({
-                            ...current,
+                        onInput={(event) => updateForm({
                             public_port_min: event.currentTarget.value === '' ? null : Number(event.currentTarget.value),
-                        }))}
+                        })}
                     />
                 </Field>
                 <Field label="Port public max">
@@ -179,10 +222,9 @@ function InstanceForm({
                         max={65535}
                         value={form.public_port_max ?? ''}
                         disabled={!canEdit || saving}
-                        onInput={(event) => setForm((current) => ({
-                            ...current,
+                        onInput={(event) => updateForm({
                             public_port_max: event.currentTarget.value === '' ? null : Number(event.currentTarget.value),
-                        }))}
+                        })}
                     />
                 </Field>
             </div>

@@ -262,7 +262,11 @@ function Invoke-OverlayDeploy {
     Copy-Item -Path $Artifact -Destination (Join-Path $bundleStaging 'rollout.tar.gz') -Force
     Copy-Item -Path $RemoteScript -Destination (Join-Path $bundleStaging 'remote.sh') -Force
     Copy-Item -Path $NasDataDirScript -Destination (Join-Path $bundleStaging 'devforge-nas-data-dir.sh') -Force
-    & tar -czf $bundlePath -C $bundleStaging rollout.tar.gz remote.sh devforge-nas-data-dir.sh
+    $proxyNginx = Join-Path $Root 'docker/devforge-proxy/nginx.conf'
+    if (Test-Path $proxyNginx) {
+        Copy-Item -Path $proxyNginx -Destination (Join-Path $bundleStaging 'nginx.conf') -Force
+    }
+    & tar -czf $bundlePath -C $bundleStaging rollout.tar.gz remote.sh devforge-nas-data-dir.sh nginx.conf
     if ($LASTEXITCODE -ne 0) { throw 'Creation du bundle SSH a echoue.' }
     Remove-Item -Recurse -Force $bundleStaging
 

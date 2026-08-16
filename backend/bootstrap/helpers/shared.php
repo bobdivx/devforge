@@ -772,17 +772,62 @@ function validate_timezone(string $timezone): bool
     return in_array($timezone, timezone_identifiers_list());
 }
 
+function normalizeEnvFileContents(string $env_file_contents): string
+{
+    if (str_starts_with($env_file_contents, "\xEF\xBB\xBF")) {
+        $env_file_contents = substr($env_file_contents, 3);
+    }
+
+    $env_file_contents = preg_replace('/^\x{FEFF}/u', '', $env_file_contents) ?? $env_file_contents;
+
+    if (str_contains($env_file_contents, "\0")) {
+        $env_file_contents = str_replace("\0", '', $env_file_contents);
+    }
+
+    $env_file_contents = str_replace(["\r\n", "\r", "\u{FF1D}"], ["\n", "\n", '='], $env_file_contents);
+
+    $normalized = [];
+
+    foreach (explode("\n", $env_file_contents) as $line) {
+        $line = trim($line);
+
+        if ($line === '' || str_starts_with($line, '#') || str_starts_with($line, ';')) {
+            $normalized[] = $line;
+
+            continue;
+        }
+
+        $line = preg_replace('/^export\s+/i', '', $line) ?? $line;
+
+        if (preg_match('/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/s', $line, $matches) === 1) {
+            $normalized[] = $matches[1].'='.$matches[2];
+
+            continue;
+        }
+
+        if (! str_contains($line, '=') && preg_match('/^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/s', $line, $matches) === 1) {
+            $normalized[] = $matches[1].'='.$matches[2];
+
+            continue;
+        }
+
+        $normalized[] = $line;
+    }
+
+    return implode("\n", $normalized);
+}
+
 function parseEnvFormatToArray($env_file_contents)
 {
     $env_array = [];
-    $lines = explode("\n", $env_file_contents);
+    $lines = explode("\n", normalizeEnvFileContents((string) $env_file_contents));
     foreach ($lines as $line) {
         if ($line === '' || substr($line, 0, 1) === '#') {
             continue;
         }
         $equals_pos = strpos($line, '=');
         if ($equals_pos !== false) {
-            $key = substr($line, 0, $equals_pos);
+            $key = trim(substr($line, 0, $equals_pos));
             $value_and_comment = substr($line, $equals_pos + 1);
             $comment = null;
             $remainder = '';
@@ -1072,10 +1117,7 @@ function data_get_str($data, $key, $default = null): Stringable
 
 function generateUrl(Server $server, string $random, bool $forceHttps = false): string
 {
-    $wildcard = data_get($server, 'settings.wildcard_domain');
-    if (is_null($wildcard) || $wildcard === '') {
-        $wildcard = sslip($server);
-    }
+    $wildcard = resolve_application_wildcard($server);
     $url = Url::fromString($wildcard);
     $host = $url->getHost();
     $path = $url->getPath() === '/' ? '' : $url->getPath();
@@ -1089,10 +1131,7 @@ function generateUrl(Server $server, string $random, bool $forceHttps = false): 
 function generateFqdn(Server $server, string $random, bool $forceHttps = false, int $parserVersion = 5): string
 {
 
-    $wildcard = data_get($server, 'settings.wildcard_domain');
-    if (is_null($wildcard) || $wildcard === '') {
-        $wildcard = sslip($server);
-    }
+    $wildcard = resolve_application_wildcard($server);
     $url = Url::fromString($wildcard);
     $host = $url->getHost();
     $path = $url->getPath() === '/' ? '' : $url->getPath();

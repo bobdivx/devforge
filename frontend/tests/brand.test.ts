@@ -24,7 +24,12 @@ describe('identité visuelle DevForge', () => {
 
         expect(webNginx).toContain('location = /favicon.ico');
         expect(webNginx).toContain('try_files /favicon.ico /brand/logo.png =404');
+        expect(webNginx).toContain('absolute_redirect off');
+        expect(webNginx).toContain('try_files $uri $uri/index.html /index.html');
         expect(proxyNginx).toContain('location = /favicon.ico');
         expect(proxyNginx).toContain('proxy_pass http://devforge_web/brand/logo.png');
+        expect(proxyNginx).toContain('absolute_redirect off');
+        expect(proxyNginx).toContain('proxy_redirect ~^https?://[^/]+(/.*)$ $1');
+        expect(proxyNginx).toContain('|mcp|webhooks)(/|$)');
     });
 });

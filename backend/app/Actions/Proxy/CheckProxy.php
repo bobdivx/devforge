@@ -39,8 +39,7 @@ class CheckProxy
             }
         }
 
-        // Determine proxy container name based on environment
-        $proxyContainerName = $server->isSwarm() ? 'coolify-proxy_traefik' : 'coolify-proxy';
+        $proxyContainerName = devforge_proxy_container_name($server);
 
         if ($server->isSwarm()) {
             $status = getContainerStatus($server, $proxyContainerName);
@@ -165,17 +164,22 @@ class CheckProxy
      */
     private function buildPortCheckCommands(Server $server, string $port, string $proxyContainerName): array
     {
-        // First check if our own proxy is using this port (which is fine)
-        $getProxyContainerId = "docker ps -a --filter name=$proxyContainerName --format '{{.ID}}'";
-        $checkProxyPortScript = "
-            CONTAINER_ID=\$($getProxyContainerId);
+        $proxyNames = collect(devforge_proxy_container_names($server))
+            ->push($proxyContainerName)
+            ->unique()
+            ->values();
+        $checkProxyPortScript = $proxyNames
+            ->map(function (string $name) use ($port): string {
+                return "
+            CONTAINER_ID=\$(docker ps -a --filter name={$name} --format '{{.ID}}');
             if [ ! -z \"\$CONTAINER_ID\" ]; then
-                if docker inspect \$CONTAINER_ID --format '{{json .NetworkSettings.Ports}}' | grep -q '\"$port/tcp\"'; then
+                if docker inspect \$CONTAINER_ID --format '{{json .NetworkSettings.Ports}}' | grep -q '\"{$port}/tcp\"'; then
                     echo 'proxy_using_port';
                     exit 0;
                 fi;
-            fi;
-        ";
+            fi;";
+            })
+            ->implode("\n");
 
         // Command sets for different ways to check ports, ordered by preference
         $portCheckScript = "
@@ -194,7 +198,7 @@ class CheckProxy
                     exit 0;
                 fi;
                 # Check for dual-stack or docker processes
-                if [ \$count -le 2 ] && (echo \"\$ss_output\" | grep -q 'docker\\|coolify'); then
+                if [ \$count -le 2 ] && (echo \"\$ss_output\" | grep -q 'docker\\|coolify\\|devforge\\|traefik'); then
                     echo 'port_free';
                     exit 0;
                 fi;
@@ -284,20 +288,22 @@ class CheckProxy
      */
     private function isPortConflict(Server $server, string $port, string $proxyContainerName): bool
     {
-        // First check if our own proxy is using this port (which is fine)
         try {
-            $getProxyContainerId = "docker ps -a --filter name=$proxyContainerName --format '{{.ID}}'";
-            $containerId = trim(instant_remote_process([$getProxyContainerId], $server));
+            foreach (devforge_proxy_container_names($server) as $name) {
+                $getProxyContainerId = "docker ps -a --filter name={$name} --format '{{.ID}}'";
+                $containerId = trim(instant_remote_process([$getProxyContainerId], $server, false) ?? '');
 
-            if (! empty($containerId)) {
-                $checkProxyPort = "docker inspect $containerId --format '{{json .NetworkSettings.Ports}}' | grep '\"$port/tcp\"'";
+                if ($containerId === '') {
+                    continue;
+                }
+
+                $checkProxyPort = "docker inspect {$containerId} --format '{{json .NetworkSettings.Ports}}' | grep '\"{$port}/tcp\"'";
                 try {
                     instant_remote_process([$checkProxyPort], $server);
 
-                    // Our proxy is using the port, which is fine
                     return false;
                 } catch (\Throwable $e) {
-                    // Our container exists but not using this port
+                    // This proxy container exists but is not publishing this port
                 }
             }
         } catch (\Throwable $e) {
@@ -356,7 +362,7 @@ class CheckProxy
                     return false;
                 }
 
-                // Try to detect if this is our coolify-proxy
+                // Treat Docker / DevForge proxy listeners as our own reverse proxy
                 if (strpos($details, 'docker') !== false || strpos($details, $proxyContainerName) !== false) {
                     // It's likely our docker or proxy, which is fine
                     return false;

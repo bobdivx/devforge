@@ -3,10 +3,12 @@
 namespace App\Services\DevForge\Application;
 
 use App\Models\Application;
+use App\Models\Server;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use Spatie\Url\Url;
+use Throwable;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Visus\Cuid2\Cuid2;
 
@@ -126,22 +128,20 @@ class ApplicationDomainService
 
         $validated = validator($input, [
             'redeploy' => ['sometimes', 'boolean'],
+            'previous_wildcard' => ['sometimes', 'nullable', 'string', 'max:255'],
         ])->validate();
 
         $shouldRedeploy = (bool) ($validated['redeploy'] ?? true);
         $previousFqdn = $application->fqdn;
+        $previousWildcard = is_string($validated['previous_wildcard'] ?? null)
+            ? (string) $validated['previous_wildcard']
+            : null;
 
         $application->loadMissing(['destination.server.settings']);
         $server = $application->destination?->server;
         abort_unless($server !== null, 422, 'Aucun serveur de destination trouvé pour cette application.');
 
-        $managed = str(generateUrl(server: $server, random: $application->uuid))->lower()->toString();
-        $custom = $this->parseDomainList($application->fqdn)
-            ->reject(fn (string $domain): bool => $this->isManagedDomain($domain, $application))
-            ->values();
-
-        // Custom domains first so notifications / COOLIFY_URL prefer the real URL.
-        $application->fqdn = $custom->merge([$managed])->unique()->implode(',');
+        $application->fqdn = $this->composeGeneratedFqdn($application, $server, $previousWildcard);
         $application->save();
         $this->refreshLabels($application, force: true);
         $application->refresh();
@@ -156,6 +156,36 @@ class ApplicationDomainService
             ...$this->present($application),
             'redeploy' => $redeploy,
         ];
+    }
+
+    /**
+     * Recalcule les URLs générées (nomdelapp.domaine + UUID) pour toutes les apps.
+     */
+    public function regenerateManagedDomains(?string $previousWildcard = null, bool $redeploy = false): int
+    {
+        $updated = 0;
+
+        Application::query()
+            ->with(['destination.server.settings', 'settings'])
+            ->where('build_pack', '!=', 'dockercompose')
+            ->chunkById(50, function ($applications) use ($previousWildcard, $redeploy, &$updated): void {
+                foreach ($applications as $application) {
+                    try {
+                        $before = $application->fqdn;
+                        $this->generate($application, [
+                            'redeploy' => $redeploy,
+                            'previous_wildcard' => $previousWildcard,
+                        ]);
+                        if ($application->fresh()->fqdn !== $before) {
+                            $updated++;
+                        }
+                    } catch (Throwable) {
+                        continue;
+                    }
+                }
+            });
+
+        return $updated;
     }
 
     /**
@@ -177,6 +207,9 @@ class ApplicationDomainService
             ->first(fn (string $domain): bool => $this->isManagedDomain($domain, $application));
 
         $wildcard = data_get($application, 'destination.server.settings.wildcard_domain');
+        if (! filled($wildcard)) {
+            $wildcard = instance_apps_wildcard_domain();
+        }
 
         return [
             'domains' => $domains,
@@ -241,7 +274,7 @@ class ApplicationDomainService
 
         $preserved = str($existingManaged)->lower()->toString();
         $custom = $this->parseDomainList($incomingFqdn)
-            ->reject(fn (string $domain): bool => $this->isManagedDomain($domain, $application))
+            ->reject(fn (string $domain): bool => $this->isGeneratedDomain($domain, $application))
             ->values();
 
         // Custom domains first so notifications / COOLIFY_URL prefer the real URL.
@@ -260,6 +293,27 @@ class ApplicationDomainService
             ->values();
     }
 
+    private function composeGeneratedFqdn(Application $application, Server $server, ?string $previousWildcard = null): string
+    {
+        $managed = str(generateUrl(server: $server, random: $application->uuid))->lower()->toString();
+        $pretty = str(generateUrl(
+            server: $server,
+            random: application_url_slug((string) $application->name, (string) $application->uuid),
+        ))->lower()->toString();
+
+        $generated = collect([$pretty, $managed])
+            ->filter(fn (string $domain): bool => $domain !== '')
+            ->unique()
+            ->values();
+
+        $custom = $this->parseDomainList($application->fqdn)
+            ->reject(fn (string $domain): bool => $this->isGeneratedDomain($domain, $application, $previousWildcard))
+            ->reject(fn (string $domain): bool => $generated->contains(strtolower($domain)))
+            ->values();
+
+        return $custom->merge($generated)->unique()->implode(',');
+    }
+
     private function isManagedDomain(string $domain, Application $application): bool
     {
         $uuid = strtolower((string) $application->uuid);
@@ -274,6 +328,60 @@ class ApplicationDomainService
         }
 
         return str_contains($host, $uuid);
+    }
+
+    private function isGeneratedDomain(string $domain, Application $application, ?string $previousWildcard = null): bool
+    {
+        if ($this->isManagedDomain($domain, $application)) {
+            return true;
+        }
+
+        $normalized = strtolower(trim($domain));
+        if (str_contains($normalized, 'sslip.io')) {
+            return true;
+        }
+
+        try {
+            $host = strtolower(Url::fromString($domain)->getHost());
+        } catch (\Throwable) {
+            return false;
+        }
+
+        $slug = application_url_slug((string) $application->name, (string) $application->uuid);
+        $wildcardHosts = collect([
+            data_get($application, 'destination.server.settings.wildcard_domain'),
+            instance_apps_wildcard_domain(),
+            $previousWildcard,
+        ])
+            ->map(fn (mixed $wildcard): ?string => $this->wildcardHost(is_string($wildcard) ? $wildcard : null))
+            ->filter()
+            ->unique();
+
+        return $wildcardHosts->contains(fn (string $wildcardHost): bool => $host === $slug.'.'.$wildcardHost);
+    }
+
+    private function wildcardHost(?string $wildcard): ?string
+    {
+        if (! filled($wildcard)) {
+            return null;
+        }
+
+        try {
+            $host = strtolower(Url::fromString($wildcard)->getHost());
+        } catch (\Throwable) {
+            $normalized = normalize_apps_wildcard_domain($wildcard);
+            if (! filled($normalized)) {
+                return null;
+            }
+
+            try {
+                $host = strtolower(Url::fromString($normalized)->getHost());
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
+        return filled($host) ? $host : null;
     }
 
     private function assertNoConflicts(Application $application, bool $force): void

@@ -215,7 +215,7 @@ it('harness executes fix_coolify_base_config_path on read-only logs', function (
         ->and($result['text'])->toContain('Réparation exécutée');
 });
 
-it('harness sets PUPPETEER_SKIP_DOWNLOAD then redeploys', function () {
+it('harness enables skip puppeteer download in advanced settings then redeploys', function () {
     config(['devforge.agents_auto_fallback' => true]);
 
     $agent = AiAgent::factory()->deployment()->make(['resource_uuid' => 'app-uuid-pup']);
@@ -233,11 +233,7 @@ it('harness sets PUPPETEER_SKIP_DOWNLOAD then redeploys', function () {
         ]);
     $toolkit->shouldReceive('execute')
         ->once()
-        ->with('upsert_application_env_var', Mockery::on(fn (array $args): bool => ($args['key'] ?? '') === 'PUPPETEER_SKIP_DOWNLOAD'))
-        ->andReturn(['ok' => true]);
-    $toolkit->shouldReceive('execute')
-        ->once()
-        ->with('control_resource', Mockery::on(fn (array $args): bool => ($args['action'] ?? '') === 'deploy'))
+        ->with('update_application_advanced_settings', Mockery::on(fn (array $args): bool => ($args['skip_puppeteer_browser_download'] ?? false) === true))
         ->andReturn(['ok' => true, 'deployment_uuid' => 'dep-1']);
 
     $result = app(AgentRepairHarness::class)->execute(
@@ -248,9 +244,8 @@ it('harness sets PUPPETEER_SKIP_DOWNLOAD then redeploys', function () {
         'corrige puppeteer',
     );
 
-    expect($result['steps'])->toHaveCount(3)
-        ->and($result['steps'][1]['name'])->toBe('upsert_application_env_var')
-        ->and($result['steps'][2]['name'])->toBe('control_resource')
+    expect($result['steps'])->toHaveCount(2)
+        ->and($result['steps'][1]['name'])->toBe('update_application_advanced_settings')
         ->and($result['text'])->toContain('Réparation exécutée');
 });
 

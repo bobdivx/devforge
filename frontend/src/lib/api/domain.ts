@@ -394,6 +394,7 @@ export type InstanceSettings = {
     instance: {
         instance_name: string;
         fqdn: string | null;
+        apps_wildcard_domain: string | null;
         instance_timezone: string;
         public_ipv4: string | null;
         public_ipv6: string | null;
@@ -453,6 +454,7 @@ export type InstanceSettings = {
 
 export type InstanceGeneralUpdateInput = {
     fqdn?: string | null;
+    apps_wildcard_domain?: string | null;
     instance_name?: string | null;
     instance_timezone?: string;
     public_ipv4?: string | null;
@@ -1444,6 +1446,8 @@ export type CreateApplicationInput = {
     ports_exposes?: number;
     name?: string;
     instant_deploy?: boolean;
+    env_contents?: string;
+    domains?: string;
 };
 
 export type ApplicationDomainRedirect = 'both' | 'www' | 'non-www';
@@ -1896,7 +1900,19 @@ export type ApplicationEnvironmentVariableInput = {
 
 export type ApplicationEnvironmentVariableUpdateInput = Partial<
     Omit<ApplicationEnvironmentVariableInput, 'key' | 'is_preview'>
->;
+>
+
+export type ApplicationEnvironmentVariableImportInput = {
+    contents: string;
+    is_preview?: boolean;
+};
+
+export type ApplicationEnvironmentVariableImportResult = {
+    created: number;
+    updated: number;
+    skipped: Array<{ key: string; reason: string }>;
+    variables: ApplicationEnvironmentVariables;
+};;
 
 export type ConnectDatabaseResult = {
     application_uuid: string;
@@ -2154,6 +2170,7 @@ export type ApplicationAdvancedSettings = {
     disable_build_cache: boolean;
     inject_build_args_to_dockerfile: boolean;
     include_source_commit_in_build: boolean;
+    skip_puppeteer_browser_download: boolean;
     is_consistent_container_name_enabled: boolean;
     is_auto_deploy_enabled: boolean;
     is_image_auto_update_enabled: boolean;
@@ -2695,6 +2712,10 @@ export const domainApi = {
         '/onboarding/complete',
         { method: 'POST' },
     ),
+    restartOnboarding: () => mutate<ApiResponse<BootstrapData> & { message?: string }>(
+        '/onboarding/restart',
+        { method: 'POST' },
+    ),
     githubApps: () => apiFetch<ApiResponse<GithubAppSummary[]>>(`${API_BASE}/github/apps`),
     startGithubApp: (input: {
         name?: string;
@@ -2702,12 +2723,13 @@ export const domainApi = {
         preview_deployments?: boolean;
         administration?: boolean;
         from_onboarding?: boolean;
+        return_to?: 'applications' | 'onboarding';
     } = {}) => mutate<ApiResponse<GithubAppSetupResult>>('/github/apps', {
         method: 'POST',
         body: JSON.stringify(input),
     }),
-    githubAppInstallUrl: (githubAppUuid: string) => apiFetch<ApiResponse<{ url: string }>>(
-        `${API_BASE}/github/apps/${encodeURIComponent(githubAppUuid)}/install-url`,
+    githubAppInstallUrl: (githubAppUuid: string, returnTo?: 'applications' | 'onboarding') => apiFetch<ApiResponse<{ url: string }>>(
+        `${API_BASE}/github/apps/${encodeURIComponent(githubAppUuid)}/install-url${returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : ''}`,
     ),
     updateGithubPackagesToken: (githubAppUuid: string, packagesToken: string | null) => mutate<ApiResponse<{
         uuid: string;
@@ -3299,6 +3321,16 @@ export const domainApi = {
         input: ApplicationEnvironmentVariableInput,
     ) => mutate<ApiResponse<ApplicationEnvironmentVariable>>(
         `/applications/${encodeURIComponent(applicationUuid)}/environment-variables`,
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+    ),
+    importApplicationEnvironmentVariables: (
+        applicationUuid: string,
+        input: ApplicationEnvironmentVariableImportInput,
+    ) => mutate<ApiResponse<ApplicationEnvironmentVariableImportResult>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/environment-variables/import`,
         {
             method: 'POST',
             body: JSON.stringify(input),

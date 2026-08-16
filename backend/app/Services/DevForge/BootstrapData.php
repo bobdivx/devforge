@@ -4,13 +4,17 @@ namespace App\Services\DevForge;
 
 use App\Models\Team;
 use App\Models\User;
+use App\Services\DevForge\Onboarding\DefaultWorkspace;
 use App\Services\DevForge\Onboarding\OnboardingStatus;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 
 class BootstrapData
 {
-    public function __construct(private readonly OnboardingStatus $onboardingStatus) {}
+    public function __construct(
+        private readonly OnboardingStatus $onboardingStatus,
+        private readonly DefaultWorkspace $defaultWorkspace,
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -20,6 +24,10 @@ class BootstrapData
         $teams = $this->teamsFor($user);
         $currentTeam = $this->currentTeam($teams);
         $role = (string) $currentTeam->pivot->role;
+
+        if ((bool) $currentTeam->show_boarding && ! $user->isMember()) {
+            $this->defaultWorkspace->ensure($currentTeam);
+        }
 
         return [
             'user' => [

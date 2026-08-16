@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Providers\RouteServiceProvider;
 use Closure;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
@@ -24,9 +25,13 @@ class DecideWhatToDoWithUser
             // User's session team is invalid (e.g., removed from team), switch to first available team
             refreshSession(auth()->user()->teams->first());
         }
+        if ($this->shouldSkipHtmlRedirect($request)) {
+            return $next($request);
+        }
+
         if (! auth()->user() || ! isCloud()) {
             if (! isCloud() && showBoarding() && ! in_array($path, allowedPathsForBoardingAccounts())) {
-                return redirect()->route('onboarding');
+                return $this->relativeRedirect('onboarding');
             }
 
             return $next($request);
@@ -40,7 +45,7 @@ class DecideWhatToDoWithUser
                 return $next($request);
             }
 
-            return redirect()->route('verify.email');
+            return $this->relativeRedirect('verify.email');
         }
         if (! isSubscriptionActive() && ! isSubscriptionOnGracePeriod()) {
             if (! in_array($path, allowedPathsForUnsubscribedAccounts())) {
@@ -48,7 +53,7 @@ class DecideWhatToDoWithUser
                     return $next($request);
                 }
 
-                return redirect()->route('subscription.index');
+                return $this->relativeRedirect('subscription.index');
             }
         }
         if (showBoarding() && ! in_array($path, allowedPathsForBoardingAccounts())) {
@@ -56,16 +61,34 @@ class DecideWhatToDoWithUser
                 return $next($request);
             }
 
-            return redirect()->route('onboarding');
+            return $this->relativeRedirect('onboarding');
         }
         if (auth()->user()->hasVerifiedEmail() && $path === 'verify') {
-            return redirect(RouteServiceProvider::HOME);
+            return new RedirectResponse(RouteServiceProvider::HOME);
         }
         if (isSubscriptionActive() && ($request->routeIs('subscription.index') || $path === 'subscription/new')) {
-            return redirect(RouteServiceProvider::HOME);
+            return new RedirectResponse(RouteServiceProvider::HOME);
         }
 
         return $next($request);
+    }
+
+    private function shouldSkipHtmlRedirect(Request $request): bool
+    {
+        if ($request->expectsJson() || $request->ajax()) {
+            return true;
+        }
+
+        $path = $this->logicalPath($request);
+
+        return str_starts_with($path, 'api/')
+            || str_starts_with($path, 'sanctum/')
+            || str_starts_with($path, 'mcp/');
+    }
+
+    private function relativeRedirect(string $routeName): RedirectResponse
+    {
+        return new RedirectResponse(route($routeName, absolute: false));
     }
 
     private function logicalPath(Request $request): string

@@ -17,6 +17,7 @@ class ApplicationSetting extends Model
         'use_build_secrets' => 'boolean',
         'inject_build_args_to_dockerfile' => 'boolean',
         'include_source_commit_in_build' => 'boolean',
+        'skip_puppeteer_browser_download' => 'boolean',
         'is_auto_deploy_enabled' => 'boolean',
         'is_image_auto_update_enabled' => 'boolean',
         'is_force_https_enabled' => 'boolean',
@@ -66,9 +67,15 @@ class ApplicationSetting extends Model
         'use_build_secrets',
         'inject_build_args_to_dockerfile',
         'include_source_commit_in_build',
+        'skip_puppeteer_browser_download',
         'docker_images_to_keep',
         'stop_grace_period',
     ];
+
+    public function skipsPuppeteerBrowserDownload(): bool
+    {
+        return (bool) ($this->skip_puppeteer_browser_download ?? true);
+    }
 
     public function stopGracePeriodSeconds(): int
     {

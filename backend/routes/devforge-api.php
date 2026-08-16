@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Route;
 Route::get('/bootstrap', BootstrapController::class)->name('bootstrap');
 Route::post('/teams/switch', [TeamController::class, 'switch'])->name('teams.switch');
 Route::post('/onboarding/complete', [OnboardingController::class, 'complete'])->name('onboarding.complete');
+Route::post('/onboarding/restart', [OnboardingController::class, 'restart'])->name('onboarding.restart');
 
 require __DIR__.'/devforge-simple.php';
 require __DIR__.'/devforge-applications.php';

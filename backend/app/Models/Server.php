@@ -609,7 +609,7 @@ $schema://$host {
     public function reloadCaddy()
     {
         return instant_remote_process([
-            'docker exec coolify-proxy caddy reload --config /config/caddy/Caddyfile.autosave',
+            'docker exec '.devforge_proxy_container_name($this).' caddy reload --config /config/caddy/Caddyfile.autosave',
         ], $this);
     }
 

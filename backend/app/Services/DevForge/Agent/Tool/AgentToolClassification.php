@@ -55,6 +55,7 @@ class AgentToolClassification
             'upsert_application_env_var' => $destructive,
             'get_application_runtime_settings' => $readOnly,
             'update_application_runtime_settings' => $destructive,
+            'update_application_advanced_settings' => $destructive,
             'update_application_git_branch' => $destructive,
             'sync_application_proxy_labels' => $destructive,
             'fix_application_host_permissions' => $destructive,

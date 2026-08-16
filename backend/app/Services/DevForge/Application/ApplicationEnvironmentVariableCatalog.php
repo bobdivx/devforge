@@ -5,6 +5,7 @@ namespace App\Services\DevForge\Application;
 use App\Models\Application;
 use App\Models\EnvironmentVariable;
 use App\Support\ValidationPatterns;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
@@ -99,6 +100,112 @@ class ApplicationEnvironmentVariableCatalog
         }
 
         return $this->store($application, $validated);
+    }
+
+    /**
+     * Importe un fichier .env (contenu texte) dans le scope production ou preview.
+     *
+     * @param  array<string, mixed>  $input
+     * @return array{
+     *     created: int,
+     *     updated: int,
+     *     skipped: array<int, array{key: string, reason: string}>,
+     *     variables: array{production: array<int, array<string, mixed>>, preview: array<int, array<string, mixed>>}
+     * }
+     */
+    public function import(Application $application, array $input): array
+    {
+        $validated = validator($input, [
+            'contents' => ['required', 'string', 'max:262144'],
+            'is_preview' => ['sometimes', 'boolean'],
+        ])->validate();
+
+        $isPreview = (bool) ($validated['is_preview'] ?? false);
+        $parsed = parseEnvFormatToArray($validated['contents']);
+
+        if ($parsed === []) {
+            throw ValidationException::withMessages([
+                'contents' => 'Aucune variable KEY=VALUE n’a été trouvée dans ce fichier.',
+            ]);
+        }
+
+        if (count($parsed) > 500) {
+            throw ValidationException::withMessages([
+                'contents' => 'Ce fichier contient trop de variables (maximum 500).',
+            ]);
+        }
+
+        $created = 0;
+        $updated = 0;
+        $skipped = [];
+
+        DB::transaction(function () use ($application, $parsed, $isPreview, &$created, &$updated, &$skipped): void {
+            foreach ($parsed as $rawKey => $entry) {
+                $key = $this->normalizeImportedKey((string) $rawKey);
+
+                if ($key === '' || ! ValidationPatterns::isValidEnvironmentVariableKey($key)) {
+                    $skipped[] = ['key' => (string) $rawKey, 'reason' => 'invalid_key'];
+
+                    continue;
+                }
+
+                $value = is_array($entry) ? (string) ($entry['value'] ?? '') : (string) $entry;
+                $comment = is_array($entry) ? ($entry['comment'] ?? null) : null;
+                $payload = [
+                    'key' => $key,
+                    'value' => $value,
+                    'comment' => is_string($comment) && $comment !== '' ? mb_substr($comment, 0, 256) : null,
+                    'is_preview' => $isPreview,
+                    'is_runtime' => true,
+                    'is_buildtime' => true,
+                    'is_multiline' => str_contains($value, "\n") || str_contains($value, "\r"),
+                    'is_literal' => false,
+                ];
+
+                $existing = ($isPreview
+                    ? $application->environment_variables_preview()
+                    : $application->environment_variables()
+                )->where('key', $key)->first();
+
+                try {
+                    if ($existing instanceof EnvironmentVariable) {
+                        if (! $this->isEditable($existing)) {
+                            $skipped[] = ['key' => $key, 'reason' => 'protected'];
+
+                            continue;
+                        }
+
+                        $this->update($application, $existing->uuid, $payload);
+                        $updated++;
+
+                        continue;
+                    }
+
+                    $this->store($application, $payload);
+                    $created++;
+                } catch (ValidationException) {
+                    $skipped[] = ['key' => $key, 'reason' => 'invalid'];
+                }
+            }
+        });
+
+        return [
+            'created' => $created,
+            'updated' => $updated,
+            'skipped' => $skipped,
+            'variables' => $this->list($application->fresh()),
+        ];
+    }
+
+    private function normalizeImportedKey(string $rawKey): string
+    {
+        $key = trim($rawKey);
+
+        if (str_starts_with(strtolower($key), 'export ')) {
+            $key = trim(substr($key, 7));
+        }
+
+        return ValidationPatterns::normalizeEnvironmentVariableKey($key);
     }
 
     /**

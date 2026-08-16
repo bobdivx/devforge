@@ -74,18 +74,18 @@ class ServerCheckJob implements ShouldBeEncrypted, ShouldQueue
                 if ($this->server->proxySet() && ! $this->server->proxy->force_stop) {
                     $this->server->proxyType();
                     $foundProxyContainer = $this->containers->filter(function ($value, $key) {
-                        if ($this->server->isSwarm()) {
-                            return data_get($value, 'Spec.Name') === 'coolify-proxy_traefik';
-                        } else {
-                            return data_get($value, 'Name') === '/coolify-proxy';
-                        }
+                        $name = (string) ($this->server->isSwarm()
+                            ? data_get($value, 'Spec.Name')
+                            : data_get($value, 'Name'));
+
+                        return is_managed_devforge_proxy_container_name($name);
                     })->first();
                     if (! $foundProxyContainer) {
                         try {
                             $shouldStart = CheckProxy::run($this->server);
                             if ($shouldStart) {
                                 StartProxy::run($this->server, async: false);
-                                $this->server->team?->notify(new ContainerRestarted('coolify-proxy', $this->server));
+                                $this->server->team?->notify(new ContainerRestarted(devforge_proxy_container_name($this->server), $this->server));
                             }
                         } catch (\Throwable $e) {
                         }

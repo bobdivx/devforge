@@ -20,6 +20,7 @@ use App\Services\DevForge\Agent\Tool\ApplicationSourceWritePreview;
 use App\Services\DevForge\Agent\Tool\AgentToolInstaller;
 use App\Services\DevForge\Agent\Tool\AgentToolkitSession;
 use App\Services\DevForge\Agent\Tool\AgentToolPackage;
+use App\Services\DevForge\Application\ApplicationAdvancedSettingsCatalog;
 use App\Services\DevForge\Application\ApplicationEnvironmentVariableCatalog;
 use App\Services\DevForge\Application\ApplicationRepairActions;
 use App\Services\DevForge\Application\ApplicationRuntimeSettingsService;
@@ -932,6 +933,31 @@ class AgentToolkit
                         'health_check_enabled' => ['type' => 'boolean'],
                         'health_check_path' => ['type' => 'string'],
                         'health_check_port' => ['type' => 'string'],
+                        'redeploy' => [
+                            'type' => 'boolean',
+                            'description' => 'Queue un redéploiement après la mise à jour (défaut: true)',
+                        ],
+                        'reason' => [
+                            'type' => 'string',
+                            'description' => 'Raison courte pour les logs',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'update_application_advanced_settings',
+                'description' => 'Met à jour les paramètres avancés DevForge (ex. skip_puppeteer_browser_download). Préférer ceci à une variable d’environnement pour Puppeteer/Chrome.',
+                'parameters' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_uuid' => [
+                            'type' => 'string',
+                            'description' => 'UUID de l\'application. Omis si contexte déploiement ou agent lié à l\'app.',
+                        ],
+                        'skip_puppeteer_browser_download' => [
+                            'type' => 'boolean',
+                            'description' => 'Si true, Nixpacks n’essaie pas de télécharger Chrome pendant npm ci (défaut produit).',
+                        ],
                         'redeploy' => [
                             'type' => 'boolean',
                             'description' => 'Queue un redéploiement après la mise à jour (défaut: true)',
@@ -1914,6 +1940,10 @@ class AgentToolkit
                 isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
             ),
             'update_application_runtime_settings' => $this->updateApplicationRuntimeSettings(
+                isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
+                is_array($arguments) ? $arguments : [],
+            ),
+            'update_application_advanced_settings' => $this->updateApplicationAdvancedSettings(
                 isset($arguments['application_uuid']) ? (string) $arguments['application_uuid'] : null,
                 is_array($arguments) ? $arguments : [],
             ),
@@ -3752,6 +3782,85 @@ class AgentToolkit
             'applications',
             'deploy',
             $reason !== '' ? $reason : 'Redeploy après correction runtime/build DevForge',
+        );
+
+        if (isset($deploy['error'])) {
+            return [
+                ...$payload,
+                'redeploy' => $deploy,
+                'hint' => 'Réglages mis à jour, mais le redeploy a échoué — réessaie control_resource deploy.',
+            ];
+        }
+
+        return [...$payload, 'redeploy' => $deploy];
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function updateApplicationAdvancedSettings(?string $applicationUuid, array $arguments): array
+    {
+        $application = $this->resolveApplication($applicationUuid);
+        if (is_array($application)) {
+            return $application;
+        }
+
+        $input = [];
+        if (array_key_exists('skip_puppeteer_browser_download', $arguments)) {
+            $input['skip_puppeteer_browser_download'] = (bool) $arguments['skip_puppeteer_browser_download'];
+        }
+
+        if ($input === []) {
+            return ['error' => 'Aucun paramètre avancé fourni pour update_application_advanced_settings.'];
+        }
+
+        $redeploy = array_key_exists('redeploy', $arguments) ? (bool) $arguments['redeploy'] : true;
+        $reason = trim((string) ($arguments['reason'] ?? ''));
+
+        try {
+            $result = app(ApplicationAdvancedSettingsCatalog::class)->update($application, $input);
+        } catch (ValidationException $exception) {
+            return ['error' => collect($exception->errors())->flatten()->first() ?? 'Réglages invalides.'];
+        } catch (\Throwable $exception) {
+            return ['error' => mb_substr($exception->getMessage(), 0, 300)];
+        }
+
+        $changedKeys = array_keys($input);
+        $this->run->appendLog('  ✓ Paramètres avancés mis à jour ('.implode(', ', $changedKeys).") sur {$application->uuid}");
+
+        $actionsTaken = $this->run->actions_taken ?? [];
+        $actionsTaken[] = [
+            'tool' => 'update_application_advanced_settings',
+            'uuid' => $application->uuid,
+            'type' => 'applications',
+            'action' => 'update_advanced_settings',
+            'reason' => $reason !== '' ? $reason : 'Correction paramètres avancés DevForge',
+            'keys' => $changedKeys,
+            'at' => now()->toISOString(),
+        ];
+        $this->run->actions_taken = $actionsTaken;
+        $this->run->saveQuietly();
+
+        $payload = [
+            'ok' => true,
+            'application_uuid' => $application->uuid,
+            'settings' => $result,
+            'updated_keys' => $changedKeys,
+        ];
+
+        if (! $redeploy) {
+            return [
+                ...$payload,
+                'hint' => 'Réglages enregistrés. Utilise control_resource deploy pour reconstruire.',
+            ];
+        }
+
+        $deploy = $this->controlResource(
+            $application->uuid,
+            'applications',
+            'deploy',
+            $reason !== '' ? $reason : 'Redeploy après paramètres avancés DevForge',
         );
 
         if (isset($deploy['error'])) {

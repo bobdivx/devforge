@@ -117,6 +117,7 @@ it('enables env var and spawn_task tools from the core package', function () {
         ->and($names)->toContain('update_application_git_branch')
         ->and($names)->toContain('get_application_runtime_settings')
         ->and($names)->toContain('update_application_runtime_settings')
+        ->and($names)->toContain('update_application_advanced_settings')
         ->and($names)->toContain('fix_application_host_permissions')
         ->and($names)->toContain('fix_coolify_base_config_path');
 

@@ -6,9 +6,11 @@ use App\Jobs\CheckForUpdatesJob;
 use App\Models\InstanceSettings;
 use App\Models\OauthSetting;
 use App\Models\Server;
+use App\Models\ServerSetting;
 use App\Rules\ValidDnsServers;
 use App\Rules\ValidIpOrCidr;
 use App\Services\DevForge\Agent\AgentRuntimeSettings;
+use App\Services\DevForge\Application\ApplicationDomainService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
@@ -17,6 +19,7 @@ class InstanceSettingsUpdater
 {
     public function __construct(
         private readonly AgentRuntimeSettings $agentRuntime = new AgentRuntimeSettings,
+        private readonly ApplicationDomainService $applicationDomainService = new ApplicationDomainService,
     ) {}
 
     /**
@@ -27,6 +30,7 @@ class InstanceSettingsUpdater
     {
         $validated = validator($input, [
             'fqdn' => ['sometimes', 'nullable', 'string', 'max:255', 'url'],
+            'apps_wildcard_domain' => ['sometimes', 'nullable', 'string', 'max:255'],
             'instance_name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'instance_timezone' => ['sometimes', 'required', 'string', 'timezone'],
             'public_ipv4' => ['sometimes', 'nullable', 'ipv4'],
@@ -36,6 +40,9 @@ class InstanceSettingsUpdater
             'dev_helper_version' => ['sometimes', 'nullable', 'string', 'max:128', 'regex:/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/'],
             'force_save_domains' => ['sometimes', 'boolean'],
         ])->validate();
+
+        $wildcardChanged = false;
+        $previousWildcard = null;
 
         if (array_key_exists('instance_timezone', $validated)) {
             $timezone = (string) $validated['instance_timezone'];
@@ -50,6 +57,24 @@ class InstanceSettingsUpdater
         if (array_key_exists('fqdn', $validated)) {
             $fqdn = $validated['fqdn'];
             $settings->fqdn = filled($fqdn) ? trim((string) $fqdn) : null;
+        }
+
+        if (array_key_exists('apps_wildcard_domain', $validated)) {
+            $rawWildcard = $validated['apps_wildcard_domain'];
+            $normalizedWildcard = filled($rawWildcard)
+                ? normalize_apps_wildcard_domain((string) $rawWildcard)
+                : null;
+
+            if (filled($rawWildcard) && $normalizedWildcard === null) {
+                throw ValidationException::withMessages([
+                    'apps_wildcard_domain' => ['Indiquez un domaine valide, par exemple exemple.com'],
+                ]);
+            }
+
+            $previousWildcard = $settings->apps_wildcard_domain;
+            $settings->apps_wildcard_domain = $normalizedWildcard;
+            $this->syncAppsWildcardToServers($normalizedWildcard, is_string($previousWildcard) ? $previousWildcard : null);
+            $wildcardChanged = $previousWildcard !== $normalizedWildcard;
         }
 
         foreach (['instance_name', 'public_ipv4', 'public_ipv6', 'dev_helper_version'] as $field) {
@@ -86,6 +111,13 @@ class InstanceSettingsUpdater
 
         $settings->save();
         $this->refreshLocalhostProxy();
+
+        if ($wildcardChanged && filled($settings->apps_wildcard_domain)) {
+            $this->applicationDomainService->regenerateManagedDomains(
+                previousWildcard: is_string($previousWildcard) ? $previousWildcard : null,
+                redeploy: true,
+            );
+        }
 
         return InstanceSettingsPresenter::from($settings->fresh())->toArray();
     }
@@ -467,6 +499,28 @@ class InstanceSettingsUpdater
         }
 
         return implode(',', $entries);
+    }
+
+    private function syncAppsWildcardToServers(?string $wildcard, ?string $previousWildcard): void
+    {
+        if (! filled($wildcard)) {
+            return;
+        }
+
+        $normalized = rtrim($wildcard, '/');
+
+        ServerSetting::query()
+            ->where(function ($query) use ($previousWildcard): void {
+                $query->whereNull('wildcard_domain')
+                    ->orWhere('wildcard_domain', '')
+                    ->orWhere('wildcard_domain', 'like', '%sslip.io%')
+                    ->orWhere('server_id', 0);
+
+                if (filled($previousWildcard)) {
+                    $query->orWhere('wildcard_domain', rtrim((string) $previousWildcard, '/'));
+                }
+            })
+            ->update(['wildcard_domain' => $normalized]);
     }
 
     private function refreshLocalhostProxy(): void

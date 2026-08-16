@@ -164,10 +164,28 @@ class GithubAppCatalog
     public function createDraftForTeam(Team $team, array $input = []): GithubApp
     {
         $name = trim((string) ($input['name'] ?? ''));
+        $organization = filled($input['organization'] ?? null) ? $input['organization'] : null;
+
+        $draft = GithubApp::query()
+            ->where('team_id', $team->id)
+            ->where('is_system_wide', false)
+            ->whereNull('app_id')
+            ->latest('id')
+            ->first();
+
+        if ($draft) {
+            $draft->fill([
+                'name' => $name !== '' ? $name : $draft->name,
+                'organization' => $organization,
+            ]);
+            $draft->save();
+
+            return $draft;
+        }
 
         return GithubApp::create([
             'name' => $name !== '' ? $name : substr(generate_random_name(), 0, 30),
-            'organization' => filled($input['organization'] ?? null) ? $input['organization'] : null,
+            'organization' => $organization,
             'api_url' => 'https://api.github.com',
             'html_url' => 'https://github.com',
             'custom_user' => 'git',
@@ -220,11 +238,11 @@ class GithubAppCatalog
                     'url' => $webhookBaseUrl.'/source/github/events',
                     'active' => true,
                 ],
-                'redirect_url' => $webhookBaseUrl.'/source/github/redirect',
+                'redirect_url' => $baseUrl.'/login/github/manifest',
                 'callback_urls' => [$baseUrl.'/login/github/app'],
                 'public' => false,
                 'request_oauth_on_install' => false,
-                'setup_url' => $webhookBaseUrl.'/source/github/install',
+                'setup_url' => $baseUrl.'/login/github/setup',
                 'setup_on_update' => true,
                 'default_permissions' => $permissions,
                 'default_events' => $events,

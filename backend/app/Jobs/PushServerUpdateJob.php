@@ -286,7 +286,7 @@ class PushServerUpdateJob implements ShouldBeEncrypted, ShouldQueue, Silenced
             } else {
                 $uuid = $labels->get('com.docker.compose.service');
                 $type = $labels->get('devforge.type');
-                if ($name === 'coolify-proxy' && $this->isRunning($containerStatus)) {
+                if (is_managed_devforge_proxy_container_name((string) $name) && $this->isRunning($containerStatus)) {
                     $this->foundProxy = true;
                 } elseif ($type === 'service' && $this->isRunning($containerStatus)) {
                 } else {
@@ -659,7 +659,7 @@ class PushServerUpdateJob implements ShouldBeEncrypted, ShouldQueue, Silenced
                 try {
                     if (CheckProxy::run($this->server)) {
                         StartProxy::run($this->server, async: false);
-                        $this->server->team?->notify(new ContainerRestarted('coolify-proxy', $this->server));
+                        $this->server->team?->notify(new ContainerRestarted(devforge_proxy_container_name($this->server), $this->server));
                     }
                 } catch (\Throwable $e) {
                 }

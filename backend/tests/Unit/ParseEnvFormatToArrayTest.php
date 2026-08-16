@@ -233,6 +233,24 @@ test('parseEnvFormatToArray handles mixed quoted and unquoted with comments', fu
     ]);
 });
 
+test('parseEnvFormatToArray accepts windows dotenv quirks', function () {
+    $input = "\u{FEFF}export TURSO_DATABASE_URL = libsql://example.turso.io\r\nJWT_SECRET=\"super secret\"\r\nSITE_LOGIN_REQUIRED: true\n";
+    $result = parseEnvFormatToArray($input);
+
+    expect($result)->toBe([
+        'TURSO_DATABASE_URL' => ['value' => 'libsql://example.turso.io', 'comment' => null],
+        'JWT_SECRET' => ['value' => 'super secret', 'comment' => null],
+        'SITE_LOGIN_REQUIRED' => ['value' => 'true', 'comment' => null],
+    ]);
+});
+
+test('parseEnvFormatToArray recovers utf16-le misread as utf8', function () {
+    $input = "T\0U\0R\0S\0O\0_\0D\0A\0T\0A\0B\0A\0S\0E\0_\0U\0R\0L\0=\0l\0i\0b\0s\0q\0l\0";
+    $result = parseEnvFormatToArray($input);
+
+    expect($result['TURSO_DATABASE_URL']['value'] ?? null)->toBe('libsql');
+});
+
 test('parseEnvFormatToArray handles the user reported case ASD=asd #asdfgg', function () {
     $input = 'ASD=asd #asdfgg';
     $result = parseEnvFormatToArray($input);

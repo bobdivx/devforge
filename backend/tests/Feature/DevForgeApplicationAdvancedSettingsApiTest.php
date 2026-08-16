@@ -44,6 +44,7 @@ it('returns application advanced settings', function () {
         ->assertSuccessful()
         ->assertJsonPath('data.max_restart_count', 10)
         ->assertJsonPath('data.is_force_https_enabled', false)
+        ->assertJsonPath('data.skip_puppeteer_browser_download', true)
         ->assertJsonPath('data.capabilities.dockercompose', false)
         ->assertJsonStructure([
             'data' => [
@@ -67,6 +68,7 @@ it('updates application advanced settings', function () {
         ->withSession($this->session)
         ->putJson("/api/devforge/v1/applications/{$this->application->uuid}/advanced", [
             'disable_build_cache' => true,
+            'skip_puppeteer_browser_download' => false,
             'is_git_lfs_enabled' => true,
             'is_force_https_enabled' => true,
             'max_restart_count' => 5,
@@ -74,6 +76,7 @@ it('updates application advanced settings', function () {
         ])
         ->assertSuccessful()
         ->assertJsonPath('data.disable_build_cache', true)
+        ->assertJsonPath('data.skip_puppeteer_browser_download', false)
         ->assertJsonPath('data.is_git_lfs_enabled', true)
         ->assertJsonPath('data.is_force_https_enabled', true)
         ->assertJsonPath('data.max_restart_count', 5)
@@ -82,6 +85,7 @@ it('updates application advanced settings', function () {
     $fresh = $this->application->fresh(['settings']);
 
     expect((bool) $fresh->settings->disable_build_cache)->toBeTrue()
+        ->and($fresh->settings->skipsPuppeteerBrowserDownload())->toBeFalse()
         ->and((bool) $fresh->settings->is_git_lfs_enabled)->toBeTrue()
         ->and((bool) $fresh->settings->is_force_https_enabled)->toBeTrue()
         ->and((int) $fresh->max_restart_count)->toBe(5)

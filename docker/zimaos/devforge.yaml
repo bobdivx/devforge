@@ -114,14 +114,14 @@ services:
     environment:
       - APP_ENV=production
       - APP_ID=1
-      - APP_KEY=base64:kgGufqsNEXfgu1P9CreNMKFdyxxizRyDZxkOUVuuZuE=
+      - APP_KEY=base64:RGV2Rm9yZ2VaaW1hT1NTdG9yZUFwcEtleTMyYnl0ZSE=
       - APP_NAME=DevForge
-      - APP_URL=http://10.1.0.58:8080
+      - APP_URL=http://localhost:8080
       - BASE_CONFIG_PATH=/media/Docker/AppData/devforge/data
       - DB_CONNECTION=pgsql
       - DB_DATABASE=devforge
       - DB_HOST=db
-      - DB_PASSWORD=aBVGheEhcY8E8INxMcq063RYhwG6oeM1
+      - DB_PASSWORD=devforge
       - DB_PORT=5432
       - DB_USERNAME=devforge
       - DEVFORGE_AGENTS_ENABLED=true
@@ -208,7 +208,7 @@ services:
           devices: []
     environment:
       - POSTGRES_DB=devforge
-      - POSTGRES_PASSWORD=aBVGheEhcY8E8INxMcq063RYhwG6oeM1
+      - POSTGRES_PASSWORD=devforge
       - POSTGRES_USER=devforge
     image: postgres:15-alpine
     labels:
@@ -322,6 +322,62 @@ services:
     environment: []
     privileged: false
 
+  keeper:
+    cpu_shares: 10
+    container_name: devforge-keeper
+    image: docker:27.5.1-cli
+    restart: always
+    deploy:
+      resources:
+        reservations:
+          devices: []
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/docker.png
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        bind:
+          create_host_path: true
+    command:
+      - /bin/sh
+      - -c
+      - |
+        INTERVAL="$${DEVFORGE_KEEPER_INTERVAL:-15}"
+        while true; do
+          need_reload=0
+          for c in devforge-api devforge-web devforge-proxy devforge-db devforge-redis devforge-realtime; do
+            s=$$(docker inspect -f '{{.State.Status}}' "$$c" 2>/dev/null || true)
+            if [ "$$s" = created ] || [ "$$s" = exited ]; then
+              docker start "$$c" >/dev/null 2>&1 || true
+              need_reload=1
+            fi
+          done
+          if [ "$$need_reload" = 1 ]; then
+            docker exec devforge-proxy nginx -s reload >/dev/null 2>&1 || true
+          fi
+          if docker inspect -f '{{.State.Status}}' devforge-api 2>/dev/null | grep -q running; then
+            if ! docker exec devforge-api getent hosts host.docker.internal >/dev/null 2>&1; then
+              gw=$$(docker exec devforge-api ip route 2>/dev/null | awk '/default/ {print $$3; exit}')
+              if [ -n "$$gw" ]; then
+                docker exec -u root devforge-api sh -c "echo $$gw host.docker.internal >> /etc/hosts" >/dev/null 2>&1 || true
+              fi
+            fi
+          fi
+          sleep "$$INTERVAL"
+        done
+    networks:
+      - devforge
+    ports: []
+    devices: []
+    cap_add: []
+    privileged: false
+
 networks:
   devforge:
     name: devforge
@@ -345,20 +401,20 @@ x-casaos:
     fr_fr: DevForge PaaS — déploiements, agents IA, ops Docker
   developer: DevForge
   tip: |
-    1. APP_KEY et DB_PASSWORD sont déjà définis dans ce compose (ZimaOS vide ${VAR}).
-    2. Copier docker/devforge-proxy/nginx.conf vers
-       /media/Docker/AppData/devforge/nginx/default.conf
+    1. ZimaOS vide ${VAR} : APP_KEY et DB_PASSWORD ont des défauts littéraux.
+       Changez-les avant une install de production (DB_PASSWORD = POSTGRES_PASSWORD).
+    2. Réglez APP_URL sur l'URL que le navigateur utilise (http://IP_OU_HOSTNAME:8080).
+    3. Copier docker/devforge-proxy/nginx.conf vers le fichier monté
        (un dossier à la place du fichier fait échouer nginx).
-    3. Images : bobdivx/devforge:latest, :web et :realtime (Docker Hub).
-    4. Données sous /media/Docker/AppData/devforge/ (SSD Docker 512 Go).
-    5. Surveiller l'espace /media/Docker (builds + images) — un disque plein fait planter Postgres.
+       Ce fichier doit proxy /webhooks vers l'API (retour GitHub App).
+    4. Images : bobdivx/devforge:latest, :web et :realtime (Docker Hub).
+    5. Adaptez les chemins AppData à votre NAS (/DATA/AppData ou /media/Docker/AppData).
     6. HTTP :8080 — SESSION_SECURE_COOKIE doit rester false.
     7. Mise à jour : docker pull bobdivx/devforge:latest
        && docker pull bobdivx/devforge:web
        && docker pull bobdivx/devforge:realtime
-       puis recréer les conteneurs (CasaOS Update / compose up -d --force-recreate).
-       Un simple redémarrage ne tire PAS la nouvelle version.
-    8. default.conf nginx doit être un FICHIER (un dossier fait échouer le proxy).
-    9. Clé SSH localhost : sudo sh scripts/zimaos-bootstrap-localhost-ssh.sh
-       puis php artisan db:seed --class=Database\\Seeders\\ProductionSeeder --force
-       (utilisateur SSH : bobdivx, PermitRootLogin est off sur ZimaOS).
+       puis recréer les conteneurs. Un redémarrage ne tire PAS la nouvelle image.
+    8. Clé SSH localhost : sudo sh scripts/zimaos-bootstrap-localhost-ssh.sh
+       (compte SSH = l'utilisateur NAS, pas root si PermitRootLogin est off).
+    9. Le service keeper relance api/web/proxy restés en Created (ZimaOS).
+       En secours hors compose : sudo sh scripts/zimaos-install-keeper.sh

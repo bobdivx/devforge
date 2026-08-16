@@ -298,6 +298,7 @@ it('creates ApplicationSetting with all fillable attributes', function () {
         'use_build_secrets' => false,
         'inject_build_args_to_dockerfile' => true,
         'include_source_commit_in_build' => true,
+        'skip_puppeteer_browser_download' => true,
         'docker_images_to_keep' => 5,
         'stop_grace_period' => 300,
     ]);

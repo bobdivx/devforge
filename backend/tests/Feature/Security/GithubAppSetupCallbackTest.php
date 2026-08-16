@@ -165,6 +165,21 @@ it('blocks rebinding an already configured github app through manifest callback'
         ->and($this->githubApp->webhook_secret)->toBe('existing-webhook-secret');
 });
 
+it('accepts the proxied login github manifest callback', function () {
+    authenticateGithubSetupCallbackTest($this);
+    fakeGithubManifestConversion();
+    cacheGithubAppSetupState('valid-state', 'manifest', $this->githubApp);
+
+    $this->withSession([
+        'currentTeam' => $this->team,
+        'devforge_onboarding_github' => true,
+    ])->get('/login/github/manifest?state=valid-state&code=real-code')
+        ->assertRedirect();
+
+    $this->githubApp->refresh();
+    expect($this->githubApp->app_id)->toBe(987654);
+});
+
 it('redirects to github installation when onboarding started the manifest', function () {
     authenticateGithubSetupCallbackTest($this);
     fakeGithubManifestConversion();
@@ -336,6 +351,38 @@ it('rejects an installation id that github does not confirm belongs to the app',
 
     $this->githubApp->refresh();
     expect($this->githubApp->installation_id)->toBeNull();
+});
+
+it('returns to applications after a github install started from create application', function () {
+    authenticateGithubSetupCallbackTest($this);
+    configureGithubAppCredentials($this->githubApp);
+    fakeGithubInstallationVerification($this->githubApp->app_id);
+    cacheGithubAppSetupState('valid-install-state', 'install', $this->githubApp);
+
+    $this->withSession([
+        'currentTeam' => $this->team,
+        'devforge_github_return_to' => 'applications',
+    ])->get('/login/github/setup?state=valid-install-state&setup_action=install&installation_id=123456')
+        ->assertRedirect('/applications');
+
+    $this->githubApp->refresh();
+    expect($this->githubApp->installation_id)->toBe(123456);
+});
+
+it('returns to onboarding after a proxied github install callback', function () {
+    authenticateGithubSetupCallbackTest($this);
+    configureGithubAppCredentials($this->githubApp);
+    fakeGithubInstallationVerification($this->githubApp->app_id);
+    cacheGithubAppSetupState('valid-install-state', 'install', $this->githubApp);
+
+    $this->withSession([
+        'currentTeam' => $this->team,
+        'devforge_onboarding_github' => true,
+    ])->get('/login/github/setup?state=valid-install-state&setup_action=install&installation_id=123456')
+        ->assertRedirect('/onboarding?pick=repos');
+
+    $this->githubApp->refresh();
+    expect($this->githubApp->installation_id)->toBe(123456);
 });
 
 it('sets installation id when github confirms it belongs to the app', function () {

@@ -40,6 +40,7 @@ class GithubController extends Controller
             'preview_deployments' => ['sometimes', 'boolean'],
             'administration' => ['sometimes', 'boolean'],
             'from_onboarding' => ['sometimes', 'boolean'],
+            'return_to' => ['sometimes', 'string', 'in:applications,onboarding'],
         ]);
 
         $githubApp = $this->githubAppCatalog->createDraftForTeam($team, [
@@ -47,8 +48,12 @@ class GithubController extends Controller
             'organization' => $validated['organization'] ?? null,
         ]);
 
-        if (($validated['from_onboarding'] ?? false) === true) {
+        if (($validated['from_onboarding'] ?? false) === true || ($validated['return_to'] ?? null) === 'onboarding') {
             session(['devforge_onboarding_github' => true]);
+            session()->forget('devforge_github_return_to');
+        } elseif (($validated['return_to'] ?? null) === 'applications') {
+            session(['devforge_github_return_to' => 'applications']);
+            session()->forget('devforge_onboarding_github');
         }
 
         return response()->json([
@@ -71,6 +76,18 @@ class GithubController extends Controller
             $githubApp = $this->githubAppCatalog->appForTeam($team, $githubAppUuid);
         } catch (ModelNotFoundException) {
             return response()->json(['message' => 'GitHub app not found.'], 404);
+        }
+
+        $validated = $request->validate([
+            'return_to' => ['sometimes', 'string', 'in:applications,onboarding'],
+        ]);
+
+        if (($validated['return_to'] ?? null) === 'onboarding') {
+            session(['devforge_onboarding_github' => true]);
+            session()->forget('devforge_github_return_to');
+        } elseif (($validated['return_to'] ?? null) === 'applications') {
+            session(['devforge_github_return_to' => 'applications']);
+            session()->forget('devforge_onboarding_github');
         }
 
         return response()->json([

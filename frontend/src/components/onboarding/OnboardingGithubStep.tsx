@@ -14,8 +14,8 @@ import {
     isGithubAppInstalled,
     toggleSelectedId,
 } from '../../lib/onboarding-github';
-import { submitGithubManifest } from '../../lib/onboarding-steps';
 import { useApiQuery } from '../../lib/use-api-query';
+import { ConnectGithubButton } from '../github/ConnectGithubButton';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { DataState } from '../ui/DataState';
@@ -75,71 +75,19 @@ export function OnboardingGithubStep({ canManage, onSkip, onConnected }: Onboard
                     </ul>
                 )}
             </DataState>
-            {canManage && pending.length === 0 && (
-                <ConnectGithubButton onError={() => undefined} />
+            {canManage && (
+                <div class="mt-4">
+                    <ConnectGithubButton
+                        fromOnboarding
+                        returnTo="onboarding"
+                        label={pending.length > 0 ? 'Relancer la configuration GitHub' : 'Continuer avec GitHub'}
+                    />
+                </div>
             )}
             <div class="mt-4">
                 <Button variant="ghost" onClick={onSkip}>Plus tard</Button>
             </div>
         </Card>
-    );
-}
-
-function ConnectGithubButton({ onError }: { onError: (message: string) => void }) {
-    const [submitting, setSubmitting] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [organization, setOrganization] = useState('');
-    const [showOrg, setShowOrg] = useState(false);
-
-    const connect = async () => {
-        setSubmitting(true);
-        setError(null);
-        try {
-            const result = await domainApi.startGithubApp({
-                name: 'DevForge',
-                organization: organization.trim() || undefined,
-                preview_deployments: true,
-                from_onboarding: true,
-            });
-            submitGithubManifest(result.data.launch.action_url, result.data.launch.manifest);
-        } catch (err) {
-            const message = err instanceof Error ? err.message : 'Impossible de démarrer la connexion GitHub.';
-            setError(message);
-            onError(message);
-            setSubmitting(false);
-        }
-    };
-
-    return (
-        <div class="mt-4 grid gap-3">
-            <Button
-                disabled={submitting}
-                aria-label={submitting ? 'Redirection vers GitHub…' : 'Continuer avec GitHub'}
-                onClick={() => void connect()}
-            >
-                <FolderGit2 class="size-4" aria-hidden />
-                {submitting ? 'Redirection vers GitHub…' : 'Continuer avec GitHub'}
-            </Button>
-            <button
-                class="text-left text-xs text-base-content/50 underline-offset-2 hover:underline"
-                type="button"
-                onClick={() => setShowOrg((current) => !current)}
-            >
-                {showOrg ? 'Masquer les options' : 'Organisation GitHub (optionnel)'}
-            </button>
-            {showOrg && (
-                <label class="grid gap-1 text-sm">
-                    <span class="font-medium">Organisation</span>
-                    <input
-                        class="input input-bordered rounded-xl"
-                        placeholder="laisser vide pour un compte personnel"
-                        value={organization}
-                        onInput={(event) => setOrganization(event.currentTarget.value)}
-                    />
-                </label>
-            )}
-            {error && <p class="text-xs text-error" role="alert">{error}</p>}
-        </div>
     );
 }
 

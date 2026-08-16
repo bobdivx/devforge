@@ -106,7 +106,7 @@ class DestinationWriter
         if ($destination instanceof StandaloneDocker) {
             $safeNetwork = escapeshellarg($destination->network);
             instant_remote_process(
-                ["docker network disconnect {$safeNetwork} coolify-proxy"],
+                devforge_proxy_network_disconnect_commands($destination->network),
                 $destination->server,
                 throwError: false,
             );

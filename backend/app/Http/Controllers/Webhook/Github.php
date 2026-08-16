@@ -579,7 +579,11 @@ class Github extends Controller
         $github_app->save();
 
         if (session()->pull('devforge_onboarding_github')) {
-            return redirect('/devforge/onboarding?pick=repos');
+            return redirect('/onboarding?pick=repos');
+        }
+
+        if (session()->pull('devforge_github_return_to') === 'applications') {
+            return redirect('/applications');
         }
 
         return redirect()->route('source.github.show', ['github_app_uuid' => $github_app->uuid]);

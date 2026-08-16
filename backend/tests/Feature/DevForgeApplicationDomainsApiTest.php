@@ -104,10 +104,14 @@ it('generates a domain from the server wildcard', function () {
 
     $fqdn = $response->json('data.fqdn');
     $managed = $response->json('data.managed_domain');
+    $domains = $response->json('data.domains');
 
     expect($fqdn)->toContain($this->application->uuid);
     expect($fqdn)->toContain('apps.example.com');
-    expect($managed)->toBe($fqdn);
+    expect($fqdn)->toContain('https://domain-app.apps.example.com');
+    expect($managed)->toContain($this->application->uuid);
+    expect($domains)->toContain($managed);
+    expect($domains)->toContain('https://domain-app.apps.example.com');
     expect($this->application->fresh()->fqdn)->toBe($fqdn);
     expect($response->json('meta.redeploy'))->toBeNull();
 });
@@ -179,8 +183,38 @@ it('creates applications with the server wildcard domain', function () {
     $domains = $response->json('data.configuration.domains');
 
     expect($domains)->not->toBeEmpty();
-    expect($domains[0])->toContain($uuid);
-    expect($domains[0])->toContain('apps.example.com');
+    expect($domains[0])->toBe('https://demo-app.apps.example.com');
+    expect($domains)->toContain('https://demo-app.apps.example.com');
+    expect(collect($domains)->first(fn (string $domain): bool => str_contains($domain, $uuid)))->not->toBeNull();
+});
+
+it('creates an application with a custom url in front of the managed domain', function () {
+    $githubApp = createDevForgeGithubAppForDomains($this->team, $this->user);
+
+    fakeDevForgeGithubHttpForDomains();
+
+    $response = $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/applications', [
+            'project_uuid' => $this->project->uuid,
+            'environment_uuid' => $this->environment->uuid,
+            'destination_uuid' => $this->destination->uuid,
+            'github_app_uuid' => $githubApp->uuid,
+            'git_repository' => 'acme/demo-app',
+            'repository_id' => 424242,
+            'git_branch' => 'main',
+            'build_pack' => 'nixpacks',
+            'instant_deploy' => false,
+            'domains' => 'https://blog.maison.local',
+        ])
+        ->assertCreated();
+
+    $uuid = $response->json('data.uuid');
+    $domains = $response->json('data.configuration.domains');
+
+    expect($domains[0])->toBe('https://blog.maison.local')
+        ->and($domains)->toContain('https://blog.maison.local')
+        ->and(collect($domains)->first(fn (string $domain): bool => str_contains($domain, $uuid)))->not->toBeNull();
 });
 
 it('rejects domain updates for applications from another team', function () {

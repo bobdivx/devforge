@@ -1,6 +1,7 @@
-import { FolderGit2, LoaderCircle, Search } from 'lucide-preact';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { FolderGit2, LoaderCircle, Search, Upload } from 'lucide-preact';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Modal } from '../ui/Modal';
+import { ConnectGithubButton, FinishGithubInstallButton } from '../github/ConnectGithubButton';
 import {
     domainApi,
     type CreateApplicationInput,
@@ -11,7 +12,14 @@ import {
     type GithubRepository,
     type Project,
 } from '../../lib/domain-api';
-import { routeHref } from '../../lib/routes';
+import { isGithubAppInstalled } from '../../lib/onboarding-github';
+import { readEnvFile } from '../../lib/env-file';
+import {
+    CREATE_APPLICATION_WIZARD_STEPS,
+    resolveApplicationCustomDomain,
+    type ApplicationUrlMode,
+    type CreateApplicationWizardStep,
+} from '../../lib/create-application-wizard';
 
 const buildPacks: Array<{ value: CreateApplicationInput['build_pack']; label: string }> = [
     { value: 'nixpacks', label: 'Nixpacks (auto-détection)' },
@@ -40,6 +48,7 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
     const [projects, setProjects] = useState<Project[]>([]);
     const [targets, setTargets] = useState<DeploymentTarget[]>([]);
     const [githubApps, setGithubApps] = useState<GithubAppSummary[]>([]);
+    const [pendingGithubApps, setPendingGithubApps] = useState<GithubAppSummary[]>([]);
     const [repositories, setRepositories] = useState<GithubRepository[]>([]);
     const [branches, setBranches] = useState<GithubBranch[]>([]);
     const [repoSearch, setRepoSearch] = useState('');
@@ -47,6 +56,13 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
     const [loadingBranches, setLoadingBranches] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [step, setStep] = useState<CreateApplicationWizardStep>('source');
+    const [urlMode, setUrlMode] = useState<ApplicationUrlMode | null>(null);
+    const [customUrl, setCustomUrl] = useState('');
+    const [importEnv, setImportEnv] = useState(false);
+    const [envFileName, setEnvFileName] = useState<string | null>(null);
+    const [envContents, setEnvContents] = useState<string | null>(null);
+    const envFileRef = useRef<HTMLInputElement>(null);
     const [form, setForm] = useState({
         project_uuid: '',
         environment_uuid: '',
@@ -65,9 +81,19 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
         }
 
         setError(null);
+        setStep('source');
+        setUrlMode(null);
+        setCustomUrl('');
         setRepoSearch('');
         setRepositories([]);
         setBranches([]);
+        setImportEnv(false);
+        setEnvFileName(null);
+        setEnvContents(null);
+
+        if (envFileRef.current) {
+            envFileRef.current.value = '';
+        }
 
         Promise.all([
             domainApi.projects(),
@@ -77,7 +103,9 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
             .then(([projectsResponse, targetsResponse, appsResponse]) => {
                 const nextProjects = projectsResponse.data;
                 const nextTargets = targetsResponse.data;
-                const nextApps = appsResponse.data;
+                const listedApps = appsResponse.data;
+                const nextApps = listedApps.filter(isGithubAppInstalled);
+                const pendingApps = listedApps.filter((app) => !isGithubAppInstalled(app));
                 const firstProject = nextProjects[0];
                 const firstEnvironment = firstProject?.environments?.[0];
                 const firstDestination = nextTargets[0]?.destinations[0];
@@ -85,6 +113,7 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
                 setProjects(nextProjects);
                 setTargets(nextTargets);
                 setGithubApps(nextApps);
+                setPendingGithubApps(pendingApps);
                 setForm({
                     project_uuid: firstProject?.uuid ?? '',
                     environment_uuid: firstEnvironment?.uuid ?? '',
@@ -170,11 +199,19 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
             .finally(() => setLoadingBranches(false));
     }, [open, form.github_app_uuid, selectedRepository?.id]);
 
-    const connexionsUrl = useMemo(() => routeHref('/connexions'), []);
-
     const handleSubmit = async (event: Event) => {
         event.preventDefault();
+        if (step !== 'options') {
+            return;
+        }
+
         if (!form.project_uuid || !form.environment_uuid || !form.destination_uuid || !form.github_app_uuid || !form.git_repository || !form.git_branch) {
+            return;
+        }
+
+        if (importEnv && !envContents) {
+            setError('Choisis un fichier .env à importer, ou décoche l’option.');
+
             return;
         }
 
@@ -192,6 +229,8 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
                 git_branch: form.git_branch,
                 build_pack: form.build_pack,
                 instant_deploy: form.instant_deploy,
+                env_contents: envContents ?? undefined,
+                domains: resolveApplicationCustomDomain(urlMode, customUrl),
             });
             onCreated(response.data.uuid);
             onClose();
@@ -202,7 +241,7 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
         }
     };
 
-    const canSubmit = Boolean(
+    const canAdvanceSource = Boolean(
         form.project_uuid
         && form.environment_uuid
         && form.destination_uuid
@@ -211,40 +250,113 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
         && form.git_branch
         && !submitting,
     );
+    const canAdvanceDomain = urlMode === 'auto'
+        || (urlMode === 'custom' && resolveApplicationCustomDomain(urlMode, customUrl) !== undefined);
+    const canSubmit = canAdvanceSource && canAdvanceDomain && !submitting;
+    const stepIndex = CREATE_APPLICATION_WIZARD_STEPS.findIndex((item) => item.id === step);
 
     return (
         <Modal
             open={open}
             title="Nouvelle application"
+            size="lg"
             onClose={onClose}
             footer={(
                 <>
                     <button class="btn btn-ghost btn-sm" type="button" onClick={onClose}>Annuler</button>
-                    <button class="btn btn-primary btn-sm" type="submit" form="create-application-form" disabled={!canSubmit}>
-                        {submitting && <span class="loading loading-spinner loading-xs" />}
-                        Créer et déployer
-                    </button>
+                    {step !== 'source' && (
+                        <button
+                            class="btn btn-ghost btn-sm"
+                            type="button"
+                            onClick={() => setStep(step === 'options' ? 'domain' : 'source')}
+                        >
+                            Retour
+                        </button>
+                    )}
+                    {step === 'source' && githubApps.length > 0 && (
+                        <button
+                            class="btn btn-primary btn-sm"
+                            type="button"
+                            disabled={!canAdvanceSource}
+                            onClick={() => setStep('domain')}
+                        >
+                            Suivant
+                        </button>
+                    )}
+                    {step === 'domain' && (
+                        <button
+                            class="btn btn-primary btn-sm"
+                            type="button"
+                            disabled={!canAdvanceDomain}
+                            onClick={() => setStep('options')}
+                        >
+                            Suivant
+                        </button>
+                    )}
+                    {step === 'options' && (
+                        <button class="btn btn-primary btn-sm" type="submit" form="create-application-form" disabled={!canSubmit}>
+                            {submitting && <span class="loading loading-spinner loading-xs" />}
+                            {form.instant_deploy
+                                ? (importEnv ? 'Créer, importer et déployer' : 'Créer et déployer')
+                                : (importEnv ? 'Créer et importer' : 'Créer')}
+                        </button>
+                    )}
                 </>
             )}
         >
             <form id="create-application-form" class="grid gap-4" onSubmit={handleSubmit}>
                 <p class="text-xs text-base-content/60">
-                    Déployez une application depuis vos dépôts GitHub connectés à DevForge.
+                    Étape {stepIndex + 1} sur {CREATE_APPLICATION_WIZARD_STEPS.length}
+                    {' · '}
+                    {CREATE_APPLICATION_WIZARD_STEPS[stepIndex]?.title}
                 </p>
 
                 {githubApps.length === 0 ? (
                     <div class="rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm">
-                        <p class="font-medium text-warning">Aucun compte GitHub connecté</p>
-                        <p class="mt-1 text-xs text-base-content/70">
-                            Connectez GitHub (compte bobdivx / org) pour lister vos dépôts privés.
-                        </p>
-                        <a class="btn btn-warning btn-sm mt-3" href={connexionsUrl}>
-                            <FolderGit2 class="size-3.5" aria-hidden />
-                            Ouvrir GitHub
-                        </a>
+                        {pendingGithubApps.length > 0 ? (
+                            <>
+                                <p class="font-medium text-warning">GitHub App créée, installation incomplète</p>
+                                <p class="mt-1 text-xs text-base-content/70">
+                                    L’app {pendingGithubApps[0].display_name ?? pendingGithubApps[0].name} existe déjà.
+                                    Il faut encore l’installer sur votre compte GitHub pour lister les dépôts.
+                                    Le token Packages (PAT) est optionnel et ne bloque pas cette étape.
+                                </p>
+                                <div class="mt-3 grid gap-2">
+                                    <FinishGithubInstallButton
+                                        app={pendingGithubApps[0]}
+                                        returnTo="applications"
+                                        size="sm"
+                                        onError={setError}
+                                    />
+                                    <ConnectGithubButton
+                                        returnTo="applications"
+                                        label="Recommencer avec une nouvelle app"
+                                        size="sm"
+                                        onError={setError}
+                                    />
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <p class="font-medium text-warning">GitHub n’est pas encore relié</p>
+                                <p class="mt-1 text-xs text-base-content/70">
+                                    Relancez la configuration GitHub, puis revenez créer l’application.
+                                </p>
+                                <div class="mt-3">
+                                    <ConnectGithubButton
+                                        returnTo="applications"
+                                        label="Relancer la configuration GitHub"
+                                        size="sm"
+                                        onError={setError}
+                                    />
+                                </div>
+                            </>
+                        )}
                     </div>
                 ) : (
                     <>
+                        {step === 'source' && (
+                        <div class="grid gap-4">
                         <div class="grid gap-3 sm:grid-cols-2">
                             <div class="grid gap-1.5">
                                 <label class="text-xs font-medium" for="app-project">Projet</label>
@@ -414,6 +526,152 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
                                 </select>
                             </div>
                         </div>
+                        </div>
+                        )}
+
+                        {step === 'domain' && (
+                            <fieldset class="grid gap-2">
+                                <legend class="text-sm font-medium">Cette application a-t-elle une URL personnalisée ?</legend>
+                                <p class="text-xs text-base-content/55">
+                                    Sinon, DevForge créera automatiquement nomdelapp.votredomaine, par exemple starbasefr.exemple.com.
+                                </p>
+                                <label class={`flex cursor-pointer items-start gap-3 rounded-2xl border p-3 ${
+                                    urlMode === 'auto' ? 'border-primary/40 bg-primary/5' : 'border-base-300/70'
+                                }`}
+                                >
+                                    <input
+                                        class="radio radio-sm mt-0.5"
+                                        type="radio"
+                                        name="app-url-mode"
+                                        checked={urlMode === 'auto'}
+                                        onChange={() => setUrlMode('auto')}
+                                    />
+                                    <span class="grid gap-0.5">
+                                        <span class="text-sm font-semibold">Non, générer une URL automatique</span>
+                                        <span class="text-xs text-base-content/55">
+                                            Exemple : https://starbasefr.exemple.com
+                                        </span>
+                                    </span>
+                                </label>
+                                <label class={`flex cursor-pointer items-start gap-3 rounded-2xl border p-3 ${
+                                    urlMode === 'custom' ? 'border-primary/40 bg-primary/5' : 'border-base-300/70'
+                                }`}
+                                >
+                                    <input
+                                        class="radio radio-sm mt-0.5"
+                                        type="radio"
+                                        name="app-url-mode"
+                                        checked={urlMode === 'custom'}
+                                        onChange={() => setUrlMode('custom')}
+                                    />
+                                    <span class="grid gap-0.5">
+                                        <span class="text-sm font-semibold">Oui, j’ai une URL pour cette app</span>
+                                        <span class="text-xs text-base-content/55">
+                                            Exemple : https://blog.maison.local
+                                        </span>
+                                    </span>
+                                </label>
+                                {urlMode === 'custom' && (
+                                    <label class="grid gap-1.5">
+                                        <span class="text-xs font-medium">URL de l’application</span>
+                                        <input
+                                            class="input input-bordered input-sm w-full rounded-xl"
+                                            value={customUrl}
+                                            placeholder="https://blog.maison.local"
+                                            inputMode="url"
+                                            onInput={(event) => setCustomUrl(event.currentTarget.value)}
+                                        />
+                                    </label>
+                                )}
+                            </fieldset>
+                        )}
+
+                        {step === 'options' && (
+                        <div class="grid gap-4">
+                        <div class="grid gap-2 rounded-xl border border-base-300/70 bg-base-200/30 p-3">
+                            <label class="flex items-start gap-2 text-xs">
+                                <input
+                                    class="checkbox checkbox-primary checkbox-sm mt-0.5"
+                                    type="checkbox"
+                                    checked={importEnv}
+                                    onChange={(event) => {
+                                        const checked = (event.target as HTMLInputElement).checked;
+                                        setImportEnv(checked);
+
+                                        if (!checked) {
+                                            setEnvFileName(null);
+                                            setEnvContents(null);
+
+                                            if (envFileRef.current) {
+                                                envFileRef.current.value = '';
+                                            }
+                                        }
+                                    }}
+                                />
+                                <span>
+                                    <span class="block font-medium">Importer un fichier .env avant le déploiement</span>
+                                    <span class="mt-0.5 block text-[11px] text-base-content/55">
+                                        Les variables (Turso, secrets, etc.) seront créées avant le premier build.
+                                    </span>
+                                </span>
+                            </label>
+
+                            {importEnv && (
+                                <div class="grid gap-1.5 pl-6">
+                                    <input
+                                        ref={envFileRef}
+                                        id="create-app-env-file"
+                                        class="sr-only"
+                                        type="file"
+                                        accept=".env,.txt,text/plain"
+                                        aria-label="Fichier .env à importer"
+                                        onChange={(event) => {
+                                            const file = (event.target as HTMLInputElement).files?.[0];
+
+                                            if (!file) {
+                                                setEnvFileName(null);
+                                                setEnvContents(null);
+
+                                                return;
+                                            }
+
+                                            if (file.size > 262144) {
+                                                setError('Le fichier .env dépasse 256 Ko.');
+                                                setEnvFileName(null);
+                                                setEnvContents(null);
+
+                                                return;
+                                            }
+
+                                            void readEnvFile(file)
+                                                .then((contents) => {
+                                                    setEnvFileName(file.name);
+                                                    setEnvContents(contents);
+                                                    setError(null);
+                                                })
+                                                .catch(() => {
+                                                    setError('Impossible de lire ce fichier .env.');
+                                                    setEnvFileName(null);
+                                                    setEnvContents(null);
+                                                });
+                                        }}
+                                    />
+                                    <button
+                                        class="btn btn-ghost btn-sm w-fit rounded-full"
+                                        type="button"
+                                        onClick={() => envFileRef.current?.click()}
+                                    >
+                                        <Upload class="size-3.5" aria-hidden />
+                                        {envFileName ? 'Changer de fichier' : 'Choisir un fichier .env'}
+                                    </button>
+                                    {envFileName && (
+                                        <p class="text-[11px] text-base-content/60">
+                                            Fichier prêt : <span class="font-mono">{envFileName}</span>
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+                        </div>
 
                         <label class="flex items-center gap-2 text-xs">
                             <input
@@ -427,6 +685,8 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
                             />
                             Lancer le déploiement immédiatement après la création
                         </label>
+                        </div>
+                        )}
                     </>
                 )}
 

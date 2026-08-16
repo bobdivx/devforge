@@ -3,6 +3,8 @@ import { useState, useMemo } from 'preact/hooks';
 import { Modal } from '../../components/ui/Modal';
 import { PageHeader } from '../../components/PageHeader';
 import { Card } from '../../components/ui/Card';
+import { ConnectGithubButton, FinishGithubInstallButton } from '../../components/github/ConnectGithubButton';
+import { isGithubAppInstalled } from '../../lib/onboarding-github';
 import { SharedVariablesPanel } from '../../components/shared-variables/SharedVariablesPanel';
 import type { BootstrapPermissions } from '../../lib/bootstrap';
 import { domainApi, type GithubAppSummary } from '../../lib/domain-api';
@@ -91,12 +93,16 @@ export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
         }
     }
 
+    const listedApps = apps.data?.data ?? [];
+    const installedApps = listedApps.filter(isGithubAppInstalled);
+    const pendingApps = listedApps.filter((app) => !isGithubAppInstalled(app));
+
     const extraVariables = useMemo(() => {
-        return (apps.data?.data ?? []).map((app) => ({
+        return installedApps.map((app) => ({
             id: -Math.floor(Math.random() * 1000000),
             key: `github_pat_${app.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
             value: app.has_packages_token ? '***' : '',
-            comment: accountSubtitle(app),
+            comment: `Token Packages optionnel · ${accountSubtitle(app)}`,
             scope: 'team',
             is_multiline: false,
             is_literal: true,
@@ -104,7 +110,7 @@ export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
             isExtra: true,
             originalApp: app,
         } as any));
-    }, [apps.data?.data]);
+    }, [installedApps]);
 
     return (
         <div class="grid gap-5">
@@ -114,6 +120,32 @@ export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
             />
             {(feedback || error) && (
                 <p class={`text-sm ${error ? 'text-error' : 'text-success'}`}>{error ?? feedback}</p>
+            )}
+
+            {pendingApps.length > 0 && (
+                <Card title="Compte GitHub" eyebrow="Installation incomplète">
+                    <p class="mb-3 text-sm text-base-content/65">
+                        L’app {pendingApps[0].display_name ?? pendingApps[0].name} est créée sur GitHub, mais pas encore
+                        installée sur votre compte. Le token Packages vide n’est pas requis pour ajouter une application.
+                    </p>
+                    <FinishGithubInstallButton
+                        app={pendingApps[0]}
+                        returnTo="applications"
+                        onError={setError}
+                    />
+                </Card>
+            )}
+            {installedApps.length === 0 && pendingApps.length === 0 && (
+                <Card title="Compte GitHub" eyebrow="Requis pour déployer">
+                    <p class="mb-3 text-sm text-base-content/65">
+                        Aucune GitHub App n’est encore reliée. Relancez la configuration pour autoriser DevForge à lire vos dépôts.
+                    </p>
+                    <ConnectGithubButton
+                        returnTo="applications"
+                        label="Relancer la configuration GitHub"
+                        onError={setError}
+                    />
+                </Card>
             )}
 
             {agentRequests.data?.data && agentRequests.data.data.length > 0 && (

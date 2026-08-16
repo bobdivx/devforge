@@ -172,6 +172,57 @@ it('creates an application from a github repository', function () {
         ->and($application->readiness->autonomous_enabled)->toBeTrue();
 });
 
+it('imports dotenv contents before the first deployment when creating an application', function () {
+    fakeDevForgeGithubHttp();
+
+    $response = $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/applications', [
+            'project_uuid' => $this->project->uuid,
+            'environment_uuid' => $this->environment->uuid,
+            'destination_uuid' => $this->destination->uuid,
+            'github_app_uuid' => $this->githubApp->uuid,
+            'git_repository' => 'acme/demo-app',
+            'repository_id' => 424242,
+            'git_branch' => 'main',
+            'build_pack' => 'nixpacks',
+            'instant_deploy' => false,
+            'env_contents' => "TURSO_DATABASE_URL=libsql://example.turso.io\nJWT_SECRET=super-secret\n",
+        ])
+        ->assertCreated()
+        ->assertJsonPath('meta.instant_deploy', false)
+        ->assertJsonPath('meta.env_import.created', 2)
+        ->assertJsonPath('meta.env_import.updated', 0);
+
+    $application = \App\Models\Application::query()->where('uuid', $response->json('data.uuid'))->firstOrFail();
+
+    expect($application->environment_variables()->where('key', 'TURSO_DATABASE_URL')->first()?->value)
+        ->toBe('libsql://example.turso.io')
+        ->and($application->environment_variables()->where('key', 'JWT_SECRET')->first()?->value)
+        ->toBe('super-secret');
+});
+
+it('rejects application creation when env_contents has no variables', function () {
+    fakeDevForgeGithubHttp();
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/applications', [
+            'project_uuid' => $this->project->uuid,
+            'environment_uuid' => $this->environment->uuid,
+            'destination_uuid' => $this->destination->uuid,
+            'github_app_uuid' => $this->githubApp->uuid,
+            'git_repository' => 'acme/demo-app',
+            'repository_id' => 424242,
+            'git_branch' => 'main',
+            'build_pack' => 'nixpacks',
+            'instant_deploy' => false,
+            'env_contents' => "# empty\n",
+        ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['env_contents']);
+});
+
 it('rejects destinations from another team', function () {
     fakeDevForgeGithubHttp();
 

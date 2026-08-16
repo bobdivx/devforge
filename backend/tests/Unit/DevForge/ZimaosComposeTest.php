@@ -33,7 +33,10 @@ it('keeps the ZimaOS compose copies identical', function () {
 
     expect(is_file($import))->toBeTrue()
         ->and(is_file($canonical))->toBeTrue()
-        ->and(file_get_contents($import))->toBe(file_get_contents($canonical));
+        ->and(file_get_contents($import))->toBe(file_get_contents($canonical))
+        ->and(file_get_contents($import))->not->toContain('10.1.0.58')
+        ->and(file_get_contents($import))->not->toContain('jeser.me')
+        ->and(file_get_contents($import))->not->toContain('zimacube');
 });
 
 it('starts DevForge on ZimaOS with web, proxy, and AppData paths', function (string $relativePath) {
@@ -41,7 +44,7 @@ it('starts DevForge on ZimaOS with web, proxy, and AppData paths', function (str
     $compose = zimaosCompose($path);
     $services = $compose['services'];
 
-    expect($services)->toHaveKeys(['proxy', 'web', 'api', 'db', 'redis', 'realtime']);
+    expect($services)->toHaveKeys(['proxy', 'web', 'api', 'db', 'redis', 'realtime', 'keeper']);
 
     foreach ($services as $service) {
         expect($service)->not->toHaveKey('network_mode');
@@ -59,6 +62,10 @@ it('starts DevForge on ZimaOS with web, proxy, and AppData paths', function (str
         ->and($services['db']['volumes'][0]['source'])->toBe('/media/Docker/AppData/devforge/postgres')
         ->and($services['redis']['volumes'][0]['source'])->toBe('/media/Docker/AppData/devforge/redis')
         ->and($services['api']['depends_on'])->toHaveKeys(['db', 'redis', 'realtime'])
+        ->and($services['keeper']['image'])->toBe('docker:27.5.1-cli')
+        ->and($services['keeper']['container_name'])->toBe('devforge-keeper')
+        ->and(implode("\n", $services['keeper']['command'] ?? []))->toContain('docker start')
+        ->and(implode("\n", $services['keeper']['command'] ?? []))->toContain('host.docker.internal')
         ->and($compose['x-casaos']['port_map'])->toBe('8080');
 
     $env = $services['api']['environment'];
@@ -67,12 +74,15 @@ it('starts DevForge on ZimaOS with web, proxy, and AppData paths', function (str
         ->and(zimaosEnv($env, 'REDIS_HOST'))->toBe('redis')
         ->and(zimaosEnv($env, 'PUSHER_BACKEND_HOST'))->toBe('realtime')
         ->and(zimaosEnv($env, 'SESSION_SECURE_COOKIE'))->toBe('false')
-        ->and(zimaosEnv($env, 'APP_URL'))->toBe('http://10.1.0.58:8080')
+        ->and(zimaosEnv($env, 'APP_URL'))->toBe('http://localhost:8080')
+        ->and(zimaosEnv($env, 'APP_URL'))->not->toContain('10.1.0.58')
         ->and(zimaosEnv($env, 'APP_KEY'))->toStartWith('base64:')
         ->and(zimaosEnv($env, 'APP_KEY'))->not->toContain('${')
-        ->and(zimaosEnv($env, 'DB_PASSWORD'))->not->toBeEmpty()
+        ->and(zimaosEnv($env, 'APP_KEY'))->not->toContain('kgGufqsNEXfgu1P9CreNMKFdyxxizRyDZxkOUVuuZuE=')
+        ->and(zimaosEnv($env, 'DB_PASSWORD'))->toBe('devforge')
         ->and(zimaosEnv($env, 'DB_PASSWORD'))->not->toContain('${')
-        ->and(zimaosEnv($env, 'DB_PASSWORD'))->not->toStartWith('$');
+        ->and(zimaosEnv($env, 'DB_PASSWORD'))->not->toStartWith('$')
+        ->and(zimaosEnv($env, 'DB_PASSWORD'))->not->toBe('aBVGheEhcY8E8INxMcq063RYhwG6oeM1');
 })->with([
     'import yaml' => 'devforge.zimaos.yaml',
     'canonical yaml' => 'docker'.DIRECTORY_SEPARATOR.'zimaos'.DIRECTORY_SEPARATOR.'devforge.yaml',
@@ -85,13 +95,16 @@ it('ships a ZimaOS App Store compose with pinned tags and /DATA/AppData volumes'
     $casaos = $compose['x-casaos'];
 
     expect($compose['name'])->toBe('devforge')
-        ->and($services)->toHaveKeys(['proxy', 'web', 'api', 'db', 'redis', 'realtime'])
+        ->and($services)->toHaveKeys(['proxy', 'web', 'api', 'db', 'redis', 'realtime', 'keeper'])
         ->and($services['proxy']['image'])->toBe('nginx:1.27.5-alpine')
         ->and($services['web']['image'])->toBe('bobdivx/devforge:web-4.1.2')
         ->and($services['api']['image'])->toBe('bobdivx/devforge:4.1.2')
         ->and($services['realtime']['image'])->toBe('bobdivx/devforge:realtime-4.1.2')
         ->and($services['db']['image'])->toBe('postgres:15.14-alpine')
-        ->and($services['redis']['image'])->toBe('redis:7.4.5-alpine');
+        ->and($services['redis']['image'])->toBe('redis:7.4.5-alpine')
+        ->and($services['keeper']['image'])->toBe('docker:27.5.1-cli')
+        ->and(implode("\n", $services['keeper']['command'] ?? []))->toContain('docker start')
+        ->and(implode("\n", $services['keeper']['command'] ?? []))->toContain('host.docker.internal');
 
     foreach ($services as $service) {
         expect($service['image'])->not->toEndWith(':latest')

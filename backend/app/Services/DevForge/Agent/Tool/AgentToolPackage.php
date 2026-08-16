@@ -70,6 +70,7 @@ class AgentToolPackage
                     'upsert_application_env_var',
                     'get_application_runtime_settings',
                     'update_application_runtime_settings',
+                    'update_application_advanced_settings',
                     'update_application_git_branch',
                     'sync_application_proxy_labels',
                     'fix_application_host_permissions',

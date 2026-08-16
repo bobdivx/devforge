@@ -4,6 +4,7 @@ namespace App\Services\DevForge\Server;
 
 use App\Models\Server;
 use App\Models\Team;
+use Illuminate\Validation\ValidationException;
 
 class ServerSettingsService
 {
@@ -37,7 +38,7 @@ class ServerSettingsService
     public function update(Server $server, array $input): array
     {
         $validated = validator($input, [
-            'wildcard_domain' => ['sometimes', 'nullable', 'url', 'max:255'],
+            'wildcard_domain' => ['sometimes', 'nullable', 'string', 'max:255'],
             'is_swarm_manager' => ['sometimes', 'boolean'],
             'is_swarm_worker' => ['sometimes', 'boolean'],
             'is_sentinel_enabled' => ['sometimes', 'boolean'],
@@ -52,8 +53,18 @@ class ServerSettingsService
         abort_unless($settings !== null, 422, 'Server settings are missing.');
 
         if (array_key_exists('wildcard_domain', $validated)) {
-            $wildcard = $validated['wildcard_domain'];
-            $settings->wildcard_domain = filled($wildcard) ? rtrim((string) $wildcard, '/') : null;
+            $rawWildcard = $validated['wildcard_domain'];
+            if (! filled($rawWildcard)) {
+                $settings->wildcard_domain = null;
+            } else {
+                $normalized = normalize_apps_wildcard_domain((string) $rawWildcard);
+                if ($normalized === null) {
+                    throw ValidationException::withMessages([
+                        'wildcard_domain' => ['Indiquez un domaine valide, par exemple exemple.com'],
+                    ]);
+                }
+                $settings->wildcard_domain = $normalized;
+            }
         }
 
         if (array_key_exists('is_swarm_manager', $validated)) {
@@ -99,7 +110,9 @@ class ServerSettingsService
     private function present(Server $server): array
     {
         $settings = $server->settings;
-        $wildcard = $settings?->wildcard_domain;
+        $wildcard = filled($settings?->wildcard_domain)
+            ? $settings->wildcard_domain
+            : instance_apps_wildcard_domain();
         $proxy = $server->proxy;
         $lastSaved = data_get($proxy, 'last_saved_settings');
         $lastApplied = data_get($proxy, 'last_applied_settings');

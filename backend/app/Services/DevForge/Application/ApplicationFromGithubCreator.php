@@ -6,6 +6,7 @@ use App\Enums\BuildPackTypes;
 use App\Jobs\LoadComposeFile;
 use App\Models\Application;
 use App\Models\GithubApp;
+use App\Models\Server;
 use App\Models\StandaloneDocker;
 use App\Models\SwarmDocker;
 use App\Models\Team;
@@ -17,6 +18,7 @@ use App\Services\DevForge\Github\GithubAppCatalog;
 use App\Services\DevForge\Readiness\ApplicationReadinessService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 use Visus\Cuid2\Cuid2;
 
@@ -26,11 +28,16 @@ class ApplicationFromGithubCreator
         private readonly CurrentTeamResources $currentTeamResources,
         private readonly DeploymentTargetData $deploymentTargetData,
         private readonly GithubAppCatalog $githubAppCatalog,
+        private readonly ApplicationDomainService $applicationDomainService,
     ) {}
 
     /**
      * @param  array<string, mixed>  $input
-     * @return array{application: Application, instant_deploy: bool}
+     * @return array{
+     *     application: Application,
+     *     instant_deploy: bool,
+     *     env_import: array{created: int, updated: int, skipped: array<int, array{key: string, reason: string}>}|null
+     * }
      */
     public function create(User $user, Team $team, array $input): array
     {
@@ -46,7 +53,19 @@ class ApplicationFromGithubCreator
             'ports_exposes' => ['nullable', 'integer', 'min:1', 'max:65535'],
             'name' => ['nullable', 'string', 'max:255'],
             'instant_deploy' => ['nullable', 'boolean'],
+            'env_contents' => ['nullable', 'string', 'max:262144'],
+            'domains' => ['nullable', 'string', 'max:5000'],
         ])->validate();
+
+        $envContents = is_string($validated['env_contents'] ?? null)
+            ? (string) $validated['env_contents']
+            : '';
+
+        if ($envContents !== '' && parseEnvFormatToArray($envContents) === []) {
+            throw ValidationException::withMessages([
+                'env_contents' => 'Aucune variable KEY=VALUE n’a été trouvée dans ce fichier .env.',
+            ]);
+        }
 
         $project = $this->currentTeamResources->project($user, $validated['project_uuid']);
         $environment = $this->currentTeamResources->environment(
@@ -86,8 +105,12 @@ class ApplicationFromGithubCreator
         $server = $destination->server;
         abort_unless($server !== null, 422, 'Destination server not found.');
         $server->loadMissing('settings');
-        $application->fqdn = generateUrl(server: $server, random: $application->uuid);
-        $application->save();
+        $this->assignDefaultDomains(
+            $application,
+            $server,
+            is_string($validated['domains'] ?? null) ? trim((string) $validated['domains']) : '',
+            $buildPack,
+        );
 
         app(ApplicationReadinessService::class)->ensureFor($application, autonomousEnabled: true);
 
@@ -100,6 +123,19 @@ class ApplicationFromGithubCreator
 
         if ($buildPack === BuildPackTypes::DOCKERCOMPOSE->value) {
             LoadComposeFile::dispatch($application);
+        }
+
+        $envImport = null;
+        if ($envContents !== '') {
+            $imported = app(ApplicationEnvironmentVariableCatalog::class)->import($application, [
+                'contents' => $envContents,
+                'is_preview' => false,
+            ]);
+            $envImport = [
+                'created' => $imported['created'],
+                'updated' => $imported['updated'],
+                'skipped' => $imported['skipped'],
+            ];
         }
 
         if ($instantDeploy) {
@@ -122,7 +158,42 @@ class ApplicationFromGithubCreator
         return [
             'application' => $application->load(['environment.project', 'destination.server']),
             'instant_deploy' => $instantDeploy,
+            'env_import' => $envImport,
         ];
+    }
+
+    private function assignDefaultDomains(
+        Application $application,
+        Server $server,
+        string $customDomains,
+        string $buildPack,
+    ): void {
+        $slug = application_url_slug($application->name, $application->uuid);
+        $pretty = generateUrl(server: $server, random: $slug);
+        $managed = generateUrl(server: $server, random: $application->uuid);
+
+        $application->fqdn = $managed;
+        $application->save();
+
+        $preferred = collect([$customDomains, $pretty === $managed ? null : $pretty])
+            ->filter(fn (mixed $domain): bool => is_string($domain) && $domain !== '')
+            ->implode(',');
+
+        if ($preferred !== '' && $buildPack !== BuildPackTypes::DOCKERCOMPOSE->value) {
+            $this->applicationDomainService->update($application, [
+                'domains' => $preferred,
+                'force_domain_override' => true,
+                'redeploy' => false,
+            ]);
+            $application->refresh();
+
+            return;
+        }
+
+        if ($pretty !== $managed) {
+            $application->fqdn = $pretty.','.$managed;
+            $application->save();
+        }
     }
 
     /**

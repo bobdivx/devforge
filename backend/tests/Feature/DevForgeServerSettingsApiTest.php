@@ -44,6 +44,18 @@ it('updates server wildcard domain settings', function () {
     expect($this->server->settings->fresh()->wildcard_domain)->toBe('https://apps.example.com');
 });
 
+it('accepts a bare host as server wildcard domain', function () {
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson("/api/devforge/v1/servers/{$this->server->uuid}/settings", [
+            'wildcard_domain' => 'exemple.com',
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.wildcard_domain', 'https://exemple.com');
+
+    expect($this->server->settings->fresh()->wildcard_domain)->toBe('https://exemple.com');
+});
+
 it('clears server wildcard domain when null', function () {
     $this->server->settings->update([
         'wildcard_domain' => 'https://apps.example.com',

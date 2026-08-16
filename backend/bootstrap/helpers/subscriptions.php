@@ -79,6 +79,7 @@ function allowedPathsForUnsubscribedAccounts()
         'force-password-reset',
         'two-factor-challenge',
         'livewire/update',
+        'sanctum/csrf-cookie',
         'admin',
     ];
 }
@@ -90,6 +91,8 @@ function allowedPathsForBoardingAccounts()
         'livewire/update',
         'webhooks/source/github/redirect',
         'webhooks/source/github/install',
+        'login/github/manifest',
+        'login/github/setup',
     ];
 }
 function allowedPathsForInvalidAccounts()

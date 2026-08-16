@@ -120,6 +120,9 @@ Route::get('/applications/{applicationUuid}/environment-variables', [Application
 Route::post('/applications/{applicationUuid}/environment-variables', [ApplicationController::class, 'storeEnvironmentVariable'])
     ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
     ->name('applications.environment-variables.store');
+Route::post('/applications/{applicationUuid}/environment-variables/import', [ApplicationController::class, 'importEnvironmentVariables'])
+    ->where('applicationUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('applications.environment-variables.import');
 Route::put('/applications/{applicationUuid}/environment-variables/{envUuid}', [ApplicationController::class, 'updateEnvironmentVariable'])
     ->where(['applicationUuid' => '[A-Za-z0-9-]{8,64}', 'envUuid' => '[A-Za-z0-9-]{8,64}'])
     ->name('applications.environment-variables.update');

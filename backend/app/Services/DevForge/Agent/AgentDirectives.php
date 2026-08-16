@@ -487,6 +487,7 @@ class AgentDirectives
             'update_application_git_branch',
             'upsert_application_env_var',
             'update_application_runtime_settings',
+            'update_application_advanced_settings',
             'get_application_runtime_settings',
             'write_application_source',
             'get_deployment_logs',

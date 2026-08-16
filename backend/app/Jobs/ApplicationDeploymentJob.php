@@ -22,6 +22,7 @@ use App\Notifications\Application\DeploymentSuccess;
 use App\Services\DevForge\Agent\DeploymentBuildAgentDispatcher;
 use App\Services\DevForge\Agent\DeploymentFailureAgentDispatcher;
 use App\Services\DevForge\Application\GithubPackagesBuildAuthInjector;
+use App\Services\DevForge\Application\NixpacksPlanDefaults;
 use App\Services\DevForge\Readiness\ApplicationReadinessService;
 use App\Support\ValidationPatterns;
 use App\Traits\EnvironmentVariableAnalyzer;
@@ -326,7 +327,7 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
                     $allContainers = collect($allContainers)->sort()->values();
                     foreach ($allContainers as $container) {
                         $containerName = data_get($container, 'Name');
-                        if ($containerName === 'coolify-proxy') {
+                        if (is_devforge_proxy_container_name((string) $containerName)) {
                             continue;
                         }
                         if (preg_match('/-(\d{12})/', $containerName)) {
@@ -804,7 +805,7 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
                 'hidden' => true,
                 'ignore_errors' => true,
             ], [
-                "docker network connect {$networkId} coolify-proxy >/dev/null 2>&1 || true",
+                'docker network connect '.$networkId.' '.devforge_proxy_container_name($this->server).' >/dev/null 2>&1 || true',
                 'hidden' => true,
                 'ignore_errors' => true,
             ]);
@@ -2557,20 +2558,16 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
                 // We need to generate envs here because nixpacks need to know to generate a proper Dockerfile
                 $this->generate_env_variables();
                 $merged_envs = collect(data_get($parsed, 'variables', []))->merge($this->env_args);
-                $aptPkgs = data_get($parsed, 'phases.setup.aptPkgs', []);
-                if (count($aptPkgs) === 0) {
-                    $aptPkgs = ['curl', 'wget'];
-                    data_set($parsed, 'phases.setup.aptPkgs', ['curl', 'wget']);
-                } else {
-                    if (! in_array('curl', $aptPkgs)) {
-                        $aptPkgs[] = 'curl';
-                    }
-                    if (! in_array('wget', $aptPkgs)) {
-                        $aptPkgs[] = 'wget';
-                    }
-                    data_set($parsed, 'phases.setup.aptPkgs', $aptPkgs);
-                }
                 data_set($parsed, 'variables', $merged_envs->toArray());
+                $skipPuppeteerBrowserDownload = $this->application->settings?->skipsPuppeteerBrowserDownload() ?? true;
+                $parsed = app(NixpacksPlanDefaults::class)->apply(
+                    $parsed,
+                    (string) $this->nixpacks_type,
+                    $skipPuppeteerBrowserDownload,
+                );
+                if ($this->nixpacks_type === 'node' && $skipPuppeteerBrowserDownload) {
+                    $this->application_deployment_queue->addLogEntry('Skip Puppeteer Chrome download (Paramètres avancés — désactivable).');
+                }
                 $is_laravel = data_get($parsed, 'variables.IS_LARAVEL', false);
                 if ($is_laravel) {
                     $variables = $this->laravel_finetunes();

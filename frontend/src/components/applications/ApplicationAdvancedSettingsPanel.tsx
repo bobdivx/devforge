@@ -14,6 +14,7 @@ type Draft = {
     disable_build_cache: boolean;
     inject_build_args_to_dockerfile: boolean;
     include_source_commit_in_build: boolean;
+    skip_puppeteer_browser_download: boolean;
     is_consistent_container_name_enabled: boolean;
     is_auto_deploy_enabled: boolean;
     is_image_auto_update_enabled: boolean;
@@ -35,6 +36,7 @@ function toDraft(data: ApplicationAdvancedSettings): Draft {
         disable_build_cache: data.disable_build_cache,
         inject_build_args_to_dockerfile: data.inject_build_args_to_dockerfile,
         include_source_commit_in_build: data.include_source_commit_in_build,
+        skip_puppeteer_browser_download: data.skip_puppeteer_browser_download,
         is_consistent_container_name_enabled: data.is_consistent_container_name_enabled,
         is_auto_deploy_enabled: data.is_auto_deploy_enabled,
         is_image_auto_update_enabled: data.is_image_auto_update_enabled,
@@ -124,6 +126,7 @@ export function ApplicationAdvancedSettingsPanel({ applicationUuid, canAct }: Pr
                 disable_build_cache: draft.disable_build_cache,
                 inject_build_args_to_dockerfile: draft.inject_build_args_to_dockerfile,
                 include_source_commit_in_build: draft.include_source_commit_in_build,
+                skip_puppeteer_browser_download: draft.skip_puppeteer_browser_download,
                 is_consistent_container_name_enabled: draft.is_consistent_container_name_enabled,
                 is_auto_deploy_enabled: draft.is_auto_deploy_enabled,
                 is_image_auto_update_enabled: draft.is_image_auto_update_enabled,
@@ -163,6 +166,11 @@ export function ApplicationAdvancedSettingsPanel({ applicationUuid, canAct }: Pr
         {
             key: 'include_source_commit_in_build',
             label: 'Inclure le commit source dans le build',
+        },
+        {
+            key: 'skip_puppeteer_browser_download',
+            label: 'Ne pas télécharger Chrome (Puppeteer)',
+            help: 'Activé par défaut. Évite l’échec npm ci sur Nixpacks. Décochez si l’app doit télécharger Chrome au build.',
         },
         {
             key: 'is_consistent_container_name_enabled',

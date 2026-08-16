@@ -4,6 +4,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Controllers\DevForgeController;
 use App\Http\Controllers\OauthController;
 use App\Http\Controllers\UploadController;
+use App\Http\Controllers\Webhook\Github as GithubWebhookController;
 use App\Livewire\Admin\Index as AdminIndex;
 use App\Livewire\Boarding\Index as BoardingIndex;
 use App\Livewire\Dashboard;
@@ -105,6 +106,11 @@ Route::middleware(['throttle:login'])->group(function () {
 
 Route::get('/auth/{provider}/redirect', [OauthController::class, 'redirect'])->name('auth.redirect');
 Route::get('/auth/{provider}/callback', [OauthController::class, 'callback'])->name('auth.callback');
+
+Route::middleware(['auth', 'throttle:30,1'])->group(function () {
+    Route::get('/login/github/manifest', [GithubWebhookController::class, 'redirect']);
+    Route::get('/login/github/setup', [GithubWebhookController::class, 'install']);
+});
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::middleware(['throttle:force-password-reset'])->group(function () {

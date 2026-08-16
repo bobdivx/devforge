@@ -206,6 +206,74 @@ it('rejects reveal for variables marked as shown once', function () {
         ->assertJsonPath('message', 'Cette valeur ne peut plus être affichée.');
 });
 
+it('imports a dotenv file into production and updates existing keys', function () {
+    $this->application->environment_variables()->create([
+        'key' => 'APP_ENV',
+        'value' => 'staging',
+        'is_preview' => false,
+        'is_runtime' => true,
+        'is_buildtime' => true,
+    ]);
+
+    $contents = <<<'ENV'
+# commentaire
+APP_ENV=production
+export TURSO_DATABASE_URL=libsql://example.turso.io
+JWT_SECRET="super secret"
+NIXPACKS_NODE_VERSION=20
+ENV;
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson("/api/devforge/v1/applications/{$this->application->uuid}/environment-variables/import", [
+            'contents' => $contents,
+            'is_preview' => false,
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.created', 2)
+        ->assertJsonPath('data.updated', 1)
+        ->assertJsonPath('data.skipped.0.key', 'NIXPACKS_NODE_VERSION')
+        ->assertJsonPath('data.skipped.0.reason', 'protected');
+
+    expect($this->application->environment_variables()->where('key', 'APP_ENV')->where('is_preview', false)->first()?->value)
+        ->toBe('production')
+        ->and($this->application->environment_variables()->where('key', 'TURSO_DATABASE_URL')->where('is_preview', false)->first()?->value)
+        ->toBe('libsql://example.turso.io')
+        ->and($this->application->environment_variables()->where('key', 'JWT_SECRET')->where('is_preview', false)->first()?->value)
+        ->toBe('super secret');
+});
+
+it('imports a windows-style dotenv with bom export and spaced equals', function () {
+    $contents = "\u{FEFF}export TURSO_DATABASE_URL = libsql://example.turso.io\r\nJWT_SECRET=\"super secret\"\r\nSITE_LOGIN_REQUIRED: true\n";
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson("/api/devforge/v1/applications/{$this->application->uuid}/environment-variables/import", [
+            'contents' => $contents,
+            'is_preview' => false,
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.created', 3)
+        ->assertJsonPath('data.updated', 0);
+
+    expect($this->application->environment_variables()->where('key', 'TURSO_DATABASE_URL')->where('is_preview', false)->first()?->value)
+        ->toBe('libsql://example.turso.io')
+        ->and($this->application->environment_variables()->where('key', 'JWT_SECRET')->where('is_preview', false)->first()?->value)
+        ->toBe('super secret')
+        ->and($this->application->environment_variables()->where('key', 'SITE_LOGIN_REQUIRED')->where('is_preview', false)->first()?->value)
+        ->toBe('true');
+});
+
+it('rejects an empty dotenv import', function () {
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson("/api/devforge/v1/applications/{$this->application->uuid}/environment-variables/import", [
+            'contents' => "# only comments\n\n",
+        ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['contents']);
+});
+
 it('returns not found for variables belonging to another team application', function () {
     $otherTeam = Team::factory()->create();
     $otherProject = Project::factory()->create(['team_id' => $otherTeam->id]);

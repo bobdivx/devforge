@@ -397,11 +397,11 @@
                             url: `${webhookBaseUrl}/source/github/events`,
                             active: true,
                         },
-                        redirect_url: `${webhookBaseUrl}/source/github/redirect`,
+                        redirect_url: `${baseUrl}/login/github/manifest`,
                         callback_urls: [`${baseUrl}/login/github/app`],
                         public: false,
                         request_oauth_on_install: false,
-                        setup_url: `${webhookBaseUrl}/source/github/install`,
+                        setup_url: `${baseUrl}/login/github/setup`,
                         setup_on_update: true,
                         default_permissions,
                         default_events
