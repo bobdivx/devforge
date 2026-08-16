@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact';
+import { FolderGit2 } from 'lucide-preact';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OnboardingGithubStep } from '../src/components/onboarding/OnboardingGithubStep';
 
@@ -15,6 +16,10 @@ afterEach(() => {
 });
 
 describe('OnboardingGithubStep', () => {
+    it('importe une icône lucide-preact toujours exportée', () => {
+        expect(FolderGit2).toBeTypeOf('function');
+    });
+
     it('propose un seul bouton pour se connecter à GitHub', async () => {
         vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
             if (String(input).includes('/github/apps')) {

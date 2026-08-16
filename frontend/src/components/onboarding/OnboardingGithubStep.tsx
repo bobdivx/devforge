@@ -1,4 +1,4 @@
-import { Github, LoaderCircle, Search } from 'lucide-preact';
+import { FolderGit2, LoaderCircle, Search } from 'lucide-preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import {
     domainApi,
@@ -65,7 +65,7 @@ export function OnboardingGithubStep({ canManage, onSkip, onConnected }: Onboard
                         {pending.map((app) => (
                             <li class="flex flex-wrap items-center justify-between gap-3 py-3" key={app.uuid}>
                                 <div class="flex items-center gap-2">
-                                    <Github class="size-4 text-primary" aria-hidden />
+                                    <FolderGit2 class="size-4 text-primary" aria-hidden />
                                     <p class="text-sm font-semibold">{app.display_name ?? app.name}</p>
                                     <StatusBadge label="À installer sur GitHub" tone="warning" />
                                 </div>
@@ -117,7 +117,7 @@ function ConnectGithubButton({ onError }: { onError: (message: string) => void }
                 aria-label={submitting ? 'Redirection vers GitHub…' : 'Continuer avec GitHub'}
                 onClick={() => void connect()}
             >
-                <Github class="size-4" aria-hidden />
+                <FolderGit2 class="size-4" aria-hidden />
                 {submitting ? 'Redirection vers GitHub…' : 'Continuer avec GitHub'}
             </Button>
             <button
