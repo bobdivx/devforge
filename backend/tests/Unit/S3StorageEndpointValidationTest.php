@@ -55,6 +55,8 @@ it('accepts real-world S3 endpoints', function (string $endpoint) {
     'Self-hosted MinIO on 172.16.x' => 'http://172.16.0.10:9000',
     'Self-hosted MinIO on 192.168.x' => 'http://192.168.1.50:9000',
     'Custom domain MinIO' => 'https://minio.example.com',
+    'Scaleway path-style' => 'https://s3.fr-par.scw.cloud',
+    'Scaleway virtual-hosted' => 'https://devforge.s3.fr-par.scw.cloud',
 ]);
 
 it('blocks testConnection() on an unsafe endpoint without issuing HTTP', function () {

@@ -110,10 +110,13 @@ class InstanceBackupService
         ]);
         $database->save();
 
+        $storage = $this->defaultS3Storage();
+
         ScheduledDatabaseBackup::create([
             'id' => 0,
             'enabled' => true,
-            'save_s3' => false,
+            'save_s3' => $storage !== null,
+            's3_storage_id' => $storage?->id,
             'frequency' => '0 0 * * *',
             'database_id' => $database->id,
             'database_type' => StandalonePostgresql::class,
@@ -198,10 +201,12 @@ class InstanceBackupService
         $backup = $database->scheduledBackups()->first();
 
         if (! $backup) {
+            $storage = $this->defaultS3Storage();
             $backup = ScheduledDatabaseBackup::create([
                 'id' => 0,
                 'enabled' => true,
-                'save_s3' => false,
+                'save_s3' => $storage !== null,
+                's3_storage_id' => $storage?->id,
                 'frequency' => '0 0 * * *',
                 'database_id' => $database->id,
                 'database_type' => StandalonePostgresql::class,
@@ -466,6 +471,17 @@ class InstanceBackupService
         }
 
         return $this->containerExists($server, 'coolify-db');
+    }
+
+    private function defaultS3Storage(): ?S3Storage
+    {
+        $teamId = (int) (currentTeam()?->id ?? 0);
+
+        return S3Storage::query()
+            ->where('is_usable', true)
+            ->whereIn('team_id', array_values(array_unique([$teamId, 0])))
+            ->orderBy('id')
+            ->first();
     }
 
     /**

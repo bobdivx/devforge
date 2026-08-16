@@ -9,7 +9,6 @@ use App\Rules\SafeWebhookUrl;
 use App\Services\DevForge\CurrentTeamContext;
 use App\Support\ValidationPatterns;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Uri;
 use Illuminate\Validation\ValidationException;
 
 class S3StorageService
@@ -147,7 +146,18 @@ class S3StorageService
         $validated = $validator->validated();
 
         if (! empty($validated['endpoint'])) {
-            $validated['endpoint'] = $this->normalizeEndpoint((string) $validated['endpoint']);
+            $normalized = S3EndpointNormalizer::normalize(
+                (string) $validated['endpoint'],
+                isset($validated['bucket']) ? (string) $validated['bucket'] : null,
+                isset($validated['region']) ? (string) $validated['region'] : null,
+            );
+            $validated['endpoint'] = $normalized['endpoint'];
+            if (filled($normalized['bucket'])) {
+                $validated['bucket'] = $normalized['bucket'];
+            }
+            if (filled($normalized['region'])) {
+                $validated['region'] = $normalized['region'];
+            }
         }
 
         return $validated;
@@ -182,24 +192,4 @@ class S3StorageService
             $storage->endpoint = 'https://s3.'.$validated['region'].'.amazonaws.com';
         }
     }
-
-    private function normalizeEndpoint(string $endpoint): string
-    {
-        if (str($endpoint)->contains('digitaloceanspaces.com')) {
-            $uri = Uri::of($endpoint);
-            $host = $uri->host();
-
-            if (preg_match('/^(.+)\.([^.]+\.digitaloceanspaces\.com)$/', $host, $matches)) {
-                $host = $matches[2];
-                $endpoint = "https://{$host}";
-            }
-        }
-
-        if (! str($endpoint)->startsWith('https://') && ! str($endpoint)->startsWith('http://')) {
-            $endpoint = 'https://'.$endpoint;
-        }
-
-        return $endpoint;
-    }
-
 }

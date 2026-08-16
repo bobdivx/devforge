@@ -56,6 +56,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Sauvegardes S3 (instance + bases)
+    |--------------------------------------------------------------------------
+    |
+    | Les identifiants vivent dans le .env (pas seulement en base) pour
+    | survivre à une recréation de Postgres. `php artisan app:init` et
+    | `php artisan devforge:ensure-s3-backup` synchronisent la destination
+    | et activent save_s3 sur les plannings existants.
+    |
+    */
+    'backup_s3' => [
+        'enabled' => filter_var(env('DEVFORGE_BACKUP_S3_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+        'attach_new_backups' => filter_var(env('DEVFORGE_BACKUP_S3_ATTACH_NEW', true), FILTER_VALIDATE_BOOLEAN),
+        'name' => (string) env('DEVFORGE_BACKUP_S3_NAME', 'Scaleway backups'),
+        'key' => (string) env('DEVFORGE_BACKUP_S3_KEY', ''),
+        'secret' => (string) env('DEVFORGE_BACKUP_S3_SECRET', ''),
+        'bucket' => (string) env('DEVFORGE_BACKUP_S3_BUCKET', 'devforge'),
+        'region' => (string) env('DEVFORGE_BACKUP_S3_REGION', 'fr-par'),
+        'endpoint' => (string) env('DEVFORGE_BACKUP_S3_ENDPOINT', 'https://s3.fr-par.scw.cloud'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Séquence de démarrage des applications
     |--------------------------------------------------------------------------
     |

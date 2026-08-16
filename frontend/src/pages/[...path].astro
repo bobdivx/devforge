@@ -1,6 +1,6 @@
 ---
 import { App } from '../components/App';
-import { DEVFORGE_LOGO_URL } from '../lib/brand';
+import { DEVFORGE_FAVICON_URL, DEVFORGE_LOGO_URL } from '../lib/brand';
 import { staticRoutePaths } from '../lib/routes';
 import '../styles/global.css';
 
@@ -25,6 +25,7 @@ const { initialPath } = Astro.props;
         <meta name="viewport" content="width=device-width" />
         <meta name="description" content="Interface DevForge pour administrer la plateforme Coolify." />
         <meta name="theme-color" content="#171717" />
+        <link rel="icon" href={DEVFORGE_FAVICON_URL} sizes="any" />
         <link rel="icon" href={DEVFORGE_LOGO_URL} type="image/png" />
         <link rel="apple-touch-icon" href={DEVFORGE_LOGO_URL} />
         <title>DevForge</title>

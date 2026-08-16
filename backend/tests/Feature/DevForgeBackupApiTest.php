@@ -323,3 +323,36 @@ it('queues a manual database backup run', function () {
 
 });
 
+it('attaches the team s3 destination when creating a backup without save_s3', function () {
+    config()->set('devforge.backup_s3.enabled', true);
+    config()->set('devforge.backup_s3.attach_new_backups', true);
+
+    $storage = createDevForgeS3Storage($this->team);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson("/api/devforge/v1/databases/{$this->database->uuid}/backups", [
+            'frequency' => '0 0 * * *',
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.save_s3', true)
+        ->assertJsonPath('data.s3_storage.uuid', $storage->uuid);
+});
+
+it('normalizes a scaleway virtual-hosted endpoint on create', function () {
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/s3-storages', [
+            'name' => 'Scaleway',
+            'region' => 'us-east-1',
+            'key' => 'access-key',
+            'secret' => 'secret-key',
+            'bucket' => 'devforge',
+            'endpoint' => 'https://devforge.s3.fr-par.scw.cloud',
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.endpoint', 'https://s3.fr-par.scw.cloud')
+        ->assertJsonPath('data.bucket', 'devforge')
+        ->assertJsonPath('data.region', 'fr-par');
+});
+

@@ -366,6 +366,22 @@ class DatabaseBackupService
             if (empty($payload['databases_to_backup'])) {
                 $payload['databases_to_backup'] = $this->defaultDatabasesToBackup($database);
             }
+
+            if (
+                ! array_key_exists('save_s3', $validated)
+                && config('devforge.backup_s3.enabled')
+                && config('devforge.backup_s3.attach_new_backups')
+            ) {
+                $defaultStorage = S3Storage::ownedByCurrentTeamAPI($team->id)
+                    ->where('is_usable', true)
+                    ->orderBy('id')
+                    ->first();
+
+                if ($defaultStorage) {
+                    $payload['save_s3'] = true;
+                    $payload['s3_storage_id'] = $defaultStorage->id;
+                }
+            }
         }
 
         return $payload;

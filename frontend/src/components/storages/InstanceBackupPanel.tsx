@@ -92,11 +92,12 @@ export function InstanceBackupPanel({ compact = false }: Props) {
     };
 
     const openScheduleEditor = (data: InstanceBackupSettings) => {
+        const defaultStorage = data.backup?.s3_storage?.uuid ?? data.s3_storages[0]?.uuid ?? null;
         setScheduleForm({
             enabled: data.backup?.enabled ?? true,
             frequency: data.backup?.frequency ?? '0 0 * * *',
-            save_s3: data.backup?.save_s3 ?? false,
-            s3_storage_uuid: data.backup?.s3_storage?.uuid ?? null,
+            save_s3: data.backup?.save_s3 ?? Boolean(defaultStorage),
+            s3_storage_uuid: defaultStorage,
             disable_local_backup: data.backup?.disable_local_backup ?? false,
         });
     };

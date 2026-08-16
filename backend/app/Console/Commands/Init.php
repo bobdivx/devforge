@@ -70,6 +70,11 @@ class Init extends Command
         // Backward compatibility
         $this->replaceSlashInEnvironmentName();
         $this->restoreCoolifyDbBackup();
+        try {
+            $this->call('devforge:ensure-s3-backup');
+        } catch (\Throwable $e) {
+            echo "Error in devforge:ensure-s3-backup: {$e->getMessage()}\n";
+        }
         $this->updateUserEmails();
         //
         $this->updateTraefikLabels();

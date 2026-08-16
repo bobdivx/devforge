@@ -10,7 +10,7 @@
         <div class="devforge-auth-panel">
             <header class="devforge-auth-brand">
                 <img
-                    src="{{ asset('brand/logo.png') }}"
+                    src="/brand/logo.png"
                     alt=""
                     class="devforge-auth-logo"
                     width="56"

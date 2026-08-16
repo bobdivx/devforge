@@ -51,7 +51,11 @@ class FortifyServiceProvider extends ServiceProvider
                 return redirect()->route('login');
             }
 
-            return view('auth.register', [
+            $registerView = config('devforge.enabled')
+                ? 'auth.register-devforge'
+                : 'auth.register';
+
+            return view($registerView, [
                 'isFirstUser' => $isFirstUser,
             ]);
         });
