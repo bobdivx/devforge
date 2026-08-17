@@ -1125,6 +1125,9 @@ function generateUrl(Server $server, string $random, bool $forceHttps = false): 
     if ($forceHttps) {
         $scheme = 'https';
     }
+    if ($scheme === '') {
+        $scheme = fqdn_default_scheme_for_host((string) $host);
+    }
 
     return "$scheme://{$random}.$host$path";
 }
@@ -1140,8 +1143,8 @@ function generateFqdn(Server $server, string $random, bool $forceHttps = false, 
         $scheme = 'https';
     }
 
-    if ($parserVersion >= 5 && version_compare(config('constants.coolify.version'), '4.0.0-beta.420.7', '>=')) {
-        return "{$random}.$host$path";
+    if ($scheme === '') {
+        $scheme = fqdn_default_scheme_for_host((string) $host);
     }
 
     return "$scheme://{$random}.$host$path";

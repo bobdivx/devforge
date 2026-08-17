@@ -189,12 +189,25 @@ export function primaryDomain(domains: string[]): string | null {
     return domains[0] ?? null;
 }
 
+export function ensureDomainScheme(domain: string): string {
+    const trimmed = domain.trim();
+    if (!trimmed) {
+        return '';
+    }
+
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+        return trimmed;
+    }
+
+    return `https://${trimmed}`;
+}
+
 export function visitUrl(domain: string | null): string | null {
     if (!domain) {
         return null;
     }
 
-    return domain.startsWith('http') ? domain : `https://${domain}`;
+    return ensureDomainScheme(domain) || null;
 }
 
 export function websiteScreenshotUrl(domain: string | null, width = 960): string | null {

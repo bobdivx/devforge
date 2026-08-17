@@ -78,6 +78,11 @@ class Init extends Command
         $this->updateUserEmails();
         //
         $this->updateTraefikLabels();
+        try {
+            $this->call('devforge:repair-fqdn-schemes', ['--redeploy' => true]);
+        } catch (\Throwable $e) {
+            echo "Error in devforge:repair-fqdn-schemes: {$e->getMessage()}\n";
+        }
         $this->cleanupUnusedNetworkFromCoolifyProxy();
 
         try {

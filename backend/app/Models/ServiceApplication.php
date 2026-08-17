@@ -42,6 +42,9 @@ class ServiceApplication extends BaseModel
             if ($service->isDirty('status')) {
                 $service->last_online_at = now();
             }
+            if ($service->isDirty('fqdn') && filled($service->fqdn)) {
+                $service->fqdn = normalize_fqdn_list($service->fqdn);
+            }
         });
     }
 

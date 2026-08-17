@@ -68,6 +68,7 @@ bootstrap/helpers/constants.php
 bootstrap/helpers/databases.php
 bootstrap/helpers/docker.php
 app/Jobs/ApplicationDeploymentJob.php
+app/Jobs/DatabaseBackupJob.php
 app/Models/StandaloneLibsql.php
 app/Actions/Database/StartLibsql.php
 app/Actions/Database/StartDatabase.php

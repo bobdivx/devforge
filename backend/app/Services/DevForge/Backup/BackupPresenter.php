@@ -75,6 +75,7 @@ class BackupPresenter
             'filename' => $execution->filename,
             'database_name' => $execution->database_name,
             's3_uploaded' => $execution->s3_uploaded,
+            'local_storage_deleted' => (bool) $execution->local_storage_deleted,
             'created_at' => $this->iso8601($execution->created_at),
             'finished_at' => $this->iso8601($execution->finished_at),
         ];

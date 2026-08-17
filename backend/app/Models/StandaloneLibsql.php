@@ -95,6 +95,9 @@ class StandaloneLibsql extends BaseModel
             if ($database->isDirty('status')) {
                 $database->last_online_at = now();
             }
+            if ($database->isDirty('fqdn') && filled($database->fqdn)) {
+                $database->fqdn = normalize_fqdn_list($database->fqdn);
+            }
         });
     }
 

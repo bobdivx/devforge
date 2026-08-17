@@ -1,10 +1,9 @@
-import type { ServerCleanupPhase } from '../../lib/server-cleanup-tracker';
-import type { ServerStorageExecution } from '../../lib/domain-api';
+type JobProgressPhase = 'queued' | 'running' | 'completed' | 'failed' | 'timeout';
 
 type Props = {
-    phase: ServerCleanupPhase;
+    phase: JobProgressPhase;
     phaseLabel: string;
-    execution: ServerStorageExecution | null;
+    execution?: { message?: string | null } | null;
 };
 
 export function CleanupProgressPanel({ phase, phaseLabel, execution }: Props) {

@@ -89,9 +89,22 @@ it('rejects invalid domain urls', function () {
     $this->actingAs($this->user)
         ->withSession($this->session)
         ->putJson("/api/devforge/v1/applications/{$this->application->uuid}/domains", [
-            'domains' => 'not-a-url',
+            'domains' => 'https://',
         ])
         ->assertStatus(422);
+});
+
+it('prefixes https on scheme-less hostnames', function () {
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson("/api/devforge/v1/applications/{$this->application->uuid}/domains", [
+            'domains' => 'sonozz.example.com',
+            'redeploy' => false,
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.domains.0', 'https://sonozz.example.com');
+
+    expect($this->application->fresh()->fqdn)->toContain('https://sonozz.example.com');
 });
 
 it('generates a domain from the server wildcard', function () {

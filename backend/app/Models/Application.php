@@ -254,8 +254,13 @@ class Application extends BaseModel
             if ($application->isDirty('fqdn')) {
                 if ($application->fqdn === '') {
                     $application->fqdn = null;
+                } elseif ($application->fqdn !== null) {
+                    $application->fqdn = normalize_fqdn_list($application->fqdn);
                 }
                 $payload['fqdn'] = $application->fqdn;
+            }
+            if ($application->isDirty('docker_compose_domains') && filled($application->docker_compose_domains)) {
+                $application->docker_compose_domains = normalize_compose_domains_json($application->docker_compose_domains);
             }
             if ($application->isDirty('install_command')) {
                 $payload['install_command'] = str($application->install_command)->trim();

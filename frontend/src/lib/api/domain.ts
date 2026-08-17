@@ -523,6 +523,7 @@ export type InstanceBackupExecution = {
     filename: string | null;
     database_name: string | null;
     s3_uploaded: boolean | null;
+    local_storage_deleted?: boolean;
     created_at: string | null;
     finished_at: string | null;
     download_url: string | null;
@@ -2547,6 +2548,14 @@ export const domainApi = {
     migrateInstanceFromCoolify: () => mutate<ApiResponse<InstanceBackupSettings>>('/settings/backup/migrate-coolify', {
         method: 'POST',
     }),
+    deleteInstanceBackupExecution: (executionUuid: string, deleteS3 = false) => mutate<ApiResponse<InstanceBackupSettings>>(
+        `/settings/backup/executions/${encodeURIComponent(executionUuid)}?delete_s3=${deleteS3 ? '1' : '0'}`,
+        { method: 'DELETE' },
+    ),
+    deleteFailedInstanceBackupExecutions: () => mutate<ApiResponse<InstanceBackupSettings>>(
+        '/settings/backup/executions/failed',
+        { method: 'DELETE' },
+    ),
     scheduledJobs: (type = 'all', date = 'last_24h', skip = 0) => apiFetch<ApiResponse<ScheduledJobsData>>(`${API_BASE}/settings/scheduled-jobs?type=${type}&date=${date}&skip=${skip}`),
     scheduledJobsDefinitions: () => apiFetch<ApiResponse<{ definitions: ScheduledJobDefinition[] }>>(`${API_BASE}/settings/scheduled-jobs/definitions`),
     oauthSettings: () => apiFetch<ApiResponse<OauthProviderSettings[]>>(`${API_BASE}/settings/oauth`),

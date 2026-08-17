@@ -71,9 +71,13 @@ class InstanceBackupController extends Controller
     {
         abort_unless(isInstanceAdmin(), 403);
 
-        return response()->json([
-            'data' => $this->instanceBackupService->latestExport(),
-        ]);
+        try {
+            return response()->json([
+                'data' => $this->instanceBackupService->latestExport(),
+            ]);
+        } catch (HttpException $e) {
+            return response()->json(['error' => $e->getMessage()], $e->getStatusCode());
+        }
     }
 
     public function import(Request $request): JsonResponse
@@ -91,6 +95,35 @@ class InstanceBackupController extends Controller
                     $request->file('file'),
                     $request->boolean('from_coolify'),
                 ),
+            ]);
+        } catch (HttpException $e) {
+            return response()->json(['error' => $e->getMessage()], $e->getStatusCode());
+        }
+    }
+
+    public function destroyExecution(Request $request, string $executionUuid): JsonResponse
+    {
+        abort_unless(isInstanceAdmin(), 403);
+
+        try {
+            return response()->json([
+                'data' => $this->instanceBackupService->deleteExecution(
+                    $executionUuid,
+                    $request->boolean('delete_s3'),
+                ),
+            ]);
+        } catch (HttpException $e) {
+            return response()->json(['error' => $e->getMessage()], $e->getStatusCode());
+        }
+    }
+
+    public function destroyFailedExecutions(): JsonResponse
+    {
+        abort_unless(isInstanceAdmin(), 403);
+
+        try {
+            return response()->json([
+                'data' => $this->instanceBackupService->deleteFailedExecutions(),
             ]);
         } catch (HttpException $e) {
             return response()->json(['error' => $e->getMessage()], $e->getStatusCode());

@@ -188,6 +188,49 @@ it('can fetch instance backup settings when executions have finished_at', functi
         ]);
 });
 
+it('hides local download when the dump was deleted after s3 upload', function () {
+    seedInstanceDatabase();
+
+    $backup = ScheduledDatabaseBackup::find(0);
+    ScheduledDatabaseBackupExecution::create([
+        'scheduled_database_backup_id' => $backup->id,
+        'filename' => '/media/Docker/AppData/devforge/data/backups/coolify/devforge-db-hostdockerinternal/pg-dump-devforge-1786985338.dmp',
+        'status' => 'success',
+        'size' => 3232086,
+        's3_uploaded' => true,
+        'local_storage_deleted' => true,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/settings/backup')
+        ->assertSuccessful()
+        ->assertJsonPath('data.executions.0.s3_uploaded', true)
+        ->assertJsonPath('data.executions.0.local_storage_deleted', true)
+        ->assertJsonPath('data.executions.0.download_url', null);
+});
+
+it('rejects local export when only s3 copies remain', function () {
+    seedInstanceDatabase();
+
+    $backup = ScheduledDatabaseBackup::find(0);
+    $backup->update(['disable_local_backup' => true, 'save_s3' => true]);
+    ScheduledDatabaseBackupExecution::create([
+        'scheduled_database_backup_id' => $backup->id,
+        'filename' => '/data/devforge/backups/instance.sql.gz',
+        'status' => 'success',
+        'size' => 1234,
+        's3_uploaded' => true,
+        'local_storage_deleted' => true,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/settings/backup/export')
+        ->assertStatus(404)
+        ->assertJsonPath('error', 'Aucune copie locale à exporter : les dumps sont uniquement sur S3.');
+});
+
 it('rejects invalid instance backup import files', function () {
     seedInstanceDatabase();
 
@@ -198,4 +241,155 @@ it('rejects invalid instance backup import files', function () {
             'from_coolify' => true,
         ])
         ->assertStatus(422);
+});
+
+it('can delete a failed instance backup execution', function () {
+    seedInstanceDatabase();
+
+    $backup = ScheduledDatabaseBackup::find(0);
+    $execution = ScheduledDatabaseBackupExecution::create([
+        'scheduled_database_backup_id' => $backup->id,
+        'filename' => null,
+        'status' => 'failed',
+        'message' => 'No such container: coolify-db',
+        'size' => 0,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->deleteJson('/api/devforge/v1/settings/backup/executions/'.$execution->uuid)
+        ->assertSuccessful()
+        ->assertJsonCount(0, 'data.executions');
+
+    expect(ScheduledDatabaseBackupExecution::find($execution->id))->toBeNull();
+});
+
+it('rejects deleting a running instance backup execution', function () {
+    seedInstanceDatabase();
+
+    $backup = ScheduledDatabaseBackup::find(0);
+    $execution = ScheduledDatabaseBackupExecution::create([
+        'scheduled_database_backup_id' => $backup->id,
+        'filename' => null,
+        'status' => 'running',
+        'size' => 0,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->deleteJson('/api/devforge/v1/settings/backup/executions/'.$execution->uuid)
+        ->assertStatus(422)
+        ->assertJsonPath('error', 'Impossible de supprimer une sauvegarde en cours.');
+
+    expect(ScheduledDatabaseBackupExecution::find($execution->id))->not->toBeNull();
+});
+
+it('can purge all failed instance backup executions', function () {
+    seedInstanceDatabase();
+
+    $backup = ScheduledDatabaseBackup::find(0);
+    ScheduledDatabaseBackupExecution::create([
+        'scheduled_database_backup_id' => $backup->id,
+        'filename' => null,
+        'status' => 'failed',
+        'size' => 0,
+    ]);
+    ScheduledDatabaseBackupExecution::create([
+        'scheduled_database_backup_id' => $backup->id,
+        'filename' => null,
+        'status' => 'failed',
+        'size' => 0,
+    ]);
+    $success = ScheduledDatabaseBackupExecution::create([
+        'scheduled_database_backup_id' => $backup->id,
+        'filename' => '/data/devforge/backups/instance.sql.gz',
+        'status' => 'success',
+        'size' => 1234,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->deleteJson('/api/devforge/v1/settings/backup/executions/failed')
+        ->assertSuccessful()
+        ->assertJsonCount(1, 'data.executions')
+        ->assertJsonPath('data.executions.0.uuid', $success->uuid);
+
+    expect(ScheduledDatabaseBackupExecution::where('status', 'failed')->count())->toBe(0)
+        ->and(ScheduledDatabaseBackupExecution::find($success->id))->not->toBeNull();
+});
+
+it('enables s3 on instance backup when a destination already exists', function () {
+    seedInstanceDatabase();
+
+    $storage = S3Storage::create([
+        'name' => 'Backups bucket',
+        'region' => 'us-east-1',
+        'key' => 'test-key',
+        'secret' => 'test-secret',
+        'bucket' => 'test-bucket',
+        'endpoint' => 'https://s3.example.com',
+        'is_usable' => true,
+        'team_id' => 0,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/settings/backup')
+        ->assertSuccessful()
+        ->assertJsonPath('data.backup.save_s3', true)
+        ->assertJsonPath('data.backup.s3_storage.uuid', $storage->uuid);
+
+    $backup = ScheduledDatabaseBackup::find(0);
+
+    expect($backup->save_s3)->toBeTrue()
+        ->and($backup->s3_storage_id)->toBe($storage->id);
+});
+
+it('attaches a configured s3 destination even when it is not marked usable yet', function () {
+    seedInstanceDatabase();
+
+    $storage = S3Storage::create([
+        'name' => 'Untested bucket',
+        'region' => 'us-east-1',
+        'key' => 'test-key',
+        'secret' => 'test-secret',
+        'bucket' => 'test-bucket',
+        'endpoint' => 'https://s3.example.com',
+        'is_usable' => false,
+        'team_id' => 0,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/settings/backup')
+        ->assertSuccessful()
+        ->assertJsonPath('data.backup.save_s3', true)
+        ->assertJsonPath('data.backup.s3_storage.uuid', $storage->uuid);
+});
+
+it('does not re-enable s3 after an explicit disable', function () {
+    seedInstanceDatabase();
+
+    $storage = S3Storage::create([
+        'name' => 'Backups bucket',
+        'region' => 'us-east-1',
+        'key' => 'test-key',
+        'secret' => 'test-secret',
+        'bucket' => 'test-bucket',
+        'endpoint' => 'https://s3.example.com',
+        'is_usable' => true,
+        'team_id' => 0,
+    ]);
+
+    ScheduledDatabaseBackup::find(0)->update([
+        'save_s3' => false,
+        's3_storage_id' => $storage->id,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/settings/backup')
+        ->assertSuccessful()
+        ->assertJsonPath('data.backup.save_s3', false)
+        ->assertJsonPath('data.backup.s3_storage.uuid', $storage->uuid);
 });

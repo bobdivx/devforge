@@ -73,6 +73,12 @@ class ApplicationPreview extends BaseModel
             if ($preview->isDirty('status')) {
                 $preview->last_online_at = now();
             }
+            if ($preview->isDirty('fqdn') && filled($preview->fqdn)) {
+                $preview->fqdn = normalize_fqdn_list($preview->fqdn);
+            }
+            if ($preview->isDirty('docker_compose_domains') && filled($preview->docker_compose_domains)) {
+                $preview->docker_compose_domains = normalize_compose_domains_json($preview->docker_compose_domains);
+            }
         });
     }
 

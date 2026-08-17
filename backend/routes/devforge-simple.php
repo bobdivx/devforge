@@ -58,6 +58,11 @@ Route::put('/settings/backup/schedule', [InstanceBackupController::class, 'updat
 Route::post('/settings/backup/run', [InstanceBackupController::class, 'run'])->name('settings.backup.run');
 Route::get('/settings/backup/export', [InstanceBackupController::class, 'export'])->name('settings.backup.export');
 Route::post('/settings/backup/import', [InstanceBackupController::class, 'import'])->name('settings.backup.import');
+Route::delete('/settings/backup/executions/failed', [InstanceBackupController::class, 'destroyFailedExecutions'])
+    ->name('settings.backup.executions.destroy-failed');
+Route::delete('/settings/backup/executions/{executionUuid}', [InstanceBackupController::class, 'destroyExecution'])
+    ->where('executionUuid', '[A-Za-z0-9-]{8,64}')
+    ->name('settings.backup.executions.destroy');
 Route::post('/settings/backup/migrate-coolify', [InstanceBackupController::class, 'migrateFromCoolify'])->name('settings.backup.migrate-coolify');
 Route::get('/settings/oauth', [OauthSettingsController::class, 'index'])->name('settings.oauth');
 Route::put('/settings/oauth/{provider}', [OauthSettingsController::class, 'update'])->name('settings.oauth.update');

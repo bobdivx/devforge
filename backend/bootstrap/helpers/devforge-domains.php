@@ -28,6 +28,103 @@ function resolve_application_wildcard(Server $server): string
     return sslip($server);
 }
 
+/**
+ * Traefik/Caddy treat a scheme-less value as a path, not a host
+ * (`Host(``) && PathPrefix(`app.example.com`)` → HTTP 404).
+ */
+function ensure_fqdn_has_scheme(string $domain, ?string $defaultScheme = null): string
+{
+    $domain = trim($domain);
+    if ($domain === '') {
+        return $domain;
+    }
+
+    if (preg_match('#^[a-z][a-z0-9+.-]*://#i', $domain) === 1) {
+        return $domain;
+    }
+
+    $scheme = $defaultScheme ?: fqdn_default_scheme_for_host($domain);
+
+    return $scheme.'://'.$domain;
+}
+
+function fqdn_default_scheme_for_host(string $host): string
+{
+    $host = strtolower(trim($host));
+    $host = (string) preg_replace('#^[a-z][a-z0-9+.-]*://#i', '', $host);
+    $host = explode('/', $host, 2)[0] ?? $host;
+    $host = explode(':', $host, 2)[0] ?? $host;
+
+    if (
+        str_ends_with($host, '.local')
+        || str_contains($host, 'sslip.io')
+        || str_contains($host, 'zimacube')
+        || filter_var($host, FILTER_VALIDATE_IP)
+    ) {
+        return 'http';
+    }
+
+    return 'https';
+}
+
+function normalize_fqdn_list(?string $fqdn): ?string
+{
+    if ($fqdn === null) {
+        return null;
+    }
+
+    $normalized = str($fqdn)
+        ->explode(',')
+        ->map(fn (string $domain): string => trim($domain))
+        ->filter()
+        ->map(fn (string $domain): string => ensure_fqdn_has_scheme($domain))
+        ->unique()
+        ->values();
+
+    if ($normalized->isEmpty()) {
+        return null;
+    }
+
+    return $normalized->implode(',');
+}
+
+function normalize_compose_domains_json(?string $json): ?string
+{
+    if ($json === null || trim($json) === '') {
+        return $json;
+    }
+
+    $decoded = json_decode($json, true);
+    if (! is_array($decoded)) {
+        return $json;
+    }
+
+    $changed = false;
+    foreach ($decoded as $key => $value) {
+        if (is_string($value)) {
+            $normalized = normalize_fqdn_list($value) ?? $value;
+            if ($normalized !== $value) {
+                $decoded[$key] = $normalized;
+                $changed = true;
+            }
+
+            continue;
+        }
+
+        if (! is_array($value) || ! isset($value['domain']) || ! is_string($value['domain'])) {
+            continue;
+        }
+
+        $normalized = normalize_fqdn_list($value['domain']);
+        if ($normalized !== null && $normalized !== $value['domain']) {
+            $decoded[$key]['domain'] = $normalized;
+            $changed = true;
+        }
+    }
+
+    return $changed ? json_encode($decoded) : $json;
+}
+
 function normalize_apps_wildcard_domain(?string $value): ?string
 {
     if ($value === null) {

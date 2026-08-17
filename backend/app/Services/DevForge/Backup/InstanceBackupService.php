@@ -10,6 +10,7 @@ use App\Models\Server;
 use App\Models\StandaloneDocker;
 use App\Models\StandalonePostgresql;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -18,9 +19,9 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class InstanceBackupService
 {
-    public const INSTANCE_DATABASE_NAMES = ['coolify-db', 'devforge-db'];
+    public const INSTANCE_DATABASE_NAMES = InstanceBackupTarget::DATABASE_NAMES;
 
-    public const CONTAINER_CANDIDATES = ['devforge-db', 'coolify-db'];
+    public const CONTAINER_CANDIDATES = InstanceBackupTarget::CONTAINER_CANDIDATES;
 
     public function __construct(
         private readonly BackupPresenter $presenter,
@@ -31,6 +32,8 @@ class InstanceBackupService
      */
     public function show(): array
     {
+        $this->attachDefaultS3IfUnconfigured();
+
         $database = $this->findInstanceDatabase();
         $backup = $database?->scheduledBackups()->with(['s3', 'latest_log'])->first();
         $server = Server::find(0);
@@ -59,7 +62,7 @@ class InstanceBackupService
                     $this->presenter->execution($execution),
                     [
                         'id' => $execution->id,
-                        'download_url' => $execution->filename
+                        'download_url' => $execution->filename && ! $execution->local_storage_deleted
                             ? url('/download/backup/'.$execution->id)
                             : null,
                     ],
@@ -240,8 +243,6 @@ class InstanceBackupService
             }
 
             $s3Id = $storage->id;
-        } elseif (array_key_exists('save_s3', $validated) && ! $saveS3) {
-            $s3Id = null;
         }
 
         $backup->fill([
@@ -265,6 +266,30 @@ class InstanceBackupService
     }
 
     /**
+     * Active S3 sur la sauvegarde d’instance dès qu’une destination existe,
+     * sauf si une destination a déjà été choisie (y compris après désactivation manuelle).
+     */
+    public function attachDefaultS3IfUnconfigured(): void
+    {
+        $database = $this->findInstanceDatabase();
+        $backup = $database?->scheduledBackups()->first();
+
+        if (! $backup || $backup->s3_storage_id) {
+            return;
+        }
+
+        $storage = $this->defaultS3Storage();
+        if (! $storage) {
+            return;
+        }
+
+        $backup->forceFill([
+            'save_s3' => true,
+            's3_storage_id' => $storage->id,
+        ])->save();
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function runNow(): array
@@ -284,6 +309,57 @@ class InstanceBackupService
             'backup_uuid' => $backup->uuid,
             'message' => 'Sauvegarde d’instance mise en file d’attente.',
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function deleteExecution(string $executionUuid, bool $deleteS3 = false): array
+    {
+        [$database, $backup] = $this->requireBackup();
+        $execution = $backup->executions()
+            ->where('uuid', $executionUuid)
+            ->firstOrFail();
+
+        if ($execution->status === 'running') {
+            throw new HttpException(422, 'Impossible de supprimer une sauvegarde en cours.');
+        }
+
+        $this->purgeExecutionFiles($execution, $backup, $deleteS3);
+        $execution->delete();
+
+        auditLog('devforge.instance.backup_execution_deleted', [
+            'backup_uuid' => $backup->uuid,
+            'database_uuid' => $database->uuid,
+            'execution_uuid' => $executionUuid,
+            'delete_s3' => $deleteS3,
+        ]);
+
+        return $this->show();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function deleteFailedExecutions(): array
+    {
+        [$database, $backup] = $this->requireBackup();
+        $failed = $backup->executions()
+            ->where('status', 'failed')
+            ->get();
+
+        foreach ($failed as $execution) {
+            $this->purgeExecutionFiles($execution, $backup, false);
+            $execution->delete();
+        }
+
+        auditLog('devforge.instance.backup_failed_executions_deleted', [
+            'backup_uuid' => $backup->uuid,
+            'database_uuid' => $database->uuid,
+            'deleted_count' => $failed->count(),
+        ]);
+
+        return $this->show();
     }
 
     /**
@@ -365,6 +441,10 @@ class InstanceBackupService
         $execution = $backup->executions()
             ->whereNotNull('filename')
             ->where(function ($query): void {
+                $query->where('local_storage_deleted', false)
+                    ->orWhereNull('local_storage_deleted');
+            })
+            ->where(function ($query): void {
                 $query->where('status', 'success')
                     ->orWhere('status', 'finished')
                     ->orWhereNull('status');
@@ -375,6 +455,10 @@ class InstanceBackupService
         if (! $execution) {
             $execution = $backup->executions()
                 ->whereNotNull('filename')
+                ->where(function ($query): void {
+                    $query->where('local_storage_deleted', false)
+                        ->orWhereNull('local_storage_deleted');
+                })
                 ->orderByDesc('created_at')
                 ->first();
         }
@@ -382,7 +466,9 @@ class InstanceBackupService
         if (! $execution) {
             throw new HttpException(
                 404,
-                'Aucune sauvegarde locale à exporter. Lancez d’abord une sauvegarde (éventuellement vers S3 + local).',
+                $backup->disable_local_backup
+                    ? 'Aucune copie locale à exporter : les dumps sont uniquement sur S3.'
+                    : 'Aucune sauvegarde locale à exporter. Lancez d’abord une sauvegarde (éventuellement vers S3 + local).',
             );
         }
 
@@ -417,6 +503,56 @@ class InstanceBackupService
     }
 
     /**
+     * @return array{0: StandalonePostgresql, 1: ScheduledDatabaseBackup}
+     */
+    private function requireBackup(): array
+    {
+        $database = $this->requireInstanceDatabase();
+        $backup = $database->scheduledBackups()->first();
+
+        if (! $backup) {
+            throw new HttpException(404, 'Aucune planification de sauvegarde d’instance.');
+        }
+
+        return [$database, $backup];
+    }
+
+    private function purgeExecutionFiles(
+        ScheduledDatabaseBackupExecution $execution,
+        ScheduledDatabaseBackup $backup,
+        bool $deleteS3,
+    ): void {
+        if (! filled($execution->filename)) {
+            return;
+        }
+
+        $server = Server::find(0);
+        if ($server) {
+            try {
+                deleteBackupsLocally($execution->filename, $server);
+            } catch (\Throwable $e) {
+                Log::warning('Failed to delete instance backup file locally.', [
+                    'execution_uuid' => $execution->uuid,
+                    'filename' => $execution->filename,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        if ($deleteS3 && $backup->s3) {
+            try {
+                deleteBackupsS3($execution->filename, $backup->s3);
+            } catch (\Throwable $e) {
+                Log::warning('Failed to delete instance backup file from S3.', [
+                    'execution_uuid' => $execution->uuid,
+                    'filename' => $execution->filename,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function presentDatabase(StandalonePostgresql $database): array
@@ -430,6 +566,11 @@ class InstanceBackupService
             'postgres_db' => $database->postgres_db,
             'status' => $database->status,
         ];
+    }
+
+    public function resolveRunningContainer(Server $server, ?string $preferred = null): string
+    {
+        return $this->resolveContainerName($server, $preferred);
     }
 
     private function resolveContainerName(Server $server, ?string $preferred = null): string
@@ -476,10 +617,20 @@ class InstanceBackupService
     private function defaultS3Storage(): ?S3Storage
     {
         $teamId = (int) (currentTeam()?->id ?? 0);
+        $teamIds = array_values(array_unique([$teamId, 0]));
+
+        $usable = S3Storage::query()
+            ->where('is_usable', true)
+            ->whereIn('team_id', $teamIds)
+            ->orderBy('id')
+            ->first();
+
+        if ($usable) {
+            return $usable;
+        }
 
         return S3Storage::query()
-            ->where('is_usable', true)
-            ->whereIn('team_id', array_values(array_unique([$teamId, 0])))
+            ->whereIn('team_id', $teamIds)
             ->orderBy('id')
             ->first();
     }

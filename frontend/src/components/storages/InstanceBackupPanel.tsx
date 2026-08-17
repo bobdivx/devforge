@@ -1,21 +1,43 @@
-import { useRef, useState } from 'preact/hooks';
-import { CloudUpload, Database, Download, RefreshCw, Save, Upload } from 'lucide-preact';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { CloudUpload, Database, Download, RefreshCw, Save, Trash2, Upload } from 'lucide-preact';
 import {
     domainApi,
     type InstanceBackupDatabaseUpdateInput,
+    type InstanceBackupExecution,
     type InstanceBackupScheduleUpdateInput,
     type InstanceBackupSettings,
 } from '../../lib/domain-api';
+import { formatDateTime } from '../../lib/application-config';
+import { formatCron } from '../../lib/cron-utils';
+import { pickActiveInstanceBackupExecution, instanceBackupFileName, instanceBackupLocationLabel } from '../../lib/instance-backup-tracker';
 import { useApiQuery } from '../../lib/use-api-query';
+import { useInstanceBackupTracker } from '../../lib/use-instance-backup-tracker';
 import { CronInput } from '../ui/CronInput';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { DataState } from '../ui/DataState';
 import { Modal } from '../ui/Modal';
 import { StatusBadge } from '../ui/StatusBadge';
 import { Card } from '../ui/Card';
+import { CleanupProgressPanel } from '../storage/CleanupProgressPanel';
 
 type Props = {
     compact?: boolean;
 };
+
+type PendingDelete = InstanceBackupExecution | 'failed';
+
+function instanceBackupStatusLabel(status: string | null): string {
+    switch (status) {
+        case 'success':
+            return 'Réussi';
+        case 'failed':
+            return 'Échec';
+        case 'running':
+            return 'En cours';
+        default:
+            return status ?? '—';
+    }
+}
 
 export function InstanceBackupPanel({ compact = false }: Props) {
     const settingsQuery = useApiQuery('instance-backup-settings', () => domainApi.instanceBackupSettings());
@@ -26,8 +48,28 @@ export function InstanceBackupPanel({ compact = false }: Props) {
     const [error, setError] = useState<string | null>(null);
     const [dbForm, setDbForm] = useState<InstanceBackupDatabaseUpdateInput | null>(null);
     const [scheduleForm, setScheduleForm] = useState<InstanceBackupScheduleUpdateInput | null>(null);
+    const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
     const importInputRef = useRef<HTMLInputElement>(null);
     const coolifyImportInputRef = useRef<HTMLInputElement>(null);
+    const backupTracker = useInstanceBackupTracker({
+        onComplete: (updated) => {
+            const latest = updated?.executions[0] ?? updated?.backup?.latest_execution;
+            if (latest?.status === 'success') {
+                setNotice('Sauvegarde d’instance terminée.');
+            }
+            void settingsQuery.reload({ silent: true });
+        },
+    });
+    const { resume } = backupTracker;
+
+    useEffect(() => {
+        const active = pickActiveInstanceBackupExecution(settings);
+        if (!active) {
+            return;
+        }
+
+        resume(active, settings?.executions.map((execution) => execution.uuid) ?? []);
+    }, [resume, settings]);
 
     const withAction = async (key: string, action: () => Promise<void>) => {
         setBusy(key);
@@ -53,10 +95,14 @@ export function InstanceBackupPanel({ compact = false }: Props) {
         setNotice(response.data.message ?? 'Synchronisation de l’instance effectuée.');
     });
 
-    const runNow = () => withAction('run', async () => {
-        const response = await domainApi.runInstanceBackup();
-        setNotice(response.data.message);
-    });
+    const runNow = () => {
+        setError(null);
+        setNotice(null);
+        void backupTracker.startRun(settings?.executions.map((execution) => execution.uuid) ?? [])
+            .catch((e: unknown) => {
+                setError(e instanceof Error ? e.message : 'Action impossible.');
+            });
+    };
 
     const exportBackup = () => withAction('export', async () => {
         const response = await domainApi.exportInstanceBackup();
@@ -102,6 +148,43 @@ export function InstanceBackupPanel({ compact = false }: Props) {
         });
     };
 
+    const confirmDelete = async () => {
+        if (!pendingDelete) {
+            return;
+        }
+
+        const deletingFailed = pendingDelete === 'failed';
+        await withAction(deletingFailed ? 'delete-failed' : 'delete', async () => {
+            if (deletingFailed) {
+                await domainApi.deleteFailedInstanceBackupExecutions();
+                setNotice('Sauvegardes en échec supprimées.');
+            } else {
+                await domainApi.deleteInstanceBackupExecution(
+                    pendingDelete.uuid,
+                    Boolean(pendingDelete.s3_uploaded),
+                );
+                setNotice(pendingDelete.status === 'failed'
+                    ? 'Entrée en échec supprimée.'
+                    : 'Sauvegarde supprimée.');
+            }
+            setPendingDelete(null);
+        });
+    };
+
+    const failedCount = settings?.executions.filter((execution) => execution.status === 'failed').length ?? 0;
+
+    const deleteDialogMessage = (): string => {
+        if (pendingDelete === 'failed') {
+            return `Retirer ${failedCount} entrée${failedCount > 1 ? 's' : ''} en échec de l’historique ? Aucun fichier dump n’est associé.`;
+        }
+
+        if (pendingDelete?.filename) {
+            return `Supprimer ${pendingDelete.filename} de l’historique${pendingDelete.s3_uploaded ? ' et de S3' : ''} ?`;
+        }
+
+        return 'Retirer cette entrée de l’historique ?';
+    };
+
     return (
         <section class="grid gap-4">
             {!compact && (
@@ -114,11 +197,11 @@ export function InstanceBackupPanel({ compact = false }: Props) {
                 </div>
             )}
 
-            {notice && (
+            {notice && !backupTracker.isTracking && (
                 <div class="rounded-xl border border-success/30 bg-success/10 px-4 py-3 text-sm text-success">{notice}</div>
             )}
-            {error && (
-                <div class="rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">{error}</div>
+            {(error || backupTracker.error) && (
+                <div class="rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">{error ?? backupTracker.error}</div>
             )}
 
             <DataState loading={settingsQuery.loading} error={settingsQuery.error} onRetry={() => void settingsQuery.reload()}>
@@ -228,26 +311,45 @@ export function InstanceBackupPanel({ compact = false }: Props) {
                                         <div class="grid gap-2 text-sm">
                                             <div class="flex justify-between gap-3">
                                                 <span class="text-base-content/60">Fréquence</span>
-                                                <span class="font-mono text-right">{settings.backup.frequency}</span>
+                                                <span class="text-right">
+                                                    <span class="block">{formatCron(settings.backup.frequency)}</span>
+                                                    <span class="font-mono text-[11px] text-base-content/45">{settings.backup.frequency}</span>
+                                                </span>
                                             </div>
                                             <div class="flex justify-between gap-3">
                                                 <span class="text-base-content/60">S3</span>
                                                 <span>
                                                     {settings.backup.save_s3
-                                                        ? (settings.backup.s3_storage?.name ?? 'Activé')
+                                                        ? `${settings.backup.s3_storage?.name ?? 'Activé'}${settings.backup.disable_local_backup ? ' · S3 uniquement' : ''}`
                                                         : 'Local uniquement'}
                                                 </span>
                                             </div>
                                             {!settings.is_server_functional && (
                                                 <p class="text-xs text-warning">Le serveur local n’est pas prêt — les jobs peuvent être désactivés.</p>
                                             )}
+                                            {backupTracker.isTracking && (
+                                                <div class="mt-3">
+                                                    <CleanupProgressPanel
+                                                        execution={backupTracker.execution}
+                                                        phase={backupTracker.phase}
+                                                        phaseLabel={backupTracker.phaseLabel}
+                                                    />
+                                                </div>
+                                            )}
                                             <div class="mt-3 flex flex-wrap justify-end gap-2">
                                                 <button class="btn btn-outline btn-sm" type="button" onClick={() => openScheduleEditor(settings)}>
                                                     Configurer (S3)
                                                 </button>
-                                                <button class="btn btn-primary btn-sm" type="button" disabled={busy === 'run'} onClick={() => void runNow()}>
-                                                    {busy === 'run' ? <span class="loading loading-spinner loading-sm" /> : <RefreshCw class="size-4" aria-hidden />}
-                                                    Lancer maintenant
+                                                <button
+                                                    class="btn btn-primary btn-sm"
+                                                    type="button"
+                                                    disabled={backupTracker.isTracking}
+                                                    onClick={() => runNow()}
+                                                >
+                                                    {backupTracker.isTracking
+                                                        ? <span class="loading loading-spinner loading-sm" />
+                                                        : <RefreshCw class="size-4" aria-hidden />}
+                                                    {backupTracker.isTracking ? 'Sauvegarde…' : 'Lancer maintenant'}
                                                 </button>
                                             </div>
                                         </div>
@@ -306,7 +408,21 @@ export function InstanceBackupPanel({ compact = false }: Props) {
                                 </div>
 
                                 {settings.executions.length > 0 && (
-                                    <div class="mt-5 overflow-x-auto">
+                                    <div class="mt-5">
+                                        {failedCount > 0 && (
+                                            <div class="mb-3 flex justify-end">
+                                                <button
+                                                    class="btn btn-ghost btn-xs text-error"
+                                                    type="button"
+                                                    disabled={busy === 'delete-failed'}
+                                                    onClick={() => setPendingDelete('failed')}
+                                                >
+                                                    <Trash2 class="size-3.5" aria-hidden />
+                                                    Supprimer les échecs ({failedCount})
+                                                </button>
+                                            </div>
+                                        )}
+                                        <div class="overflow-x-auto">
                                         <table class="table table-sm">
                                             <thead>
                                                 <tr>
@@ -319,20 +435,59 @@ export function InstanceBackupPanel({ compact = false }: Props) {
                                             <tbody>
                                                 {settings.executions.slice(0, 8).map((execution) => (
                                                     <tr key={execution.uuid}>
-                                                        <td class="whitespace-nowrap text-xs">{execution.created_at ?? '—'}</td>
-                                                        <td><StatusBadge label={execution.status ?? '—'} tone={execution.status === 'success' ? 'success' : 'neutral'} /></td>
-                                                        <td class="max-w-[14rem] truncate font-mono text-xs">{execution.filename ?? '—'}</td>
+                                                        <td class="whitespace-nowrap text-xs">{formatDateTime(execution.created_at)}</td>
                                                         <td>
-                                                            {execution.download_url && (
-                                                                <a class="btn btn-ghost btn-xs" href={execution.download_url}>
-                                                                    Télécharger
-                                                                </a>
+                                                            <StatusBadge
+                                                                label={instanceBackupStatusLabel(execution.status)}
+                                                                tone={
+                                                                    execution.status === 'success'
+                                                                        ? 'success'
+                                                                        : execution.status === 'failed'
+                                                                            ? 'error'
+                                                                            : execution.status === 'running'
+                                                                                ? 'warning'
+                                                                                : 'neutral'
+                                                                }
+                                                            />
+                                                            {execution.status === 'failed' && execution.message && (
+                                                                <p class="mt-1 max-w-[22rem] text-[11px] leading-snug text-error/80">{execution.message}</p>
                                                             )}
+                                                        </td>
+                                                        <td class="max-w-[16rem]">
+                                                            <span class="block truncate font-mono text-xs">
+                                                                {instanceBackupFileName(execution.filename)}
+                                                            </span>
+                                                            {execution.status === 'success' && (
+                                                                <span class="text-[11px] text-base-content/55">
+                                                                    {instanceBackupLocationLabel(execution, settings.backup?.s3_storage?.name)}
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                        <td>
+                                                            <div class="flex justify-end gap-1">
+                                                                {execution.download_url && (
+                                                                    <a class="btn btn-ghost btn-xs" href={execution.download_url}>
+                                                                        Télécharger
+                                                                    </a>
+                                                                )}
+                                                                {execution.status !== 'running' && (
+                                                                    <button
+                                                                        class="btn btn-ghost btn-xs text-error"
+                                                                        type="button"
+                                                                        aria-label="Supprimer cette sauvegarde"
+                                                                        disabled={busy === 'delete'}
+                                                                        onClick={() => setPendingDelete(execution)}
+                                                                    >
+                                                                        <Trash2 class="size-3.5" aria-hidden />
+                                                                    </button>
+                                                                )}
+                                                            </div>
                                                         </td>
                                                     </tr>
                                                 ))}
                                             </tbody>
                                         </table>
+                                        </div>
                                     </div>
                                 )}
                             </Card>
@@ -380,13 +535,10 @@ export function InstanceBackupPanel({ compact = false }: Props) {
                         />
                         Activée
                     </label>
-                    <div>
-                        <span class="label-text mb-1 block">Fréquence</span>
-                        <CronInput
-                            value={scheduleForm?.frequency ?? '0 0 * * *'}
-                            onChange={(value) => setScheduleForm({ ...scheduleForm!, frequency: value })}
-                        />
-                    </div>
+                    <CronInput
+                        value={scheduleForm?.frequency ?? '0 0 * * *'}
+                        onChange={(value) => setScheduleForm({ ...scheduleForm!, frequency: value })}
+                    />
                     <label class="flex items-center gap-2 text-sm">
                         <input
                             type="checkbox"
@@ -432,6 +584,17 @@ export function InstanceBackupPanel({ compact = false }: Props) {
                     </div>
                 </form>
             </Modal>
+
+            <ConfirmDialog
+                open={pendingDelete !== null}
+                title={pendingDelete === 'failed' ? 'Supprimer les échecs' : 'Supprimer cette sauvegarde'}
+                message={deleteDialogMessage()}
+                confirmLabel="Supprimer"
+                tone="danger"
+                loading={busy === 'delete' || busy === 'delete-failed'}
+                onCancel={() => setPendingDelete(null)}
+                onConfirm={() => void confirmDelete()}
+            />
         </section>
     );
 }

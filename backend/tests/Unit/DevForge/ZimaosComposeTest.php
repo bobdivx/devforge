@@ -137,5 +137,12 @@ it('ships a ZimaOS App Store compose with pinned tags and /DATA/AppData volumes'
         ->and($casaos['tagline'])->toHaveKeys(['en_US', 'fr_FR', 'zh_CN'])
         ->and($casaos['tips']['before_install']['en_US'])->toContain('APP_URL')
         ->and($casaos['tips']['before_install']['fr_FR'])->toContain('APP_URL')
-        ->and($casaos['icon'])->toContain('frontend/public/brand/logo.png');
+        ->and($casaos['icon'])->toContain('Apps/DevForge/icon.svg')
+        ->and($casaos['thumbnail'])->toContain('Apps/DevForge/thumbnail.png')
+        ->and($casaos['screenshot_link'])->toHaveCount(1)
+        ->and($casaos['screenshot_link'][0])->toContain('Apps/DevForge/screenshot-1.png')
+        ->and(is_file(dirname($path).DIRECTORY_SEPARATOR.'icon.svg'))->toBeTrue()
+        ->and(is_file(dirname($path).DIRECTORY_SEPARATOR.'icon.png'))->toBeTrue()
+        ->and(is_file(dirname($path).DIRECTORY_SEPARATOR.'thumbnail.png'))->toBeTrue()
+        ->and(is_file(dirname($path).DIRECTORY_SEPARATOR.'screenshot-1.png'))->toBeTrue();
 });

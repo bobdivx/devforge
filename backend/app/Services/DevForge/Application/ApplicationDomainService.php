@@ -240,9 +240,17 @@ class ApplicationDomainService
                 return null;
             }
 
+            $domain = ensure_fqdn_has_scheme($domain);
+
             try {
-                Url::fromString($domain, ['http', 'https']);
+                $url = Url::fromString($domain, ['http', 'https']);
             } catch (\Throwable) {
+                $errors[] = "URL invalide : {$domain}";
+
+                return null;
+            }
+
+            if ($url->getHost() === '') {
                 $errors[] = "URL invalide : {$domain}";
 
                 return null;
@@ -307,6 +315,7 @@ class ApplicationDomainService
             ->values();
 
         $custom = $this->parseDomainList($application->fqdn)
+            ->map(fn (string $domain): string => str(ensure_fqdn_has_scheme($domain))->lower()->toString())
             ->reject(fn (string $domain): bool => $this->isGeneratedDomain($domain, $application, $previousWildcard))
             ->reject(fn (string $domain): bool => $generated->contains(strtolower($domain)))
             ->values();
@@ -436,6 +445,19 @@ class ApplicationDomainService
         $customLabels = str(implode('|coolify|', generateLabelsApplication($application)))->replace('|coolify|', "\n");
         $application->custom_labels = base64_encode((string) $customLabels);
         $application->save();
+    }
+
+    public function refreshProxyLabels(Application $application, bool $force = true): void
+    {
+        $this->refreshLabels($application, force: $force);
+    }
+
+    /**
+     * @return array{queued: bool, deployment_uuid: string|null, message: string}
+     */
+    public function queueRestart(Application $application): array
+    {
+        return $this->queueRedeploy($application);
     }
 
     /**

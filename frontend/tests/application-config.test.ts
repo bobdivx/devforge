@@ -3,6 +3,7 @@ import {
     applicationStatusLabel,
     applicationStatusTone,
     deploymentSystemLabel,
+    ensureDomainScheme,
     formatDateTime,
     parseApplicationConfiguration,
     primaryDomain,
@@ -71,6 +72,14 @@ describe('configuration application', () => {
             build_pack: 'dockerfile',
             is_static: false,
         })).toBe('dockerfile');
+    });
+
+    it('préfixe https sur un domaine sans schéma', () => {
+        expect(ensureDomainScheme('sonozz.briseteia.me')).toBe('https://sonozz.briseteia.me');
+        expect(ensureDomainScheme('https://app.example.com')).toBe('https://app.example.com');
+        expect(ensureDomainScheme('http://app.local')).toBe('http://app.local');
+        expect(ensureDomainScheme('  ')).toBe('');
+        expect(visitUrl('sonozz.briseteia.me')).toBe('https://sonozz.briseteia.me');
     });
 
     it('construit l’URL de capture d’écran à partir du domaine', () => {

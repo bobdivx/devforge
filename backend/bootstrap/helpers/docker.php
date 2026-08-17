@@ -431,8 +431,12 @@ function fqdnLabelsForCaddy(string $network, string $uuid, Collection $domains, 
     }
 
     foreach ($domains as $loop => $domain) {
+        $domain = ensure_fqdn_has_scheme((string) $domain);
         $url = Url::fromString($domain);
         $host = $url->getHost();
+        if ($host === '') {
+            continue;
+        }
         $path = $url->getPath();
         $host_without_www = str($host)->replace('www.', '');
         $schema = $url->getScheme();
@@ -525,8 +529,12 @@ function fqdnLabelsForTraefik(string $uuid, Collection $domains, bool $is_force_
                 $uuid = new Cuid2;
             }
 
+            $domain = ensure_fqdn_has_scheme((string) $domain);
             $url = Url::fromString($domain);
             $host = $url->getHost();
+            if ($host === '') {
+                continue;
+            }
             $path = $url->getPath();
             $schema = $url->getScheme();
             $port = $url->getPort();

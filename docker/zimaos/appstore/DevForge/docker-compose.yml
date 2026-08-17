@@ -319,12 +319,10 @@ x-casaos:
   author: bobdivx
   developer: DevForge
   category: Developer
-  icon: https://raw.githubusercontent.com/bobdivx/devforge/main/frontend/public/brand/logo.png
+  icon: https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/DevForge/icon.svg
   thumbnail: https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/DevForge/thumbnail.png
   screenshot_link:
     - https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/DevForge/screenshot-1.png
-    - https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/DevForge/screenshot-2.png
-    - https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/DevForge/screenshot-3.png
   title:
     en_US: DevForge
     fr_FR: DevForge

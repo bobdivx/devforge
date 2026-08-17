@@ -16,6 +16,8 @@ use App\Models\Team;
 use App\Notifications\Database\BackupFailed;
 use App\Notifications\Database\BackupSuccess;
 use App\Notifications\Database\BackupSuccessWithS3Warning;
+use App\Services\DevForge\Backup\InstanceBackupService;
+use App\Services\DevForge\Backup\InstanceBackupTarget;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeEncrypted;
@@ -88,8 +90,10 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
         return [(new WithoutOverlapping('database-backup-'.$this->backup->id))->expireAfter($expireAfter)->dontRelease()];
     }
 
-    public function handle(): void
+    public function handle(?InstanceBackupService $instanceBackupService = null): void
     {
+        $instanceBackupService ??= app(InstanceBackupService::class);
+
         try {
             $databasesToBackup = null;
 
@@ -299,11 +303,13 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
                 }
             }
             $this->backup_dir = backup_dir().'/databases/'.str($this->team->name)->slug().'-'.$this->team->id.'/'.$this->directory_name;
-            if ($this->database->name === 'coolify-db') {
-                $databasesToBackup = ['coolify'];
-                $this->directory_name = $this->container_name = 'coolify-db';
-                $ip = Str::slug($this->server->ip);
-                $this->backup_dir = backup_dir().'/coolify'."/coolify-db-$ip";
+            $instanceDatabase = $this->database instanceof StandalonePostgresql ? $this->database : null;
+            if (InstanceBackupTarget::isInstanceDatabase($instanceDatabase)) {
+                $container = $instanceBackupService->resolveRunningContainer($this->server);
+                $this->postgres_password = $instanceDatabase->postgres_password;
+                $this->directory_name = $this->container_name = $container;
+                $databasesToBackup = [InstanceBackupTarget::dumpDatabaseName($instanceDatabase, $container)];
+                $this->backup_dir = InstanceBackupTarget::backupDirectory($container, (string) $this->server->ip);
             }
             foreach ($databasesToBackup as $database) {
                 // Generate unique UUID for each database backup execution
@@ -700,8 +706,8 @@ class DatabaseBackupJob implements ShouldBeEncrypted, ShouldQueue
             }
 
             if (isDev()) {
-                if ($this->database->name === 'coolify-db') {
-                    $backup_location_from = '/var/lib/docker/volumes/coolify_dev_backups_data/_data/coolify/coolify-db-'.$this->server->ip.$this->backup_file;
+                if (InstanceBackupTarget::isInstanceDatabase($this->database instanceof StandalonePostgresql ? $this->database : null)) {
+                    $backup_location_from = '/var/lib/docker/volumes/coolify_dev_backups_data/_data/coolify/'.$this->container_name.'-'.$this->server->ip.$this->backup_file;
                     $commands[] = "docker run -d --network {$safeNetwork} --name backup-of-{$this->backup_log_uuid} --rm -v $backup_location_from:$this->backup_location:ro {$fullImageName}";
                 } else {
                     $backup_location_from = '/var/lib/docker/volumes/coolify_dev_backups_data/_data/databases/'.str($this->team->name)->slug().'-'.$this->team->id.'/'.$this->directory_name.$this->backup_file;

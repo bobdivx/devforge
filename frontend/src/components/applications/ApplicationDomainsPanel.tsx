@@ -4,7 +4,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ActionToolbar } from '../ui/ActionToolbar';
 import { DataState } from '../ui/DataState';
 import { ApiError } from '../../lib/api-client';
-import { visitUrl } from '../../lib/application-config';
+import { ensureDomainScheme, visitUrl } from '../../lib/application-config';
 import {
     domainApi,
     type ApplicationDomainRedirect,
@@ -57,7 +57,7 @@ function rowsFromDomains(domains: string[], managedDomain: string | null | undef
 
 function serializeRows(rows: DomainRow[]): string {
     return rows
-        .map((row) => row.url.trim())
+        .map((row) => ensureDomainScheme(row.url))
         .filter(Boolean)
         .join(', ');
 }

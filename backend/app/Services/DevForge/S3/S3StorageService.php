@@ -6,6 +6,7 @@ use App\Models\S3Storage;
 use App\Models\Team;
 use App\Models\User;
 use App\Rules\SafeWebhookUrl;
+use App\Services\DevForge\Backup\InstanceBackupService;
 use App\Services\DevForge\CurrentTeamContext;
 use App\Support\ValidationPatterns;
 use Illuminate\Support\Facades\Validator;
@@ -16,6 +17,7 @@ class S3StorageService
     public function __construct(
         private readonly CurrentTeamContext $currentTeamContext,
         private readonly S3StoragePresenter $presenter,
+        private readonly InstanceBackupService $instanceBackupService,
     ) {}
 
     /**
@@ -51,6 +53,8 @@ class S3StorageService
             'storage_uuid' => $storage->uuid,
         ]);
 
+        $this->instanceBackupService->attachDefaultS3IfUnconfigured();
+
         return $this->presenter->present($storage);
     }
 
@@ -71,6 +75,8 @@ class S3StorageService
             'team_id' => $team->id,
             'storage_uuid' => $storage->uuid,
         ]);
+
+        $this->instanceBackupService->attachDefaultS3IfUnconfigured();
 
         return $this->presenter->present($storage->fresh());
     }
@@ -97,6 +103,7 @@ class S3StorageService
         $storage = $this->findForTeam($team, $storageUuid);
 
         $storage->testConnection(shouldSave: true);
+        $this->instanceBackupService->attachDefaultS3IfUnconfigured();
 
         return [
             'success' => true,

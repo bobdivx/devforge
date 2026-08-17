@@ -111,6 +111,61 @@ describe('ApplicationDomainsPanel', () => {
         });
     });
 
+    it('préfixe https avant d’enregistrer un domaine sans schéma', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+            const url = String(input);
+            const method = init?.method ?? 'GET';
+
+            if (url.includes('/sanctum/csrf-cookie')) {
+                return new Response(null, { status: 204 });
+            }
+
+            if (url.includes('/domains') && method === 'PUT') {
+                return jsonResponse({
+                    data: {
+                        ...domainsFixture,
+                        domains: [managedDomain, 'https://sonozz.briseteia.me'],
+                        fqdn: `${managedDomain},https://sonozz.briseteia.me`,
+                    },
+                    meta: { redeploy: { queued: false, deployment_uuid: null, message: 'skipped' } },
+                });
+            }
+
+            if (url.includes('/domains')) {
+                return jsonResponse({ data: domainsFixture });
+            }
+
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(
+            <ApplicationDomainsPanel
+                applicationUuid="app-uuid-1234"
+                canAct
+            />,
+        );
+
+        fireEvent.input(await screen.findByLabelText(/Domaine personnalisé/), {
+            target: { value: 'sonozz.briseteia.me' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }));
+
+        await waitFor(() => {
+            expect(screen.getByText(/Domaines enregistrés\./)).toBeInTheDocument();
+        });
+
+        const putCall = fetchMock.mock.calls.find((call) => {
+            const url = String(call[0]);
+            const init = call[1] as RequestInit | undefined;
+
+            return url.includes('/applications/app-uuid-1234/domains') && init?.method === 'PUT';
+        });
+
+        expect(JSON.parse(String((putCall?.[1] as RequestInit).body))).toMatchObject({
+            domains: `${managedDomain}, https://sonozz.briseteia.me`,
+        });
+    });
+
     it('ajoute un domaine personnalisé sans toucher au domaine DevForge', async () => {
         vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
             const url = String(input);
