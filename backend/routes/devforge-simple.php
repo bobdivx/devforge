@@ -49,6 +49,8 @@ Route::put('/settings/advanced', [SettingsController::class, 'updateAdvanced'])-
 Route::put('/settings/email', [SettingsController::class, 'updateEmail'])->name('settings.email.update');
 Route::put('/settings/updates', [SettingsController::class, 'updateUpdates'])->name('settings.updates.update');
 Route::post('/settings/updates/check', [SettingsController::class, 'checkUpdates'])->name('settings.updates.check');
+Route::get('/settings/updates/status', [SettingsController::class, 'upgradeStatus'])->name('settings.updates.status');
+Route::post('/settings/updates/upgrade', [SettingsController::class, 'upgrade'])->name('settings.updates.upgrade');
 Route::get('/settings/scheduled-jobs', [ScheduledJobsController::class, 'index'])->name('settings.scheduled-jobs.index');
 Route::get('/settings/scheduled-jobs/definitions', [ScheduledJobsController::class, 'definitions'])->name('settings.scheduled-jobs.definitions');
 Route::get('/settings/backup', [InstanceBackupController::class, 'show'])->name('settings.backup.show');

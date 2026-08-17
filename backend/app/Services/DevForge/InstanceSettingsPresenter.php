@@ -10,6 +10,7 @@ class InstanceSettingsPresenter
     public function __construct(
         private readonly InstanceSettings $settings,
         private readonly AgentRuntimeSettings $agentRuntime = new AgentRuntimeSettings,
+        private readonly InstanceUpgradeService $upgradeService = new InstanceUpgradeService,
     ) {}
 
     public static function from(InstanceSettings $settings): self
@@ -105,11 +106,15 @@ class InstanceSettingsPresenter
      */
     private function updates(): array
     {
+        $upgrade = $this->upgradeService->availability($this->settings);
+
         return [
             'is_auto_update_enabled' => (bool) $this->settings->is_auto_update_enabled,
             'auto_update_frequency' => $this->settings->auto_update_frequency,
             'update_check_frequency' => $this->settings->update_check_frequency,
-            'new_version_available' => (bool) $this->settings->new_version_available,
+            'new_version_available' => $upgrade['available'],
+            'current_version' => $upgrade['current_version'],
+            'latest_version' => $upgrade['latest_version'],
         ];
     }
 

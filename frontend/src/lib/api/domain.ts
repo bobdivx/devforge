@@ -449,7 +449,18 @@ export type InstanceSettings = {
         auto_update_frequency: string | null;
         update_check_frequency: string | null;
         new_version_available: boolean;
+        current_version?: string;
+        latest_version?: string;
     };
+};
+
+export type InstanceUpgradeStatus = {
+    available: boolean;
+    current_version: string;
+    latest_version: string;
+    status: 'none' | 'in_progress' | 'complete' | 'error';
+    step: number;
+    message: string | null;
 };
 
 export type InstanceGeneralUpdateInput = {
@@ -2514,6 +2525,10 @@ export const domainApi = {
     checkUpdatesSettings: () => mutate<ApiResponse<InstanceSettings>>('/settings/updates/check', {
         method: 'POST',
     }),
+    instanceUpgradeStatus: () => apiFetch<ApiResponse<InstanceUpgradeStatus>>(`${API_BASE}/settings/updates/status`),
+    startInstanceUpgrade: () => mutate<ApiResponse<InstanceUpgradeStatus>>('/settings/updates/upgrade', {
+        method: 'POST',
+    }, 60_000),
     instanceBackupSettings: () => apiFetch<ApiResponse<InstanceBackupSettings>>(`${API_BASE}/settings/backup`),
     initInstanceBackupSettings: (container?: string) => mutate<ApiResponse<InstanceBackupSettings>>('/settings/backup/init', {
         method: 'POST',

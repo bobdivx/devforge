@@ -1,6 +1,7 @@
-import { RefreshCw, Save } from 'lucide-preact';
+import { ArrowUpCircle, RefreshCw, Save } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
 import { Card } from '../ui/Card';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { DataState } from '../ui/DataState';
 import { StatusBadge } from '../ui/StatusBadge';
 import { CronInput } from '../ui/CronInput';
@@ -669,6 +670,8 @@ function UpdatesForm({
     const [form, setForm] = useState(data);
     const [saving, setSaving] = useState(false);
     const [checking, setChecking] = useState(false);
+    const [upgrading, setUpgrading] = useState(false);
+    const [confirmOpen, setConfirmOpen] = useState(false);
     const [message, setMessage] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
@@ -710,6 +713,25 @@ function UpdatesForm({
         }
     };
 
+    const upgrade = async () => {
+        setUpgrading(true);
+        setMessage(null);
+        setError(null);
+        try {
+            await domainApi.startInstanceUpgrade();
+            await onSaved();
+            setConfirmOpen(false);
+            setMessage('Mise à jour lancée. L’instance va redémarrer.');
+        } catch (caught) {
+            setError(caught instanceof Error ? caught.message : 'Échec de la mise à jour.');
+        } finally {
+            setUpgrading(false);
+        }
+    };
+
+    const currentVersion = form.current_version ?? '—';
+    const latestVersion = form.latest_version ?? '—';
+
     return (
         <div class="grid gap-3">
             <div class="flex flex-wrap items-center gap-2">
@@ -717,6 +739,10 @@ function UpdatesForm({
                     label={form.new_version_available ? 'Mise à jour disponible' : 'À jour'}
                     tone={form.new_version_available ? 'warning' : 'success'}
                 />
+                <p class="text-sm text-base-content/60">
+                    {currentVersion}
+                    {form.new_version_available ? ` → ${latestVersion}` : ''}
+                </p>
             </div>
             <ToggleField
                 label="Mises à jour auto"
@@ -742,16 +768,37 @@ function UpdatesForm({
             {message && <p class="text-sm text-base-content/60" role="status">{message}</p>}
             {canEdit && (
                 <div class="flex flex-wrap gap-2">
-                    <button class="btn btn-primary btn-sm rounded-xl" type="button" disabled={saving || checking} onClick={() => void save()}>
+                    <button class="btn btn-primary btn-sm rounded-xl" type="button" disabled={saving || checking || upgrading} onClick={() => void save()}>
                         <Save class="size-3.5" aria-hidden />
                         {saving ? 'Enregistrement…' : 'Enregistrer'}
                     </button>
-                    <button class="btn btn-ghost btn-sm rounded-xl" type="button" disabled={saving || checking} onClick={() => void check()}>
+                    <button class="btn btn-ghost btn-sm rounded-xl" type="button" disabled={saving || checking || upgrading} onClick={() => void check()}>
                         <RefreshCw class="size-3.5" aria-hidden />
                         {checking ? 'Vérification…' : 'Vérifier maintenant'}
                     </button>
+                    {form.new_version_available && (
+                        <button
+                            class="btn btn-warning btn-sm rounded-xl"
+                            type="button"
+                            disabled={saving || checking || upgrading}
+                            onClick={() => setConfirmOpen(true)}
+                        >
+                            <ArrowUpCircle class="size-3.5" aria-hidden />
+                            {upgrading ? 'Mise à jour…' : 'Mettre à jour maintenant'}
+                        </button>
+                    )}
                 </div>
             )}
+            <ConfirmDialog
+                open={confirmOpen}
+                title="Mettre à jour DevForge ?"
+                message={`La version ${currentVersion} va être mise à jour vers ${latestVersion}. L’interface sera indisponible pendant le redémarrage.`}
+                confirmLabel="Mettre à jour maintenant"
+                cancelLabel="Annuler"
+                loading={upgrading}
+                onConfirm={() => void upgrade()}
+                onCancel={() => setConfirmOpen(false)}
+            />
         </div>
     );
 }

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\InstanceSettings;
 use App\Services\DevForge\InstanceSettingsPresenter;
 use App\Services\DevForge\InstanceSettingsUpdater;
+use App\Services\DevForge\InstanceUpgradeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -13,6 +14,7 @@ class SettingsController extends Controller
 {
     public function __construct(
         private readonly InstanceSettingsUpdater $updater,
+        private readonly InstanceUpgradeService $upgradeService,
     ) {}
 
     public function show(): JsonResponse
@@ -72,6 +74,26 @@ class SettingsController extends Controller
 
         return response()->json([
             'data' => $this->updater->checkForUpdates($settings),
+        ]);
+    }
+
+    public function upgradeStatus(): JsonResponse
+    {
+        $settings = InstanceSettings::get();
+        $this->authorize('view', $settings);
+
+        return response()->json([
+            'data' => $this->upgradeService->status($settings),
+        ]);
+    }
+
+    public function upgrade(): JsonResponse
+    {
+        $settings = InstanceSettings::get();
+        $this->authorize('update', $settings);
+
+        return response()->json([
+            'data' => $this->upgradeService->start($settings),
         ]);
     }
 }

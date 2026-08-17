@@ -82,4 +82,58 @@ describe('InstanceSettingsPanels', () => {
             }));
         });
     });
+
+    it('propose de lancer la mise à jour d’instance quand une version est disponible', async () => {
+        const start = vi.fn();
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+            const url = String(input);
+            if (url === '/sanctum/csrf-cookie') {
+                return new Response(null, { status: 204 });
+            }
+            if (url.includes('/settings/updates/upgrade') && init?.method === 'POST') {
+                start();
+                return jsonResponse({
+                    data: {
+                        available: true,
+                        current_version: '4.0.0-beta.998',
+                        latest_version: '4.0.0-beta.999',
+                        status: 'in_progress',
+                        step: 1,
+                        message: 'Starting upgrade...',
+                    },
+                });
+            }
+            if (url.includes('/api/devforge/v1/settings')) {
+                return jsonResponse({
+                    data: {
+                        updates: {
+                            is_auto_update_enabled: false,
+                            auto_update_frequency: '0 0 * * *',
+                            update_check_frequency: '0 * * * *',
+                            new_version_available: true,
+                            current_version: '4.0.0-beta.998',
+                            latest_version: '4.0.0-beta.999',
+                        },
+                    },
+                });
+            }
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(<InstanceSettingsPanels
+            section="updates"
+            permissions={{ ...bootstrapData.permissions, instance_admin: true }}
+            legacyBaseUrl=""
+        />);
+
+        expect(await screen.findByText('Mise à jour disponible')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Mettre à jour maintenant' }));
+        expect(await screen.findByText('Mettre à jour DevForge ?')).toBeInTheDocument();
+        const confirmButtons = screen.getAllByRole('button', { name: 'Mettre à jour maintenant' });
+        fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+
+        await waitFor(() => {
+            expect(start).toHaveBeenCalledOnce();
+        });
+    });
 });
