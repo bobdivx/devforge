@@ -310,16 +310,25 @@ class ApplicationEnvironmentVariableCatalog
 
     private function isEditable(EnvironmentVariable $variable): bool
     {
-        if ($variable->is_coolify || $variable->is_buildpack_control) {
+        if ($variable->is_coolify) {
+            return false;
+        }
+
+        if ($variable->is_buildpack_control && ! $this->isNodeVersionControlKey($variable->key)) {
             return false;
         }
 
         return $this->isUserManaged($variable);
     }
 
+    private function isNodeVersionControlKey(?string $key): bool
+    {
+        return in_array($key, ['NIXPACKS_NODE_VERSION', 'RAILPACK_NODE_VERSION'], true);
+    }
+
     /**
      * Les variables buildpack (NIXPACKS_*, RAILPACK_*) restent non éditables
-     * mais peuvent être supprimées manuellement.
+     * sauf NIXPACKS_NODE_VERSION / RAILPACK_NODE_VERSION, et peuvent être supprimées.
      */
     private function isDeletable(EnvironmentVariable $variable): bool
     {

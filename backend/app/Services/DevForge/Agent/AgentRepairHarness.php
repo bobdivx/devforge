@@ -8,6 +8,8 @@ use App\Models\AiAgentRun;
 use App\Models\Application;
 use App\Services\DevForge\Application\ApplicationGitRepositoryParser;
 use App\Services\DevForge\Application\GithubPackagesBuildAuthInjector;
+use App\Services\DevForge\Application\NixpacksNodeVersionApplier;
+use App\Services\DevForge\Application\NixpacksNodeVersionResolver;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -291,6 +293,39 @@ class AgentRepairHarness
             ];
             $settingsResult = $toolkit->execute('update_application_advanced_settings', $settingsArgs);
             $record('update_application_advanced_settings', $settingsArgs, $settingsResult);
+        } elseif ($issue === AgentChatRepairStrategy::ISSUE_NODE_ENGINE) {
+            $application = $applicationUuid !== null
+                ? Application::query()->where('uuid', $applicationUuid)->first()
+                : null;
+            $applier = app(NixpacksNodeVersionApplier::class);
+            $resolver = app(NixpacksNodeVersionResolver::class);
+            $current = $application instanceof Application
+                ? ($applier->current($application) ?? NixpacksNodeVersionResolver::DEFAULT)
+                : NixpacksNodeVersionResolver::DEFAULT;
+            $next = $resolver->resolveFromBuildError($issueBlob, $current);
+
+            if ($next !== null && $applicationUuid !== null) {
+                $envKey = $application instanceof Application ? $applier->keyFor($application) : 'NIXPACKS_NODE_VERSION';
+                $envArgs = [
+                    ...$appArgs,
+                    'key' => $envKey,
+                    'value' => $next,
+                    'is_buildtime' => true,
+                    'is_runtime' => false,
+                    'is_literal' => true,
+                ];
+                $envResult = $toolkit->execute('upsert_application_env_var', $envArgs);
+                $record('upsert_application_env_var', $envArgs, $envResult);
+
+                $deployArgs = [
+                    'uuid' => $applicationUuid,
+                    'type' => 'applications',
+                    'action' => 'deploy',
+                    'reason' => "Harness: {$envKey} {$current} → {$next}",
+                ];
+                $deployResult = $toolkit->execute('control_resource', $deployArgs);
+                $record('control_resource', $deployArgs, $deployResult);
+            }
         } elseif ($issue === AgentChatRepairStrategy::ISSUE_BRANCH) {
             $gitResult = $toolkit->execute('get_application_git_info', $appArgs);
             $record('get_application_git_info', $appArgs, $gitResult);

@@ -174,7 +174,7 @@ class ApplicationBootSequenceService
                 ? Carbon::parse((string) $existing['finished_at'])
                 : null;
 
-            if ($finishedAt !== null && $finishedAt->diffInSeconds(now()) < 60) {
+            if ($finishedAt !== null && $finishedAt->gt(now()->subSeconds(60))) {
                 return;
             }
         }
@@ -289,7 +289,7 @@ class ApplicationBootSequenceService
                 continue;
             }
 
-            if ($currentUuid === $uuid && $this->isRunningStatus($liveStatus)) {
+            if ($currentUuid === $uuid && $this->isReadyStatus($liveStatus)) {
                 $items[$index]['phase'] = self::PHASE_RUNNING;
                 $items[$index]['finished_at'] = now()->toIso8601String();
                 $items[$index]['message'] = null;
@@ -306,10 +306,18 @@ class ApplicationBootSequenceService
             } else {
                 $current = $items[$currentIndex];
                 $startedAt = isset($current['started_at']) ? Carbon::parse((string) $current['started_at']) : null;
-                $timedOut = $startedAt !== null && $startedAt->diffInSeconds(now()) >= $itemTimeout;
+                $timedOut = $startedAt !== null && $startedAt->lte(now()->subSeconds($itemTimeout));
+                /** @var Application|null $currentApplication */
+                $currentApplication = $applications->get($currentUuid);
+                $deploying = $currentApplication instanceof Application
+                    && $this->applicationHasActiveDeployment($currentApplication);
 
                 if (($current['phase'] ?? null) === self::PHASE_RUNNING) {
                     $currentUuid = null;
+                    $changed = true;
+                } elseif ($deploying) {
+                    $items[$currentIndex]['message'] = 'Déploiement en cours…';
+                    $items[$currentIndex]['started_at'] = now()->toIso8601String();
                     $changed = true;
                 } elseif ($timedOut) {
                     $items[$currentIndex]['phase'] = self::PHASE_FAILED;
@@ -338,7 +346,7 @@ class ApplicationBootSequenceService
                 $liveStatus = (string) ($application->status ?? 'unknown');
                 $items[$nextIndex]['status'] = $liveStatus;
 
-                if ($this->isRunningStatus($liveStatus)) {
+                if ($this->isReadyStatus($liveStatus)) {
                     $items[$nextIndex]['phase'] = self::PHASE_RUNNING;
                     $items[$nextIndex]['finished_at'] = now()->toIso8601String();
                     $changed = true;
@@ -480,11 +488,25 @@ class ApplicationBootSequenceService
         return self::CACHE_PREFIX.'team:'.$teamId;
     }
 
-    private function isRunningStatus(string $status): bool
+    private function applicationHasActiveDeployment(Application $application): bool
+    {
+        try {
+            return (bool) $application->isDeploymentInprogress();
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    private function isReadyStatus(string $status): bool
     {
         $primary = str($status)->before(':')->lower()->trim()->value();
 
-        return $primary === 'running';
+        return $primary === 'running' || $primary === 'degraded';
+    }
+
+    private function isRunningStatus(string $status): bool
+    {
+        return $this->isReadyStatus($status);
     }
 
     private function isStartingStatus(string $status): bool

@@ -23,6 +23,13 @@ describe('composants graphiques dashboard', () => {
     it('rend ProgressBar avec pourcentage', () => {
         const { container } = render(<ProgressBar value={75} label="Santé" />);
         expect(container.textContent).toContain('75%');
+        expect(container.querySelector('.onboarding-deploy-shimmer')).toBeNull();
+    });
+
+    it('anime ProgressBar tant que le démarrage est actif', () => {
+        const { container } = render(<ProgressBar value={2} max={3} active />);
+        expect(container.textContent).toContain('67%');
+        expect(container.querySelector('.onboarding-deploy-shimmer')).toBeTruthy();
     });
 
     it('rend Sparkline sans erreur', () => {

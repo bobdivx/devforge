@@ -405,3 +405,49 @@ input {
     opacity: 0.8;
     border-color: color-mix(in oklab, var(--color-error) 45%, var(--color-base-300)) !important;
 }
+
+@keyframes onboarding-deploy-shimmer {
+    0% {
+        transform: translateX(-120%);
+    }
+
+    100% {
+        transform: translateX(220%);
+    }
+}
+
+@keyframes onboarding-deploy-node {
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-primary) 40%, transparent);
+    }
+
+    50% {
+        box-shadow: 0 0 0 8px color-mix(in oklab, var(--color-primary) 0%, transparent);
+    }
+}
+
+.onboarding-deploy-shimmer {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 28%;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        color-mix(in oklab, var(--color-primary-content) 55%, transparent),
+        transparent
+    );
+    animation: onboarding-deploy-shimmer 1.4s ease-in-out infinite;
+}
+
+.onboarding-deploy-node-active {
+    animation: onboarding-deploy-node 1.4s ease-in-out infinite;
+}
+
+.onboarding-deploy-app-active {
+    animation: application-boot-pulse 1.6s ease-in-out infinite;
+}
+
+.onboarding-deploy-track-active {
+    animation: application-boot-pulse 1.2s ease-in-out infinite;
+}

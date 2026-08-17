@@ -94,7 +94,12 @@ it('classifies repair strategy from deployment log blobs', function () {
             'New container is unhealthy.'
         ))->toBe(AgentChatRepairStrategy::ISSUE_HEALTHCHECK_PORT)
         ->and(AgentChatRepairStrategy::detectIssue('docker tee: /artifacts/foo without permission words'))
-        ->toBe(AgentChatRepairStrategy::ISSUE_GENERIC);
+        ->toBe(AgentChatRepairStrategy::ISSUE_GENERIC)
+        ->and(AgentChatRepairStrategy::detectIssue(
+            'error @apollo/federation@0.27.0: The engine "node" is incompatible with this module. Expected version ">=12.13.0 <17.0". Got "22.11.0"',
+        ))->toBe(AgentChatRepairStrategy::ISSUE_NODE_ENGINE)
+        ->and(AgentChatRepairStrategy::detectIssue('Node.js v22.11.0 is not supported by Astro!'))
+        ->toBe(AgentChatRepairStrategy::ISSUE_NODE_ENGINE);
 });
 
 it('harness aligns ports when healthcheck mismatches listen port', function () {

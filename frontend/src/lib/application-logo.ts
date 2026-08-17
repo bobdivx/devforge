@@ -48,11 +48,17 @@ function githubOwnerFromRepository(repository: string | null | undefined): strin
     return null;
 }
 
+function isGeneratedApplicationHostname(hostname: string): boolean {
+    const label = hostname.split('.')[0] ?? '';
+
+    return /^[a-z0-9]{20,}$/i.test(label);
+}
+
 export function resolveApplicationLogoUrl(configuration: Record<string, unknown> | null | undefined): string | null {
     const domains = asStringArray(configuration?.domains);
     for (const domain of domains) {
         const hostname = hostnameFromCandidate(domain);
-        if (hostname) {
+        if (hostname && !isGeneratedApplicationHostname(hostname)) {
             return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=64`;
         }
     }

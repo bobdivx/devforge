@@ -2,6 +2,8 @@
 
 namespace App\Services\DevForge\Agent;
 
+use App\Services\DevForge\Application\NixpacksNodeVersionResolver;
+
 /**
  * Décide quelle réparation déterministe lancer quand le LLM refuse d'émettre des tool_calls.
  */
@@ -18,6 +20,8 @@ class AgentChatRepairStrategy
     public const ISSUE_BASE_CONFIG = 'base_config';
 
     public const ISSUE_PUPPETEER = 'puppeteer';
+
+    public const ISSUE_NODE_ENGINE = 'node_engine';
 
     public const ISSUE_HEALTHCHECK_PORT = 'healthcheck_port';
 
@@ -88,6 +92,10 @@ class AgentChatRepairStrategy
 
         if (AgentDirectives::isMissingStaticPublishDirectoryIssue($logsBlob)) {
             return self::ISSUE_NGINX_PUBLISH;
+        }
+
+        if (app(NixpacksNodeVersionResolver::class)->logsLookLikeEngineMismatch($logsBlob)) {
+            return self::ISSUE_NODE_ENGINE;
         }
 
         if (

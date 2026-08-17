@@ -338,6 +338,7 @@ class Application extends BaseModel
                 EnvironmentVariable::create([
                     'key' => 'NIXPACKS_NODE_VERSION',
                     'value' => '22',
+                    'comment' => 'devforge:auto:nixpacks-node',
                     'is_multiline' => false,
                     'is_literal' => false,
                     'is_buildtime' => true,

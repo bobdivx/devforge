@@ -33,10 +33,13 @@ export function ApplicationBootSequenceBanner({ sequence }: ApplicationBootSeque
                         {sequence.completed}/{sequence.total} prêtes
                         {current ? ` — ${current.name}` : ''}
                     </p>
+                    {current?.message ? (
+                        <p class="mt-0.5 truncate text-xs text-base-content/50">{current.message}</p>
+                    ) : null}
                 </div>
                 <Loader2 class="size-4 shrink-0 animate-spin text-primary" aria-hidden />
             </div>
-            <ProgressBar value={sequence.completed} max={sequence.total} tone="primary" />
+            <ProgressBar value={sequence.completed} max={sequence.total} tone="primary" active />
         </article>
     );
 }

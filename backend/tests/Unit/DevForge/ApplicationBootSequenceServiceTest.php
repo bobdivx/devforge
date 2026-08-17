@@ -5,17 +5,23 @@ use App\Models\Team;
 use App\Services\DevForge\Application\ApplicationBootSequenceService;
 use App\Services\DevForge\Core\CoreResourceAction;
 use App\Services\DevForge\Core\CoreResourceCatalog;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Mockery;
 
 beforeEach(function () {
     Cache::flush();
+    Carbon::setTestNow();
     config()->set('devforge.enabled', true);
     config()->set('devforge.application_boot_sequence.enabled', true);
     config()->set('devforge.application_boot_sequence.window_seconds', 900);
     config()->set('devforge.application_boot_sequence.item_timeout_seconds', 300);
     config()->set('devforge.application_boot_sequence.poll_interval_ms', 2500);
+});
+
+afterEach(function () {
+    Carbon::setTestNow();
 });
 
 function makeBootService(?CoreResourceCatalog $catalog = null, ?CoreResourceAction $action = null): ApplicationBootSequenceService
@@ -159,4 +165,95 @@ it('force-starts all stopped applications including a minority', function () {
         ->and($status['current_uuid'])->toBe('app-2')
         ->and($status['items'][0]['phase'])->toBe('running')
         ->and($status['items'][1]['phase'])->toBe('starting');
+});
+
+it('treats degraded applications as ready so the sequence can finish', function () {
+    $team = Team::factory()->make(['id' => 15]);
+    $ready = makeApplication('app-1', 'Alpha', 'running:healthy');
+    $degraded = makeApplication('app-2', 'Tesla', 'degraded:unhealthy');
+
+    $catalog = Mockery::mock(CoreResourceCatalog::class);
+    $catalog->shouldReceive('resources')
+        ->with($team, 'applications')
+        ->andReturn(new Collection([$ready, $degraded]));
+
+    $action = Mockery::mock(CoreResourceAction::class);
+    $action->shouldReceive('execute')->never();
+
+    $service = makeBootService($catalog, $action);
+    $service->begin($team, [$ready, $degraded]);
+    $service->tickTeam($team);
+    $service->tickTeam($team);
+    $status = $service->statusForTeam($team, ensure: false);
+
+    expect($status['active'])->toBeFalse()
+        ->and($status['status'])->toBe('completed')
+        ->and($status['completed'])->toBe(2)
+        ->and($status['items'][1]['phase'])->toBe('running');
+});
+
+it('times out a starting application that never becomes ready', function () {
+    Carbon::setTestNow('2026-08-17 10:00:00');
+
+    $team = Team::factory()->make(['id' => 16]);
+    $application = Mockery::mock(Application::class)->makePartial();
+    $application->uuid = 'app-1';
+    $application->name = 'Tesla';
+    $application->status = 'created';
+    $application->shouldReceive('isDeploymentInprogress')->andReturn(false);
+
+    $catalog = Mockery::mock(CoreResourceCatalog::class);
+    $catalog->shouldReceive('resources')
+        ->with($team, 'applications')
+        ->andReturn(new Collection([$application]));
+
+    $action = Mockery::mock(CoreResourceAction::class);
+    $action->shouldReceive('execute')->never();
+
+    $service = makeBootService($catalog, $action);
+    $service->begin($team, [$application]);
+    $service->tickTeam($team);
+
+    expect($service->statusForTeam($team, ensure: false)['items'][0]['phase'])->toBe('starting');
+
+    Carbon::setTestNow('2026-08-17 10:06:00');
+    $service->tickTeam($team);
+    $status = $service->statusForTeam($team, ensure: false);
+
+    expect($status['active'])->toBeFalse()
+        ->and($status['status'])->toBe('completed')
+        ->and($status['items'][0]['phase'])->toBe('failed')
+        ->and($status['items'][0]['message'])->toBe('Délai de démarrage dépassé.');
+});
+
+it('does not timeout while a deployment is still in progress', function () {
+    Carbon::setTestNow('2026-08-17 10:00:00');
+
+    $team = Team::factory()->make(['id' => 17]);
+    $application = Mockery::mock(Application::class)->makePartial();
+    $application->uuid = 'app-1';
+    $application->name = 'Tesla';
+    $application->status = 'starting';
+    $application->shouldReceive('isDeploymentInprogress')->andReturn(true);
+
+    $catalog = Mockery::mock(CoreResourceCatalog::class);
+    $catalog->shouldReceive('resources')
+        ->with($team, 'applications')
+        ->andReturn(new Collection([$application]));
+
+    $action = Mockery::mock(CoreResourceAction::class);
+    $action->shouldReceive('execute')->never();
+
+    $service = makeBootService($catalog, $action);
+    $service->begin($team, [$application]);
+    $service->tickTeam($team);
+
+    Carbon::setTestNow('2026-08-17 10:06:00');
+    $service->tickTeam($team);
+    $status = $service->statusForTeam($team, ensure: false);
+
+    expect($status['active'])->toBeTrue()
+        ->and($status['current_uuid'])->toBe('app-1')
+        ->and($status['items'][0]['phase'])->toBe('starting')
+        ->and($status['items'][0]['message'])->toBe('Déploiement en cours…');
 });

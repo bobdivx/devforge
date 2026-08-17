@@ -12,6 +12,8 @@ class ApplicationDeploySettingsReconciler
     public function __construct(
         private readonly ApplicationRuntimeSettingsDetector $detector,
         private readonly ApplicationRuntimeSettingsService $runtimeSettings,
+        private readonly NixpacksNodeVersionApplier $nodeVersionApplier,
+        private readonly NixpacksNodeVersionResolver $nodeVersionResolver,
     ) {}
 
     /**
@@ -143,6 +145,7 @@ class ApplicationDeploySettingsReconciler
         }
 
         $this->applyHealthcheckDefaults($application, $suggestions, $suggestedStatic, $payload, $changes);
+        $this->applyNixpacksNodeVersion($application, $suggestions, $changes);
 
         if ($payload !== []) {
             $payload['redeploy'] = false;
@@ -200,6 +203,52 @@ class ApplicationDeploySettingsReconciler
                 $payload['health_check_enabled'] = true;
                 $changes[] = 'health_check_enabled=true';
             }
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $suggestions
+     * @param  list<string>  $changes
+     */
+    private function applyNixpacksNodeVersion(Application $application, array $suggestions, array &$changes): void
+    {
+        if (! in_array((string) $application->build_pack, ['nixpacks', 'railpack'], true)) {
+            return;
+        }
+
+        $suggested = $suggestions['nixpacks_node_version'] ?? null;
+        if (! is_string($suggested) || trim($suggested) === '') {
+            return;
+        }
+
+        $applier = $this->nodeVersionApplier;
+        $resolver = $this->nodeVersionResolver;
+        $key = $applier->keyFor($application);
+        $variable = $application->environment_variables()->where('key', $key)->first();
+        $current = $variable !== null ? trim((string) $variable->value) : null;
+        if ($current === '') {
+            $current = null;
+        }
+        $current ??= NixpacksNodeVersionResolver::DEFAULT;
+        $constraint = $suggestions['nixpacks_node_constraint'] ?? null;
+        $isAutoManaged = $variable === null
+            || $current === NixpacksNodeVersionResolver::DEFAULT
+            || str((string) ($variable->comment ?? ''))->startsWith('devforge:auto:');
+
+        if ($current === $suggested) {
+            return;
+        }
+
+        if (is_string($constraint) && $constraint !== '' && $resolver->majorSatisfies($current, $constraint)) {
+            return;
+        }
+
+        if (! $isAutoManaged && (! is_string($constraint) || $constraint === '')) {
+            return;
+        }
+
+        if ($applier->apply($application, $suggested)) {
+            $changes[] = $key."={$suggested}";
         }
     }
 

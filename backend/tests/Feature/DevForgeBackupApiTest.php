@@ -3,26 +3,17 @@
 
 
 use App\Jobs\DatabaseBackupJob;
-
 use App\Models\Environment;
-
 use App\Models\Project;
-
 use App\Models\S3Storage;
-
 use App\Models\ScheduledDatabaseBackup;
-
 use App\Models\Server;
-
 use App\Models\StandalonePostgresql;
-
 use App\Models\Team;
-
 use App\Models\User;
-
 use Illuminate\Foundation\Testing\RefreshDatabase;
-
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 
 
 
@@ -337,6 +328,33 @@ it('attaches the team s3 destination when creating a backup without save_s3', fu
         ->assertCreated()
         ->assertJsonPath('data.save_s3', true)
         ->assertJsonPath('data.s3_storage.uuid', $storage->uuid);
+});
+
+it('tests an s3 storage connection with a cuid identifier', function () {
+    $storage = createDevForgeS3Storage($this->team);
+    $storage->uuid = 'my2gtulfu369jfgyygmz6gvu';
+    $storage->save();
+
+    $disk = Mockery::mock();
+    $disk->expects('files')->once()->andReturn([]);
+    Storage::expects('build')->once()->andReturn($disk);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson("/api/devforge/v1/s3-storages/{$storage->uuid}/test")
+        ->assertOk()
+        ->assertJsonPath('data.success', true)
+        ->assertJsonPath('data.message', 'Connexion S3 validée.')
+        ->assertJsonPath('data.storage.uuid', 'my2gtulfu369jfgyygmz6gvu');
+
+    expect($storage->fresh()->is_usable)->toBeTrue();
+});
+
+it('returns not found when testing an s3 storage that does not exist', function () {
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/s3-storages/my2gtulfu369jfgyygmz6gvu/test')
+        ->assertNotFound();
 });
 
 it('normalizes a scaleway virtual-hosted endpoint on create', function () {

@@ -11,6 +11,7 @@ class ApplicationRuntimeSettingsDetector
 {
     public function __construct(
         private readonly ApplicationSourceService $sourceService,
+        private readonly NixpacksNodeVersionResolver $nodeVersionResolver,
     ) {}
 
     /**
@@ -256,6 +257,15 @@ class ApplicationRuntimeSettingsDetector
             $reasons[] = 'Dockerfile détecté.';
         }
 
+        $nodeVersion = $this->nodeVersionResolver->resolveFromSources(
+            $package,
+            $files['.nvmrc'] ?? null,
+            $files['.node-version'] ?? null,
+            $nixpacks,
+            $framework,
+        );
+        $reasons[] = "NIXPACKS_NODE_VERSION={$nodeVersion} déduit du dépôt (engines / .nvmrc / stack).";
+
         $suggestions = [
             'is_static' => $isStatic,
             'ports_exposes' => $portsExposes,
@@ -269,6 +279,8 @@ class ApplicationRuntimeSettingsDetector
             'health_check_port' => $isStatic ? '80' : $portsExposes,
             'framework' => $framework,
             'framework_label' => $frameworkLabel,
+            'nixpacks_node_version' => $nodeVersion,
+            'nixpacks_node_constraint' => $this->nodeVersionResolver->enginesConstraint($package),
         ];
 
         if ($sources === [] && $reasons === []) {
@@ -306,6 +318,8 @@ class ApplicationRuntimeSettingsDetector
             'astro.config.js',
             'astro.config.mts',
             'nixpacks.toml',
+            '.nvmrc',
+            '.node-version',
             'Dockerfile',
             'dockerfile',
             '.env.example',

@@ -175,3 +175,33 @@ it('corrects wrongly-enabled static mode for Astro SSR', function () {
         ->and((string) $this->application->health_check_port)->toBe('4321')
         ->and($result['changes'])->toContain('is_static=false');
 });
+
+it('applies detected NIXPACKS_NODE_VERSION when the default 22 cannot satisfy engines', function () {
+    $detection = [
+        'available' => true,
+        'reason' => null,
+        'sources' => ['package.json'],
+        'suggestions' => [
+            'is_static' => false,
+            'ports_exposes' => '3000',
+            'publish_directory' => '/',
+            'base_directory' => '/',
+            'start_command' => 'nuxt start',
+            'build_command' => null,
+            'install_command' => 'yarn install --frozen-lockfile',
+            'health_check_port' => '3000',
+            'framework' => 'nuxt',
+            'framework_label' => 'Nuxt',
+            'nixpacks_node_version' => '16',
+            'nixpacks_node_constraint' => '>=12.13.0 <17.0',
+        ],
+        'reasons' => ['Nuxt 2'],
+    ];
+
+    $reconciler = app(ApplicationDeploySettingsReconciler::class);
+    $result = $reconciler->applyDetection($this->application, $detection);
+
+    expect($result['changes'])->toContain('NIXPACKS_NODE_VERSION=16')
+        ->and($this->application->environment_variables()->where('key', 'NIXPACKS_NODE_VERSION')->first()?->value)
+        ->toBe('16');
+});

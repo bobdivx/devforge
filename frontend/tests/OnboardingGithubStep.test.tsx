@@ -165,6 +165,20 @@ describe('OnboardingGithubStep', () => {
             if (url.endsWith('/applications') && init?.method === 'POST') {
                 return jsonResponse({ data: { uuid: 'app-created' } }, 201);
             }
+            if (url.includes('/deployments')) {
+                return jsonResponse({
+                    data: [{
+                        uuid: 'dep-1',
+                        status: 'in_progress',
+                        application: { uuid: 'app-created', name: 'popcorn' },
+                    }],
+                });
+            }
+            if (url.includes('/core/applications')) {
+                return jsonResponse({
+                    data: [{ uuid: 'app-created', status: 'starting' }],
+                });
+            }
             throw new Error(`URL inattendue : ${url}`);
         });
 
@@ -173,8 +187,14 @@ describe('OnboardingGithubStep', () => {
         fireEvent.click(await screen.findByRole('checkbox'));
         fireEvent.click(screen.getByRole('button', { name: 'Démarrer 1 dépôt' }));
 
+        expect(await screen.findByRole('heading', { name: 'Déploiement des applications' })).toBeInTheDocument();
+        expect(await screen.findByText('bob/popcorn')).toBeInTheDocument();
+        expect(onConnected).not.toHaveBeenCalled();
+        const continueButton = await screen.findByRole('button', { name: /Continuer/ });
         await waitFor(() => {
-            expect(onConnected).toHaveBeenCalled();
+            expect(continueButton).toBeEnabled();
         });
+        fireEvent.click(continueButton);
+        expect(onConnected).toHaveBeenCalled();
     });
 });

@@ -123,7 +123,7 @@ it('rejects updates on automatically managed variables', function () {
         ->assertJsonPath('message', 'Cette variable est gérée automatiquement et ne peut pas être modifiée.');
 });
 
-it('allows deleting buildpack control variables while keeping them non-editable', function () {
+it('allows updating and deleting NIXPACKS_NODE_VERSION', function () {
     $variable = $this->application->environment_variables()
         ->where('key', 'NIXPACKS_NODE_VERSION')
         ->where('is_preview', false)
@@ -135,16 +135,18 @@ it('allows deleting buildpack control variables while keeping them non-editable'
         ->assertSuccessful()
         ->assertJsonPath('data.production.0.key', 'NIXPACKS_NODE_VERSION')
         ->assertJsonPath('data.production.0.is_buildpack_control', true)
-        ->assertJsonPath('data.production.0.is_editable', false)
+        ->assertJsonPath('data.production.0.is_editable', true)
         ->assertJsonPath('data.production.0.is_deletable', true);
 
     $this->actingAs($this->user)
         ->withSession($this->session)
         ->putJson("/api/devforge/v1/applications/{$this->application->uuid}/environment-variables/{$variable->uuid}", [
-            'value' => '20',
+            'value' => '16',
         ])
-        ->assertStatus(422)
-        ->assertJsonPath('message', 'Cette variable est gérée automatiquement et ne peut pas être modifiée.');
+        ->assertSuccessful()
+        ->assertJsonPath('data.key', 'NIXPACKS_NODE_VERSION');
+
+    expect($variable->fresh()->value)->toBe('16');
 
     $this->actingAs($this->user)
         ->withSession($this->session)
@@ -231,12 +233,12 @@ ENV;
         ])
         ->assertSuccessful()
         ->assertJsonPath('data.created', 2)
-        ->assertJsonPath('data.updated', 1)
-        ->assertJsonPath('data.skipped.0.key', 'NIXPACKS_NODE_VERSION')
-        ->assertJsonPath('data.skipped.0.reason', 'protected');
+        ->assertJsonPath('data.updated', 2);
 
     expect($this->application->environment_variables()->where('key', 'APP_ENV')->where('is_preview', false)->first()?->value)
         ->toBe('production')
+        ->and($this->application->environment_variables()->where('key', 'NIXPACKS_NODE_VERSION')->where('is_preview', false)->first()?->value)
+        ->toBe('20')
         ->and($this->application->environment_variables()->where('key', 'TURSO_DATABASE_URL')->where('is_preview', false)->first()?->value)
         ->toBe('libsql://example.turso.io')
         ->and($this->application->environment_variables()->where('key', 'JWT_SECRET')->where('is_preview', false)->first()?->value)

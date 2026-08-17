@@ -2791,7 +2791,7 @@ export const domainApi = {
     createApplication: (input: CreateApplicationInput) => mutate<ApiResponse<CoreResource>>('/applications', {
         method: 'POST',
         body: JSON.stringify(input),
-    }),
+    }, 90_000),
     deleteApplication: (
         applicationUuid: string,
         input: {

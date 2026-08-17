@@ -44,7 +44,7 @@ const variablesFixture = {
         is_shared: false,
         is_coolify: false,
         is_buildpack_control: true,
-        is_editable: false,
+        is_editable: true,
         is_deletable: true,
         is_revealable: true,
         updated_at: '2026-04-27T10:00:00.000Z',
@@ -86,8 +86,8 @@ describe('ApplicationEnvironmentVariablesPanel', () => {
         expect(screen.getByRole('button', { name: 'Modifier APP_ENV' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Afficher APP_ENV' })).toBeInTheDocument();
         expect(screen.getByText('NIXPACKS_NODE_VERSION')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Modifier NIXPACKS_NODE_VERSION' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Supprimer NIXPACKS_NODE_VERSION' })).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: 'Modifier NIXPACKS_NODE_VERSION' })).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('button', { name: 'Afficher APP_ENV' }));
 

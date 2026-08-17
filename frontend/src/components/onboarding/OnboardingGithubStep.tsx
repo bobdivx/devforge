@@ -1,4 +1,4 @@
-import { FolderGit2, LoaderCircle, Search } from 'lucide-preact';
+import { FolderGit2, Search } from 'lucide-preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import {
     domainApi,
@@ -7,6 +7,14 @@ import {
     type GithubRepository,
     type Project,
 } from '../../lib/domain-api';
+import {
+    createInitialDeployItems,
+    markDeployItemCreated,
+    markDeployItemCreating,
+    markDeployItemFailed,
+    mergeOnboardingDeployStatus,
+    type OnboardingDeployItem,
+} from '../../lib/onboarding-deploy';
 import {
     filterGithubRepositories,
     firstDestinationUuid,
@@ -20,6 +28,7 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { DataState } from '../ui/DataState';
 import { StatusBadge } from '../ui/StatusBadge';
+import { OnboardingDeployProgress } from './OnboardingDeployProgress';
 
 type OnboardingGithubStepProps = {
     canManage: boolean;
@@ -136,7 +145,7 @@ function OnboardingGithubRepos({
     const [query, setQuery] = useState('');
     const [selected, setSelected] = useState<number[]>([]);
     const [submitting, setSubmitting] = useState(false);
-    const [progress, setProgress] = useState<string | null>(null);
+    const [deployItems, setDeployItems] = useState<OnboardingDeployItem[]>([]);
 
     useEffect(() => {
         let cancelled = false;
@@ -175,11 +184,70 @@ function OnboardingGithubRepos({
     const visible = useMemo(() => filterGithubRepositories(repositories, query), [repositories, query]);
     const destinationUuid = firstDestinationUuid(targets);
 
+    const createdUuids = deployItems
+        .map((item) => item.uuid)
+        .filter((uuid): uuid is string => uuid !== null)
+        .sort()
+        .join(',');
+
+    useEffect(() => {
+        if (createdUuids === '') {
+            return;
+        }
+
+        let cancelled = false;
+        let timer: number | null = null;
+
+        const poll = async () => {
+            try {
+                const [deployments, applications] = await Promise.all([
+                    domainApi.deployments(1, undefined, 50),
+                    domainApi.coreResources('applications'),
+                ]);
+                if (cancelled) {
+                    return;
+                }
+
+                let nextItems: OnboardingDeployItem[] = [];
+                setDeployItems((current) => {
+                    nextItems = mergeOnboardingDeployStatus(current, deployments.data, applications.data);
+
+                    return nextItems;
+                });
+
+                const keepPolling = nextItems.some((item) => item.phase !== 'healthy' && item.phase !== 'failed');
+
+                if (!cancelled && keepPolling) {
+                    timer = window.setTimeout(() => {
+                        void poll();
+                    }, 2500);
+                }
+            } catch {
+                if (!cancelled) {
+                    timer = window.setTimeout(() => {
+                        void poll();
+                    }, 4000);
+                }
+            }
+        };
+
+        void poll();
+
+        return () => {
+            cancelled = true;
+            if (timer !== null) {
+                window.clearTimeout(timer);
+            }
+        };
+    }, [createdUuids]);
+
     const startSelected = async () => {
         if (selected.length === 0) {
             return;
         }
 
+        const chosen = repositories.filter((repository) => selected.includes(repository.id));
+        setDeployItems(createInitialDeployItems(chosen));
         setSubmitting(true);
         setError(null);
 
@@ -201,31 +269,46 @@ function OnboardingGithubRepos({
                 throw new Error('Aucun serveur Docker n’est encore prêt. Passez à l’étape serveur, puis revenez ici.');
             }
 
-            const chosen = repositories.filter((repository) => selected.includes(repository.id));
-            for (const [index, repository] of chosen.entries()) {
-                setProgress(`Démarrage ${index + 1}/${chosen.length} · ${repository.full_name}`);
-                await domainApi.createApplication({
-                    project_uuid: launch.projectUuid,
-                    environment_uuid: launch.environmentUuid,
-                    destination_uuid: destinationUuid,
-                    github_app_uuid: app.uuid,
-                    git_repository: repository.full_name,
-                    repository_id: repository.id,
-                    git_branch: repository.default_branch || 'main',
-                    build_pack: 'nixpacks',
-                    name: repository.name,
-                    instant_deploy: true,
-                });
+            for (const repository of chosen) {
+                setDeployItems((current) => markDeployItemCreating(current, repository.id));
+                try {
+                    const created = await domainApi.createApplication({
+                        project_uuid: launch.projectUuid,
+                        environment_uuid: launch.environmentUuid,
+                        destination_uuid: destinationUuid,
+                        github_app_uuid: app.uuid,
+                        git_repository: repository.full_name,
+                        repository_id: repository.id,
+                        git_branch: repository.default_branch || 'main',
+                        build_pack: 'nixpacks',
+                        name: repository.name,
+                        instant_deploy: true,
+                    });
+                    setDeployItems((current) => markDeployItemCreated(current, repository.id, created.data.uuid));
+                } catch (createError: unknown) {
+                    setDeployItems((current) => markDeployItemFailed(
+                        current,
+                        repository.id,
+                        createError instanceof Error ? createError.message : 'Impossible de créer l’application.',
+                    ));
+                }
             }
-
-            onStarted();
         } catch (startError: unknown) {
             setError(startError instanceof Error ? startError.message : 'Impossible de démarrer les applications.');
+            setDeployItems([]);
         } finally {
             setSubmitting(false);
-            setProgress(null);
         }
     };
+
+    if (deployItems.length > 0) {
+        return (
+            <OnboardingDeployProgress
+                items={deployItems}
+                onContinue={onStarted}
+            />
+        );
+    }
 
     return (
         <Card title="Quels dépôts démarrer ?" eyebrow="GitHub connecté">
@@ -278,12 +361,6 @@ function OnboardingGithubRepos({
             {!destinationUuid && !loading && (
                 <p class="mt-3 text-xs text-warning">
                     Aucun serveur Docker n’est encore prêt. Vous pourrez démarrer ces dépôts après l’étape serveur.
-                </p>
-            )}
-            {progress && (
-                <p class="mt-3 flex items-center gap-2 text-xs text-base-content/60">
-                    <LoaderCircle class="size-3.5 animate-spin" aria-hidden />
-                    {progress}
                 </p>
             )}
             {error && repositories.length > 0 && <p class="mt-3 text-xs text-error" role="alert">{error}</p>}

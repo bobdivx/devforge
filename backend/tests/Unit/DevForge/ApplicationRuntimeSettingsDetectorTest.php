@@ -146,5 +146,30 @@ it('detects Next.js as node runtime', function () {
         ->and($result['suggestions']['ports_exposes'])->toBe('3000')
         ->and($result['suggestions']['start_command'])->toBe('next start')
         ->and($result['suggestions']['framework'])->toBe('next')
-        ->and($result['suggestions']['framework_label'])->toBe('Next.js');
+        ->and($result['suggestions']['framework_label'])->toBe('Next.js')
+        ->and($result['suggestions']['nixpacks_node_version'])->toBe('22');
+});
+
+it('suggests Node 24 for Astro 7 engines and Node 16 for Nuxt 2', function () {
+    $detector = app(ApplicationRuntimeSettingsDetector::class);
+
+    $astro = $detector->inferFromContents([
+        'package.json' => json_encode([
+            'engines' => ['node' => '>=22.12.0'],
+            'scripts' => ['build' => 'astro build', 'start' => 'node ./dist/server/entry.mjs'],
+            'dependencies' => ['astro' => '^7.1.6', '@astrojs/node' => '^9.0.0'],
+        ], JSON_THROW_ON_ERROR),
+    ]);
+
+    $nuxt = $detector->inferFromContents([
+        'package.json' => json_encode([
+            'scripts' => ['dev' => 'nuxt', 'start' => 'nuxt start'],
+            'dependencies' => ['nuxt' => '^2.15.8'],
+        ], JSON_THROW_ON_ERROR),
+        'yarn.lock' => '# yarn',
+    ]);
+
+    expect($astro['suggestions']['nixpacks_node_version'])->toBe('24')
+        ->and($nuxt['suggestions']['framework'])->toBe('nuxt')
+        ->and($nuxt['suggestions']['nixpacks_node_version'])->toBe('16');
 });

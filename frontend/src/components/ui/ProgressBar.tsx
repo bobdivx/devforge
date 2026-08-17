@@ -3,6 +3,7 @@ type ProgressBarProps = {
     max?: number;
     label?: string;
     tone?: 'primary' | 'success' | 'warning' | 'error';
+    active?: boolean;
 };
 
 const toneClasses = {
@@ -12,7 +13,7 @@ const toneClasses = {
     error: 'bg-error',
 };
 
-export function ProgressBar({ value, max = 100, label, tone = 'primary' }: ProgressBarProps) {
+export function ProgressBar({ value, max = 100, label, tone = 'primary', active = false }: ProgressBarProps) {
     const percent = Math.max(0, Math.min(100, Math.round((value / max) * 100)));
 
     return (
@@ -23,8 +24,9 @@ export function ProgressBar({ value, max = 100, label, tone = 'primary' }: Progr
                     <span class="tabular-nums">{percent}%</span>
                 </div>
             )}
-            <div class="h-2 overflow-hidden rounded-sm bg-base-300">
+            <div class="relative h-2 overflow-hidden rounded-sm bg-base-300">
                 <div class={`h-full transition-all ${toneClasses[tone]}`} style={{ width: `${percent}%` }} />
+                {active && <span class="onboarding-deploy-shimmer" aria-hidden />}
             </div>
         </div>
     );

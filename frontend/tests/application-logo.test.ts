@@ -22,6 +22,22 @@ describe('resolveApplicationLogoUrl', () => {
         })).toBe('https://github.com/briseteia.png?size=64');
     });
 
+    it('ignore les FQDN générés Coolify qui n’ont pas de favicon Google', () => {
+        expect(resolveApplicationLogoUrl({
+            domains: [
+                'http://elhqi0vaqt1z9913zgv9h4zu.briseteia.me',
+                'https://tesla.briseteia.me',
+            ],
+        })).toBe('https://www.google.com/s2/favicons?domain=tesla.briseteia.me&sz=64');
+    });
+
+    it('retombe sur GitHub si tous les domaines sont des FQDN générés', () => {
+        expect(resolveApplicationLogoUrl({
+            domains: ['http://cdnsf18lcgxwr3d3tmzhy50w.briseteia.me'],
+            git_repository: 'https://github.com/briseteia/teslasphere',
+        })).toBe('https://github.com/briseteia.png?size=64');
+    });
+
     it('supporte les URLs git SSH GitHub', () => {
         expect(resolveApplicationLogoUrl({
             git_repository: 'git@github.com:briseteia/chistera.git',
