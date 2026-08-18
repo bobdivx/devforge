@@ -259,6 +259,11 @@ class SsoProtection
             $callbacks[] = "{$scheme}://*.{$parent}/**";
         }
 
+        foreach (self::applicationPublicOrigins() as $origin) {
+            $callbacks[] = $origin.'/**';
+            $callbacks[] = $origin.'/api/auth/callback/pocket-id';
+        }
+
         return array_values(array_unique($callbacks));
     }
 
@@ -289,7 +294,78 @@ class SsoProtection
             $logout[] = "{$scheme}://*.{$parent}";
         }
 
+        foreach (self::applicationPublicOrigins() as $origin) {
+            $logout[] = $origin;
+        }
+
         return array_values(array_unique($logout));
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function applicationPublicOrigins(): array
+    {
+        try {
+            $origins = [];
+            Application::query()
+                ->whereNotNull('fqdn')
+                ->where('fqdn', '!=', '')
+                ->each(function (Application $application) use (&$origins): void {
+                    foreach (self::originsFromFqdn((string) $application->fqdn) as $origin) {
+                        $origins[] = $origin;
+                    }
+                });
+
+            return array_values(array_unique($origins));
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function originsFromFqdn(string $fqdn): array
+    {
+        $origins = [];
+        foreach (explode(',', $fqdn) as $entry) {
+            $entry = trim($entry);
+            if ($entry === '') {
+                continue;
+            }
+            if (! str_contains($entry, '://')) {
+                $entry = 'https://'.$entry;
+            }
+
+            try {
+                $url = Url::fromString($entry);
+            } catch (\Throwable) {
+                continue;
+            }
+
+            $host = $url->getHost();
+            if (! filled($host)) {
+                continue;
+            }
+
+            $origins[] = 'https://'.$host;
+            $origins[] = 'http://'.$host;
+        }
+
+        return array_values(array_unique($origins));
+    }
+
+    public static function primaryPublicOrigin(Application $application): ?string
+    {
+        $origins = self::originsFromFqdn((string) $application->fqdn);
+        foreach ($origins as $origin) {
+            if (str_starts_with($origin, 'https://')) {
+                return $origin;
+            }
+        }
+
+        return $origins[0] ?? null;
     }
 
     /**

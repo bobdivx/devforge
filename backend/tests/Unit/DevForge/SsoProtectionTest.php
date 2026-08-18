@@ -20,6 +20,14 @@ it('builds public pocket id urls from the apps wildcard domain', function () {
     ]);
 });
 
+it('includes custom application domains in oidc callbacks', function () {
+    expect(SsoProtection::originsFromFqdn('https://starbasefr.com,https://starbasefr.briseteia.me'))->toContain(
+        'https://starbasefr.com',
+        'http://starbasefr.com',
+        'https://starbasefr.briseteia.me',
+    );
+});
+
 it('builds wildcard oidc callbacks so every deployed app can use pocket id', function () {
     $settings = new InstanceSettings([
         'apps_wildcard_domain' => 'https://apps.exemple.com',

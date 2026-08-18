@@ -23,6 +23,7 @@ use App\Services\DevForge\Agent\DeploymentBuildAgentDispatcher;
 use App\Services\DevForge\Agent\DeploymentFailureAgentDispatcher;
 use App\Services\DevForge\Application\GithubPackagesBuildAuthInjector;
 use App\Services\DevForge\Sso\SsoProtection;
+use App\Services\DevForge\Sso\SyncApplicationOidcEnvironment;
 use App\Services\DevForge\Application\NixpacksNodeVersionAutoRepair;
 use App\Services\DevForge\Application\NixpacksPlanDefaults;
 use App\Services\DevForge\Readiness\ApplicationReadinessService;
@@ -3108,6 +3109,8 @@ COPY ./nginx.conf /etc/nginx/conf.d/default.conf");
 
             add_coolify_default_environment_variables($this->application, $coolify_envs, $this->application->environment_variables_preview);
             if (! $forBuildTime) {
+                app(SyncApplicationOidcEnvironment::class)->sync($this->application);
+                $this->application->unsetRelation('environment_variables_preview');
                 $coolify_envs = SsoProtection::mergeOidcEnvironment($coolify_envs, $this->application->environment_variables_preview);
             }
 
@@ -3155,6 +3158,8 @@ COPY ./nginx.conf /etc/nginx/conf.d/default.conf");
 
             add_coolify_default_environment_variables($this->application, $coolify_envs, $this->application->environment_variables);
             if (! $forBuildTime) {
+                app(SyncApplicationOidcEnvironment::class)->sync($this->application);
+                $this->application->unsetRelation('environment_variables');
                 $coolify_envs = SsoProtection::mergeOidcEnvironment($coolify_envs, $this->application->environment_variables);
             }
 

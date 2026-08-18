@@ -7,6 +7,7 @@ use App\Models\Server;
 use App\Services\DevForge\Sso\ProvisionPocketIdClients;
 use App\Services\DevForge\Sso\SsoComposeGenerator;
 use App\Services\DevForge\Sso\SsoProtection;
+use App\Services\DevForge\Sso\SyncApplicationOidcEnvironment;
 use Illuminate\Support\Facades\Log;
 use Lorisleiva\Actions\Concerns\AsAction;
 use Symfony\Component\Yaml\Yaml;
@@ -52,6 +53,7 @@ class StartSsoStack
             if (filled($settings->sso_apps_client_id) && filled($settings->sso_apps_client_secret)) {
                 $this->writeAndUp($server, $settings);
             }
+            app(SyncApplicationOidcEnvironment::class)->sync();
         } catch (\Throwable $e) {
             Log::warning('SSO stack started but OIDC clients were not provisioned yet.', [
                 'error' => $e->getMessage(),

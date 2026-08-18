@@ -349,6 +349,10 @@ class ApplicationEnvironmentVariableCatalog
             return false;
         }
 
+        if (str($variable->comment ?? '')->startsWith('devforge:auto:oidc')) {
+            return false;
+        }
+
         if (str($variable->key)->startsWith('SERVICE_FQDN')
             || str($variable->key)->startsWith('SERVICE_URL')
             || str($variable->key)->startsWith('SERVICE_NAME')) {
