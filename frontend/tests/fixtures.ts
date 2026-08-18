@@ -69,6 +69,7 @@ export const bootstrapData: BootstrapData = {
         steps: {
             account: true,
             domain: false,
+            sso: false,
             github: false,
             s3: false,
             server: false,

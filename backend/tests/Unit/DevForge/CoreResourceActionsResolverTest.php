@@ -2,12 +2,12 @@
 
 use App\Services\DevForge\Core\CoreResourceActionsResolver;
 
-it('returns deploy only for stopped applications', function () {
+it('returns start and deploy for stopped applications', function () {
     $resolver = new CoreResourceActionsResolver;
 
-    expect($resolver->forResource('application', 'exited:unknown'))->toBe(['deploy'])
-        ->and($resolver->forResource('application', 'stopped'))->toBe(['deploy'])
-        ->and($resolver->forResource('application', 'dead'))->toBe(['deploy']);
+    expect($resolver->forResource('application', 'exited:unknown'))->toBe(['start', 'deploy'])
+        ->and($resolver->forResource('application', 'stopped'))->toBe(['start', 'deploy'])
+        ->and($resolver->forResource('application', 'dead'))->toBe(['start', 'deploy']);
 });
 
 it('returns lifecycle actions for running applications', function () {

@@ -2,11 +2,13 @@
 
 namespace App\Services\DevForge;
 
+use App\Jobs\CheckAndStartSsoJob;
 use App\Jobs\CheckForUpdatesJob;
 use App\Models\InstanceSettings;
 use App\Models\OauthSetting;
 use App\Models\Server;
 use App\Models\ServerSetting;
+use App\Services\DevForge\Sso\SsoProtection;
 use App\Rules\ValidDnsServers;
 use App\Rules\ValidIpOrCidr;
 use App\Services\DevForge\Agent\AgentRuntimeSettings;
@@ -111,6 +113,7 @@ class InstanceSettingsUpdater
 
         $settings->save();
         $this->refreshLocalhostProxy();
+        $this->startManagedSsoStack();
 
         if ($wildcardChanged && filled($settings->apps_wildcard_domain)) {
             $this->applicationDomainService->regenerateManagedDomains(
@@ -370,6 +373,49 @@ class InstanceSettingsUpdater
     }
 
     /**
+     * @param  array<string, mixed>  $input
+     * @return array<string, mixed>
+     */
+    public function updateSso(InstanceSettings $settings, array $input): array
+    {
+        $validated = validator($input, [
+            'sso_protect_apps_by_default' => ['sometimes', 'boolean'],
+            'sso_forward_auth_address' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'sso_hide_local_login' => ['sometimes', 'boolean'],
+        ])->validate();
+
+        if (array_key_exists('sso_protect_apps_by_default', $validated)) {
+            $settings->sso_protect_apps_by_default = (bool) $validated['sso_protect_apps_by_default'];
+        }
+
+        if (array_key_exists('sso_forward_auth_address', $validated)) {
+            $address = $validated['sso_forward_auth_address'];
+            $settings->sso_forward_auth_address = filled($address) ? trim((string) $address) : null;
+        }
+
+        if (array_key_exists('sso_hide_local_login', $validated)) {
+            $settings->sso_hide_local_login = (bool) $validated['sso_hide_local_login'];
+        }
+
+        $settings->save();
+        $this->startManagedSsoStack();
+        $this->refreshSsoProxyOnServers();
+
+        return InstanceSettingsPresenter::from($settings->fresh())->toArray();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function startSso(InstanceSettings $settings): array
+    {
+        $this->startManagedSsoStack();
+        $this->refreshSsoProxyOnServers();
+
+        return InstanceSettingsPresenter::from($settings->fresh())->toArray();
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function checkForUpdates(InstanceSettings $settings): array
@@ -533,5 +579,38 @@ class InstanceSettingsUpdater
         if ($server) {
             $server->setupDynamicProxyConfiguration();
         }
+    }
+
+    private function startManagedSsoStack(): void
+    {
+        if (function_exists('isCloud') && isCloud()) {
+            return;
+        }
+
+        $server = Server::find(0);
+        if (! $server || ! SsoProtection::canStartStack()) {
+            return;
+        }
+
+        CheckAndStartSsoJob::dispatch($server);
+    }
+
+    private function refreshSsoProxyOnServers(): void
+    {
+        if (function_exists('isCloud') && isCloud()) {
+            return;
+        }
+
+        Server::query()->each(function (Server $server): void {
+            if (! $server->isFunctional()) {
+                return;
+            }
+
+            try {
+                $server->setupSsoProxyConfiguration();
+            } catch (\Throwable) {
+                // A single unreachable host must not fail the SSO settings save.
+            }
+        });
     }
 }

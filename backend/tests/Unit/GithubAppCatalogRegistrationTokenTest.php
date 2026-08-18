@@ -32,6 +32,9 @@ it('throws a validation error when github denies runner registration', function 
     ]);
 
     $githubApp = new GithubApp([
+        'name' => 'devforgezimaos',
+        'html_url' => 'https://github.com',
+        'installation_id' => 154217861,
         'api_url' => 'https://api.github.com',
         'packages_token' => 'ghp_packages',
     ]);
@@ -43,7 +46,8 @@ it('throws a validation error when github denies runner registration', function 
         expect($exception->errors()['github_app_uuid'][0] ?? '')
             ->toContain('Permission insuffisante')
             ->toContain('bobdivx/popcorn-client')
-            ->toContain('Administration');
+            ->toContain('Administration')
+            ->toContain('settings/apps');
     }
 });
 

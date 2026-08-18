@@ -9,6 +9,7 @@ use App\Models\LocalPersistentVolume;
 use App\Models\Service;
 use App\Models\ServiceApplication;
 use App\Models\ServiceDatabase;
+use App\Services\DevForge\Sso\SsoProtection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
@@ -1277,6 +1278,9 @@ function applicationParser(Application $resource, int $pull_request_id = 0, ?int
             $coolifyEnvironments->put('COOLIFY_FQDN', $urls->implode(','));
         }
         add_coolify_default_environment_variables($resource, $coolifyEnvironments, $resource->environment_variables);
+        if (! $isDatabase) {
+            $coolifyEnvironments = SsoProtection::mergeOidcEnvironment($coolifyEnvironments, $resource->environment_variables);
+        }
         if ($environment->count() > 0) {
             $environment = $environment->filter(function ($value, $key) {
                 return ! str($key)->startsWith('SERVICE_FQDN_');
@@ -2554,6 +2558,9 @@ function serviceParser(Service $resource): Collection
             $coolifyEnvironments->put('COOLIFY_URL', $urls->implode(','));
         }
         add_coolify_default_environment_variables($resource, $coolifyEnvironments, $resource->environment_variables);
+        if (! $isDatabase) {
+            $coolifyEnvironments = SsoProtection::mergeOidcEnvironment($coolifyEnvironments, $resource->environment_variables);
+        }
         if ($environment->count() > 0) {
             $environment = $environment->filter(function ($value, $key) {
                 return ! str($key)->startsWith('SERVICE_FQDN_');

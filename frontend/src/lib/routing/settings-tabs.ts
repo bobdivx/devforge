@@ -9,6 +9,7 @@ export type SettingsTabId =
     | 'advanced'
     | 'email'
     | 'oauth'
+    | 'sso'
     | 'updates'
     | 'backup'
     | 'notifications'
@@ -33,6 +34,7 @@ export const settingsTabs: SettingsTab[] = [
     { id: 'advanced', label: 'Avancé', path: '/settings/advanced', requiresInstanceAdmin: true },
     { id: 'email', label: 'E-mail', path: '/settings/email', requiresInstanceAdmin: true },
     { id: 'oauth', label: 'OAuth', path: '/settings/oauth', requiresInstanceAdmin: true },
+    { id: 'sso', label: 'SSO', path: '/settings/sso', requiresInstanceAdmin: true },
     { id: 'updates', label: 'Mises à jour', path: '/settings/updates', requiresInstanceAdmin: true },
     { id: 'backup', label: 'Sauvegarde', path: '/settings/backup', requiresInstanceAdmin: true },
     { id: 'notifications', label: 'Notifications', path: '/settings/notifications' },
@@ -90,6 +92,7 @@ const tabGroupById: Record<SettingsTabId, SettingsTabGroupId> = {
     advanced: 'instance',
     email: 'instance',
     oauth: 'instance',
+    sso: 'instance',
     updates: 'instance',
     backup: 'instance',
 };

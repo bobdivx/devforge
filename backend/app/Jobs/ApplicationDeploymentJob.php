@@ -22,6 +22,7 @@ use App\Notifications\Application\DeploymentSuccess;
 use App\Services\DevForge\Agent\DeploymentBuildAgentDispatcher;
 use App\Services\DevForge\Agent\DeploymentFailureAgentDispatcher;
 use App\Services\DevForge\Application\GithubPackagesBuildAuthInjector;
+use App\Services\DevForge\Sso\SsoProtection;
 use App\Services\DevForge\Application\NixpacksNodeVersionAutoRepair;
 use App\Services\DevForge\Application\NixpacksPlanDefaults;
 use App\Services\DevForge\Readiness\ApplicationReadinessService;
@@ -3106,6 +3107,9 @@ COPY ./nginx.conf /etc/nginx/conf.d/default.conf");
             }
 
             add_coolify_default_environment_variables($this->application, $coolify_envs, $this->application->environment_variables_preview);
+            if (! $forBuildTime) {
+                $coolify_envs = SsoProtection::mergeOidcEnvironment($coolify_envs, $this->application->environment_variables_preview);
+            }
 
         } else {
             // Only add SOURCE_COMMIT for runtime OR when explicitly enabled for build-time
@@ -3150,6 +3154,9 @@ COPY ./nginx.conf /etc/nginx/conf.d/default.conf");
             }
 
             add_coolify_default_environment_variables($this->application, $coolify_envs, $this->application->environment_variables);
+            if (! $forBuildTime) {
+                $coolify_envs = SsoProtection::mergeOidcEnvironment($coolify_envs, $this->application->environment_variables);
+            }
 
         }
 

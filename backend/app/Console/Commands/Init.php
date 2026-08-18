@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\ActivityTypes;
 use App\Enums\ApplicationDeploymentStatus;
+use App\Jobs\CheckAndStartSsoJob;
 use App\Jobs\CheckHelperImageJob;
 use App\Jobs\PullChangelog;
 use App\Models\ApplicationDeploymentQueue;
@@ -151,6 +152,26 @@ class Init extends Command
             }
         } catch (\Throwable $e) {
             echo "Could not setup dynamic configuration: {$e->getMessage()}\n";
+        }
+
+        foreach ($this->servers as $server) {
+            if (! $server->isFunctional()) {
+                continue;
+            }
+
+            try {
+                $server->setupSsoProxyConfiguration();
+            } catch (\Throwable $e) {
+                echo "Could not setup SSO proxy configuration on {$server->name}: {$e->getMessage()}\n";
+            }
+
+            if ($server->isLocalhost()) {
+                try {
+                    CheckAndStartSsoJob::dispatch($server);
+                } catch (\Throwable $e) {
+                    echo "Could not start SSO stack: {$e->getMessage()}\n";
+                }
+            }
         }
 
         if (! is_null(config('constants.coolify.autoupdate', null))) {

@@ -25,6 +25,7 @@ type Draft = {
     is_force_https_enabled: boolean;
     is_gzip_enabled: boolean;
     is_stripprefix_enabled: boolean;
+    is_sso_protected: boolean | null;
     is_log_drain_enabled: boolean;
     connect_to_docker_network: boolean;
     stop_grace_period: string;
@@ -47,6 +48,7 @@ function toDraft(data: ApplicationAdvancedSettings): Draft {
         is_force_https_enabled: data.is_force_https_enabled,
         is_gzip_enabled: data.is_gzip_enabled,
         is_stripprefix_enabled: data.is_stripprefix_enabled,
+        is_sso_protected: data.is_sso_protected,
         is_log_drain_enabled: data.is_log_drain_enabled,
         connect_to_docker_network: data.connect_to_docker_network,
         stop_grace_period: data.stop_grace_period !== null ? String(data.stop_grace_period) : '',
@@ -137,6 +139,7 @@ export function ApplicationAdvancedSettingsPanel({ applicationUuid, canAct }: Pr
                 is_force_https_enabled: draft.is_force_https_enabled,
                 is_gzip_enabled: draft.is_gzip_enabled,
                 is_stripprefix_enabled: draft.is_stripprefix_enabled,
+                is_sso_protected: draft.is_sso_protected,
                 is_log_drain_enabled: draft.is_log_drain_enabled,
                 connect_to_docker_network: draft.connect_to_docker_network,
                 stop_grace_period: stopGrace === '' ? null : Number(stopGrace),
@@ -211,6 +214,14 @@ export function ApplicationAdvancedSettingsPanel({ applicationUuid, canAct }: Pr
         { key: 'is_gzip_enabled', label: 'Gzip' },
         { key: 'is_stripprefix_enabled', label: 'Strip prefix' },
     ];
+
+    const ssoValue = draft === null
+        ? 'inherit'
+        : draft.is_sso_protected === true
+            ? 'enabled'
+            : draft.is_sso_protected === false
+                ? 'disabled'
+                : 'inherit';
 
     const opsToggles: ToggleField[] = [
         {
@@ -324,6 +335,28 @@ export function ApplicationAdvancedSettingsPanel({ applicationUuid, canAct }: Pr
                                         />
                                     ))}
                                 </div>
+                                <label class="grid gap-1.5 text-sm">
+                                    <span class="font-medium">Protéger avec le SSO</span>
+                                    <select
+                                        class="select select-bordered select-sm w-full max-w-xs rounded-xl"
+                                        disabled={!canAct || saving}
+                                        value={ssoValue}
+                                        onChange={(event) => {
+                                            const value = event.currentTarget.value;
+                                            update(
+                                                'is_sso_protected',
+                                                value === 'enabled' ? true : value === 'disabled' ? false : null,
+                                            );
+                                        }}
+                                    >
+                                        <option value="inherit">Hériter du défaut instance</option>
+                                        <option value="enabled">Activé</option>
+                                        <option value="disabled">Désactivé</option>
+                                    </select>
+                                    <span class="text-xs text-base-content/50">
+                                        L’app reçoit aussi les variables OIDC Pocket ID. Redéployez après modification.
+                                    </span>
+                                </label>
                             </div>
 
                             <div class="grid gap-2">

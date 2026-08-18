@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Server;
 use App\Services\DevForge\CurrentTeamContext;
 use App\Services\DevForge\Github\GithubRunnerInventory;
+use App\Services\DevForge\Github\GithubRunnerJobMonitor;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,6 +19,7 @@ class GithubRunnerController extends Controller
     public function __construct(
         private readonly CurrentTeamContext $currentTeamContext,
         private readonly GithubRunnerInventory $githubRunnerInventory,
+        private readonly GithubRunnerJobMonitor $githubRunnerJobMonitor,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -169,6 +171,40 @@ class GithubRunnerController extends Controller
             ]);
 
             return response()->json(['message' => 'Impossible de lire les logs du runner.'], 500);
+        }
+    }
+
+    public function jobs(Request $request, string $serverUuid, string $containerName): JsonResponse
+    {
+        $team = $this->currentTeamContext->resolve($request->user());
+
+        try {
+            $server = Server::query()
+                ->where('team_id', $team->id)
+                ->where('uuid', $serverUuid)
+                ->firstOrFail();
+        } catch (ModelNotFoundException) {
+            return response()->json(['message' => 'Serveur introuvable.'], 404);
+        }
+
+        $this->authorize('view', $server);
+
+        try {
+            return response()->json([
+                'data' => $this->githubRunnerJobMonitor->listForRunner($team, $serverUuid, $containerName),
+            ]);
+        } catch (ModelNotFoundException) {
+            return response()->json(['message' => 'Runner introuvable.'], 404);
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            Log::error('github_runner.jobs_failed', [
+                'server_uuid' => $serverUuid,
+                'container' => $containerName,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json(['message' => 'Impossible de lire les GitHub Actions du runner.'], 500);
         }
     }
 

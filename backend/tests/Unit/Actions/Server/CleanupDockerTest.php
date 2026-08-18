@@ -445,6 +445,7 @@ it('container prune excludes persistent resource types', function () {
     expect($sourceFile)->toContain('label!=devforge.type=database');
     expect($sourceFile)->toContain('label!=devforge.type=application');
     expect($sourceFile)->toContain('label!=devforge.type=service');
+    expect($sourceFile)->toContain('label!=devforge.type=sso');
     expect($sourceFile)->toContain('label!=coolify.proxy=true');
     expect($sourceFile)->toContain('label=devforge.managed=true');
 });

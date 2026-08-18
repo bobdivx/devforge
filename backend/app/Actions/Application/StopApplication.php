@@ -22,13 +22,13 @@ class StopApplication
         foreach ($servers as $server) {
             try {
                 if (! $server->isFunctional()) {
-                    return 'Server is not functional';
+                    continue;
                 }
 
                 if ($server->isSwarm()) {
                     instant_remote_process(["docker stack rm {$application->uuid}"], $server);
 
-                    return;
+                    continue;
                 }
 
                 $containers = $previewDeployments
@@ -52,22 +52,22 @@ class StopApplication
                 if ($dockerCleanup) {
                     CleanupDocker::dispatch($server, false, false);
                 }
-            } catch (\Exception $e) {
-                return $e->getMessage();
+            } catch (\Exception) {
+                continue;
             }
         }
 
+        $payload = [
+            'status' => 'exited',
+        ];
+
         if ($resetRestartCount) {
-            $application->update([
-                'restart_count' => 0,
-                'last_restart_at' => null,
-                'last_restart_type' => null,
-            ]);
-        } else {
-            $application->update([
-                'status' => 'exited',
-            ]);
+            $payload['restart_count'] = 0;
+            $payload['last_restart_at'] = null;
+            $payload['last_restart_type'] = null;
         }
+
+        $application->update($payload);
 
         ServiceStatusChanged::dispatch($application->environment->project->team->id);
     }

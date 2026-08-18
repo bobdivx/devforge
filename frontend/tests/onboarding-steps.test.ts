@@ -23,6 +23,7 @@ describe('onboarding-steps', () => {
         expect(firstIncompleteStep({
             account: true,
             domain: false,
+            sso: false,
             github: false,
             s3: false,
             server: false,
@@ -31,6 +32,16 @@ describe('onboarding-steps', () => {
         expect(firstIncompleteStep({
             account: true,
             domain: true,
+            sso: false,
+            github: false,
+            s3: false,
+            server: false,
+        })).toBe('sso');
+
+        expect(firstIncompleteStep({
+            account: true,
+            domain: true,
+            sso: true,
             github: false,
             s3: false,
             server: false,
@@ -39,6 +50,7 @@ describe('onboarding-steps', () => {
         expect(firstIncompleteStep({
             account: true,
             domain: true,
+            sso: true,
             github: true,
             s3: false,
             server: true,
@@ -47,6 +59,7 @@ describe('onboarding-steps', () => {
         expect(firstIncompleteStep({
             account: true,
             domain: true,
+            sso: true,
             github: true,
             s3: true,
             server: false,
@@ -55,6 +68,7 @@ describe('onboarding-steps', () => {
         expect(firstIncompleteStep({
             account: true,
             domain: true,
+            sso: true,
             github: true,
             s3: true,
             server: true,
@@ -63,6 +77,7 @@ describe('onboarding-steps', () => {
         expect(firstIncompleteStep({
             account: true,
             domain: false,
+            sso: false,
             github: true,
             s3: false,
             server: false,
@@ -73,6 +88,7 @@ describe('onboarding-steps', () => {
         const fresh = {
             account: true,
             domain: false,
+            sso: false,
             github: false,
             s3: false,
             server: false,
@@ -83,6 +99,7 @@ describe('onboarding-steps', () => {
         expect(initialWizardStep(true, 'domain', {
             account: true,
             domain: true,
+            sso: true,
             github: true,
             s3: true,
             server: true,
@@ -90,6 +107,7 @@ describe('onboarding-steps', () => {
         expect(initialWizardStep(true, null, {
             account: true,
             domain: true,
+            sso: true,
             github: true,
             s3: true,
             server: true,
@@ -98,6 +116,7 @@ describe('onboarding-steps', () => {
         expect(initialWizardStep(false, null, {
             account: true,
             domain: true,
+            sso: true,
             github: true,
             s3: true,
             server: true,

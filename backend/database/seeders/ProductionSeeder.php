@@ -8,6 +8,7 @@ use App\Data\ServerMetadata;
 use App\Enums\ProxyStatus;
 use App\Enums\ProxyTypes;
 use App\Jobs\CheckAndStartSentinelJob;
+use App\Jobs\CheckAndStartSsoJob;
 use App\Models\GithubApp;
 use App\Models\GitlabApp;
 use App\Models\InstanceSettings;
@@ -131,6 +132,7 @@ class ProductionSeeder extends Seeder
                 $server->settings->save();
                 StartProxy::dispatch($server);
                 CheckAndStartSentinelJob::dispatch($server);
+                CheckAndStartSsoJob::dispatch($server);
             } else {
                 $server = Server::find(0);
                 $server->settings->is_reachable = true;
@@ -143,6 +145,7 @@ class ProductionSeeder extends Seeder
                 if ($server->isSentinelEnabled()) {
                     CheckAndStartSentinelJob::dispatch($server);
                 }
+                CheckAndStartSsoJob::dispatch($server);
             }
 
             if (StandaloneDocker::find(0) == null) {

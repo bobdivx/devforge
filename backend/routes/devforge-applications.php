@@ -205,6 +205,12 @@ Route::prefix('github')->name('github.')->group(function () {
             'containerName' => '[A-Za-z0-9][A-Za-z0-9._-]{0,254}',
         ])
         ->name('runners.logs');
+    Route::get('/runners/{serverUuid}/{containerName}/jobs', [GithubRunnerController::class, 'jobs'])
+        ->where([
+            'serverUuid' => '[A-Za-z0-9-]{8,64}',
+            'containerName' => '[A-Za-z0-9][A-Za-z0-9._-]{0,254}',
+        ])
+        ->name('runners.jobs');
     Route::delete('/runners/{serverUuid}/{containerName}', [GithubRunnerController::class, 'destroy'])
         ->where([
             'serverUuid' => '[A-Za-z0-9-]{8,64}',

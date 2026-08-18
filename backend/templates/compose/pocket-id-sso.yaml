@@ -1,0 +1,62 @@
+# documentation: https://pocket-id.org/docs/guides/proxy-services
+# slogan: Pocket ID + oauth2-proxy — started automatically by DevForge (optional extra instance)
+# category: auth
+# tags: identity,oidc,oauth,passkey,webauthn,authentication,sso,openid,oauth2-proxy
+# logo: svgs/pocketid-logo.png
+# port: 1411
+#
+# Required environment variables (set after creating the oauth2-proxy OIDC client):
+#   OAUTH2_PROXY_CLIENT_ID
+#   OAUTH2_PROXY_CLIENT_SECRET
+#   OAUTH2_PROXY_COOKIE_DOMAINS  (parent domain, e.g. .example.com)
+# Coolify generates SERVICE_URL_POCKETID and SERVICE_URL_OAUTH2PROXY from SERVICE_URL_* placeholders.
+
+services:
+  pocket-id:
+    image: ghcr.io/pocket-id/pocket-id:v2
+    environment:
+      - SERVICE_URL_POCKETID_1411
+      - APP_URL=${SERVICE_URL_POCKETID}
+      - TRUST_PROXY=${TRUST_PROXY:-true}
+      - ENCRYPTION_KEY=${SERVICE_PASSWORD_64_POCKETID}
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+    volumes:
+      - pocket-id-data:/app/data
+    healthcheck:
+      test: ["CMD", "/app/pocket-id", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.8.2
+    environment:
+      - SERVICE_URL_OAUTH2PROXY_4180
+      - OAUTH2_PROXY_HTTP_ADDRESS=0.0.0.0:4180
+      - OAUTH2_PROXY_PROVIDER=oidc
+      - OAUTH2_PROXY_OIDC_ISSUER_URL=${SERVICE_URL_POCKETID}
+      - OAUTH2_PROXY_CLIENT_ID=${OAUTH2_PROXY_CLIENT_ID}
+      - OAUTH2_PROXY_CLIENT_SECRET=${OAUTH2_PROXY_CLIENT_SECRET}
+      - OAUTH2_PROXY_COOKIE_SECRET=${SERVICE_BASE64_32_OAUTH2PROXY}
+      - OAUTH2_PROXY_REDIRECT_URL=${SERVICE_URL_OAUTH2PROXY}/oauth2/callback
+      - OAUTH2_PROXY_EMAIL_DOMAINS=*
+      - OAUTH2_PROXY_REVERSE_PROXY=true
+      - OAUTH2_PROXY_SET_XAUTHREQUEST=true
+      - OAUTH2_PROXY_SET_AUTHORIZATION_HEADER=true
+      - OAUTH2_PROXY_SKIP_PROVIDER_BUTTON=true
+      - OAUTH2_PROXY_WHITELIST_DOMAINS=*
+      - OAUTH2_PROXY_COOKIE_SECURE=${OAUTH2_PROXY_COOKIE_SECURE:-true}
+      - OAUTH2_PROXY_COOKIE_DOMAINS=${OAUTH2_PROXY_COOKIE_DOMAINS}
+    networks:
+      default:
+        aliases:
+          - devforge-sso-proxy
+    depends_on:
+      pocket-id:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:4180/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

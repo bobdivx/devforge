@@ -46,6 +46,7 @@
                     </div>
                 @endif
 
+                @unless ($sso_hide_local_login ?? false)
                 <form action="/login" method="POST" class="devforge-auth-form">
                     @csrf
 
@@ -107,29 +108,34 @@
                         {{ __('auth.login') }}
                     </button>
                 </form>
+                @endunless
 
-                @if ($is_registration_enabled)
-                    <div class="devforge-auth-divider">
-                        <span>Pas encore de compte ?</span>
-                    </div>
-                    <a href="/register" class="devforge-auth-secondary">
-                        {{ __('auth.register_now') }}
-                    </a>
-                @else
-                    <p class="devforge-auth-muted devforge-auth-center">
-                        {{ __('auth.registration_disabled') }}
-                    </p>
+                @if (! ($sso_hide_local_login ?? false))
+                    @if ($is_registration_enabled)
+                        <div class="devforge-auth-divider">
+                            <span>Pas encore de compte ?</span>
+                        </div>
+                        <a href="/register" class="devforge-auth-secondary">
+                            {{ __('auth.register_now') }}
+                        </a>
+                    @else
+                        <p class="devforge-auth-muted devforge-auth-center">
+                            {{ __('auth.registration_disabled') }}
+                        </p>
+                    @endif
                 @endif
 
                 @if ($enabled_oauth_providers->isNotEmpty())
-                    <div class="devforge-auth-divider">
-                        <span>ou continuer avec</span>
-                    </div>
+                    @unless ($sso_hide_local_login ?? false)
+                        <div class="devforge-auth-divider">
+                            <span>ou continuer avec</span>
+                        </div>
+                    @endunless
                     <div class="devforge-auth-stack">
                         @foreach ($enabled_oauth_providers as $provider_setting)
                             <a
                                 href="/auth/{{ $provider_setting->provider }}/redirect"
-                                class="devforge-auth-secondary"
+                                class="{{ $provider_setting->provider === 'pocketid' ? 'devforge-auth-primary' : 'devforge-auth-secondary' }}"
                             >
                                 {{ __("auth.login.$provider_setting->provider") }}
                             </a>

@@ -5,6 +5,7 @@ use App\Models\Application;
 use App\Models\ApplicationPreview;
 use App\Models\Server;
 use App\Models\ServiceApplication;
+use App\Services\DevForge\Sso\SsoProtection;
 use App\Models\StandaloneLibsql;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
@@ -732,6 +733,9 @@ function generateLabelsApplication(Application $application, ?ApplicationPreview
         $appUuid = $appUuid.'-pr-'.$pull_request_id;
     }
     $labels = collect([]);
+    $ssoServiceLabels = SsoProtection::shouldProtectApplication($application)
+        ? collect(SsoProtection::traefikMiddlewareLabels())
+        : null;
     if ($pull_request_id === 0) {
         if ($application->fqdn) {
             $domains = str(data_get($application, 'fqdn'))->explode(',');
@@ -743,6 +747,7 @@ function generateLabelsApplication(Application $application, ?ApplicationPreview
                             uuid: $appUuid,
                             domains: $domains,
                             onlyPort: $onlyPort,
+                            serviceLabels: $ssoServiceLabels,
                             is_force_https_enabled: $application->isForceHttpsEnabled(),
                             is_gzip_enabled: $application->isGzipEnabled(),
                             is_stripprefix_enabled: $application->isStripprefixEnabled(),
@@ -773,6 +778,7 @@ function generateLabelsApplication(Application $application, ?ApplicationPreview
                     uuid: $appUuid,
                     domains: $domains,
                     onlyPort: $onlyPort,
+                    serviceLabels: $ssoServiceLabels,
                     is_force_https_enabled: $application->isForceHttpsEnabled(),
                     is_gzip_enabled: $application->isGzipEnabled(),
                     is_stripprefix_enabled: $application->isStripprefixEnabled(),
@@ -810,6 +816,7 @@ function generateLabelsApplication(Application $application, ?ApplicationPreview
                         uuid: $appUuid,
                         domains: $domains,
                         onlyPort: $onlyPort,
+                        serviceLabels: $ssoServiceLabels,
                         is_force_https_enabled: $application->isForceHttpsEnabled(),
                         is_gzip_enabled: $application->isGzipEnabled(),
                         is_stripprefix_enabled: $application->isStripprefixEnabled(),
@@ -838,6 +845,7 @@ function generateLabelsApplication(Application $application, ?ApplicationPreview
                 uuid: $appUuid,
                 domains: $domains,
                 onlyPort: $onlyPort,
+                serviceLabels: $ssoServiceLabels,
                 is_force_https_enabled: $application->isForceHttpsEnabled(),
                 is_gzip_enabled: $application->isGzipEnabled(),
                 is_stripprefix_enabled: $application->isStripprefixEnabled(),

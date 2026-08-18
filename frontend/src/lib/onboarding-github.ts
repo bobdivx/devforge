@@ -4,7 +4,7 @@ export function isGithubAppInstalled(app: GithubAppSummary): boolean {
     return app.installation_id !== null && app.installation_id !== undefined && `${app.installation_id}` !== '';
 }
 
-export function filterGithubRepositories(repositories: GithubRepository[], query: string): GithubRepository[] {
+export function filterGithubRepositories<T extends GithubRepository>(repositories: T[], query: string): T[] {
     const normalized = query.trim().toLowerCase();
     if (normalized === '') {
         return repositories;

@@ -8,6 +8,7 @@ use App\Actions\Fortify\UpdateUserPassword;
 use App\Actions\Fortify\UpdateUserProfileInformation;
 use App\Models\OauthSetting;
 use App\Models\User;
+use App\Services\DevForge\Sso\SsoProtection;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -62,7 +63,10 @@ class FortifyServiceProvider extends ServiceProvider
 
         Fortify::loginView(function () {
             $settings = instanceSettings();
-            $enabled_oauth_providers = OauthSetting::where('enabled', true)->get();
+            $enabled_oauth_providers = OauthSetting::where('enabled', true)
+                ->get()
+                ->sortBy(fn (OauthSetting $provider): int => $provider->provider === 'pocketid' ? 0 : 1)
+                ->values();
             $users = User::count();
             if ($users == 0) {
                 // If there are no users, redirect to registration
@@ -76,6 +80,7 @@ class FortifyServiceProvider extends ServiceProvider
             return view($loginView, [
                 'is_registration_enabled' => $settings->is_registration_enabled,
                 'enabled_oauth_providers' => $enabled_oauth_providers,
+                'sso_hide_local_login' => SsoProtection::hideLocalLogin($settings),
             ]);
         });
 

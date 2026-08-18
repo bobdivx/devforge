@@ -64,7 +64,7 @@ import {
     websiteScreenshotUrl,
 } from '../../lib/application-config';
 import { applicationTabs, parseApplicationTab, type ApplicationTabId } from '../../lib/application-tabs';
-import { canVisitApplication, resolveCoreResourceActions } from '../../lib/core-resource-actions';
+import { canVisitApplication, resolveCoreResourceActions, resourceStatusPrimary } from '../../lib/core-resource-actions';
 import { domainApi, type ApplicationReadiness, type CoreAction, type GithubBranch } from '../../lib/domain-api';
 import { isDeploymentActive, isDeploymentCancellable } from '../../lib/deployment-status';
 import { pickFocusedDeployment } from '../../lib/pick-focused-deployment';
@@ -553,7 +553,10 @@ export function ApplicationDetailPanel({
     const hadActiveDeploymentRef = useRef(false);
 
     useEffect(() => {
-        if (!hasActiveDeployment) {
+        const primary = resourceStatusPrimary(status);
+        const transitioning = primary === 'restarting' || primary === 'starting' || primary === 'created';
+
+        if (!hasActiveDeployment && !transitioning) {
             return;
         }
 
@@ -568,7 +571,7 @@ export function ApplicationDetailPanel({
         const interval = window.setInterval(refreshStatus, 3000);
 
         return () => window.clearInterval(interval);
-    }, [hasActiveDeployment, uuid, deploymentsQuery.reload, resourceQuery.reload, readinessQuery.reload, gitSyncQuery.reload]);
+    }, [hasActiveDeployment, status, uuid, deploymentsQuery.reload, resourceQuery.reload, readinessQuery.reload, gitSyncQuery.reload]);
 
     useEffect(() => {
         if (hadActiveDeploymentRef.current && !hasActiveDeployment) {
@@ -1389,8 +1392,10 @@ export function ApplicationDetailPanel({
                                         </li>
                                     </ul>
                                 </>
+                            ) : pendingAction === 'restart' ? (
+                                `Redémarrer « ${resource.name} » relance le conteneur en cours, sans reconstruire l’image ni lancer un déploiement.`
                             ) : `Confirmer « ${actionLabels[pendingAction]} » sur « ${resource.name} » ?`}
-                            tone={pendingAction === 'deploy' ? 'primary' : 'danger'}
+                            tone={pendingAction === 'stop' ? 'danger' : 'primary'}
                             loading={acting === pendingAction}
                             onCancel={() => setPendingAction(null)}
                             onConfirm={() => void runAction(

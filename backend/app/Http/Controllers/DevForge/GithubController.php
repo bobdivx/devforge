@@ -62,7 +62,7 @@ class GithubController extends Controller
                 'launch' => $this->githubAppCatalog->manifestLaunch(
                     $githubApp,
                     (bool) ($validated['preview_deployments'] ?? true),
-                    (bool) ($validated['administration'] ?? false),
+                    (bool) ($validated['administration'] ?? true),
                 ),
             ],
         ], 201);

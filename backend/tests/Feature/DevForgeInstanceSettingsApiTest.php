@@ -161,6 +161,34 @@ it('keeps existing smtp password when blank secret is sent', function () {
     expect(InstanceSettings::get()->smtp_password)->toBe('keep-me');
 });
 
+it('exposes and updates sso settings', function () {
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/settings')
+        ->assertSuccessful()
+        ->assertJsonPath('data.sso.sso_protect_apps_by_default', true)
+        ->assertJsonPath('data.sso.sso_hide_local_login', false)
+        ->assertJsonPath('data.sso.apps_protection_configured', false)
+        ->assertJsonPath('data.sso.middleware_name', 'devforge-sso-auth')
+        ->assertJsonPath('data.sso.managed_by_devforge', true)
+        ->assertJsonPath('data.sso.default_forward_auth_address', 'http://devforge-sso-proxy:4180/');
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson('/api/devforge/v1/settings/sso', [
+            'sso_protect_apps_by_default' => false,
+            'sso_forward_auth_address' => 'http://devforge-sso-proxy:4180/',
+            'sso_hide_local_login' => true,
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.sso.sso_protect_apps_by_default', false)
+        ->assertJsonPath('data.sso.sso_forward_auth_address', 'http://devforge-sso-proxy:4180/')
+        ->assertJsonPath('data.sso.sso_hide_local_login', true)
+        ->assertJsonPath('data.sso.apps_protection_configured', true);
+
+    expect(InstanceSettings::get()->sso_forward_auth_address)->toBe('http://devforge-sso-proxy:4180/');
+});
+
 it('updates update schedule settings', function () {
     $this->actingAs($this->user)
         ->withSession($this->session)

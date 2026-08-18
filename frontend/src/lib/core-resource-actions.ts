@@ -32,7 +32,7 @@ export function resolveCoreResourceActions(resource: CoreResource): CoreAction[]
 
     if (resource.type === 'application') {
         resolved = isResourceStopped(status)
-            ? ['deploy']
+            ? ['start', 'deploy']
             : ['stop', 'restart', 'deploy'];
     } else if (resource.type === 'service') {
         resolved = isResourceStopped(status)

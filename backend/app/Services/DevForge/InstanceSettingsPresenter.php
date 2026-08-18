@@ -4,6 +4,7 @@ namespace App\Services\DevForge;
 
 use App\Models\InstanceSettings;
 use App\Services\DevForge\Agent\AgentRuntimeSettings;
+use App\Services\DevForge\Sso\SsoProtection;
 
 class InstanceSettingsPresenter
 {
@@ -28,6 +29,7 @@ class InstanceSettingsPresenter
             'advanced' => $this->advanced(),
             'email' => $this->email(),
             'updates' => $this->updates(),
+            'sso' => $this->sso(),
         ];
     }
 
@@ -115,6 +117,28 @@ class InstanceSettingsPresenter
             'new_version_available' => $upgrade['available'],
             'current_version' => $upgrade['current_version'],
             'latest_version' => $upgrade['latest_version'],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function sso(): array
+    {
+        $urls = SsoProtection::publicUrls($this->settings);
+
+        return [
+            'sso_protect_apps_by_default' => (bool) $this->settings->sso_protect_apps_by_default,
+            'sso_forward_auth_address' => $this->settings->sso_forward_auth_address,
+            'sso_hide_local_login' => (bool) $this->settings->sso_hide_local_login,
+            'pocketid_login_enabled' => SsoProtection::pocketIdLoginEnabled(),
+            'apps_protection_configured' => SsoProtection::isAppsProtectionConfigured($this->settings),
+            'middleware_name' => SsoProtection::MIDDLEWARE_NAME,
+            'default_forward_auth_address' => SsoProtection::DEFAULT_FORWARD_AUTH_ADDRESS,
+            'managed_by_devforge' => true,
+            'can_start' => SsoProtection::canStartStack($this->settings),
+            'pocket_id_url' => $this->settings->sso_pocket_id_url ?: ($urls['pocket_id'] ?? null),
+            'oauth2_proxy_url' => $this->settings->sso_oauth2_proxy_url ?: ($urls['oauth2_proxy'] ?? null),
         ];
     }
 

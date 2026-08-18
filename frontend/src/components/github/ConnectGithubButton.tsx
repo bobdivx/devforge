@@ -4,6 +4,22 @@ import { domainApi, type GithubAppSummary } from '../../lib/domain-api';
 import { submitGithubManifest } from '../../lib/onboarding-steps';
 import { Button } from '../ui/Button';
 
+export async function redirectToGithubAppSetup(options: {
+    fromOnboarding?: boolean;
+    returnTo?: 'applications' | 'onboarding';
+    organization?: string;
+}): Promise<void> {
+    const result = await domainApi.startGithubApp({
+        name: 'DevForge',
+        organization: options.organization,
+        preview_deployments: true,
+        administration: true,
+        from_onboarding: options.fromOnboarding,
+        return_to: options.returnTo ?? (options.fromOnboarding ? 'onboarding' : undefined),
+    });
+    submitGithubManifest(result.data.launch.action_url, result.data.launch.manifest);
+}
+
 type ConnectGithubButtonProps = {
     fromOnboarding?: boolean;
     returnTo?: 'applications' | 'onboarding';
@@ -30,14 +46,11 @@ export function ConnectGithubButton({
         setSubmitting(true);
         setError(null);
         try {
-            const result = await domainApi.startGithubApp({
-                name: 'DevForge',
+            await redirectToGithubAppSetup({
+                fromOnboarding,
+                returnTo,
                 organization: organization.trim() || undefined,
-                preview_deployments: true,
-                from_onboarding: fromOnboarding,
-                return_to: returnTo ?? (fromOnboarding ? 'onboarding' : undefined),
             });
-            submitGithubManifest(result.data.launch.action_url, result.data.launch.manifest);
         } catch (err) {
             const message = err instanceof Error ? err.message : 'Impossible de démarrer la connexion GitHub.';
             setError(message);

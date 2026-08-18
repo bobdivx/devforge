@@ -143,6 +143,12 @@ export const sidebarNav: SidebarNavEntry[] = [
                 pages: ['agents'],
             },
             {
+                id: 'automation',
+                label: 'Automations',
+                path: '/automation',
+                pages: ['automation'],
+            },
+            {
                 id: 'agents-settings',
                 label: 'Paramètres AI',
                 path: '/agents/settings',

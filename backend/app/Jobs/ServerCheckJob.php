@@ -67,6 +67,10 @@ class ServerCheckJob implements ShouldBeEncrypted, ShouldQueue
                     CheckAndStartSentinelJob::dispatch($this->server);
                 }
 
+                if ($this->server->isLocalhost()) {
+                    CheckAndStartSsoJob::dispatch($this->server);
+                }
+
                 if ($this->server->isLogDrainEnabled()) {
                     $this->checkLogDrainContainer();
                 }

@@ -16,6 +16,7 @@ it('marks only the account step as done on a fresh team', function () {
     expect((new OnboardingStatus)->steps($team))->toBe([
         'account' => true,
         'domain' => false,
+        'sso' => false,
         'github' => false,
         's3' => false,
         'server' => false,
@@ -48,6 +49,7 @@ it('marks github s3 and server when the team already configured them', function 
     expect((new OnboardingStatus)->steps($team))->toBe([
         'account' => true,
         'domain' => false,
+        'sso' => false,
         'github' => true,
         's3' => true,
         'server' => true,
@@ -92,6 +94,26 @@ it('does not mark domain when only the instance fqdn is set', function () {
     ]));
 
     expect((new OnboardingStatus)->steps($team)['domain'])->toBeFalse();
+});
+
+it('marks sso when pocket id oauth is enabled or forward auth is set', function () {
+    $team = Team::factory()->create();
+
+    InstanceSettings::unguarded(fn (): InstanceSettings => InstanceSettings::query()->create([
+        'id' => 0,
+        'instance_name' => 'DevForge',
+        'instance_timezone' => 'UTC',
+        'sso_forward_auth_address' => 'http://devforge-sso-proxy:4180/',
+        'public_port_min' => 1025,
+        'public_port_max' => 65535,
+        'is_registration_enabled' => false,
+        'disable_two_step_confirmation' => false,
+        'is_auto_update_enabled' => false,
+        'auto_update_frequency' => '0 0 * * *',
+        'update_check_frequency' => '0 * * * *',
+    ]));
+
+    expect((new OnboardingStatus)->steps($team)['sso'])->toBeTrue();
 });
 
 it('does not mark github as done before the app is installed', function () {

@@ -51,6 +51,7 @@ describe('navigation latérale groupée', () => {
         expect(agents?.items.map(({ label, path }) => ({ label, path }))).toEqual([
             { label: 'Chat', path: '/agents/chat' },
             { label: 'Équipe', path: '/agents' },
+            { label: 'Automations', path: '/automation' },
             { label: 'Paramètres AI', path: '/agents/settings' },
         ]);
     });

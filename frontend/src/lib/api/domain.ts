@@ -452,6 +452,25 @@ export type InstanceSettings = {
         current_version?: string;
         latest_version?: string;
     };
+    sso: {
+        sso_protect_apps_by_default: boolean;
+        sso_forward_auth_address: string | null;
+        sso_hide_local_login: boolean;
+        pocketid_login_enabled: boolean;
+        apps_protection_configured: boolean;
+        middleware_name: string;
+        default_forward_auth_address: string;
+        managed_by_devforge: boolean;
+        can_start: boolean;
+        pocket_id_url: string | null;
+        oauth2_proxy_url: string | null;
+    };
+};
+
+export type InstanceSsoUpdateInput = {
+    sso_protect_apps_by_default?: boolean;
+    sso_forward_auth_address?: string | null;
+    sso_hide_local_login?: boolean;
 };
 
 export type InstanceUpgradeStatus = {
@@ -1239,6 +1258,9 @@ export type GithubAppSummary = {
     is_system_wide: boolean;
     has_packages_token?: boolean;
     installation_id?: string | number | null;
+    administration?: string | null;
+    permissions_url?: string | null;
+    installation_settings_url?: string | null;
 };
 
 export type GithubAppManifestLaunch = {
@@ -1334,6 +1356,35 @@ export type GithubRunnerLogs = {
     node24_ready?: boolean | null;
     node24_min_version?: string;
     recommended_runner_version?: string;
+};
+
+export type GithubRunnerJobBucket = 'in_progress' | 'queued' | 'failure';
+
+export type GithubRunnerJob = {
+    id: string;
+    run_id?: number | null;
+    job_id?: number | null;
+    name: string;
+    workflow_name: string;
+    bucket: GithubRunnerJobBucket;
+    status: string;
+    conclusion?: string | null;
+    head_branch?: string | null;
+    head_sha?: string | null;
+    html_url?: string | null;
+    started_at?: string | null;
+    completed_at?: string | null;
+    updated_at?: string | null;
+    runner_name?: string | null;
+    assigned?: boolean;
+};
+
+export type GithubRunnerJobs = {
+    available: boolean;
+    repo: string | null;
+    message: string | null;
+    counts: Record<GithubRunnerJobBucket, number>;
+    items: GithubRunnerJob[];
 };
 
 export type GithubRepository = {
@@ -2193,6 +2244,7 @@ export type ApplicationAdvancedSettings = {
     is_force_https_enabled: boolean;
     is_gzip_enabled: boolean;
     is_stripprefix_enabled: boolean;
+    is_sso_protected: boolean | null;
     is_log_drain_enabled: boolean;
     connect_to_docker_network: boolean;
     stop_grace_period: number | null;
@@ -2514,6 +2566,14 @@ export const domainApi = {
         '/settings/advanced',
         { method: 'PUT', body: JSON.stringify(input) },
     ),
+    updateSsoSettings: (input: InstanceSsoUpdateInput) => mutate<ApiResponse<InstanceSettings>>(
+        '/settings/sso',
+        { method: 'PUT', body: JSON.stringify(input) },
+    ),
+    startSsoStack: () => mutate<ApiResponse<InstanceSettings>>(
+        '/settings/sso/start',
+        { method: 'POST' },
+    ),
     updateEmailSettings: (input: InstanceEmailUpdateInput) => mutate<ApiResponse<InstanceSettings>>(
         '/settings/email',
         { method: 'PUT', body: JSON.stringify(input) },
@@ -2803,6 +2863,11 @@ export const domainApi = {
     ),
     githubRunnerLogs: (serverUuid: string, containerName: string, lines = 200) => apiFetch<ApiResponse<GithubRunnerLogs>>(
         `${API_BASE}/github/runners/${encodeURIComponent(serverUuid)}/${encodeURIComponent(containerName)}/logs?lines=${lines}`,
+        {},
+        45_000,
+    ),
+    githubRunnerJobs: (serverUuid: string, containerName: string) => apiFetch<ApiResponse<GithubRunnerJobs>>(
+        `${API_BASE}/github/runners/${encodeURIComponent(serverUuid)}/${encodeURIComponent(containerName)}/jobs`,
         {},
         45_000,
     ),

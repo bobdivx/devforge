@@ -1,6 +1,7 @@
 import { useState } from 'preact/hooks';
 import { OnboardingDomainStep } from '../../components/onboarding/OnboardingDomainStep';
 import { OnboardingGithubStep } from '../../components/onboarding/OnboardingGithubStep';
+import { OnboardingSsoStep } from '../../components/onboarding/OnboardingSsoStep';
 import { OnboardingS3Step } from '../../components/onboarding/OnboardingS3Step';
 import { OnboardingServerStep } from '../../components/onboarding/OnboardingServerStep';
 import { OnboardingWizardProgress } from '../../components/onboarding/OnboardingWizardProgress';
@@ -60,7 +61,7 @@ export function OnboardingPage({ bootstrap }: OnboardingPageProps) {
         <div class="mx-auto grid w-full max-w-3xl gap-5">
             <PageHeader
                 title="Assistant de configuration"
-                description="Quelques questions pour préparer DevForge : URL d’accès, GitHub, sauvegardes, puis le serveur."
+                description="Quelques questions pour préparer DevForge : URL d’accès, SSO Pocket ID, GitHub, sauvegardes, puis le serveur."
             />
             <OnboardingWizardProgress current={current} onSelect={goTo} />
 
@@ -69,7 +70,7 @@ export function OnboardingPage({ bootstrap }: OnboardingPageProps) {
                     <p class="text-sm text-base-content/65">
                         Le compte root est prêt. Un projet « Mon premier projet » et l’environnement production
                         sont créés automatiquement. Nous allons d’abord demander si vous avez une URL
-                        personnalisée, puis GitHub, S3 et le serveur Docker.
+                        personnalisée, puis le SSO Pocket ID, GitHub, S3 et le serveur Docker.
                     </p>
                     <p class="mt-2 text-sm text-base-content/55">
                         GitHub et S3 peuvent être passés. L’URL sert aux retours GitHub et aux applications.
@@ -85,6 +86,15 @@ export function OnboardingPage({ bootstrap }: OnboardingPageProps) {
                     canEdit={bootstrap.permissions.instance_admin}
                     onBack={() => backFrom('domain')}
                     onSaved={() => nextAfter('domain')}
+                />
+            )}
+
+            {current === 'sso' && (
+                <OnboardingSsoStep
+                    canEdit={bootstrap.permissions.instance_admin}
+                    onSkip={() => nextAfter('sso')}
+                    onContinue={() => nextAfter('sso')}
+                    onBack={() => backFrom('sso')}
                 />
             )}
 

@@ -4,6 +4,7 @@ use App\Models\Server;
 use App\Models\Team;
 use App\Models\User;
 use App\Services\DevForge\Github\GithubRunnerInventory;
+use App\Services\DevForge\Github\GithubRunnerJobMonitor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -65,6 +66,47 @@ it('returns an empty list when runner inventory listing fails', function () {
         ->assertSuccessful()
         ->assertJsonPath('data', [])
         ->assertJsonPath('message', 'Impossible de lister les runners GitHub pour le moment.');
+});
+
+it('returns github actions jobs for a runner', function () {
+    $fake = Mockery::mock(GithubRunnerJobMonitor::class);
+    $fake->shouldReceive('listForRunner')
+        ->once()
+        ->with(
+            Mockery::type(Team::class),
+            $this->server->uuid,
+            'github-runner-client',
+        )
+        ->andReturn([
+            'available' => true,
+            'repo' => 'bobdivx/popcorn-tauri',
+            'message' => null,
+            'counts' => [
+                'in_progress' => 1,
+                'queued' => 0,
+                'failure' => 1,
+            ],
+            'items' => [
+                [
+                    'id' => '101',
+                    'name' => 'build-windows',
+                    'workflow_name' => 'Desktop',
+                    'bucket' => 'in_progress',
+                    'status' => 'in_progress',
+                    'html_url' => 'https://github.com/bobdivx/popcorn-tauri/actions/runs/11/job/101',
+                ],
+            ],
+        ]);
+
+    $this->app->instance(GithubRunnerJobMonitor::class, $fake);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson('/api/devforge/v1/github/runners/'.$this->server->uuid.'/github-runner-client/jobs')
+        ->assertSuccessful()
+        ->assertJsonPath('data.available', true)
+        ->assertJsonPath('data.counts.in_progress', 1)
+        ->assertJsonPath('data.items.0.name', 'build-windows');
 });
 
 it('returns runner logs', function () {

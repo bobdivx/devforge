@@ -1,4 +1,5 @@
 import { InstanceSettingsPanels, OauthSettingsPanel } from '../../components/settings/InstanceSettingsPanels';
+import { SsoSettingsPanel } from '../../components/settings/SsoSettingsPanel';
 import { NotificationsSettingsPanel } from '../../components/settings/NotificationsSettingsPanel';
 import { InstanceBackupSettingsPanel } from '../../components/settings/InstanceBackupSettingsPanel';
 import { ProfileSettingsPanel } from '../../components/settings/ProfileSettingsPanel';
@@ -63,6 +64,8 @@ export function SettingsPage({
                 return <InstanceSettingsPanels section="email" permissions={permissions} legacyBaseUrl={legacyBaseUrl} />;
             case 'oauth':
                 return <OauthSettingsPanel permissions={permissions} legacyBaseUrl={legacyBaseUrl} />;
+            case 'sso':
+                return <SsoSettingsPanel permissions={permissions} />;
             case 'updates':
                 return <InstanceSettingsPanels section="updates" permissions={permissions} legacyBaseUrl={legacyBaseUrl} />;
             case 'backup':

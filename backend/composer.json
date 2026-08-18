@@ -43,6 +43,7 @@
         "sentry/sentry-laravel": "^4.20.1",
         "socialiteproviders/authentik": "^5.2",
         "socialiteproviders/clerk": "^5.1",
+        "socialiteproviders/pocketid": "^5.0",
         "socialiteproviders/discord": "^4.2",
         "socialiteproviders/google": "^4.1",
         "socialiteproviders/infomaniak": "^4.0",

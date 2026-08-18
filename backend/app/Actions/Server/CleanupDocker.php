@@ -48,7 +48,7 @@ class CleanupDocker
         );
 
         $commands = [
-            'docker container prune -f --filter "label=devforge.managed=true" --filter "label!=devforge.proxy=true" --filter "label!=devforge.type=database" --filter "label!=devforge.type=application" --filter "label!=devforge.type=service"',
+            'docker container prune -f --filter "label=devforge.managed=true" --filter "label!=devforge.proxy=true" --filter "label!=devforge.type=database" --filter "label!=devforge.type=application" --filter "label!=devforge.type=service" --filter "label!=devforge.type=sso"',
             $imagePruneCmd,
             'docker builder prune -af',
             'sudo DOCKER_CONFIG=/DATA/.docker docker buildx prune -af 2>/dev/null || docker buildx prune -af 2>/dev/null || true',

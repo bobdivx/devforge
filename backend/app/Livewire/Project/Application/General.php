@@ -106,6 +106,8 @@ class General extends Component
 
     public bool $isHttpBasicAuthEnabled = false;
 
+    public string $ssoProtection = 'inherit';
+
     public ?string $httpBasicAuthUsername = null;
 
     public ?string $httpBasicAuthPassword = null;
@@ -181,6 +183,7 @@ class General extends Component
             'isContainerLabelReadonlyEnabled' => 'boolean|required',
             'isPreserveRepositoryEnabled' => 'boolean|required',
             'isHttpBasicAuthEnabled' => 'boolean|required',
+            'ssoProtection' => 'required|in:inherit,enabled,disabled',
             'httpBasicAuthUsername' => 'string|nullable',
             'httpBasicAuthPassword' => 'string|nullable',
             'watchPaths' => 'nullable',
@@ -385,6 +388,11 @@ class General extends Component
             $this->application->post_deployment_command_container = $this->postDeploymentCommandContainer;
             $this->application->custom_nginx_configuration = $this->customNginxConfiguration;
             $this->application->is_http_basic_auth_enabled = $this->isHttpBasicAuthEnabled;
+            $this->application->is_sso_protected = match ($this->ssoProtection) {
+                'enabled' => true,
+                'disabled' => false,
+                default => null,
+            };
             $this->application->http_basic_auth_username = $this->httpBasicAuthUsername;
             $this->application->http_basic_auth_password = $this->httpBasicAuthPassword;
             $this->application->watch_paths = $this->watchPaths;
@@ -435,6 +443,11 @@ class General extends Component
             $this->postDeploymentCommandContainer = $this->application->post_deployment_command_container;
             $this->customNginxConfiguration = $this->application->custom_nginx_configuration;
             $this->isHttpBasicAuthEnabled = $this->application->is_http_basic_auth_enabled;
+            $this->ssoProtection = match ($this->application->is_sso_protected) {
+                true => 'enabled',
+                false => 'disabled',
+                default => 'inherit',
+            };
             $this->httpBasicAuthUsername = $this->application->http_basic_auth_username;
             $this->httpBasicAuthPassword = $this->application->http_basic_auth_password;
             $this->watchPaths = $this->application->watch_paths;
@@ -460,13 +473,14 @@ class General extends Component
             $oldIsPreserveRepositoryEnabled = $this->application->settings->is_preserve_repository_enabled;
             $oldIsSpa = $this->application->settings->is_spa;
             $oldIsHttpBasicAuthEnabled = $this->application->is_http_basic_auth_enabled;
+            $oldSsoProtection = $this->application->is_sso_protected;
 
             $this->syncData(toModel: true);
 
             if ($oldIsSpa !== $this->isSpa) {
                 $this->generateNginxConfiguration($this->isSpa ? 'spa' : 'static');
             }
-            if ($oldIsHttpBasicAuthEnabled !== $this->isHttpBasicAuthEnabled) {
+            if ($oldIsHttpBasicAuthEnabled !== $this->isHttpBasicAuthEnabled || $oldSsoProtection !== $this->application->is_sso_protected) {
                 $this->application->save();
             }
 

@@ -2,13 +2,16 @@
 
 namespace App\Services\DevForge\Core;
 
+use App\Actions\Application\RestartApplication;
 use App\Actions\Application\StopApplication;
 use App\Actions\Database\RestartDatabase;
 use App\Actions\Database\StartDatabase;
 use App\Actions\Database\StopDatabase;
+use App\Actions\Docker\GetContainersStatus;
 use App\Actions\Service\RestartService;
 use App\Actions\Service\StartService;
 use App\Actions\Service\StopService;
+use App\Events\ServiceStatusChanged;
 use App\Models\Application;
 use App\Models\Service;
 use App\Services\DevForge\Application\ApplicationDesiredRuntimeState;
@@ -61,6 +64,7 @@ class CoreResourceAction
     {
         if ($action === 'stop') {
             $this->desiredRuntimeState->markDesiredStopped($application);
+            $application->update(['status' => 'exited']);
 
             StopApplication::dispatch(
                 $application,
@@ -73,12 +77,64 @@ class CoreResourceAction
 
         $this->desiredRuntimeState->markDesiredRunning($application);
 
+        if ($action === 'restart') {
+            return $this->restartApplication($application, $options);
+        }
+
+        return $this->queueApplicationDeployment(
+            $application,
+            $options,
+            restartOnly: $action === 'start',
+            action: $action,
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     * @return array<string, mixed>
+     */
+    private function restartApplication(Application $application, array $options): array
+    {
+        $server = $application->destination?->server;
+
+        if ($server?->isSwarm()) {
+            return $this->queueApplicationDeployment($application, $options, restartOnly: true, action: 'restart');
+        }
+
+        $restarted = RestartApplication::run($application);
+
+        if ($restarted < 1) {
+            return $this->queueApplicationDeployment($application, $options, restartOnly: true, action: 'restart');
+        }
+
+        $application->update(['status' => 'restarting']);
+
+        if ($server) {
+            GetContainersStatus::dispatch($server);
+        }
+
+        $teamId = $application->environment?->project?->team_id;
+        ServiceStatusChanged::dispatch(is_numeric($teamId) ? (int) $teamId : null);
+
+        return [
+            'queued' => false,
+            'completed' => true,
+            'message' => 'Application redémarrée.',
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     * @return array<string, mixed>
+     */
+    private function queueApplicationDeployment(Application $application, array $options, bool $restartOnly, string $action): array
+    {
         $deploymentUuid = new Cuid2;
         $result = queue_application_deployment(
             application: $application,
             deployment_uuid: $deploymentUuid,
             force_rebuild: (bool) ($options['force'] ?? false),
-            restart_only: $action === 'restart',
+            restart_only: $restartOnly,
             is_api: true,
             no_questions_asked: (bool) ($options['instant_deploy'] ?? false),
         );
@@ -94,9 +150,11 @@ class CoreResourceAction
         return [
             'queued' => true,
             'deployment_uuid' => $deploymentUuid->toString(),
-            'message' => $action === 'restart'
-                ? 'Application restart request queued.'
-                : 'Application deployment request queued.',
+            'message' => match ($action) {
+                'start' => 'Application start request queued.',
+                'restart' => 'Application restart request queued.',
+                default => 'Application deployment request queued.',
+            },
         ];
     }
 

@@ -48,6 +48,39 @@ it('logs in an existing user when the oauth provider returns a mixed-case email'
     expect(User::count())->toBe(1);
 });
 
+it('logs in an existing user through the pocketid socialite driver', function () {
+    config()->set('app.maintenance.driver', 'file');
+
+    OauthSetting::create([
+        'provider' => 'pocketid',
+        'client_id' => 'pocket-client',
+        'client_secret' => 'pocket-secret',
+        'redirect_uri' => 'https://coolify.example.com/auth/pocketid/callback',
+        'base_url' => 'https://id.example.com',
+        'enabled' => true,
+    ]);
+
+    $user = User::factory()->create([
+        'email' => 'ada@example.com',
+    ]);
+
+    $provider = Mockery::mock();
+    $provider->shouldReceive('setConfig')->once()->andReturnSelf();
+    $provider->shouldReceive('user')->once()->andReturn((object) [
+        'email' => 'Ada@example.com',
+        'name' => 'Ada Lovelace',
+        'id' => 'pocketid-user-id',
+    ]);
+
+    Socialite::shouldReceive('driver')->once()->with('pocketid')->andReturn($provider);
+
+    $response = $this->get(route('auth.callback', 'pocketid'));
+
+    $response->assertRedirect('/');
+    $this->assertAuthenticatedAs($user);
+    expect(User::count())->toBe(1);
+});
+
 it('rejects oauth logins when the provider does not return an email address', function (?string $providerEmail) {
     config()->set('app.maintenance.driver', 'file');
     InstanceSettings::firstOrCreate([

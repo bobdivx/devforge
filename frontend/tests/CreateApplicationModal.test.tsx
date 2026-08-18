@@ -121,7 +121,7 @@ describe('CreateApplicationModal', () => {
 
         render(<CreateApplicationModal open onClose={() => undefined} onCreated={() => undefined} />);
 
-        fireEvent.click(await screen.findByText('bobdivx/starbasefr'));
+        fireEvent.click(await screen.findByText('starbasefr'));
         await waitFor(() => {
             expect(screen.getByRole('button', { name: 'Suivant' })).not.toBeDisabled();
         });
@@ -211,7 +211,7 @@ describe('CreateApplicationModal', () => {
 
         render(<CreateApplicationModal open onClose={() => undefined} onCreated={created} />);
 
-        fireEvent.click(await screen.findByText('bobdivx/starbasefr'));
+        fireEvent.click(await screen.findByText('starbasefr'));
         await waitFor(() => {
             expect(screen.getByRole('button', { name: 'Suivant' })).not.toBeDisabled();
         });

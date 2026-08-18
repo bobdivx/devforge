@@ -534,6 +534,16 @@
                     @endif
                 </div>
 
+                <h3 class="pt-8">SSO (Pocket ID)</h3>
+                <div class="w-full sm:w-96">
+                    <x-forms.select helper="Leave inherit to follow the instance default. Enabling or disabling overrides it for this application. Redeploy after changing so Traefik labels refresh."
+                        instantSave label="SSO (Pocket ID)" id="ssoProtection" x-bind:disabled="!canUpdate">
+                        <option value="inherit">Inherit instance default</option>
+                        <option value="enabled">Enabled</option>
+                        <option value="disabled">Disabled</option>
+                    </x-forms.select>
+                </div>
+
                 <h3 class="pt-8">HTTP Basic Authentication</h3>
                 <div>
                     <div class="w-full sm:w-96">

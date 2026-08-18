@@ -87,6 +87,8 @@ export type PageKey =
 
     | 'scheduled-tasks'
 
+    | 'automation'
+
     | 'github-runners'
 
     | 'not-found';
@@ -127,9 +129,11 @@ export const appRoutes: AppRoute[] = [
 
     { path: '/monitoring', label: 'Supervision', description: 'État et métriques système.', icon: Activity, page: 'monitoring' },
 
-    { path: '/github-runners', label: 'Runners GitHub', description: 'Runners self-hosted, état, logs et actions.', icon: Cpu, page: 'github-runners' },
+    { path: '/github-runners', label: 'Runners GitHub', description: 'Runners self-hosted, Actions en cours et logs.', icon: Cpu, page: 'github-runners' },
 
     { path: '/scheduled-tasks', label: 'Tâches planifiées', description: 'Historique des exécutions.', icon: CalendarClock, page: 'scheduled-tasks' },
+
+    { path: '/automation', label: 'Automations', description: 'Agents planifiés : déclencheur, instructions et mémoire.', icon: Bot, page: 'automation' },
 
     { path: '/settings', label: 'Paramètres', description: 'Projets, serveurs, équipe et configuration.', icon: Settings, page: 'settings' },
 
@@ -151,6 +155,8 @@ export const staticRoutePaths = [
 
     // Redirection legacy → /agents/settings (voir resolveResourceCanonicalLocation)
     '/settings/ai',
+
+    '/automations',
 
     '/shared-variables',
 
@@ -376,6 +382,10 @@ export function resolveResourceCanonicalLocation(pathname: string): string | nul
         return '/agents/settings';
     }
 
+    if (normalizedPath === '/automations') {
+        return '/automation';
+    }
+
     const applicationMatch = normalizedPath.match(
         /^\/project\/[^/]+\/environment\/[^/]+\/application\/([^/]+)(?:\/([^/]+))?/,
     );
@@ -437,6 +447,10 @@ export function visibleRoutes(agentsEnabled: boolean): AppRoute[] {
         // Sous-menu Agents — pas d’entrée plate dans l’ancien menu
         if (page === 'agents-settings') {
             return false;
+        }
+
+        if (page === 'automation') {
+            return agentsEnabled;
         }
 
         return agentsEnabled || page !== 'agents';
@@ -642,6 +656,10 @@ export function findRoute(pathname: string): AppRoute {
             description: 'Providers LLM, Ollama et instructions agents.',
             page: 'agents-settings',
         };
+    }
+
+    if (normalizedPath === '/automations') {
+        return appRouteByPage('automation');
     }
 
     const exactRoute = appRoutes.find(({ path }) => path === normalizedPath);

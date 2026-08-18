@@ -14,6 +14,7 @@ import { RunnersPage } from './runners/_RunnersPage';
 import { OnboardingPage } from './onboarding/_OnboardingPage';
 import { OverviewPage } from './dashboard/_OverviewPage';
 import { ProfilePage } from './profile/_ProfilePage';
+import { AutomationPage } from './automation/_AutomationPage';
 import { ScheduledTasksPage } from './scheduled-tasks/_ScheduledTasksPage';
 import { SettingsPage } from './settings/_SettingsPage';
 import { SharedVariablesPage } from './shared-variables/_SharedVariablesPage';
@@ -196,6 +197,8 @@ export function DomainPage({ bootstrap, route, onSwitchTeam }: DomainPageProps) 
                 );
         case 'scheduled-tasks':
             return <ScheduledTasksPage />;
+        case 'automation':
+            return <AutomationPage />;
         case 'not-found':
             return (
                 <>

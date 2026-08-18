@@ -90,6 +90,7 @@ class ApplicationAdvancedSettingsCatalog
             'is_force_https_enabled' => ['sometimes', 'boolean'],
             'is_gzip_enabled' => ['sometimes', 'boolean'],
             'is_stripprefix_enabled' => ['sometimes', 'boolean'],
+            'is_sso_protected' => ['sometimes', 'nullable', 'boolean'],
             'is_log_drain_enabled' => ['sometimes', 'boolean'],
             'connect_to_docker_network' => ['sometimes', 'boolean'],
             'stop_grace_period' => [
@@ -118,6 +119,13 @@ class ApplicationAdvancedSettingsCatalog
         }
 
         $resetLabels = false;
+        if (array_key_exists('is_sso_protected', $validated)) {
+            $incomingSso = $validated['is_sso_protected'];
+            $currentSso = $application->is_sso_protected;
+            if ($incomingSso !== $currentSso) {
+                $resetLabels = true;
+            }
+        }
         foreach (['is_force_https_enabled', 'is_gzip_enabled', 'is_stripprefix_enabled'] as $proxyFlag) {
             if (
                 array_key_exists($proxyFlag, $validated)
@@ -156,6 +164,11 @@ class ApplicationAdvancedSettingsCatalog
         }
 
         $settings->save();
+
+        if (array_key_exists('is_sso_protected', $validated)) {
+            $application->is_sso_protected = $validated['is_sso_protected'];
+            $application->save();
+        }
 
         if (array_key_exists('max_restart_count', $validated)) {
             $application->max_restart_count = (int) $validated['max_restart_count'];
@@ -222,6 +235,7 @@ class ApplicationAdvancedSettingsCatalog
             'is_force_https_enabled' => (bool) $settings->is_force_https_enabled,
             'is_gzip_enabled' => (bool) ($settings->is_gzip_enabled ?? true),
             'is_stripprefix_enabled' => (bool) ($settings->is_stripprefix_enabled ?? true),
+            'is_sso_protected' => $application->is_sso_protected,
             'is_log_drain_enabled' => (bool) $settings->is_log_drain_enabled,
             'connect_to_docker_network' => (bool) $settings->connect_to_docker_network,
             'stop_grace_period' => $settings->stop_grace_period !== null

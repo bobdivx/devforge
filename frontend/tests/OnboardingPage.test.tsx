@@ -30,6 +30,9 @@ describe('OnboardingPage', () => {
                     data: { instance: { fqdn: window.location.origin, apps_wildcard_domain: null } },
                 });
             }
+            if (url.includes('/settings/oauth')) {
+                return jsonResponse({ data: [] });
+            }
             if (url.includes('/api/devforge/v1/settings') && !url.includes('/settings/')) {
                 return jsonResponse({
                     data: {
@@ -38,6 +41,15 @@ describe('OnboardingPage', () => {
                             apps_wildcard_domain: null,
                             instance_name: 'DevForge',
                             instance_timezone: 'UTC',
+                        },
+                        sso: {
+                            sso_protect_apps_by_default: true,
+                            sso_forward_auth_address: null,
+                            sso_hide_local_login: false,
+                            pocketid_login_enabled: false,
+                            apps_protection_configured: false,
+                            middleware_name: 'devforge-sso-auth',
+                            default_forward_auth_address: 'http://devforge-sso-proxy:4180/',
                         },
                     },
                 });
@@ -54,7 +66,7 @@ describe('OnboardingPage', () => {
             onboarding: {
                 ...bootstrapData.onboarding,
                 required: true,
-                steps: { account: true, domain: false, github: false, s3: false, server: false },
+                steps: { account: true, domain: false, sso: false, github: false, s3: false, server: false },
             },
         }}
         />);
@@ -74,7 +86,7 @@ describe('OnboardingPage', () => {
                 force_save_domains: true,
             });
         });
-        expect(await screen.findByRole('heading', { name: 'Connecter GitHub' })).toBeInTheDocument();
+        expect(await screen.findByRole('heading', { name: 'SSO Pocket ID' })).toBeInTheDocument();
     });
 
     it('reprend GitHub après le retour d’installation', async () => {
@@ -92,7 +104,7 @@ describe('OnboardingPage', () => {
             onboarding: {
                 ...bootstrapData.onboarding,
                 required: true,
-                steps: { account: true, domain: true, github: false, s3: false, server: false },
+                steps: { account: true, domain: true, sso: false, github: false, s3: false, server: false },
             },
         }}
         />);
@@ -121,7 +133,7 @@ describe('OnboardingPage', () => {
             onboarding: {
                 ...bootstrapData.onboarding,
                 required: true,
-                steps: { account: true, domain: true, github: true, s3: true, server: true },
+                steps: { account: true, domain: true, sso: true, github: true, s3: true, server: true },
             },
         }}
         />);
@@ -157,7 +169,7 @@ describe('OnboardingPage', () => {
             onboarding: {
                 ...bootstrapData.onboarding,
                 required: false,
-                steps: { account: true, domain: false, github: true, s3: true, server: true },
+                steps: { account: true, domain: false, sso: true, github: true, s3: true, server: true },
             },
         }}
         />);
@@ -172,7 +184,7 @@ describe('OnboardingPage', () => {
             onboarding: {
                 ...bootstrapData.onboarding,
                 required: false,
-                steps: { account: true, domain: true, github: true, s3: true, server: true },
+                steps: { account: true, domain: true, sso: true, github: true, s3: true, server: true },
             },
         }}
         />);

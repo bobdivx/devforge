@@ -67,6 +67,26 @@ class SettingsController extends Controller
         ]);
     }
 
+    public function updateSso(Request $request): JsonResponse
+    {
+        $settings = InstanceSettings::get();
+        $this->authorize('update', $settings);
+
+        return response()->json([
+            'data' => $this->updater->updateSso($settings, $request->all()),
+        ]);
+    }
+
+    public function startSso(): JsonResponse
+    {
+        $settings = InstanceSettings::get();
+        $this->authorize('update', $settings);
+
+        return response()->json([
+            'data' => $this->updater->startSso($settings),
+        ]);
+    }
+
     public function checkUpdates(): JsonResponse
     {
         $settings = InstanceSettings::get();

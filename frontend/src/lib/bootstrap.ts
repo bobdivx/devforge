@@ -48,6 +48,7 @@ export type BootstrapData = {
         steps: {
             account: boolean;
             domain: boolean;
+            sso: boolean;
             github: boolean;
             s3: boolean;
             server: boolean;

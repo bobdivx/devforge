@@ -387,13 +387,14 @@ class GithubRunnerInventory
         $extraEnv = GithubRunnerCompatibility::withCompatibleExtraEnv($extraEnv);
 
         $exists = $this->containerExists($server, $containerName);
-        if ($exists && ! ($validated['recreate'] ?? false)) {
+        $replaceUnhealthy = $exists && $this->containerIsUnhealthy($server, $containerName);
+        if ($exists && ! ($validated['recreate'] ?? false) && ! $replaceUnhealthy) {
             throw ValidationException::withMessages([
                 'container_name' => ["Le conteneur {$containerName} existe déjà sur ce serveur."],
             ]);
         }
 
-        if ($exists && ($validated['recreate'] ?? false)) {
+        if ($exists && (($validated['recreate'] ?? false) || $replaceUnhealthy)) {
             $this->removeContainer($server, $containerName);
         }
 
@@ -674,15 +675,8 @@ class GithubRunnerInventory
             '-e '.escapeshellarg('RUNNER_REPLACE_EXISTING='.($replaceExisting ? 'true' : 'false')),
         ];
 
-        if ($authMode === 'pat') {
-            // Classic / fine-grained PAT: popcorn + myoung34 mint a registration token from it.
-            $parts[] = '-e '.escapeshellarg('ACCESS_TOKEN='.$authToken);
-            $parts[] = '-e '.escapeshellarg('PAT_TOKEN='.$authToken);
-        } else {
-            // Short-lived registration token (works for myoung34 via RUNNER_TOKEN and popcorn via ACCESS_TOKEN).
-            $parts[] = '-e '.escapeshellarg('RUNNER_TOKEN='.$authToken);
-            $parts[] = '-e '.escapeshellarg('ACCESS_TOKEN='.$authToken);
-            $parts[] = '-e '.escapeshellarg('PAT_TOKEN='.$authToken);
+        foreach ($this->authEnvironmentVariables($image, $authMode, $authToken) as $key => $value) {
+            $parts[] = '-e '.escapeshellarg($key.'='.$value);
         }
 
         $extraEnv = GithubRunnerCompatibility::withCompatibleExtraEnv($extraEnv);
@@ -703,6 +697,77 @@ class GithubRunnerInventory
         ];
 
         return implode(' ', $parts);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function authEnvironmentVariables(string $image, string $authMode, string $authToken): array
+    {
+        if ($authMode === 'pat') {
+            return [
+                'ACCESS_TOKEN' => $authToken,
+                'PAT_TOKEN' => $authToken,
+            ];
+        }
+
+        if ($this->imageTreatsAccessTokenAsPat($image)) {
+            return ['RUNNER_TOKEN' => $authToken];
+        }
+
+        return [
+            'RUNNER_TOKEN' => $authToken,
+            'ACCESS_TOKEN' => $authToken,
+            'PAT_TOKEN' => $authToken,
+        ];
+    }
+
+    public function looksLikeGithubPat(string $token): bool
+    {
+        return preg_match('/^(ghp_|github_pat_|gho_|ghu_|ghs_|ghr_)/', $token) === 1;
+    }
+
+    /**
+     * @param  array<int, mixed>  $envLines
+     * @return array<int, string>
+     */
+    public function sanitizeInspectEnvLines(string $image, array $envLines): array
+    {
+        if (! $this->imageTreatsAccessTokenAsPat($image)) {
+            return array_values(array_filter($envLines, fn (mixed $line): bool => is_string($line)));
+        }
+
+        $parsed = [];
+        foreach ($envLines as $line) {
+            if (! is_string($line) || ! str_contains($line, '=')) {
+                continue;
+            }
+
+            [$key, $value] = explode('=', $line, 2);
+            $parsed[$key] = $value;
+        }
+
+        $accessToken = (string) ($parsed['ACCESS_TOKEN'] ?? $parsed['PAT_TOKEN'] ?? '');
+        if ($accessToken !== '' && ! $this->looksLikeGithubPat($accessToken)) {
+            unset($parsed['ACCESS_TOKEN'], $parsed['PAT_TOKEN']);
+        }
+
+        $normalized = [];
+        foreach ($parsed as $key => $value) {
+            $normalized[] = $key.'='.$value;
+        }
+
+        return $normalized;
+    }
+
+    public function imageTreatsAccessTokenAsPat(string $image): bool
+    {
+        return str_contains(strtolower($image), 'myoung34');
+    }
+
+    public function isUnhealthyContainerStatus(string $status): bool
+    {
+        return in_array($status, ['restarting', 'exited', 'dead', 'created', ''], true);
     }
 
     public function isContainerRunning(Server $server, string $containerName): bool
@@ -887,6 +952,7 @@ class GithubRunnerInventory
 
         $envLines = data_get($inspect, 'Config.Env', []);
         $envLines = is_array($envLines) ? $envLines : [];
+        $envLines = $this->sanitizeInspectEnvLines($image, $envLines);
         foreach (GithubRunnerCompatibility::withCompatibleRunnerVersion($envLines) as $line) {
             if (! is_string($line) || ! str_contains($line, '=')) {
                 continue;
@@ -1442,6 +1508,19 @@ class GithubRunnerInventory
         }
 
         return is_string($raw) && trim($raw) !== '';
+    }
+
+    private function containerIsUnhealthy(Server $server, string $containerName): bool
+    {
+        try {
+            $status = trim((string) instant_remote_process([
+                'docker inspect -f {{.State.Status}} '.escapeshellarg($containerName).' 2>/dev/null || true',
+            ], $server));
+        } catch (\Throwable) {
+            return true;
+        }
+
+        return $this->isUnhealthyContainerStatus($status);
     }
 
     /**

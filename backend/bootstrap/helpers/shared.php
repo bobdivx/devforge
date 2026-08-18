@@ -29,6 +29,7 @@ use App\Models\StandaloneRedis;
 use App\Models\SwarmDocker;
 use App\Models\Team;
 use App\Models\User;
+use App\Services\DevForge\Sso\SsoProtection;
 use Carbon\CarbonImmutable;
 use DanHarrin\LivewireRateLimiting\Exceptions\TooManyRequestsException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -2609,6 +2610,9 @@ function parseDockerComposeFile(Service|Application $resource, bool $isNew = fal
                     environment: $resource->environment->name,
                 );
                 $serviceLabels = $serviceLabels->merge($defaultLabels);
+                if ($savedService instanceof ServiceApplication && SsoProtection::shouldProtectServiceApplication($savedService)) {
+                    $serviceLabels = $serviceLabels->merge(SsoProtection::traefikMiddlewareLabels());
+                }
                 if (! $isDatabase && $fqdns->count() > 0) {
                     if ($fqdns) {
                         $shouldGenerateLabelsExactly = $resource->server->settings->generate_exact_labels;
@@ -3388,6 +3392,9 @@ function parseDockerComposeFile(Service|Application $resource, bool $isNew = fal
                                     return $preview_fqdn;
                                 });
                             }
+                        }
+                        if ($resource instanceof Application && SsoProtection::shouldProtectApplication($resource)) {
+                            $serviceLabels = $serviceLabels->merge(SsoProtection::traefikMiddlewareLabels());
                         }
                         $shouldGenerateLabelsExactly = $server->settings->generate_exact_labels;
                         if ($shouldGenerateLabelsExactly) {

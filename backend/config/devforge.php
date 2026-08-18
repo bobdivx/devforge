@@ -370,6 +370,7 @@ return [
                 'settings.backup' => ['legacy' => '/settings/backup', 'devforge' => '/settings/backup'],
                 'settings.email' => ['legacy' => '/settings/email', 'devforge' => '/settings/email'],
                 'settings.oauth' => ['legacy' => '/settings/oauth', 'devforge' => '/settings/oauth'],
+                'settings.sso' => ['legacy' => '/settings/sso', 'devforge' => '/settings/sso'],
                 'settings.scheduled-jobs' => ['legacy' => '/settings/scheduled-jobs', 'devforge' => '/settings/scheduled-jobs'],
             ],
         ],

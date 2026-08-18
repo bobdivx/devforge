@@ -10,6 +10,7 @@ import {
     Link2,
     ExternalLink,
     AlertTriangle,
+    ChevronDown,
 } from 'lucide-preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { PageHeader } from '../../components/PageHeader';
@@ -19,6 +20,7 @@ import { StatusBadge } from '../../components/ui/StatusBadge';
 import { ActionToolbar } from '../../components/ui/ActionToolbar';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { CreateRunnerModal, type CreateRunnerPrefill } from '../../components/runners/CreateRunnerModal';
+import { RunnerGithubJobsPanel } from '../../components/runners/RunnerGithubJobsPanel';
 import {
     domainApi,
     type GithubRunner,
@@ -44,6 +46,11 @@ import {
     type LinkedApplication,
     type RunnerCoherence,
 } from '../../lib/runners/runner-coherence';
+import {
+    runnerHasTrackedJobs,
+    runnerJobCounts,
+    runnerJobTone,
+} from '../../lib/runners/runner-jobs';
 
 type ListFilter = 'all' | 'linked' | 'orphan' | 'gaps';
 
@@ -114,8 +121,9 @@ export function RunnersPage() {
         action: GithubRunnerAction;
     } | null>(null);
     const [pendingDelete, setPendingDelete] = useState<GithubRunner | null>(null);
-    const [logsEnabled, setLogsEnabled] = useState(false);
+    const [logsOpen, setLogsOpen] = useState(false);
     const [detailEnabled, setDetailEnabled] = useState(false);
+    const [jobsRefreshing, setJobsRefreshing] = useState(false);
     const [linkAppUuid, setLinkAppUuid] = useState('');
     const [linkRole, setLinkRole] = useState('frontend');
     const [linkBusy, setLinkBusy] = useState(false);
@@ -201,20 +209,18 @@ export function RunnersPage() {
         }
     }, [filteredRunners, selectedId, listFilter]);
 
-    // Stagger detail / logs so the list can paint before heavier SSH calls.
+    // Stagger detail so the list can paint before heavier SSH calls. Logs stay closed.
     useEffect(() => {
         setDetailEnabled(false);
-        setLogsEnabled(false);
+        setLogsOpen(false);
         if (!selected || listFilter === 'gaps') {
             return;
         }
 
         const detailTimer = window.setTimeout(() => setDetailEnabled(true), 150);
-        const logsTimer = window.setTimeout(() => setLogsEnabled(true), 600);
 
         return () => {
             window.clearTimeout(detailTimer);
-            window.clearTimeout(logsTimer);
         };
     }, [selected?.id, listFilter]);
 
@@ -226,19 +232,28 @@ export function RunnersPage() {
     );
 
     const logs = useApiQuery(
-        logsEnabled && selected && listFilter !== 'gaps'
+        logsOpen && selected && listFilter !== 'gaps'
             ? `github-runner-logs:${selected.server_uuid}:${selected.name}:${lines}`
             : null,
         () => domainApi.githubRunnerLogs(selected!.server_uuid, selected!.name, lines),
     );
 
+    const jobs = useApiQuery(
+        selected && listFilter !== 'gaps'
+            ? `github-runner-jobs:${selected.server_uuid}:${selected.name}`
+            : null,
+        () => domainApi.githubRunnerJobs(selected!.server_uuid, selected!.name),
+    );
+
     const logsReloadRef = useRef(logs.reload);
+    const jobsReloadRef = useRef(jobs.reload);
     const detailReloadRef = useRef(detail.reload);
     logsReloadRef.current = logs.reload;
+    jobsReloadRef.current = jobs.reload;
     detailReloadRef.current = detail.reload;
 
     useEffect(() => {
-        if (!selected || listFilter === 'gaps' || !logsEnabled) {
+        if (!selected || listFilter === 'gaps' || !logsOpen) {
             return;
         }
 
@@ -248,7 +263,20 @@ export function RunnersPage() {
         }, 15_000);
 
         return () => window.clearInterval(interval);
-    }, [selected?.id, lines, listFilter, logsEnabled]);
+    }, [selected?.id, lines, listFilter, logsOpen]);
+
+    useEffect(() => {
+        if (!selected || listFilter === 'gaps') {
+            return;
+        }
+
+        const interval = window.setInterval(() => {
+            setJobsRefreshing(true);
+            void jobsReloadRef.current({ silent: true }).finally(() => setJobsRefreshing(false));
+        }, 20_000);
+
+        return () => window.clearInterval(interval);
+    }, [selected?.id, listFilter]);
 
     useEffect(() => {
         if (stickLogsToBottom.current) {
@@ -265,7 +293,8 @@ export function RunnersPage() {
                 runners.reload({ silent: true }),
                 applications.reload({ silent: true }),
                 selected ? detail.reload({ silent: true }) : Promise.resolve(),
-                selected ? logs.reload({ silent: true }) : Promise.resolve(),
+                selected ? jobs.reload({ silent: true }) : Promise.resolve(),
+                selected && logsOpen ? logs.reload({ silent: true }) : Promise.resolve(),
             ]);
         } finally {
             setRefreshing(false);
@@ -281,7 +310,11 @@ export function RunnersPage() {
             setFeedback(result.message ?? result.data.message);
             await runners.reload({ silent: true });
             if (selected?.id === runner.id) {
-                await Promise.all([detail.reload({ silent: true }), logs.reload({ silent: true })]);
+                await Promise.all([
+                    detail.reload({ silent: true }),
+                    jobs.reload({ silent: true }),
+                    logsOpen ? logs.reload({ silent: true }) : Promise.resolve(),
+                ]);
             }
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Action impossible.');
@@ -365,6 +398,8 @@ export function RunnersPage() {
 
     const detailRunner = detail.data?.data ?? selected;
     const logData = logs.data?.data;
+    const jobData = jobs.data?.data ?? null;
+    const jobCounts = runnerJobCounts(jobData);
     const detailGithub = detailRunner ? githubStatusLabel(detailRunner) : null;
     const selectedMeta = selected ? runnerMeta.get(selected.id) : null;
     const attachCandidates = useMemo(
@@ -388,7 +423,7 @@ export function RunnersPage() {
         <>
             <PageHeader
                 title="Runners GitHub"
-                description="Liez vos runners self-hosted aux applications DevForge, suivez la cohérence Docker ↔ GitHub, et recréez un conteneur (pull image) quand le binaire est trop ancien pour Node 24."
+                description="Liez vos runners self-hosted aux applications DevForge, suivez les GitHub Actions en cours / en attente / en échec, et n’ouvrez les logs Docker que si besoin."
                 eyebrow="CI / CD"
                 actions={(
                     <>
@@ -522,6 +557,19 @@ export function RunnersPage() {
                                                         label={coherenceLabel(coherence)}
                                                         tone={coherenceTone(coherence)}
                                                     />
+                                                    {active && runnerHasTrackedJobs(jobData) && (
+                                                        <>
+                                                            {jobCounts.in_progress > 0 && (
+                                                                <StatusBadge label={`${jobCounts.in_progress} en cours`} tone={runnerJobTone('in_progress')} />
+                                                            )}
+                                                            {jobCounts.queued > 0 && (
+                                                                <StatusBadge label={`${jobCounts.queued} en attente`} tone={runnerJobTone('queued')} />
+                                                            )}
+                                                            {jobCounts.failure > 0 && (
+                                                                <StatusBadge label={`${jobCounts.failure} échec${jobCounts.failure > 1 ? 's' : ''}`} tone={runnerJobTone('failure')} />
+                                                            )}
+                                                        </>
+                                                    )}
                                                     {apps.slice(0, 2).map((app) => (
                                                         <span
                                                             key={app.uuid}
@@ -559,7 +607,7 @@ export function RunnersPage() {
                             </Card>
                         ) : !selected ? (
                             <Card title="Détail">
-                                <p class="text-sm text-base-content/55">Sélectionnez un runner pour voir ses logs et actions.</p>
+                                <p class="text-sm text-base-content/55">Sélectionnez un runner pour voir ses Actions GitHub et ses logs.</p>
                             </Card>
                         ) : (
                             <>
@@ -817,92 +865,118 @@ export function RunnersPage() {
                                     </DataState>
                                 </Card>
 
+                                <RunnerGithubJobsPanel
+                                    jobs={jobData}
+                                    loading={jobs.loading}
+                                    error={jobs.error}
+                                    refreshing={jobsRefreshing}
+                                    onRetry={() => {
+                                        setJobsRefreshing(true);
+                                        void jobs.reload({ silent: true }).finally(() => setJobsRefreshing(false));
+                                    }}
+                                />
+
                                 <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
                                     <div class="toolbar-row border-b border-base-300/70 px-5 py-4">
-                                        <div class="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            class="flex min-w-0 flex-1 items-center gap-2 text-start"
+                                            aria-expanded={logsOpen}
+                                            onClick={() => setLogsOpen((current) => !current)}
+                                        >
                                             <Terminal class="size-4 text-base-content/45" aria-hidden />
-                                            <div>
-                                                <p class="text-sm font-semibold">Logs</p>
+                                            <div class="min-w-0">
+                                                <p class="text-sm font-semibold">Logs Docker</p>
                                                 <p class="text-xs text-base-content/50">
-                                                    {logsRefreshing
-                                                        ? 'Mise à jour…'
-                                                        : detectedVersion
-                                                            ? `stdout / stderr · binaire ${detectedVersion} · refresh auto 15s`
-                                                            : 'stdout / stderr · cherchez « Version: 2.336.0 » après recréation'}
+                                                    {logsOpen
+                                                        ? (logsRefreshing
+                                                            ? 'Mise à jour…'
+                                                            : detectedVersion
+                                                                ? `stdout / stderr · binaire ${detectedVersion} · refresh auto 15s`
+                                                                : 'stdout / stderr · cherchez « Version: 2.336.0 » après recréation')
+                                                        : 'Masqués par défaut — cliquer pour afficher'}
                                                 </p>
                                             </div>
-                                        </div>
-                                        <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-                                            <label class="flex items-center gap-2 text-xs">
-                                                <span class="text-base-content/45">Lignes</span>
-                                                <select
-                                                    class="select select-bordered select-sm w-full sm:w-auto"
-                                                    value={lines}
-                                                    onChange={(event) => setLines(Number((event.target as HTMLSelectElement).value))}
-                                                >
-                                                    {[100, 200, 500].map((option) => (
-                                                        <option key={option} value={option}>{option}</option>
-                                                    ))}
-                                                </select>
-                                            </label>
-                                            <button
-                                                class="btn btn-ghost btn-sm"
-                                                type="button"
-                                                disabled={logsRefreshing}
-                                                onClick={() => {
-                                                    setLogsRefreshing(true);
-                                                    void logs.reload({ silent: true }).finally(() => setLogsRefreshing(false));
-                                                }}
-                                            >
-                                                {logsRefreshing
-                                                    ? <span class="loading loading-spinner loading-xs" aria-hidden />
-                                                    : <RefreshCw class="size-3.5" aria-hidden />}
-                                                Actualiser
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div class="p-5">
-                                        <DataState
-                                            loading={logs.loading && !logs.data}
-                                            error={logs.error && !logs.data ? logs.error : null}
-                                            onRetry={() => void logs.reload()}
-                                        >
-                                            {logData ? (
-                                                <>
-                                                    {!logData.available && (
-                                                        <p class="mb-3 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-                                                            {logData.message ?? 'Logs indisponibles.'}
-                                                        </p>
-                                                    )}
-                                                    <div
-                                                        class={`max-h-[28rem] overflow-auto rounded-xl border border-base-300 bg-black p-3 font-mono text-[11px] leading-5 text-zinc-200 transition-opacity ${logsRefreshing ? 'opacity-80' : 'opacity-100'}`}
-                                                        onScroll={(event) => {
-                                                            const el = event.currentTarget;
-                                                            stickLogsToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
-                                                        }}
+                                            <ChevronDown
+                                                class={`size-4 shrink-0 text-base-content/45 transition ${logsOpen ? 'rotate-180' : ''}`}
+                                                aria-hidden
+                                            />
+                                        </button>
+                                        {logsOpen && (
+                                            <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                                                <label class="flex items-center gap-2 text-xs">
+                                                    <span class="text-base-content/45">Lignes</span>
+                                                    <select
+                                                        class="select select-bordered select-sm w-full sm:w-auto"
+                                                        value={lines}
+                                                        onChange={(event) => setLines(Number((event.target as HTMLSelectElement).value))}
                                                     >
-                                                        {logData.items.length === 0 ? (
-                                                            <p class="text-zinc-500">Aucune ligne de log.</p>
-                                                        ) : logData.items.map((line) => (
-                                                            <div
-                                                                key={line.cursor}
-                                                                class={isRunnerVersionLogLine(line.message) ? 'text-emerald-300' : undefined}
-                                                            >
-                                                                <span class="me-2 select-none text-zinc-600">{line.cursor}</span>
-                                                                {line.message}
-                                                            </div>
+                                                        {[100, 200, 500].map((option) => (
+                                                            <option key={option} value={option}>{option}</option>
                                                         ))}
-                                                        <div ref={logsEndRef} />
-                                                    </div>
-                                                </>
-                                            ) : (
-                                                <div class="flex min-h-24 items-center justify-center gap-2 text-xs text-base-content/55">
-                                                    <span class="loading loading-spinner loading-xs text-primary" aria-hidden />
-                                                    Chargement des logs…
-                                                </div>
-                                            )}
-                                        </DataState>
+                                                    </select>
+                                                </label>
+                                                <button
+                                                    class="btn btn-ghost btn-sm"
+                                                    type="button"
+                                                    disabled={logsRefreshing}
+                                                    onClick={() => {
+                                                        setLogsRefreshing(true);
+                                                        void logs.reload({ silent: true }).finally(() => setLogsRefreshing(false));
+                                                    }}
+                                                >
+                                                    {logsRefreshing
+                                                        ? <span class="loading loading-spinner loading-xs" aria-hidden />
+                                                        : <RefreshCw class="size-3.5" aria-hidden />}
+                                                    Actualiser
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
+                                    {logsOpen && (
+                                        <div class="p-5">
+                                            <DataState
+                                                loading={logs.loading && !logs.data}
+                                                error={logs.error && !logs.data ? logs.error : null}
+                                                onRetry={() => void logs.reload()}
+                                            >
+                                                {logData ? (
+                                                    <>
+                                                        {!logData.available && (
+                                                            <p class="mb-3 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+                                                                {logData.message ?? 'Logs indisponibles.'}
+                                                            </p>
+                                                        )}
+                                                        <div
+                                                            class={`max-h-[28rem] overflow-auto rounded-xl border border-base-300 bg-black p-3 font-mono text-[11px] leading-5 text-zinc-200 transition-opacity ${logsRefreshing ? 'opacity-80' : 'opacity-100'}`}
+                                                            onScroll={(event) => {
+                                                                const el = event.currentTarget;
+                                                                stickLogsToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+                                                            }}
+                                                        >
+                                                            {logData.items.length === 0 ? (
+                                                                <p class="text-zinc-500">Aucune ligne de log.</p>
+                                                            ) : logData.items.map((line) => (
+                                                                <div
+                                                                    key={line.cursor}
+                                                                    class={isRunnerVersionLogLine(line.message) ? 'text-emerald-300' : undefined}
+                                                                >
+                                                                    <span class="me-2 select-none text-zinc-600">{line.cursor}</span>
+                                                                    {line.message}
+                                                                </div>
+                                                            ))}
+                                                            <div ref={logsEndRef} />
+                                                        </div>
+                                                    </>
+                                                ) : (
+                                                    <div class="flex min-h-24 items-center justify-center gap-2 text-xs text-base-content/55">
+                                                        <span class="loading loading-spinner loading-xs text-primary" aria-hidden />
+                                                        Chargement des logs…
+                                                    </div>
+                                                )}
+                                            </DataState>
+                                        </div>
+                                    )}
                                 </section>
                             </>
                         )}

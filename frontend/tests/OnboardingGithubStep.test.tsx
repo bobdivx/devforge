@@ -110,8 +110,8 @@ describe('OnboardingGithubStep', () => {
 
         render(<OnboardingGithubStep canManage onSkip={() => undefined} onConnected={() => undefined} />);
 
-        expect(await screen.findByRole('heading', { name: 'Quels dépôts démarrer ?' })).toBeInTheDocument();
-        expect(await screen.findByText('bob/popcorn')).toBeInTheDocument();
+        expect(await screen.findByRole('heading', { name: 'Choisir les dépôts' })).toBeInTheDocument();
+        expect(await screen.findByText('popcorn')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('checkbox'));
         expect(screen.getByRole('button', { name: 'Démarrer 1 dépôt' })).toBeEnabled();
     });

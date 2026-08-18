@@ -58,6 +58,7 @@ it('exposes onboarding steps in the bootstrap contract', function () {
         ->assertJsonPath('data.onboarding.required', true)
         ->assertJsonPath('data.onboarding.steps.account', true)
         ->assertJsonPath('data.onboarding.steps.domain', false)
+        ->assertJsonPath('data.onboarding.steps.sso', false)
         ->assertJsonPath('data.onboarding.steps.github', false)
         ->assertJsonPath('data.onboarding.steps.s3', false)
         ->assertJsonPath('data.onboarding.steps.server', true);
@@ -145,7 +146,14 @@ it('starts a github app manifest from onboarding', function () {
         ->assertCreated()
         ->assertJsonPath('data.app.name', 'devforge-app')
         ->assertJsonPath('data.launch.manifest.name', 'devforge-app')
-        ->assertJsonPath('data.launch.manifest.default_permissions.contents', 'read');
+        ->assertJsonPath('data.launch.manifest.default_permissions.contents', 'write')
+        ->assertJsonPath('data.launch.manifest.default_permissions.administration', 'write')
+        ->assertJsonPath('data.launch.manifest.default_permissions.actions', 'write')
+        ->assertJsonPath('data.launch.manifest.default_permissions.workflows', 'write')
+        ->assertJsonPath('data.launch.manifest.default_permissions.packages', 'read')
+        ->assertJsonPath('data.launch.manifest.default_permissions.pull_requests', 'write')
+        ->assertJsonPath('data.launch.manifest.default_events.0', 'push')
+        ->assertJsonPath('data.launch.manifest.default_events.1', 'pull_request');
 
     expect($response->json('data.launch.action_url'))->toStartWith('https://github.com/settings/apps/new?state=')
         ->and($response->json('data.launch.manifest.redirect_url'))->toEndWith('/login/github/manifest')
@@ -159,6 +167,21 @@ it('starts a github app manifest from onboarding', function () {
         'action' => 'manifest',
         'team_id' => $this->currentTeam->id,
     ]);
+});
+
+it('still requests administration write when the client omits the flag', function () {
+    $response = $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/github/apps', [
+            'name' => 'devforge-app',
+            'administration' => false,
+        ]);
+
+    $response
+        ->assertCreated()
+        ->assertJsonPath('data.launch.manifest.default_permissions.administration', 'write')
+        ->assertJsonPath('data.launch.manifest.default_permissions.contents', 'write')
+        ->assertJsonPath('data.launch.manifest.default_permissions.actions', 'write');
 });
 
 it('reuses an incomplete github app draft when the setup is relaunched', function () {

@@ -236,6 +236,17 @@ it('authorizes and delegates supported actions using the scoped resource', funct
         ->assertJsonPath('data.deployment_uuid', 'deployment-test');
 });
 
+it('exposes start and deploy for a stopped application', function () {
+    $this->application->update(['status' => 'exited:unknown']);
+
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson("/api/devforge/v1/core/applications/{$this->application->uuid}")
+        ->assertSuccessful()
+        ->assertJsonPath('data.status', 'exited:unknown')
+        ->assertJsonPath('data.actions', ['start', 'deploy']);
+});
+
 it('does not delegate an action for another team resource', function () {
     $otherTeam = Team::factory()->create();
     $otherProject = Project::factory()->create(['team_id' => $otherTeam->id]);

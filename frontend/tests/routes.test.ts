@@ -65,6 +65,7 @@ describe('routage DevForge', () => {
         expect(parseSettingsTab('/settings/servers')).toBe('servers');
         expect(parseSettingsTab('/settings/advanced')).toBe('advanced');
         expect(parseSettingsTab('/settings/oauth')).toBe('oauth');
+        expect(parseSettingsTab('/settings/sso')).toBe('sso');
         expect(parseSettingsTab('/notifications/email')).toBe('notifications');
         expect(parseSettingsTab('/security/api-tokens')).toBe('security');
         expect(parseSettingsTab('/team/members')).toBe('team');
@@ -138,5 +139,15 @@ describe('routage DevForge', () => {
         expect(findRoute('/settings/ai').page).toBe('agents-settings');
         expect(findRoute('/devforge/settings/ai').path).toBe('/agents/settings');
         expect(findRoute('/agents/settings').page).toBe('agents-settings');
+    });
+
+    it('expose la page Automations et l’alias pluriel', () => {
+        expect(findRoute('/automation').page).toBe('automation');
+        expect(findRoute('/devforge/automation').path).toBe('/automation');
+        expect(findRoute('/automations').page).toBe('automation');
+        expect(findRoute('/automations').path).toBe('/automation');
+        expect(resolveResourceCanonicalLocation('/automations')).toBe('/automation');
+        expect(visibleRoutes(false).some(({ page }) => page === 'automation')).toBe(false);
+        expect(visibleRoutes(true).some(({ page }) => page === 'automation')).toBe(true);
     });
 });

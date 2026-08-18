@@ -1,10 +1,9 @@
-import { FolderGit2, Search } from 'lucide-preact';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { FolderGit2 } from 'lucide-preact';
+import { useEffect, useState } from 'preact/hooks';
 import {
     domainApi,
     type DeploymentTarget,
     type GithubAppSummary,
-    type GithubRepository,
     type Project,
 } from '../../lib/domain-api';
 import {
@@ -16,14 +15,14 @@ import {
     type OnboardingDeployItem,
 } from '../../lib/onboarding-deploy';
 import {
-    filterGithubRepositories,
     firstDestinationUuid,
     firstProjectEnvironment,
     isGithubAppInstalled,
-    toggleSelectedId,
 } from '../../lib/onboarding-github';
+import type { PickedGithubRepository } from '../../lib/github-repo-picker';
 import { useApiQuery } from '../../lib/use-api-query';
 import { ConnectGithubButton } from '../github/ConnectGithubButton';
+import { GithubRepoPicker } from '../github/GithubRepoPicker';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { DataState } from '../ui/DataState';
@@ -55,10 +54,11 @@ export function OnboardingGithubStep({ canManage, onSkip, onConnected }: Onboard
     if (installed.length > 0) {
         return (
             <OnboardingGithubRepos
-                app={installed[0]}
+                apps={installed}
                 canManage={canManage}
                 onSkip={onSkip}
                 onStarted={onConnected}
+                onRefreshApps={() => void apps.reload()}
             />
         );
     }
@@ -127,23 +127,23 @@ function InstallButton({ app }: { app: GithubAppSummary }) {
 }
 
 function OnboardingGithubRepos({
-    app,
+    apps,
     canManage,
     onSkip,
     onStarted,
+    onRefreshApps,
 }: {
-    app: GithubAppSummary;
+    apps: GithubAppSummary[];
     canManage: boolean;
     onSkip: () => void;
     onStarted: () => void;
+    onRefreshApps: () => void;
 }) {
-    const [repositories, setRepositories] = useState<GithubRepository[]>([]);
     const [projects, setProjects] = useState<Project[]>([]);
     const [targets, setTargets] = useState<DeploymentTarget[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [query, setQuery] = useState('');
-    const [selected, setSelected] = useState<number[]>([]);
+    const [selected, setSelected] = useState<PickedGithubRepository[]>([]);
     const [submitting, setSubmitting] = useState(false);
     const [deployItems, setDeployItems] = useState<OnboardingDeployItem[]>([]);
 
@@ -153,21 +153,19 @@ function OnboardingGithubRepos({
         setError(null);
 
         Promise.all([
-            domainApi.githubRepositories(app.uuid),
             domainApi.projects(),
             domainApi.deploymentTargets(),
         ])
-            .then(([reposResponse, projectsResponse, targetsResponse]) => {
+            .then(([projectsResponse, targetsResponse]) => {
                 if (cancelled) {
                     return;
                 }
-                setRepositories(reposResponse.data);
                 setProjects(projectsResponse.data);
                 setTargets(targetsResponse.data);
             })
             .catch((loadError: unknown) => {
                 if (!cancelled) {
-                    setError(loadError instanceof Error ? loadError.message : 'Impossible de charger les dépôts GitHub.');
+                    setError(loadError instanceof Error ? loadError.message : 'Impossible de charger le contexte de déploiement.');
                 }
             })
             .finally(() => {
@@ -179,9 +177,8 @@ function OnboardingGithubRepos({
         return () => {
             cancelled = true;
         };
-    }, [app.uuid]);
+    }, []);
 
-    const visible = useMemo(() => filterGithubRepositories(repositories, query), [repositories, query]);
     const destinationUuid = firstDestinationUuid(targets);
 
     const createdUuids = deployItems
@@ -246,7 +243,7 @@ function OnboardingGithubRepos({
             return;
         }
 
-        const chosen = repositories.filter((repository) => selected.includes(repository.id));
+        const chosen = selected;
         setDeployItems(createInitialDeployItems(chosen));
         setSubmitting(true);
         setError(null);
@@ -276,7 +273,7 @@ function OnboardingGithubRepos({
                         project_uuid: launch.projectUuid,
                         environment_uuid: launch.environmentUuid,
                         destination_uuid: destinationUuid,
-                        github_app_uuid: app.uuid,
+                        github_app_uuid: repository.github_app_uuid,
                         git_repository: repository.full_name,
                         repository_id: repository.id,
                         git_branch: repository.default_branch || 'main',
@@ -311,60 +308,32 @@ function OnboardingGithubRepos({
     }
 
     return (
-        <Card title="Quels dépôts démarrer ?" eyebrow="GitHub connecté">
+        <Card title="Choisir les dépôts" eyebrow="GitHub connecté">
             <p class="text-sm text-base-content/65">
-                Cochez les dépôts à créer comme applications DevForge. Ils seront déployés tout de suite sur le premier
-                serveur disponible.
+                Choisissez une organisation, puis les dépôts à créer comme applications DevForge. Ils seront déployés
+                tout de suite sur le premier serveur disponible.
             </p>
-            <label class="mt-3 flex items-center gap-2 rounded-xl border border-base-300/70 px-3 py-2">
-                <Search class="size-4 text-base-content/40" aria-hidden />
-                <input
-                    class="min-w-0 flex-1 bg-transparent text-sm outline-none"
-                    type="search"
-                    placeholder="Rechercher un dépôt"
-                    value={query}
-                    onInput={(event) => setQuery(event.currentTarget.value)}
+            <div class="mt-3">
+                <GithubRepoPicker
+                    apps={apps}
+                    mode="multiple"
+                    selected={selected}
+                    onChange={setSelected}
+                    canManage={canManage && !submitting}
+                    disabled={submitting}
+                    fromOnboarding
+                    returnTo="onboarding"
+                    onRefreshApps={onRefreshApps}
+                    onError={setError}
                 />
-            </label>
-            <DataState loading={loading} error={error && repositories.length === 0 ? error : null} onRetry={() => window.location.reload()}>
-                {visible.length === 0 && !loading ? (
-                    <p class="mt-3 text-sm text-base-content/60">
-                        Aucun dépôt visible. Vérifiez que la GitHub App a accès aux bons dépôts.
-                    </p>
-                ) : (
-                    <ul class="mt-3 max-h-80 divide-y divide-base-300/70 overflow-y-auto">
-                        {visible.map((repository) => {
-                            const checked = selected.includes(repository.id);
-                            return (
-                                <li key={repository.id}>
-                                    <label class="flex cursor-pointer items-start gap-3 py-3">
-                                        <input
-                                            class="checkbox checkbox-sm mt-0.5"
-                                            type="checkbox"
-                                            checked={checked}
-                                            disabled={!canManage || submitting}
-                                            onChange={() => setSelected((current) => toggleSelectedId(current, repository.id))}
-                                        />
-                                        <span class="min-w-0">
-                                            <span class="block text-sm font-semibold">{repository.full_name}</span>
-                                            {repository.description && (
-                                                <span class="mt-0.5 block text-xs text-base-content/50">{repository.description}</span>
-                                            )}
-                                        </span>
-                                    </label>
-                                </li>
-                            );
-                        })}
-                    </ul>
-                )}
-            </DataState>
+            </div>
             {!destinationUuid && !loading && (
                 <p class="mt-3 text-xs text-warning">
                     Aucun serveur Docker n’est encore prêt. Vous pourrez démarrer ces dépôts après l’étape serveur.
                 </p>
             )}
-            {error && repositories.length > 0 && <p class="mt-3 text-xs text-error" role="alert">{error}</p>}
-            <div class="mt-4 flex flex-wrap gap-2">
+            {error && <p class="mt-3 text-xs text-error" role="alert">{error}</p>}
+            <div class="mt-4 grid gap-2">
                 <Button
                     disabled={!canManage || submitting || selected.length === 0 || !destinationUuid}
                     onClick={() => void startSelected()}
@@ -372,11 +341,11 @@ function OnboardingGithubRepos({
                     {submitting
                         ? 'Démarrage…'
                         : selected.length === 0
-                            ? 'Démarrer la sélection'
+                            ? 'Continuer →'
                             : `Démarrer ${selected.length} dépôt${selected.length > 1 ? 's' : ''}`}
                 </Button>
                 <Button variant="ghost" disabled={submitting} onClick={onSkip}>
-                    Passer
+                    Synchroniser plus tard
                 </Button>
             </div>
         </Card>

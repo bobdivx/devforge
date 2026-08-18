@@ -1,6 +1,7 @@
 {
     "auth.login": "Connexion",
     "auth.login.authentik": "Connexion avec Authentik",
+    "auth.login.pocketid": "Connexion avec Pocket ID",
     "auth.login.azure": "Connexion avec Microsoft",
     "auth.login.bitbucket": "Connexion avec Bitbucket",
     "auth.login.clerk": "Connexion avec Clerk",
@@ -9,6 +10,7 @@
     "auth.login.gitlab": "Connexion avec Gitlab",
     "auth.login.google": "Connexion avec Google",
     "auth.login.infomaniak": "Connexion avec Infomaniak",
+    "auth.login.zitadel": "Connexion avec Zitadel",
     "auth.already_registered": "Déjà enregistré ?",
     "auth.confirm_password": "Confirmer le mot de passe",
     "auth.forgot_password_link": "Mot de passe oublié ?",

@@ -228,7 +228,7 @@ if [ "$WARNING_SPACE" = true ]; then
     sleep 5
 fi
 
-mkdir -p /data/coolify/{source,ssh,applications,databases,backups,services,proxy,sentinel}
+mkdir -p /data/coolify/{source,ssh,applications,databases,backups,services,proxy,sentinel,sso}
 mkdir -p /data/coolify/ssh/{keys,mux}
 mkdir -p /data/coolify/proxy/dynamic
 

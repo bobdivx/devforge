@@ -297,15 +297,15 @@
                             @endif
 
                             <div class="flex w-full flex-col gap-2">
-                                <x-forms.checkbox canGate="create" :canResource="$github_app" disabled id="default_permissions" label="Mandatory"
-                                    helper="Contents: read<br>Metadata: read<br>Email: read" />
+                                <x-forms.checkbox canGate="create" :canResource="$github_app" disabled id="default_permissions" label="Permissions DevForge"
+                                    helper="Contents: read & write<br>Metadata: read<br>Emails: read<br>Administration: read & write (runners self-hosted)<br>Packages: read<br>Actions: read & write<br>Workflows: write<br>Pull requests: read & write" />
                                 <x-forms.checkbox canGate="create" :canResource="$github_app" id="preview_deployment_permissions" label="Preview Deployments"
                                     helper="Necessary for updating pull requests with useful comments (deployment status, links, etc.)<br><br>Pull Request: read & write" />
                             </div>
                         </div>
                         <div class="mt-auto pt-2">
                             <x-forms.button canGate="create" :canResource="$github_app" class="w-full justify-center" isHighlighted
-                                x-on:click.prevent="createGithubApp(webhookEndpoint, useCustomWebhookEndpoint, customWebhookEndpoint, {{ Illuminate\Support\Js::from($preview_deployment_permissions) }}, {{ Illuminate\Support\Js::from($administration) }})">
+                                x-on:click.prevent="createGithubApp(webhookEndpoint, useCustomWebhookEndpoint, customWebhookEndpoint)">
                                 Register Now
                             </x-forms.button>
                         </div>
@@ -348,7 +348,7 @@
             </div>
         </div>
             <script>
-                function createGithubApp(webhook_endpoint, use_custom_webhook_endpoint, custom_webhook_endpoint, preview_deployment_permissions, administration) {
+                function createGithubApp(webhook_endpoint, use_custom_webhook_endpoint, custom_webhook_endpoint) {
                     const {
                         organization,
                         html_url
@@ -374,21 +374,8 @@
                     }
                     const webhookBaseUrl = `${baseUrl}/webhooks`;
                     const path = organization ? `organizations/${organization}/settings/apps/new` : 'settings/apps/new';
-                    const default_permissions = {
-                        contents: 'read',
-                        metadata: 'read',
-                        emails: 'read',
-                        administration: 'read',
-                        packages: 'read'
-                    };
-                    const default_events = ['push'];
-                    if (preview_deployment_permissions) {
-                        default_permissions.pull_requests = 'write';
-                        default_events.push('pull_request');
-                    }
-                    if (administration) {
-                        default_permissions.administration = 'write';
-                    }
+                    const default_permissions = @js(\App\Services\DevForge\Github\GithubAppManifestPermissions::permissions());
+                    const default_events = @js(\App\Services\DevForge\Github\GithubAppManifestPermissions::events());
 
                     const data = {
                         name,

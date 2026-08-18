@@ -88,3 +88,31 @@ it('does not restart an application stopped on purpose', function () {
     expect($status['active'])->toBeFalse()
         ->and($status['items'])->toBe([]);
 });
+
+it('does not treat a still-running container as desired running after a manual stop', function () {
+    $team = Team::factory()->make(['id' => 23]);
+    $running = makeKeepAliveApplication('app-keep-3', 'Stopping', 'running:unhealthy');
+
+    $desired = new ApplicationDesiredRuntimeState;
+    $desired->markDesiredStopped($running);
+
+    $catalog = Mockery::mock(CoreResourceCatalog::class);
+    $catalog->shouldReceive('resources')
+        ->with($team, 'applications')
+        ->andReturn(new Collection([$running]));
+
+    $action = Mockery::mock(CoreResourceAction::class);
+    $action->shouldReceive('execute')->never();
+
+    $boot = new ApplicationBootSequenceService($catalog, $action, $desired);
+    $keepAlive = new ApplicationKeepAliveService($catalog, $boot, $desired);
+
+    $keepAlive->tickTeam($team);
+
+    expect($desired->isDesiredRunning($running))->toBeFalse();
+
+    $status = $boot->statusForTeam($team, ensure: false);
+
+    expect($status['active'])->toBeFalse()
+        ->and($status['items'])->toBe([]);
+});

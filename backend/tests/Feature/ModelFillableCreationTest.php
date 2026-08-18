@@ -220,6 +220,7 @@ it('creates Application with all fillable attributes', function () {
         'is_http_basic_auth_enabled' => false,
         'http_basic_auth_username' => 'admin',
         'http_basic_auth_password' => 'secret',
+        'is_sso_protected' => true,
         'config_hash' => 'sha256:abc123',
         'last_online_at' => now()->subMinutes(5)->toISOString(),
         'restart_count' => 2,

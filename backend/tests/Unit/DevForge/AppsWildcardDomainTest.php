@@ -49,6 +49,17 @@ it('builds traefik host rules for scheme-less domains', function () {
         ->and($labels->contains(fn (string $label) => str_contains($label, 'entryPoints=https')))->toBeTrue();
 });
 
+it('attaches the sso traefik middleware from service labels', function () {
+    $labels = fqdnLabelsForTraefik(
+        uuid: 'kq5rr0s1qn0hkcs58gflvljk',
+        domains: collect(['https://app.example.com']),
+        onlyPort: 80,
+        serviceLabels: collect(['coolify.traefik.middlewares=devforge-sso-auth']),
+    );
+
+    expect($labels->contains(fn (string $label) => str_contains($label, 'devforge-sso-auth')))->toBeTrue();
+});
+
 it('builds a dns slug from the application name', function () {
     expect(application_url_slug('Star Base FR', 'uuid-fallback'))->toBe('star-base-fr')
         ->and(application_url_slug('starbasefr', 'uuid-fallback'))->toBe('starbasefr')

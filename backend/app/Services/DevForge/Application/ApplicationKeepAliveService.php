@@ -67,7 +67,9 @@ class ApplicationKeepAliveService
             $status = (string) ($application->status ?? 'unknown');
 
             if ($this->isRunningStatus($status) || $this->isStartingStatus($status)) {
-                $this->desiredRuntimeState->markDesiredRunning($application);
+                if ($this->desiredRuntimeState->isDesiredRunning($application)) {
+                    $this->desiredRuntimeState->markDesiredRunning($application);
+                }
 
                 continue;
             }

@@ -46,6 +46,14 @@ return [
         'redirect' => env('AUTHENTIK_REDIRECT_URI'),
     ],
 
+    'pocketid' => [
+        'base_url' => env('POCKETID_BASE_URL'),
+        'client_id' => env('POCKETID_CLIENT_ID'),
+        'client_secret' => env('POCKETID_CLIENT_SECRET'),
+        'redirect' => env('POCKETID_REDIRECT_URI'),
+        'use_pkce' => env('POCKETID_USE_PKCE', false),
+    ],
+
     'clerk' => [
         'client_id' => env('CLERK_CLIENT_ID'),
         'client_secret' => env('CLERK_CLIENT_SECRET'),

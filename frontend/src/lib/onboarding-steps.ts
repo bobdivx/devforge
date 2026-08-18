@@ -1,8 +1,9 @@
-export type OnboardingStepId = 'welcome' | 'domain' | 'github' | 's3' | 'server' | 'finish';
+export type OnboardingStepId = 'welcome' | 'domain' | 'sso' | 'github' | 's3' | 'server' | 'finish';
 
 export type OnboardingSteps = {
     account: boolean;
     domain: boolean;
+    sso: boolean;
     github: boolean;
     s3: boolean;
     server: boolean;
@@ -16,6 +17,7 @@ export const ONBOARDING_WIZARD_STEPS: Array<{
 }> = [
     { id: 'welcome', title: 'Compte', hint: 'Administrateur créé', optional: false },
     { id: 'domain', title: 'Domaine', hint: 'Domaine des applications', optional: false },
+    { id: 'sso', title: 'SSO', hint: 'Pocket ID', optional: true },
     { id: 'github', title: 'GitHub', hint: 'Connexion puis dépôts', optional: true },
     { id: 's3', title: 'S3', hint: 'Sauvegardes objet', optional: true },
     { id: 'server', title: 'Serveur', hint: 'Hôte Docker', optional: false },
@@ -29,6 +31,10 @@ export function firstIncompleteStep(steps: OnboardingSteps, pick: string | null 
 
     if (!steps.domain) {
         return 'domain';
+    }
+
+    if (!steps.sso) {
+        return 'sso';
     }
 
     if (!steps.github) {
@@ -63,7 +69,7 @@ export function initialWizardStep(
         return 'finish';
     }
 
-    if (steps?.domain && steps.github && steps.s3 && steps.server) {
+    if (steps?.domain && steps.sso && steps.github && steps.s3 && steps.server) {
         return 'finish';
     }
 

@@ -7,7 +7,7 @@
 
 services:
   pocket-id:
-    image: ghcr.io/pocket-id/pocket-id:v1.13
+    image: ghcr.io/pocket-id/pocket-id:v2
     environment:
       - SERVICE_URL_POCKETID_1411
       - APP_URL=${SERVICE_URL_POCKETID}

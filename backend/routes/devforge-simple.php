@@ -46,6 +46,8 @@ Route::post('/profile/two-factor/recovery-codes', [ProfileController::class, 're
 Route::get('/settings', [SettingsController::class, 'show'])->name('settings.show');
 Route::put('/settings/instance', [SettingsController::class, 'updateInstance'])->name('settings.instance.update');
 Route::put('/settings/advanced', [SettingsController::class, 'updateAdvanced'])->name('settings.advanced.update');
+Route::put('/settings/sso', [SettingsController::class, 'updateSso'])->name('settings.sso.update');
+Route::post('/settings/sso/start', [SettingsController::class, 'startSso'])->name('settings.sso.start');
 Route::put('/settings/email', [SettingsController::class, 'updateEmail'])->name('settings.email.update');
 Route::put('/settings/updates', [SettingsController::class, 'updateUpdates'])->name('settings.updates.update');
 Route::post('/settings/updates/check', [SettingsController::class, 'checkUpdates'])->name('settings.updates.check');

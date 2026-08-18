@@ -21,8 +21,8 @@ function application(overrides: Partial<CoreResource> = {}): CoreResource {
 }
 
 describe('resolveCoreResourceActions', () => {
-    it('n’expose que deploy pour une application arrêtée', () => {
-        expect(resolveCoreResourceActions(application({ status: 'exited:unknown' }))).toEqual(['deploy']);
+    it('expose démarrer et déployer pour une application arrêtée', () => {
+        expect(resolveCoreResourceActions(application({ status: 'exited:unknown' }))).toEqual(['start', 'deploy']);
     });
 
     it('n’expose pas démarrer pour une application en cours d’exécution', () => {

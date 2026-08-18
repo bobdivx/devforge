@@ -218,6 +218,7 @@ describe('ApplicationDetailPanel', () => {
         expect(screen.getByRole('link', { name: 'Visiter' })).toHaveAttribute('href', 'https://popcornn.app');
         expect(screen.getByRole('button', { name: 'Déployer' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Arrêter' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Redémarrer' })).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'Danger' })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Supprimer' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Démarrer' })).not.toBeInTheDocument();
@@ -228,9 +229,12 @@ describe('ApplicationDetailPanel', () => {
         expect(await screen.findByLabelText('État de l’application')).toBeInTheDocument();
         expect(screen.queryByText('Logs du conteneur')).not.toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'Bases de données' })).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Redémarrer' }));
+        expect(await screen.findByText(/sans reconstruire l’image ni lancer un déploiement/)).toBeInTheDocument();
     });
 
-    it('garde visiter et n’affiche que déployer quand l’application est arrêtée', async () => {
+    it('affiche démarrer à la place d’arrêter quand l’application est arrêtée', async () => {
         vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
             const url = String(input);
             if (url.includes('/api/devforge/v1/core/applications/app-uuid-1234')) {
@@ -344,7 +348,7 @@ describe('ApplicationDetailPanel', () => {
         expect(await screen.findByRole('heading', { name: 'popcorn-web' })).toBeInTheDocument();
         expect(screen.getByRole('link', { name: 'Visiter' })).toHaveAttribute('href', 'https://popcornn.app');
         expect(screen.getByRole('button', { name: 'Déployer' })).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: 'Démarrer' })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Démarrer' })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Arrêter' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Redémarrer' })).not.toBeInTheDocument();
     });

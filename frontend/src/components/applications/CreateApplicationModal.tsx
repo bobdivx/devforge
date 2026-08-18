@@ -1,7 +1,8 @@
-import { FolderGit2, LoaderCircle, Search, Upload } from 'lucide-preact';
+import { Upload } from 'lucide-preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Modal } from '../ui/Modal';
 import { ConnectGithubButton, FinishGithubInstallButton } from '../github/ConnectGithubButton';
+import { GithubRepoPicker } from '../github/GithubRepoPicker';
 import {
     domainApi,
     type CreateApplicationInput,
@@ -9,9 +10,9 @@ import {
     type Environment,
     type GithubAppSummary,
     type GithubBranch,
-    type GithubRepository,
     type Project,
 } from '../../lib/domain-api';
+import type { PickedGithubRepository } from '../../lib/github-repo-picker';
 import { isGithubAppInstalled } from '../../lib/onboarding-github';
 import { readEnvFile } from '../../lib/env-file';
 import {
@@ -49,10 +50,8 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
     const [targets, setTargets] = useState<DeploymentTarget[]>([]);
     const [githubApps, setGithubApps] = useState<GithubAppSummary[]>([]);
     const [pendingGithubApps, setPendingGithubApps] = useState<GithubAppSummary[]>([]);
-    const [repositories, setRepositories] = useState<GithubRepository[]>([]);
+    const [pickedRepositories, setPickedRepositories] = useState<PickedGithubRepository[]>([]);
     const [branches, setBranches] = useState<GithubBranch[]>([]);
-    const [repoSearch, setRepoSearch] = useState('');
-    const [loadingRepos, setLoadingRepos] = useState(false);
     const [loadingBranches, setLoadingBranches] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -84,8 +83,7 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
         setStep('source');
         setUrlMode(null);
         setCustomUrl('');
-        setRepoSearch('');
-        setRepositories([]);
+        setPickedRepositories([]);
         setBranches([]);
         setImportEnv(false);
         setEnvFileName(null);
@@ -144,39 +142,7 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
         label: `${server.name} / ${destination.name}`,
     }))), [targets]);
 
-    const filteredRepositories = useMemo(() => {
-        const normalized = repoSearch.trim().toLowerCase();
-        if (!normalized) {
-            return repositories;
-        }
-
-        return repositories.filter((repository) => repository.full_name.toLowerCase().includes(normalized)
-            || repository.name.toLowerCase().includes(normalized)
-            || (repository.description ?? '').toLowerCase().includes(normalized));
-    }, [repositories, repoSearch]);
-
-    const selectedRepository = useMemo(
-        () => repositories.find((repository) => repository.id === form.repository_id) ?? null,
-        [repositories, form.repository_id],
-    );
-
-    useEffect(() => {
-        if (!open || !form.github_app_uuid) {
-            return;
-        }
-
-        setLoadingRepos(true);
-        setRepositories([]);
-        setBranches([]);
-        setForm((current) => ({ ...current, repository_id: 0, git_repository: '', git_branch: 'main' }));
-
-        domainApi.githubRepositories(form.github_app_uuid)
-            .then((response) => setRepositories(response.data))
-            .catch((loadError: unknown) => {
-                setError(loadError instanceof Error ? loadError.message : 'Impossible de charger les dépôts GitHub.');
-            })
-            .finally(() => setLoadingRepos(false));
-    }, [open, form.github_app_uuid]);
+    const selectedRepository = pickedRepositories[0] ?? null;
 
     useEffect(() => {
         if (!open || !form.github_app_uuid || !selectedRepository) {
@@ -421,74 +387,29 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
                             )}
                         </div>
 
-                        {githubApps.length > 1 && (
+                        {githubApps.length > 0 && (
                             <div class="grid gap-1.5">
-                                <label class="text-xs font-medium" for="app-github">Compte GitHub</label>
-                                <select
-                                    id="app-github"
-                                    class="select select-bordered select-sm w-full"
-                                    value={form.github_app_uuid}
-                                    onChange={(event) => setForm((current) => ({
-                                        ...current,
-                                        github_app_uuid: (event.target as HTMLSelectElement).value,
-                                    }))}
-                                >
-                                    {githubApps.map((app) => (
-                                        <option key={app.uuid} value={app.uuid}>
-                                            {app.account_login ? `@${app.account_login}` : (app.display_name ?? app.name)}
-                                        </option>
-                                    ))}
-                                </select>
+                                <span class="text-xs font-medium">Dépôt GitHub</span>
+                                <GithubRepoPicker
+                                    apps={githubApps}
+                                    mode="single"
+                                    selected={pickedRepositories}
+                                    onChange={(next) => {
+                                        const repository = next[0] ?? null;
+                                        setPickedRepositories(repository ? [repository] : []);
+                                        setForm((current) => ({
+                                            ...current,
+                                            github_app_uuid: repository?.github_app_uuid ?? current.github_app_uuid,
+                                            repository_id: repository?.id ?? 0,
+                                            git_repository: repository ? `${repository.owner}/${repository.name}` : '',
+                                            git_branch: repository?.default_branch || 'main',
+                                        }));
+                                    }}
+                                    returnTo="applications"
+                                    onError={setError}
+                                />
                             </div>
                         )}
-
-                        <div class="grid gap-1.5">
-                            <label class="text-xs font-medium" for="app-repo-search">Dépôt GitHub</label>
-                            <label class="input input-bordered input-sm flex items-center gap-2">
-                                <Search class="size-3.5 opacity-50" aria-hidden />
-                                <input
-                                    id="app-repo-search"
-                                    class="grow"
-                                    type="search"
-                                    placeholder="Rechercher un dépôt…"
-                                    value={repoSearch}
-                                    onInput={(event) => setRepoSearch((event.target as HTMLInputElement).value)}
-                                />
-                            </label>
-                            <div class="max-h-48 overflow-y-auto rounded-xl border border-base-300/70">
-                                {loadingRepos ? (
-                                    <div class="flex items-center justify-center gap-2 p-6 text-xs text-base-content/55">
-                                        <LoaderCircle class="size-4 animate-spin" aria-hidden />
-                                        Chargement des dépôts…
-                                    </div>
-                                ) : filteredRepositories.length === 0 ? (
-                                    <p class="p-4 text-xs text-base-content/55">Aucun dépôt trouvé.</p>
-                                ) : (
-                                    filteredRepositories.map((repository) => (
-                                        <button
-                                            key={repository.id}
-                                            type="button"
-                                            class={`flex w-full items-start gap-3 border-b border-base-300/50 px-3 py-2.5 text-left transition last:border-b-0 hover:bg-base-200/60 ${
-                                                form.repository_id === repository.id ? 'bg-primary/10' : ''
-                                            }`}
-                                            onClick={() => setForm((current) => ({
-                                                ...current,
-                                                repository_id: repository.id,
-                                                git_repository: `${repository.owner}/${repository.name}`,
-                                            }))}
-                                        >
-                                            <FolderGit2 class="mt-0.5 size-4 shrink-0 text-base-content/45" aria-hidden />
-                                            <span class="min-w-0">
-                                                <span class="block truncate text-sm font-medium">{repository.full_name}</span>
-                                                {repository.description && (
-                                                    <span class="block truncate text-[11px] text-base-content/50">{repository.description}</span>
-                                                )}
-                                            </span>
-                                        </button>
-                                    ))
-                                )}
-                            </div>
-                        </div>
 
                         <div class="grid gap-3 sm:grid-cols-2">
                             <div class="grid gap-1.5">

@@ -61,6 +61,15 @@ describe('GitHub Source Change Component', function () {
         expect($missingAuthorization)->toBeEmpty();
     });
 
+    test('github app registration manifest uses the shared permission catalog', function () {
+        $view = file_get_contents(resource_path('views/livewire/source/github/change.blade.php'));
+
+        expect($view)
+            ->toContain('GithubAppManifestPermissions::permissions()')
+            ->toContain('GithubAppManifestPermissions::events()')
+            ->toContain('Administration: read & write');
+    });
+
     test('can mount with newly created github app with null app_id', function () {
         // Create a GitHub app without app_id (simulating a newly created source)
         $githubApp = GithubApp::create([

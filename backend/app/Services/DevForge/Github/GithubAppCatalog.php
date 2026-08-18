@@ -155,6 +155,9 @@ class GithubAppCatalog
             'is_system_wide' => (bool) $githubApp->is_system_wide,
             'has_packages_token' => filled($githubApp->packages_token),
             'installation_id' => $githubApp->installation_id,
+            'administration' => filled($githubApp->administration) ? (string) $githubApp->administration : null,
+            'permissions_url' => GithubAppManifestPermissions::permissionsUrl($githubApp),
+            'installation_settings_url' => GithubAppManifestPermissions::installationSettingsUrl($githubApp),
         ];
     }
 
@@ -196,13 +199,17 @@ class GithubAppCatalog
     }
 
     /**
+     * @param  bool  $previewDeployments  Kept for API compatibility. DevForge always requests the full permission set.
+     * @param  bool  $administration  Kept for API compatibility. Administration is always write.
      * @return array{action_url: string, manifest: array<string, mixed>}
      */
     public function manifestLaunch(
         GithubApp $githubApp,
         bool $previewDeployments = true,
-        bool $administration = false,
+        bool $administration = true,
     ): array {
+        unset($previewDeployments, $administration);
+
         $state = Str::random(64);
         Cache::put('github-app-setup-state:'.hash('sha256', $state), [
             'action' => 'manifest',
@@ -215,19 +222,6 @@ class GithubAppCatalog
         $path = filled($githubApp->organization)
             ? 'organizations/'.$githubApp->organization.'/settings/apps/new'
             : 'settings/apps/new';
-
-        $permissions = [
-            'contents' => 'read',
-            'metadata' => 'read',
-            'emails' => 'read',
-            'administration' => $administration ? 'write' : 'read',
-            'packages' => 'read',
-        ];
-        $events = ['push'];
-        if ($previewDeployments) {
-            $permissions['pull_requests'] = 'write';
-            $events[] = 'pull_request';
-        }
 
         return [
             'action_url' => rtrim((string) $githubApp->html_url, '/').'/'.$path.'?state='.$state,
@@ -244,8 +238,8 @@ class GithubAppCatalog
                 'request_oauth_on_install' => false,
                 'setup_url' => $baseUrl.'/login/github/setup',
                 'setup_on_update' => true,
-                'default_permissions' => $permissions,
-                'default_events' => $events,
+                'default_permissions' => GithubAppManifestPermissions::permissions(),
+                'default_events' => GithubAppManifestPermissions::events(),
             ],
         ];
     }
@@ -435,23 +429,25 @@ class GithubAppCatalog
 
         throw ValidationException::withMessages([
             'github_app_uuid' => [
-                $this->registrationTokenFailureMessage($owner, $repo, $lastStatus, $lastMessage),
+                $this->registrationTokenFailureMessage($githubApp, $owner, $repo, $lastStatus, $lastMessage),
             ],
         ]);
     }
 
     private function registrationTokenFailureMessage(
+        GithubApp $githubApp,
         string $owner,
         string $repo,
         int $status,
         string $githubMessage,
     ): string {
         $repoLabel = $owner.'/'.$repo;
+        $help = GithubAppManifestPermissions::missingRightsHelpText($githubApp);
 
         return match (true) {
-            $status === 401 => "GitHub a refusé l’authentification pour {$repoLabel}. Vérifiez le packages token ou la GitHub App.",
-            $status === 403 => "Permission insuffisante pour créer un runner sur {$repoLabel}. La GitHub App (ou le packages token) doit avoir le droit Administration (écriture) sur le dépôt.",
-            $status === 404 => "Dépôt {$repoLabel} introuvable, ou la GitHub App n’y a pas accès.",
+            $status === 401 => "GitHub a refusé l’authentification pour {$repoLabel}. Vérifiez le packages token ou la GitHub App. {$help}",
+            $status === 403 => "Permission insuffisante pour créer un runner sur {$repoLabel}. La GitHub App (ou le packages token) doit avoir le droit Administration (écriture) sur le dépôt. {$help}",
+            $status === 404 => "Dépôt {$repoLabel} introuvable, ou la GitHub App n’y a pas accès. {$help}",
             $status === 422 => "GitHub a rejeté la demande de jeton pour {$repoLabel}".($githubMessage !== '' ? " : {$githubMessage}" : '.'),
             default => trim($githubMessage) !== ''
                 ? "Impossible d’obtenir un jeton d’enregistrement pour {$repoLabel} (HTTP {$status}) : {$githubMessage}"

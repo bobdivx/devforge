@@ -35,7 +35,7 @@ class Change extends Component
 
     public ?bool $preview_deployment_permissions = true;
 
-    public ?bool $administration = false;
+    public ?bool $administration = true;
 
     public $parameters;
 

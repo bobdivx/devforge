@@ -25,7 +25,7 @@ class CoreResourceActionsResolver
     private function applicationActions(string $status, string $primary): array
     {
         if ($this->isStopped($status, $primary)) {
-            return ['deploy'];
+            return ['start', 'deploy'];
         }
 
         return ['stop', 'restart', 'deploy'];

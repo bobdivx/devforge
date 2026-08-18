@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { Modal } from '../ui/Modal';
+import { GithubRepoPicker } from '../github/GithubRepoPicker';
+import { GithubAppMissingRightsHelp } from '../github/GithubAppMissingRightsHelp';
 import {
     domainApi,
     type CoreResource,
     type GithubAppSummary,
-    type GithubRepository,
     type GithubRunnerAuthMode,
     type GithubRunnerCreateInput,
 } from '../../lib/domain-api';
+import type { PickedGithubRepository } from '../../lib/github-repo-picker';
+import { isGithubAppInstalled } from '../../lib/onboarding-github';
+import { looksLikeExistingContainerError, looksLikeTimeoutError } from '../../lib/runners/runner-create-errors';
 
 type Props = {
     open: boolean;
@@ -125,9 +129,8 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
     const [form, setForm] = useState<FormState>(defaultForm);
     const [step, setStep] = useState<WizardStep>(1);
     const [githubApps, setGithubApps] = useState<GithubAppSummary[]>([]);
-    const [repositories, setRepositories] = useState<GithubRepository[]>([]);
+    const [pickedRepository, setPickedRepository] = useState<PickedGithubRepository[]>([]);
     const [servers, setServers] = useState<CoreResource[]>([]);
-    const [repoSearch, setRepoSearch] = useState('');
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
@@ -140,7 +143,7 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
 
         setForm(defaultForm());
         setStep(1);
-        setRepoSearch(prefill?.repo ?? '');
+        setPickedRepository([]);
         setShowAdvanced(Boolean(prefill?.container_name || prefill?.network_mode));
         setError(null);
         setLoading(true);
@@ -175,65 +178,8 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
             .finally(() => setLoading(false));
     }, [open, prefill]);
 
-    useEffect(() => {
-        if (!open || !form.github_app_uuid) {
-            setRepositories([]);
-            return;
-        }
-
-        let cancelled = false;
-        setLoading(true);
-        void domainApi.githubRepositories(form.github_app_uuid)
-            .then((response) => {
-                if (cancelled) {
-                    return;
-                }
-                const repos = response.data ?? [];
-                setRepositories(repos);
-
-                const preferred = prefill?.owner && prefill?.repo
-                    ? repos.find((repository) => repository.owner.toLowerCase() === prefill.owner!.toLowerCase()
-                        && repository.name.toLowerCase() === prefill.repo!.toLowerCase())
-                    : null;
-
-                setForm((current) => ({
-                    ...current,
-                    repository_id: preferred?.id ?? '',
-                    runner_name: current.runner_name || (preferred
-                        ? `devforge-runner-${preferred.name}`.slice(0, 64)
-                        : ''),
-                }));
-            })
-            .catch((err) => {
-                if (!cancelled) {
-                    setError(err instanceof Error ? err.message : 'Impossible de charger les dépôts.');
-                }
-            })
-            .finally(() => {
-                if (!cancelled) {
-                    setLoading(false);
-                }
-            });
-
-        return () => {
-            cancelled = true;
-        };
-    }, [open, form.github_app_uuid, prefill?.owner, prefill?.repo]);
-
-    const filteredRepos = useMemo(() => {
-        const normalized = repoSearch.trim().toLowerCase();
-        if (!normalized) {
-            return repositories;
-        }
-
-        return repositories.filter((repository) => repository.full_name.toLowerCase().includes(normalized)
-            || repository.name.toLowerCase().includes(normalized));
-    }, [repositories, repoSearch]);
-
-    const selectedRepo = useMemo(
-        () => repositories.find((repository) => repository.id === form.repository_id) ?? null,
-        [repositories, form.repository_id],
-    );
+    const selectedRepo = pickedRepository[0] ?? null;
+    const installedGithubApps = useMemo(() => githubApps.filter(isGithubAppInstalled), [githubApps]);
 
     const useManualRepo = form.auth_mode === 'pat' && (githubApps.length === 0 || !form.github_app_uuid);
 
@@ -282,6 +228,9 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
         && !submitting
         && !loading,
     );
+
+    const expectedContainerName = form.container_name.trim()
+        || `github-runner-${form.runner_name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
 
     function goToPatStep() {
         setError(null);
@@ -332,6 +281,13 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
         if (!canSubmit) {
             return;
         }
+        await createRunner(form.recreate);
+    }
+
+    async function createRunner(recreate: boolean) {
+        if (step !== 3 || submitting || loading) {
+            return;
+        }
 
         setSubmitting(true);
         setError(null);
@@ -363,7 +319,7 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
             network_mode: form.network_mode,
             timezone: form.timezone.trim() || undefined,
             replace_existing: form.replace_existing,
-            recreate: form.recreate,
+            recreate,
             pull_image: form.pull_image,
             volumes: volumes.length > 0 ? volumes : undefined,
             extra_env: extraEnv.length > 0 ? extraEnv : undefined,
@@ -375,6 +331,32 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
             onClose();
         } catch (err) {
             const message = err instanceof Error ? err.message : 'Création impossible.';
+            if (looksLikeTimeoutError(err, message)) {
+                try {
+                    const runners = await domainApi.githubRunners();
+                    const created = (runners.data ?? []).find((runner) => (
+                        runner.server_uuid === form.server_uuid
+                        && runner.name === expectedContainerName
+                    ));
+                    if (created && !['restarting', 'exited', 'dead'].includes(created.state)) {
+                        onCreated();
+                        onClose();
+                        return;
+                    }
+                } catch {
+                    // Keep the timeout message if inventory is unavailable.
+                }
+                setShowAdvanced(true);
+                setForm((current) => ({ ...current, recreate: true }));
+                setError('Le serveur a mis trop longtemps à répondre (pull Docker). Cochez « Recréer si le conteneur existe déjà » puis réessayez.');
+                return;
+            }
+            if (looksLikeExistingContainerError(message)) {
+                setShowAdvanced(true);
+                setForm((current) => ({ ...current, recreate: true }));
+                setError('Le conteneur existe déjà — souvent après un timeout. Recréez-le pour le remplacer par un jeton neuf.');
+                return;
+            }
             setError(message);
             if (looksLikeAuthPermissionError(message)) {
                 setStep(1);
@@ -410,7 +392,7 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
                     ) : (
                         <button class="btn btn-primary btn-sm" type="submit" form="create-runner-form" disabled={!canSubmit}>
                             {submitting && <span class="loading loading-spinner loading-xs" />}
-                            Créer le runner
+                            {submitting ? 'Création… pull Docker' : 'Créer le runner'}
                         </button>
                     )}
                 </>
@@ -454,8 +436,21 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
                     <div class="grid gap-2 rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">
                         <p>{error}</p>
                         {looksLikeAuthPermissionError(error) && form.auth_mode === 'registration' && (
-                            <button class="btn btn-outline btn-error btn-xs justify-self-start" type="button" onClick={goToPatStep}>
-                                Utiliser un PAT à la place
+                            <>
+                                <GithubAppMissingRightsHelp app={selectedApp} />
+                                <button class="btn btn-outline btn-error btn-xs justify-self-start" type="button" onClick={goToPatStep}>
+                                    Utiliser un PAT à la place
+                                </button>
+                            </>
+                        )}
+                        {(looksLikeExistingContainerError(error) || error.includes('trop longtemps')) && (
+                            <button
+                                class="btn btn-outline btn-error btn-xs justify-self-start"
+                                type="button"
+                                disabled={submitting}
+                                onClick={() => void createRunner(true)}
+                            >
+                                Recréer le conteneur existant
                             </button>
                         )}
                     </div>
@@ -552,11 +547,10 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
                                 )}
 
                                 <div class="rounded-lg border border-base-300/60 bg-base-100/60 px-3 py-2 text-[11px] text-base-content/65">
-                                    <p class="font-medium text-base-content/80">À vérifier sur GitHub</p>
-                                    <ul class="mt-1 list-disc space-y-0.5 ps-4">
+                                    <GithubAppMissingRightsHelp app={selectedApp} />
+                                    <ul class="mt-2 list-disc space-y-0.5 ps-4">
                                         <li>Permission dépôt <strong>Administration : Read and write</strong></li>
                                         <li>Permission <strong>Actions</strong> (lecture au minimum)</li>
-                                        <li>Réinstaller / accepter les nouvelles permissions sur le dépôt</li>
                                     </ul>
                                 </div>
                             </div>
@@ -748,34 +742,33 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
                                     />
                                 </div>
                             </div>
+                        ) : installedGithubApps.length === 0 ? (
+                            <p class="text-xs text-warning">
+                                Aucune GitHub App installée. Passez en saisie manuelle via un PAT, ou connectez GitHub.
+                            </p>
                         ) : (
-                            <div class="grid gap-1.5">
-                                <label class="text-xs font-medium" for="runner-repo-search">Dépôt</label>
-                                <input
-                                    id="runner-repo-search"
-                                    class="input input-bordered input-sm w-full"
-                                    placeholder="Rechercher un dépôt…"
-                                    value={repoSearch}
-                                    onInput={(event) => setRepoSearch((event.target as HTMLInputElement).value)}
-                                />
-                                <select
-                                    class="select select-bordered select-sm w-full"
-                                    value={form.repository_id}
-                                    onChange={(event) => setForm((current) => ({
+                            <GithubRepoPicker
+                                apps={installedGithubApps}
+                                mode="single"
+                                selected={pickedRepository}
+                                initialOwner={prefill?.owner}
+                                initialRepo={prefill?.repo}
+                                onChange={(next) => {
+                                    const repository = next[0] ?? null;
+                                    setPickedRepository(repository ? [repository] : []);
+                                    setForm((current) => ({
                                         ...current,
-                                        repository_id: Number((event.target as HTMLSelectElement).value) || '',
-                                        runner_name: '',
-                                    }))}
-                                >
-                                    <option value="">Choisir un dépôt</option>
-                                    {filteredRepos.map((repository) => (
-                                        <option key={repository.id} value={repository.id}>{repository.full_name}</option>
-                                    ))}
-                                </select>
-                                {loading && (
-                                    <p class="text-[11px] text-base-content/50">Chargement des dépôts…</p>
-                                )}
-                            </div>
+                                        github_app_uuid: repository?.github_app_uuid ?? current.github_app_uuid,
+                                        repository_id: repository?.id ?? '',
+                                        owner: repository?.owner ?? current.owner,
+                                        repo: repository?.name ?? current.repo,
+                                        runner_name: current.runner_name.trim() !== ''
+                                            ? current.runner_name
+                                            : (repository ? `devforge-runner-${repository.name}`.slice(0, 64) : ''),
+                                    }));
+                                }}
+                                onError={setError}
+                            />
                         )}
 
                         {(owner || repo) && (
@@ -878,6 +871,11 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
                                         </button>
                                     ))}
                                 </div>
+                                {form.image.toLowerCase().includes('myoung34') && form.auth_mode === 'registration' && (
+                                    <p class="text-[11px] text-base-content/55">
+                                        myoung34 n’accepte qu’un jeton d’enregistrement (`RUNNER_TOKEN`). DevForge n’injecte plus ce jeton comme PAT.
+                                    </p>
+                                )}
                                 <label class="mt-1 flex items-start gap-2 text-xs">
                                     <input
                                         type="checkbox"

@@ -9,6 +9,14 @@ use Spatie\Url\Url;
 
 class InstanceSettings extends Model
 {
+    /**
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'sso_protect_apps_by_default' => true,
+        'sso_hide_local_login' => false,
+    ];
+
     protected $fillable = [
         'public_ipv4',
         'public_ipv6',
@@ -48,6 +56,16 @@ class InstanceSettings extends Model
         'is_wire_navigate_enabled',
         'is_mcp_server_enabled',
         'agents_features',
+        'sso_protect_apps_by_default',
+        'sso_forward_auth_address',
+        'sso_hide_local_login',
+        'sso_pocket_id_url',
+        'sso_oauth2_proxy_url',
+        'sso_static_api_key',
+        'sso_encryption_key',
+        'sso_oauth2_cookie_secret',
+        'sso_apps_client_id',
+        'sso_apps_client_secret',
     ];
 
     protected $casts = [
@@ -72,6 +90,12 @@ class InstanceSettings extends Model
         'is_wire_navigate_enabled' => 'boolean',
         'is_mcp_server_enabled' => 'boolean',
         'agents_features' => 'array',
+        'sso_protect_apps_by_default' => 'boolean',
+        'sso_hide_local_login' => 'boolean',
+        'sso_static_api_key' => 'encrypted',
+        'sso_encryption_key' => 'encrypted',
+        'sso_oauth2_cookie_secret' => 'encrypted',
+        'sso_apps_client_secret' => 'encrypted',
     ];
 
     protected static function booted(): void
