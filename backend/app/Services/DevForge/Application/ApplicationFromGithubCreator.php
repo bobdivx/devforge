@@ -90,6 +90,7 @@ class ApplicationFromGithubCreator
 
         $application = Application::create([
             'name' => $name,
+            'redirect' => 'both',
             'repository_project_id' => $repositoryId,
             'git_repository' => $validated['git_repository'],
             'git_branch' => $validated['git_branch'],
