@@ -64,6 +64,17 @@ it('parses an error upgrade status file', function () {
         ->and($parsed['message'])->toBe('curl failed');
 });
 
+it('uses the DevForge versions feed instead of the Coolify CDN', function () {
+    expect(config('constants.coolify.versions_url'))
+        ->toContain('bobdivx/devforge')
+        ->and(config('constants.coolify.versions_url'))
+        ->not->toContain('/coolify/versions.json')
+        ->and(config('constants.coolify.upgrade_script_url'))
+        ->toContain('bobdivx/devforge')
+        ->and(config('constants.coolify.upgrade_script_url'))
+        ->not->toContain('/coolify/upgrade.sh');
+});
+
 it('ignores empty, invalid or stale upgrade status files', function (?string $content) {
     $now = Carbon::parse('2026-08-17 20:00:00');
 
