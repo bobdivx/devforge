@@ -461,6 +461,7 @@ export type InstanceSsoSettings = {
     sso_hide_local_login: boolean;
     pocketid_login_enabled: boolean;
     apps_protection_configured: boolean;
+    apps_oidc_configured: boolean;
     middleware_name: string;
     default_forward_auth_address: string;
     managed_by_devforge: boolean;
@@ -475,6 +476,7 @@ export const DEFAULT_INSTANCE_SSO: InstanceSsoSettings = {
     sso_hide_local_login: false,
     pocketid_login_enabled: false,
     apps_protection_configured: false,
+    apps_oidc_configured: false,
     middleware_name: 'devforge-sso-auth',
     default_forward_auth_address: 'http://devforge-sso-proxy:4180/',
     managed_by_devforge: true,
@@ -484,7 +486,7 @@ export const DEFAULT_INSTANCE_SSO: InstanceSsoSettings = {
 };
 
 export function instanceSsoSettings(data: InstanceSettings | null | undefined): InstanceSsoSettings {
-    return data?.sso ?? DEFAULT_INSTANCE_SSO;
+    return { ...DEFAULT_INSTANCE_SSO, ...(data?.sso ?? {}) };
 }
 
 export type InstanceSsoUpdateInput = {
@@ -2593,6 +2595,7 @@ export const domainApi = {
     startSsoStack: () => mutate<ApiResponse<InstanceSettings>>(
         '/settings/sso/start',
         { method: 'POST' },
+        120_000,
     ),
     updateEmailSettings: (input: InstanceEmailUpdateInput) => mutate<ApiResponse<InstanceSettings>>(
         '/settings/email',

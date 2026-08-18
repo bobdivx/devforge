@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\CheckAndStartSsoJob;
 use App\Models\InstanceSettings;
 use App\Models\OauthSetting;
 use App\Models\Server;
@@ -7,6 +8,7 @@ use App\Models\Team;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
 
@@ -169,6 +171,7 @@ it('exposes and updates sso settings', function () {
         ->assertJsonPath('data.sso.sso_protect_apps_by_default', true)
         ->assertJsonPath('data.sso.sso_hide_local_login', false)
         ->assertJsonPath('data.sso.apps_protection_configured', false)
+        ->assertJsonPath('data.sso.apps_oidc_configured', false)
         ->assertJsonPath('data.sso.middleware_name', 'devforge-sso-auth')
         ->assertJsonPath('data.sso.managed_by_devforge', true)
         ->assertJsonPath('data.sso.default_forward_auth_address', 'http://devforge-sso-proxy:4180/');
@@ -187,6 +190,28 @@ it('exposes and updates sso settings', function () {
         ->assertJsonPath('data.sso.apps_protection_configured', true);
 
     expect(InstanceSettings::get()->sso_forward_auth_address)->toBe('http://devforge-sso-proxy:4180/');
+});
+
+it('queues the managed sso stack start for an instance admin', function () {
+    Queue::fake();
+    Server::factory()->create([
+        'id' => 0,
+        'name' => 'localhost',
+        'ip' => 'host.docker.internal',
+        'team_id' => $this->rootTeam->id,
+    ]);
+    InstanceSettings::get()->update([
+        'apps_wildcard_domain' => 'https://exemple.com',
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/settings/sso/start')
+        ->assertSuccessful()
+        ->assertJsonPath('data.sso.can_start', true)
+        ->assertJsonPath('data.sso.apps_oidc_configured', false);
+
+    Queue::assertPushed(CheckAndStartSsoJob::class);
 });
 
 it('updates update schedule settings', function () {

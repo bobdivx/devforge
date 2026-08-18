@@ -28,6 +28,7 @@ const settingsPayload = {
         sso_hide_local_login: false,
         pocketid_login_enabled: false,
         apps_protection_configured: true,
+        apps_oidc_configured: false,
         middleware_name: 'devforge-sso-auth',
         default_forward_auth_address: 'http://devforge-sso-proxy:4180/',
         managed_by_devforge: true,
@@ -65,6 +66,8 @@ describe('SsoSettingsPanel', () => {
             'https://id.exemple.com/setup',
         );
         expect(screen.getByRole('link', { name: /Ouvrir Pocket ID/ })).toHaveAttribute('href', 'https://id.exemple.com');
+        expect(screen.getByRole('button', { name: 'Configurer le SSO' })).toBeInTheDocument();
+        expect(screen.getByLabelText('État du SSO')).toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }));
 
@@ -100,5 +103,37 @@ describe('SsoSettingsPanel', () => {
 
         expect(await screen.findByText('Protéger les applications par défaut')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Enregistrer' })).toBeInTheDocument();
+    });
+
+    it('lance la configuration SSO depuis la page', async () => {
+        const posts: string[] = [];
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+            const url = String(input);
+            if (url === '/sanctum/csrf-cookie') {
+                return new Response(null, { status: 204 });
+            }
+            if (url.includes('/settings/sso/start') && init?.method === 'POST') {
+                posts.push(url);
+                return jsonResponse({
+                    data: {
+                        ...settingsPayload,
+                        sso: { ...settingsPayload.sso, apps_oidc_configured: true },
+                    },
+                });
+            }
+            if (url.includes('/api/devforge/v1/settings')) {
+                return jsonResponse({ data: settingsPayload });
+            }
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(<SsoSettingsPanel permissions={{ ...bootstrapData.permissions, instance_admin: true }} />);
+
+        fireEvent.click(await screen.findByRole('button', { name: 'Configurer le SSO' }));
+
+        await waitFor(() => {
+            expect(posts).toHaveLength(1);
+        });
+        expect(await screen.findByText('SSO lancé : Pocket ID, oauth2-proxy et clients OIDC des apps.')).toBeInTheDocument();
     });
 });

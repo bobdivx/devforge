@@ -173,6 +173,13 @@ class SsoProtection
         return filled($settings->sso_forward_auth_address);
     }
 
+    public static function isAppsOidcConfigured(?InstanceSettings $settings = null): bool
+    {
+        $settings ??= instanceSettings();
+
+        return filled($settings->sso_apps_client_id) && filled($settings->sso_apps_client_secret);
+    }
+
     public static function pocketIdLoginEnabled(): bool
     {
         $oauth = OauthSetting::query()->firstWhere('provider', 'pocketid');

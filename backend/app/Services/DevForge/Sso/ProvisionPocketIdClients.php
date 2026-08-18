@@ -122,7 +122,10 @@ class ProvisionPocketIdClients
                 return ['id' => (string) $existing, 'secret' => (string) $knownSecret];
             }
 
-            $secretResponse = $http->post('/api/oidc/clients/'.$existing.'/secret');
+            $secretResponse = $http->send('POST', '/api/oidc/clients/'.$existing.'/secret', [
+                'headers' => ['Content-Type' => 'application/json'],
+                'body' => '{}',
+            ]);
             $secretResponse->throw();
             $secret = (string) ($secretResponse->json('secret') ?? $secretResponse->json('clientSecret') ?? '');
 

@@ -97,4 +97,12 @@ it('creates pocket id oidc clients and enables the devforge login provider', fun
             && in_array('https://*.apps.exemple.com/**', $request['callbackURLs'], true)
             && in_array('https://sso.apps.exemple.com/oauth2/callback', $request['callbackURLs'], true);
     });
+
+    Http::assertSent(function (Request $request): bool {
+        $path = (string) parse_url($request->url(), PHP_URL_PATH);
+
+        return $request->method() === 'POST'
+            && str_ends_with($path, '/secret')
+            && $request->body() === '{}';
+    });
 });

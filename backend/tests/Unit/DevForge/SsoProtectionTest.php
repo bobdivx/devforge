@@ -64,6 +64,18 @@ it('does not overwrite an app-defined oidc client id', function () {
         ->and($envs->get('OIDC_ISSUER'))->toBe('https://id.apps.exemple.com');
 });
 
+it('treats apps oidc as configured only when client id and secret are filled', function () {
+    expect(SsoProtection::isAppsOidcConfigured(new InstanceSettings([
+        'sso_apps_client_id' => 'apps-id',
+        'sso_apps_client_secret' => null,
+    ])))->toBeFalse();
+
+    expect(SsoProtection::isAppsOidcConfigured(new InstanceSettings([
+        'sso_apps_client_id' => 'apps-id',
+        'sso_apps_client_secret' => 'apps-secret',
+    ])))->toBeTrue();
+});
+
 it('does not treat apps protection as configured when the address is empty', function () {
     $settings = new InstanceSettings([
         'sso_forward_auth_address' => null,
