@@ -9,7 +9,7 @@ class SyncApplicationOidcEnvironment
 {
     public const AUTO_COMMENT = 'devforge:auto:oidc';
 
-    public function sync(?Application $application = null): int
+    public function sync(?Application $application = null, bool $refreshPocketIdClient = true): int
     {
         $values = SsoProtection::oidcEnvironmentForApps();
         if ($values === []) {
@@ -17,15 +17,33 @@ class SyncApplicationOidcEnvironment
         }
 
         if ($application !== null) {
-            return $this->syncApplication($application, $values);
+            $updated = $this->syncApplication($application, $values);
+            if ($refreshPocketIdClient) {
+                $this->refreshPocketIdAppClient();
+            }
+
+            return $updated;
         }
 
         $updated = 0;
         Application::query()->orderBy('id')->each(function (Application $app) use ($values, &$updated): void {
             $updated += $this->syncApplication($app, $values);
         });
+        if ($refreshPocketIdClient) {
+            $this->refreshPocketIdAppClient();
+        }
 
         return $updated;
+    }
+
+    /**
+     * Register the current apps' public origins on the shared Pocket ID client.
+     * Without this, a first deploy of a custom domain (e.g. popcornn.app) keeps
+     * sending a redirect_uri that Pocket ID has never seen.
+     */
+    private function refreshPocketIdAppClient(): void
+    {
+        app(ProvisionPocketIdClients::class)->handle();
     }
 
     /**
@@ -54,9 +72,14 @@ class SyncApplicationOidcEnvironment
             return [];
         }
 
+        $callback = $origin.'/api/auth/callback/pocket-id';
+
         return [
             'AUTH_URL' => $origin,
+            'NEXTAUTH_URL' => $origin,
             'AUTH_TRUST_HOST' => 'true',
+            'OIDC_REDIRECT_URI' => $callback,
+            'AUTH_POCKET_ID_REDIRECT_URI' => $callback,
         ];
     }
 

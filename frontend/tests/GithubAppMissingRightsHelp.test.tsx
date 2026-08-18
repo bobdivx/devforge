@@ -28,5 +28,7 @@ describe('GithubAppMissingRightsHelp', () => {
             'https://github.com/settings/installations/154217861',
         );
         expect(screen.getByText(/Administration, Contents, Actions et Workflows/)).toBeInTheDocument();
+        expect(screen.getByText(/événement Push/)).toBeInTheDocument();
+        expect(screen.getByText(/FQDN public HTTPS/)).toBeInTheDocument();
     });
 });

@@ -3108,11 +3108,7 @@ COPY ./nginx.conf /etc/nginx/conf.d/default.conf");
             }
 
             add_coolify_default_environment_variables($this->application, $coolify_envs, $this->application->environment_variables_preview);
-            if (! $forBuildTime) {
-                app(SyncApplicationOidcEnvironment::class)->sync($this->application);
-                $this->application->unsetRelation('environment_variables_preview');
-                $coolify_envs = SsoProtection::mergeOidcEnvironment($coolify_envs, $this->application->environment_variables_preview);
-            }
+            $coolify_envs = $this->mergeOidcIntoCoolifyEnvs($coolify_envs, $forBuildTime, preview: true);
 
         } else {
             // Only add SOURCE_COMMIT for runtime OR when explicitly enabled for build-time
@@ -3157,15 +3153,31 @@ COPY ./nginx.conf /etc/nginx/conf.d/default.conf");
             }
 
             add_coolify_default_environment_variables($this->application, $coolify_envs, $this->application->environment_variables);
-            if (! $forBuildTime) {
-                app(SyncApplicationOidcEnvironment::class)->sync($this->application);
-                $this->application->unsetRelation('environment_variables');
-                $coolify_envs = SsoProtection::mergeOidcEnvironment($coolify_envs, $this->application->environment_variables);
-            }
+            $coolify_envs = $this->mergeOidcIntoCoolifyEnvs($coolify_envs, $forBuildTime, preview: false);
 
         }
 
         return $coolify_envs;
+    }
+
+    /**
+     * Persist OIDC + AUTH_URL before the env file is written so the first deploy
+     * already has a https callback, then register that origin on Pocket ID.
+     *
+     * @param  Collection<string|int, mixed>  $coolify_envs
+     * @return Collection<string|int, mixed>
+     */
+    private function mergeOidcIntoCoolifyEnvs(Collection $coolify_envs, bool $forBuildTime, bool $preview): Collection
+    {
+        app(SyncApplicationOidcEnvironment::class)->sync($this->application, refreshPocketIdClient: ! $forBuildTime);
+        $relation = $preview ? 'environment_variables_preview' : 'environment_variables';
+        $this->application->unsetRelation($relation);
+        $userVariables = $this->application->{$relation};
+        if (! $forBuildTime) {
+            $coolify_envs = SsoProtection::mergeOidcEnvironment($coolify_envs, $userVariables);
+        }
+
+        return SsoProtection::mergeApplicationAuthEnvironment($coolify_envs, $this->application, $userVariables);
     }
 
     private function generate_env_variables()

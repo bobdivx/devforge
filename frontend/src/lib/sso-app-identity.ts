@@ -129,6 +129,8 @@ URLs de CETTE instance (copie-les telles quelles dans tes tests / docs, pas dans
 ${urlsBlock}
 
 Dans le code, lis UNIQUEMENT les variables d’environnement injectées au déploiement DevForge (ne hardcode pas l’issuer, le client id ni le secret) :
+- AUTH_URL, NEXTAUTH_URL, AUTH_TRUST_HOST (URL publique https de CETTE app — obligatoire pour le redirect_uri OIDC)
+- OIDC_REDIRECT_URI, AUTH_POCKET_ID_REDIRECT_URI (callback https complet, ex. …/api/auth/callback/pocket-id)
 - OIDC_ISSUER, OIDC_ISSUER_URL, OIDC_DISCOVERY_URL
 - OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_SCOPES
 - POCKET_ID_URL

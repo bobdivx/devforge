@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ApplicationDeploymentStatus;
+use App\Jobs\RefreshPocketIdAppClientsJob;
 use App\Services\ConfigurationGenerator;
 use App\Services\DeploymentConfiguration\ApplicationConfigurationSnapshot;
 use App\Services\DeploymentConfiguration\ConfigurationDiff;
@@ -364,6 +365,11 @@ class Application extends BaseModel
                     'resourceable_type' => Application::class,
                     'resourceable_id' => $application->id,
                 ]);
+            }
+        });
+        static::updated(function (Application $application) {
+            if ($application->wasChanged('fqdn') && filled($application->fqdn)) {
+                RefreshPocketIdAppClientsJob::dispatch($application->id);
             }
         });
         static::forceDeleting(function ($application) {

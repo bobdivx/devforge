@@ -29,5 +29,8 @@ it('builds github app permission and installation settings urls', function () {
     expect(GithubAppManifestPermissions::permissionsUrl($githubApp))
         ->toBe('https://github.com/settings/apps/devforgezimaos/permissions')
         ->and(GithubAppManifestPermissions::installationSettingsUrl($githubApp))
-        ->toBe('https://github.com/settings/installations/154217861');
+        ->toBe('https://github.com/settings/installations/154217861')
+        ->and(GithubAppManifestPermissions::missingRightsHelpText($githubApp))
+        ->toContain('événement Push')
+        ->toContain('FQDN public HTTPS');
 });

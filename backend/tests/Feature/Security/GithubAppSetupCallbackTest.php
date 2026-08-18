@@ -88,16 +88,28 @@ function configureGithubAppCredentials(GithubApp $githubApp): void
 
 function fakeGithubInstallationVerification(int $appId): void
 {
-    Http::preventStrayRequests();
-    Http::fake([
-        'https://api.github.com/zen' => Http::response('Keep it logically awesome.', 200, [
-            'Date' => now()->toRfc7231String(),
-        ]),
-        'https://api.github.com/app/installations/*' => Http::response([
-            'id' => 555,
-            'app_id' => $appId,
-        ], 200),
-    ]);
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.github.com/zen' => Http::response('Keep it logically awesome.', 200, [
+                'Date' => now()->toRfc7231String(),
+            ]),
+            'https://api.github.com/app/installations/*' => Http::response([
+                'id' => 555,
+                'app_id' => $appId,
+            ], 200),
+            'https://api.github.com/app/hook/config' => Http::response([
+                'url' => 'https://web.example.test/webhooks/source/github/events',
+                'content_type' => 'json',
+            ], 200),
+            'https://api.github.com/app' => Http::response([
+                'permissions' => [
+                    'contents' => 'write',
+                    'metadata' => 'read',
+                    'pull_requests' => 'write',
+                    'administration' => 'write',
+                ],
+            ], 200),
+        ]);
 }
 
 function fakeGithubInstallationVerificationFailure(): void

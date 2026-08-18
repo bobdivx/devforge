@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\GithubApp;
+use App\Services\DevForge\Github\GithubAppHookUrlSynchronizer;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -48,6 +49,12 @@ class GithubAppPermissionJob implements ShouldBeEncrypted, ShouldQueue
 
             $this->github_app->save();
             $this->github_app->makeVisible('client_secret')->makeVisible('webhook_secret');
+
+            try {
+                app(GithubAppHookUrlSynchronizer::class)->sync($this->github_app, $github_access_token);
+            } catch (\Throwable $e) {
+                send_internal_notification('GithubAppHookUrlSynchronizer failed with: '.$e->getMessage());
+            }
 
         } catch (\Throwable $e) {
             send_internal_notification('GithubAppPermissionJob failed with: '.$e->getMessage());

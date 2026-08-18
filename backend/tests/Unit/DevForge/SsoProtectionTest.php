@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Application;
 use App\Models\InstanceSettings;
 use App\Models\OauthSetting;
 use App\Models\Server;
@@ -37,6 +38,8 @@ it('builds wildcard oidc callbacks so every deployed app can use pocket id', fun
         'https://sso.apps.exemple.com/oauth2/callback',
         'https://*.apps.exemple.com/**',
         'https://*.exemple.com/**',
+        'http://*.apps.exemple.com/**',
+        'http://*.exemple.com/**',
     );
 });
 
@@ -81,6 +84,32 @@ it('does not overwrite an app-defined oidc client id', function () {
 
     expect($envs->get('OIDC_CLIENT_ID'))->toBe('custom-app-client')
         ->and($envs->get('OIDC_ISSUER'))->toBe('https://id.apps.exemple.com');
+});
+
+it('injects https AUTH_URL so Auth.js does not send http callbacks on first deploy', function () {
+    $application = new Application([
+        'fqdn' => 'https://popcornn.app,https://popcornn.apps.exemple.com',
+    ]);
+
+    $envs = SsoProtection::mergeApplicationAuthEnvironment(collect(['EXISTING' => 'keep']), $application);
+
+    expect($envs->get('EXISTING'))->toBe('keep')
+        ->and($envs->get('AUTH_URL'))->toBe('https://popcornn.app')
+        ->and($envs->get('NEXTAUTH_URL'))->toBe('https://popcornn.app')
+        ->and($envs->get('AUTH_TRUST_HOST'))->toBe('true')
+        ->and($envs->get('OIDC_REDIRECT_URI'))->toBe('https://popcornn.app/api/auth/callback/pocket-id')
+        ->and($envs->get('AUTH_POCKET_ID_REDIRECT_URI'))->toBe('https://popcornn.app/api/auth/callback/pocket-id');
+});
+
+it('does not overwrite a user-defined AUTH_URL', function () {
+    $application = new Application(['fqdn' => 'https://popcornn.app']);
+
+    $envs = SsoProtection::mergeApplicationAuthEnvironment(collect([
+        'AUTH_URL' => 'https://custom.example',
+    ]), $application);
+
+    expect($envs->get('AUTH_URL'))->toBe('https://custom.example')
+        ->and($envs->get('AUTH_TRUST_HOST'))->toBe('true');
 });
 
 it('treats apps oidc as configured only when client id and secret are filled', function () {

@@ -16,6 +16,8 @@ class ProvisionPocketIdClients
 
     public const APPS_CLIENT_NAME = 'DevForge Apps';
 
+    public const ACCENT_COLOR = '#175b37';
+
     public function handle(?InstanceSettings $settings = null): InstanceSettings
     {
         $settings ??= instanceSettings();
@@ -73,6 +75,7 @@ class ProvisionPocketIdClients
         $settings->save();
 
         $this->ensureAdminUser($http);
+        $this->ensureBranding($http, $settings);
 
         return $settings->fresh() ?? $settings;
     }
@@ -186,5 +189,94 @@ class ProvisionPocketIdClients
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    private function ensureBranding(PendingRequest $http, InstanceSettings $settings): void
+    {
+        try {
+            $this->applyApplicationName($http, $settings);
+            $this->uploadBrandImages((string) $settings->sso_static_api_key);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to apply DevForge branding to Pocket ID.', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function applyApplicationName(PendingRequest $http, InstanceSettings $settings): void
+    {
+        $response = $http->get('/api/application-configuration/all');
+        $response->throw();
+
+        $items = $response->json();
+        if (isset($items['data']) && is_array($items['data'])) {
+            $items = $items['data'];
+        }
+        if (! is_array($items)) {
+            return;
+        }
+
+        $config = [];
+        foreach ($items as $item) {
+            if (is_array($item) && filled($item['key'] ?? null)) {
+                $config[(string) $item['key']] = (string) ($item['value'] ?? '');
+            }
+        }
+        if ($config === []) {
+            return;
+        }
+
+        $config['appName'] = $this->pocketIdAppName($settings);
+        $config['accentColor'] = self::ACCENT_COLOR;
+        unset($config['uiConfigDisabled'], $config['tracingEnabled']);
+
+        $http->put('/api/application-configuration', $config)->throw();
+    }
+
+    private function pocketIdAppName(InstanceSettings $settings): string
+    {
+        $name = Str::of((string) ($settings->instance_name ?: self::DEVFORGE_CLIENT_NAME))
+            ->trim()
+            ->limit(30, '')
+            ->value();
+
+        return $name !== '' ? $name : self::DEVFORGE_CLIENT_NAME;
+    }
+
+    private function uploadBrandImages(string $apiKey): void
+    {
+        $logoPath = public_path('brand/logo.png');
+        if (! is_file($logoPath)) {
+            return;
+        }
+
+        $contents = file_get_contents($logoPath);
+        if ($contents === false || $contents === '') {
+            return;
+        }
+
+        $filename = $this->brandImageFilename($logoPath, $contents);
+
+        foreach (['/api/application-images/logo?light=true', '/api/application-images/logo?light=false', '/api/application-images/email', '/api/application-images/favicon'] as $path) {
+            $this->client($apiKey)
+                ->attach('file', $contents, $filename)
+                ->put($path)
+                ->throw();
+        }
+    }
+
+    private function brandImageFilename(string $path, string $contents): string
+    {
+        $mime = function_exists('mime_content_type') ? (mime_content_type($path) ?: '') : '';
+        if ($mime === '' && str_starts_with($contents, "\xff\xd8\xff")) {
+            $mime = 'image/jpeg';
+        }
+
+        return match ($mime) {
+            'image/jpeg' => 'logo.jpg',
+            'image/svg+xml' => 'logo.svg',
+            'image/x-icon', 'image/vnd.microsoft.icon' => 'favicon.ico',
+            default => 'logo.png',
+        };
     }
 }

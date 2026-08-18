@@ -251,6 +251,11 @@ class GithubAppCatalog
 
     private function webhookBaseUrl(): string
     {
+        $public = app(GithubAppHookUrlSynchronizer::class)->publicBaseUrl();
+        if (is_string($public)) {
+            return $public;
+        }
+
         $settings = instanceSettings();
         $fqdn = is_string($settings->fqdn) ? trim($settings->fqdn) : '';
         $baseUrl = $fqdn !== '' ? rtrim($fqdn, '/') : request()->getSchemeAndHttpHost();

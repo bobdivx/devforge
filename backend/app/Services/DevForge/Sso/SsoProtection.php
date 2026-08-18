@@ -246,17 +246,15 @@ class SsoProtection
 
         $scheme = $urls['scheme'];
         $host = $urls['host'];
-        $callbacks = [
-            $urls['oauth2_proxy'].'/oauth2/callback',
-            "{$scheme}://{$host}/**",
-            "{$scheme}://*.{$host}/**",
-        ];
+        $callbacks = array_merge(
+            [$urls['oauth2_proxy'].'/oauth2/callback'],
+            self::hostWildcardUrls($scheme, $host, suffix: '/**'),
+        );
 
         $labels = explode('.', $host);
         if (count($labels) >= 3) {
             $parent = implode('.', array_slice($labels, 1));
-            $callbacks[] = "{$scheme}://{$parent}/**";
-            $callbacks[] = "{$scheme}://*.{$parent}/**";
+            $callbacks = array_merge($callbacks, self::hostWildcardUrls($scheme, $parent, suffix: '/**'));
         }
 
         foreach (self::applicationPublicOrigins() as $origin) {
@@ -281,17 +279,15 @@ class SsoProtection
 
         $scheme = $urls['scheme'];
         $host = $urls['host'];
-        $logout = [
-            $urls['oauth2_proxy'],
-            "{$scheme}://{$host}",
-            "{$scheme}://*.{$host}",
-        ];
+        $logout = array_merge(
+            [$urls['oauth2_proxy']],
+            self::hostWildcardUrls($scheme, $host),
+        );
 
         $labels = explode('.', $host);
         if (count($labels) >= 3) {
             $parent = implode('.', array_slice($labels, 1));
-            $logout[] = "{$scheme}://{$parent}";
-            $logout[] = "{$scheme}://*.{$parent}";
+            $logout = array_merge($logout, self::hostWildcardUrls($scheme, $parent));
         }
 
         foreach (self::applicationPublicOrigins() as $origin) {
@@ -299,6 +295,26 @@ class SsoProtection
         }
 
         return array_values(array_unique($logout));
+    }
+
+    /**
+     * https wildcards plus http fallbacks so a first deploy behind Traefik
+     * (X-Forwarded-Proto=http) is still accepted by Pocket ID.
+     *
+     * @return list<string>
+     */
+    private static function hostWildcardUrls(string $scheme, string $host, string $suffix = ''): array
+    {
+        $urls = [
+            "{$scheme}://{$host}{$suffix}",
+            "{$scheme}://*.{$host}{$suffix}",
+        ];
+        if ($scheme === 'https') {
+            $urls[] = "http://{$host}{$suffix}";
+            $urls[] = "http://*.{$host}{$suffix}";
+        }
+
+        return $urls;
     }
 
     /**
@@ -444,16 +460,52 @@ class SsoProtection
     public static function mergeOidcEnvironment(Collection $envs, ?Collection $userVariables = null, ?InstanceSettings $settings = null): Collection
     {
         foreach (self::oidcEnvironmentForApps($settings) as $key => $value) {
-            if ($envs->has($key)) {
-                continue;
-            }
-            if ($userVariables?->contains(fn (mixed $item): bool => is_object($item) && (string) data_get($item, 'key') === $key)) {
-                continue;
-            }
-            $envs->put($key, $value);
+            self::putManagedEnv($envs, $userVariables, $key, $value);
         }
 
         return $envs;
+    }
+
+    /**
+     * Auth.js / NextAuth build the OIDC redirect_uri from AUTH_URL. Without it the
+     * app (behind Traefik HTTP) sends http://…/api/auth/callback/pocket-id, which
+     * Pocket ID rejects on the first deploy.
+     *
+     * @param  Collection<string|int, mixed>  $envs
+     * @param  Collection<int, mixed>|null  $userVariables
+     * @return Collection<string|int, mixed>
+     */
+    public static function mergeApplicationAuthEnvironment(Collection $envs, Application $application, ?Collection $userVariables = null): Collection
+    {
+        $origin = self::primaryPublicOrigin($application);
+        if ($origin === null) {
+            return $envs;
+        }
+
+        $callback = $origin.'/api/auth/callback/pocket-id';
+        self::putManagedEnv($envs, $userVariables, 'AUTH_URL', $origin);
+        self::putManagedEnv($envs, $userVariables, 'NEXTAUTH_URL', $origin);
+        self::putManagedEnv($envs, $userVariables, 'AUTH_TRUST_HOST', 'true');
+        self::putManagedEnv($envs, $userVariables, 'OIDC_REDIRECT_URI', $callback);
+        self::putManagedEnv($envs, $userVariables, 'AUTH_POCKET_ID_REDIRECT_URI', $callback);
+
+        return $envs;
+    }
+
+    /**
+     * @param  Collection<string|int, mixed>  $envs
+     * @param  Collection<int, mixed>|null  $userVariables
+     */
+    private static function putManagedEnv(Collection $envs, ?Collection $userVariables, string $key, string $value): void
+    {
+        if ($envs->has($key)) {
+            return;
+        }
+        if ($userVariables?->contains(fn (mixed $item): bool => is_object($item) && (string) data_get($item, 'key') === $key)) {
+            return;
+        }
+
+        $envs->put($key, $value);
     }
 
     /**

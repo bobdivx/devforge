@@ -409,6 +409,10 @@ describe('GitHub Source Change Component', function () {
             'https://api.github.com/zen' => Http::response('Keep it logically awesome.', 200, [
                 'date' => now()->toRfc7231String(),
             ]),
+            'https://api.github.com/app/hook/config' => Http::response([
+                'url' => 'https://web.example.test/webhooks/source/github/events',
+                'content_type' => 'json',
+            ], 200),
             'https://api.github.com/app' => Http::response([
                 'permissions' => [
                     'contents' => 'read',

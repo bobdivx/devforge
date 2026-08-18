@@ -8,13 +8,19 @@ use App\Models\Project;
 use App\Models\Server;
 use App\Models\StandaloneDocker;
 use App\Models\Team;
+use App\Services\DevForge\Sso\ProvisionPocketIdClients;
 use App\Services\DevForge\Sso\SyncApplicationOidcEnvironment;
+use App\Jobs\RefreshPocketIdAppClientsJob;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Once;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function () {
+    Queue::fake();
     InstanceSettings::unguarded(fn (): InstanceSettings => InstanceSettings::query()->create([
         'id' => 0,
         'fqdn' => 'https://forge.exemple.com',
@@ -70,8 +76,12 @@ it('persists AUTH_URL from the application public origin so Auth.js uses https c
 
     expect($this->application->environment_variables()->where('key', 'AUTH_URL')->value('value'))
         ->toBe('https://starbasefr.com')
+        ->and($this->application->environment_variables()->where('key', 'NEXTAUTH_URL')->value('value'))
+        ->toBe('https://starbasefr.com')
         ->and($this->application->environment_variables()->where('key', 'AUTH_TRUST_HOST')->value('value'))
-        ->toBe('true');
+        ->toBe('true')
+        ->and($this->application->environment_variables()->where('key', 'OIDC_REDIRECT_URI')->value('value'))
+        ->toBe('https://starbasefr.com/api/auth/callback/pocket-id');
 });
 
 it('does not overwrite a user-defined oidc client id', function () {
@@ -105,4 +115,66 @@ it('does nothing when the instance oidc client is not configured', function () {
 
     expect($count)->toBe(0)
         ->and($this->application->environment_variables()->where('key', 'OIDC_ISSUER')->exists())->toBeFalse();
+});
+
+it('queues a pocket id client refresh when the application domain changes', function () {
+    $this->application->update(['fqdn' => 'https://popcornn.app']);
+
+    Queue::assertPushed(RefreshPocketIdAppClientsJob::class, function (RefreshPocketIdAppClientsJob $job): bool {
+        return $job->applicationId === $this->application->id;
+    });
+});
+
+it('registers http and https app callbacks on pocket id so the first deploy can log in', function () {
+    InstanceSettings::get()->update([
+        'sso_static_api_key' => 'static-api-key',
+    ]);
+    Once::flush();
+
+    $this->application->update([
+        'fqdn' => 'https://popcornn.app',
+    ]);
+
+    Http::preventStrayRequests();
+    Http::fake(function (Request $request) {
+        $path = (string) parse_url($request->url(), PHP_URL_PATH);
+
+        if ($request->method() === 'GET' && str_ends_with($path, '/api/oidc/clients')) {
+            return Http::response(['data' => []], 200);
+        }
+
+        if ($request->method() === 'POST' && str_ends_with($path, '/api/oidc/clients')) {
+            $id = $request['name'] === ProvisionPocketIdClients::DEVFORGE_CLIENT_NAME
+                ? 'devforge-client'
+                : 'apps-client';
+
+            return Http::response(['id' => $id], 201);
+        }
+
+        if ($request->method() === 'PUT' && str_contains($path, '/api/oidc/clients/')) {
+            return Http::response([], 200);
+        }
+
+        if ($request->method() === 'POST' && str_ends_with($path, '/secret')) {
+            return Http::response(['secret' => 'apps-secret'], 200);
+        }
+
+        if ($request->method() === 'POST' && str_ends_with($path, '/api/users')) {
+            return Http::response([], 201);
+        }
+
+        return Http::response(['error' => $path], 404);
+    });
+
+    app(SyncApplicationOidcEnvironment::class)->sync($this->application);
+
+    Http::assertSent(function (Request $request): bool {
+        if ($request->method() !== 'PUT' || ! str_contains((string) parse_url($request->url(), PHP_URL_PATH), '/api/oidc/clients/')) {
+            return false;
+        }
+
+        return $request['name'] === ProvisionPocketIdClients::APPS_CLIENT_NAME
+            && in_array('https://popcornn.app/api/auth/callback/pocket-id', $request['callbackURLs'], true)
+            && in_array('http://popcornn.app/api/auth/callback/pocket-id', $request['callbackURLs'], true);
+    });
 });

@@ -578,6 +578,8 @@ class Github extends Controller
         $github_app->installation_id = $installation_id;
         $github_app->save();
 
+        GithubAppPermissionJob::dispatch($github_app);
+
         if (session()->pull('devforge_onboarding_github')) {
             return redirect('/onboarding?pick=repos');
         }

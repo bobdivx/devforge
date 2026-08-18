@@ -4,6 +4,8 @@ namespace App\Services\DevForge;
 
 use App\Jobs\CheckAndStartSsoJob;
 use App\Jobs\CheckForUpdatesJob;
+use App\Jobs\GithubAppPermissionJob;
+use App\Models\GithubApp;
 use App\Models\InstanceSettings;
 use App\Models\OauthSetting;
 use App\Models\Server;
@@ -114,6 +116,10 @@ class InstanceSettingsUpdater
         $settings->save();
         $this->refreshLocalhostProxy();
         $this->startManagedSsoStack();
+
+        if (array_key_exists('fqdn', $validated)) {
+            $this->syncGithubAppWebhookUrls();
+        }
 
         if ($wildcardChanged && filled($settings->apps_wildcard_domain)) {
             $this->applicationDomainService->regenerateManagedDomains(
@@ -579,6 +585,17 @@ class InstanceSettingsUpdater
         if ($server) {
             $server->setupDynamicProxyConfiguration();
         }
+    }
+
+    private function syncGithubAppWebhookUrls(): void
+    {
+        GithubApp::query()
+            ->where('is_public', false)
+            ->whereNotNull('app_id')
+            ->whereNotNull('private_key_id')
+            ->each(function (GithubApp $githubApp): void {
+                GithubAppPermissionJob::dispatch($githubApp);
+            });
     }
 
     private function startManagedSsoStack(): void

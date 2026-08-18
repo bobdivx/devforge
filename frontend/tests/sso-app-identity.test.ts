@@ -22,6 +22,8 @@ describe('sso-app-identity', () => {
         expect(prompt).toContain('https://<ton-app>.briseteia.me/api/auth/callback/pocket-id');
         expect(prompt).toContain('OIDC_CLIENT_ID');
         expect(prompt).toContain('OIDC_CLIENT_SECRET');
+        expect(prompt).toContain('AUTH_URL');
+        expect(prompt).toContain('OIDC_REDIRECT_URI');
         expect(prompt).toContain('ne hardcode pas l’issuer');
         expect(prompt).not.toContain('id.exemple.com');
         expect(prompt).not.toContain('mon-app.briseteia.me');

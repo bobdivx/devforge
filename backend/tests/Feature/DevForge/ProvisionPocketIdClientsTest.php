@@ -72,6 +72,23 @@ it('creates pocket id oidc clients and enables the devforge login provider', fun
             return Http::response([], 201);
         }
 
+        if ($request->method() === 'GET' && str_ends_with($path, '/api/application-configuration/all')) {
+            return Http::response([
+                ['key' => 'appName', 'value' => 'Pocket ID'],
+                ['key' => 'accentColor', 'value' => 'default'],
+                ['key' => 'sessionDuration', 'value' => '60'],
+                ['key' => 'homePageUrl', 'value' => '/settings/account'],
+            ], 200);
+        }
+
+        if ($request->method() === 'PUT' && str_ends_with($path, '/api/application-configuration')) {
+            return Http::response([], 200);
+        }
+
+        if ($request->method() === 'PUT' && str_contains($path, '/api/application-images/')) {
+            return Http::response('', 204);
+        }
+
         return Http::response(['error' => $path], 404);
     });
 
@@ -104,5 +121,24 @@ it('creates pocket id oidc clients and enables the devforge login provider', fun
         return $request->method() === 'POST'
             && str_ends_with($path, '/secret')
             && $request->body() === '{}';
+    });
+
+    Http::assertSent(function (Request $request): bool {
+        $path = (string) parse_url($request->url(), PHP_URL_PATH);
+        if ($request->method() !== 'PUT' || ! str_ends_with($path, '/api/application-configuration')) {
+            return false;
+        }
+
+        return ($request['appName'] ?? null) === 'DevForge'
+            && ($request['accentColor'] ?? null) === ProvisionPocketIdClients::ACCENT_COLOR;
+    });
+
+    Http::assertSent(function (Request $request): bool {
+        $path = (string) parse_url($request->url(), PHP_URL_PATH);
+        $query = (string) parse_url($request->url(), PHP_URL_QUERY);
+
+        return $request->method() === 'PUT'
+            && str_ends_with($path, '/api/application-images/logo')
+            && str_contains($query, 'light=true');
     });
 });

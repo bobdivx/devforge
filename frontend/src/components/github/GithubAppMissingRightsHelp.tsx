@@ -29,7 +29,10 @@ export function GithubAppMissingRightsHelp({ app = null }: GithubAppMissingRight
                     )}
                 </li>
                 <li>
-                    Passer Administration, Contents, Actions et Workflows sur Read and write, puis enregistrer.
+                    Passer Administration, Contents, Actions et Workflows sur Read and write, cocher l’événement Push, puis enregistrer.
+                </li>
+                <li>
+                    Vérifier que l’URL webhook de l’app est le FQDN public HTTPS (pas un hôte .local).
                 </li>
                 <li>
                     {installationSettingsUrl ? (
