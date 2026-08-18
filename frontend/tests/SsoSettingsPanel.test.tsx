@@ -75,6 +75,7 @@ describe('SsoSettingsPanel', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Prompt Cursor' }));
         expect(screen.getByText('Prompt Cursor pour tes apps')).toBeInTheDocument();
         expect(screen.getByText((content) => content.includes('sso_linked_at'))).toBeInTheDocument();
+        expect(screen.getByText((content) => content.includes('Issuer Pocket ID : https://id.exemple.com'))).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Copier le prompt' })).toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }));

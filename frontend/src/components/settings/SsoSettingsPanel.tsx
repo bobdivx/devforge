@@ -232,7 +232,7 @@ function SsoSettingsForm({
                     </p>
                 </div>
             )}
-            <SsoAppIdentityGuide sso={sso} />
+            <SsoAppIdentityGuide sso={sso} appsWildcardDomain={data.instance.apps_wildcard_domain} />
         </form>
     );
 }

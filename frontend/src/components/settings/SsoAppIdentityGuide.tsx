@@ -6,6 +6,7 @@ import { Modal } from '../ui/Modal';
 
 type SsoAppIdentityGuideProps = {
     sso: InstanceSsoSettings;
+    appsWildcardDomain?: string | null;
 };
 
 async function copyText(value: string): Promise<boolean> {
@@ -17,10 +18,10 @@ async function copyText(value: string): Promise<boolean> {
     }
 }
 
-export function SsoAppIdentityGuide({ sso }: SsoAppIdentityGuideProps) {
+export function SsoAppIdentityGuide({ sso, appsWildcardDomain = null }: SsoAppIdentityGuideProps) {
     const [open, setOpen] = useState(false);
     const [copied, setCopied] = useState(false);
-    const prompt = ssoCursorPrompt(sso);
+    const prompt = ssoCursorPrompt(sso, { appsWildcardDomain });
     const issuer = ssoIssuerUrl(sso);
 
     const copyPrompt = () => {
@@ -42,7 +43,8 @@ export function SsoAppIdentityGuide({ sso }: SsoAppIdentityGuideProps) {
                 </p>
             </div>
             <p class="text-xs text-base-content/55">
-                Issuer : <span class="font-mono break-all">{issuer}</span>
+                Issuer :{' '}
+                <span class="font-mono break-all">{issuer ?? 'domaine instance manquant'}</span>
             </p>
             <button class="btn btn-outline btn-sm w-fit rounded-xl" type="button" onClick={() => setOpen(true)}>
                 <Sparkles class="size-3.5" aria-hidden />

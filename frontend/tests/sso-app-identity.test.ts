@@ -1,25 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_INSTANCE_SSO } from '../src/lib/api/domain';
-import { ssoCursorPrompt, ssoIssuerUrl } from '../src/lib/sso-app-identity';
+import { ssoAppsOrigin, ssoCursorPrompt, ssoIssuerUrl } from '../src/lib/sso-app-identity';
 
 const sso = {
     ...DEFAULT_INSTANCE_SSO,
-    pocket_id_url: 'https://id.exemple.com',
-    oauth2_proxy_url: 'https://sso.exemple.com',
+    pocket_id_url: 'https://id.briseteia.me',
+    oauth2_proxy_url: 'https://sso.briseteia.me',
 };
 
 describe('sso-app-identity', () => {
-    it('utilise l’issuer Pocket ID public', () => {
-        expect(ssoIssuerUrl(sso)).toBe('https://id.exemple.com');
+    it('expose l’issuer Pocket ID réel', () => {
+        expect(ssoIssuerUrl(sso)).toBe('https://id.briseteia.me');
+        expect(ssoAppsOrigin(sso, 'https://briseteia.me')).toBe('https://briseteia.me');
     });
 
-    it('génère un prompt Cursor où le SSO est optionnel puis prioritaire par user', () => {
-        const prompt = ssoCursorPrompt(sso);
-        expect(prompt).toContain('https://id.exemple.com');
-        expect(prompt).toContain('Continuer avec Pocket ID');
-        expect(prompt).toContain('OPTIONNEL');
-        expect(prompt).toContain('sso_linked_at');
+    it('met les URLs de l’instance dans le prompt et laisse id/secret en variables d’env', () => {
+        const prompt = ssoCursorPrompt(sso, { appsWildcardDomain: 'https://briseteia.me' });
+        expect(prompt).toContain('Issuer Pocket ID : https://id.briseteia.me');
+        expect(prompt).toContain('https://id.briseteia.me/.well-known/openid-configuration');
+        expect(prompt).toContain('https://*.briseteia.me/**');
+        expect(prompt).toContain('https://<ton-app>.briseteia.me/api/auth/callback/pocket-id');
         expect(prompt).toContain('OIDC_CLIENT_ID');
-        expect(prompt).not.toContain('Ne PAS implémenter un flow OIDC');
+        expect(prompt).toContain('OIDC_CLIENT_SECRET');
+        expect(prompt).toContain('ne hardcode pas l’issuer');
+        expect(prompt).not.toContain('id.exemple.com');
+        expect(prompt).not.toContain('mon-app.briseteia.me');
     });
 });
