@@ -16,6 +16,7 @@ export type SidebarNavLink = {
     pages: PageKey[];
     icon?: LucideIcon;
     requiresAgents?: boolean;
+    requiresInstanceAdmin?: boolean;
 };
 
 export type SidebarNavGroup = {
@@ -24,6 +25,7 @@ export type SidebarNavGroup = {
     label: string;
     icon: LucideIcon;
     requiresAgents?: boolean;
+    requiresInstanceAdmin?: boolean;
     items: SidebarNavLink[];
 };
 
@@ -35,6 +37,7 @@ export type SidebarNavItem = {
     icon: LucideIcon;
     pages: PageKey[];
     requiresAgents?: boolean;
+    requiresInstanceAdmin?: boolean;
 };
 
 export type SidebarNavEntry = SidebarNavItem | SidebarNavGroup;
@@ -108,6 +111,13 @@ export const sidebarNav: SidebarNavEntry[] = [
                 pages: ['github-runners'],
             },
             {
+                id: 'sso',
+                label: 'SSO',
+                path: '/settings/sso',
+                pages: ['sso'],
+                requiresInstanceAdmin: true,
+            },
+            {
                 id: 'scheduled-tasks',
                 label: 'Tâches planifiées',
                 path: '/scheduled-tasks',
@@ -175,22 +185,38 @@ export const sidebarNav: SidebarNavEntry[] = [
     },
 ];
 
-export function visibleSidebarNav(agentsEnabled: boolean): SidebarNavEntry[] {
+function isNavEntryVisible(
+    entry: { requiresAgents?: boolean; requiresInstanceAdmin?: boolean },
+    agentsEnabled: boolean,
+    instanceAdmin: boolean,
+): boolean {
+    if (entry.requiresAgents && !agentsEnabled) {
+        return false;
+    }
+
+    if (entry.requiresInstanceAdmin && !instanceAdmin) {
+        return false;
+    }
+
+    return true;
+}
+
+export function visibleSidebarNav(agentsEnabled: boolean, instanceAdmin = false): SidebarNavEntry[] {
     return sidebarNav
         .map((entry) => {
             if (entry.type === 'link') {
-                if (entry.requiresAgents && !agentsEnabled) {
+                if (!isNavEntryVisible(entry, agentsEnabled, instanceAdmin)) {
                     return null;
                 }
 
                 return entry;
             }
 
-            if (entry.requiresAgents && !agentsEnabled) {
+            if (!isNavEntryVisible(entry, agentsEnabled, instanceAdmin)) {
                 return null;
             }
 
-            const items = entry.items.filter((item) => !item.requiresAgents || agentsEnabled);
+            const items = entry.items.filter((item) => isNavEntryVisible(item, agentsEnabled, instanceAdmin));
 
             if (items.length === 0) {
                 return null;

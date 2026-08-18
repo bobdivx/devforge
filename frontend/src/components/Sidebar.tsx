@@ -154,7 +154,11 @@ export function Sidebar({
     onToggleCollapsed,
 }: SidebarProps) {
     const agentsEnabled = bootstrap.features?.agents_enabled ?? false;
-    const entries = useMemo(() => visibleSidebarNav(agentsEnabled), [agentsEnabled]);
+    const instanceAdmin = bootstrap.permissions.instance_admin;
+    const entries = useMemo(
+        () => visibleSidebarNav(agentsEnabled, instanceAdmin),
+        [agentsEnabled, instanceAdmin],
+    );
     const panelClass = collapsed ? 'w-16' : 'w-64';
 
     const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});

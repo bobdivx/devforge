@@ -60,6 +60,7 @@ export function DomainPage({ bootstrap, route, onSwitchTeam }: DomainPageProps) 
         case 'github-runners':
             return <RunnersPage />;
         case 'settings':
+        case 'sso':
             return (
                 <SettingsPage
                     path={route.path}

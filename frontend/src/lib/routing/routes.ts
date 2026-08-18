@@ -91,6 +91,8 @@ export type PageKey =
 
     | 'github-runners'
 
+    | 'sso'
+
     | 'not-found';
 
 
@@ -647,6 +649,16 @@ const dynamicRoutes: Array<{ pattern: RegExp; route: AppRoute }> = [
 export function findRoute(pathname: string): AppRoute {
 
     const normalizedPath = normalizeRoutePath(pathname);
+
+    if (normalizedPath === '/settings/sso') {
+        return {
+            ...settingsRoute,
+            path: '/settings/sso',
+            label: 'SSO',
+            description: 'Pocket ID et protection des applications.',
+            page: 'sso',
+        };
+    }
 
     if (normalizedPath === '/settings/ai') {
         return {

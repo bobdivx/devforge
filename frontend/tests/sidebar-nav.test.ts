@@ -36,6 +36,22 @@ describe('navigation latérale groupée', () => {
 
         expect(infrastructure?.items.some(({ path }) => path === '/storage')).toBe(true);
         expect(infrastructure?.items.some(({ path }) => path === '/monitoring')).toBe(true);
+        expect(infrastructure?.items.some(({ path }) => path === '/settings/sso')).toBe(false);
+    });
+
+    it('expose le SSO sous Infrastructure pour un admin d’instance', () => {
+        const infrastructure = visibleSidebarNav(false, true).find(
+            (entry): entry is SidebarNavGroup => entry.type === 'group' && entry.id === 'infrastructure',
+        );
+
+        expect(infrastructure?.items.map(({ label, path }) => ({ label, path }))).toEqual([
+            { label: 'Stockage', path: '/storage' },
+            { label: 'Supervision', path: '/monitoring' },
+            { label: 'Runners GitHub', path: '/github-runners' },
+            { label: 'SSO', path: '/settings/sso' },
+            { label: 'Tâches planifiées', path: '/scheduled-tasks' },
+        ]);
+        expect(isNavGroupActive(infrastructure!, 'sso')).toBe(true);
     });
 
     it('masque les agents quand la fonctionnalité est désactivée', () => {

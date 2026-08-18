@@ -66,6 +66,8 @@ describe('routage DevForge', () => {
         expect(parseSettingsTab('/settings/advanced')).toBe('advanced');
         expect(parseSettingsTab('/settings/oauth')).toBe('oauth');
         expect(parseSettingsTab('/settings/sso')).toBe('sso');
+        expect(findRoute('/settings/sso').page).toBe('sso');
+        expect(findRoute('/devforge/settings/sso').path).toBe('/settings/sso');
         expect(parseSettingsTab('/notifications/email')).toBe('notifications');
         expect(parseSettingsTab('/security/api-tokens')).toBe('security');
         expect(parseSettingsTab('/team/members')).toBe('team');
