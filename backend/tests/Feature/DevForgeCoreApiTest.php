@@ -103,7 +103,22 @@ it('exposes the application boot sequence contract', function () {
         ->assertJsonPath('data.status', 'running')
         ->assertJsonPath('data.total', 1)
         ->assertJsonPath('data.items.0.uuid', $this->application->uuid)
-        ->assertJsonPath('data.items.0.phase', 'starting');
+        ->assertJsonPath('data.items.0.phase', 'waiting');
+});
+
+it('does not start deployments when polling the boot sequence', function () {
+    $this->application->update(['status' => 'exited:unhealthy']);
+
+    $this->mock(CoreResourceAction::class, function (MockInterface $mock): void {
+        $mock->shouldReceive('execute')->never();
+    });
+
+    $this->actingAs($this->user)
+        ->withSession(['currentTeam' => $this->team])
+        ->getJson('/api/devforge/v1/core/applications/boot-sequence')
+        ->assertSuccessful()
+        ->assertJsonPath('data.active', true)
+        ->assertJsonPath('data.items.0.phase', 'waiting');
 });
 
 it('can force-start the application boot sequence for the team', function () {

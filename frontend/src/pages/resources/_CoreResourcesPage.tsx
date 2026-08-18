@@ -1,5 +1,5 @@
 import { Eye, Play, Plus, RefreshCw, RotateCw, Rocket, Square } from 'lucide-preact';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { ApplicationBootSequenceBanner } from '../../components/applications/ApplicationBootSequenceBanner';
 import { ApplicationDetailPanel } from '../../components/applications/ApplicationDetailPanel';
 import { ApplicationLogo } from '../../components/applications/ApplicationLogo';
@@ -302,7 +302,25 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
     const [startAllOpen, setStartAllOpen] = useState(false);
     const [startAllLoading, setStartAllLoading] = useState(false);
     const [startAllError, setStartAllError] = useState<string | null>(null);
-    const resources = query.data?.data ?? [];
+    const loadedResources = query.data?.data ?? [];
+    const resources = useMemo(() => {
+        if (loadedResources.length > 0 || type !== 'applications' || !bootSequence.active) {
+            return loadedResources;
+        }
+
+        return bootSequence.items.map((item): CoreResource => ({
+            uuid: item.uuid,
+            type: 'application',
+            name: item.name,
+            description: null,
+            status: item.status || 'starting:unknown',
+            configuration: {},
+            actions: [],
+            created_at: null,
+            updated_at: null,
+        }));
+    }, [bootSequence.active, bootSequence.items, loadedResources, type]);
+    const bootReloadKeyRef = useRef('');
 
     const stoppedApplicationsCount = useMemo(() => {
         if (type !== 'applications') {
@@ -337,12 +355,22 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
     };
 
     useEffect(() => {
-        if (type !== 'applications' || !bootSequence.active) {
+        if (type !== 'applications' || !bootSequence.active || query.loading || loadedResources.length === 0) {
             return;
         }
 
+        const key = `${bootSequence.current_uuid ?? ''}:${bootSequence.completed}`;
+        if (bootReloadKeyRef.current === '') {
+            bootReloadKeyRef.current = key;
+            return;
+        }
+        if (bootReloadKeyRef.current === key) {
+            return;
+        }
+
+        bootReloadKeyRef.current = key;
         void query.reload({ silent: true });
-    }, [type, bootSequence.active, bootSequence.completed, bootSequence.current_uuid, query.reload]);
+    }, [type, bootSequence.active, bootSequence.completed, bootSequence.current_uuid, query.loading, loadedResources.length, query.reload]);
 
     useEffect(() => {
         setSearch('');
@@ -555,7 +583,7 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                     )}
 
                     <DataState
-                        loading={query.loading}
+                        loading={query.loading && resources.length === 0}
                         error={query.error}
                         empty={filtered.length === 0}
                         emptyMessage={`Aucune ressource « ${labels[type].toLowerCase()} ».`}

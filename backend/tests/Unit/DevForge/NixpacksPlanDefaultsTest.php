@@ -44,3 +44,40 @@ it('does not inject puppeteer vars for non-node plans', function () {
     expect($plan['variables'])->not->toHaveKey('PUPPETEER_SKIP_DOWNLOAD')
         ->and($plan['phases']['setup']['aptPkgs'])->toContain('unzip');
 });
+
+it('pins a nixpkgs archive that actually contains nodejs_24', function () {
+    $legacy = 'ffeebf0acf3ae8b29f8c7049cd911b9636efd7e7';
+    $plan = (new NixpacksPlanDefaults)->apply([
+        'nixpkgsArchive' => $legacy,
+        'phases' => [
+            'setup' => [
+                'nixPkgs' => ['nodejs_24', 'npm-9_x'],
+                'nixpkgsArchive' => $legacy,
+            ],
+        ],
+        'variables' => [
+            'NIXPACKS_NODE_VERSION' => '24',
+        ],
+    ], 'node');
+
+    $archive = NixpacksPlanDefaults::NODE_NIXPKGS_ARCHIVES['24'];
+
+    expect($plan['nixpkgsArchive'])->toBe($archive)
+        ->and($plan['phases']['setup']['nixpkgsArchive'])->toBe($archive)
+        ->and($plan['nixpkgsArchive'])->not->toBe($legacy);
+});
+
+it('pins the node 22 nixpkgs archive from current nixpacks', function () {
+    $plan = (new NixpacksPlanDefaults)->apply([
+        'phases' => [
+            'setup' => [
+                'nixPkgs' => ['nodejs_22', 'npm-9_x'],
+            ],
+        ],
+        'variables' => [
+            'NIXPACKS_NODE_VERSION' => '22',
+        ],
+    ], 'node');
+
+    expect($plan['nixpkgsArchive'])->toBe(NixpacksPlanDefaults::NODE_NIXPKGS_ARCHIVES['22']);
+});

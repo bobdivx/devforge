@@ -24,7 +24,7 @@ class CoreResourceCatalog
                 ->get(),
             'applications' => Application::query()
                 ->whereRelation('environment.project', 'team_id', $team->id)
-                ->with(['environment.project', 'destination.server'])
+                ->with(['environment.project', 'destination.server', 'settings', 'additional_servers'])
                 ->orderBy('name')
                 ->get(),
             'services' => Service::query()
@@ -48,7 +48,7 @@ class CoreResourceCatalog
             'applications' => Application::query()
                 ->where('uuid', $uuid)
                 ->whereRelation('environment.project', 'team_id', $team->id)
-                ->with(['environment.project', 'destination.server'])
+                ->with(['environment.project', 'destination.server', 'settings', 'additional_servers'])
                 ->first(),
             'services' => Service::query()
                 ->where('uuid', $uuid)

@@ -58,7 +58,7 @@ class ApplicationBootSequenceService
      *     }>
      * }
      */
-    public function statusForTeam(Team $team, bool $ensure = true): array
+    public function statusForTeam(Team $team, bool $ensure = true, bool $tick = true): array
     {
         if (! $this->enabled()) {
             return $this->inactivePayload();
@@ -66,7 +66,9 @@ class ApplicationBootSequenceService
 
         if ($ensure) {
             $this->ensureForTeam($team);
-            $this->tickTeam($team);
+            if ($tick) {
+                $this->tickTeam($team);
+            }
         }
 
         $state = $this->readState($team->id);

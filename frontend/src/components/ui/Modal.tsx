@@ -9,6 +9,7 @@ type ModalProps = {
     children: ComponentChildren;
     footer?: ComponentChildren;
     size?: 'md' | 'lg' | 'xl';
+    dismissible?: boolean;
 };
 
 const sizeClass = {
@@ -17,9 +18,17 @@ const sizeClass = {
     xl: 'max-w-3xl',
 };
 
-export function Modal({ open, title, onClose, children, footer, size = 'md' }: ModalProps) {
+export function Modal({
+    open,
+    title,
+    onClose,
+    children,
+    footer,
+    size = 'md',
+    dismissible = true,
+}: ModalProps) {
     useEffect(() => {
-        if (!open) {
+        if (!open || !dismissible) {
             return;
         }
 
@@ -31,7 +40,7 @@ export function Modal({ open, title, onClose, children, footer, size = 'md' }: M
 
         window.addEventListener('keydown', onKeyDown);
         return () => window.removeEventListener('keydown', onKeyDown);
-    }, [open, onClose]);
+    }, [open, onClose, dismissible]);
 
     if (!open) {
         return null;
@@ -42,14 +51,20 @@ export function Modal({ open, title, onClose, children, footer, size = 'md' }: M
             <div class={`modal-box ${sizeClass[size]}`}>
                 <div class="mb-3 flex items-start justify-between gap-3">
                     <h2 class="text-sm font-semibold">{title}</h2>
-                    <button class="btn btn-ghost btn-sm btn-square" type="button" aria-label="Fermer" onClick={onClose}>
-                        <X class="size-4" aria-hidden />
-                    </button>
+                    {dismissible && (
+                        <button class="btn btn-ghost btn-sm btn-square" type="button" aria-label="Fermer" onClick={onClose}>
+                            <X class="size-4" aria-hidden />
+                        </button>
+                    )}
                 </div>
                 <div class="grid gap-3">{children}</div>
                 {footer && <div class="modal-action form-actions mt-4">{footer}</div>}
             </div>
-            <button class="modal-backdrop" type="button" aria-label="Fermer la fenêtre" onClick={onClose} />
+            {dismissible ? (
+                <button class="modal-backdrop" type="button" aria-label="Fermer la fenêtre" onClick={onClose} />
+            ) : (
+                <div class="modal-backdrop" aria-hidden />
+            )}
         </div>
     );
 }

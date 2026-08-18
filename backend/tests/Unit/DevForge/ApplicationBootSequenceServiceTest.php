@@ -119,6 +119,24 @@ it('queues deploy for the next stopped application only', function () {
         ->and($status['items'][1]['phase'])->toBe('waiting');
 });
 
+it('does not queue deploys when presenting status without ticking', function () {
+    $team = Team::factory()->make(['id' => 14]);
+    $stopped = makeApplication('app-1', 'Alpha', 'exited:unhealthy');
+
+    $catalog = Mockery::mock(CoreResourceCatalog::class);
+    $catalog->shouldReceive('resources')
+        ->with($team, 'applications')
+        ->andReturn(new Collection([$stopped]));
+
+    $action = Mockery::mock(CoreResourceAction::class);
+    $action->shouldReceive('execute')->never();
+
+    $status = makeBootService($catalog, $action)->statusForTeam($team, ensure: true, tick: false);
+
+    expect($status['active'])->toBeTrue()
+        ->and($status['items'][0]['phase'])->toBe('waiting');
+});
+
 it('does not auto-start a single stopped app while others are already running', function () {
     $team = Team::factory()->make(['id' => 13]);
     $running = makeApplication('app-1', 'Alpha', 'running:healthy');

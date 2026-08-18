@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from '@testing-library/preact';
-import { describe, expect, it } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/preact';
+import { afterEach, describe, expect, it } from 'vitest';
 import { useEffect, useState } from 'preact/hooks';
 import { TeamContext } from '../src/lib/team-context';
 import { useApiQuery } from '../src/lib/use-api-query';
@@ -49,7 +49,29 @@ function SilentReloadProbe() {
     return <span>{query.data?.revision ?? 'empty'}</span>;
 }
 
+function SilentReloadDuringInitialLoadProbe() {
+    const query = useApiQuery('silent-during-load', async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, 40));
+        return { revision: 'loaded' };
+    });
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            void query.reload({ silent: true });
+        }, 5);
+
+        return () => window.clearTimeout(timer);
+    }, [query.reload]);
+
+    if (query.loading) return <span>loading</span>;
+    return <span>{query.data?.revision ?? 'empty'}</span>;
+}
+
 describe('useApiQuery team invalidation', () => {
+    afterEach(() => {
+        cleanup();
+    });
+
     it('recharge les données quand la révision équipe change', async () => {
         const { rerender } = render(
             <TeamContext.Provider value={{ teamId: 1, revision: 0, agentsEnabled: false }}>
@@ -81,6 +103,18 @@ describe('useApiQuery team invalidation', () => {
         await waitFor(() => {
             expect(screen.queryByText('loading')).not.toBeInTheDocument();
         });
+    });
+
+    it('termine le chargement si un reload silencieux interrompt la requête initiale', async () => {
+        render(
+            <TeamContext.Provider value={{ teamId: 1, revision: 0, agentsEnabled: false }}>
+                <SilentReloadDuringInitialLoadProbe />
+            </TeamContext.Provider>,
+        );
+
+        expect(screen.getByText('loading')).toBeInTheDocument();
+        expect(await screen.findByText('loaded', {}, { timeout: 500 })).toBeInTheDocument();
+        expect(screen.queryByText('loading')).not.toBeInTheDocument();
     });
 
     it('ignore la réponse obsolète quand la clé change rapidement', async () => {

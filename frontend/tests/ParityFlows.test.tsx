@@ -42,7 +42,10 @@ const application: CoreResource = {
     updated_at: null,
 };
 
-afterEach(cleanup);
+afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+});
 
 describe('actions core DevForge', () => {
     it('n’envoie une action sensible qu’après confirmation puis recharge les données', async () => {
@@ -100,6 +103,50 @@ describe('actions core DevForge', () => {
         await waitFor(() => expect(
             fetchMock.mock.calls.filter(([input]) => String(input) === '/api/devforge/v1/core/applications'),
         ).toHaveLength(2));
+    });
+
+    it('affiche la liste même si le démarrage séquentiel est déjà actif', async () => {
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+            const url = String(input);
+            if (url === '/sanctum/csrf-cookie') {
+                return new Response(null, { status: 204 });
+            }
+            if (url === '/api/devforge/v1/core/applications') {
+                await new Promise((resolve) => window.setTimeout(resolve, 40));
+                return jsonResponse({ data: [application], meta: { count: 1 } });
+            }
+            if (url === '/api/devforge/v1/core/applications/boot-sequence') {
+                return jsonResponse({
+                    data: {
+                        active: true,
+                        status: 'running',
+                        started_at: '2026-08-18T12:00:00Z',
+                        finished_at: null,
+                        current_uuid: application.uuid,
+                        completed: 0,
+                        total: 1,
+                        poll_interval_ms: 60_000,
+                        items: [{
+                            uuid: application.uuid,
+                            name: application.name,
+                            order: 1,
+                            phase: 'starting',
+                            status: 'starting',
+                            message: 'Déploiement en cours…',
+                            started_at: '2026-08-18T12:00:00Z',
+                            finished_at: null,
+                        }],
+                    },
+                });
+            }
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(withTeam(<CoreResourcesPage type="applications" permissions={permissions} />));
+
+        expect(await screen.findByText('Démarrage des applications')).toBeInTheDocument();
+        expect(await screen.findByRole('button', { name: /Application de parité/i })).toBeInTheDocument();
+        expect(screen.queryByText('Chargement…')).not.toBeInTheDocument();
     });
 });
 

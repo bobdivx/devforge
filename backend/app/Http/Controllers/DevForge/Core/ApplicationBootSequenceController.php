@@ -25,7 +25,7 @@ class ApplicationBootSequenceController extends Controller
         $team = $this->currentTeam($request);
 
         return response()->json([
-            'data' => $this->bootSequence->statusForTeam($team, ensure: true),
+            'data' => $this->bootSequence->statusForTeam($team, ensure: true, tick: false),
         ]);
     }
 

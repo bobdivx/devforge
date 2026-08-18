@@ -12,6 +12,7 @@ import {
     type InstanceSettings,
     type OauthProviderSettings,
 } from '../../lib/domain-api';
+import { notifyInstanceUpgradeChanged } from '../../lib/instance-upgrade';
 import { normalizeAppsWildcardDomain, previewDefaultApplicationUrl } from '../../lib/onboarding-steps';
 import { useApiQuery } from '../../lib/use-api-query';
 
@@ -719,9 +720,10 @@ function UpdatesForm({
         setError(null);
         try {
             await domainApi.startInstanceUpgrade();
+            notifyInstanceUpgradeChanged();
             await onSaved();
             setConfirmOpen(false);
-            setMessage('Mise à jour lancée. L’instance va redémarrer.');
+            setMessage('Mise à jour lancée. Suivez la progression dans la fenêtre de mise à jour.');
         } catch (caught) {
             setError(caught instanceof Error ? caught.message : 'Échec de la mise à jour.');
         } finally {

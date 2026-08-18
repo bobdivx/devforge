@@ -58,9 +58,9 @@ export function useApiQuery<T>(
             if (requestId !== requestIdRef.current) {
                 return;
             }
-            if (!keepPrevious) {
-                setLoading(false);
-            }
+            // Silent refresh must not flash a spinner, but it still has to
+            // clear an in-flight initial load it superseded.
+            setLoading(false);
         }
     }, [cacheKey]);
 
