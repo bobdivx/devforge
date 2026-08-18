@@ -72,4 +72,29 @@ describe('SsoSettingsPanel', () => {
         });
         expect(await screen.findByText('Paramètres SSO enregistrés.')).toBeInTheDocument();
     });
+
+    it('n’explose pas si l’API omet le bloc sso', async () => {
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+            const url = String(input);
+            if (url === '/sanctum/csrf-cookie') {
+                return new Response(null, { status: 204 });
+            }
+            if (url.includes('/api/devforge/v1/settings')) {
+                return jsonResponse({
+                    data: {
+                        instance: {
+                            fqdn: 'https://forge.exemple.com',
+                            apps_wildcard_domain: 'https://exemple.com',
+                        },
+                    },
+                });
+            }
+            throw new Error(`URL inattendue : ${url}`);
+        });
+
+        render(<SsoSettingsPanel permissions={{ ...bootstrapData.permissions, instance_admin: true }} />);
+
+        expect(await screen.findByText('Protéger les applications par défaut')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Enregistrer' })).toBeInTheDocument();
+    });
 });

@@ -29,7 +29,7 @@ class InstanceSettingsPresenter
             'advanced' => $this->advanced(),
             'email' => $this->email(),
             'updates' => $this->updates(),
-            'sso' => $this->sso(),
+            'sso' => $this->ssoPayload(),
         ];
     }
 
@@ -118,6 +118,32 @@ class InstanceSettingsPresenter
             'current_version' => $upgrade['current_version'],
             'latest_version' => $upgrade['latest_version'],
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function ssoPayload(): array
+    {
+        try {
+            return $this->sso();
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return [
+                'sso_protect_apps_by_default' => true,
+                'sso_forward_auth_address' => null,
+                'sso_hide_local_login' => false,
+                'pocketid_login_enabled' => false,
+                'apps_protection_configured' => false,
+                'middleware_name' => SsoProtection::MIDDLEWARE_NAME,
+                'default_forward_auth_address' => SsoProtection::DEFAULT_FORWARD_AUTH_ADDRESS,
+                'managed_by_devforge' => true,
+                'can_start' => false,
+                'pocket_id_url' => null,
+                'oauth2_proxy_url' => null,
+            ];
+        }
     }
 
     /**

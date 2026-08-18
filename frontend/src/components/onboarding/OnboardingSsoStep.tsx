@@ -1,6 +1,6 @@
 import { ExternalLink, KeyRound } from 'lucide-preact';
 import { useState } from 'preact/hooks';
-import { domainApi } from '../../lib/domain-api';
+import { domainApi, instanceSsoSettings } from '../../lib/domain-api';
 import { previewDefaultApplicationUrl } from '../../lib/onboarding-steps';
 import { useApiQuery } from '../../lib/use-api-query';
 import { Button } from '../ui/Button';
@@ -18,7 +18,8 @@ export function OnboardingSsoStep({ canEdit, onSkip, onContinue, onBack }: Onboa
     const settingsQuery = useApiQuery('onboarding-sso-settings', () => domainApi.settings());
     const wildcard = settingsQuery.data?.data.instance.apps_wildcard_domain ?? '';
     const settings = settingsQuery.data?.data;
-    const pocketIdUrl = settings?.sso.pocket_id_url || previewDefaultApplicationUrl('id', wildcard);
+    const sso = instanceSsoSettings(settings);
+    const pocketIdUrl = sso.pocket_id_url || previewDefaultApplicationUrl('id', wildcard);
 
     return (
         <Card title="SSO Pocket ID" eyebrow="Identité">
@@ -35,9 +36,9 @@ export function OnboardingSsoStep({ canEdit, onSkip, onContinue, onBack }: Onboa
                     <OnboardingSsoForm
                         canEdit={canEdit}
                         pocketIdUrl={pocketIdUrl}
-                        protectApps={settings.sso.sso_protect_apps_by_default}
-                        hideLocalLogin={settings.sso.sso_hide_local_login}
-                        canStart={settings.sso.can_start}
+                        protectApps={sso.sso_protect_apps_by_default}
+                        hideLocalLogin={sso.sso_hide_local_login}
+                        canStart={sso.can_start}
                         onSkip={onSkip}
                         onContinue={onContinue}
                         onBack={onBack}

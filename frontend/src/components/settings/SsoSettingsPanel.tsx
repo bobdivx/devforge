@@ -1,7 +1,7 @@
 import { ExternalLink, RefreshCw, Save } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
 import type { BootstrapPermissions } from '../../lib/bootstrap';
-import { domainApi, type InstanceSettings } from '../../lib/domain-api';
+import { domainApi, instanceSsoSettings, type InstanceSettings } from '../../lib/domain-api';
 import { useApiQuery } from '../../lib/use-api-query';
 import { Card } from '../ui/Card';
 import { DataState } from '../ui/DataState';
@@ -78,7 +78,7 @@ function SsoSettingsForm({
     canEdit: boolean;
     onSaved: () => Promise<void>;
 }) {
-    const sso = data.sso;
+    const sso = instanceSsoSettings(data);
     const [protectApps, setProtectApps] = useState(sso.sso_protect_apps_by_default);
     const [hideLocalLogin, setHideLocalLogin] = useState(sso.sso_hide_local_login);
     const [saving, setSaving] = useState(false);

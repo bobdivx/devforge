@@ -452,20 +452,40 @@ export type InstanceSettings = {
         current_version?: string;
         latest_version?: string;
     };
-    sso: {
-        sso_protect_apps_by_default: boolean;
-        sso_forward_auth_address: string | null;
-        sso_hide_local_login: boolean;
-        pocketid_login_enabled: boolean;
-        apps_protection_configured: boolean;
-        middleware_name: string;
-        default_forward_auth_address: string;
-        managed_by_devforge: boolean;
-        can_start: boolean;
-        pocket_id_url: string | null;
-        oauth2_proxy_url: string | null;
-    };
+    sso?: InstanceSsoSettings;
 };
+
+export type InstanceSsoSettings = {
+    sso_protect_apps_by_default: boolean;
+    sso_forward_auth_address: string | null;
+    sso_hide_local_login: boolean;
+    pocketid_login_enabled: boolean;
+    apps_protection_configured: boolean;
+    middleware_name: string;
+    default_forward_auth_address: string;
+    managed_by_devforge: boolean;
+    can_start: boolean;
+    pocket_id_url: string | null;
+    oauth2_proxy_url: string | null;
+};
+
+export const DEFAULT_INSTANCE_SSO: InstanceSsoSettings = {
+    sso_protect_apps_by_default: true,
+    sso_forward_auth_address: null,
+    sso_hide_local_login: false,
+    pocketid_login_enabled: false,
+    apps_protection_configured: false,
+    middleware_name: 'devforge-sso-auth',
+    default_forward_auth_address: 'http://devforge-sso-proxy:4180/',
+    managed_by_devforge: true,
+    can_start: false,
+    pocket_id_url: null,
+    oauth2_proxy_url: null,
+};
+
+export function instanceSsoSettings(data: InstanceSettings | null | undefined): InstanceSsoSettings {
+    return data?.sso ?? DEFAULT_INSTANCE_SSO;
+}
 
 export type InstanceSsoUpdateInput = {
     sso_protect_apps_by_default?: boolean;
