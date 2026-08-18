@@ -253,6 +253,7 @@ class Application extends BaseModel
             $application->manual_webhook_secret_bitbucket ??= Str::random(40);
             $application->manual_webhook_secret_gitea ??= Str::random(40);
             $application->redirect ??= 'both';
+            $application->is_http_basic_auth_enabled ??= false;
         });
         static::addGlobalScope('withRelations', function ($builder) {
             $builder->withCount([

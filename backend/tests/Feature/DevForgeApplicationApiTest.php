@@ -188,6 +188,7 @@ it('generates traefik labels when application redirect is null', function () {
         'ports_exposes' => '3000',
     ]);
     $application->setAttribute('redirect', null);
+    $application->setAttribute('is_http_basic_auth_enabled', null);
     $application->load(['settings', 'destination.server.settings']);
 
     $labels = generateLabelsApplication($application);
