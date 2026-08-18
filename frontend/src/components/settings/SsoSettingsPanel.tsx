@@ -166,7 +166,7 @@ function SsoSettingsForm({
                     Le premier compte admin se crée sur{' '}
                     <a
                         class="link link-primary inline-flex items-center gap-1"
-                        href={setupUrl}
+                        href={setupUrl ?? undefined}
                         target="_blank"
                         rel="noreferrer"
                     >
