@@ -60,6 +60,10 @@ describe('OnboardingSsoStep', () => {
         expect(screen.getByText((content) => content.includes('DevForge démarre Pocket ID tout seul'))).toBeInTheDocument();
         expect(screen.queryByLabelText('Client ID')).not.toBeInTheDocument();
         expect(await screen.findByRole('link', { name: /Ouvrir Pocket ID/ })).toHaveAttribute('href', 'https://id.exemple.com');
+        expect(screen.getByRole('link', { name: 'https://id.exemple.com/setup' })).toHaveAttribute(
+            'href',
+            'https://id.exemple.com/setup',
+        );
 
         fireEvent.click(screen.getByRole('button', { name: 'Démarrer le SSO' }));
 

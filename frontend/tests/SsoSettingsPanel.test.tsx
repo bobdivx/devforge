@@ -60,6 +60,10 @@ describe('SsoSettingsPanel', () => {
         expect(await screen.findByText('SSO Pocket ID')).toBeInTheDocument();
         expect(await screen.findByText((content) => content.includes('fournisseur d’identité'))).toBeInTheDocument();
         expect(screen.queryByPlaceholderText('http://devforge-sso-proxy:4180/')).not.toBeInTheDocument();
+        expect(screen.getByRole('link', { name: 'https://id.exemple.com/setup' })).toHaveAttribute(
+            'href',
+            'https://id.exemple.com/setup',
+        );
         expect(screen.getByRole('link', { name: /Ouvrir Pocket ID/ })).toHaveAttribute('href', 'https://id.exemple.com');
 
         fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }));

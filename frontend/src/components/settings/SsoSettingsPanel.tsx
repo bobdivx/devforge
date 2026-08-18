@@ -141,13 +141,28 @@ function SsoSettingsForm({
                 (<a class="link link-primary" href="https://pocket-id.org/" target="_blank" rel="noreferrer">pocket-id.org</a>)
             </p>
             {sso.pocket_id_url ? (
-                <p class="text-sm">
-                    <a class="link link-primary inline-flex items-center gap-1" href={sso.pocket_id_url} target="_blank" rel="noreferrer">
-                        Ouvrir Pocket ID
-                        <ExternalLink class="size-3.5" aria-hidden />
-                    </a>
-                    <span class="ml-2 font-mono text-xs text-base-content/55">{sso.pocket_id_url}</span>
-                </p>
+                <div class="grid gap-1">
+                    <p class="text-sm">
+                        Le premier compte admin se crée sur{' '}
+                        <a
+                            class="link link-primary inline-flex items-center gap-1"
+                            href={`${sso.pocket_id_url.replace(/\/$/, '')}/setup`}
+                            target="_blank"
+                            rel="noreferrer"
+                        >
+                            {sso.pocket_id_url.replace(/\/$/, '')}/setup
+                            <ExternalLink class="size-3.5" aria-hidden />
+                        </a>
+                        . La page « Sign in » n’a pas encore de passkey : Authenticate y expire forcément.
+                    </p>
+                    <p class="text-sm">
+                        <a class="link link-primary inline-flex items-center gap-1" href={sso.pocket_id_url} target="_blank" rel="noreferrer">
+                            Ouvrir Pocket ID
+                            <ExternalLink class="size-3.5" aria-hidden />
+                        </a>
+                        <span class="ml-2 font-mono text-xs text-base-content/55">{sso.pocket_id_url}</span>
+                    </p>
+                </div>
             ) : (
                 <p class="text-sm text-warning">
                     Définissez le domaine de l’instance pour que DevForge publie Pocket ID.

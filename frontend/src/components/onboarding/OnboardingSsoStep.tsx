@@ -105,7 +105,15 @@ function OnboardingSsoForm({
         >
             <p class="text-sm text-base-content/65">
                 Les apps déployées pourront s’authentifier via Pocket ID (variables OIDC injectées automatiquement).
-                Après le démarrage, ouvrez Pocket ID pour enregistrer votre passkey (obligatoire pour WebAuthn).
+                Après le démarrage, ouvrez{' '}
+                {pocketIdUrl ? (
+                    <a class="link link-primary" href={`${pocketIdUrl.replace(/\/$/, '')}/setup`} target="_blank" rel="noreferrer">
+                        {pocketIdUrl.replace(/\/$/, '')}/setup
+                    </a>
+                ) : (
+                    'id.…/setup'
+                )}
+                {' '}pour créer le compte admin et enregistrer votre passkey. N’utilisez pas « Sign in » tant que cette étape n’est pas faite.
             </p>
             {pocketIdUrl && (
                 <p class="text-sm">

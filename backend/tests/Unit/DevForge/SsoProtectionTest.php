@@ -113,6 +113,40 @@ it('builds a dedicated traefik file with only the sso middleware', function () {
         ->toBe('http://devforge-sso-proxy:4180/');
 });
 
+it('adds http and https routers for the localhost sso stack', function () {
+    $server = Mockery::mock(Server::class);
+    $server->shouldReceive('isLocalhost')->andReturn(true);
+
+    $settings = new InstanceSettings([
+        'apps_wildcard_domain' => 'https://apps.exemple.com',
+        'sso_forward_auth_address' => 'http://devforge-sso-proxy:4180/',
+    ]);
+
+    $conf = SsoProtection::traefikDynamicConfiguration($settings, $server);
+
+    expect($conf['http']['routers'])->toHaveKeys([
+        'devforge-sso-pocket-id-http',
+        'devforge-sso-pocket-id',
+        'devforge-sso-proxy-http',
+        'devforge-sso-proxy',
+    ])
+        ->and($conf['http']['routers']['devforge-sso-pocket-id-http']['entryPoints'])->toBe(['http'])
+        ->and($conf['http']['routers']['devforge-sso-pocket-id-http'])->not->toHaveKey('middlewares')
+        ->and($conf['http']['routers']['devforge-sso-pocket-id']['entryPoints'])->toBe(['https'])
+        ->and($conf['http']['routers']['devforge-sso-pocket-id']['rule'])->toBe('Host(`id.apps.exemple.com`)')
+        ->and($conf['http']['services']['devforge-sso-pocket-id']['loadBalancer']['servers'][0]['url'])
+        ->toBe('http://devforge-sso-pocket-id:1411');
+});
+
+it('persists the encryption key without a trailing newline', function () {
+    $commands = SsoProtection::persistEncryptionKeyCommands('abc+/=');
+
+    expect($commands[0])->toContain('/sso/data')
+        ->and($commands[2])->toContain('chown -R 1000:1000')
+        ->and($commands[3])->toContain("echo '".base64_encode('abc+/=')."' | base64 -d")
+        ->and($commands[3])->toContain('/sso/encryption.key');
+});
+
 it('requires client id secret and base url before pocketid can be enabled', function () {
     $oauth = new OauthSetting([
         'provider' => 'pocketid',
@@ -147,7 +181,12 @@ it('builds compose for the managed pocket id stack', function () {
     expect($compose['name'])->toBe('devforge-sso')
         ->and($compose['services']['pocket-id']['environment']['APP_URL'])->toBe('https://id.apps.exemple.com')
         ->and($compose['services']['pocket-id']['environment']['STATIC_API_KEY'])->toBe('static-key')
-        ->and($compose['services']['oauth2-proxy']['container_name'])->toBe('devforge-sso-proxy')
+        ->and($compose['services']['oauth2-proxy']['image'])->toBe('quay.io/oauth2-proxy/oauth2-proxy:v7.8.2-alpine')
         ->and($compose['services']['oauth2-proxy']['environment']['OAUTH2_PROXY_CLIENT_ID'])->toBe('apps-id')
+        ->and($compose['services']['oauth2-proxy']['environment']['OAUTH2_PROXY_OIDC_ISSUER_URL'])->toBe('http://devforge-sso-pocket-id:1411')
+        ->and($compose['services']['pocket-id']['environment']['PUID'])->toBe('1000')
+        ->and($compose['services']['pocket-id']['environment']['PGID'])->toBe('1000')
+        ->and($compose['services']['pocket-id']['labels'])->toContain('traefik.enable=true')
+        ->and($compose['services']['pocket-id']['labels'])->toContain('traefik.http.routers.devforge-sso-pocket-id.rule=Host(`id.apps.exemple.com`)')
         ->and($compose['networks'])->toHaveKey('devforge');
 });

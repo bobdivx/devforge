@@ -26,7 +26,7 @@ class StartSsoStack
             return 'NO_DOMAIN';
         }
 
-        $settings = SsoProtection::ensureSecrets($settings);
+        $settings = $this->alignEncryptionKey($server, $settings);
         $urls = SsoProtection::publicUrls($settings);
         if ($urls === null) {
             return 'NO_DOMAIN';
@@ -37,7 +37,15 @@ class StartSsoStack
         $settings->sso_forward_auth_address = SsoProtection::DEFAULT_FORWARD_AUTH_ADDRESS;
         $settings->save();
 
-        $this->writeAndUp($server, $settings);
+        try {
+            $this->writeAndUp($server, $settings);
+        } catch (\Throwable $e) {
+            Log::warning('SSO stack failed to become healthy; resetting Pocket ID data and retrying.', [
+                'error' => $e->getMessage(),
+            ]);
+            instant_remote_process(SsoProtection::resetPocketIdDatabaseCommands(), $server);
+            $this->writeAndUp($server, $settings);
+        }
 
         try {
             $settings = app(ProvisionPocketIdClients::class)->handle($settings->fresh());
@@ -62,8 +70,8 @@ class StartSsoStack
         $yaml = Yaml::dump($compose, 12, 2);
         $base64 = base64_encode($yaml);
 
-        $commands = collect([
-            "mkdir -p {$path}/data",
+        $commands = collect(SsoProtection::persistEncryptionKeyCommands((string) $settings->sso_encryption_key));
+        $commands = $commands->merge([
             "cd {$path}",
             "echo '{$base64}' | base64 -d | tee {$path}/docker-compose.yml > /dev/null",
         ]);
@@ -74,5 +82,22 @@ class StartSsoStack
         $commands = $commands->merge(connectProxyToNetworks($server));
 
         instant_remote_process($commands, $server);
+    }
+
+    private function alignEncryptionKey(Server $server, InstanceSettings $settings): InstanceSettings
+    {
+        $keyFile = SsoProtection::encryptionKeyFilePath();
+        $hostKey = trim((string) instant_remote_process(
+            ["cat {$keyFile} 2>/dev/null || true"],
+            $server,
+            throwError: false,
+        ));
+
+        if ($hostKey !== '') {
+            $settings->sso_encryption_key = $hostKey;
+            $settings->save();
+        }
+
+        return SsoProtection::ensureSecrets($settings->fresh() ?? $settings);
     }
 }

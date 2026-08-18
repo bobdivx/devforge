@@ -50,6 +50,43 @@ class SsoProtection
         return rtrim((string) config('constants.coolify.base_config_path'), '/').'/sso';
     }
 
+    public static function encryptionKeyFilePath(): string
+    {
+        return self::stackPath().'/encryption.key';
+    }
+
+    /**
+     * Host commands that persist the Pocket ID encryption key without a trailing newline.
+     *
+     * @return list<string>
+     */
+    public static function persistEncryptionKeyCommands(string $key): array
+    {
+        $path = self::encryptionKeyFilePath();
+        $base64 = base64_encode($key);
+
+        return [
+            'mkdir -p '.self::stackPath().'/data/application-images',
+            'chmod -R ug+rwX '.self::stackPath().'/data',
+            'chown -R 1000:1000 '.self::stackPath().'/data || true',
+            "echo '{$base64}' | base64 -d | tee {$path} > /dev/null",
+        ];
+    }
+
+    /**
+     * Host commands that drop the SQLite files so Pocket ID can boot with a new key.
+     *
+     * @return list<string>
+     */
+    public static function resetPocketIdDatabaseCommands(): array
+    {
+        $data = self::stackPath().'/data';
+
+        return [
+            "rm -f {$data}/pocket-id.db {$data}/pocket-id.db-shm {$data}/pocket-id.db-wal",
+        ];
+    }
+
     public static function canStartStack(?InstanceSettings $settings = null): bool
     {
         if (function_exists('isCloud') && isCloud()) {
@@ -377,6 +414,18 @@ class SsoProtection
         $ssoHost = parse_url($urls['oauth2_proxy'], PHP_URL_HOST);
         $https = $urls['scheme'] === 'https';
 
+        // HTTP routers stay live (no HTTPS redirect): Cloudflare Flexible SSL
+        // fetches origin :80, and a redirect-to-https loop would 404 the public hostname.
+        $pocketHttpRouter = [
+            'entryPoints' => ['http'],
+            'service' => 'devforge-sso-pocket-id',
+            'rule' => "Host(`{$pocketHost}`)",
+        ];
+        $ssoHttpRouter = [
+            'entryPoints' => ['http'],
+            'service' => 'devforge-sso-proxy',
+            'rule' => "Host(`{$ssoHost}`)",
+        ];
         $pocketRouter = [
             'entryPoints' => [$https ? 'https' : 'http'],
             'service' => 'devforge-sso-pocket-id',
@@ -394,10 +443,17 @@ class SsoProtection
             $ssoRouter['tls'] = $tls;
         }
 
-        $conf['http']['routers'] = [
-            'devforge-sso-pocket-id' => $pocketRouter,
-            'devforge-sso-proxy' => $ssoRouter,
-        ];
+        $conf['http']['routers'] = $https
+            ? [
+                'devforge-sso-pocket-id-http' => $pocketHttpRouter,
+                'devforge-sso-pocket-id' => $pocketRouter,
+                'devforge-sso-proxy-http' => $ssoHttpRouter,
+                'devforge-sso-proxy' => $ssoRouter,
+            ]
+            : [
+                'devforge-sso-pocket-id' => $pocketRouter,
+                'devforge-sso-proxy' => $ssoRouter,
+            ];
         $conf['http']['services'] = [
             'devforge-sso-pocket-id' => [
                 'loadBalancer' => [
