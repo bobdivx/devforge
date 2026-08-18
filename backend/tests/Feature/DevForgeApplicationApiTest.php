@@ -154,6 +154,7 @@ it('creates an application from a github repository', function () {
             'git_branch' => 'main',
             'build_pack' => 'nixpacks',
             'instant_deploy' => false,
+            'domains' => 'https://demo.example.com',
         ])
         ->assertCreated()
         ->assertJsonPath('data.type', 'application')
@@ -168,6 +169,7 @@ it('creates an application from a github repository', function () {
     $application = \App\Models\Application::query()->where('uuid', $uuid)->first();
     expect($application)->not->toBeNull()
         ->and($application->name)->toBe('demo-app')
+        ->and($application->redirect)->toBe('both')
         ->and($application->readiness)->not->toBeNull()
         ->and($application->readiness->autonomous_enabled)->toBeTrue();
 });
