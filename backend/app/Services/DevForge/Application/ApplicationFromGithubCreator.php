@@ -16,6 +16,7 @@ use App\Services\DevForge\CurrentTeamResources;
 use App\Services\DevForge\DeploymentTargetData;
 use App\Services\DevForge\Github\GithubAppCatalog;
 use App\Services\DevForge\Readiness\ApplicationReadinessService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -88,54 +89,70 @@ class ApplicationFromGithubCreator
             ? trim((string) $validated['name'])
             : generate_application_name($validated['git_repository'], $validated['git_branch']);
 
-        $application = Application::create([
-            'name' => $name,
-            'repository_project_id' => $repositoryId,
-            'git_repository' => $validated['git_repository'],
-            'git_branch' => $validated['git_branch'],
-            'build_pack' => $buildPack,
-            'ports_exposes' => $portsExposes,
-            'environment_id' => $environment->id,
-            'destination_id' => $destination->id,
-            'destination_type' => $destination->getMorphClass(),
-            'source_id' => $githubApp->id,
-            'source_type' => $githubApp->getMorphClass(),
-        ]);
-
-        $server = $destination->server;
-        abort_unless($server !== null, 422, 'Destination server not found.');
-        $server->loadMissing('settings');
-        $this->assignDefaultDomains(
-            $application,
-            $server,
-            is_string($validated['domains'] ?? null) ? trim((string) $validated['domains']) : '',
+        $envImport = null;
+        $application = DB::transaction(function () use (
+            $validated,
+            $repositoryId,
             $buildPack,
-        );
+            $portsExposes,
+            $environment,
+            $destination,
+            $githubApp,
+            $name,
+            $envContents,
+            &$envImport,
+        ): Application {
+            $application = Application::create([
+                'name' => $name,
+                'repository_project_id' => $repositoryId,
+                'git_repository' => $validated['git_repository'],
+                'git_branch' => $validated['git_branch'],
+                'build_pack' => $buildPack,
+                'ports_exposes' => $portsExposes,
+                'redirect' => 'both',
+                'environment_id' => $environment->id,
+                'destination_id' => $destination->id,
+                'destination_type' => $destination->getMorphClass(),
+                'source_id' => $githubApp->id,
+                'source_type' => $githubApp->getMorphClass(),
+            ]);
 
-        app(ApplicationReadinessService::class)->ensureFor($application, autonomousEnabled: true);
+            $server = $destination->server;
+            abort_unless($server !== null, 422, 'Destination server not found.');
+            $server->loadMissing('settings');
+            $this->assignDefaultDomains(
+                $application,
+                $server,
+                is_string($validated['domains'] ?? null) ? trim((string) $validated['domains']) : '',
+                $buildPack,
+            );
 
-        try {
-            app(ApplicationDeploySettingsReconciler::class)->reconcile($application);
-            $application->refresh();
-        } catch (Throwable) {
-            // Detection must never block app creation.
-        }
+            app(ApplicationReadinessService::class)->ensureFor($application, autonomousEnabled: true);
+
+            try {
+                app(ApplicationDeploySettingsReconciler::class)->reconcile($application);
+                $application->refresh();
+            } catch (Throwable) {
+                // Detection must never block app creation.
+            }
+
+            if ($envContents !== '') {
+                $imported = app(ApplicationEnvironmentVariableCatalog::class)->import($application, [
+                    'contents' => $envContents,
+                    'is_preview' => false,
+                ]);
+                $envImport = [
+                    'created' => $imported['created'],
+                    'updated' => $imported['updated'],
+                    'skipped' => $imported['skipped'],
+                ];
+            }
+
+            return $application;
+        });
 
         if ($buildPack === BuildPackTypes::DOCKERCOMPOSE->value) {
             LoadComposeFile::dispatch($application);
-        }
-
-        $envImport = null;
-        if ($envContents !== '') {
-            $imported = app(ApplicationEnvironmentVariableCatalog::class)->import($application, [
-                'contents' => $envContents,
-                'is_preview' => false,
-            ]);
-            $envImport = [
-                'created' => $imported['created'],
-                'updated' => $imported['updated'],
-                'skipped' => $imported['skipped'],
-            ];
         }
 
         if ($instantDeploy) {

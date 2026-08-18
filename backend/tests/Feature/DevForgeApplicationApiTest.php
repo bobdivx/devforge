@@ -52,6 +52,8 @@ beforeEach(function () {
     $this->server = Server::factory()->create([
         'team_id' => $this->team->id,
     ]);
+    $this->server->proxy->set('type', 'TRAEFIK');
+    $this->server->save();
     $this->destination = $this->server->standaloneDockers()->firstOrFail();
     $this->project = Project::factory()->create(['team_id' => $this->team->id]);
     $this->environment = Environment::factory()->create(['project_id' => $this->project->id]);
@@ -168,8 +170,30 @@ it('creates an application from a github repository', function () {
     $application = \App\Models\Application::query()->where('uuid', $uuid)->first();
     expect($application)->not->toBeNull()
         ->and($application->name)->toBe('demo-app')
+        ->and($application->redirect)->toBe('both')
         ->and($application->readiness)->not->toBeNull()
         ->and($application->readiness->autonomous_enabled)->toBeTrue();
+});
+
+it('generates traefik labels when application redirect is null', function () {
+    $application = \App\Models\Application::factory()->create([
+        'name' => 'labels-app',
+        'environment_id' => $this->environment->id,
+        'destination_id' => $this->destination->id,
+        'destination_type' => StandaloneDocker::class,
+        'git_repository' => 'acme/demo-app',
+        'git_branch' => 'main',
+        'build_pack' => 'nixpacks',
+        'fqdn' => 'https://demo.example.com',
+        'ports_exposes' => '3000',
+    ]);
+    $application->setAttribute('redirect', null);
+    $application->load(['settings', 'destination.server.settings']);
+
+    $labels = generateLabelsApplication($application);
+
+    expect($labels)->not->toBeEmpty()
+        ->and(collect($labels)->contains('traefik.enable=true'))->toBeTrue();
 });
 
 it('imports dotenv contents before the first deployment when creating an application', function () {

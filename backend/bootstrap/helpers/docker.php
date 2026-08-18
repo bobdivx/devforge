@@ -417,8 +417,9 @@ function generateServiceSpecificFqdns(ServiceApplication|Application $resource)
     return $payload;
 }
 
-function fqdnLabelsForCaddy(string $network, string $uuid, Collection $domains, bool $is_force_https_enabled = false, $onlyPort = null, ?Collection $serviceLabels = null, ?bool $is_gzip_enabled = true, ?bool $is_stripprefix_enabled = true, ?string $service_name = null, ?string $image = null, string $redirect_direction = 'both', ?string $predefinedPort = null, bool $is_http_basic_auth_enabled = false, ?string $http_basic_auth_username = null, ?string $http_basic_auth_password = null)
+function fqdnLabelsForCaddy(string $network, string $uuid, Collection $domains, bool $is_force_https_enabled = false, $onlyPort = null, ?Collection $serviceLabels = null, ?bool $is_gzip_enabled = true, ?bool $is_stripprefix_enabled = true, ?string $service_name = null, ?string $image = null, ?string $redirect_direction = 'both', ?string $predefinedPort = null, bool $is_http_basic_auth_enabled = false, ?string $http_basic_auth_username = null, ?string $http_basic_auth_password = null)
 {
+    $redirect_direction ??= 'both';
     $labels = collect([]);
     if ($serviceLabels) {
         $labels->push("caddy_ingress_network={$uuid}");
@@ -479,8 +480,9 @@ function fqdnLabelsForCaddy(string $network, string $uuid, Collection $domains, 
     return $labels->sort();
 }
 
-function fqdnLabelsForTraefik(string $uuid, Collection $domains, bool $is_force_https_enabled = false, $onlyPort = null, ?Collection $serviceLabels = null, ?bool $is_gzip_enabled = true, ?bool $is_stripprefix_enabled = true, ?string $service_name = null, bool $generate_unique_uuid = false, ?string $image = null, string $redirect_direction = 'both', bool $is_http_basic_auth_enabled = false, ?string $http_basic_auth_username = null, ?string $http_basic_auth_password = null)
+function fqdnLabelsForTraefik(string $uuid, Collection $domains, bool $is_force_https_enabled = false, $onlyPort = null, ?Collection $serviceLabels = null, ?bool $is_gzip_enabled = true, ?bool $is_stripprefix_enabled = true, ?string $service_name = null, bool $generate_unique_uuid = false, ?string $image = null, ?string $redirect_direction = 'both', bool $is_http_basic_auth_enabled = false, ?string $http_basic_auth_username = null, ?string $http_basic_auth_password = null)
 {
+    $redirect_direction ??= 'both';
     $labels = collect([]);
     $labels->push('traefik.enable=true');
     if ($is_gzip_enabled) {
@@ -736,6 +738,10 @@ function generateLabelsApplication(Application $application, ?ApplicationPreview
     $ssoServiceLabels = SsoProtection::shouldProtectApplication($application)
         ? collect(SsoProtection::traefikMiddlewareLabels())
         : null;
+    $redirectDirection = match ($application->redirect) {
+        'www', 'non-www', 'both' => $application->redirect,
+        default => 'both',
+    };
     if ($pull_request_id === 0) {
         if ($application->fqdn) {
             $domains = str(data_get($application, 'fqdn'))->explode(',');
@@ -751,7 +757,7 @@ function generateLabelsApplication(Application $application, ?ApplicationPreview
                             is_force_https_enabled: $application->isForceHttpsEnabled(),
                             is_gzip_enabled: $application->isGzipEnabled(),
                             is_stripprefix_enabled: $application->isStripprefixEnabled(),
-                            redirect_direction: $application->redirect,
+                            redirect_direction: $redirectDirection,
                             is_http_basic_auth_enabled: $application->is_http_basic_auth_enabled,
                             http_basic_auth_username: $application->http_basic_auth_username,
                             http_basic_auth_password: $application->http_basic_auth_password,
@@ -766,7 +772,7 @@ function generateLabelsApplication(Application $application, ?ApplicationPreview
                             is_force_https_enabled: $application->isForceHttpsEnabled(),
                             is_gzip_enabled: $application->isGzipEnabled(),
                             is_stripprefix_enabled: $application->isStripprefixEnabled(),
-                            redirect_direction: $application->redirect,
+                            redirect_direction: $redirectDirection,
                             is_http_basic_auth_enabled: $application->is_http_basic_auth_enabled,
                             http_basic_auth_username: $application->http_basic_auth_username,
                             http_basic_auth_password: $application->http_basic_auth_password,
@@ -782,7 +788,7 @@ function generateLabelsApplication(Application $application, ?ApplicationPreview
                     is_force_https_enabled: $application->isForceHttpsEnabled(),
                     is_gzip_enabled: $application->isGzipEnabled(),
                     is_stripprefix_enabled: $application->isStripprefixEnabled(),
-                    redirect_direction: $application->redirect,
+                    redirect_direction: $redirectDirection,
                     is_http_basic_auth_enabled: $application->is_http_basic_auth_enabled,
                     http_basic_auth_username: $application->http_basic_auth_username,
                     http_basic_auth_password: $application->http_basic_auth_password,
@@ -795,7 +801,7 @@ function generateLabelsApplication(Application $application, ?ApplicationPreview
                     is_force_https_enabled: $application->isForceHttpsEnabled(),
                     is_gzip_enabled: $application->isGzipEnabled(),
                     is_stripprefix_enabled: $application->isStripprefixEnabled(),
-                    redirect_direction: $application->redirect,
+                    redirect_direction: $redirectDirection,
                     is_http_basic_auth_enabled: $application->is_http_basic_auth_enabled,
                     http_basic_auth_username: $application->http_basic_auth_username,
                     http_basic_auth_password: $application->http_basic_auth_password,
