@@ -59,7 +59,7 @@ describe('SsoSettingsPanel', () => {
         render(<SsoSettingsPanel permissions={{ ...bootstrapData.permissions, instance_admin: true }} />);
 
         expect(await screen.findByText('SSO Pocket ID')).toBeInTheDocument();
-        expect(await screen.findByText((content) => content.includes('fournisseur d’identité'))).toBeInTheDocument();
+        expect(await screen.findByText((content) => content.includes('moyen de connexion'))).toBeInTheDocument();
         expect(screen.queryByPlaceholderText('http://devforge-sso-proxy:4180/')).not.toBeInTheDocument();
         expect(screen.getByRole('link', { name: 'https://id.exemple.com/setup' })).toHaveAttribute(
             'href',
@@ -68,6 +68,14 @@ describe('SsoSettingsPanel', () => {
         expect(screen.getByRole('link', { name: /Ouvrir Pocket ID/ })).toHaveAttribute('href', 'https://id.exemple.com');
         expect(screen.getByRole('button', { name: 'Configurer le SSO' })).toBeInTheDocument();
         expect(screen.getByLabelText('État du SSO')).toBeInTheDocument();
+        expect(screen.getByText('SSO dans tes apps')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Prompt Cursor' })).toBeInTheDocument();
+        expect(screen.queryByText('Prompt Cursor pour tes apps')).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Prompt Cursor' }));
+        expect(screen.getByText('Prompt Cursor pour tes apps')).toBeInTheDocument();
+        expect(screen.getByText((content) => content.includes('sso_linked_at'))).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Copier le prompt' })).toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }));
 

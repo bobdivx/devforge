@@ -354,7 +354,7 @@ export function ApplicationAdvancedSettingsPanel({ applicationUuid, canAct }: Pr
                                         <option value="disabled">Désactivé</option>
                                     </select>
                                     <span class="text-xs text-base-content/50">
-                                        L’app reçoit aussi les variables OIDC Pocket ID. Redéployez après modification.
+                                        Barrière Traefik (passkey avant l’app). Pour le bouton SSO dans l’app, voir Infrastructure → SSO → Prompt Cursor. Redéployez après modification.
                                     </span>
                                 </label>
                             </div>

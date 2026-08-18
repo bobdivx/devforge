@@ -5,6 +5,7 @@ import { domainApi, instanceSsoSettings, type InstanceSettings, type InstanceSso
 import { useApiQuery } from '../../lib/use-api-query';
 import { Card } from '../ui/Card';
 import { DataState } from '../ui/DataState';
+import { SsoAppIdentityGuide } from './SsoAppIdentityGuide';
 
 type SsoSettingsPanelProps = {
     permissions: BootstrapPermissions;
@@ -154,8 +155,8 @@ function SsoSettingsForm({
             }}
         >
             <p class="text-sm text-base-content/65">
-                Pocket ID est le fournisseur d’identité des apps que vous déployez.
-                Chaque app reçoit au déploiement les variables OIDC (issuer, client id/secret) pour s’y connecter.
+                Pocket ID est un moyen de connexion pour tes apps, pas le seul.
+                Le login existant reste ; dès qu’un utilisateur lie le SSO, c’est sa façon de s’identifier.
                 {' '}
                 (<a class="link link-primary" href="https://pocket-id.org/" target="_blank" rel="noreferrer">pocket-id.org</a>)
             </p>
@@ -190,7 +191,7 @@ function SsoSettingsForm({
             )}
             <ToggleField
                 label="Protéger les applications par défaut"
-                description="Les apps déployées exigent une passkey Pocket ID avant d’être accessibles."
+                description="Barrière Traefik optionnelle : l’app n’est accessible qu’après une passkey. N’active pas ça si l’app doit garder son propre login."
                 checked={protectApps}
                 disabled={!canEdit || saving}
                 onChange={setProtectApps}
@@ -231,6 +232,7 @@ function SsoSettingsForm({
                     </p>
                 </div>
             )}
+            <SsoAppIdentityGuide sso={sso} />
         </form>
     );
 }

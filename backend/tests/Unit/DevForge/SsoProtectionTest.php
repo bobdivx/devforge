@@ -49,6 +49,17 @@ it('injects standard oidc variables for deployed apps', function () {
         ->and($envs->get('AUTH_POCKET_ID_ISSUER'))->toBe('https://id.apps.exemple.com');
 });
 
+it('documents the same oidc env keys that are injected into apps', function () {
+    $settings = new InstanceSettings([
+        'apps_wildcard_domain' => 'https://apps.exemple.com',
+        'sso_apps_client_id' => 'apps-id',
+        'sso_apps_client_secret' => 'apps-secret',
+    ]);
+
+    expect(array_keys(SsoProtection::oidcEnvironmentForApps($settings)))
+        ->toBe(SsoProtection::appIdentityContract()['oidc_env_keys']);
+});
+
 it('does not overwrite an app-defined oidc client id', function () {
     $settings = new InstanceSettings([
         'apps_wildcard_domain' => 'https://apps.exemple.com',
@@ -108,7 +119,8 @@ it('builds the traefik forwardauth middleware from the stored address', function
 
     expect($middleware['forwardAuth']['address'])->toBe('http://custom-proxy:4180/')
         ->and($middleware['forwardAuth']['trustForwardHeader'])->toBeTrue()
-        ->and($middleware['forwardAuth']['authResponseHeaders'])->toContain('X-Auth-Request-Email');
+        ->and($middleware['forwardAuth']['authResponseHeaders'])->toContain('X-Auth-Request-Email')
+        ->and($middleware['forwardAuth']['authResponseHeaders'])->toContain('X-Auth-Request-Groups');
 });
 
 it('builds a dedicated traefik file with only the sso middleware', function () {

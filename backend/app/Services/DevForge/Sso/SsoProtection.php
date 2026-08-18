@@ -325,6 +325,42 @@ class SsoProtection
     }
 
     /**
+     * Contract the deployed app should use: optional Pocket ID login alongside existing auth.
+     *
+     * @return array{
+     *     strategy: string,
+     *     logout_path: string,
+     *     headers: array{email: string, user: string, name: string, groups: string},
+     *     oidc_env_keys: list<string>
+     * }
+     */
+    public static function appIdentityContract(): array
+    {
+        return [
+            'strategy' => 'oidc_login_optional',
+            'logout_path' => '/oauth2/sign_out',
+            'headers' => [
+                'email' => 'X-Auth-Request-Email',
+                'user' => 'X-Auth-Request-User',
+                'name' => 'X-Auth-Request-Preferred-Username',
+                'groups' => 'X-Auth-Request-Groups',
+            ],
+            'oidc_env_keys' => [
+                'OIDC_ISSUER',
+                'OIDC_ISSUER_URL',
+                'OIDC_DISCOVERY_URL',
+                'OIDC_CLIENT_ID',
+                'OIDC_CLIENT_SECRET',
+                'OIDC_SCOPES',
+                'POCKET_ID_URL',
+                'AUTH_POCKET_ID_ID',
+                'AUTH_POCKET_ID_SECRET',
+                'AUTH_POCKET_ID_ISSUER',
+            ],
+        ];
+    }
+
+    /**
      * @param  Collection<string|int, mixed>  $envs
      * @param  Collection<int, mixed>|null  $userVariables
      * @return Collection<string|int, mixed>
@@ -386,6 +422,7 @@ class SsoProtection
                     'X-Auth-Request-User',
                     'X-Auth-Request-Email',
                     'X-Auth-Request-Preferred-Username',
+                    'X-Auth-Request-Groups',
                     'Authorization',
                 ],
             ],

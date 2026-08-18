@@ -455,6 +455,18 @@ export type InstanceSettings = {
     sso?: InstanceSsoSettings;
 };
 
+export type InstanceSsoAppIdentity = {
+    strategy: 'oidc_login_optional' | 'forward_auth_headers';
+    logout_path: string;
+    headers: {
+        email: string;
+        user: string;
+        name: string;
+        groups: string;
+    };
+    oidc_env_keys: string[];
+};
+
 export type InstanceSsoSettings = {
     sso_protect_apps_by_default: boolean;
     sso_forward_auth_address: string | null;
@@ -468,6 +480,7 @@ export type InstanceSsoSettings = {
     can_start: boolean;
     pocket_id_url: string | null;
     oauth2_proxy_url: string | null;
+    app_identity?: InstanceSsoAppIdentity;
 };
 
 export const DEFAULT_INSTANCE_SSO: InstanceSsoSettings = {

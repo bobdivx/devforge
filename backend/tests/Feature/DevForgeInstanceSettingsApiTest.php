@@ -174,7 +174,9 @@ it('exposes and updates sso settings', function () {
         ->assertJsonPath('data.sso.apps_oidc_configured', false)
         ->assertJsonPath('data.sso.middleware_name', 'devforge-sso-auth')
         ->assertJsonPath('data.sso.managed_by_devforge', true)
-        ->assertJsonPath('data.sso.default_forward_auth_address', 'http://devforge-sso-proxy:4180/');
+        ->assertJsonPath('data.sso.default_forward_auth_address', 'http://devforge-sso-proxy:4180/')
+        ->assertJsonPath('data.sso.app_identity.strategy', 'oidc_login_optional')
+        ->assertJsonPath('data.sso.app_identity.headers.email', 'X-Auth-Request-Email');
 
     $this->actingAs($this->user)
         ->withSession($this->session)

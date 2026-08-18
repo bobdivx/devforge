@@ -143,6 +143,7 @@ class InstanceSettingsPresenter
                 'can_start' => false,
                 'pocket_id_url' => null,
                 'oauth2_proxy_url' => null,
+                'app_identity' => SsoProtection::appIdentityContract(),
             ];
         }
     }
@@ -167,6 +168,7 @@ class InstanceSettingsPresenter
             'can_start' => SsoProtection::canStartStack($this->settings),
             'pocket_id_url' => $this->settings->sso_pocket_id_url ?: ($urls['pocket_id'] ?? null),
             'oauth2_proxy_url' => $this->settings->sso_oauth2_proxy_url ?: ($urls['oauth2_proxy'] ?? null),
+            'app_identity' => SsoProtection::appIdentityContract(),
         ];
     }
 
