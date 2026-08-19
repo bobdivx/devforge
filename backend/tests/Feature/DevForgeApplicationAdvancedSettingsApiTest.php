@@ -44,6 +44,8 @@ it('returns application advanced settings', function () {
         ->assertSuccessful()
         ->assertJsonPath('data.max_restart_count', 10)
         ->assertJsonPath('data.is_force_https_enabled', false)
+        ->assertJsonPath('data.has_own_user_system', null)
+        ->assertJsonPath('data.sso_protection_active', false)
         ->assertJsonPath('data.skip_puppeteer_browser_download', true)
         ->assertJsonPath('data.capabilities.dockercompose', false)
         ->assertJsonStructure([
@@ -90,6 +92,45 @@ it('updates application advanced settings', function () {
         ->and((bool) $fresh->settings->is_force_https_enabled)->toBeTrue()
         ->and((int) $fresh->max_restart_count)->toBe(5)
         ->and((int) $fresh->settings->stop_grace_period)->toBe(30);
+});
+
+it('enables pocket id access protection for apps without a user system', function () {
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson("/api/devforge/v1/applications/{$this->application->uuid}/advanced", [
+            'has_own_user_system' => false,
+            'is_sso_protected' => true,
+            'redeploy' => false,
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.has_own_user_system', false)
+        ->assertJsonPath('data.is_sso_protected', true)
+        ->assertJsonPath('data.message', 'Accès Pocket ID mis à jour.');
+
+    $fresh = $this->application->fresh();
+
+    expect($fresh->has_own_user_system)->toBeFalse()
+        ->and($fresh->is_sso_protected)->toBeTrue();
+});
+
+it('turns off pocket id access protection when the app has its own user system', function () {
+    $this->application->update([
+        'has_own_user_system' => false,
+        'is_sso_protected' => true,
+    ]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->putJson("/api/devforge/v1/applications/{$this->application->uuid}/advanced", [
+            'has_own_user_system' => true,
+            'is_sso_protected' => true,
+            'redeploy' => false,
+        ])
+        ->assertSuccessful()
+        ->assertJsonPath('data.has_own_user_system', true)
+        ->assertJsonPath('data.is_sso_protected', false);
+
+    expect($this->application->fresh()->is_sso_protected)->toBeFalse();
 });
 
 it('rejects log drain when server does not support it', function () {

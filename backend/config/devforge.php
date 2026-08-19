@@ -5,6 +5,14 @@ $devforgeEnabled = env('DEVFORGE_ENABLED', true);
 return [
     'enabled' => $devforgeEnabled,
 
+    /*
+    | Catalogue public des listings officiels (schéma JSON).
+    | Les fiches publiées depuis DevForge vivent en base ; ce dépôt documente le format.
+    */
+    'store' => [
+        'catalog_repository' => env('DEVFORGE_STORE_CATALOG', 'bobdivx/devforge-store'),
+    ],
+
     'agents_enabled' => env('DEVFORGE_AGENTS_ENABLED', $devforgeEnabled),
 
     /*

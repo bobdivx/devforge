@@ -3,37 +3,15 @@
 namespace App\Services\DevForge\Application;
 
 use App\Models\Application;
+use App\Services\DevForge\Sso\SsoProtection;
 use Illuminate\Validation\ValidationException;
 
 class ApplicationAdvancedSettingsCatalog
 {
+    public function __construct(private readonly ApplicationDomainService $applicationDomainService) {}
+
     /**
-     * @return array{
-     *     disable_build_cache: bool,
-     *     inject_build_args_to_dockerfile: bool,
-     *     include_source_commit_in_build: bool,
-     *     skip_puppeteer_browser_download: bool,
-     *     is_consistent_container_name_enabled: bool,
-     *     is_auto_deploy_enabled: bool,
-     *     is_image_auto_update_enabled: bool,
-     *     is_git_submodules_enabled: bool,
-     *     is_git_lfs_enabled: bool,
-     *     is_git_shallow_clone_enabled: bool,
-     *     is_pr_deployments_public_enabled: bool,
-     *     is_force_https_enabled: bool,
-     *     is_gzip_enabled: bool,
-     *     is_stripprefix_enabled: bool,
-     *     is_log_drain_enabled: bool,
-     *     connect_to_docker_network: bool,
-     *     stop_grace_period: int|null,
-     *     max_restart_count: int,
-     *     capabilities: array{
-     *         git_based: bool,
-     *         dockercompose: bool,
-     *         dockerimage: bool,
-     *         log_drain_server: bool
-     *     }
-     * }
+     * @return array<string, mixed>
      */
     public function show(Application $application): array
     {
@@ -42,38 +20,15 @@ class ApplicationAdvancedSettingsCatalog
 
     /**
      * @param  array<string, mixed>  $input
-     * @return array{
-     *     disable_build_cache: bool,
-     *     inject_build_args_to_dockerfile: bool,
-     *     include_source_commit_in_build: bool,
-     *     skip_puppeteer_browser_download: bool,
-     *     is_consistent_container_name_enabled: bool,
-     *     is_auto_deploy_enabled: bool,
-     *     is_image_auto_update_enabled: bool,
-     *     is_git_submodules_enabled: bool,
-     *     is_git_lfs_enabled: bool,
-     *     is_git_shallow_clone_enabled: bool,
-     *     is_pr_deployments_public_enabled: bool,
-     *     is_force_https_enabled: bool,
-     *     is_gzip_enabled: bool,
-     *     is_stripprefix_enabled: bool,
-     *     is_log_drain_enabled: bool,
-     *     connect_to_docker_network: bool,
-     *     stop_grace_period: int|null,
-     *     max_restart_count: int,
-     *     capabilities: array{
-     *         git_based: bool,
-     *         dockercompose: bool,
-     *         dockerimage: bool,
-     *         log_drain_server: bool
-     *     },
-     *     message: string
-     * }
+     * @return array<string, mixed>
      */
     public function update(Application $application, array $input): array
     {
         $settings = $application->settings;
         abort_unless($settings !== null, 404);
+
+        $shouldRedeploy = (bool) ($input['redeploy'] ?? false);
+        unset($input['redeploy']);
 
         $validated = validator($input, [
             'disable_build_cache' => ['sometimes', 'boolean'],
@@ -90,6 +45,7 @@ class ApplicationAdvancedSettingsCatalog
             'is_force_https_enabled' => ['sometimes', 'boolean'],
             'is_gzip_enabled' => ['sometimes', 'boolean'],
             'is_stripprefix_enabled' => ['sometimes', 'boolean'],
+            'has_own_user_system' => ['sometimes', 'nullable', 'boolean'],
             'is_sso_protected' => ['sometimes', 'nullable', 'boolean'],
             'is_log_drain_enabled' => ['sometimes', 'boolean'],
             'connect_to_docker_network' => ['sometimes', 'boolean'],
@@ -118,14 +74,17 @@ class ApplicationAdvancedSettingsCatalog
             }
         }
 
-        $resetLabels = false;
-        if (array_key_exists('is_sso_protected', $validated)) {
-            $incomingSso = $validated['is_sso_protected'];
-            $currentSso = $application->is_sso_protected;
-            if ($incomingSso !== $currentSso) {
-                $resetLabels = true;
-            }
+        $accessFields = ['has_own_user_system', 'is_sso_protected'];
+        $accessChanged = false;
+
+        if (array_key_exists('has_own_user_system', $validated) && $validated['has_own_user_system'] !== $application->has_own_user_system) {
+            $accessChanged = true;
         }
+        if (array_key_exists('is_sso_protected', $validated) && $validated['is_sso_protected'] !== $application->is_sso_protected) {
+            $accessChanged = true;
+        }
+
+        $resetLabels = $accessChanged;
         foreach (['is_force_https_enabled', 'is_gzip_enabled', 'is_stripprefix_enabled'] as $proxyFlag) {
             if (
                 array_key_exists($proxyFlag, $validated)
@@ -165,8 +124,8 @@ class ApplicationAdvancedSettingsCatalog
 
         $settings->save();
 
-        if (array_key_exists('is_sso_protected', $validated)) {
-            $application->is_sso_protected = $validated['is_sso_protected'];
+        if (array_key_exists('has_own_user_system', $validated) || array_key_exists('is_sso_protected', $validated)) {
+            $this->applyAccessSettings($application, $validated);
             $application->save();
         }
 
@@ -175,43 +134,53 @@ class ApplicationAdvancedSettingsCatalog
             $application->save();
         }
 
+        $fresh = $application->fresh(['settings', 'destination.server']);
+        abort_unless($fresh instanceof Application, 404);
+
         if ($resetLabels) {
-            $this->resetDefaultLabels($application->fresh(['settings']));
+            $this->resetDefaultLabels($fresh);
         }
 
-        return [
-            ...$this->present($application->fresh(['settings', 'destination.server'])),
-            'message' => 'Paramètres avancés mis à jour.',
+        $accessOnly = collect(array_keys($validated))->diff($accessFields)->isEmpty();
+        $payload = [
+            ...$this->present($fresh->fresh(['settings', 'destination.server']) ?? $fresh),
+            'message' => $accessOnly ? 'Accès Pocket ID mis à jour.' : 'Paramètres avancés mis à jour.',
+            'redeploy' => null,
         ];
+
+        if ($shouldRedeploy && $accessChanged) {
+            $payload['redeploy'] = $this->applicationDomainService->queueRestart($fresh);
+        }
+
+        return $payload;
     }
 
     /**
-     * @return array{
-     *     disable_build_cache: bool,
-     *     inject_build_args_to_dockerfile: bool,
-     *     include_source_commit_in_build: bool,
-     *     skip_puppeteer_browser_download: bool,
-     *     is_consistent_container_name_enabled: bool,
-     *     is_auto_deploy_enabled: bool,
-     *     is_image_auto_update_enabled: bool,
-     *     is_git_submodules_enabled: bool,
-     *     is_git_lfs_enabled: bool,
-     *     is_git_shallow_clone_enabled: bool,
-     *     is_pr_deployments_public_enabled: bool,
-     *     is_force_https_enabled: bool,
-     *     is_gzip_enabled: bool,
-     *     is_stripprefix_enabled: bool,
-     *     is_log_drain_enabled: bool,
-     *     connect_to_docker_network: bool,
-     *     stop_grace_period: int|null,
-     *     max_restart_count: int,
-     *     capabilities: array{
-     *         git_based: bool,
-     *         dockercompose: bool,
-     *         dockerimage: bool,
-     *         log_drain_server: bool
-     *     }
-     * }
+     * @param  array<string, mixed>  $validated
+     */
+    private function applyAccessSettings(Application $application, array $validated): void
+    {
+        if (array_key_exists('has_own_user_system', $validated)) {
+            $application->has_own_user_system = $validated['has_own_user_system'];
+        }
+
+        if (array_key_exists('is_sso_protected', $validated)) {
+            $application->is_sso_protected = $validated['is_sso_protected'];
+        }
+
+        if ($application->has_own_user_system === true) {
+            $application->is_sso_protected = false;
+
+            return;
+        }
+
+        if ($application->is_sso_protected === true && $application->has_own_user_system === null) {
+            $application->has_own_user_system = false;
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
      */
     private function present(Application $application): array
     {
@@ -219,6 +188,7 @@ class ApplicationAdvancedSettingsCatalog
         abort_unless($settings !== null, 404);
 
         $server = $application->destination?->server;
+        $sso = $this->ssoContext($application);
 
         return [
             'disable_build_cache' => (bool) $settings->disable_build_cache,
@@ -235,7 +205,9 @@ class ApplicationAdvancedSettingsCatalog
             'is_force_https_enabled' => (bool) $settings->is_force_https_enabled,
             'is_gzip_enabled' => (bool) ($settings->is_gzip_enabled ?? true),
             'is_stripprefix_enabled' => (bool) ($settings->is_stripprefix_enabled ?? true),
+            'has_own_user_system' => $application->has_own_user_system,
             'is_sso_protected' => $application->is_sso_protected,
+            ...$sso,
             'is_log_drain_enabled' => (bool) $settings->is_log_drain_enabled,
             'connect_to_docker_network' => (bool) $settings->connect_to_docker_network,
             'stop_grace_period' => $settings->stop_grace_period !== null
@@ -249,6 +221,39 @@ class ApplicationAdvancedSettingsCatalog
                 'log_drain_server' => $server ? $server->isLogDrainEnabled() : false,
             ],
         ];
+    }
+
+    /**
+     * @return array{
+     *     sso_protection_active: bool,
+     *     sso_available: bool,
+     *     sso_protect_apps_by_default: bool,
+     *     pocket_id_url: string|null,
+     *     apps_wildcard_domain: string|null
+     * }
+     */
+    private function ssoContext(Application $application): array
+    {
+        try {
+            $instance = instanceSettings();
+            $urls = SsoProtection::publicUrls($instance);
+
+            return [
+                'sso_protection_active' => SsoProtection::shouldProtectApplication($application),
+                'sso_available' => SsoProtection::isAppsProtectionConfigured($instance),
+                'sso_protect_apps_by_default' => SsoProtection::shouldProtectApplicationsByDefault($instance),
+                'pocket_id_url' => $instance->sso_pocket_id_url ?: ($urls['pocket_id'] ?? null),
+                'apps_wildcard_domain' => $instance->apps_wildcard_domain,
+            ];
+        } catch (\Throwable) {
+            return [
+                'sso_protection_active' => false,
+                'sso_available' => false,
+                'sso_protect_apps_by_default' => false,
+                'pocket_id_url' => null,
+                'apps_wildcard_domain' => null,
+            ];
+        }
     }
 
     private function resetDefaultLabels(Application $application): void

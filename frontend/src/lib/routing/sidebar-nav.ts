@@ -67,6 +67,12 @@ export const sidebarNav: SidebarNavEntry[] = [
                 pages: ['applications', 'application-detail'],
             },
             {
+                id: 'store',
+                label: 'Store',
+                path: '/store',
+                pages: ['store'],
+            },
+            {
                 id: 'databases',
                 label: 'Bases de données',
                 path: '/databases',

@@ -130,7 +130,10 @@ function OnboardingSsoForm({
                 </p>
             )}
             <label class="flex items-center justify-between gap-3 rounded-xl border border-base-300/70 px-3 py-2 text-sm">
-                <span>Protéger les applications par défaut</span>
+                <span>
+                    Protéger par défaut les apps sans comptes
+                    <span class="mt-0.5 block text-xs text-base-content/55">Barrière Pocket ID pour les sites sans login. Les apps avec utilisateurs gardent leur page publique.</span>
+                </span>
                 <input
                     class="toggle toggle-sm"
                     type="checkbox"

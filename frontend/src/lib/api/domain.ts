@@ -1548,6 +1548,102 @@ export type CreateApplicationInput = {
     domains?: string;
 };
 
+export type StoreCategory = 'web' | 'api' | 'cms' | 'ecommerce' | 'ai' | 'devops' | 'other';
+
+export type StoreRuntimeDefaults = {
+    build_pack?: string | null;
+    is_static?: boolean;
+    start_command?: string | null;
+    install_command?: string | null;
+    build_command?: string | null;
+    ports_exposes?: string;
+    base_directory?: string;
+    publish_directory?: string;
+    detected_framework?: string | null;
+    health_check_enabled?: boolean;
+    health_check_type?: string | null;
+    health_check_path?: string | null;
+    health_check_port?: string | null;
+};
+
+export type StoreEnvSchemaItem = {
+    key: string;
+    is_secret: boolean;
+    required: boolean;
+    default: string | null;
+    has_default?: boolean;
+    description: string | null;
+    is_runtime?: boolean;
+    is_buildtime?: boolean;
+    included?: boolean;
+    has_value?: boolean;
+};
+
+export type StoreListing = {
+    uuid: string;
+    slug: string;
+    name: string;
+    description: string | null;
+    category: StoreCategory | string | null;
+    icon_url: string | null;
+    website_url: string | null;
+    git_repository: string;
+    git_branch: string;
+    git_commit_sha?: string | null;
+    runtime_defaults: StoreRuntimeDefaults;
+    env_schema: StoreEnvSchemaItem[];
+    status: 'published' | 'unpublished' | string;
+    install_count: number;
+    owned: boolean;
+    publisher: { team_name: string | null };
+    created_at: string | null;
+    updated_at: string | null;
+};
+
+export type StorePublishPreview = {
+    publishable: boolean;
+    reason: string | null;
+    listing: StoreListing | null;
+    suggested_slug: string;
+    suggested_name: string;
+    git_repository: string | null;
+    git_branch: string | null;
+    runtime_defaults: StoreRuntimeDefaults;
+    environment_variables: StoreEnvSchemaItem[];
+};
+
+export type StorePublishInput = {
+    name: string;
+    slug?: string;
+    description?: string | null;
+    category?: StoreCategory | string | null;
+    icon_url?: string | null;
+    website_url?: string | null;
+    git_branch?: string | null;
+    runtime_defaults?: StoreRuntimeDefaults;
+    env_schema?: Array<{
+        key: string;
+        included?: boolean;
+        is_secret?: boolean;
+        required?: boolean;
+        default?: string | null;
+        description?: string | null;
+        is_runtime?: boolean;
+        is_buildtime?: boolean;
+    }>;
+};
+
+export type StoreInstallInput = {
+    project_uuid: string;
+    environment_uuid: string;
+    destination_uuid: string;
+    github_app_uuid: string;
+    name?: string;
+    instant_deploy?: boolean;
+    domains?: string;
+    env_values?: Record<string, string>;
+};
+
 export type ApplicationDomainRedirect = 'both' | 'www' | 'non-www';
 
 export type ApplicationDomains = {
@@ -2279,7 +2375,13 @@ export type ApplicationAdvancedSettings = {
     is_force_https_enabled: boolean;
     is_gzip_enabled: boolean;
     is_stripprefix_enabled: boolean;
+    has_own_user_system: boolean | null;
     is_sso_protected: boolean | null;
+    sso_protection_active: boolean;
+    sso_available: boolean;
+    sso_protect_apps_by_default: boolean;
+    pocket_id_url: string | null;
+    apps_wildcard_domain: string | null;
     is_log_drain_enabled: boolean;
     connect_to_docker_network: boolean;
     stop_grace_period: number | null;
@@ -2917,6 +3019,51 @@ export const domainApi = {
         method: 'POST',
         body: JSON.stringify(input),
     }, 90_000),
+    storeListings: (options?: { q?: string; category?: string }) => {
+        const params = new URLSearchParams();
+        if (options?.q) {
+            params.set('q', options.q);
+        }
+        if (options?.category) {
+            params.set('category', options.category);
+        }
+        const qs = params.toString();
+
+        return apiFetch<ApiResponse<StoreListing[]> & { meta?: { categories?: string[] } }>(
+            `${API_BASE}/store/listings${qs ? `?${qs}` : ''}`,
+        );
+    },
+    storeListing: (slug: string) => apiFetch<ApiResponse<StoreListing>>(
+        `${API_BASE}/store/listings/${encodeURIComponent(slug)}`,
+    ),
+    applicationStorePublishPreview: (applicationUuid: string) => apiFetch<ApiResponse<StorePublishPreview>>(
+        `${API_BASE}/applications/${encodeURIComponent(applicationUuid)}/store/publish-preview`,
+    ),
+    publishApplicationToStore: (applicationUuid: string, input: StorePublishInput) => mutate<ApiResponse<StoreListing>>(
+        `/applications/${encodeURIComponent(applicationUuid)}/store/publish`,
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+    ),
+    unpublishStoreListing: (slug: string) => mutate<ApiResponse<StoreListing>>(
+        `/store/listings/${encodeURIComponent(slug)}/unpublish`,
+        { method: 'POST' },
+    ),
+    installStoreListing: (slug: string, input: StoreInstallInput) => mutate<ApiResponse<CoreResource> & {
+        meta?: {
+            listing_slug?: string;
+            instant_deploy?: boolean;
+            env_import?: { created: number; updated: number };
+        };
+    }>(
+        `/store/listings/${encodeURIComponent(slug)}/install`,
+        {
+            method: 'POST',
+            body: JSON.stringify(input),
+        },
+        90_000,
+    ),
     deleteApplication: (
         applicationUuid: string,
         input: {
@@ -3169,8 +3316,18 @@ export const domainApi = {
     ),
     updateApplicationAdvancedSettings: (
         applicationUuid: string,
-        input: Partial<Omit<ApplicationAdvancedSettings, 'capabilities' | 'message'>>,
-    ) => mutate<ApiResponse<ApplicationAdvancedSettings>>(
+        input: Partial<Omit<ApplicationAdvancedSettings, 'capabilities' | 'message' | 'sso_protection_active' | 'sso_available' | 'sso_protect_apps_by_default' | 'pocket_id_url' | 'apps_wildcard_domain'>> & {
+            redeploy?: boolean;
+        },
+    ) => mutate<ApiResponse<ApplicationAdvancedSettings> & {
+        meta?: {
+            redeploy?: {
+                queued: boolean;
+                deployment_uuid: string | null;
+                message: string;
+            } | null;
+        };
+    }>(
         `/applications/${encodeURIComponent(applicationUuid)}/advanced`,
         {
             method: 'PUT',

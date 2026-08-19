@@ -18,6 +18,7 @@ import {
     Server,
     Sparkles,
     Square,
+    Store,
     X,
     XCircle,
 } from 'lucide-preact';
@@ -34,6 +35,7 @@ import { ApplicationDomainsPanel } from './ApplicationDomainsPanel';
 import { ApplicationDangerPanel } from './ApplicationDangerPanel';
 import { ApplicationReadinessCard } from './ApplicationReadinessCard';
 import { ApplicationRuntimeSettingsPanel } from './ApplicationRuntimeSettingsPanel';
+import { ApplicationAccessPanel } from './ApplicationAccessPanel';
 import { ApplicationAdvancedSettingsPanel } from './ApplicationAdvancedSettingsPanel';
 import { ApplicationResourceOperationsPanel } from './ApplicationResourceOperationsPanel';
 import { ApplicationEnvironmentVariablesPanel } from './ApplicationEnvironmentVariablesPanel';
@@ -49,6 +51,7 @@ import { DeploymentAgentCard } from './DeploymentAgentCard';
 import { DeploymentMonitorPanel } from './DeploymentMonitorPanel';
 import { ApplicationSourceExplorer } from './ApplicationSourceExplorer';
 import { ApplicationFeatureRequestModal } from './ApplicationFeatureRequestModal';
+import { PublishToStoreModal } from './PublishToStoreModal';
 import {
     deploymentSystemLabel,
     formatDateTime,
@@ -64,7 +67,7 @@ import {
     websiteScreenshotUrl,
 } from '../../lib/application-config';
 import { applicationTabs, parseApplicationTab, type ApplicationTabId } from '../../lib/application-tabs';
-import { canVisitApplication, resolveCoreResourceActions, resourceStatusPrimary } from '../../lib/core-resource-actions';
+import { canVisitApplication, isResourceRunning, resolveCoreResourceActions, resourceStatusPrimary } from '../../lib/core-resource-actions';
 import { domainApi, type ApplicationReadiness, type CoreAction, type GithubBranch } from '../../lib/domain-api';
 import { isDeploymentActive, isDeploymentCancellable } from '../../lib/deployment-status';
 import { pickFocusedDeployment } from '../../lib/pick-focused-deployment';
@@ -432,6 +435,7 @@ export function ApplicationDetailPanel({
     const [renaming, setRenaming] = useState(false);
     const [renameError, setRenameError] = useState<string | null>(null);
     const [featureRequestOpen, setFeatureRequestOpen] = useState(false);
+    const [publishStoreOpen, setPublishStoreOpen] = useState(false);
     const [deployBranch, setDeployBranch] = useState<string>('');
     const [deployBranches, setDeployBranches] = useState<GithubBranch[]>([]);
     const [deployBranchesLoading, setDeployBranchesLoading] = useState(false);
@@ -840,6 +844,18 @@ export function ApplicationDetailPanel({
                                     <span class="action-toolbar-label">Nouvelle fonctionnalité</span>
                                 </button>
                             )}
+                            {canAct && isResourceRunning(status) && (
+                                <button
+                                    class="btn btn-ghost btn-sm rounded-full border border-base-300/80"
+                                    type="button"
+                                    aria-label="Publier sur le Store"
+                                    title="Publier sur le Store"
+                                    onClick={() => setPublishStoreOpen(true)}
+                                >
+                                    <Store class="size-3.5" aria-hidden />
+                                    <span class="action-toolbar-label">Publier</span>
+                                </button>
+                            )}
                             {canAct && availableActions.map((action) => {
                                 const Icon = actionIcons[action];
                                 const primary = action === 'deploy';
@@ -1218,6 +1234,15 @@ export function ApplicationDetailPanel({
 
                     {activeTab === 'settings' && (
                         <div class="grid gap-4">
+                            <ApplicationAccessPanel
+                                applicationUuid={resource.uuid}
+                                canAct={canAct}
+                                onChanged={reload}
+                                onRedeployQueued={(deploymentUuid) => {
+                                    focusDeployment(deploymentUuid, false);
+                                    openDeploymentsTab();
+                                }}
+                            />
                             <ApplicationRuntimeSettingsPanel
                                 applicationUuid={resource.uuid}
                                 canAct={canAct}
@@ -1429,6 +1454,13 @@ export function ApplicationDetailPanel({
                         applicationUuid={resource.uuid}
                         applicationName={resource.name}
                         onClose={() => setFeatureRequestOpen(false)}
+                    />
+                    <PublishToStoreModal
+                        open={publishStoreOpen}
+                        applicationUuid={resource.uuid}
+                        applicationName={resource.name}
+                        onClose={() => setPublishStoreOpen(false)}
+                        onPublished={() => undefined}
                     />
                 </div>
             )}

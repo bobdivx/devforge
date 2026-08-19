@@ -95,6 +95,9 @@ describe('routage DevForge', () => {
         expect(findRoute('/devforge/tags/production').path).toBe('/tags/production');
         expect(findRoute('/devforge/subscription').page).toBe('subscription');
         expect(findRoute('/devforge/onboarding').page).toBe('onboarding');
+        expect(findRoute('/devforge/store').page).toBe('store');
+        expect(findRoute('/devforge/store/hello-static').page).toBe('store');
+        expect(findRoute('/devforge/store/hello-static').path).toBe('/store/hello-static');
         expect(findRoute('/devforge/storages').page).toBe('storages');
         expect(findRoute('/devforge/storage').page).toBe('storage');
         expect(findRoute('/devforge/storages/storage-uuid').path).toBe('/storages/storage-uuid');

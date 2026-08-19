@@ -16,6 +16,7 @@ import {
     Wrench,
     CalendarClock,
     Cpu,
+    Store,
     type LucideIcon,
 } from 'lucide-preact';
 
@@ -93,6 +94,8 @@ export type PageKey =
 
     | 'sso'
 
+    | 'store'
+
     | 'not-found';
 
 
@@ -118,6 +121,8 @@ export const appRoutes: AppRoute[] = [
     { path: '/', label: "Vue d'ensemble", description: 'Santé et activité de la plateforme.', icon: Gauge, page: 'dashboard' },
 
     { path: '/applications', label: 'Applications', description: 'Configuration et déploiements.', icon: Boxes, page: 'applications' },
+
+    { path: '/store', label: 'Store', description: 'Publier et installer des applications en un clic.', icon: Store, page: 'store' },
 
     { path: '/connexions', label: 'Tokens & Clés API', description: 'GitHub, tokens Packages, clés API et secrets de build.', icon: Plug, page: 'connexions' },
 
@@ -198,6 +203,8 @@ export const staticRoutePaths = [
 
     '/onboarding',
 
+    '/store',
+
     '/notifications/email',
 
     '/notifications/discord',
@@ -243,6 +250,26 @@ export function routeHref(path: string): string {
 }
 
 
+
+export function extractStoreSlug(pathname: string): string | null {
+    const normalizedPath = normalizeRoutePath(pathname);
+    const match = normalizedPath.match(/^\/store\/([^/]+)$/);
+    const slug = match?.[1]?.trim() ?? '';
+
+    if (!slug || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+        return null;
+    }
+
+    return slug;
+}
+
+export function storePath(slug?: string): string {
+    if (!slug) {
+        return '/store';
+    }
+
+    return `/store/${slug}`;
+}
 
 export function extractApplicationUuid(pathname: string): string | null {
     const normalizedPath = normalizeRoutePath(pathname);
@@ -588,6 +615,8 @@ const dynamicRoutes: Array<{ pattern: RegExp; route: AppRoute }> = [
 
     { pattern: /^\/applications\/[^/]+(?:\/.*)?$/, route: { ...applicationsRoute, page: 'application-detail' } },
 
+    { pattern: /^\/store\/[^/]+$/, route: { path: '/store', label: 'Store', description: 'Publier et installer des applications en un clic.', icon: Store, page: 'store' } },
+
     { pattern: /^\/project\/[^/]+\/environment\/[^/]+\/application\/[^/]+(?:\/.*)?$/, route: { ...applicationsRoute, page: 'application-detail' } },
 
     { pattern: /^\/project\/[^/]+\/environment\/[^/]+\/database\/[^/]+(?:\/.*)?$/, route: databasesRoute },
@@ -655,7 +684,7 @@ export function findRoute(pathname: string): AppRoute {
             ...settingsRoute,
             path: '/settings/sso',
             label: 'SSO',
-            description: 'Pocket ID et protection des applications.',
+            description: 'Pocket ID : login optionnel dans tes apps, ou barrière d’accès pour celles sans comptes.',
             page: 'sso',
         };
     }

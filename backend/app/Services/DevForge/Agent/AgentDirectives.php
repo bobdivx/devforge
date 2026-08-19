@@ -601,6 +601,49 @@ class AgentDirectives
         ) || self::failureExcerptMatches($failureExcerpt, [self::class, 'isCoolifyBaseConfigPathIssue']);
     }
 
+    /**
+     * Astro a build en static (pas de dist/server/entry.mjs) mais DevForge lance un start SSR.
+     */
+    public static function isMissingAstroServerEntryIssue(?string $text): bool
+    {
+        if ($text === null || trim($text) === '') {
+            return false;
+        }
+
+        return (bool) preg_match(
+            '/cannot find module[^\n]*dist\/server\/entry\.(mjs|js)|module_not_found[^\n]*dist\/server\/entry\.(mjs|js)/iu',
+            $text,
+        );
+    }
+
+    /**
+     * @param  array<int, mixed>  $failureExcerpt
+     */
+    public static function failureExcerptHasMissingAstroServerEntryIssue(array $failureExcerpt): bool
+    {
+        return self::failureExcerptContextMatches(
+            $failureExcerpt,
+            static fn (string $blob): bool => self::isMissingAstroServerEntryIssue($blob),
+        ) || self::failureExcerptMatches($failureExcerpt, [self::class, 'isMissingAstroServerEntryIssue']);
+    }
+
+    /**
+     * Réglages nginx Coolify pour un site Astro static (plus de start Node).
+     *
+     * @return array<string, mixed>
+     */
+    public static function astroStaticNginxRuntimeSettings(): array
+    {
+        return [
+            'is_static' => true,
+            'start_command' => '',
+            'publish_directory' => '/dist',
+            'ports_exposes' => '80',
+            'health_check_port' => '80',
+            'detected_framework' => 'astro-static',
+        ];
+    }
+
     public static function isMissingStaticPublishDirectoryIssue(?string $text): bool
     {
         if ($text === null || trim($text) === '') {

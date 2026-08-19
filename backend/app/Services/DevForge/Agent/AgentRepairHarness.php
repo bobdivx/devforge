@@ -99,6 +99,50 @@ class AgentRepairHarness
             $fixArgs = [...$appArgs, 'redeploy' => true, 'reason' => 'Harness: Read-only DevForge BASE_CONFIG_PATH'];
             $fixResult = $toolkit->execute('fix_coolify_base_config_path', $fixArgs);
             $record('fix_coolify_base_config_path', $fixArgs, $fixResult);
+        } elseif ($issue === AgentChatRepairStrategy::ISSUE_ASTRO_STATIC_RUNTIME) {
+            $settingsArgs = [
+                ...$appArgs,
+                ...AgentDirectives::astroStaticNginxRuntimeSettings(),
+                'redeploy' => true,
+                'reason' => 'Harness: Astro static (entry.mjs absent) → nginx + /dist',
+            ];
+            $settingsResult = $toolkit->execute('update_application_runtime_settings', $settingsArgs);
+            $record('update_application_runtime_settings', $settingsArgs, $settingsResult);
+
+            $headline = 'Astro static : is_static=true, publish=/dist, start Node retiré — redeploy lancé.';
+            $action = [
+                'kind' => 'runtime_settings',
+                'label' => 'astro_static_nginx',
+                'detail' => 'is_static=true publish_directory=/dist ports=80',
+                'ok' => ! isset($settingsResult['error']),
+                'at' => now()->toISOString(),
+            ];
+            $run->mergeMetadata([
+                'correction_actions' => [
+                    ...((is_array($run->metadata['correction_actions'] ?? null)) ? $run->metadata['correction_actions'] : []),
+                    $action,
+                ],
+                'correction' => [
+                    'outcome' => isset($settingsResult['error']) ? 'partial' : 'fixed',
+                    'headline' => $headline,
+                    'diagnosis' => 'Build Astro static sans dist/server/entry.mjs — le start SSR DevForge ne peut pas démarrer. Correction : nginx + /dist.',
+                    'source_scope' => 'runtime_settings',
+                    'actions' => [$action],
+                    'steps' => ['is_static=true', 'publish_directory=/dist', 'start_command vidé', 'ports_exposes=80', 'Redéployer'],
+                    'pills' => [
+                        ['id' => 'build', 'label' => 'Build', 'active' => true, 'href' => null, 'detail' => 'Astro static nginx'],
+                        ['id' => 'redeploy', 'label' => 'Redeploy', 'active' => true, 'href' => null, 'detail' => 'lancé'],
+                    ],
+                    'belongs_to_deployment_uuid' => is_string($runContext['deployment_uuid'] ?? null)
+                        ? $runContext['deployment_uuid']
+                        : null,
+                ],
+            ]);
+
+            return [
+                'text' => $headline,
+                'steps' => $steps,
+            ];
         } elseif ($issue === AgentChatRepairStrategy::ISSUE_HEALTHCHECK_PORT) {
             $listenPort = AgentDirectives::inferListenPortFromLogs($issueBlob)
                 ?? AgentDirectives::inferListenPortFromLogs($logsBlob);
@@ -524,9 +568,8 @@ class AgentRepairHarness
             $looksLikeSsr = str_contains($framework, 'ssr')
                 || (
                     ! $alreadyStatic && (
-                        str_contains($framework, 'astro')
-                        || in_array($portsExposes, ['4321', '3000', '3001', '8080'], true)
-                        || filled($application?->start_command)
+                        in_array($portsExposes, ['4321', '3000', '3001', '8080'], true)
+                        || str_contains((string) ($application?->start_command ?? ''), 'dist/server/entry')
                     )
                 );
 

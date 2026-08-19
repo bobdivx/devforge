@@ -651,6 +651,31 @@ class AgentRunner
             return;
         }
 
+        if (AgentDirectives::failureExcerptHasMissingAstroServerEntryIssue($excerpt)) {
+            $alreadyStatic = filter_var($context['is_static'] ?? false, FILTER_VALIDATE_BOOLEAN);
+            $startCommand = trim((string) ($context['start_command'] ?? ''));
+            $alreadyNginxStatic = $alreadyStatic && ! str_contains($startCommand, 'dist/server/entry');
+            if (! $alreadyNginxStatic) {
+                $run->appendLog('Astro static lancé comme SSR (entry.mjs introuvable) — correction automatique nginx + /dist.');
+
+                $result = $toolkit->execute('update_application_runtime_settings', [
+                    'application_uuid' => $applicationUuid,
+                    ...AgentDirectives::astroStaticNginxRuntimeSettings(),
+                    'redeploy' => true,
+                    'reason' => 'Auto-fix: Astro static (entry.mjs absent) → nginx + /dist',
+                ]);
+
+                $this->recordAutoFixOutcome(
+                    $run,
+                    'update_application_runtime_settings',
+                    $result,
+                    'Auto-fix Astro static → nginx + /dist OK',
+                );
+
+                return;
+            }
+        }
+
         if (AgentDirectives::failureExcerptHasInvalidChownGroupIssue($excerpt)) {
             $run->appendLog('chown invalid group détecté — redéploiement automatique (groupe primaire).');
 

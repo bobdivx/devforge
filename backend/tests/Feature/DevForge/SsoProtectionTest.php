@@ -34,16 +34,52 @@ it('does not protect an application when the forward-auth address is empty', fun
     expect(SsoProtection::shouldProtectApplication($application))->toBeFalse();
 });
 
-it('protects an application when the address is set and the flag is inherited', function () {
+it('does not inherit default protection when the app has not declared its user system', function () {
     InstanceSettings::get()->update([
         'sso_forward_auth_address' => SsoProtection::DEFAULT_FORWARD_AUTH_ADDRESS,
         'sso_protect_apps_by_default' => true,
     ]);
     Once::flush();
 
-    $application = new Application(['is_sso_protected' => null]);
+    $application = new Application(['is_sso_protected' => null, 'has_own_user_system' => null]);
+
+    expect(SsoProtection::shouldProtectApplication($application))->toBeFalse();
+});
+
+it('protects an application without a user system when the flag is inherited', function () {
+    InstanceSettings::get()->update([
+        'sso_forward_auth_address' => SsoProtection::DEFAULT_FORWARD_AUTH_ADDRESS,
+        'sso_protect_apps_by_default' => true,
+    ]);
+    Once::flush();
+
+    $application = new Application(['is_sso_protected' => null, 'has_own_user_system' => false]);
 
     expect(SsoProtection::shouldProtectApplication($application))->toBeTrue();
+});
+
+it('protects an application without a user system when explicitly enabled', function () {
+    InstanceSettings::get()->update([
+        'sso_forward_auth_address' => SsoProtection::DEFAULT_FORWARD_AUTH_ADDRESS,
+        'sso_protect_apps_by_default' => false,
+    ]);
+    Once::flush();
+
+    $application = new Application(['is_sso_protected' => true, 'has_own_user_system' => false]);
+
+    expect(SsoProtection::shouldProtectApplication($application))->toBeTrue();
+});
+
+it('never protects an application that has its own user system', function () {
+    InstanceSettings::get()->update([
+        'sso_forward_auth_address' => SsoProtection::DEFAULT_FORWARD_AUTH_ADDRESS,
+        'sso_protect_apps_by_default' => true,
+    ]);
+    Once::flush();
+
+    $application = new Application(['is_sso_protected' => true, 'has_own_user_system' => true]);
+
+    expect(SsoProtection::shouldProtectApplication($application))->toBeFalse();
 });
 
 it('does not protect an application that opted out', function () {

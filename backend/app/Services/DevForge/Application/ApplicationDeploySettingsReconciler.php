@@ -88,6 +88,11 @@ class ApplicationDeploySettingsReconciler
             $changes[] = 'is_static=true';
         }
 
+        if ($suggestedStatic && filled($application->start_command) && ! array_key_exists('start_command', $payload)) {
+            $payload['start_command'] = null;
+            $changes[] = 'start_command cleared';
+        }
+
         // Critical: wrongly-enabled nginx static breaks Astro/Next SSR healthchecks (port 80 vs 4321).
         $ssrFrameworks = ['astro-ssr', 'next', 'nuxt', 'node'];
         if (! $suggestedStatic && $currentStatic && in_array($framework, $ssrFrameworks, true)) {

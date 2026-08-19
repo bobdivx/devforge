@@ -114,7 +114,8 @@ use Visus\Cuid2\Cuid2;
         'is_http_basic_auth_enabled' => ['type' => 'boolean', 'description' => 'HTTP Basic Authentication enabled.'],
         'http_basic_auth_username' => ['type' => 'string', 'nullable' => true, 'description' => 'Username for HTTP Basic Authentication'],
         'http_basic_auth_password' => ['type' => 'string', 'nullable' => true, 'description' => 'Password for HTTP Basic Authentication'],
-        'is_sso_protected' => ['type' => 'boolean', 'nullable' => true, 'description' => 'Protect with Pocket ID SSO. Null inherits the instance default.'],
+        'is_sso_protected' => ['type' => 'boolean', 'nullable' => true, 'description' => 'Protect with Pocket ID SSO. Null inherits the instance default for apps without a user system.'],
+        'has_own_user_system' => ['type' => 'boolean', 'nullable' => true, 'description' => 'Whether the application has its own user/login system. When true, Traefik Pocket ID protection stays off.'],
     ]
 )]
 
@@ -202,6 +203,7 @@ class Application extends BaseModel
         'http_basic_auth_username',
         'http_basic_auth_password',
         'is_sso_protected',
+        'has_own_user_system',
         'connect_to_docker_network',
         'force_domain_override',
         'is_container_label_escape_enabled',
@@ -225,6 +227,14 @@ class Application extends BaseModel
     protected $appends = ['server_status'];
 
     protected function isSsoProtected(): Attribute
+    {
+        return Attribute::make(
+            get: fn (mixed $value): ?bool => $value === null ? null : (bool) $value,
+            set: fn (mixed $value): ?bool => $value === null ? null : (bool) $value,
+        );
+    }
+
+    protected function hasOwnUserSystem(): Attribute
     {
         return Attribute::make(
             get: fn (mixed $value): ?bool => $value === null ? null : (bool) $value,

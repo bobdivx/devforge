@@ -933,6 +933,10 @@ class AgentToolkit
                         'health_check_enabled' => ['type' => 'boolean'],
                         'health_check_path' => ['type' => 'string'],
                         'health_check_port' => ['type' => 'string'],
+                        'detected_framework' => [
+                            'type' => 'string',
+                            'description' => 'Framework détecté (ex. astro-static, astro-ssr)',
+                        ],
                         'redeploy' => [
                             'type' => 'boolean',
                             'description' => 'Queue un redéploiement après la mise à jour (défaut: true)',
@@ -3715,6 +3719,7 @@ class AgentToolkit
             'health_check_type',
             'health_check_path',
             'health_check_port',
+            'detected_framework',
         ];
 
         $input = [];

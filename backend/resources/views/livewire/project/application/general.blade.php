@@ -536,13 +536,23 @@
 
                 <h3 class="pt-8">SSO (Pocket ID)</h3>
                 <div class="w-full sm:w-96">
-                    <x-forms.select helper="Leave inherit to follow the instance default. Enabling or disabling overrides it for this application. Redeploy after changing so Traefik labels refresh."
-                        instantSave label="SSO (Pocket ID)" id="ssoProtection" x-bind:disabled="!canUpdate">
-                        <option value="inherit">Inherit instance default</option>
-                        <option value="enabled">Enabled</option>
-                        <option value="disabled">Disabled</option>
+                    <x-forms.select helper="Si l’app a déjà un login (comptes, email / mot de passe), Pocket ID s’ajoute comme bouton de connexion — pas comme barrière devant le site."
+                        instantSave label="Système d’utilisateurs" id="hasOwnUserSystem" x-bind:disabled="!canUpdate">
+                        <option value="unknown">Non renseigné</option>
+                        <option value="yes">Oui, l’app a ses propres comptes</option>
+                        <option value="no">Non, pas de login dans l’app</option>
                     </x-forms.select>
                 </div>
+                @if ($hasOwnUserSystem === 'no')
+                    <div class="w-full sm:w-96">
+                        <x-forms.select helper="Barrière Traefik : les visiteurs s’identifient avec Pocket ID (passkey) avant d’ouvrir le site. Redéployez après modification."
+                            instantSave label="Protéger l’accès avec Pocket ID" id="ssoProtection" x-bind:disabled="!canUpdate">
+                            <option value="inherit">Hériter du défaut instance</option>
+                            <option value="enabled">Activé</option>
+                            <option value="disabled">Désactivé</option>
+                        </x-forms.select>
+                    </div>
+                @endif
 
                 <h3 class="pt-8">HTTP Basic Authentication</h3>
                 <div>

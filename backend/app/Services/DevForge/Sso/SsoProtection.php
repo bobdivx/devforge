@@ -206,14 +206,24 @@ class SsoProtection
         if (! self::isAppsProtectionConfigured()) {
             return false;
         }
+
+        if ($application->has_own_user_system === true) {
+            return false;
+        }
+
         if ($application->is_sso_protected === false) {
             return false;
         }
+
         if ($application->is_sso_protected === true) {
             return true;
         }
 
-        return self::shouldProtectApplicationsByDefault();
+        if ($application->has_own_user_system === false) {
+            return self::shouldProtectApplicationsByDefault();
+        }
+
+        return false;
     }
 
     public static function shouldProtectServiceApplication(ServiceApplication $serviceApplication): bool

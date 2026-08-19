@@ -178,6 +178,8 @@ class ApplicationConfigurationSnapshot
             $this->item('is_http_basic_auth_enabled', 'HTTP basic auth', $this->application->is_http_basic_auth_enabled, 'redeploy'),
             $this->item('http_basic_auth_username', 'HTTP basic auth username', $this->application->http_basic_auth_username, 'redeploy'),
             $this->item('http_basic_auth_password', 'HTTP basic auth password', $this->application->http_basic_auth_password, 'redeploy', sensitive: true),
+            $this->item('has_own_user_system', 'Own user system', $this->application->has_own_user_system, 'redeploy'),
+            $this->item('is_sso_protected', 'Pocket ID access protection', $this->application->is_sso_protected, 'redeploy'),
         ];
     }
 

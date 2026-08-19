@@ -176,6 +176,29 @@ it('corrects wrongly-enabled static mode for Astro SSR', function () {
         ->and($result['changes'])->toContain('is_static=false');
 });
 
+it('enables nginx static and clears leftover Astro SSR start command', function () {
+    $this->application->update([
+        'ports_exposes' => '80',
+        'publish_directory' => '/dist',
+        'start_command' => 'node ./dist/server/entry.mjs',
+        'detected_framework' => 'astro-ssr',
+    ]);
+    $this->application->settings()->update(['is_static' => false]);
+
+    $reconciler = app(ApplicationDeploySettingsReconciler::class);
+    $result = $reconciler->applyDetection($this->application->fresh(['settings']), astroStaticDetection());
+
+    $this->application->refresh();
+    $this->application->load('settings');
+
+    expect($result['applied'])->toBeTrue()
+        ->and($this->application->settings->is_static)->toBeTrue()
+        ->and($this->application->start_command)->toBeNull()
+        ->and($this->application->detected_framework)->toBe('astro-static')
+        ->and($result['changes'])->toContain('is_static=true')
+        ->and($result['changes'])->toContain('start_command cleared');
+});
+
 it('applies detected NIXPACKS_NODE_VERSION when the default 22 cannot satisfy engines', function () {
     $detection = [
         'available' => true,

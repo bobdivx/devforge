@@ -27,6 +27,8 @@ class AgentChatRepairStrategy
 
     public const ISSUE_PROXY_PORT = 'proxy_port';
 
+    public const ISSUE_ASTRO_STATIC_RUNTIME = 'astro_static_runtime';
+
     public const ISSUE_GENERIC = 'generic';
 
     /** Outils de lecture / diagnostic — ne comptent pas comme correction. */
@@ -59,6 +61,11 @@ class AgentChatRepairStrategy
 
         if (AgentDirectives::isCoolifyBaseConfigPathIssue($logsBlob)) {
             return self::ISSUE_BASE_CONFIG;
+        }
+
+        // Astro static lancé avec node ./dist/server/entry.mjs — avant healthcheck/nginx (sinon faux SSR).
+        if (AgentDirectives::isMissingAstroServerEntryIssue($logsBlob)) {
+            return self::ISSUE_ASTRO_STATIC_RUNTIME;
         }
 
         // Healthcheck sur mauvais port (ex. curl :3000 alors qu’Astro écoute :4321) — avant permissions.

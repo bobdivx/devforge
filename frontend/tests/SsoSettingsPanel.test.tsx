@@ -110,7 +110,7 @@ describe('SsoSettingsPanel', () => {
 
         render(<SsoSettingsPanel permissions={{ ...bootstrapData.permissions, instance_admin: true }} />);
 
-        expect(await screen.findByText('Protéger les applications par défaut')).toBeInTheDocument();
+        expect(await screen.findByText('Protéger par défaut les apps sans comptes')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Enregistrer' })).toBeInTheDocument();
     });
 

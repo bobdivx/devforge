@@ -190,8 +190,8 @@ function SsoSettingsForm({
                 </p>
             )}
             <ToggleField
-                label="Protéger les applications par défaut"
-                description="Barrière Traefik optionnelle : l’app n’est accessible qu’après une passkey. N’active pas ça si l’app doit garder son propre login."
+                label="Protéger par défaut les apps sans comptes"
+                description="Uniquement pour les applications qui n’ont pas de login : barrière Pocket ID (passkey) avant d’ouvrir le site. Les apps avec leur propre système d’utilisateurs restent publiques."
                 checked={protectApps}
                 disabled={!canEdit || saving}
                 onChange={setProtectApps}

@@ -33,3 +33,16 @@ it('proxies GitHub App webhook callbacks to Laravel instead of the SPA', functio
         ->and($proxy)->toContain('proxy_set_header X-Forwarded-Proto $devforge_forwarded_proto')
         ->and($proxy)->not->toContain('proxy_set_header X-Forwarded-Proto $scheme');
 });
+
+it('proxies Pocket ID Socialite /auth callbacks to Laravel instead of the SPA', function () {
+    $proxyNginx = dirname(base_path()).DIRECTORY_SEPARATOR.'docker'.DIRECTORY_SEPARATOR.'devforge-proxy'.DIRECTORY_SEPARATOR.'nginx.conf';
+
+    expect(is_file($proxyNginx))->toBeTrue();
+
+    $proxy = file_get_contents($proxyNginx);
+
+    expect($proxy)->toContain('(api|auth|login|logout|')
+        ->and($proxy)->toContain('proxy_pass http://devforge_api')
+        ->and($proxy)->toContain('proxy_redirect http://api:8080/ /')
+        ->and(substr_count($proxy, 'proxy_redirect ~^https?://[^/]+(/.*)$ $1'))->toBe(1);
+});

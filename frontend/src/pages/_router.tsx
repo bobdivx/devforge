@@ -1,6 +1,7 @@
 import type { BootstrapData } from '../lib/bootstrap';
 import type { AppRoute } from '../lib/routes';
 import { extractApplicationUuid } from '../lib/routes';
+import { StorePage } from './store/_StorePage';
 import { extractGithubAppUuid } from '../lib/settings-tabs';
 import { AgentDetailPage } from './agents/_AgentDetailPage';
 import { AgentsPage } from './agents/_AgentsPage';
@@ -49,6 +50,8 @@ export function DomainPage({ bootstrap, route, onSwitchTeam }: DomainPageProps) 
                     initialResourceUuid={extractApplicationUuid(route.path)}
                 />
             );
+        case 'store':
+            return <StorePage path={route.path} />;
         case 'databases':
             return <CoreResourcesPage key="databases" type="databases" permissions={bootstrap.permissions} />;
         case 'services':

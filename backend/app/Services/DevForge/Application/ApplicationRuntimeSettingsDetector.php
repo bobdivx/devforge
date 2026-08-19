@@ -83,11 +83,6 @@ class ApplicationRuntimeSettingsDetector
         $hasAstro = $hasAstroDep || is_string($astroConfig) || $hasAstroBuildScript;
 
         $hasNodeAdapterDep = $this->hasAnyDep($deps, ['@astrojs/node']);
-        $hasServerlessAstroAdapter = $this->hasAnyDep($deps, [
-            '@astrojs/vercel',
-            '@astrojs/cloudflare',
-            '@astrojs/netlify',
-        ]);
         $astroConfigUsesNodeAdapter = is_string($astroConfig) && (
             str_contains($astroConfig, '@astrojs/node')
             || preg_match('/\badapter\s*:\s*node\s*\(/', $astroConfig) === 1
@@ -117,13 +112,13 @@ class ApplicationRuntimeSettingsDetector
         $frameworkLabel = 'Inconnu';
 
         if ($hasAstro) {
-            // Node/server signals always win. Static only when explicitly static, or Astro
-            // with no adapter / output server / entry.mjs (classic static site).
+            // Node adapter / output server|hybrid / entry.mjs → SSR on Nixpacks.
+            // Leftover @astrojs/vercel|cloudflare|netlify in package.json must not force
+            // `node ./dist/server/entry.mjs` — those adapters do not produce that file.
             $astroSsrSignals = $astroOutputServer
                 || $hasNodeAdapterDep
                 || $astroConfigUsesNodeAdapter
-                || $astroHasServerEntryScript
-                || $hasServerlessAstroAdapter;
+                || $astroHasServerEntryScript;
             $treatAsStatic = ! $astroSsrSignals && ($astroOutputStatic || ! $astroOutputServer);
 
             if ($treatAsStatic) {

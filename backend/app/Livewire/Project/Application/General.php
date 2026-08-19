@@ -108,6 +108,8 @@ class General extends Component
 
     public string $ssoProtection = 'inherit';
 
+    public string $hasOwnUserSystem = 'unknown';
+
     public ?string $httpBasicAuthUsername = null;
 
     public ?string $httpBasicAuthPassword = null;
@@ -184,6 +186,7 @@ class General extends Component
             'isPreserveRepositoryEnabled' => 'boolean|required',
             'isHttpBasicAuthEnabled' => 'boolean|required',
             'ssoProtection' => 'required|in:inherit,enabled,disabled',
+            'hasOwnUserSystem' => 'required|in:unknown,yes,no',
             'httpBasicAuthUsername' => 'string|nullable',
             'httpBasicAuthPassword' => 'string|nullable',
             'watchPaths' => 'nullable',
@@ -393,6 +396,14 @@ class General extends Component
                 'disabled' => false,
                 default => null,
             };
+            $this->application->has_own_user_system = match ($this->hasOwnUserSystem) {
+                'yes' => true,
+                'no' => false,
+                default => null,
+            };
+            if ($this->application->has_own_user_system === true) {
+                $this->application->is_sso_protected = false;
+            }
             $this->application->http_basic_auth_username = $this->httpBasicAuthUsername;
             $this->application->http_basic_auth_password = $this->httpBasicAuthPassword;
             $this->application->watch_paths = $this->watchPaths;
@@ -448,6 +459,11 @@ class General extends Component
                 false => 'disabled',
                 default => 'inherit',
             };
+            $this->hasOwnUserSystem = match ($this->application->has_own_user_system) {
+                true => 'yes',
+                false => 'no',
+                default => 'unknown',
+            };
             $this->httpBasicAuthUsername = $this->application->http_basic_auth_username;
             $this->httpBasicAuthPassword = $this->application->http_basic_auth_password;
             $this->watchPaths = $this->application->watch_paths;
@@ -474,13 +490,14 @@ class General extends Component
             $oldIsSpa = $this->application->settings->is_spa;
             $oldIsHttpBasicAuthEnabled = $this->application->is_http_basic_auth_enabled;
             $oldSsoProtection = $this->application->is_sso_protected;
+            $oldHasOwnUserSystem = $this->application->has_own_user_system;
 
             $this->syncData(toModel: true);
 
             if ($oldIsSpa !== $this->isSpa) {
                 $this->generateNginxConfiguration($this->isSpa ? 'spa' : 'static');
             }
-            if ($oldIsHttpBasicAuthEnabled !== $this->isHttpBasicAuthEnabled || $oldSsoProtection !== $this->application->is_sso_protected) {
+            if ($oldIsHttpBasicAuthEnabled !== $this->isHttpBasicAuthEnabled || $oldSsoProtection !== $this->application->is_sso_protected || $oldHasOwnUserSystem !== $this->application->has_own_user_system) {
                 $this->application->save();
             }
 

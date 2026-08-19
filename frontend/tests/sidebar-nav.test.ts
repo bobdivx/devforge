@@ -16,12 +16,14 @@ describe('navigation latérale groupée', () => {
         expect(applications).toBeTruthy();
         expect(applications?.items.map(({ label }) => label)).toEqual([
             'Gérer',
+            'Store',
             'Bases de données',
             'Services',
             'Cartographie',
         ]);
         expect(applications?.items.map(({ path }) => path)).toEqual([
             '/applications',
+            '/store',
             '/databases',
             '/services',
             '/deployments',

@@ -492,8 +492,13 @@ class ApplicationController extends Controller
         $application = $this->currentTeamResources->application($user, $applicationUuid);
         $this->authorize('update', $application);
 
+        $result = $this->applicationAdvancedSettingsCatalog->update($application, $request->all());
+
         return response()->json([
-            'data' => $this->applicationAdvancedSettingsCatalog->update($application, $request->all()),
+            'data' => collect($result)->except('redeploy')->all(),
+            'meta' => [
+                'redeploy' => $result['redeploy'],
+            ],
         ]);
     }
 

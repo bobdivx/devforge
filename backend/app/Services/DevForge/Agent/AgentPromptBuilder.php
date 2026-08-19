@@ -42,6 +42,9 @@ class AgentPromptBuilder
             - Site statique qui sert la page nginx par défaut / publish_directory vide :
               Déduis le dossier de build depuis les logs (directory: /app/…, astro/vite/next) puis
               update_application_runtime_settings(publish_directory=…, redeploy=true).
+            - Conteneur unhealthy + « Cannot find module … dist/server/entry.mjs » (Astro a build en static) :
+              update_application_runtime_settings(is_static=true, start_command='', publish_directory=/dist, ports_exposes=80, health_check_port=80, redeploy=true)
+              IMMÉDIATEMENT — ne pas relancer node ./dist/server/entry.mjs.
             - Conteneur unhealthy + « Healthcheck URL … :3000 » alors que les logs disent « listening on … :4321 » :
               update_application_runtime_settings(ports_exposes=4321, health_check_port=4321, redeploy=true)
               et upsert_application_env_var PORT=4321 (runtime). Astro SSR écoute souvent 4321, pas 3000.
@@ -524,11 +527,13 @@ class AgentPromptBuilder
            INTERDIT : variables factices (DUMMY_*, *_TRIGGER), upsert cosmétique, s’arrêter sans tenter le fix
         7. Si « Read-only file system » pendant mkdir DevForge (config path incorrecte / cache) :
            fix_coolify_base_config_path (redeploy=true) IMMÉDIATEMENT — recharge BASE_CONFIG_PATH réelle
-        8. Si site statique / page nginx par défaut / publish_directory vide :
+        8. Si « Cannot find module … dist/server/entry.mjs » (Astro static lancé comme SSR) :
+           update_application_runtime_settings(is_static=true, start_command='', publish_directory=/dist, ports_exposes=80, health_check_port=80, redeploy=true) IMMÉDIATEMENT → STOP
+        9. Si site statique / page nginx par défaut / publish_directory vide :
            déduis le dossier depuis les logs de build puis update_application_runtime_settings(publish_directory=…, redeploy=true)
-        9. write_application_source seulement pour un fix code évident (jamais .env) ; permissions GitHub → bascule runtime/env DevForge
-        10. control_resource deploy UNE FOIS si correction appliquée (sauf si un autre outil a déjà redeployé), puis STOP
-        11. Résumé actionnable (constats → actions outils → suite)
+        10. write_application_source seulement pour un fix code évident (jamais .env) ; permissions GitHub → bascule runtime/env DevForge
+        11. control_resource deploy UNE FOIS si correction appliquée (sauf si un autre outil a déjà redeployé), puis STOP
+        12. Résumé actionnable (constats → actions outils → suite)
 
         Première action : appel d'outil obligatoire.
         CONTEXT);

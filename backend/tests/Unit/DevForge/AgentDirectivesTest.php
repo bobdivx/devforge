@@ -106,6 +106,7 @@ it('teaches failure playbook to use upsert_application_env_var and stop after de
     expect($system)->toContain('upsert_application_env_var')
         ->and($system)->toContain('update_application_git_branch')
         ->and($system)->toContain('update_application_runtime_settings')
+        ->and($system)->toContain('dist/server/entry.mjs')
         ->and($system)->toContain('fix_application_host_permissions')
         ->and($system)->toContain('Permission denied')
         ->and($system)->toContain('DUMMY_')
@@ -113,6 +114,7 @@ it('teaches failure playbook to use upsert_application_env_var and stop after de
         ->and($message)->toContain('upsert_application_env_var')
         ->and($message)->toContain('update_application_git_branch')
         ->and($message)->toContain('update_application_runtime_settings')
+        ->and($message)->toContain('dist/server/entry.mjs')
         ->and($message)->toContain('fix_application_host_permissions')
         ->and($message)->toContain('JAMAIS write_application_source sur .env')
         ->and($message)->toContain('STOP');
@@ -158,6 +160,19 @@ it('detects Coolify BASE_CONFIG_PATH / read-only failures without hardcoded host
             ['message' => 'sudo mkdir -p /var/custom/coolify/applications/x'],
             ['message' => "mkdir: cannot create directory '/var': Read-only file system"],
         ]))->toBeTrue();
+});
+
+it('detects missing Astro SSR entry as static nginx runtime', function () {
+    $log = "Error: Cannot find module '/app/dist/server/entry.mjs'\ncode: 'MODULE_NOT_FOUND'";
+
+    expect(AgentDirectives::isMissingAstroServerEntryIssue($log))->toBeTrue()
+        ->and(AgentDirectives::failureExcerptHasMissingAstroServerEntryIssue([
+            ['message' => $log],
+        ]))->toBeTrue()
+        ->and(AgentDirectives::isMissingAstroServerEntryIssue('npm ERR! missing script: start'))->toBeFalse()
+        ->and(AgentDirectives::astroStaticNginxRuntimeSettings()['is_static'])->toBeTrue()
+        ->and(AgentDirectives::astroStaticNginxRuntimeSettings()['publish_directory'])->toBe('/dist')
+        ->and(AgentDirectives::astroStaticNginxRuntimeSettings()['ports_exposes'])->toBe('80');
 });
 
 it('detects missing static publish_directory / nginx welcome failures', function () {

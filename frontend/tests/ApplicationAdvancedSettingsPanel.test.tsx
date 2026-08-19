@@ -35,7 +35,6 @@ describe('ApplicationAdvancedSettingsPanel', () => {
                         is_force_https_enabled: false,
                         is_gzip_enabled: true,
                         is_stripprefix_enabled: true,
-                        is_sso_protected: null,
                         is_log_drain_enabled: false,
                         connect_to_docker_network: false,
                         stop_grace_period: 30,
@@ -60,7 +59,7 @@ describe('ApplicationAdvancedSettingsPanel', () => {
             expect(screen.getByText('Désactiver le cache de build')).toBeTruthy();
             expect(screen.getByText('Ne pas télécharger Chrome (Puppeteer)')).toBeTruthy();
             expect(screen.getByText('Auto-update image Docker Hub')).toBeTruthy();
-            expect(screen.getByText('Protéger avec le SSO')).toBeTruthy();
+            expect(screen.queryByText('Protéger avec le SSO')).toBeNull();
             expect(screen.getByDisplayValue('30')).toBeTruthy();
             expect(screen.getByDisplayValue('10')).toBeTruthy();
         });

@@ -31,5 +31,7 @@ describe('identité visuelle DevForge', () => {
         expect(proxyNginx).toContain('absolute_redirect off');
         expect(proxyNginx).toContain('proxy_redirect ~^https?://[^/]+(/.*)$ $1');
         expect(proxyNginx).toContain('|mcp|webhooks)(/|$)');
+        expect(proxyNginx).toContain('(api|auth|login|logout|');
+        expect(proxyNginx).toContain('proxy_redirect http://api:8080/ /');
     });
 });

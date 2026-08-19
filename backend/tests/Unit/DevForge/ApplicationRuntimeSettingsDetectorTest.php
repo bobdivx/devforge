@@ -128,6 +128,34 @@ it('prefers SSR when output static conflicts with node adapter', function () {
         ->and($result['suggestions']['ports_exposes'])->toBe('4321');
 });
 
+it('treats leftover @astrojs/vercel as static when output is static and no node adapter is used', function () {
+    $detector = app(ApplicationRuntimeSettingsDetector::class);
+
+    $result = $detector->inferFromContents([
+        'package.json' => json_encode([
+            'scripts' => [
+                'build' => 'node scripts/popcorn-cli.js build',
+                'preview' => 'node scripts/popcorn-cli.js preview',
+            ],
+            'dependencies' => [
+                'astro' => '^7.1.6',
+                '@astrojs/preact' => '^6.0.2',
+            ],
+            'devDependencies' => [
+                '@astrojs/vercel' => '^11.0.4',
+            ],
+        ], JSON_THROW_ON_ERROR),
+        'astro.config.mjs' => "import preact from '@astrojs/preact';\nexport default { output: 'static', integrations: [preact()] };",
+        'package-lock.json' => '{}',
+    ]);
+
+    expect($result['suggestions']['is_static'])->toBeTrue()
+        ->and($result['suggestions']['start_command'])->toBeNull()
+        ->and($result['suggestions']['ports_exposes'])->toBe('80')
+        ->and($result['suggestions']['publish_directory'])->toBe('/dist')
+        ->and($result['suggestions']['framework'])->toBe('astro-static');
+});
+
 it('detects Next.js as node runtime', function () {
     $detector = app(ApplicationRuntimeSettingsDetector::class);
 

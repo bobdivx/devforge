@@ -99,7 +99,54 @@ it('classifies repair strategy from deployment log blobs', function () {
             'error @apollo/federation@0.27.0: The engine "node" is incompatible with this module. Expected version ">=12.13.0 <17.0". Got "22.11.0"',
         ))->toBe(AgentChatRepairStrategy::ISSUE_NODE_ENGINE)
         ->and(AgentChatRepairStrategy::detectIssue('Node.js v22.11.0 is not supported by Astro!'))
-        ->toBe(AgentChatRepairStrategy::ISSUE_NODE_ENGINE);
+        ->toBe(AgentChatRepairStrategy::ISSUE_NODE_ENGINE)
+        ->and(AgentChatRepairStrategy::detectIssue(
+            "Error: Cannot find module '/app/dist/server/entry.mjs'\nNew container is unhealthy.",
+        ))->toBe(AgentChatRepairStrategy::ISSUE_ASTRO_STATIC_RUNTIME);
+});
+
+it('harness switches Astro static missing entry.mjs to nginx runtime settings', function () {
+    config(['devforge.agents_auto_fallback' => true]);
+
+    $agent = AiAgent::factory()->deployment()->make(['resource_uuid' => 'app-uuid-astro-static']);
+    $run = Mockery::mock(AiAgentRun::class);
+    $run->shouldReceive('appendLog')->andReturnNull();
+    $run->shouldReceive('mergeMetadata')->andReturnNull();
+    $run->metadata = [];
+
+    $toolkit = Mockery::mock(AgentToolkit::class);
+    $toolkit->shouldReceive('execute')
+        ->once()
+        ->with('get_deployment_logs', Mockery::type('array'))
+        ->andReturn([
+            'deployments' => [
+                ['logs' => [[
+                    'message' => "Error: Cannot find module '/app/dist/server/entry.mjs'\nNew container is unhealthy.",
+                ]]],
+            ],
+        ]);
+    $toolkit->shouldReceive('execute')
+        ->once()
+        ->with('update_application_runtime_settings', Mockery::on(
+            fn (array $args): bool => ($args['is_static'] ?? null) === true
+                && ($args['publish_directory'] ?? null) === '/dist'
+                && ($args['ports_exposes'] ?? null) === '80'
+                && ($args['start_command'] ?? null) === ''
+                && ($args['redeploy'] ?? false) === true
+        ))
+        ->andReturn(['ok' => true]);
+
+    $result = app(AgentRepairHarness::class)->execute(
+        $toolkit,
+        $agent,
+        $run,
+        ['application_uuid' => 'app-uuid-astro-static'],
+        'corrige le déploiement',
+    );
+
+    expect($result['steps'])->toHaveCount(2)
+        ->and($result['steps'][1]['name'])->toBe('update_application_runtime_settings')
+        ->and($result['text'])->toContain('nginx');
 });
 
 it('harness aligns ports when healthcheck mismatches listen port', function () {

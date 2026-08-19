@@ -12,6 +12,7 @@ Route::post('/onboarding/restart', [OnboardingController::class, 'restart'])->na
 
 require __DIR__.'/devforge-simple.php';
 require __DIR__.'/devforge-applications.php';
+require __DIR__.'/devforge-store.php';
 require __DIR__.'/devforge-services.php';
 require __DIR__.'/devforge-databases.php';
 
