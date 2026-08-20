@@ -30,4 +30,27 @@ describe('Tabs', () => {
 
         expect(screen.getByRole('tab', { name: 'Déploiements' })).toHaveAttribute('aria-selected', 'true');
     });
+
+    it('affiche des sections dans la navigation latérale groupée', () => {
+        render(
+            <Tabs
+                active="logs"
+                variant="sidebar"
+                groups={[
+                    { id: 'health', label: 'Santé', items: [
+                        { id: 'overview', label: 'Vue d’ensemble' },
+                        { id: 'logs', label: 'Logs' },
+                    ] },
+                    { id: 'danger', label: 'Zone sensible', items: [
+                        { id: 'danger', label: 'Danger' },
+                    ] },
+                ]}
+                onChange={() => undefined}
+            />,
+        );
+
+        expect(screen.getByText('Santé')).toBeInTheDocument();
+        expect(screen.getByText('Zone sensible')).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Logs' })).toHaveAttribute('aria-selected', 'true');
+    });
 });

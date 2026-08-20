@@ -1,4 +1,4 @@
-import { Eye, Play, RefreshCw, Rocket, RotateCw, Square, Wrench } from 'lucide-preact';
+import { ArrowLeft, Eye, Play, RefreshCw, Rocket, RotateCw, Square, Wrench } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
 import { domainApi, type CoreAction, type CoreResource } from '../../lib/domain-api';
 import { resolveCoreResourceActions } from '../../lib/core-resource-actions';
@@ -110,8 +110,9 @@ export function ServiceDetailPanel({
     return (
         <div class="grid gap-4">
             <div class="flex flex-wrap items-center justify-between gap-2">
-                <button class="btn btn-ghost btn-sm w-fit" type="button" onClick={onClose}>
-                    ← Retour aux services
+                <button class="btn btn-ghost btn-sm -ms-1 w-fit" type="button" onClick={onClose}>
+                    <ArrowLeft class="size-3.5" aria-hidden />
+                    Services
                 </button>
                 <button class="btn btn-ghost btn-sm" type="button" onClick={() => void query.reload()}>
                     <RefreshCw class="size-3.5" aria-hidden />
@@ -132,14 +133,14 @@ export function ServiceDetailPanel({
 
             <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
                 {resource && activeTab === 'overview' && (
-                    <div class="grid gap-4 rounded-2xl border border-base-300/70 bg-base-100 p-4 shadow-sm">
+                    <div class="devforge-card grid gap-4 p-5">
                         <div class="flex flex-wrap items-start justify-between gap-3">
                             <div class="flex min-w-0 items-start gap-3">
                                 <div class="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
                                     <Wrench class="size-5" aria-hidden />
                                 </div>
                                 <div class="min-w-0">
-                                    <h2 class="truncate text-base font-semibold">{resource.name}</h2>
+                                    <h2 class="truncate text-[1.75rem] font-semibold tracking-tight">{resource.name}</h2>
                                     <p class="font-mono text-[11px] text-base-content/45">{resource.uuid}</p>
                                     {resource.description && (
                                         <p class="mt-1 text-sm text-base-content/60">{resource.description}</p>

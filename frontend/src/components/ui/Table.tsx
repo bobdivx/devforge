@@ -9,7 +9,7 @@ type TableProps = {
 
 export function Table({ headers, children, caption, embedded = false }: TableProps) {
     return (
-        <div class={`min-w-0 max-w-full overflow-x-auto ${embedded ? '' : 'rounded-2xl border border-base-300/70 bg-base-100'}`}>
+        <div class={`min-w-0 max-w-full overflow-x-auto ${embedded ? '' : 'devforge-card'}`}>
             <table class="table table-sm w-full">
                 {caption && <caption class="sr-only">{caption}</caption>}
                 <thead>

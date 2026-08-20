@@ -1,4 +1,4 @@
-import { Eye, Play, Plus, RefreshCw, RotateCw, Rocket, Square } from 'lucide-preact';
+import { Play, Plus, RefreshCw, RotateCw, Rocket, Square } from 'lucide-preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { ApplicationBootSequenceBanner } from '../../components/applications/ApplicationBootSequenceBanner';
 import { ApplicationDetailPanel } from '../../components/applications/ApplicationDetailPanel';
@@ -14,7 +14,9 @@ import { Card } from '../../components/ui/Card';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { DataState } from '../../components/ui/DataState';
 import { FilterBar } from '../../components/ui/FilterBar';
+import { ResourceCard } from '../../components/ui/ResourceCard';
 import { ResourceStatusIcon } from '../../components/ui/ResourceStatusIcon';
+import { StatCard } from '../../components/ui/StatCard';
 import { resourceStatusInput } from '../../lib/resource-status';
 import { resolveCoreResourceActions } from '../../lib/core-resource-actions';
 import type { BootstrapPermissions } from '../../lib/bootstrap';
@@ -131,6 +133,13 @@ const labels: Record<CoreResourceType, string> = {
     applications: 'Applications',
     databases: 'Bases de données',
     services: 'Services',
+};
+
+const descriptions: Record<CoreResourceType, string> = {
+    servers: 'Hôtes SSH, proxy et destinations de déploiement.',
+    applications: 'Santé, déploiements et accès rapide à vos apps.',
+    databases: 'Instances, connexions et sauvegardes.',
+    services: 'Stacks et services gérés.',
 };
 
 const actionLabels: Record<CoreAction, string> = {
@@ -444,6 +453,17 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
         return [...list].sort((left, right) => (order.get(left.uuid) ?? 999) - (order.get(right.uuid) ?? 999));
     }, [resources, search, type, bootSequence.active, bootSequence.items]);
 
+    const healthSummary = useMemo(() => {
+        const parsed = resources.map((resource) => parseResourceStatus(resource.status));
+
+        return {
+            total: resources.length,
+            running: parsed.filter(({ tone }) => tone === 'success').length,
+            degraded: parsed.filter(({ tone }) => tone === 'warning').length,
+            stopped: parsed.filter(({ tone }) => tone === 'error').length,
+        };
+    }, [resources]);
+
     const activeUuid = useMemo(() => {
         const candidate = sanitizeResourceUuid(selectedUuid);
 
@@ -474,7 +494,7 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
             {!embedded && !isFullPageDetail && (
                 <PageHeader
                     title={labels[type]}
-                    description="Données et actions fournies par l’API core."
+                    description={descriptions[type]}
                     actions={(
                         <>
                             {type === 'applications' && permissions.create_resources && resources.length > 0 && (
@@ -582,6 +602,15 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                         />
                     )}
 
+                    {healthSummary.total > 0 && (
+                        <div class="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                            <StatCard label="Total" value={healthSummary.total} hint={labels[type]} />
+                            <StatCard label="En ligne" value={healthSummary.running} tone="success" hint="Sains" />
+                            <StatCard label="Attention" value={healthSummary.degraded} tone={healthSummary.degraded > 0 ? 'warning' : 'default'} hint="Dégradés" />
+                            <StatCard label="Arrêtés" value={healthSummary.stopped} tone={healthSummary.stopped > 0 ? 'error' : 'default'} hint="Hors ligne" />
+                        </div>
+                    )}
+
                     <DataState
                         loading={query.loading && resources.length === 0}
                         error={query.error}
@@ -589,7 +618,7 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                         emptyMessage={`Aucune ressource « ${labels[type].toLowerCase()} ».`}
                         onRetry={() => void query.reload()}
                     >
-                        <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                        <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                             {filtered.map((resource) => {
                                 const bootPhase = type === 'applications'
                                     ? bootPhaseForResource(resource.uuid, bootSequence.items, bootSequence.active)
@@ -602,14 +631,23 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                                         : resourceStatusInput(resource);
 
                                 return (
-                                <button
-                                    class={`rounded-2xl border bg-base-100 p-4 text-left shadow-sm transition hover:border-primary/30 hover:shadow-md focus-visible:ring-2 focus-visible:ring-primary ${
-                                        activeUuid === resource.uuid ? 'border-primary/40 ring-1 ring-primary/15' : 'border-base-300/70'
-                                    } ${bootCardClass(bootPhase)}`}
-                                    type="button"
+                                <ResourceCard
                                     key={resource.uuid}
+                                    title={type === 'databases' ? databaseCardTitle(resource) : resource.name}
+                                    subtitle={type === 'databases' ? databaseCardSubtitle(resource) : resource.type}
+                                    status={statusInput}
+                                    selected={activeUuid === resource.uuid}
+                                    class={bootCardClass(bootPhase)}
                                     style={bootItem && bootSequence.active
                                         ? { animationDelay: `${Math.min(bootItem.order, 12) * 70}ms` }
+                                        : undefined}
+                                    logo={type === 'applications'
+                                        ? (
+                                            <ApplicationLogo
+                                                name={resource.name}
+                                                configuration={resource.configuration}
+                                            />
+                                        )
                                         : undefined}
                                     onClick={() => {
                                         if (type === 'applications') {
@@ -626,36 +664,7 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                                         }
                                         setSelectedUuid(resource.uuid);
                                     }}
-                                >
-                                    <div class="mb-2 flex items-start justify-between gap-2">
-                                        <div class="flex min-w-0 items-start gap-3">
-                                            {type === 'applications' && (
-                                                <ApplicationLogo
-                                                    name={resource.name}
-                                                    configuration={resource.configuration}
-                                                />
-                                            )}
-                                            <div class="min-w-0">
-                                                {type === 'databases' ? (
-                                                    <>
-                                                        <p class="truncate text-sm font-semibold">{databaseCardTitle(resource)}</p>
-                                                        <p class="text-[11px] text-base-content/55">{databaseCardSubtitle(resource)}</p>
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <p class="truncate text-sm font-semibold">{resource.name}</p>
-                                                        <p class="text-[11px] uppercase tracking-wide text-base-content/45">{resource.type}</p>
-                                                    </>
-                                                )}
-                                            </div>
-                                        </div>
-                                        <ResourceStatusIcon status={statusInput} />
-                                    </div>
-                                    <span class="inline-flex items-center gap-1 text-xs text-primary">
-                                        <Eye class="size-3.5" aria-hidden />
-                                        Voir le détail
-                                    </span>
-                                </button>
+                                />
                                 );
                             })}
                         </div>

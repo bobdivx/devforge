@@ -46,7 +46,7 @@ describe('OverviewPage', () => {
 
         render(<OverviewPage />);
 
-        expect(await screen.findByText('Santé des applications')).toBeInTheDocument();
+        expect(await screen.findByText('Santé plateforme')).toBeInTheDocument();
         expect(screen.getByText('popcorn-web')).toBeInTheDocument();
         const quickLink = screen.getByRole('link', { name: /popcorn-web/i });
         expect(quickLink.getAttribute('href')).toBe('/devforge/applications/app-1/');

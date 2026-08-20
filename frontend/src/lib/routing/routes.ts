@@ -130,7 +130,7 @@ export const appRoutes: AppRoute[] = [
 
     { path: '/services', label: 'Services', description: 'Stacks et services gérés.', icon: Wrench, page: 'services' },
 
-    { path: '/deployments', label: 'Cartographie', description: 'Relations apps, GitHub, déploiements et agents.', icon: Rocket, page: 'deployments' },
+    { path: '/deployments', label: 'Déploiements', description: 'Pipeline apps, GitHub, déploiements et agents.', icon: Rocket, page: 'deployments' },
 
     { path: '/storage', label: 'Stockage', description: 'Espace disque, nettoyage Docker et surveillance.', icon: HardDrive, page: 'storage' },
 

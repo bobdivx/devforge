@@ -8,24 +8,24 @@
     default: true;
     color-scheme: light;
     --color-base-100: #ffffff;
-    --color-base-200: #f4f7f5;
-    --color-base-300: #e5ebe7;
-    --color-base-content: #1f2937;
-    --color-primary: #175b37;
+    --color-base-200: #f3f5f2;
+    --color-base-300: #e3e8e4;
+    --color-base-content: #15231c;
+    --color-primary: #0f6b4c;
     --color-primary-content: #ffffff;
     --color-secondary: #1e4d31;
     --color-secondary-content: #ffffff;
-    --color-accent: #175b37;
+    --color-accent: #1aa37a;
     --color-accent-content: #ffffff;
-    --color-neutral: #262626;
-    --color-neutral-content: #fafafa;
+    --color-neutral: #14201a;
+    --color-neutral-content: #e9f3ee;
     --color-info: #2563eb;
     --color-success: #16a34a;
     --color-warning: #ca8a04;
     --color-error: #dc2626;
-    --radius-selector: 0.75rem;
+    --radius-selector: 0.875rem;
     --radius-field: 0.75rem;
-    --radius-box: 1rem;
+    --radius-box: 1.25rem;
     --size-selector: 0.25rem;
     --size-field: 0.25rem;
     --border: 1px;
@@ -36,25 +36,25 @@
     name: "dark";
     prefersdark: true;
     color-scheme: dark;
-    --color-base-100: #181818;
-    --color-base-200: #101010;
-    --color-base-300: #202020;
-    --color-base-content: #e7e7e7;
+    --color-base-100: #161a18;
+    --color-base-200: #0c0f0d;
+    --color-base-300: #222824;
+    --color-base-content: #e8ece9;
     --color-primary: #fcd452;
     --color-primary-content: #101010;
     --color-secondary: #fde047;
     --color-secondary-content: #101010;
-    --color-accent: #fcd452;
-    --color-accent-content: #101010;
-    --color-neutral: #202020;
-    --color-neutral-content: #e7e7e7;
+    --color-accent: #3ddc97;
+    --color-accent-content: #0c0f0d;
+    --color-neutral: #101412;
+    --color-neutral-content: #e8ece9;
     --color-info: #60a5fa;
     --color-success: #22c55e;
     --color-warning: #fcd452;
     --color-error: #ef4444;
-    --radius-selector: 0.75rem;
+    --radius-selector: 0.875rem;
     --radius-field: 0.75rem;
-    --radius-box: 1rem;
+    --radius-box: 1.25rem;
     --size-selector: 0.25rem;
     --size-field: 0.25rem;
     --border: 1px;
@@ -86,13 +86,13 @@ body {
 .btn {
     min-height: 2.25rem;
     height: 2.25rem;
-    border-radius: 9999px;
+    border-radius: 0.75rem;
     padding-inline: 1rem;
 }
 
 .btn-ghost,
 .btn-primary {
-    border-radius: 9999px;
+    border-radius: 0.75rem;
 }
 
 .btn-sm {
@@ -298,8 +298,34 @@ body {
     border-radius: 1rem;
 }
 
+[data-theme="light"] {
+    --devforge-sidebar-bg: #10231c;
+    --devforge-sidebar-fg: #e9f3ee;
+    --devforge-sidebar-muted: #8aa396;
+    --devforge-sidebar-hover: rgba(255, 255, 255, 0.06);
+    --devforge-sidebar-active-bg: rgba(61, 220, 151, 0.16);
+    --devforge-sidebar-active-fg: #3ddc97;
+}
+
+[data-theme="dark"] {
+    --devforge-sidebar-bg: #101412;
+    --devforge-sidebar-fg: #ececec;
+    --devforge-sidebar-muted: #8b938e;
+    --devforge-sidebar-hover: rgba(255, 255, 255, 0.05);
+    --devforge-sidebar-active-bg: color-mix(in oklab, var(--color-primary) 16%, transparent);
+    --devforge-sidebar-active-fg: var(--color-primary);
+}
+
 .devforge-sidebar {
-    min-height: calc(100dvh - 1.5rem);
+    min-height: 100dvh;
+    background: var(--devforge-sidebar-bg);
+    color: var(--devforge-sidebar-fg);
+}
+
+.devforge-topbar {
+    background: color-mix(in oklab, var(--color-base-200) 88%, transparent);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid color-mix(in oklab, var(--color-base-content) 8%, transparent);
 }
 
 .devforge-panel {
@@ -337,6 +363,16 @@ input {
 .dashboard-shell {
     min-height: 100vh;
     overflow-x: clip;
+}
+
+.devforge-card {
+    box-shadow: 0 1px 2px color-mix(in oklab, var(--color-base-content) 4%, transparent);
+    border: 1px solid color-mix(in oklab, var(--color-base-content) 6%, transparent);
+}
+
+[data-theme="dark"] .devforge-card {
+    box-shadow: none;
+    border-color: color-mix(in oklab, var(--color-base-content) 8%, transparent);
 }
 
 :root {

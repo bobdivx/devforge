@@ -38,7 +38,7 @@ type DomainPageProps = {
 export function DomainPage({ bootstrap, route, onSwitchTeam }: DomainPageProps) {
     switch (route.page) {
         case 'dashboard':
-            return <OverviewPage />;
+            return <OverviewPage userName={bootstrap.user.name} />;
         case 'applications':
         case 'application-detail':
             return (

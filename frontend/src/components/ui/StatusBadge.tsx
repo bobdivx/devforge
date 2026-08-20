@@ -12,7 +12,7 @@ const toneClasses = {
 
 export function StatusBadge({ label, tone = 'neutral' }: StatusBadgeProps) {
     return (
-        <span class={`badge badge-sm h-5 rounded-sm border px-1.5 text-[11px] font-medium ${toneClasses[tone]}`}>
+        <span class={`inline-flex h-5 items-center rounded-full border px-2 text-[11px] font-medium ${toneClasses[tone]}`}>
             {label}
         </span>
     );

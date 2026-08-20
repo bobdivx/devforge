@@ -160,7 +160,7 @@ export function App({ initialPath }: AppProps) {
                             revision: teamRevision,
                             agentsEnabled: bootstrapData.features?.agents_enabled ?? false,
                         }}>
-                            <div class={`flex gap-3 p-3 md:gap-4 md:p-4 ${immersiveChat ? 'h-dvh max-h-dvh overflow-hidden' : 'min-h-screen'}`}>
+                            <div class={`flex ${immersiveChat ? 'h-dvh max-h-dvh overflow-hidden' : 'min-h-dvh'}`}>
                                 {sidebarOpen && (
                                     <button
                                         class="fixed inset-0 z-30 bg-black/50 backdrop-blur-[1px] lg:hidden"
@@ -180,26 +180,27 @@ export function App({ initialPath }: AppProps) {
                                     onToggleCollapsed={() => setSidebarCollapsed((current) => !current)}
                                 />
 
-                                <div class={`flex min-w-0 flex-1 flex-col gap-3 md:gap-4 ${immersiveChat ? 'min-h-0' : ''}`}>
+                                <div class={`flex min-w-0 flex-1 flex-col ${immersiveChat ? 'min-h-0' : ''}`}>
                                     <Topbar
                                         bootstrap={bootstrapData}
                                         theme={theme}
                                         onOpenMenu={() => setSidebarOpen(true)}
                                         onToggleTheme={toggleTheme}
+                                        onSwitchTeam={handleSwitchTeam}
                                     />
                                     <main
                                         id="devforge-content"
-                                        class={`custom-scrollbar devforge-panel min-w-0 flex-1 rounded-2xl bg-base-100/70 shadow-sm outline-none ${
+                                        class={`custom-scrollbar min-w-0 flex-1 outline-none ${
                                             immersiveChat
                                                 ? 'flex min-h-0 flex-col overflow-hidden p-0'
-                                                : 'overflow-x-hidden overflow-y-auto p-4 md:p-6'
+                                                : 'overflow-x-hidden overflow-y-auto px-4 py-5 md:px-8 md:py-7'
                                         }`}
                                         tabIndex={-1}
                                     >
                                         <div class={`mx-auto w-full min-w-0 ${contentWidthClass(appearance.pageWidth)} ${
                                             immersiveChat
                                                 ? 'flex min-h-0 flex-1 flex-col'
-                                                : 'grid gap-5'
+                                                : 'grid gap-6'
                                         }`}>
                                             <DomainPage
                                                 key={`${bootstrapData.current_team.id}-${teamRevision}`}

@@ -1,59 +1,51 @@
 import { describe, expect, it } from 'vitest';
+import { findRoute } from '../src/lib/routes';
 import {
     flattenSidebarNav,
-    isNavGroupActive,
+    isNavSectionActive,
+    resolveActiveNavId,
     visibleSidebarNav,
-    type SidebarNavGroup,
+    type SidebarNavSection,
 } from '../src/lib/routing/sidebar-nav';
 
-describe('navigation latérale groupée', () => {
-    it('regroupe applications, bases, services et déploiements', () => {
+describe('navigation latérale par sections', () => {
+    it('regroupe les workloads sous Ressources, sans accordéon ni libellé Gérer', () => {
         const entries = visibleSidebarNav(false);
-        const applications = entries.find(
-            (entry): entry is SidebarNavGroup => entry.type === 'group' && entry.id === 'applications',
+        const resources = entries.find(
+            (entry): entry is SidebarNavSection => entry.type === 'section' && entry.id === 'resources',
         );
 
-        expect(applications).toBeTruthy();
-        expect(applications?.items.map(({ label }) => label)).toEqual([
-            'Gérer',
-            'Store',
-            'Bases de données',
-            'Services',
-            'Cartographie',
-        ]);
-        expect(applications?.items.map(({ path }) => path)).toEqual([
-            '/applications',
-            '/store',
-            '/databases',
-            '/services',
-            '/deployments',
+        expect(resources).toBeTruthy();
+        expect(resources?.items.map(({ label, path }) => ({ label, path }))).toEqual([
+            { label: 'Applications', path: '/applications' },
+            { label: 'Bases de données', path: '/databases' },
+            { label: 'Services', path: '/services' },
+            { label: 'Store', path: '/store' },
         ]);
     });
 
-    it('regroupe le stockage sous Infrastructure', () => {
-        const entries = visibleSidebarNav(false);
-        const infrastructure = entries.find(
-            (entry): entry is SidebarNavGroup => entry.type === 'group' && entry.id === 'infrastructure',
+    it('place serveurs, supervision et stockage sous Opérations', () => {
+        const operations = visibleSidebarNav(false).find(
+            (entry): entry is SidebarNavSection => entry.type === 'section' && entry.id === 'operations',
         );
 
-        expect(infrastructure?.items.some(({ path }) => path === '/storage')).toBe(true);
-        expect(infrastructure?.items.some(({ path }) => path === '/monitoring')).toBe(true);
-        expect(infrastructure?.items.some(({ path }) => path === '/settings/sso')).toBe(false);
-    });
-
-    it('expose le SSO sous Infrastructure pour un admin d’instance', () => {
-        const infrastructure = visibleSidebarNav(false, true).find(
-            (entry): entry is SidebarNavGroup => entry.type === 'group' && entry.id === 'infrastructure',
-        );
-
-        expect(infrastructure?.items.map(({ label, path }) => ({ label, path }))).toEqual([
-            { label: 'Stockage', path: '/storage' },
+        expect(operations?.items.map(({ label, path }) => ({ label, path }))).toEqual([
+            { label: 'Déploiements', path: '/deployments' },
             { label: 'Supervision', path: '/monitoring' },
+            { label: 'Stockage', path: '/storage' },
+            { label: 'Serveurs', path: '/settings/servers' },
             { label: 'Runners GitHub', path: '/github-runners' },
-            { label: 'SSO', path: '/settings/sso' },
             { label: 'Tâches planifiées', path: '/scheduled-tasks' },
         ]);
-        expect(isNavGroupActive(infrastructure!, 'sso')).toBe(true);
+        expect(operations?.items.some(({ path }) => path === '/settings/sso')).toBe(false);
+    });
+
+    it('laisse le SSO dans les paramètres, pas dans la barre latérale', () => {
+        const entries = visibleSidebarNav(false, true);
+        const links = flattenSidebarNav(entries);
+
+        expect(links.some(({ path }) => path === '/settings/sso')).toBe(false);
+        expect(resolveActiveNavId(entries, findRoute('/settings/sso'))).toBe('settings');
     });
 
     it('masque les agents quand la fonctionnalité est désactivée', () => {
@@ -61,9 +53,9 @@ describe('navigation latérale groupée', () => {
         expect(visibleSidebarNav(true).some((entry) => entry.id === 'agents')).toBe(true);
     });
 
-    it('expose Gérer et Paramètres AI sous Agents IA', () => {
+    it('expose Chat, Équipe, Automations et Paramètres AI sous Agents IA', () => {
         const agents = visibleSidebarNav(true).find(
-            (entry): entry is SidebarNavGroup => entry.type === 'group' && entry.id === 'agents',
+            (entry): entry is SidebarNavSection => entry.type === 'section' && entry.id === 'agents',
         );
 
         expect(agents?.items.map(({ label, path }) => ({ label, path }))).toEqual([
@@ -74,22 +66,20 @@ describe('navigation latérale groupée', () => {
         ]);
     });
 
-    it('ouvre le groupe Applications sur une page fille', () => {
-        const applications = visibleSidebarNav(false).find(
-            (entry): entry is SidebarNavGroup => entry.type === 'group' && entry.id === 'applications',
+    it('marque la section Ressources active sur une page fille', () => {
+        const resources = visibleSidebarNav(false).find(
+            (entry): entry is SidebarNavSection => entry.type === 'section' && entry.id === 'resources',
         );
 
-        expect(applications && isNavGroupActive(applications, 'databases')).toBe(true);
-        expect(applications && isNavGroupActive(applications, 'dashboard')).toBe(false);
+        expect(resources && isNavSectionActive(resources, 'databases')).toBe(true);
+        expect(resources && isNavSectionActive(resources, 'dashboard')).toBe(false);
     });
 
-    it('laisse tous les groupes repliés hors interaction', () => {
+    it('expose les sections sans les replier', () => {
         const entries = visibleSidebarNav(true);
-        const groups = entries.filter((entry): entry is SidebarNavGroup => entry.type === 'group');
+        const sections = entries.filter((entry): entry is SidebarNavSection => entry.type === 'section');
 
-        expect(groups.map(({ id }) => id)).toEqual(['applications', 'infrastructure', 'agents']);
-        // L’état ouvert est géré manuellement dans Sidebar (défaut : aucun groupe déroulé).
-        expect(groups.every((group) => !isNavGroupActive(group, 'dashboard'))).toBe(true);
+        expect(sections.map(({ id }) => id)).toEqual(['resources', 'operations', 'agents']);
     });
 
     it('aplatit les liens pour le mode réduit', () => {
@@ -97,6 +87,23 @@ describe('navigation latérale groupée', () => {
         expect(flat[0]?.path).toBe('/');
         expect(flat.some(({ path }) => path === '/applications')).toBe(true);
         expect(flat.some(({ path }) => path === '/storage')).toBe(true);
-        expect(flat.some(({ id }) => id === 'applications')).toBe(false);
+        expect(flat.some(({ id }) => id === 'resources')).toBe(false);
+        expect(flat.some(({ id }) => id === 'servers')).toBe(true);
+    });
+
+    it('active Serveurs plutôt que Paramètres sur /settings/servers', () => {
+        const entries = visibleSidebarNav(false);
+
+        expect(resolveActiveNavId(entries, findRoute('/settings/servers'))).toBe('servers');
+        expect(resolveActiveNavId(entries, findRoute('/settings'))).toBe('settings');
+        expect(resolveActiveNavId(entries, findRoute('/settings/team'))).toBe('settings');
+        expect(resolveActiveNavId(entries, findRoute('/server/abc'))).toBe('servers');
+    });
+
+    it('active Connexions sur les routes GitHub legacy', () => {
+        const entries = visibleSidebarNav(false);
+
+        expect(resolveActiveNavId(entries, findRoute('/github'))).toBe('connexions');
+        expect(resolveActiveNavId(entries, findRoute('/sources'))).toBe('connexions');
     });
 });

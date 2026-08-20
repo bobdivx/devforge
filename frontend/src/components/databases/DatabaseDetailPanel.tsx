@@ -577,7 +577,7 @@ export function DatabaseDetailPanel({
     return (
         <>
             <div class="mb-4 grid gap-3">
-                <button class="btn btn-ghost btn-sm w-fit" type="button" onClick={onClose}>
+                <button class="btn btn-ghost btn-sm -ms-1 w-fit" type="button" onClick={onClose}>
                     <ArrowLeft class="size-3.5" aria-hidden />
                     Retour à la liste
                 </button>
@@ -596,10 +596,10 @@ export function DatabaseDetailPanel({
 
             <DataState loading={resourceQuery.loading} error={resourceQuery.error} onRetry={() => void resourceQuery.reload()}>
                 {resource && activeTab === 'overview' && (
-                    <section class="rounded-2xl border border-base-300/70 bg-base-100 p-4 shadow-sm">
+                    <section class="devforge-card p-5">
                         <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
                             <div class="grid gap-1">
-                                <h2 class="text-lg font-semibold">{databaseTitle(resource.name, connections)}</h2>
+                                <h2 class="text-[1.75rem] font-semibold tracking-tight">{databaseTitle(resource.name, connections)}</h2>
                                 <p class="text-sm text-base-content/60">{databaseSubtitle(resource, connections)}</p>
                                 <p class="font-mono text-[10px] text-base-content/35">Identifiant : {resource.uuid}</p>
                             </div>

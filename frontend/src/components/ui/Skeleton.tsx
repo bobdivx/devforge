@@ -19,9 +19,9 @@ export function Skeleton({ lines = 3, class: className = '' }: SkeletonProps) {
 
 export function SkeletonCard() {
     return (
-        <div class="card border border-base-300 bg-base-100 p-4" aria-hidden>
-            <div class="skeleton mb-2 h-3 w-24 rounded-sm" />
-            <div class="skeleton h-6 w-16 rounded-sm" />
+        <div class="devforge-card p-5" aria-hidden>
+            <div class="skeleton mb-3 h-3 w-24 rounded-sm" />
+            <div class="skeleton h-7 w-16 rounded-sm" />
         </div>
     );
 }

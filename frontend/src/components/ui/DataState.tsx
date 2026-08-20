@@ -47,7 +47,7 @@ export function DataState({
 }: DataStateProps) {
     if (loading) {
         return (
-            <div class="flex min-h-24 items-center justify-center gap-2 text-xs text-base-content/55" role="status">
+            <div class="flex min-h-28 items-center justify-center gap-2 text-xs text-base-content/50" role="status">
                 <span class="loading loading-spinner loading-xs text-primary" aria-hidden />
                 Chargement…
             </div>
@@ -56,7 +56,7 @@ export function DataState({
 
     if (error) {
         return (
-            <div class="flex min-h-24 flex-col items-center justify-center gap-2 border border-error/25 bg-error/5 p-4 text-center">
+            <div class="devforge-card flex min-h-28 flex-col items-center justify-center gap-2 p-6 text-center">
                 <AlertTriangle class="size-4 text-error" aria-hidden />
                 <p class="text-xs text-base-content/70">{resolveErrorMessage(error)}</p>
                 <button class="btn btn-ghost btn-sm" type="button" onClick={onRetry}>
@@ -68,7 +68,11 @@ export function DataState({
     }
 
     if (empty) {
-        return <p class="py-6 text-center text-xs text-base-content/50">{emptyMessage}</p>;
+        return (
+            <div class="devforge-card px-6 py-10 text-center">
+                <p class="text-sm text-base-content/50">{emptyMessage}</p>
+            </div>
+        );
     }
 
     return <>{children}</>;

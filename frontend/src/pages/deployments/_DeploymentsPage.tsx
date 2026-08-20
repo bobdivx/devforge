@@ -24,7 +24,7 @@ export function DeploymentsPage() {
         <div class="grid min-w-0 gap-4">
             <PageHeader
                 eyebrow="Ops"
-                title="Cartographie"
+                title="Déploiements"
                 description="Parcours clair par application : source Git → app → déploiement → URL live, avec les interventions d’agents."
                 actions={(
                     <button class="btn btn-ghost btn-sm rounded-full border border-base-300/80" type="button" onClick={() => void query.reload()}>

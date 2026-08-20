@@ -7,6 +7,7 @@ type TeamSwitcherProps = {
     currentTeam: BootstrapTeam;
     compact?: boolean;
     variant?: 'sidebar' | 'settings';
+    ariaLabel?: string;
     onSwitch: (teamId: number) => Promise<void>;
 };
 
@@ -15,6 +16,7 @@ export function TeamSwitcher({
     currentTeam,
     compact = false,
     variant = 'settings',
+    ariaLabel = 'Équipe active',
     onSwitch,
 }: TeamSwitcherProps) {
     const [switching, setSwitching] = useState(false);
@@ -29,12 +31,14 @@ export function TeamSwitcher({
 
     const select = (
         <select
-            class={`select w-full rounded-xl border-base-300/80 bg-base-200/70 text-sm ${
-                variant === 'settings' ? 'select-md h-11 min-h-11' : 'select-sm h-8 min-h-8 text-xs'
+            class={`select w-full rounded-xl text-sm ${
+                variant === 'settings'
+                    ? 'select-md h-11 min-h-11 border-base-300/80 bg-base-200/70'
+                    : 'select-sm h-9 min-h-9 border-base-300/70 bg-base-100 text-xs'
             }`}
             value={currentTeam.id}
             disabled={switching || teams.length < 2}
-            aria-label="Équipe active"
+            aria-label={ariaLabel}
             onChange={async (event) => {
                 const nextTeamId = Number(event.currentTarget.value);
                 if (nextTeamId === currentTeam.id) {
@@ -82,7 +86,7 @@ export function TeamSwitcher({
 
     return (
         <label class="grid gap-1">
-            <span class="sr-only">Équipe active</span>
+            <span class="sr-only">{ariaLabel}</span>
             {select}
         </label>
     );

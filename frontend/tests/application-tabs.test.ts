@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
     applicationPath,
     applicationTabFromLegacySegment,
+    applicationTabGroups,
+    applicationTabs,
     parseApplicationTab,
 } from '../src/lib/application-tabs';
 import {
@@ -15,6 +17,30 @@ import {
 } from '../src/lib/routes';
 
 describe('onglets applications / databases', () => {
+    it('groupe les onglets application par domaine', () => {
+        expect(applicationTabGroups.map(({ id, label }) => ({ id, label }))).toEqual([
+            { id: 'health', label: 'Santé' },
+            { id: 'connect', label: 'Connexions' },
+            { id: 'configure', label: 'Configuration' },
+            { id: 'danger', label: 'Zone sensible' },
+        ]);
+        expect(applicationTabs.map(({ id }) => id)).toEqual([
+            'overview',
+            'deployments',
+            'logs',
+            'previews',
+            'domains',
+            'databases',
+            'variables',
+            'files',
+            'settings',
+            'tasks',
+            'webhooks',
+            'storage',
+            'limits',
+            'danger',
+        ]);
+    });
     it('parse les onglets applications connus', () => {
         expect(parseApplicationTab('logs')).toBe('logs');
         expect(parseApplicationTab('webhooks')).toBe('webhooks');

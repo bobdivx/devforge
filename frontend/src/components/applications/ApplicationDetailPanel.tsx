@@ -26,6 +26,7 @@ import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ActionToolbar } from '../ui/ActionToolbar';
+import { Card } from '../ui/Card';
 import { DataState } from '../ui/DataState';
 import { DeploymentStatusIcon } from '../ui/DeploymentStatusIcon';
 import { ResourceStatusIcon } from '../ui/ResourceStatusIcon';
@@ -66,7 +67,7 @@ import {
     visitUrl,
     websiteScreenshotUrl,
 } from '../../lib/application-config';
-import { applicationTabs, parseApplicationTab, type ApplicationTabId } from '../../lib/application-tabs';
+import { applicationTabGroups, parseApplicationTab, type ApplicationTabId } from '../../lib/application-tabs';
 import { canVisitApplication, isResourceRunning, resolveCoreResourceActions, resourceStatusPrimary } from '../../lib/core-resource-actions';
 import { domainApi, type ApplicationReadiness, type CoreAction, type GithubBranch } from '../../lib/domain-api';
 import { isDeploymentActive, isDeploymentCancellable } from '../../lib/deployment-status';
@@ -330,7 +331,7 @@ function PreviewPanel({
     }, [screenshotUrl]);
 
     return (
-        <div class="relative overflow-hidden rounded-2xl border border-base-300/70 bg-base-200/50">
+        <div class="relative overflow-hidden rounded-[1.25rem] bg-base-200/70">
             {showPlaceholder ? (
                 <div class="aspect-[4/3] flex flex-col items-center justify-center gap-3 p-6 text-center">
                     <div class="grid size-16 place-items-center rounded-2xl bg-base-100 text-xl font-bold shadow-sm">
@@ -727,7 +728,7 @@ export function ApplicationDetailPanel({
                 <div class="grid min-w-0 max-w-full gap-5 overflow-x-hidden">
                     <div class="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                         <div class="grid min-w-0 gap-2">
-                            <button class="btn btn-ghost btn-sm -ms-2 w-fit rounded-full px-3" type="button" onClick={onClose}>
+                            <button class="btn btn-ghost btn-sm -ms-2 w-fit px-3" type="button" onClick={onClose}>
                                 <ArrowLeft class="size-4" aria-hidden />
                                 Applications
                             </button>
@@ -769,7 +770,7 @@ export function ApplicationDetailPanel({
                                     </div>
                                 ) : (
                                     <div class="flex min-w-0 items-start gap-2">
-                                        <h2 class="min-w-0 flex-1 break-words text-2xl font-bold tracking-tight sm:text-3xl">
+                                        <h2 class="min-w-0 flex-1 break-words text-[1.75rem] font-semibold tracking-tight sm:text-3xl">
                                             {canAct ? (
                                                 <button
                                                     class="max-w-full rounded-md text-start transition hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
@@ -821,7 +822,7 @@ export function ApplicationDetailPanel({
                         <ActionToolbar class="w-full min-w-0 sm:w-auto">
                             {visit && (
                                 <a
-                                    class="btn btn-primary btn-sm rounded-full"
+                                    class="btn btn-primary btn-sm"
                                     href={visit}
                                     rel="noreferrer"
                                     target="_blank"
@@ -834,7 +835,7 @@ export function ApplicationDetailPanel({
                             )}
                             {canAct && (
                                 <button
-                                    class="btn btn-ghost btn-sm rounded-full border border-base-300/80"
+                                    class="btn btn-ghost btn-sm border border-base-300/80"
                                     type="button"
                                     aria-label="Nouvelle fonctionnalité"
                                     title="Nouvelle fonctionnalité"
@@ -846,7 +847,7 @@ export function ApplicationDetailPanel({
                             )}
                             {canAct && isResourceRunning(status) && (
                                 <button
-                                    class="btn btn-ghost btn-sm rounded-full border border-base-300/80"
+                                    class="btn btn-ghost btn-sm border border-base-300/80"
                                     type="button"
                                     aria-label="Publier sur le Store"
                                     title="Publier sur le Store"
@@ -863,7 +864,7 @@ export function ApplicationDetailPanel({
 
                                 return (
                                     <button
-                                        class={`btn btn-sm rounded-full ${primary ? 'btn-primary' : 'btn-ghost border border-base-300/80'}`}
+                                        class={`btn btn-sm ${primary ? 'btn-primary' : 'btn-ghost border border-base-300/80'}`}
                                         type="button"
                                         disabled={acting !== null}
                                         key={action}
@@ -883,7 +884,7 @@ export function ApplicationDetailPanel({
                                 );
                             })}
                             <button
-                                class="btn btn-ghost btn-sm rounded-full border border-base-300/80"
+                                class="btn btn-ghost btn-sm border border-base-300/80"
                                 type="button"
                                 aria-label="Actualiser"
                                 title="Actualiser"
@@ -898,7 +899,7 @@ export function ApplicationDetailPanel({
                     <div class="flex flex-col lg:flex-row gap-4 lg:gap-6 mt-4">
                         <div class="lg:w-56 shrink-0">
                             <Tabs
-                                items={applicationTabs}
+                                groups={applicationTabGroups}
                                 active={activeTab}
                                 variant="sidebar"
                                 onChange={(tabId) => {
@@ -914,23 +915,22 @@ export function ApplicationDetailPanel({
                         <div class="min-w-0 flex-1 grid gap-4">
                     {activeTab === 'overview' && (
                         <>
-                            <section class="min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-                                <div class="toolbar-row border-b border-base-300/70 px-4 py-4 sm:px-5">
-                                    <div class="min-w-0">
-                                        <p class="text-sm font-semibold">Production</p>
-                                        <p class="text-xs text-base-content/50">
-                                            Aperçu, domaines et source
-                                            {gitSync?.deployed_at || latest
-                                                ? ` · dernier déploiement ${relativeUpdatedAt(gitSync?.deployed_at ?? latest?.finished_at ?? latest?.created_at ?? null)}`
-                                                : ''}
-                                            {syncBadge && gitSync?.available
-                                                ? ` · ${syncBadge.text}`
-                                                : ''}
-                                        </p>
-                                    </div>
-                                </div>
+                            <Card
+                                title="Production"
+                                eyebrow="Aperçu"
+                                class="min-w-0"
+                            >
+                                <p class="text-xs text-base-content/50">
+                                    Aperçu, domaines et source
+                                    {gitSync?.deployed_at || latest
+                                        ? ` · dernier déploiement ${relativeUpdatedAt(gitSync?.deployed_at ?? latest?.finished_at ?? latest?.created_at ?? null)}`
+                                        : ''}
+                                    {syncBadge && gitSync?.available
+                                        ? ` · ${syncBadge.text}`
+                                        : ''}
+                                </p>
 
-                                <div class="grid min-w-0 gap-5 p-4 sm:p-5 lg:grid-cols-[minmax(0,280px)_1fr]">
+                                <div class="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,280px)_1fr]">
                                     <PreviewPanel
                                         name={resource.name}
                                         domain={domain}
@@ -1053,18 +1053,18 @@ export function ApplicationDetailPanel({
                                         </DetailRow>
                                     </dl>
                                 </div>
-                            </section>
+                            </Card>
 
                             <div class="flex flex-wrap gap-2">
                                 <button
-                                    class="btn btn-ghost btn-sm rounded-full border border-base-300/80"
+                                    class="btn btn-ghost btn-sm border border-base-300/80"
                                     type="button"
                                     onClick={() => setActiveTab('settings')}
                                 >
                                     Paramètres runtime
                                 </button>
                                 <button
-                                    class="btn btn-ghost btn-sm rounded-full border border-base-300/80"
+                                    class="btn btn-ghost btn-sm border border-base-300/80"
                                     type="button"
                                     onClick={openDeploymentsTab}
                                 >
@@ -1073,7 +1073,7 @@ export function ApplicationDetailPanel({
                                 </button>
                                 {config.server?.uuid && (
                                     <button
-                                        class="btn btn-ghost btn-sm rounded-full border border-base-300/80"
+                                        class="btn btn-ghost btn-sm border border-base-300/80"
                                         type="button"
                                         onClick={() => setActiveTab('files')}
                                     >
@@ -1088,7 +1088,7 @@ export function ApplicationDetailPanel({
                             <ApplicationAgentChatCard application={resource} />
 
                             {resource.description && (
-                                <section class="rounded-2xl border border-base-300/70 bg-base-100 p-5 text-sm text-base-content/65 shadow-sm">
+                                <section class="devforge-card p-5 text-sm text-base-content/65">
                                     {resource.description}
                                 </section>
                             )}

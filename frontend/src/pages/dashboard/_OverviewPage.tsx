@@ -1,4 +1,4 @@
-import { Bot, Boxes, RefreshCw } from 'lucide-preact';
+import { Activity, Bot, Boxes, Database, RefreshCw, Server } from 'lucide-preact';
 import { PageHeader } from '../../components/PageHeader';
 import { Card } from '../../components/ui/Card';
 import { DataState } from '../../components/ui/DataState';
@@ -11,19 +11,18 @@ import { DeploymentStatusIcon } from '../../components/ui/DeploymentStatusIcon';
 import { Table } from '../../components/ui/Table';
 import { parseResourceStatus } from '../../lib/resource-status';
 import { domainApi, type ResourceStatus } from '../../lib/domain-api';
+import { dayGreeting, formatDashboardDate } from '../../lib/greeting';
 import { routeHref, applicationPath } from '../../lib/routes';
 import { useApiQuery } from '../../lib/use-api-query';
 import { useNavigate } from '../../lib/use-navigate';
 
-function summarizeApplications(applications: ResourceStatus[]) {
-    const parsed = applications.map((app) => parseResourceStatus(app.status));
+function summarizeResources(resources: ResourceStatus[]) {
+    const parsed = resources.map((resource) => parseResourceStatus(resource.status));
     const running = parsed.filter(({ tone }) => tone === 'success').length;
     const degraded = parsed.filter(({ tone }) => tone === 'warning').length;
     const stopped = parsed.filter(({ tone }) => tone === 'error').length;
-    const total = applications.length;
-    const score = total > 0 ? Math.round((running / total) * 100) : 100;
 
-    return { total, running, degraded, stopped, score };
+    return { total: resources.length, running, degraded, stopped };
 }
 
 function ApplicationQuickCard({
@@ -35,7 +34,7 @@ function ApplicationQuickCard({
 }) {
     return (
         <a
-            class="flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-base-300/70 bg-base-100 p-4 shadow-sm transition hover:border-primary/30 hover:shadow-md"
+            class="flex min-w-0 items-center justify-between gap-3 rounded-2xl bg-base-200/80 px-4 py-3.5 transition hover:bg-base-200"
             href={routeHref(applicationPath(application.uuid))}
             onClick={(event) => onNavigate(event, applicationPath(application.uuid))}
         >
@@ -48,21 +47,37 @@ function ApplicationQuickCard({
     );
 }
 
-export function OverviewPage() {
+type OverviewPageProps = {
+    userName?: string;
+};
+
+export function OverviewPage({ userName = '' }: OverviewPageProps) {
     const onNavigate = useNavigate();
     const query = useApiQuery('overview', () => domainApi.overview());
     const overview = query.data?.data;
     const applications = overview?.resource_statuses.applications ?? [];
-    const appHealth = summarizeApplications(applications);
+    const databases = overview?.resource_statuses.databases ?? [];
+    const services = overview?.resource_statuses.services ?? [];
+    const servers = overview?.resource_statuses.servers ?? [];
+    const health = overview?.health;
+    const appHealth = summarizeResources(applications);
     const agentsEnabled = overview?.agents_summary !== null && overview?.agents_summary !== undefined;
+    const healthTone = !health
+        ? 'default'
+        : health.score >= 80
+            ? 'success'
+            : health.score >= 50
+                ? 'warning'
+                : 'error';
 
     return (
-        <div class="grid min-w-0 gap-5">
+        <div class="grid min-w-0 gap-6">
             <PageHeader
-                title="Vue d’ensemble"
-                description="Applications, déploiements récents et activité des agents."
+                eyebrow="Santé"
+                title={userName ? dayGreeting(userName) : 'Vue d’ensemble'}
+                description={formatDashboardDate()}
                 actions={(
-                    <button class="btn btn-ghost btn-sm rounded-full border border-base-300/80" type="button" onClick={() => void query.reload()}>
+                    <button class="btn btn-ghost btn-sm border border-base-300/80" type="button" onClick={() => void query.reload()}>
                         <RefreshCw class="size-3.5" aria-hidden />
                         Actualiser
                     </button>
@@ -70,77 +85,125 @@ export function OverviewPage() {
             />
 
             {query.loading && (
-                <div class="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                    {Array.from({ length: 3 }).map((_, index) => <SkeletonCard key={index} />)}
+                <div class="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    {Array.from({ length: 4 }).map((_, index) => <SkeletonCard key={index} />)}
                 </div>
             )}
 
             <DataState loading={false} error={query.error} onRetry={() => void query.reload()}>
-                {overview && (
-                    <div class="grid min-w-0 gap-5">
-                        <div class="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                            <Card title="Santé des applications" class="min-w-0">
-                                <div class="flex min-w-0 flex-col items-center gap-4 sm:flex-row sm:items-center">
-                                    <DonutChart
-                                        centerLabel={`${appHealth.score}%`}
-                                        segments={[
-                                            { label: 'OK', value: appHealth.running, color: 'var(--color-success)' },
-                                            { label: 'Dégradé', value: appHealth.degraded, color: 'var(--color-warning)' },
-                                            { label: 'Arrêté', value: appHealth.stopped, color: 'var(--color-error)' },
-                                        ]}
-                                    />
-                                    <div class="grid w-full min-w-0 gap-2 text-xs sm:flex-1">
-                                        <p><span class="font-medium">{appHealth.running}</span> en ligne</p>
-                                        <p><span class="font-medium">{appHealth.degraded}</span> dégradées</p>
-                                        <p><span class="font-medium">{appHealth.stopped}</span> arrêtées</p>
-                                    </div>
-                                </div>
-                                <ProgressBar
-                                    value={appHealth.score}
-                                    label="Disponibilité"
-                                    tone={appHealth.score >= 80 ? 'success' : appHealth.score >= 50 ? 'warning' : 'error'}
-                                />
-                            </Card>
-
+                {overview && health && (
+                    <div class="grid min-w-0 gap-6">
+                        <div class="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                            <StatCard
+                                label="Santé plateforme"
+                                value={`${health.score}%`}
+                                hint={`${health.running} / ${health.total_resources} ressources en ligne`}
+                                tone={healthTone}
+                                icon={Activity}
+                            />
                             <StatCard
                                 label="Applications"
                                 value={appHealth.total}
-                                hint="Voir et gérer vos apps"
+                                hint={`${appHealth.running} en ligne`}
                                 href="/applications"
+                                icon={Boxes}
                                 onNavigate={onNavigate}
                             />
-
-                            {agentsEnabled && overview.agents_summary && (
+                            <StatCard
+                                label="Bases & services"
+                                value={databases.length + services.length}
+                                hint={`${databases.length} bases · ${services.length} services`}
+                                href="/databases"
+                                icon={Database}
+                                onNavigate={onNavigate}
+                            />
+                            {agentsEnabled && overview.agents_summary ? (
                                 <StatCard
                                     label="Agents IA"
                                     value={overview.agents_summary.active}
                                     hint={`${overview.agents_summary.running} en cours`}
                                     tone="success"
                                     href="/agents"
+                                    icon={Bot}
+                                    onNavigate={onNavigate}
+                                />
+                            ) : (
+                                <StatCard
+                                    label="Serveurs"
+                                    value={servers.length}
+                                    hint="Infrastructure"
+                                    href="/settings/servers"
+                                    icon={Server}
                                     onNavigate={onNavigate}
                                 />
                             )}
                         </div>
 
-                        <Card title="Applications" eyebrow="Accès rapide" class="min-w-0">
-                            {applications.length === 0 ? (
-                                <div class="grid gap-3 py-6 text-center">
-                                    <p class="text-sm text-base-content/55">Aucune application dans cette équipe.</p>
-                                    <a class="btn btn-primary btn-sm mx-auto rounded-full" href={routeHref('/applications')} onClick={(event) => onNavigate(event, '/applications')}>
-                                        <Boxes class="size-3.5" aria-hidden />
-                                        Voir les applications
-                                    </a>
+                        <div class="grid min-w-0 gap-4 xl:grid-cols-3">
+                            <Card title="Disponibilité" eyebrow="Pipeline" class="min-w-0 xl:col-span-2">
+                                <div class="flex min-w-0 flex-col gap-6 lg:flex-row lg:items-center">
+                                    <DonutChart
+                                        size={148}
+                                        centerLabel={`${health.score}%`}
+                                        segments={[
+                                            { label: 'OK', value: health.running, color: 'var(--color-success)' },
+                                            { label: 'Dégradé', value: health.degraded, color: 'var(--color-warning)' },
+                                            { label: 'Arrêté', value: health.stopped, color: 'var(--color-error)' },
+                                        ]}
+                                    />
+                                    <div class="grid min-w-0 flex-1 gap-4">
+                                        <div class="grid gap-3 sm:grid-cols-3">
+                                            <p class="text-sm"><span class="font-semibold tabular-nums">{health.running}</span> <span class="text-base-content/50">en ligne</span></p>
+                                            <p class="text-sm"><span class="font-semibold tabular-nums">{health.degraded}</span> <span class="text-base-content/50">dégradées</span></p>
+                                            <p class="text-sm"><span class="font-semibold tabular-nums">{health.stopped}</span> <span class="text-base-content/50">arrêtées</span></p>
+                                        </div>
+                                        <ProgressBar
+                                            value={health.score}
+                                            label="Disponibilité globale"
+                                            tone={health.score >= 80 ? 'success' : health.score >= 50 ? 'warning' : 'error'}
+                                        />
+                                        <ul class="grid gap-2 text-xs sm:grid-cols-2">
+                                            <li class="flex justify-between rounded-xl bg-base-200/70 px-3 py-2">
+                                                <span class="text-base-content/55">Applications</span>
+                                                <span class="tabular-nums font-medium">{appHealth.running}/{appHealth.total}</span>
+                                            </li>
+                                            <li class="flex justify-between rounded-xl bg-base-200/70 px-3 py-2">
+                                                <span class="text-base-content/55">Bases</span>
+                                                <span class="tabular-nums font-medium">{summarizeResources(databases).running}/{databases.length}</span>
+                                            </li>
+                                            <li class="flex justify-between rounded-xl bg-base-200/70 px-3 py-2">
+                                                <span class="text-base-content/55">Services</span>
+                                                <span class="tabular-nums font-medium">{summarizeResources(services).running}/{services.length}</span>
+                                            </li>
+                                            <li class="flex justify-between rounded-xl bg-base-200/70 px-3 py-2">
+                                                <span class="text-base-content/55">Serveurs</span>
+                                                <span class="tabular-nums font-medium">{summarizeResources(servers).running}/{servers.length}</span>
+                                            </li>
+                                        </ul>
+                                    </div>
                                 </div>
-                            ) : (
-                                <div class="grid min-w-0 gap-3 sm:grid-cols-2 2xl:grid-cols-3">
-                                    {applications.map((application) => (
-                                        <ApplicationQuickCard application={application} onNavigate={onNavigate} key={application.uuid} />
-                                    ))}
-                                </div>
-                            )}
-                        </Card>
+                            </Card>
 
-                        <div class="grid min-w-0 gap-5 xl:grid-cols-2">
+                            <Card title="Applications" eyebrow="État" class="min-w-0">
+                                {applications.length === 0 ? (
+                                    <div class="grid gap-3 py-6 text-center">
+                                        <p class="text-sm text-base-content/55">Aucune application dans cette équipe.</p>
+                                        <a class="btn btn-primary btn-sm mx-auto" href={routeHref('/applications')} onClick={(event) => onNavigate(event, '/applications')}>
+                                            <Boxes class="size-3.5" aria-hidden />
+                                            Voir les applications
+                                        </a>
+                                    </div>
+                                ) : (
+                                    <div class="grid min-w-0 gap-2">
+                                        {applications.slice(0, 6).map((application) => (
+                                            <ApplicationQuickCard application={application} onNavigate={onNavigate} key={application.uuid} />
+                                        ))}
+                                    </div>
+                                )}
+                            </Card>
+                        </div>
+
+                        <div class="grid min-w-0 gap-4 xl:grid-cols-2">
                             <Card title="Déploiements récents" eyebrow="Activité" class="min-w-0">
                                 {overview.recent_deployments.length === 0 ? (
                                     <p class="py-4 text-center text-xs text-base-content/50">Aucun déploiement récent.</p>
@@ -176,7 +239,7 @@ export function OverviewPage() {
                                     {overview.agent_activity.length === 0 ? (
                                         <div class="grid gap-3 py-6 text-center">
                                             <p class="text-sm text-base-content/55">Aucune activité récente.</p>
-                                            <a class="btn btn-ghost btn-sm mx-auto rounded-full border border-base-300/80" href={routeHref('/agents')} onClick={(event) => onNavigate(event, '/agents')}>
+                                            <a class="btn btn-ghost btn-sm mx-auto border border-base-300/80" href={routeHref('/agents')} onClick={(event) => onNavigate(event, '/agents')}>
                                                 <Bot class="size-3.5" aria-hidden />
                                                 Ouvrir les agents
                                             </a>
@@ -202,7 +265,7 @@ export function OverviewPage() {
                                                 ))}
                                             </ul>
                                             <div class="card-toolbar mt-3">
-                                                <a class="btn btn-ghost btn-sm rounded-full border border-base-300/80" href={routeHref('/agents')} onClick={(event) => onNavigate(event, '/agents')}>
+                                                <a class="btn btn-ghost btn-sm border border-base-300/80" href={routeHref('/agents')} onClick={(event) => onNavigate(event, '/agents')}>
                                                     <Bot class="size-3.5" aria-hidden />
                                                     Voir les agents
                                                 </a>

@@ -19,10 +19,10 @@ export function FilterBar({
 }: FilterBarProps) {
     return (
         <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-            <label class="input input-bordered input-sm flex w-full min-w-0 items-center gap-2 sm:min-w-48 sm:flex-1">
-                <Search class="size-3.5 shrink-0 text-base-content/45" aria-hidden />
+            <label class="flex h-10 w-full min-w-0 items-center gap-2 rounded-xl border border-base-300/70 bg-base-100 px-3 sm:min-w-48 sm:flex-1">
+                <Search class="size-3.5 shrink-0 text-base-content/40" aria-hidden />
                 <input
-                    class="min-w-0 grow bg-transparent outline-none"
+                    class="min-w-0 grow bg-transparent text-sm outline-none"
                     type="search"
                     placeholder={placeholder}
                     value={query}
@@ -35,7 +35,7 @@ export function FilterBar({
                 )}
             </label>
             {sortOptions && onSortChange && (
-                <select class="select select-bordered select-sm w-full sm:w-auto" value={sort} onChange={(event) => onSortChange(event.currentTarget.value)}>
+                <select class="select select-bordered select-sm w-full bg-base-100 sm:w-auto" value={sort} onChange={(event) => onSortChange(event.currentTarget.value)}>
                     {sortOptions.map((option) => (
                         <option value={option.value} key={option.value}>{option.label}</option>
                     ))}

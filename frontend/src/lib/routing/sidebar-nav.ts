@@ -1,29 +1,38 @@
 import {
+    Activity,
     Bot,
     Boxes,
+    CalendarClock,
+    Cpu,
+    Database,
     Gauge,
     HardDrive,
+    MessageSquare,
     Plug,
+    Rocket,
+    Server,
     Settings,
+    Sparkles,
+    Store,
+    Wrench,
     type LucideIcon,
 } from 'lucide-preact';
-import type { PageKey } from './routes';
+import type { AppRoute, PageKey } from './routes';
 
 export type SidebarNavLink = {
     id: string;
     label: string;
     path: string;
     pages: PageKey[];
-    icon?: LucideIcon;
+    icon: LucideIcon;
     requiresAgents?: boolean;
     requiresInstanceAdmin?: boolean;
 };
 
-export type SidebarNavGroup = {
-    type: 'group';
+export type SidebarNavSection = {
+    type: 'section';
     id: string;
     label: string;
-    icon: LucideIcon;
     requiresAgents?: boolean;
     requiresInstanceAdmin?: boolean;
     items: SidebarNavLink[];
@@ -31,19 +40,13 @@ export type SidebarNavGroup = {
 
 export type SidebarNavItem = {
     type: 'link';
-    id: string;
-    label: string;
-    path: string;
-    icon: LucideIcon;
-    pages: PageKey[];
-    requiresAgents?: boolean;
-    requiresInstanceAdmin?: boolean;
-};
+} & SidebarNavLink;
 
-export type SidebarNavEntry = SidebarNavItem | SidebarNavGroup;
+export type SidebarNavEntry = SidebarNavItem | SidebarNavSection;
 
 /**
- * Navigation principale groupée — séparée de appRoutes (routage).
+ * Navigation principale par sections toujours visibles.
+ * Les groupes accordéon rendaient les pages difficiles à trouver.
  */
 export const sidebarNav: SidebarNavEntry[] = [
     {
@@ -55,95 +58,101 @@ export const sidebarNav: SidebarNavEntry[] = [
         pages: ['dashboard'],
     },
     {
-        type: 'group',
-        id: 'applications',
-        label: 'Applications',
-        icon: Boxes,
+        type: 'section',
+        id: 'resources',
+        label: 'Ressources',
         items: [
             {
-                id: 'applications-manage',
-                label: 'Gérer',
+                id: 'applications',
+                label: 'Applications',
                 path: '/applications',
                 pages: ['applications', 'application-detail'],
-            },
-            {
-                id: 'store',
-                label: 'Store',
-                path: '/store',
-                pages: ['store'],
+                icon: Boxes,
             },
             {
                 id: 'databases',
                 label: 'Bases de données',
                 path: '/databases',
                 pages: ['databases'],
+                icon: Database,
             },
             {
                 id: 'services',
                 label: 'Services',
                 path: '/services',
                 pages: ['services'],
+                icon: Wrench,
             },
             {
-                id: 'deployments',
-                label: 'Cartographie',
-                path: '/deployments',
-                pages: ['deployments'],
+                id: 'store',
+                label: 'Store',
+                path: '/store',
+                pages: ['store'],
+                icon: Store,
             },
         ],
     },
     {
-        type: 'group',
-        id: 'infrastructure',
-        label: 'Infrastructure',
-        icon: HardDrive,
+        type: 'section',
+        id: 'operations',
+        label: 'Opérations',
         items: [
             {
-                id: 'storage',
-                label: 'Stockage',
-                path: '/storage',
-                pages: ['storage', 'storages'],
+                id: 'deployments',
+                label: 'Déploiements',
+                path: '/deployments',
+                pages: ['deployments'],
+                icon: Rocket,
             },
             {
                 id: 'monitoring',
                 label: 'Supervision',
                 path: '/monitoring',
                 pages: ['monitoring'],
+                icon: Activity,
+            },
+            {
+                id: 'storage',
+                label: 'Stockage',
+                path: '/storage',
+                pages: ['storage', 'storages'],
+                icon: HardDrive,
+            },
+            {
+                id: 'servers',
+                label: 'Serveurs',
+                path: '/settings/servers',
+                pages: ['server-detail'],
+                icon: Server,
             },
             {
                 id: 'github-runners',
                 label: 'Runners GitHub',
                 path: '/github-runners',
                 pages: ['github-runners'],
-            },
-            {
-                id: 'sso',
-                label: 'SSO',
-                path: '/settings/sso',
-                pages: ['sso'],
-                requiresInstanceAdmin: true,
+                icon: Cpu,
             },
             {
                 id: 'scheduled-tasks',
                 label: 'Tâches planifiées',
                 path: '/scheduled-tasks',
                 pages: ['scheduled-tasks'],
+                icon: CalendarClock,
             },
         ],
     },
     {
         type: 'link',
         id: 'connexions',
-        label: 'Tokens & Clés API',
+        label: 'Connexions',
         path: '/connexions',
         icon: Plug,
         pages: ['connexions', 'github', 'sources'],
     },
     {
-        type: 'group',
+        type: 'section',
         id: 'agents',
         label: 'Agents IA',
-        icon: Bot,
         requiresAgents: true,
         items: [
             {
@@ -151,24 +160,28 @@ export const sidebarNav: SidebarNavEntry[] = [
                 label: 'Chat',
                 path: '/agents/chat',
                 pages: ['agents-chat', 'agent-detail'],
+                icon: MessageSquare,
             },
             {
                 id: 'agents-manage',
                 label: 'Équipe',
                 path: '/agents',
                 pages: ['agents'],
+                icon: Bot,
             },
             {
                 id: 'automation',
                 label: 'Automations',
                 path: '/automation',
                 pages: ['automation'],
+                icon: Sparkles,
             },
             {
                 id: 'agents-settings',
                 label: 'Paramètres AI',
                 path: '/agents/settings',
                 pages: ['agents-settings'],
+                icon: Settings,
             },
         ],
     },
@@ -180,13 +193,13 @@ export const sidebarNav: SidebarNavEntry[] = [
         icon: Settings,
         pages: [
             'settings',
+            'sso',
             'shared-variables',
             'profile',
             'destinations',
             'tags',
             'subscription',
             'onboarding',
-            'server-detail',
         ],
     },
 ];
@@ -237,13 +250,15 @@ export function isNavPageActive(pages: PageKey[], page: PageKey): boolean {
     return pages.includes(page);
 }
 
-export function isNavGroupActive(group: SidebarNavGroup, page: PageKey): boolean {
-    return group.items.some((item) => isNavPageActive(item.pages, page));
+export function isNavSectionActive(section: SidebarNavSection, page: PageKey): boolean {
+    return section.items.some((item) => isNavPageActive(item.pages, page));
 }
 
-/** Liens feuilles pour le mode barre réduite (icônes uniquement). */
-export function flattenSidebarNav(entries: SidebarNavEntry[]): Array<SidebarNavLink & { icon: LucideIcon }> {
-    const links: Array<SidebarNavLink & { icon: LucideIcon }> = [];
+/** @deprecated Utiliser isNavSectionActive */
+export const isNavGroupActive = isNavSectionActive;
+
+export function flattenSidebarNav(entries: SidebarNavEntry[]): SidebarNavLink[] {
+    const links: SidebarNavLink[] = [];
 
     for (const entry of entries) {
         if (entry.type === 'link') {
@@ -251,13 +266,33 @@ export function flattenSidebarNav(entries: SidebarNavEntry[]): Array<SidebarNavL
             continue;
         }
 
-        for (const item of entry.items) {
-            links.push({
-                ...item,
-                icon: item.icon ?? entry.icon,
-            });
-        }
+        links.push(...entry.items);
     }
 
     return links;
+}
+
+export function navPathMatches(itemPath: string, routePath: string): boolean {
+    if (itemPath === '/') {
+        return routePath === '/';
+    }
+
+    return routePath === itemPath || routePath.startsWith(`${itemPath}/`);
+}
+
+export function resolveActiveNavId(entries: SidebarNavEntry[], route: AppRoute): string | null {
+    const links = flattenSidebarNav(entries);
+    const pathHits = links.filter((item) => navPathMatches(item.path, route.path));
+
+    if (pathHits.length > 0) {
+        return [...pathHits].sort((left, right) => right.path.length - left.path.length)[0]?.id ?? null;
+    }
+
+    const pageHits = links.filter((item) => item.pages.includes(route.page));
+
+    if (pageHits.length > 0) {
+        return [...pageHits].sort((left, right) => right.path.length - left.path.length)[0]?.id ?? null;
+    }
+
+    return null;
 }

@@ -1,14 +1,14 @@
-import { ChevronDown, PanelLeftClose, PanelLeftOpen, Sparkles, X } from 'lucide-preact';
-import { useMemo, useState } from 'preact/hooks';
+import { PanelLeftClose, PanelLeftOpen, Sparkles, X } from 'lucide-preact';
+import { useMemo } from 'preact/hooks';
 import type { BootstrapData } from '../lib/bootstrap';
 import { DEVFORGE_BRAND_NAME, DEVFORGE_LOGO_URL } from '../lib/brand';
 import {
     flattenSidebarNav,
-    isNavGroupActive,
-    isNavPageActive,
+    resolveActiveNavId,
     visibleSidebarNav,
     type SidebarNavEntry,
-    type SidebarNavGroup,
+    type SidebarNavLink,
+    type SidebarNavSection,
 } from '../lib/routing/sidebar-nav';
 import { routeHref, type AppRoute } from '../lib/routes';
 
@@ -24,123 +24,119 @@ type SidebarProps = {
 
 function linkClass(active: boolean, nested = false): string {
     const base = nested
-        ? 'flex min-h-9 items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors'
+        ? 'flex min-h-9 items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[13px] transition-colors'
         : 'flex h-10 min-h-10 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors';
 
     if (active) {
-        return `${base} bg-primary/10 font-semibold text-primary shadow-sm ring-1 ring-primary/15`;
+        return `${base} bg-[var(--devforge-sidebar-active-bg)] font-semibold text-[var(--devforge-sidebar-active-fg)]`;
     }
 
-    return `${base} text-base-content/55 hover:bg-base-200/80 hover:text-base-content ${nested ? 'font-normal' : ''}`;
+    return `${base} text-[var(--devforge-sidebar-muted)] hover:bg-[var(--devforge-sidebar-hover)] hover:text-[var(--devforge-sidebar-fg)] ${nested ? 'font-normal' : ''}`;
 }
 
-function NavGroup({
-    group,
-    route,
-    open,
-    onToggle,
+function NavLink({
+    item,
+    active,
+    collapsed,
+    nested,
     onNavigate,
 }: {
-    group: SidebarNavGroup;
-    route: AppRoute;
-    open: boolean;
-    onToggle: () => void;
+    item: SidebarNavLink;
+    active: boolean;
+    collapsed: boolean;
+    nested?: boolean;
     onNavigate: (event: MouseEvent, path: string) => void;
 }) {
-    const groupActive = isNavGroupActive(group, route.page);
-    const Icon = group.icon;
+    const Icon = item.icon;
 
     return (
-        <li>
-            <button
-                type="button"
-                class={`flex h-10 min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors ${
-                    groupActive && !open
-                        ? 'bg-primary/10 text-primary'
-                        : 'text-base-content/70 hover:bg-base-200/80 hover:text-base-content'
-                }`}
-                aria-expanded={open}
-                aria-controls={`sidebar-group-${group.id}`}
-                onClick={onToggle}
-            >
-                <Icon class="size-4 shrink-0" aria-hidden />
-                <span class="min-w-0 flex-1 truncate text-start">{group.label}</span>
-                <ChevronDown
-                    class={`size-3.5 shrink-0 text-base-content/40 transition-transform ${open ? 'rotate-0' : '-rotate-90'}`}
-                    aria-hidden
-                />
-            </button>
-            {open && (
-                <ul id={`sidebar-group-${group.id}`} class="mt-0.5 mb-1 ms-3 grid gap-0.5 border-s border-base-300/80 ps-2">
-                    {group.items.map((item) => {
-                        const active = isNavPageActive(item.pages, route.page);
-
-                        return (
-                            <li key={item.id}>
-                                <a
-                                    class={linkClass(active, true)}
-                                    href={routeHref(item.path)}
-                                    aria-current={active ? 'page' : undefined}
-                                    onClick={(event) => onNavigate(event, item.path)}
-                                >
-                                    <span class="truncate">{item.label}</span>
-                                </a>
-                            </li>
-                        );
-                    })}
-                </ul>
-            )}
-        </li>
+        <a
+            class={linkClass(active, nested)}
+            href={routeHref(item.path)}
+            title={collapsed ? item.label : undefined}
+            aria-label={item.label}
+            aria-current={active ? 'page' : undefined}
+            onClick={(event) => onNavigate(event, item.path)}
+        >
+            <Icon class="size-4 shrink-0" aria-hidden />
+            {!collapsed && <span class="truncate">{item.label}</span>}
+        </a>
     );
 }
 
 function NavEntries({
     entries,
-    route,
-    openGroups,
-    onToggleGroup,
+    activeId,
+    collapsed,
     onNavigate,
 }: {
     entries: SidebarNavEntry[];
-    route: AppRoute;
-    openGroups: Record<string, boolean>;
-    onToggleGroup: (id: string) => void;
+    activeId: string | null;
+    collapsed: boolean;
     onNavigate: (event: MouseEvent, path: string) => void;
 }) {
     return (
-        <ul class="flex flex-col gap-1 p-0">
+        <ul class="flex flex-col gap-4 p-0">
             {entries.map((entry) => {
-                if (entry.type === 'group') {
+                if (entry.type === 'section') {
                     return (
-                        <NavGroup
+                        <NavSection
                             key={entry.id}
-                            group={entry}
-                            route={route}
-                            open={openGroups[entry.id] ?? false}
-                            onToggle={() => onToggleGroup(entry.id)}
+                            section={entry}
+                            activeId={activeId}
+                            collapsed={collapsed}
                             onNavigate={onNavigate}
                         />
                     );
                 }
 
-                const active = isNavPageActive(entry.pages, route.page);
-                const Icon = entry.icon;
-
                 return (
                     <li key={entry.id}>
-                        <a
-                            class={linkClass(active)}
-                            href={routeHref(entry.path)}
-                            aria-current={active ? 'page' : undefined}
-                            onClick={(event) => onNavigate(event, entry.path)}
-                        >
-                            <Icon class="size-4 shrink-0" aria-hidden />
-                            <span class="truncate">{entry.label}</span>
-                        </a>
+                        <NavLink
+                            item={entry}
+                            active={activeId === entry.id}
+                            collapsed={collapsed}
+                            onNavigate={onNavigate}
+                        />
                     </li>
                 );
             })}
         </ul>
+    );
+}
+
+function NavSection({
+    section,
+    activeId,
+    collapsed,
+    onNavigate,
+}: {
+    section: SidebarNavSection;
+    activeId: string | null;
+    collapsed: boolean;
+    onNavigate: (event: MouseEvent, path: string) => void;
+}) {
+    return (
+        <li>
+            {!collapsed && (
+                <p class="mb-1.5 px-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--devforge-sidebar-muted)]">
+                    {section.label}
+                </p>
+            )}
+            <ul class="flex flex-col gap-0.5 p-0">
+                {section.items.map((item) => (
+                    <li key={item.id}>
+                        <NavLink
+                            item={item}
+                            active={activeId === item.id}
+                            collapsed={collapsed}
+                            nested={!collapsed}
+                            onNavigate={onNavigate}
+                        />
+                    </li>
+                ))}
+            </ul>
+        </li>
     );
 }
 
@@ -159,29 +155,20 @@ export function Sidebar({
         () => visibleSidebarNav(agentsEnabled, instanceAdmin),
         [agentsEnabled, instanceAdmin],
     );
-    const panelClass = collapsed ? 'w-16' : 'w-64';
-
-    const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
-
-    const toggleGroup = (id: string) => {
-        setOpenGroups((current) => ({
-            ...current,
-            [id]: !current[id],
-        }));
-    };
-
+    const activeId = useMemo(() => resolveActiveNavId(entries, route), [entries, route]);
+    const panelClass = collapsed ? 'w-[4.5rem]' : 'w-64';
     const collapsedLinks = useMemo(() => flattenSidebarNav(entries), [entries]);
 
     return (
         <aside
-            class={`devforge-sidebar z-40 flex shrink-0 flex-col bg-base-100 shadow-sm transition-[width,transform] ${panelClass} ${
+            class={`devforge-sidebar z-40 flex shrink-0 flex-col transition-[width,transform] ${panelClass} ${
                 mobileOpen
-                    ? 'fixed inset-y-3 start-3 rounded-3xl translate-x-0'
-                    : 'fixed inset-y-3 start-3 -translate-x-[calc(100%+1rem)] rounded-3xl lg:static lg:translate-x-0'
+                    ? 'fixed inset-y-0 start-0 translate-x-0'
+                    : 'fixed inset-y-0 start-0 -translate-x-full lg:static lg:translate-x-0'
             }`}
             aria-label="Navigation principale"
         >
-            <div class="flex h-14 items-center px-4">
+            <div class={`flex h-16 items-center ${collapsed ? 'justify-center px-2' : 'px-4'}`}>
                 <a
                     class="flex min-w-0 items-center gap-3"
                     href={routeHref('/')}
@@ -191,80 +178,66 @@ export function Sidebar({
                     <img
                         src={DEVFORGE_LOGO_URL}
                         alt=""
-                        class="size-9 shrink-0 rounded-full object-cover shadow-sm"
-                        width={36}
-                        height={36}
+                        class="size-8 shrink-0 rounded-xl object-cover"
+                        width={32}
+                        height={32}
                         aria-hidden
                     />
-                    {!collapsed && <span class="truncate text-base font-bold tracking-tight">{DEVFORGE_BRAND_NAME}</span>}
+                    {!collapsed && (
+                        <span class="truncate text-[15px] font-semibold tracking-tight text-[var(--devforge-sidebar-fg)]">
+                            {DEVFORGE_BRAND_NAME}
+                        </span>
+                    )}
                 </a>
-                <button class="btn btn-ghost btn-sm ms-auto lg:hidden" type="button" aria-label="Fermer le menu" onClick={onCloseMobile}>
+                <button
+                    class="btn btn-ghost btn-sm ms-auto text-[var(--devforge-sidebar-fg)] lg:hidden"
+                    type="button"
+                    aria-label="Fermer le menu"
+                    onClick={onCloseMobile}
+                >
                     <X class="size-4" aria-hidden />
                 </button>
             </div>
 
-            <nav class="custom-scrollbar flex-1 overflow-y-auto px-3 pb-2">
-                {!collapsed && (
-                    <p class="mb-3 px-2 text-[10px] font-semibold uppercase tracking-widest text-base-content/40">
-                        Menu
-                    </p>
-                )}
-
+            <nav class="custom-scrollbar flex-1 overflow-y-auto px-2.5 pb-3">
                 {collapsed ? (
                     <ul class="flex flex-col gap-1 p-0">
-                        {collapsedLinks.map((item) => {
-                            const active = isNavPageActive(item.pages, route.page);
-                            const Icon = item.icon;
-
-                            return (
-                                <li key={item.id}>
-                                    <a
-                                        class={linkClass(active)}
-                                        href={routeHref(item.path)}
-                                        title={item.label}
-                                        aria-label={item.label}
-                                        aria-current={active ? 'page' : undefined}
-                                        onClick={(event) => onNavigate(event, item.path)}
-                                    >
-                                        <Icon class="size-4 shrink-0" aria-hidden />
-                                    </a>
-                                </li>
-                            );
-                        })}
+                        {collapsedLinks.map((item) => (
+                            <li key={item.id}>
+                                <NavLink
+                                    item={item}
+                                    active={activeId === item.id}
+                                    collapsed
+                                    onNavigate={onNavigate}
+                                />
+                            </li>
+                        ))}
                     </ul>
                 ) : (
                     <NavEntries
                         entries={entries}
-                        route={route}
-                        openGroups={openGroups}
-                        onToggleGroup={toggleGroup}
+                        activeId={activeId}
+                        collapsed={false}
                         onNavigate={onNavigate}
                     />
                 )}
             </nav>
 
-            <div class="grid gap-1 border-t border-base-300/70 p-3">
+                <div class="grid gap-1 border-t border-white/10 p-2.5">
                 {bootstrap.permissions.manage_team && (
                     <a
-                        class={collapsed
-                            ? 'grid h-10 place-items-center rounded-xl text-base-content/55 hover:bg-base-200/80 hover:text-base-content'
-                            : 'flex h-10 items-center gap-3 rounded-xl px-3 text-sm text-base-content/55 hover:bg-base-200/80 hover:text-base-content'}
+                        class={linkClass(activeId === 'onboarding')}
                         href={routeHref('/onboarding')}
                         title="Assistant de configuration"
                         aria-label="Assistant de configuration"
                         onClick={(event) => onNavigate(event, '/onboarding')}
                     >
                         <Sparkles class="size-4 shrink-0" aria-hidden />
-                        {!collapsed && <span class="truncate">Assistant de config.</span>}
+                        {!collapsed && <span class="truncate">Assistant</span>}
                     </a>
                 )}
-                {!collapsed && (
-                    <p class="px-2 pb-1 text-[10px] leading-relaxed text-base-content/40">
-                        {DEVFORGE_BRAND_NAME}
-                    </p>
-                )}
                 <button
-                    class="btn btn-ghost btn-sm hidden justify-start rounded-xl px-3 text-xs lg:flex"
+                    class="hidden h-10 min-h-10 items-center gap-3 rounded-xl px-3 text-xs text-[var(--devforge-sidebar-muted)] hover:bg-[var(--devforge-sidebar-hover)] hover:text-[var(--devforge-sidebar-fg)] lg:flex"
                     type="button"
                     aria-label={collapsed ? 'Déployer la barre latérale' : 'Réduire la barre latérale'}
                     onClick={onToggleCollapsed}

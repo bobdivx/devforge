@@ -5,16 +5,24 @@ type CardProps = {
     eyebrow?: string;
     children: ComponentChildren;
     class?: string;
+    actions?: ComponentChildren;
 };
 
-export function Card({ title, eyebrow, children, class: className = '' }: CardProps) {
+export function Card({ title, eyebrow, children, class: className = '', actions }: CardProps) {
     return (
-        <section class={`min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm ${className}`}>
-            <div class="grid min-w-0 gap-3 overflow-hidden p-5">
-                {(title || eyebrow) && (
-                    <header class="grid gap-1">
-                        {eyebrow && <p class="text-[11px] font-semibold uppercase tracking-widest text-base-content/45">{eyebrow}</p>}
-                        {title && <h2 class="text-base font-semibold">{title}</h2>}
+        <section class={`devforge-card min-w-0 overflow-hidden rounded-[1.25rem] bg-base-100 ${className}`}>
+            <div class="grid min-w-0 gap-4 overflow-hidden p-5 md:p-6">
+                {(title || eyebrow || actions) && (
+                    <header class="flex min-w-0 items-start justify-between gap-3">
+                        <div class="grid min-w-0 gap-1">
+                            {eyebrow && (
+                                <p class="text-[11px] font-semibold uppercase tracking-[0.14em] text-base-content/40">
+                                    {eyebrow}
+                                </p>
+                            )}
+                            {title && <h2 class="text-base font-semibold tracking-tight">{title}</h2>}
+                        </div>
+                        {actions}
                     </header>
                 )}
                 {children}

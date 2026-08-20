@@ -58,7 +58,7 @@ export function applyTheme(theme: Theme): void {
     document.documentElement.style.colorScheme = theme;
 
     const meta = document.querySelector('meta[name="theme-color"]');
-    meta?.setAttribute('content', theme === 'dark' ? '#171717' : '#ffffff');
+    meta?.setAttribute('content', theme === 'dark' ? '#0c0f0d' : '#f3f5f2');
 }
 
 export function applyAppearance(preferences: AppearancePreferences): Theme {

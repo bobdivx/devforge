@@ -19,22 +19,54 @@ export type ApplicationTab = {
     label: string;
 };
 
-export const applicationTabs: ApplicationTab[] = [
-    { id: 'overview', label: 'Vue d’ensemble' },
-    { id: 'settings', label: 'Paramètres' },
-    { id: 'domains', label: 'Domaines' },
-    { id: 'deployments', label: 'Déploiements' },
-    { id: 'previews', label: 'Previews' },
-    { id: 'databases', label: 'Bases de données' },
-    { id: 'tasks', label: 'Tâches' },
-    { id: 'logs', label: 'Logs' },
-    { id: 'variables', label: 'Variables' },
-    { id: 'files', label: 'Code source' },
-    { id: 'webhooks', label: 'Webhooks' },
-    { id: 'storage', label: 'Storages' },
-    { id: 'limits', label: 'Limites' },
-    { id: 'danger', label: 'Danger' },
+export type ApplicationTabGroup = {
+    id: string;
+    label: string;
+    items: ApplicationTab[];
+};
+
+export const applicationTabGroups: ApplicationTabGroup[] = [
+    {
+        id: 'health',
+        label: 'Santé',
+        items: [
+            { id: 'overview', label: 'Vue d’ensemble' },
+            { id: 'deployments', label: 'Déploiements' },
+            { id: 'logs', label: 'Logs' },
+            { id: 'previews', label: 'Previews' },
+        ],
+    },
+    {
+        id: 'connect',
+        label: 'Connexions',
+        items: [
+            { id: 'domains', label: 'Domaines' },
+            { id: 'databases', label: 'Bases de données' },
+            { id: 'variables', label: 'Variables' },
+            { id: 'files', label: 'Code source' },
+        ],
+    },
+    {
+        id: 'configure',
+        label: 'Configuration',
+        items: [
+            { id: 'settings', label: 'Paramètres' },
+            { id: 'tasks', label: 'Tâches' },
+            { id: 'webhooks', label: 'Webhooks' },
+            { id: 'storage', label: 'Storages' },
+            { id: 'limits', label: 'Limites' },
+        ],
+    },
+    {
+        id: 'danger',
+        label: 'Zone sensible',
+        items: [
+            { id: 'danger', label: 'Danger' },
+        ],
+    },
 ];
+
+export const applicationTabs: ApplicationTab[] = applicationTabGroups.flatMap((group) => group.items);
 
 const applicationTabIds = new Set<string>(applicationTabs.map((tab) => tab.id));
 

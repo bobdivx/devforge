@@ -159,7 +159,7 @@ export function DeploymentsIndicator() {
                                 En cours
                             </p>
                             <a class="link link-hover text-xs" href={routeHref('/deployments')}>
-                                Cartographie
+                                Déploiements
                             </a>
                         </div>
                         <DeploymentList
@@ -193,7 +193,7 @@ export function DeploymentsIndicator() {
                                         En cours
                                     </p>
                                     <a class="link link-hover text-xs" href={routeHref('/deployments')}>
-                                        Cartographie
+                                        Déploiements
                                     </a>
                                 </div>
                                 <DeploymentList
