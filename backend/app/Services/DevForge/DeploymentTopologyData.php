@@ -88,6 +88,7 @@ class DeploymentTopologyData
                 'meta' => [
                     'type' => $agent->type,
                     'avatar_color' => $agent->avatar_color,
+                    'avatar_shape' => $agent->avatar_shape,
                     'is_active' => (bool) $agent->is_active,
                     'resource_uuid' => $agent->resource_uuid,
                 ],
@@ -355,7 +356,7 @@ class DeploymentTopologyData
 
         return AiAgentRun::query()
             ->whereHas('agent', fn ($query) => $query->where('team_id', $team->id))
-            ->with(['agent:id,uuid,name,type,avatar_color,resource_uuid,status,is_active'])
+            ->with(['agent:id,uuid,name,type,avatar_color,avatar_shape,resource_uuid,status,is_active'])
             ->latest()
             ->limit(12)
             ->get();

@@ -5,33 +5,31 @@ import {
     Circle,
     GitBranch,
     Loader2,
+    Mic,
+    Plus,
     Send,
     Square,
     Wrench,
     X,
     XCircle,
 } from 'lucide-preact';
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Agent, AgentChatAttachment, AgentChatMessage, AgentChatSession, AgentChatStep, AgentModelRouting } from '../../lib/domain-api';
 import { isPendingToolApproval, parsePendingToolApproval } from '../../lib/agent-pending-approval';
 import { isPendingPlan, parsePendingPlan } from '../../lib/agent-pending-plan';
+import { parseChoiceCard } from '../../lib/agent-choice-card';
+import { chatDayStamp, isNewChatDay, renderChatHtml } from '../../lib/agent-chat-richtext';
+import { botMoodFromStatus } from '../../lib/bot-character';
 import {
     sanitizeAssistantContent,
     stepsCompletion,
     toolDisplayLabel,
 } from '../../lib/agent-chat-display';
 import { AgentErrorAlert } from './AgentErrorAlert';
+import { BotCharacter } from './BotCharacter';
 import { CaptureToolbar } from './CaptureToolbar';
-
-function formatTime(iso: string): string {
-    return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-}
-
-function renderContent(content: string) {
-    return content
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\n/g, '<br />');
-}
+import { ChatChoiceCardView } from './ChatChoiceCard';
+import { ChatPermissionCard } from './ChatPermissionCard';
 
 function problemStatusBadge(metadata: AgentChatMessage['metadata']): { label: string; className: string } | null {
     if (!metadata || typeof metadata !== 'object') {
@@ -170,7 +168,7 @@ type Props = {
     onSend: (content: string) => void;
     onStop?: () => void;
     stopping?: boolean;
-    onResolveApproval?: (messageUuid: string, decision: 'approve' | 'deny') => void;
+    onResolveApproval?: (messageUuid: string, decision: 'approve' | 'deny', remember?: boolean) => void;
     approvingMessageUuid?: string | null;
     onRoutingChange?: (routing: AgentModelRouting | null) => void;
     chatMode?: 'plan' | 'build' | 'debug';
@@ -181,6 +179,7 @@ type Props = {
     suggestions?: string[];
     placeholder?: string;
     hideSessionHeader?: boolean;
+    userName?: string;
     /** Nombre de leafs async en cours (spawn + yield). */
     activeSubagentCount?: number;
     /** Progression live pendant l’envoi (SSE). */
@@ -209,12 +208,48 @@ export function AgentChatPanel({
     suggestions = [],
     placeholder = 'Écrire un message…',
     hideSessionHeader = false,
+    userName,
     activeSubagentCount = 0,
     liveSteps = [],
     liveAssistantText = null,
 }: Props) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const [captureOpen, setCaptureOpen] = useState(false);
+    const [listening, setListening] = useState(false);
+    const [choiceState, setChoiceState] = useState<Record<string, { selected?: string; dismissed?: boolean }>>({});
+    const composerPlaceholder = placeholder === 'Écrire un message…'
+        ? `Envoyer un message à ${agent.name}`
+        : placeholder;
+
+    const startDictation = () => {
+        const ctor = (window as unknown as { webkitSpeechRecognition?: new () => {
+            lang: string;
+            interimResults: boolean;
+            onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+            onend: (() => void) | null;
+            onerror: (() => void) | null;
+            start: () => void;
+        } }).webkitSpeechRecognition;
+
+        if (!ctor) {
+            return;
+        }
+
+        const recognition = new ctor();
+        recognition.lang = 'fr-FR';
+        recognition.interimResults = false;
+        setListening(true);
+        recognition.onresult = (event) => {
+            const transcript = Array.from(event.results).map((result) => result[0]?.transcript ?? '').join(' ');
+            if (transcript.trim() !== '') {
+                onDraftChange(draft === '' ? transcript : `${draft} ${transcript}`);
+            }
+        };
+        recognition.onend = () => setListening(false);
+        recognition.onerror = () => setListening(false);
+        recognition.start();
+    };
 
     useEffect(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -293,12 +328,22 @@ export function AgentChatPanel({
                         <p class="text-sm text-base-content/55">Posez votre question ci-dessous</p>
                     </div>
                 ) : (
-                    <div class="mx-auto flex w-full max-w-3xl flex-col gap-3 sm:gap-4">
-                        {messages.map((message) => {
+                    <div class="mx-auto flex w-full max-w-2xl flex-col gap-5">
+                        {messages.map((message, index) => {
                             const pending = parsePendingToolApproval(message.metadata);
                             const needsApproval = isPendingToolApproval(message.metadata);
                             const pendingPlan = parsePendingPlan(message.metadata);
                             const needsPlanApproval = isPendingPlan(message.metadata);
+                            const choiceCard = parseChoiceCard(message.metadata);
+                            const choiceLocal = choiceState[message.uuid] ?? {};
+                            const mergedChoice = choiceCard
+                                ? {
+                                    ...choiceCard,
+                                    selected_id: choiceLocal.selected ?? choiceCard.selected_id,
+                                    dismissed: choiceLocal.dismissed ?? choiceCard.dismissed,
+                                }
+                                : null;
+                            const showChoice = Boolean(mergedChoice && !mergedChoice.dismissed);
                             const resolving = approvingMessageUuid === message.uuid;
                             const isUser = message.role === 'user';
                             const steps = parseMessageSteps(message.metadata);
@@ -306,196 +351,146 @@ export function AgentChatPanel({
                             const displayContent = isUser
                                 ? message.content
                                 : sanitizeAssistantContent(message.content, steps);
-                            const showApprovalChrome = needsApproval || needsPlanApproval;
+                            const showDayStamp = isNewChatDay(index === 0 ? null : messages[index - 1]?.created_at ?? null, message.created_at);
+                            const userInitials = (userName ?? 'Vous').trim().slice(0, 1).toUpperCase() || 'V';
 
                             return (
-                                <article
-                                    key={message.uuid}
-                                    class={`flex gap-2 sm:gap-3 ${isUser ? 'flex-row-reverse' : ''}`}
-                                >
-                                    <div
-                                        class={`mt-0.5 hidden size-7 shrink-0 place-items-center rounded-lg sm:grid ${
-                                            isUser ? 'bg-primary/15 text-primary' : 'bg-base-300 text-base-content/70'
-                                        }`}
-                                        aria-hidden
-                                    >
-                                        {isUser
-                                            ? <span class="text-[10px] font-bold">Vous</span>
-                                            : <Bot class="size-3.5" />}
-                                    </div>
-                                    <div class={`min-w-0 max-w-[min(100%,28rem)] flex-1 sm:max-w-[90%] ${isUser ? 'ml-auto text-end' : ''}`}>
-                                        {isUser ? (
-                                            <div class="rounded-2xl bg-primary px-3 py-2 text-sm leading-relaxed text-primary-content sm:px-3.5 sm:py-2.5">
+                                <article key={message.uuid} class="grid gap-3">
+                                    {showDayStamp && (
+                                        <p class="text-center text-[11px] font-medium text-base-content/40">
+                                            {chatDayStamp(message.created_at)}
+                                        </p>
+                                    )}
+                                    {isUser ? (
+                                        <div class="ms-auto grid max-w-[min(100%,28rem)] justify-items-end gap-2">
+                                            <div class="rounded-2xl bg-base-300/80 px-3.5 py-2.5 text-sm leading-relaxed">
                                                 <div
-                                                    class="prose prose-sm max-w-none break-words text-start text-inherit [&_strong]:font-semibold"
-                                                    dangerouslySetInnerHTML={{ __html: renderContent(displayContent) }}
+                                                    class="break-words text-start [&_strong]:font-semibold"
+                                                    dangerouslySetInnerHTML={{ __html: renderChatHtml(displayContent) }}
                                                 />
                                             </div>
-                                        ) : (
-                                            <div class="grid gap-2 text-start">
-                                                {statusBadge && (
-                                                    <span class={`w-fit rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusBadge.className}`}>
-                                                        {statusBadge.label}
-                                                    </span>
-                                                )}
-                                                {steps.length > 0 && (
-                                                    <IdeActionsCard steps={steps} title="Actions" />
-                                                )}
-                                                {(displayContent !== '' || showApprovalChrome) && (
+                                            <span class="grid size-8 place-items-center rounded-full bg-teal-500 text-xs font-bold text-neutral">
+                                                {userInitials}
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        <div class="grid max-w-[min(100%,34rem)] justify-items-start gap-2">
+                                            {statusBadge && (
+                                                <span class={`w-fit rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusBadge.className}`}>
+                                                    {statusBadge.label}
+                                                </span>
+                                            )}
+                                            {steps.length > 0 && (
+                                                <IdeActionsCard steps={steps} title="Actions" />
+                                            )}
+                                            {displayContent !== '' && (
+                                                <div class="rounded-2xl bg-base-300/70 px-3.5 py-2.5 text-sm leading-relaxed">
                                                     <div
-                                                        class={`rounded-2xl px-3 py-2 text-sm leading-relaxed sm:px-3.5 sm:py-2.5 ${
-                                                            showApprovalChrome
-                                                                ? 'border border-warning/40 bg-warning/10 text-base-content'
-                                                                : 'border border-base-300 bg-base-200/60 text-base-content'
-                                                        }`}
-                                                    >
-                                                        {displayContent !== '' && (
-                                                            <div
-                                                                class="prose prose-sm max-w-none break-words text-start text-inherit [&_strong]:font-semibold"
-                                                                dangerouslySetInnerHTML={{ __html: renderContent(displayContent) }}
-                                                            />
-                                                        )}
-                                                        {pendingPlan && needsPlanApproval && onResolveApproval && (
-                                                            <div class={`grid gap-2 text-start ${displayContent !== '' ? 'mt-3 border-t border-warning/25 pt-3' : ''}`}>
-                                                                <p class="text-[11px] font-semibold text-base-content">
-                                                                    Plan : {pendingPlan.title}
-                                                                </p>
-                                                                {pendingPlan.summary && (
-                                                                    <p class="text-[11px] text-base-content/70">{pendingPlan.summary}</p>
-                                                                )}
-                                                                {pendingPlan.steps.length > 0 && (
-                                                                    <ol class="list-decimal space-y-1 ps-4 text-[11px] text-base-content/75">
-                                                                        {pendingPlan.steps.map((step, index) => (
-                                                                            <li key={step.id ?? `${index}-${step.action}`}>
-                                                                                {step.action}
-                                                                                {step.tool ? (
-                                                                                    <span class="text-base-content/45"> · {step.tool}</span>
-                                                                                ) : null}
-                                                                                {step.risk ? (
-                                                                                    <span class="text-base-content/45"> · {step.risk}</span>
-                                                                                ) : null}
-                                                                            </li>
-                                                                        ))}
-                                                                    </ol>
-                                                                )}
-                                                                <div class="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
-                                                                    <button
-                                                                        type="button"
-                                                                        class="btn btn-success btn-sm w-full gap-1 sm:btn-xs sm:w-auto"
-                                                                        disabled={sending || resolving}
-                                                                        onClick={() => onResolveApproval(message.uuid, 'approve')}
-                                                                    >
-                                                                        {resolving
-                                                                            ? <span class="loading loading-spinner loading-xs" aria-hidden />
-                                                                            : <Check class="size-3.5" aria-hidden />}
-                                                                        Approuver le plan
-                                                                    </button>
-                                                                    <button
-                                                                        type="button"
-                                                                        class="btn btn-ghost btn-sm w-full gap-1 border border-base-300 sm:btn-xs sm:w-auto"
-                                                                        disabled={sending || resolving}
-                                                                        onClick={() => onResolveApproval(message.uuid, 'deny')}
-                                                                    >
-                                                                        <X class="size-3.5" aria-hidden />
-                                                                        Refuser
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                        {pending && needsApproval && onResolveApproval && (
-                                                            <div class={`grid gap-2 text-start ${displayContent !== '' ? 'mt-3 border-t border-warning/25 pt-3' : ''}`}>
-                                                                <p class="text-[11px] text-base-content/65">
-                                                                    Outil <span class="font-semibold text-base-content">{pending.tool}</span>
-                                                                    {pending.reason ? ` — ${pending.reason}` : ''}
-                                                                </p>
-                                                                {pending.diff_preview && (
-                                                                    <div class="grid gap-1 rounded-lg border border-base-300 bg-base-100/80 p-2 text-start">
-                                                                        <p class="text-[10px] font-medium text-base-content/70">
-                                                                            {pending.diff_preview.path}
-                                                                            {pending.diff_preview.is_new_file
-                                                                                ? ' · nouveau fichier'
-                                                                                : ` · +${pending.diff_preview.lines_added} / -${pending.diff_preview.lines_removed}`}
-                                                                        </p>
-                                                                        {pending.diff_preview.read_error && (
-                                                                            <p class="text-[10px] text-warning">{pending.diff_preview.read_error}</p>
-                                                                        )}
-                                                                        <pre class="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-base-300/40 p-2 font-mono text-[10px] leading-relaxed text-base-content/85">{pending.diff_preview.diff}</pre>
-                                                                    </div>
-                                                                )}
-                                                                <div class="grid gap-2 sm:flex sm:flex-wrap sm:items-center">
-                                                                <button
-                                                                    type="button"
-                                                                    class="btn btn-success btn-sm w-full gap-1 sm:btn-xs sm:w-auto"
-                                                                    disabled={sending || resolving}
-                                                                    onClick={() => onResolveApproval(message.uuid, 'approve')}
-                                                                >
-                                                                    {resolving
-                                                                        ? <span class="loading loading-spinner loading-xs" aria-hidden />
-                                                                        : <Check class="size-3.5" aria-hidden />}
-                                                                    Approuver
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    class="btn btn-ghost btn-sm w-full gap-1 border border-base-300 sm:btn-xs sm:w-auto"
-                                                                    disabled={sending || resolving}
-                                                                    onClick={() => onResolveApproval(message.uuid, 'deny')}
-                                                                >
-                                                                    <X class="size-3.5" aria-hidden />
-                                                                    Refuser
-                                                                </button>
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                        {pending?.resolved && (
-                                                            <p class="mt-2 text-start text-[11px] text-base-content/50">
-                                                                {pending.resolved === 'approved' ? 'Approuvé' : 'Refusé'}
-                                                            </p>
-                                                        )}
-                                                        {pendingPlan?.resolved && (
-                                                            <p class="mt-2 text-start text-[11px] text-base-content/50">
-                                                                {pendingPlan.resolved === 'approved' ? 'Plan approuvé' : 'Plan refusé'}
-                                                            </p>
-                                                        )}
+                                                        class="break-words text-start [&_strong]:font-semibold"
+                                                        dangerouslySetInnerHTML={{ __html: renderChatHtml(displayContent) }}
+                                                    />
+                                                </div>
+                                            )}
+                                            {showChoice && mergedChoice && (
+                                                <ChatChoiceCardView
+                                                    card={mergedChoice}
+                                                    disabled={sending}
+                                                    onSelect={(optionId, prompt) => {
+                                                        setChoiceState((current) => ({
+                                                            ...current,
+                                                            [message.uuid]: { selected: optionId },
+                                                        }));
+                                                        onSend(prompt);
+                                                    }}
+                                                    onDismiss={() => setChoiceState((current) => ({
+                                                        ...current,
+                                                        [message.uuid]: { ...current[message.uuid], dismissed: true },
+                                                    }))}
+                                                />
+                                            )}
+                                            {pendingPlan && needsPlanApproval && onResolveApproval && (
+                                                <div class="grid w-full gap-2 rounded-2xl border border-warning/35 bg-warning/10 px-3.5 py-3">
+                                                    <p class="text-sm font-semibold">Plan : {pendingPlan.title}</p>
+                                                    {pendingPlan.summary && (
+                                                        <p class="text-xs text-base-content/70">{pendingPlan.summary}</p>
+                                                    )}
+                                                    {pendingPlan.steps.length > 0 && (
+                                                        <ol class="list-decimal space-y-1 ps-4 text-xs text-base-content/75">
+                                                            {pendingPlan.steps.map((step, stepIndex) => (
+                                                                <li key={step.id ?? `${stepIndex}-${step.action}`}>
+                                                                    {step.action}
+                                                                    {step.tool ? <span class="text-base-content/45"> · {step.tool}</span> : null}
+                                                                </li>
+                                                            ))}
+                                                        </ol>
+                                                    )}
+                                                    <div class="flex flex-wrap gap-2">
+                                                        <button type="button" class="btn btn-primary btn-sm rounded-full" disabled={sending || resolving} onClick={() => onResolveApproval(message.uuid, 'approve')}>
+                                                            {resolving ? <span class="loading loading-spinner loading-xs" /> : <Check class="size-3.5" aria-hidden />}
+                                                            Approuver le plan
+                                                        </button>
+                                                        <button type="button" class="btn btn-ghost btn-sm rounded-full" disabled={sending || resolving} onClick={() => onResolveApproval(message.uuid, 'deny')}>
+                                                            <X class="size-3.5" aria-hidden />
+                                                            Refuser
+                                                        </button>
                                                     </div>
-                                                )}
-                                                {steps.length > 0 && displayContent === '' && !showApprovalChrome && (
-                                                    <p class="px-1 text-[11px] text-base-content/45">
-                                                        {stepsCompletion(steps).done === steps.length
-                                                            ? 'Terminé.'
-                                                            : 'Intervention enregistrée.'}
-                                                    </p>
-                                                )}
-                                            </div>
-                                        )}
-                                        <time class="mt-1 block text-[10px] text-base-content/40" datetime={message.created_at}>
-                                            {formatTime(message.created_at)}
-                                        </time>
-                                    </div>
+                                                </div>
+                                            )}
+                                            {pending && needsApproval && onResolveApproval && (
+                                                <ChatPermissionCard
+                                                    agentName={agent.name}
+                                                    pending={pending}
+                                                    disabled={sending}
+                                                    resolving={resolving}
+                                                    onApprove={(remember) => onResolveApproval(message.uuid, 'approve', remember)}
+                                                    onDeny={() => onResolveApproval(message.uuid, 'deny')}
+                                                />
+                                            )}
+                                            {(pending?.resolved || pendingPlan?.resolved) && (
+                                                <p class="px-1 text-[11px] text-base-content/45">
+                                                    {(pending?.resolved ?? pendingPlan?.resolved) === 'approved' ? 'Approuvé' : 'Refusé'}
+                                                </p>
+                                            )}
+                                            <BotCharacter
+                                                name={agent.name}
+                                                color={agent.avatar_color}
+                                                shape={agent.avatar_shape}
+                                                type={agent.type}
+                                                size="sm"
+                                                mood={botMoodFromStatus(agent.status)}
+                                                decorative
+                                            />
+                                        </div>
+                                    )}
                                 </article>
                             );
                         })}
 
                         {sending && (
-                            <article class="flex gap-2 sm:gap-3">
-                                <div class="mt-0.5 hidden size-7 shrink-0 place-items-center rounded-lg bg-base-300 text-base-content/70 sm:grid">
-                                    <Bot class="size-3.5" aria-hidden />
-                                </div>
-                                <div class="min-w-0 max-w-[min(100%,28rem)] flex-1 space-y-2 sm:max-w-[90%]">
-                                    <IdeActionsCard
-                                        steps={liveSteps}
-                                        running
-                                        title={activeSubagentCount > 0 ? 'Équipe en cours' : 'Exécution'}
-                                    />
-                                    {liveAssistantText && (
-                                        <div class="rounded-2xl border border-base-300 bg-base-200/60 px-3 py-2 text-sm leading-relaxed text-base-content/80 sm:px-3.5 sm:py-2.5">
-                                            <div
-                                                class="prose prose-sm max-w-none break-words text-start text-inherit [&_strong]:font-semibold"
-                                                dangerouslySetInnerHTML={{ __html: renderContent(sanitizeAssistantContent(liveAssistantText, liveSteps)) }}
-                                            />
-                                            <span class="mt-1 inline-block animate-pulse text-[10px] text-base-content/40">en cours…</span>
-                                        </div>
-                                    )}
-                                </div>
+                            <article class="grid max-w-[min(100%,34rem)] justify-items-start gap-2">
+                                <IdeActionsCard
+                                    steps={liveSteps}
+                                    running
+                                    title={activeSubagentCount > 0 ? 'Équipe en cours' : 'Exécution'}
+                                />
+                                {liveAssistantText && (
+                                    <div class="rounded-2xl bg-base-300/70 px-3.5 py-2.5 text-sm leading-relaxed">
+                                        <div
+                                            class="break-words text-start [&_strong]:font-semibold"
+                                            dangerouslySetInnerHTML={{ __html: renderChatHtml(sanitizeAssistantContent(liveAssistantText, liveSteps)) }}
+                                        />
+                                        <span class="mt-1 inline-block animate-pulse text-[10px] text-base-content/40">en cours…</span>
+                                    </div>
+                                )}
+                                <BotCharacter
+                                    name={agent.name}
+                                    color={agent.avatar_color}
+                                    shape={agent.avatar_shape}
+                                    type={agent.type}
+                                    size="sm"
+                                    mood="working"
+                                    decorative
+                                />
                             </article>
                         )}
                     </div>
@@ -520,7 +515,7 @@ export function AgentChatPanel({
                 </div>
             )}
 
-            <div class="shrink-0 border-t border-base-300 bg-base-100 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4">
+            <div class="shrink-0 bg-base-100 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4">
                 {error && (
                     <p class="mb-2 rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs text-error" role="alert">
                         {error}
@@ -531,7 +526,7 @@ export function AgentChatPanel({
                         Configurez un provider LLM dans les paramètres pour discuter.
                     </p>
                 )}
-                <div class="mx-auto flex max-w-3xl flex-col gap-2">
+                <div class="mx-auto flex max-w-2xl flex-col gap-2">
                     {onChatModeChange && (
                         <div class="flex flex-wrap gap-1 px-0.5" role="group" aria-label="Mode agent">
                             {([
@@ -542,7 +537,7 @@ export function AgentChatPanel({
                                 <button
                                     key={value}
                                     type="button"
-                                    class={`btn btn-xs ${chatMode === value ? 'btn-primary' : 'btn-ghost'}`}
+                                    class={`btn btn-xs rounded-full ${chatMode === value ? 'btn-primary' : 'btn-ghost'}`}
                                     disabled={sending}
                                     onClick={() => onChatModeChange(value)}
                                 >
@@ -551,48 +546,68 @@ export function AgentChatPanel({
                             ))}
                         </div>
                     )}
-                    {onAttachmentsChange && (
+                    {onAttachmentsChange && (captureOpen || attachments.length > 0) && (
                         <CaptureToolbar
                             attachments={attachments}
                             onChange={onAttachmentsChange}
                             disabled={sending || !agent.provider}
                         />
                     )}
-                    <div class="flex items-end gap-2 rounded-2xl border border-base-300 bg-base-200/50 p-1.5 focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15 sm:p-2">
-                    <textarea
-                        ref={textareaRef}
-                        class="max-h-40 min-h-[2.75rem] flex-1 resize-none bg-transparent px-2.5 py-2 text-base outline-none placeholder:text-base-content/40 sm:min-h-[2.5rem] sm:text-sm"
-                        placeholder={placeholder}
-                        rows={1}
-                        value={draft}
-                        disabled={sending || !agent.provider}
-                        onInput={(event) => onDraftChange((event.target as HTMLTextAreaElement).value)}
-                        onKeyDown={handleKeyDown}
-                    />
-                    <button
-                        type="button"
-                        class={`btn btn-sm size-10 shrink-0 rounded-xl p-0 ${sending ? 'btn-error' : 'btn-primary'}`}
-                        disabled={
-                            stopping
-                            || !agent.provider
-                            || (!sending && draft.trim() === '' && attachments.length === 0)
-                        }
-                        aria-label={sending ? 'Arrêter' : 'Envoyer'}
-                        title={sending ? 'Arrêter le run' : 'Envoyer'}
-                        onClick={() => {
-                            if (sending) {
-                                onStop?.();
-                                return;
-                            }
-                            onSend(draft);
-                        }}
-                    >
-                        {stopping
-                            ? <Loader2 class="size-4 animate-spin" aria-hidden />
-                            : sending
-                                ? <Square class="size-4" aria-hidden />
-                                : <Send class="size-4" aria-hidden />}
-                    </button>
+                    <div class="flex items-end gap-2">
+                        {onAttachmentsChange && (
+                            <button
+                                type="button"
+                                class={`btn btn-ghost btn-sm size-10 min-h-10 shrink-0 rounded-full p-0 ${captureOpen ? 'bg-base-300' : ''}`}
+                                aria-label="Joindre une capture"
+                                disabled={sending || !agent.provider}
+                                onClick={() => setCaptureOpen((open) => !open)}
+                            >
+                                <Plus class="size-5" aria-hidden />
+                            </button>
+                        )}
+                        <div class="flex min-w-0 flex-1 items-end gap-2 rounded-full border border-base-300 bg-base-200/70 px-2 py-1.5">
+                            <textarea
+                                ref={textareaRef}
+                                class="max-h-32 min-h-[2.25rem] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-base-content/40"
+                                placeholder={composerPlaceholder}
+                                rows={1}
+                                value={draft}
+                                disabled={sending || !agent.provider}
+                                onInput={(event) => onDraftChange((event.target as HTMLTextAreaElement).value)}
+                                onKeyDown={handleKeyDown}
+                            />
+                            {sending ? (
+                                <button
+                                    type="button"
+                                    class="btn btn-error btn-sm size-9 min-h-9 shrink-0 rounded-full p-0"
+                                    disabled={stopping}
+                                    aria-label="Arrêter"
+                                    onClick={() => onStop?.()}
+                                >
+                                    {stopping ? <Loader2 class="size-4 animate-spin" /> : <Square class="size-4" />}
+                                </button>
+                            ) : draft.trim() !== '' || attachments.length > 0 ? (
+                                <button
+                                    type="button"
+                                    class="btn btn-primary btn-sm size-9 min-h-9 shrink-0 rounded-full p-0"
+                                    disabled={!agent.provider}
+                                    aria-label="Envoyer"
+                                    onClick={() => onSend(draft)}
+                                >
+                                    <Send class="size-4" />
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    class={`btn btn-ghost btn-sm size-9 min-h-9 shrink-0 rounded-full p-0 ${listening ? 'text-error' : ''}`}
+                                    aria-label="Dicter"
+                                    disabled={!agent.provider}
+                                    onClick={startDictation}
+                                >
+                                    <Mic class="size-4" aria-hidden />
+                                </button>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>

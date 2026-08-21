@@ -13,6 +13,8 @@ type Props = {
     initialSessionUuid?: string | null;
     onAgentUpdated: () => void;
     onRoutingChange?: (routing: AgentModelRouting | null) => void;
+    userName?: string;
+    onOpenPlugins?: () => void;
 };
 
 export function AgentConversationView({
@@ -20,6 +22,8 @@ export function AgentConversationView({
     initialSessionUuid = null,
     onAgentUpdated,
     onRoutingChange,
+    userName,
+    onOpenPlugins,
 }: Props) {
     const [sessions, setSessions] = useState<AgentChatSession[]>([]);
     const [selectedSessionUuid, setSelectedSessionUuid] = useState<string | null>(initialSessionUuid);
@@ -296,7 +300,7 @@ export function AgentConversationView({
         }
     };
 
-    const resolveApproval = async (messageUuid: string, decision: 'approve' | 'deny') => {
+    const resolveApproval = async (messageUuid: string, decision: 'approve' | 'deny', remember?: boolean) => {
         if (!activeSession || sending || approvingMessageUuid) {
             return;
         }
@@ -306,7 +310,7 @@ export function AgentConversationView({
         setError(null);
 
         try {
-            const response = await domainApi.resolveAgentToolApproval(agent.uuid, messageUuid, decision);
+            const response = await domainApi.resolveAgentToolApproval(agent.uuid, messageUuid, decision, remember);
             setMessages((current) => [
                 ...current.map((message) => {
                     if (message.uuid !== messageUuid || !message.metadata) {
@@ -364,24 +368,20 @@ export function AgentConversationView({
     };
 
     return (
-        <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div class="flex shrink-0 items-center justify-between gap-2 border-b border-base-300 bg-base-100 px-3 py-2 sm:px-4 sm:py-2.5">
-                <p class="min-w-0 truncate text-xs text-base-content/60">
-                    Conversations
-                </p>
-                <div class="flex shrink-0 items-center gap-1">
+        <div class="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+            <aside class="flex max-h-[min(36vh,16rem)] min-h-0 shrink-0 flex-col border-b border-base-300 bg-base-200/20 lg:max-h-none lg:w-72 lg:max-w-[40%] lg:border-b-0 lg:border-e">
+                <div class="flex shrink-0 items-center justify-end gap-1 px-3 pt-3">
                     <button
-                        class="btn btn-ghost btn-sm btn-square size-9 min-h-9 p-0 sm:w-auto sm:min-w-0 sm:gap-2 sm:px-3"
+                        class="btn btn-ghost btn-sm btn-square size-9 min-h-9 p-0"
                         type="button"
                         title="Actualiser"
                         onClick={() => void refreshSessions()}
                         disabled={loadingSessions}
                     >
                         <RefreshCw class="size-4" aria-hidden />
-                        <span class="hidden sm:inline">Actualiser</span>
                     </button>
                     <button
-                        class="btn btn-primary btn-sm gap-1.5 px-2.5 sm:gap-2 sm:px-3"
+                        class="btn btn-primary btn-sm gap-1.5 px-2.5"
                         type="button"
                         disabled={creating || loadingSessions}
                         onClick={() => void handleCreate()}
@@ -389,31 +389,30 @@ export function AgentConversationView({
                         {creating
                             ? <span class="loading loading-spinner loading-sm" aria-hidden />
                             : <MessageSquarePlus class="size-4" aria-hidden />}
-                        <span class="sm:inline">Nouvelle</span>
+                        Nouvelle
                     </button>
                 </div>
-            </div>
+                {loadingSessions ? (
+                    <div class="flex flex-1 items-center justify-center px-4 py-10 text-xs text-base-content/50">
+                        <span class="loading loading-spinner loading-sm me-2" />
+                        Chargement des sessions…
+                    </div>
+                ) : (
+                    <SessionHistoryList
+                        agent={agent}
+                        sessions={sessions}
+                        selectedUuid={selectedSessionUuid}
+                        onSelect={handleSelectUuid}
+                        onDelete={(uuid) => void handleDelete(uuid)}
+                        deletingUuid={deletingUuid}
+                        userName={userName}
+                        onOpenPlugins={onOpenPlugins}
+                    />
+                )}
+            </aside>
 
-            <div class="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
-                <aside class="max-h-[min(32vh,14rem)] shrink-0 overflow-y-auto border-b border-base-300 bg-base-200/20 lg:max-h-none lg:w-80 lg:max-w-[40%] lg:border-b-0 lg:border-e">
-                    {loadingSessions ? (
-                        <div class="flex items-center justify-center px-4 py-10 text-xs text-base-content/50">
-                            <span class="loading loading-spinner loading-sm me-2" />
-                            Chargement des sessions…
-                        </div>
-                    ) : (
-                        <SessionHistoryList
-                            sessions={sessions}
-                            selectedUuid={selectedSessionUuid}
-                            onSelect={handleSelectUuid}
-                            onDelete={(uuid) => void handleDelete(uuid)}
-                            deletingUuid={deletingUuid}
-                        />
-                    )}
-                </aside>
-
-                <div class="flex min-h-0 min-w-0 flex-1 flex-col bg-base-100">
-                    <AgentChatPanel
+            <div class="flex min-h-0 min-w-0 flex-1 flex-col bg-base-100">
+                <AgentChatPanel
                         agent={agent}
                         session={activeSession}
                         messages={messages}
@@ -425,8 +424,10 @@ export function AgentConversationView({
                         onSend={(content) => void sendMessage(content)}
                         onStop={() => void stopRun()}
                         stopping={stopping}
-                        onResolveApproval={(messageUuid, decision) => void resolveApproval(messageUuid, decision)}
+                        onResolveApproval={(messageUuid, decision, remember) => void resolveApproval(messageUuid, decision, remember)}
                         approvingMessageUuid={approvingMessageUuid}
+                        hideSessionHeader
+                        userName={userName}
                         chatMode={chatMode}
                         onChatModeChange={(mode) => {
                             setChatMode(mode);
@@ -447,7 +448,6 @@ export function AgentConversationView({
                         liveSteps={liveSteps}
                         liveAssistantText={liveAssistantText}
                     />
-                </div>
             </div>
         </div>
     );

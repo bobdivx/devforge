@@ -1,43 +1,44 @@
-import { Bug, Bot, GitBranch, Layers, Rocket, ShieldCheck, CirclePlay, type LucideIcon } from 'lucide-preact';
-import type { AgentType } from '../../lib/domain-api';
-
-const typeIcons: Record<AgentType, LucideIcon> = {
-    debug: Bug,
-    'tech-watch': Layers,
-    github: GitBranch,
-    'github-actions': CirclePlay,
-    devforge: Bot,
-    deployment: Rocket,
-    security: ShieldCheck,
-};
+import { BOT_SIZE_PX, botMoodFromStatus, type BotMood, type BotSize } from '../../lib/bot-character';
+import { BotCharacter } from './BotCharacter';
 
 type Props = {
-    type: AgentType;
+    type: string;
     color: string;
-    size?: 'sm' | 'md' | 'lg';
+    shape?: string | null;
+    size?: BotSize;
     name: string;
+    mood?: BotMood;
+    status?: string | null;
+    animate?: boolean;
+    delay?: string;
 };
 
-const sizeClasses = {
-    sm: 'size-8 text-xs',
-    md: 'size-10 text-sm',
-    lg: 'size-14 text-base',
-};
-
-const iconSizes = { sm: 'size-3.5', md: 'size-4', lg: 'size-6' };
-
-export function AgentAvatar({ type, color, size = 'md', name }: Props) {
-    const Icon = typeIcons[type] ?? Bot;
-    const sizeClass = sizeClasses[size];
-    const iconClass = iconSizes[size];
+export function AgentAvatar({
+    type,
+    color,
+    shape,
+    size = 'md',
+    name,
+    mood,
+    status,
+    animate = true,
+    delay,
+}: Props) {
+    const resolvedMood = mood ?? botMoodFromStatus(status);
+    const px = BOT_SIZE_PX[size];
 
     return (
-        <div
-            class={`grid shrink-0 place-items-center rounded-xl ${sizeClass} font-bold text-white`}
-            style={{ backgroundColor: color }}
-            aria-label={`Avatar de ${name}`}
-        >
-            <Icon class={iconClass} aria-hidden />
-        </div>
+        <span class="inline-flex shrink-0 items-center justify-center" style={{ width: `${px}px`, height: `${px}px` }}>
+            <BotCharacter
+                name={name}
+                color={color}
+                shape={shape}
+                type={type}
+                size={size}
+                mood={resolvedMood}
+                animate={animate}
+                delay={delay}
+            />
+        </span>
     );
 }

@@ -128,12 +128,42 @@ it('creates an agent with valid payload', function () {
         ->assertCreated()
         ->assertJsonPath('data.name', 'Debug Agent Test')
         ->assertJsonPath('data.type', 'debug')
-        ->assertJsonPath('data.status', 'idle');
+        ->assertJsonPath('data.status', 'idle')
+        ->assertJsonPath('data.avatar_shape', 'squircle');
 
     $agent = AiAgent::where('team_id', $this->team->id)->first();
     expect($agent)->not->toBeNull()
         ->and($agent->system_prompt)->toContain('débogage')
         ->and($agent->description)->not->toBeEmpty();
+});
+
+it('creates an agent with a custom avatar shape', function () {
+    $provider = AiProviderConfig::factory()->create(['team_id' => $this->team->id]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/agents', [
+            'type' => 'deployment',
+            'name' => 'Relanceur',
+            'avatar_color' => '#ef4444',
+            'avatar_shape' => 'teardrop',
+            'provider_config_id' => $provider->id,
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.avatar_shape', 'teardrop')
+        ->assertJsonPath('data.avatar_color', '#ef4444');
+});
+
+it('rejects an invalid avatar shape', function () {
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->postJson('/api/devforge/v1/agents', [
+            'type' => 'debug',
+            'name' => 'Bot',
+            'avatar_shape' => 'robot',
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['avatar_shape']);
 });
 
 it('creates an agent with default directives when system_prompt omitted', function () {
@@ -394,6 +424,8 @@ it('queues a manual run for an idle agent', function () {
 });
 
 it('returns a welcome message when the agent has no chat history', function () {
+    $this->user->forceFill(['name' => 'Mathieu Test'])->save();
+
     $provider = AiProviderConfig::factory()->create(['team_id' => $this->team->id]);
     $agent = AiAgent::factory()->create([
         'team_id' => $this->team->id,
@@ -405,7 +437,9 @@ it('returns a welcome message when the agent has no chat history', function () {
         ->getJson("/api/devforge/v1/agents/{$agent->uuid}/messages")
         ->assertSuccessful()
         ->assertJsonPath('data.0.role', 'assistant')
-        ->assertJsonPath('data.0.uuid', 'welcome');
+        ->assertJsonPath('data.0.uuid', 'welcome')
+        ->assertJsonPath('data.0.metadata.welcome', true)
+        ->assertJsonPath('data.0.metadata.choice_card.id', 'github_connect');
 });
 
 it('queues a chat message for asynchronous processing', function () {

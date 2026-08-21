@@ -58,7 +58,14 @@ export function AgentSubAgentsPanel({ agent, onUpdated }: Props) {
                                     navigateTo(agentDetailPath(child.uuid));
                                 }}
                             >
-                                <AgentAvatar type={child.type} color={child.avatar_color} name={child.name} size="sm" />
+                                <AgentAvatar
+                                    type={child.type}
+                                    color={child.avatar_color}
+                                    shape={child.avatar_shape}
+                                    name={child.name}
+                                    size="sm"
+                                    status={child.status}
+                                />
                                 <span class="min-w-0 flex-1">
                                     <span class="block truncate text-xs font-medium">{child.name}</span>
                                     <span class="block text-[10px] text-base-content/50">{child.type}</span>

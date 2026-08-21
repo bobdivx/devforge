@@ -72,6 +72,24 @@ class AgentToolApprovalGrant
         Cache::forget(self::cacheKey($sessionId, self::PLAN_EXECUTION_KEY));
     }
 
+    /**
+     * Session-scoped “always allow this tool” — not consumed on use.
+     */
+    public static function rememberTool(int $sessionId, string $toolName): void
+    {
+        Cache::put(self::cacheKey($sessionId, self::rememberKey($toolName)), true, self::TTL_SECONDS);
+    }
+
+    public static function hasRememberedTool(int $sessionId, string $toolName): bool
+    {
+        return self::has($sessionId, self::rememberKey($toolName));
+    }
+
+    private static function rememberKey(string $toolName): string
+    {
+        return '__remember_tool__:'.mb_strtolower(trim($toolName));
+    }
+
     private static function cacheKey(int $sessionId, string $approvalKey): string
     {
         return "devforge:agent-tool-approval:{$sessionId}:{$approvalKey}";

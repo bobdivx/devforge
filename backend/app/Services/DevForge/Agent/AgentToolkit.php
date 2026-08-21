@@ -2018,6 +2018,12 @@ class AgentToolkit
             $approvalKey = AgentToolApprovalGrant::fingerprint($toolName, $arguments);
             $sessionId = $this->run->session_id;
 
+            if ($sessionId !== null && AgentToolApprovalGrant::hasRememberedTool((int) $sessionId, $toolName)) {
+                $this->run->appendLog("  ✓ Outil « {$toolName} » déjà autorisé pour cette session [{$decision['rule_id']}]");
+
+                return null;
+            }
+
             if ($sessionId !== null && AgentToolApprovalGrant::consume((int) $sessionId, $approvalKey)) {
                 $this->run->appendLog("  ✓ Approbation chat consommée [{$decision['rule_id']}] pour « {$toolName} »");
 

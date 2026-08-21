@@ -11,6 +11,7 @@ use App\Models\Team;
 use App\Models\User;
 use App\Services\DevForge\Agent\AgentChatService;
 use App\Services\DevForge\Agent\AgentSessionService;
+use App\Services\DevForge\Agent\AgentWelcomeComposer;
 use App\Services\DevForge\Core\CurrentTeamContext;
 use App\Services\DevForge\CurrentTeamResources;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -25,6 +26,7 @@ class AgentSessionController extends Controller
         private readonly CurrentTeamResources $currentTeamResources,
         private readonly AgentSessionService $sessionService,
         private readonly AgentChatService $chatService,
+        private readonly AgentWelcomeComposer $welcomeComposer,
     ) {}
 
     public function index(Request $request, string $uuid): JsonResponse
@@ -177,7 +179,7 @@ class AgentSessionController extends Controller
 
         if (! Schema::hasTable('ai_agent_messages')) {
             return response()->json([
-                'data' => [$this->welcomeMessage($agent)],
+                'data' => [$this->welcomeMessage($agent, $this->currentUser($request))],
                 'meta' => ['count' => 1, 'degraded' => true],
             ]);
         }
@@ -198,7 +200,7 @@ class AgentSessionController extends Controller
             ->map(fn (AiAgentMessage $message) => $this->presentMessage($message));
 
         if ($messages->isEmpty()) {
-            $messages = collect([$this->welcomeMessage($agent)]);
+            $messages = collect([$this->welcomeMessage($agent, $this->currentUser($request), $session)]);
         }
 
         return response()->json([
@@ -375,20 +377,8 @@ class AgentSessionController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function welcomeMessage(AiAgent $agent): array
+    private function welcomeMessage(AiAgent $agent, User $user, ?AiAgentSession $session = null): array
     {
-        $description = $agent->description
-            ? "\n\n{$agent->description}"
-            : '';
-
-        return [
-            'uuid' => 'welcome',
-            'role' => 'assistant',
-            'content' => "Bonjour, je suis **{$agent->name}**. Posez-moi une question sur votre infrastructure, vos déploiements ou demandez-moi d'analyser une ressource.{$description}",
-            'metadata' => ['welcome' => true],
-            'run_uuid' => null,
-            'session_uuid' => null,
-            'created_at' => $agent->created_at?->toISOString() ?? now()->toISOString(),
-        ];
+        return $this->welcomeComposer->compose($agent, $user, $session);
     }
 }

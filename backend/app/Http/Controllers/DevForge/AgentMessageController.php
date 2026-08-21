@@ -11,6 +11,7 @@ use App\Models\Team;
 use App\Models\User;
 use App\Services\DevForge\Agent\AgentChatService;
 use App\Services\DevForge\Agent\AgentSessionService;
+use App\Services\DevForge\Agent\AgentWelcomeComposer;
 use App\Services\DevForge\Core\CurrentTeamContext;
 use App\Services\DevForge\CurrentTeamResources;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -26,6 +27,7 @@ class AgentMessageController extends Controller
         private readonly CurrentTeamResources $currentTeamResources,
         private readonly AgentChatService $chatService,
         private readonly AgentSessionService $sessionService,
+        private readonly AgentWelcomeComposer $welcomeComposer,
     ) {}
 
     public function index(Request $request, string $uuid): JsonResponse
@@ -35,14 +37,14 @@ class AgentMessageController extends Controller
 
         if (! Schema::hasTable('ai_agent_messages')) {
             return response()->json([
-                'data' => [$this->welcomeMessage($agent)],
+                'data' => [$this->welcomeMessage($agent, $this->currentUser($request))],
                 'meta' => ['count' => 1, 'degraded' => true],
             ]);
         }
 
         if (! Schema::hasTable('ai_agent_sessions')) {
             return response()->json([
-                'data' => [$this->welcomeMessage($agent)],
+                'data' => [$this->welcomeMessage($agent, $this->currentUser($request))],
                 'meta' => ['count' => 1, 'degraded' => true],
             ]);
         }
@@ -61,14 +63,14 @@ class AgentMessageController extends Controller
             }
         } catch (\Throwable) {
             return response()->json([
-                'data' => [$this->welcomeMessage($agent)],
+                'data' => [$this->welcomeMessage($agent, $this->currentUser($request))],
                 'meta' => ['count' => 1, 'degraded' => true],
             ]);
         }
 
         if (! $session instanceof AiAgentSession) {
             return response()->json([
-                'data' => [$this->welcomeMessage($agent)],
+                'data' => [$this->welcomeMessage($agent, $this->currentUser($request))],
                 'meta' => ['count' => 1],
             ]);
         }
@@ -77,7 +79,7 @@ class AgentMessageController extends Controller
             ->map(fn (AiAgentMessage $message) => $this->present($message));
 
         if ($messages->isEmpty()) {
-            $messages = collect([$this->welcomeMessage($agent, $session)]);
+            $messages = collect([$this->welcomeMessage($agent, $this->currentUser($request), $session)]);
         }
 
         return response()->json([
@@ -135,6 +137,7 @@ class AgentMessageController extends Controller
 
         $validated = $request->validate([
             'decision' => ['required', 'string', 'in:approve,deny'],
+            'remember' => ['sometimes', 'boolean'],
         ]);
 
         $message = AiAgentMessage::query()
@@ -145,7 +148,12 @@ class AgentMessageController extends Controller
         abort_unless($message, 404, 'Message introuvable.');
 
         try {
-            $result = $this->chatService->resolveToolApproval($agent, $message, $validated['decision']);
+            $result = $this->chatService->resolveToolApproval(
+                $agent,
+                $message,
+                $validated['decision'],
+                (bool) ($validated['remember'] ?? false),
+            );
         } catch (\InvalidArgumentException $exception) {
             abort(422, $exception->getMessage());
         }
@@ -270,20 +278,8 @@ class AgentMessageController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function welcomeMessage(AiAgent $agent, ?AiAgentSession $session = null): array
+    private function welcomeMessage(AiAgent $agent, User $user, ?AiAgentSession $session = null): array
     {
-        $description = $agent->description
-            ? "\n\n{$agent->description}"
-            : '';
-
-        return [
-            'uuid' => 'welcome',
-            'role' => 'assistant',
-            'content' => "Bonjour, je suis **{$agent->name}**. Posez-moi une question sur votre infrastructure, vos déploiements ou demandez-moi d'analyser une ressource.{$description}",
-            'metadata' => ['welcome' => true],
-            'run_uuid' => null,
-            'session_uuid' => $session?->uuid,
-            'created_at' => $agent->created_at?->toISOString() ?? now()->toISOString(),
-        ];
+        return $this->welcomeComposer->compose($agent, $user, $session);
     }
 }

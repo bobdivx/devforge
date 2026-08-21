@@ -313,7 +313,7 @@ class AgentChatService
      *
      * @return array{user: AiAgentMessage, run: AiAgentRun, decision: string}
      */
-    public function resolveToolApproval(AiAgent $agent, AiAgentMessage $message, string $decision): array
+    public function resolveToolApproval(AiAgent $agent, AiAgentMessage $message, string $decision, bool $remember = false): array
     {
         $decision = strtolower(trim($decision));
         if (! in_array($decision, ['approve', 'deny'], true)) {
@@ -360,6 +360,9 @@ class AgentChatService
             }
 
             AgentToolApprovalGrant::grant((int) $session->id, $approvalKey);
+            if ($remember) {
+                AgentToolApprovalGrant::rememberTool((int) $session->id, $tool);
+            }
             $prompt = "J'approuve l'exécution de l'outil « {$tool} ». Réessaie maintenant avec les mêmes paramètres.";
         } else {
             $prompt = "Je refuse l'exécution de l'outil « {$tool} ». Continues sans l'exécuter et propose une alternative si possible.";

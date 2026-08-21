@@ -1,11 +1,20 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/preact';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SessionHistoryList } from '../src/components/agents/SessionHistoryList';
-import type { AgentChatSession } from '../src/lib/domain-api';
+import type { Agent, AgentChatSession } from '../src/lib/domain-api';
 
 afterEach(() => {
     cleanup();
 });
+
+const agent = {
+    uuid: 'agent-1',
+    name: 'Ingénieur QA',
+    type: 'debug',
+    avatar_color: '#22c55e',
+    avatar_shape: 'circle',
+    status: 'idle',
+} as Agent;
 
 function session(overrides: Partial<AgentChatSession> = {}): AgentChatSession {
     return {
@@ -26,6 +35,7 @@ describe('SessionHistoryList', () => {
 
         render(
             <SessionHistoryList
+                agent={agent}
                 sessions={[session()]}
                 selectedUuid={null}
                 onSelect={onSelect}
@@ -44,15 +54,18 @@ describe('SessionHistoryList', () => {
 
         render(
             <SessionHistoryList
+                agent={agent}
                 sessions={[session({ uuid: 'legacy-1', title: 'App · starbasefr', is_legacy: true })]}
                 selectedUuid={null}
                 onSelect={() => {}}
                 onDelete={onDelete}
+                userName="Mathieu"
             />,
         );
 
         fireEvent.click(screen.getByRole('button', { name: 'Supprimer App · starbasefr' }));
         expect(onDelete).toHaveBeenCalledWith('legacy-1');
-        expect(screen.getByText('Partagé')).toBeTruthy();
+        expect(screen.getByText(/Partagé/)).toBeTruthy();
+        expect(screen.getByText('Mathieu')).toBeTruthy();
     });
 });

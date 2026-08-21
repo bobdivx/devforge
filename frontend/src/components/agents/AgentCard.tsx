@@ -141,7 +141,13 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
         >
             <div class="card-body gap-4 p-4">
                 <div class="flex items-start gap-3">
-                    <AgentAvatar type={agent.type} color={agent.avatar_color} name={agent.name} />
+                    <AgentAvatar
+                        type={agent.type}
+                        color={agent.avatar_color}
+                        shape={agent.avatar_shape}
+                        name={agent.name}
+                        status={displayStatus}
+                    />
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-2">
                             <a

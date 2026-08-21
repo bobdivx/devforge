@@ -23,3 +23,13 @@ it('grants and consumes a one-shot approval', function () {
         ->and(AgentToolApprovalGrant::consume(42, $key))->toBeFalse()
         ->and(AgentToolApprovalGrant::has(42, $key))->toBeFalse();
 });
+
+it('remembers a tool for the session without consuming it', function () {
+    Cache::flush();
+
+    AgentToolApprovalGrant::rememberTool(42, 'exec_command');
+
+    expect(AgentToolApprovalGrant::hasRememberedTool(42, 'exec_command'))->toBeTrue()
+        ->and(AgentToolApprovalGrant::hasRememberedTool(42, 'write_remote_file'))->toBeFalse()
+        ->and(AgentToolApprovalGrant::hasRememberedTool(42, 'exec_command'))->toBeTrue();
+});

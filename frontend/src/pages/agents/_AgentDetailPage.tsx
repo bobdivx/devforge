@@ -6,6 +6,7 @@ import { AgentChatView } from '../../components/agents/AgentChatView';
 
 type Props = {
     path: string;
+    userName?: string;
 };
 
 function extractUuid(path: string): string {
@@ -13,7 +14,7 @@ function extractUuid(path: string): string {
     return parts[1] ?? '';
 }
 
-export function AgentDetailPage({ path }: Props) {
+export function AgentDetailPage({ path, userName }: Props) {
     const onNavigate = useNavigate();
     const agentUuid = extractUuid(path);
     const agentQuery = useApiQuery(`agent-${agentUuid}`, () => domainApi.agent(agentUuid));
@@ -29,6 +30,7 @@ export function AgentDetailPage({ path }: Props) {
                 {agent && (
                     <AgentChatView
                         agent={agent}
+                        userName={userName}
                         onBack={(e) => onNavigate(e, '/agents')}
                         onAgentUpdated={() => void agentQuery.reload({ silent: true })}
                     />

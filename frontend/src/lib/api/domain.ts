@@ -30,7 +30,7 @@ export type Overview = {
         trigger: AgentTrigger;
         summary: string | null;
         created_at: string | null;
-        agent: { uuid: string; name: string; type: AgentType; avatar_color: string } | null;
+        agent: { uuid: string; name: string; type: AgentType; avatar_color: string; avatar_shape?: string | null } | null;
     }>;
     agents_summary: { total: number; active: number; running: number } | null;
 };
@@ -214,6 +214,7 @@ export type DeploymentSubagentRun = {
         name: string;
         type: AgentType;
         avatar_color: string;
+        avatar_shape?: string | null;
     } | null;
     child_run: {
         uuid: string;
@@ -282,6 +283,7 @@ export type DeploymentAgentRun = {
         name: string;
         type: AgentType;
         avatar_color: string;
+        avatar_shape?: string | null;
     } | null;
 };
 
@@ -836,6 +838,7 @@ export type AgentChatMessage = {
         steps?: AgentChatStep[];
         pending_approval?: Record<string, unknown>;
         pending_plan?: Record<string, unknown>;
+        choice_card?: Record<string, unknown>;
         tokens_used?: number;
         iterations?: number;
     }) | null;
@@ -1111,6 +1114,7 @@ export type Agent = {
     name: string;
     description: string | null;
     avatar_color: string;
+    avatar_shape?: string | null;
     system_prompt: string | null;
     schedule_minutes: number;
     schedule_cron?: string | null;
@@ -1136,6 +1140,7 @@ export type Agent = {
         type: AgentType;
         name: string;
         avatar_color: string;
+        avatar_shape?: string | null;
         status: AgentStatus;
         is_active: boolean;
     }>;
@@ -1150,6 +1155,7 @@ export type AgentInput = {
     name: string;
     description?: string;
     avatar_color?: string;
+    avatar_shape?: string | null;
     system_prompt?: string;
     provider_config_id?: number | null;
     fallback_provider_config_id?: number | null;
@@ -3971,7 +3977,7 @@ export const domainApi = {
             ...(options?.attachments?.length ? { attachments: options.attachments } : {}),
         }),
     }),
-    resolveAgentToolApproval: (uuid: string, messageUuid: string, decision: 'approve' | 'deny') => mutate<ApiResponse<{
+    resolveAgentToolApproval: (uuid: string, messageUuid: string, decision: 'approve' | 'deny', remember?: boolean) => mutate<ApiResponse<{
         user: AgentChatMessage;
         run_uuid: string;
         session_uuid: string | null;
@@ -3979,7 +3985,7 @@ export const domainApi = {
         status: 'pending';
     }>>(`/agents/${encodeURIComponent(uuid)}/messages/${encodeURIComponent(messageUuid)}/approval`, {
         method: 'POST',
-        body: JSON.stringify({ decision }),
+        body: JSON.stringify({ decision, ...(remember ? { remember: true } : {}) }),
     }),
     agentMemories: (uuid: string, options?: { scope?: string; resource_uuid?: string; q?: string }) => {
         const params = new URLSearchParams();

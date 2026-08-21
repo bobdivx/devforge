@@ -8,6 +8,7 @@ import {
     applySchedulePreset,
     matchSchedulePreset,
 } from '../../lib/agent-schedule-presets';
+import { BOT_AVATAR_COLORS, BOT_SHAPES, botMoodFromStatus, type BotShape } from '../../lib/bot-character';
 import { ApiError } from '../../lib/api-client';
 import { navigateTo } from '../../lib/use-navigate';
 import { ActionToolbar } from '../ui/ActionToolbar';
@@ -21,6 +22,7 @@ import { AgentStandingOrdersPanel } from './AgentStandingOrdersPanel';
 import { AgentSubAgentsPanel } from './AgentSubAgentsPanel';
 import { AgentProviderModelFields } from './AgentProviderModelFields';
 import { AgentTeamContributionsPanel } from './AgentTeamContributionsPanel';
+import { BotCharacter } from './BotCharacter';
 import { useAgentRunTracker } from '../../lib/use-agent-run-tracker';
 import { isInFlightAgentRunStatus, shouldTrackAgentLatestRun } from '../../lib/agent-run-tracker';
 
@@ -82,6 +84,8 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
         setForm({
             name: agent.name,
             description: agent.description ?? '',
+            avatar_color: agent.avatar_color,
+            avatar_shape: agent.avatar_shape ?? null,
             system_prompt: agent.system_prompt ?? '',
             schedule_minutes: agent.schedule_minutes,
             schedule_cron: agent.schedule_cron ?? '',
@@ -226,6 +230,51 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
             <AgentSubAgentsPanel agent={agent} onUpdated={onUpdated} />
 
             <div class="grid gap-3">
+                <div class="grid justify-items-center gap-3 rounded-2xl border border-base-300/70 bg-base-200/40 px-3 py-4">
+                    <BotCharacter
+                        name={form.name || agent.name}
+                        color={form.avatar_color ?? agent.avatar_color}
+                        shape={form.avatar_shape ?? agent.avatar_shape}
+                        type={agent.type}
+                        size="lg"
+                        mood={botMoodFromStatus(agent.status)}
+                        tuft
+                    />
+                    <div class="flex flex-wrap justify-center gap-1.5">
+                        {BOT_AVATAR_COLORS.map((color) => (
+                            <button
+                                key={color}
+                                type="button"
+                                class={`size-6 rounded-full ${ (form.avatar_color ?? agent.avatar_color) === color ? 'ring-2 ring-primary ring-offset-2 ring-offset-base-100' : ''}`}
+                                style={{ backgroundColor: color }}
+                                aria-label={`Couleur ${color}`}
+                                onClick={() => setForm({ ...form, avatar_color: color })}
+                            />
+                        ))}
+                    </div>
+                    <div class="flex flex-wrap justify-center gap-1">
+                        {BOT_SHAPES.map((shape) => (
+                            <button
+                                key={shape}
+                                type="button"
+                                class={`grid size-9 place-items-center rounded-lg border ${(form.avatar_shape ?? agent.avatar_shape) === shape ? 'border-primary bg-primary/10' : 'border-transparent'}`}
+                                aria-label={`Forme ${shape}`}
+                                onClick={() => setForm({ ...form, avatar_shape: shape as BotShape })}
+                            >
+                                <BotCharacter
+                                    name={agent.name}
+                                    color={form.avatar_color ?? agent.avatar_color}
+                                    shape={shape}
+                                    type={agent.type}
+                                    size="xs"
+                                    animate={false}
+                                    tuft={false}
+                                    decorative
+                                />
+                            </button>
+                        ))}
+                    </div>
+                </div>
                 <label class="grid gap-1 text-xs">
                     <span class="font-medium">Nom</span>
                     <input class="input input-bordered input-sm" type="text" value={form.name ?? ''} onInput={(e) => setForm({ ...form, name: (e.target as HTMLInputElement).value })} />

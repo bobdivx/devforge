@@ -1,7 +1,8 @@
-import { Bot, MessageSquare, Plus, RefreshCw } from 'lucide-preact';
+import { MessageSquare, Plus, RefreshCw } from 'lucide-preact';
 import { useState } from 'preact/hooks';
 import { AgentCard } from '../../components/agents/AgentCard';
 import { AgentUserRequestsInbox } from '../../components/agents/AgentUserRequestsInbox';
+import { BotStudio } from '../../components/agents/BotStudio';
 import { CreateAgentModal } from '../../components/agents/CreateAgentModal';
 import { MissionBoardPanel } from '../../components/agents/MissionBoardPanel';
 import { PageHeader } from '../../components/PageHeader';
@@ -10,10 +11,14 @@ import { domainApi } from '../../lib/domain-api';
 import { agentDetailPath, resolveContinueChatAgent } from '../../lib/agent-routes';
 import { routeHref } from '../../lib/routes';
 import { useApiQuery } from '../../lib/use-api-query';
-import { useNavigate } from '../../lib/use-navigate';
+import { navigateTo, useNavigate } from '../../lib/use-navigate';
 import { useTeamContext } from '../../lib/team-context';
 
-export function AgentsPage() {
+type Props = {
+    userName?: string;
+};
+
+export function AgentsPage({ userName = 'Vous' }: Props) {
     const onNavigate = useNavigate();
     const { agentsEnabled } = useTeamContext();
     const [createOpen, setCreateOpen] = useState(false);
@@ -28,22 +33,24 @@ export function AgentsPage() {
 
     return (
         <div class="grid min-w-0 gap-5">
-            <PageHeader
-                title="Agents IA"
-                description="Votre équipe d'agents autonomes qui surveille et améliore la plateforme."
-                actions={(
-                    <>
-                        <button class="btn btn-ghost btn-sm" type="button" onClick={() => void query.reload()}>
-                            <RefreshCw class="size-3.5" aria-hidden />
-                            Actualiser
-                        </button>
-                        <button class="btn btn-primary btn-sm" type="button" onClick={() => setCreateOpen(true)}>
-                            <Plus class="size-3.5" aria-hidden />
-                            Nouvel agent
-                        </button>
-                    </>
-                )}
-            />
+            {!(isEmpty && !query.loading && !query.error) && (
+                <PageHeader
+                    title="Agents IA"
+                    description="Votre équipe de Bots autonomes qui surveille et améliore la plateforme."
+                    actions={(
+                        <>
+                            <button class="btn btn-ghost btn-sm" type="button" onClick={() => void query.reload()}>
+                                <RefreshCw class="size-3.5" aria-hidden />
+                                Actualiser
+                            </button>
+                            <button class="btn btn-primary btn-sm" type="button" onClick={() => setCreateOpen(true)}>
+                                <Plus class="size-3.5" aria-hidden />
+                                Nouveau Bot
+                            </button>
+                        </>
+                    )}
+                />
+            )}
 
             {continuePath && continueName && (
                 <div class="mb-0 flex flex-col gap-3 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -65,11 +72,13 @@ export function AgentsPage() {
                 </div>
             )}
 
-            <AgentUserRequestsInbox />
+            {!isEmpty && <AgentUserRequestsInbox />}
 
-            <div class="min-w-0">
-                <MissionBoardPanel />
-            </div>
+            {!isEmpty && (
+                <div class="min-w-0">
+                    <MissionBoardPanel />
+                </div>
+            )}
 
             <DataState
                 loading={query.loading}
@@ -77,21 +86,19 @@ export function AgentsPage() {
                 onRetry={() => void query.reload()}
             >
                 {isEmpty && !query.loading ? (
-                    <div class="flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-base-300 p-8 text-center sm:p-12">
-                        <div class="grid size-14 place-items-center rounded-2xl bg-primary/10 text-primary">
-                            <Bot class="size-7" aria-hidden />
-                        </div>
-                        <div>
-                            <h3 class="text-sm font-semibold">Pas encore d&apos;agents</h3>
-                            <p class="mt-1 max-w-sm text-xs text-base-content/60">
-                                Choisissez un rôle (CI, déploiement, veille…) — le déclenchement événementiel ou planifié est préconfiguré.
-                            </p>
-                        </div>
-                        <button class="btn btn-primary btn-sm" type="button" onClick={() => setCreateOpen(true)}>
-                            <Plus class="size-3.5" aria-hidden />
-                            Créer un agent
-                        </button>
-                    </div>
+                    <BotStudio
+                        open
+                        variant="page"
+                        userName={userName}
+                        onClose={() => {}}
+                        onCreated={(agent) => {
+                            if (agent?.uuid) {
+                                navigateTo(agentDetailPath(agent.uuid));
+                                return;
+                            }
+                            void query.reload();
+                        }}
+                    />
                 ) : (
                     <div class="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                         {agents.map((agent) => (
@@ -108,9 +115,14 @@ export function AgentsPage() {
 
             <CreateAgentModal
                 open={createOpen}
+                userName={userName}
                 onClose={() => setCreateOpen(false)}
-                onCreated={() => {
+                onCreated={(agent) => {
                     setCreateOpen(false);
+                    if (agent?.uuid) {
+                        navigateTo(agentDetailPath(agent.uuid));
+                        return;
+                    }
                     void query.reload();
                 }}
             />

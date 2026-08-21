@@ -272,7 +272,7 @@ export function ApplicationAgentChatCard({ application }: Props) {
         }
     };
 
-    const resolveApproval = async (messageUuid: string, decision: 'approve' | 'deny') => {
+    const resolveApproval = async (messageUuid: string, decision: 'approve' | 'deny', remember?: boolean) => {
         if (!agent || !session || sending || approvingMessageUuid) {
             return;
         }
@@ -283,7 +283,7 @@ export function ApplicationAgentChatCard({ application }: Props) {
         resetLiveProgress();
 
         try {
-            const response = await domainApi.resolveAgentToolApproval(agent.uuid, messageUuid, decision);
+            const response = await domainApi.resolveAgentToolApproval(agent.uuid, messageUuid, decision, remember);
             setMessages((current) => [
                 ...current.map((message) => {
                     if (message.uuid !== messageUuid || !message.metadata) {
@@ -391,7 +391,7 @@ export function ApplicationAgentChatCard({ application }: Props) {
                         onSend={(content) => void handleSend(content)}
                         onStop={() => void stopRun()}
                         stopping={stopping}
-                        onResolveApproval={(messageUuid, decision) => void resolveApproval(messageUuid, decision)}
+                        onResolveApproval={(messageUuid, decision, remember) => void resolveApproval(messageUuid, decision, remember)}
                         approvingMessageUuid={approvingMessageUuid}
                         chatMode={chatMode}
                         onChatModeChange={(mode) => {

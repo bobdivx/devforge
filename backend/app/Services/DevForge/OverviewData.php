@@ -86,7 +86,7 @@ class OverviewData
             ->whereHas('agent', fn ($query) => $query->where('team_id', $team->id))
             ->latest()
             ->limit(5)
-            ->with(['agent:id,uuid,name,type,avatar_color'])
+            ->with(['agent:id,uuid,name,type,avatar_color,avatar_shape'])
             ->get()
             ->map(fn (AiAgentRun $run): array => [
                 'uuid' => $run->uuid,
@@ -99,6 +99,7 @@ class OverviewData
                     'name' => $run->agent->name,
                     'type' => $run->agent->type,
                     'avatar_color' => $run->agent->avatar_color,
+                    'avatar_shape' => $run->agent->avatar_shape,
                 ] : null,
             ])
             ->all();

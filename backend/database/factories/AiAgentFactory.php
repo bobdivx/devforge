@@ -28,6 +28,7 @@ class AiAgentFactory extends Factory
             'name' => $this->faker->name().' Agent',
             'description' => $this->faker->sentence(),
             'avatar_color' => $this->faker->randomElement($colors),
+            'avatar_shape' => $this->faker->randomElement(['circle', 'squircle', 'oval', 'pill', 'triangle', 'hexagon', 'cloud']),
             'system_prompt' => null,
             'schedule_minutes' => $this->faker->randomElement([0, 15, 30, 60, 360]),
             'is_active' => true,

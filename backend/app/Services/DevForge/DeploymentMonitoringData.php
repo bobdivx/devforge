@@ -219,6 +219,7 @@ class DeploymentMonitoringData
                 'name' => $agent->name,
                 'type' => $agent->type,
                 'avatar_color' => $agent->avatar_color,
+                'avatar_shape' => $agent->avatar_shape,
             ] : null,
             'focused_deployment_status' => $deploymentStatus,
         ];
@@ -339,6 +340,7 @@ class DeploymentMonitoringData
                         'name' => $child->name,
                         'type' => $child->type,
                         'avatar_color' => $child->avatar_color,
+                        'avatar_shape' => $child->avatar_shape,
                     ] : null,
                     'child_run' => $childRun ? [
                         'uuid' => $childRun->uuid,

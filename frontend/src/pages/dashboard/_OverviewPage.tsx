@@ -9,6 +9,7 @@ import { SkeletonCard } from '../../components/ui/Skeleton';
 import { StatCard } from '../../components/ui/StatCard';
 import { DeploymentStatusIcon } from '../../components/ui/DeploymentStatusIcon';
 import { Table } from '../../components/ui/Table';
+import { AgentAvatar } from '../../components/agents/AgentAvatar';
 import { parseResourceStatus } from '../../lib/resource-status';
 import { domainApi, type ResourceStatus } from '../../lib/domain-api';
 import { dayGreeting, formatDashboardDate } from '../../lib/greeting';
@@ -249,6 +250,17 @@ export function OverviewPage({ userName = '' }: OverviewPageProps) {
                                             <ul class="min-w-0 divide-y divide-base-300/70">
                                                 {overview.agent_activity.map((activity) => (
                                                     <li class="flex min-w-0 items-start gap-3 py-3 sm:items-center" key={activity.uuid}>
+                                                        {activity.agent && (
+                                                            <AgentAvatar
+                                                                type={activity.agent.type}
+                                                                color={activity.agent.avatar_color}
+                                                                shape={activity.agent.avatar_shape}
+                                                                name={activity.agent.name}
+                                                                size="sm"
+                                                                status={activity.status === 'failed' ? 'error' : activity.status === 'completed' ? 'idle' : 'running'}
+                                                                animate={activity.status !== 'completed' && activity.status !== 'failed'}
+                                                            />
+                                                        )}
                                                         <div class="min-w-0 flex-1 overflow-hidden">
                                                             <p class="truncate text-sm font-medium">{activity.agent?.name ?? 'Agent'}</p>
                                                             <p class="line-clamp-2 break-words text-xs text-base-content/55 sm:line-clamp-1">

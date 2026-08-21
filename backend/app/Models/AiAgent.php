@@ -22,6 +22,7 @@ class AiAgent extends Model
         'name',
         'description',
         'avatar_color',
+        'avatar_shape',
         'system_prompt',
         'schedule_minutes',
         'schedule_cron',

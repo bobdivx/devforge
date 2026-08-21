@@ -487,3 +487,165 @@ input {
 .onboarding-deploy-track-active {
     animation: application-boot-pulse 1.2s ease-in-out infinite;
 }
+
+.bot-character {
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+    overflow: visible;
+    transform: rotate(var(--bot-tilt, -3deg));
+    transform-origin: 50% 70%;
+}
+
+.bot-character__svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+
+.bot-character__eyes {
+    transform-box: fill-box;
+    transform-origin: center;
+}
+
+.bot-character--live.bot-character--idle,
+.bot-character--live.bot-character--working,
+.bot-character--live.bot-character--sleep,
+.bot-character--live.bot-character--sad {
+    animation: bot-bob 3.4s ease-in-out infinite;
+    animation-delay: var(--bot-delay, 0s);
+}
+
+.bot-character--live.bot-character--working {
+    animation-name: bot-work;
+    animation-duration: 1.15s;
+}
+
+.bot-character--live.bot-character--sleep {
+    animation-duration: 4.6s;
+    filter: saturate(0.85);
+}
+
+.bot-character--live.bot-character--sad {
+    animation-duration: 4.2s;
+}
+
+.bot-character--live .bot-character__eyes {
+    animation: bot-blink 4.8s ease-in-out infinite;
+    animation-delay: var(--bot-delay, 0s);
+}
+
+.bot-character--live.bot-character--working .bot-character__eyes {
+    animation: bot-glance 1.6s ease-in-out infinite;
+}
+
+.bot-character--sleep .bot-character__eyes {
+    transform: scaleY(0.18);
+    animation: none;
+}
+
+.bot-character--sad .bot-character__eyes {
+    transform: rotate(18deg);
+}
+
+.bot-character--live .bot-character__tuft {
+    transform-origin: 28px 20px;
+    animation: bot-tuft 3.2s ease-in-out infinite;
+    animation-delay: var(--bot-delay, 0s);
+}
+
+@keyframes bot-bob {
+    0%,
+    100% {
+        transform: translateY(0) rotate(var(--bot-tilt, -3deg));
+    }
+
+    50% {
+        transform: translateY(-5px) rotate(var(--bot-tilt, -3deg));
+    }
+}
+
+@keyframes bot-work {
+    0%,
+    100% {
+        transform: translateY(0) rotate(-8deg);
+    }
+
+    50% {
+        transform: translateY(-7px) rotate(7deg);
+    }
+}
+
+@keyframes bot-blink {
+    0%,
+    90%,
+    100% {
+        transform: scaleY(1);
+    }
+
+    93%,
+    96% {
+        transform: scaleY(0.08);
+    }
+}
+
+@keyframes bot-glance {
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+
+    40% {
+        transform: translateX(-2px);
+    }
+
+    70% {
+        transform: translateX(2px);
+    }
+}
+
+@keyframes bot-tuft {
+    0%,
+    100% {
+        transform: rotate(-6deg);
+        opacity: 0.95;
+    }
+
+    50% {
+        transform: rotate(8deg);
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .bot-character--live,
+    .bot-character--live .bot-character__eyes,
+    .bot-character--live .bot-character__tuft {
+        animation: none;
+    }
+}
+
+.chat-inline-code {
+    border-radius: 0.35rem;
+    background: color-mix(in oklab, var(--color-error) 18%, var(--color-base-300));
+    padding: 0.1em 0.35em;
+    font-size: 0.85em;
+    color: color-mix(in oklab, var(--color-error) 55%, var(--color-base-content));
+}
+
+.chat-link {
+    color: var(--color-info);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.chat-status-ok {
+    color: var(--color-success);
+    font-weight: 600;
+}
+
+.chat-status-bad {
+    color: var(--color-error);
+    font-weight: 600;
+}

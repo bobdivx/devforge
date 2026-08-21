@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\DevForge;
 
+use App\Enums\AgentAvatarShape;
 use App\Http\Controllers\Controller;
 use App\Models\AiAgent;
 use App\Models\AiProviderConfig;
@@ -62,6 +63,7 @@ class AgentController extends Controller
             'name' => ['required', 'string', 'max:100'],
             'description' => ['nullable', 'string', 'max:500'],
             'avatar_color' => ['nullable', 'string', 'max:20'],
+            'avatar_shape' => ['nullable', 'string', Rule::in(AgentAvatarShape::values())],
             'system_prompt' => ['nullable', 'string', 'max:5000'],
             'provider_config_id' => ['nullable', 'integer', Rule::exists('ai_provider_configs', 'id')->where('team_id', $team->id)],
             'fallback_provider_config_id' => ['nullable', 'integer', Rule::exists('ai_provider_configs', 'id')->where('team_id', $team->id)],
@@ -158,6 +160,7 @@ class AgentController extends Controller
             'name' => ['sometimes', 'string', 'max:100'],
             'description' => ['sometimes', 'nullable', 'string', 'max:500'],
             'avatar_color' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'avatar_shape' => ['sometimes', 'nullable', 'string', Rule::in(AgentAvatarShape::values())],
             'system_prompt' => ['sometimes', 'nullable', 'string', 'max:5000'],
             'provider_config_id' => ['sometimes', 'nullable', 'integer', Rule::exists('ai_provider_configs', 'id')->where('team_id', $team->id)],
             'fallback_provider_config_id' => ['sometimes', 'nullable', 'integer', Rule::exists('ai_provider_configs', 'id')->where('team_id', $team->id)],
@@ -255,6 +258,10 @@ class AgentController extends Controller
             'name' => $agent->name,
             'description' => $agent->description,
             'avatar_color' => $agent->avatar_color,
+            'avatar_shape' => AgentAvatarShape::resolve(
+                Schema::hasColumn('ai_agents', 'avatar_shape') ? $agent->avatar_shape : null,
+                (string) $agent->type,
+            )->value,
             'system_prompt' => $agent->system_prompt,
             'schedule_minutes' => $agent->schedule_minutes,
             'schedule_cron' => Schema::hasColumn('ai_agents', 'schedule_cron')
@@ -290,6 +297,10 @@ class AgentController extends Controller
                     'type' => $child->type,
                     'name' => $child->name,
                     'avatar_color' => $child->avatar_color,
+                    'avatar_shape' => AgentAvatarShape::resolve(
+                        Schema::hasColumn('ai_agents', 'avatar_shape') ? $child->avatar_shape : null,
+                        (string) $child->type,
+                    )->value,
                     'status' => $child->status,
                     'is_active' => $child->is_active,
                 ])->values()->all()
@@ -394,6 +405,10 @@ class AgentController extends Controller
             $validated['metadata'] = $metadata === [] ? null : $metadata;
         }
 
+        if (! Schema::hasColumn('ai_agents', 'avatar_shape')) {
+            unset($validated['avatar_shape']);
+        }
+
         return $validated;
     }
 
@@ -418,6 +433,10 @@ class AgentController extends Controller
 
         if (! array_key_exists('schedule_minutes', $validated) && $catalog !== null && ! in_array($type, ['devforge', 'github-actions'], true)) {
             $fields['schedule_minutes'] = $catalog['default_schedule'];
+        }
+
+        if (Schema::hasColumn('ai_agents', 'avatar_shape') && empty($validated['avatar_shape'])) {
+            $fields['avatar_shape'] = AgentAvatarShape::defaultForType($type)->value;
         }
 
         return $fields;

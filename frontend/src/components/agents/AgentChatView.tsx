@@ -1,5 +1,5 @@
 import { ArrowLeft, PanelRightOpen, Settings2, Users } from 'lucide-preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { AgentAvatar } from './AgentAvatar';
 import { AgentSettingsPanel } from './AgentSettingsPanel';
 import { AgentStatusBadge } from './AgentStatusBadge';
@@ -25,9 +25,10 @@ type Props = {
     agent: Agent;
     onBack: (event: MouseEvent) => void;
     onAgentUpdated: () => void;
+    userName?: string;
 };
 
-export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
+export function AgentChatView({ agent, onBack, onAgentUpdated, userName }: Props) {
     const [settingsOpen, setSettingsOpen] = useState(() => shouldOpenAgentSettings(window.location.search));
     const [viewMode, setViewMode] = useState<'chat' | 'runs'>(() => agentDetailView(window.location.search));
     const [focusedRunUuid, setFocusedRunUuid] = useState<string | null>(() => agentDetailRunUuid(window.location.search));
@@ -38,8 +39,6 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
     const [activeRouting, setActiveRouting] = useState<AgentModelRouting | null>(
         agent.latest_run?.metadata?.model_routing ?? null,
     );
-
-    const didAutoSwitchRef = useRef(false);
 
     const toggleSettings = (open: boolean) => {
         setSettingsOpen(open);
@@ -95,27 +94,6 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
             .catch(() => {});
     }, [agent.uuid, agent.last_run_at]);
 
-    useEffect(() => {
-        didAutoSwitchRef.current = false;
-    }, [agent.uuid]);
-
-    useEffect(() => {
-        if (didAutoSwitchRef.current) {
-            return;
-        }
-
-        const params = new URLSearchParams(window.location.search);
-        if (params.has('view')) {
-            return;
-        }
-
-        const latestFailed = agent.latest_run?.status === 'failed';
-        if (agent.status === 'running' || latestFailed) {
-            didAutoSwitchRef.current = true;
-            switchView('runs', agent.latest_run?.uuid ?? null);
-        }
-    }, [agent.uuid, agent.status, agent.latest_run?.status, agent.latest_run?.uuid]);
-
     const latestRun = agent.latest_run;
     const waitingForTeam = latestRun?.status === 'waiting_for_subagents'
         || (latestRun?.status === 'running' && Array.isArray(latestRun.metadata?.ephemeral_tasks) && (latestRun.metadata?.ephemeral_tasks?.length ?? 0) > 0);
@@ -143,7 +121,13 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
                     <ArrowLeft class="size-4" aria-hidden />
                 </button>
                 <div class="col-start-2 row-start-1">
-                    <AgentAvatar type={agent.type} color={agent.avatar_color} name={agent.name} />
+                    <AgentAvatar
+                        type={agent.type}
+                        color={agent.avatar_color}
+                        shape={agent.avatar_shape}
+                        name={agent.name}
+                        status={agent.status}
+                    />
                 </div>
                 <div class="col-start-3 row-start-1 min-w-0 self-center">
                     <h1 class="truncate text-sm font-semibold">{agent.name}</h1>
@@ -210,6 +194,8 @@ export function AgentChatView({ agent, onBack, onAgentUpdated }: Props) {
                     <AgentConversationView
                         agent={agent}
                         initialSessionUuid={focusedSessionUuid}
+                        userName={userName}
+                        onOpenPlugins={() => toggleSettings(true)}
                         onAgentUpdated={() => {
                             onAgentUpdated();
                             domainApi.agentSessions(agent.uuid)

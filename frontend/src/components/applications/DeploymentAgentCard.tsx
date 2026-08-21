@@ -345,8 +345,10 @@ function AgentRunCard({ deploymentUuid, run, onSelectDeployment }: AgentRunCardP
                         <AgentAvatar
                             type={run.agent.type}
                             color={run.agent.avatar_color}
+                            shape={run.agent.avatar_shape}
                             name={run.agent.name}
                             size="sm"
+                            status={run.status}
                         />
                     ) : (
                         <div class="grid size-8 shrink-0 place-items-center rounded-xl bg-base-300 text-base-content/50">
