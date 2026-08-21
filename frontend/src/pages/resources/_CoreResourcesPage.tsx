@@ -306,7 +306,12 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
     const [applicationInitialTab, setApplicationInitialTab] = useState<ApplicationTabId>(() => (
         type === 'applications' ? readApplicationTabDeepLink() : 'overview'
     ));
-    const [search, setSearch] = useState('');
+    const [search, setSearch] = useState(() => {
+        if (typeof window === 'undefined') {
+            return '';
+        }
+        return new URLSearchParams(window.location.search).get('q') ?? '';
+    });
     const [createModalOpen, setCreateModalOpen] = useState(false);
     const [startAllOpen, setStartAllOpen] = useState(false);
     const [startAllLoading, setStartAllLoading] = useState(false);
@@ -544,7 +549,7 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
             )}
 
             {!isFullPageDetail && (
-                <FilterBar query={search} onQueryChange={setSearch} placeholder={`Rechercher un ${labels[type].slice(0, -1).toLowerCase()}…`} />
+                <FilterBar query={search} onQueryChange={setSearch} placeholder={`Rechercher ${type === 'applications' ? 'une application' : type === 'databases' ? 'une base de données' : `un ${labels[type].slice(0, -1).toLowerCase()}`}…`} />
             )}
 
             {activeUuid && type === 'applications' ? (

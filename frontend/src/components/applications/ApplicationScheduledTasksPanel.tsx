@@ -23,6 +23,7 @@ type Props = {
 };
 
 import { formatCron, normalizeCron } from '../../lib/cron-utils';
+import { maskSecretsInText } from '../../lib/secret-masking';
 
 const defaultForm = (): ApplicationScheduledTaskInput => ({
     name: '',
@@ -252,7 +253,7 @@ export function ApplicationScheduledTasksPanel({
                                 >
                                     <td class="max-w-[10rem]">
                                         <p class="truncate text-xs font-medium">{task.name}</p>
-                                        <p class="truncate font-mono text-[10px] text-base-content/45">{task.command}</p>
+                                        <p class="truncate font-mono text-[10px] text-base-content/45">{maskSecretsInText(task.command)}</p>
                                     </td>
                                     <td class="text-xs text-base-content/65">{formatCron(task.frequency)}</td>
                                     <td>

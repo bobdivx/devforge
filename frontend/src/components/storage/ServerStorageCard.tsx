@@ -194,7 +194,7 @@ export function ServerStorageCard({ server, canManage, onUpdated }: Props) {
                     <div class="flex flex-wrap items-center gap-2">
                         <StatusBadge label={diskUsageLabel(diskUsage, workloadLabel)} tone={usageTone} />
                         {rootInodeCritical && workloadLabel === '/media/Docker' && (
-                            <StatusBadge label="Racine / à 100 % (CasaOS)" tone="warning" />
+                            <StatusBadge label="Partition racine (inodes) saturée — Docker sur autre partition" tone="warning" />
                         )}
                         {!server.status.functional && (
                             <StatusBadge label="Serveur indisponible" tone="error" />

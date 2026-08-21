@@ -117,7 +117,7 @@ class ResourceController extends Controller
     {
         $resource = $this->catalog->find($this->currentTeam($request), $type, $uuid);
 
-        abort_unless($resource, 404, 'Resource not found.');
+        abort_unless($resource, 404, 'Ressource introuvable.');
 
         return $resource;
     }
