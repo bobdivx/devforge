@@ -124,7 +124,7 @@ export const appRoutes: AppRoute[] = [
 
     { path: '/store', label: 'Store', description: 'Publier et installer des applications en un clic.', icon: Store, page: 'store' },
 
-    { path: '/connexions', label: 'Tokens & Clés API', description: 'GitHub, tokens Packages, clés API et secrets de build.', icon: Plug, page: 'connexions' },
+    { path: '/connexions', label: 'Connexions', description: 'GitHub, tokens Packages, clés API et secrets de build.', icon: Plug, page: 'connexions' },
 
     { path: '/databases', label: 'Bases de données', description: 'Instances, sauvegardes et métriques.', icon: Database, page: 'databases' },
 
@@ -599,11 +599,11 @@ const serverDetailRoute: AppRoute = {
 
 
 
-const legacySettingsPaths: Array<{ pattern: RegExp; path: string }> = [
+const legacySettingsPaths: Array<{ pattern: RegExp; path: string; label?: string }> = [
 
-    { pattern: /^\/projects(?:\/.*)?$/, path: '/settings/projects' },
+    { pattern: /^\/projects(?:\/.*)?$/, path: '/settings/projects', label: 'Projets' },
 
-    { pattern: /^\/servers(?:\/.*)?$/, path: '/settings/servers' },
+    { pattern: /^\/servers(?:\/.*)?$/, path: '/settings/servers', label: 'Serveurs' },
 
     { pattern: /^\/security$/, path: '/settings/security' },
 
@@ -623,7 +623,7 @@ const dynamicRoutes: Array<{ pattern: RegExp; route: AppRoute }> = [
 
     { pattern: /^\/project\/[^/]+\/environment\/[^/]+\/service\/[^/]+(?:\/.*)?$/, route: servicesRoute },
 
-    { pattern: /^\/project\/[^/]+(?:\/.*)?$/, route: { ...settingsRoute, path: '/settings/projects' } },
+    { pattern: /^\/project\/[^/]+(?:\/.*)?$/, route: { ...settingsRoute, path: '/settings/projects', label: 'Projets' } },
 
     { pattern: /^\/server\/[^/]+(?:\/.*)?$/, route: serverDetailRoute },
 
@@ -722,6 +722,8 @@ export function findRoute(pathname: string): AppRoute {
             ...settingsRoute,
 
             path: legacySettings.path,
+
+            label: legacySettings.label ?? settingsRoute.label,
 
         };
 
