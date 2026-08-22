@@ -14,7 +14,7 @@ else
 fi
 
 ARTIFACT="${1:?Chemin de l artefact tar.gz requis}"
-CONTAINER="${2:-coolify}"
+CONTAINER="${2:-devforge-api}"
 HOST_ENV_FILE="${3:-}"
 if [[ "${HOST_ENV_FILE}" == "-" ]]; then
     HOST_ENV_FILE=""
@@ -75,6 +75,19 @@ tar --warning=no-timestamp -xzf "${ARTIFACT}" -C "${STAGING}"
 
 log "Copie vers ${CONTAINER}:/var/www/html/"
 docker cp "${STAGING}/." "${CONTAINER}:/var/www/html/"
+
+WEB_CONTAINER="devforge-web"
+if docker ps --format '{{.Names}}' | grep -qx "${WEB_CONTAINER}"; then
+    if [[ -d "${STAGING}/public/devforge" ]]; then
+        log "Copie SPA vers ${WEB_CONTAINER}:/usr/share/nginx/html/"
+        docker cp "${STAGING}/public/devforge/." "${WEB_CONTAINER}:/usr/share/nginx/html/"
+        echo "WEB_CONTAINER_UPDATED"
+    else
+        log "AVERTISSEMENT: ${STAGING}/public/devforge absent — ${WEB_CONTAINER} non mis a jour"
+    fi
+else
+    fail "Conteneur ${WEB_CONTAINER} introuvable — impossible de mettre a jour l interface utilisateur"
+fi
 
 apply_proxy_nginx() {
     local src="${1:-}"
@@ -305,4 +318,5 @@ fi
 printf '\nDeploiement DevForge termine.\n'
 printf 'Donnees DevForge: %s\n' "${DATA_DIR}"
 printf 'Sauvegarde: %s\n' "${BACKUP}"
-printf 'Acces: http://%s:8080/devforge/\n' "${HOST_IP:-10.1.0.58}"
+printf 'API/Proxy: http://%s:8080/devforge/\n' "${HOST_IP:-10.1.0.58}"
+printf 'UI (devforge-web): http://web.briseteia.me / http://%s:8080\n' "${HOST_IP:-10.1.0.58}"

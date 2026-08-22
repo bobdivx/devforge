@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
 NAS_HOST=""
-CONTAINER_NAME="coolify"
+CONTAINER_NAME="devforge-api"
 ENV_FILE="/data/coolify/source/.env"
 ENABLE_AGENTS="false"
 SKIP_FRONTEND="false"
@@ -150,5 +150,6 @@ fi
 cat <<EOF
 
 Déploiement terminé sur ${NAS_HOST}
-Ouvrir: http://10.1.0.58:8080/devforge/
+API/Proxy: http://10.1.0.58:8080/devforge/
+UI (devforge-web): http://web.briseteia.me / http://10.1.0.58:8080
 EOF
