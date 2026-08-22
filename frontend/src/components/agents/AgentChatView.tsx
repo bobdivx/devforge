@@ -175,13 +175,15 @@ export function AgentChatView({ agent, onBack, onAgentUpdated, userName }: Props
                 </div>
             )}
 
-            <AgentViewSwitcher
-                mode={viewMode}
-                runsActive={runsActive}
-                runsCount={runsCount}
-                sessionsCount={sessionsCount}
-                onChange={(mode) => switchView(mode, focusedRunUuid ?? agent.latest_run?.uuid ?? null)}
-            />
+            <div class="hidden sm:block">
+                <AgentViewSwitcher
+                    mode={viewMode}
+                    runsActive={runsActive}
+                    runsCount={runsCount}
+                    sessionsCount={sessionsCount}
+                    onChange={(mode) => switchView(mode, focusedRunUuid ?? agent.latest_run?.uuid ?? null)}
+                />
+            </div>
 
             <div class="flex min-h-0 min-w-0 flex-1">
                 {viewMode === 'runs' ? (

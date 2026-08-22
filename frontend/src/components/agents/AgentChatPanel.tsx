@@ -185,6 +185,8 @@ type Props = {
     /** Progression live pendant l’envoi (SSE). */
     liveSteps?: AgentChatStep[];
     liveAssistantText?: string | null;
+    /** Provider actif actuel (pour filtrer les erreurs non pertinentes) */
+    activeRoutingProvider?: string | null;
 };
 
 export function AgentChatPanel({
@@ -212,6 +214,7 @@ export function AgentChatPanel({
     activeSubagentCount = 0,
     liveSteps = [],
     liveAssistantText = null,
+    activeRoutingProvider = null,
 }: Props) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -308,7 +311,7 @@ export function AgentChatPanel({
                 </div>
             )}
 
-            <AgentErrorAlert agent={agent} compact />
+            <AgentErrorAlert agent={agent} compact activeProvider={activeRoutingProvider} />
 
             {activeSubagentCount > 0 && (
                 <div class="shrink-0 border-b border-info/30 bg-info/10 px-3 py-2 text-xs text-info sm:px-4">
@@ -515,7 +518,7 @@ export function AgentChatPanel({
                 </div>
             )}
 
-            <div class="shrink-0 bg-base-100 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4">
+            <div class="agent-chat-composer shrink-0 bg-base-100 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4">
                 {error && (
                     <p class="mb-2 rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs text-error" role="alert">
                         {error}

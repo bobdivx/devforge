@@ -658,3 +658,18 @@ input {
     color: var(--color-error);
     font-weight: 600;
 }
+
+/* Mobile chat improvements: composer always accessible, full-width messages */
+@media (max-width: 640px) {
+    /* Agent chat composer: safe bottom spacing */
+    .agent-chat-composer {
+        padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+    }
+
+    /* Prevent horizontal overflow on messages */
+    .agent-chat-message {
+        max-width: 100%;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+    }
+}
