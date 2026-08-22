@@ -124,7 +124,7 @@ function urlBadge(readiness: ApplicationReadiness | null, loading: boolean): Bad
 }
 
 function databaseBadge(
-    connections: Array<{ database_uuid: string }>,
+    connections: Array<{ database_uuid: string; external?: boolean; engine?: string; display_name?: string }>,
     databases: LinkableDatabase[],
     loading: boolean,
 ): BadgeItem {
@@ -145,6 +145,18 @@ function databaseBadge(
             label: 'Base',
             detail: 'Non rattachée',
             tone: 'neutral',
+            Icon: Database,
+        };
+    }
+
+    // Check for external Turso connection
+    const externalTurso = connections.find((conn) => conn.external === true && conn.engine === 'libsql');
+    if (externalTurso) {
+        return {
+            id: 'db',
+            label: 'Base',
+            detail: externalTurso.display_name || 'Turso',
+            tone: 'success',
             Icon: Database,
         };
     }

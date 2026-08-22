@@ -228,6 +228,13 @@ class ApplicationDatabaseConnector
             }
         }
 
+        // Third pass: detect external Turso Cloud connections (no DevForge resource)
+        $externalTursoConnection = $this->detectExternalTursoConnection($application);
+        if ($externalTursoConnection !== null && empty($grouped)) {
+            // Only add external Turso if no DevForge DB resources are connected
+            $grouped['external-turso'] = $externalTursoConnection;
+        }
+
         return collect($grouped)
             ->map(function (array $connection): array {
                 $connection['env_keys'] = collect($connection['env_keys'])
@@ -288,6 +295,129 @@ class ApplicationDatabaseConnector
         }
         
         return null;
+    }
+
+    /**
+     * Detect external Turso Cloud connection from environment variables.
+     * Returns connection metadata if app uses external Turso, null otherwise.
+     *
+     * @return array{database_uuid: string, env_keys: array<int, string>, is_runtime: bool, is_buildtime: bool, updated_at: string|null, external: true, engine: string, display_name: string}|null
+     */
+    private function detectExternalTursoConnection(Application $application): ?array
+    {
+        $tursoUrlKeys = ['TURSO_DATABASE_URL', 'PUBLIC_TURSO_DATABASE_URL', 'LIBSQL_URL', 'DATABASE_URL'];
+        $tursoTokenKeys = ['TURSO_AUTH_TOKEN', 'PUBLIC_TURSO_AUTH_TOKEN', 'DATABASE_AUTH_TOKEN'];
+        
+        $urlVar = $application->environment_variables()
+            ->where('is_preview', false)
+            ->whereIn('key', $tursoUrlKeys)
+            ->get()
+            ->first(function (EnvironmentVariable $var) {
+                return $this->isExternalTursoUrl((string) $var->value);
+            });
+
+        if (! $urlVar) {
+            return null;
+        }
+
+        // Found an external Turso URL - collect all related env keys
+        $relatedVars = $application->environment_variables()
+            ->where('is_preview', false)
+            ->get()
+            ->filter(function (EnvironmentVariable $var) use ($tursoUrlKeys, $tursoTokenKeys) {
+                return in_array($var->key, $tursoUrlKeys, true) || in_array($var->key, $tursoTokenKeys, true);
+            });
+
+        $envKeys = $relatedVars->pluck('key')->unique()->sort()->values()->all();
+        $isRuntime = $relatedVars->contains(fn (EnvironmentVariable $var) => (bool) $var->is_runtime);
+        $isBuildtime = $relatedVars->contains(fn (EnvironmentVariable $var) => (bool) $var->is_buildtime);
+        $latestUpdate = $relatedVars->max('updated_at')?->toISOString();
+
+        // Extract display name from URL
+        $displayName = $this->extractTursoDisplayName((string) $urlVar->value);
+
+        return [
+            'database_uuid' => 'external-turso',
+            'env_keys' => $envKeys,
+            'is_runtime' => $isRuntime,
+            'is_buildtime' => $isBuildtime,
+            'updated_at' => $latestUpdate,
+            'external' => true,
+            'engine' => 'libsql',
+            'display_name' => $displayName,
+        ];
+    }
+
+    /**
+     * Check if URL is an external Turso Cloud URL (not DevForge local DB).
+     */
+    private function isExternalTursoUrl(string $url): bool
+    {
+        if (empty($url)) {
+            return false;
+        }
+
+        // Reject local/file URLs
+        $localPatterns = [
+            'file:',
+            'localhost',
+            '127.0.0.1',
+            '0.0.0.0',
+            '::1',
+            '.local',
+            'docker',
+            'devforge',
+        ];
+
+        $lowerUrl = strtolower($url);
+        foreach ($localPatterns as $pattern) {
+            if (str_contains($lowerUrl, $pattern)) {
+                return false;
+            }
+        }
+
+        // Accept Turso Cloud domains
+        $tursoCloudPatterns = [
+            'turso.io',
+            'turso.tech',
+            '.turso.',
+        ];
+
+        foreach ($tursoCloudPatterns as $pattern) {
+            if (str_contains($lowerUrl, $pattern)) {
+                return true;
+            }
+        }
+
+        // Accept libsql:// or https:// with non-local hosts
+        if (preg_match('#^(libsql|https?)://#i', $url)) {
+            // Must have a proper domain/hostname, not just an IP or docker name
+            if (preg_match('#^(?:libsql|https?)://([a-z0-9][a-z0-9\-]*\.[a-z]{2,})#i', $url)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Extract a display name from Turso URL.
+     */
+    private function extractTursoDisplayName(string $url): string
+    {
+        // Try to extract database name from Turso URL patterns:
+        // libsql://dbname-orgname.turso.io
+        // https://dbname-orgname.turso.io
+        if (preg_match('#://([a-z0-9\-]+)\.(?:[a-z0-9\-]+\.)?turso\.#i', $url, $matches)) {
+            return $matches[1];
+        }
+
+        // Fallback: extract first part of hostname
+        if (preg_match('#://([a-z0-9\-]+)#i', $url, $matches)) {
+            return $matches[1];
+        }
+
+        return 'Turso';
     }
 
     /**
