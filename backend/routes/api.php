@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\SentinelController;
 use App\Http\Controllers\Api\ServersController;
 use App\Http\Controllers\Api\ServicesController;
 use App\Http\Controllers\Api\TeamController;
+use App\Http\Controllers\DevForge\TaskBoardController;
 use App\Http\Middleware\ApiAllowed;
 use Illuminate\Support\Facades\Route;
 
@@ -203,6 +204,13 @@ Route::group([
     Route::patch('/services/{uuid}/scheduled-tasks/{task_uuid}', [ScheduledTasksController::class, 'update_scheduled_task_by_service_uuid'])->middleware(['api.ability:write']);
     Route::delete('/services/{uuid}/scheduled-tasks/{task_uuid}', [ScheduledTasksController::class, 'delete_scheduled_task_by_service_uuid'])->middleware(['api.ability:write']);
     Route::get('/services/{uuid}/scheduled-tasks/{task_uuid}/executions', [ScheduledTasksController::class, 'executions_by_service_uuid'])->middleware(['api.ability:read']);
+
+    // DevForge Tasks Board
+    Route::get('/devforge/tasks', [TaskBoardController::class, 'index'])->middleware(['api.ability:read']);
+    Route::post('/devforge/tasks', [TaskBoardController::class, 'store'])->middleware(['api.ability:write']);
+    Route::get('/devforge/tasks/{uuid}', [TaskBoardController::class, 'show'])->middleware(['api.ability:read']);
+    Route::patch('/devforge/tasks/{uuid}', [TaskBoardController::class, 'update'])->middleware(['api.ability:write']);
+    Route::delete('/devforge/tasks/{uuid}', [TaskBoardController::class, 'destroy'])->middleware(['api.ability:write']);
 });
 
 Route::group([

@@ -62,6 +62,7 @@ class AuthServiceProvider extends ServiceProvider
 
         // DevForge AI policies
         \App\Models\AiAgent::class => \App\Policies\AiAgentPolicy::class,
+        \App\Models\AiAgentMission::class => \App\Policies\AiAgentMissionPolicy::class,
         \App\Models\AiProviderConfig::class => \App\Policies\AiProviderConfigPolicy::class,
 
         // Git source policies

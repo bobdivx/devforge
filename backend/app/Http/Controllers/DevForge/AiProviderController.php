@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AiProviderConfig;
 use App\Models\Team;
 use App\Models\User;
+use App\Services\DevForge\Agent\DefaultAgentProvisioner;
 use App\Services\DevForge\Agent\LlmEndpointResolver;
 use App\Services\DevForge\Agent\LlmModelCatalog;
 use App\Services\DevForge\Agent\LlmModelResolver;
@@ -24,6 +25,7 @@ class AiProviderController extends Controller
         private readonly LlmProviderFactory $providerFactory,
         private readonly LlmModelCatalog $modelCatalog,
         private readonly LlmProviderProbe $providerProbe,
+        private readonly DefaultAgentProvisioner $agentProvisioner,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -112,6 +114,9 @@ class AiProviderController extends Controller
         }
 
         $config = AiProviderConfig::create(['team_id' => $team->id, ...$validated]);
+
+        // Provisionner les agents par défaut si c'est le premier provider actif
+        $this->agentProvisioner->ensureDefaultAgents($team);
 
         return response()->json(['data' => $this->present($config)], 201);
     }
