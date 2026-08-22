@@ -1,12 +1,11 @@
 import { Copy, KeyRound, LoaderCircle, Plus, Trash2 } from 'lucide-preact';
-import { useState, useMemo } from 'preact/hooks';
-import { Card } from '../../ui/Card';
-import { Modal } from '../../ui/Modal';
-import { domainApi, type ApiToken } from '../../../lib/domain-api';
-import { useApiQuery } from '../../../lib/use-api-query';
-import { navigateTo } from '../../../lib/use-navigate';
+import { useState } from 'preact/hooks';
+import { Card } from '../ui/Card';
+import { Modal } from '../ui/Modal';
+import { domainApi, type ApiToken } from '../../lib/domain-api';
+import { useApiQuery } from '../../lib/use-api-query';
+import { navigateTo } from '../../lib/use-navigate';
 
-const MCP_ABILITIES = ['read', 'write'] as const;
 const EXPIRATION_OPTIONS = [
     { value: 7, label: '7 jours' },
     { value: 30, label: '30 jours' },
@@ -164,7 +163,7 @@ export function DevForgeMcpTokenCard() {
                         <div class="grid gap-2">
                             <h4 class="text-sm font-semibold">Jetons actifs ({tokens.length})</h4>
                             <div class="grid gap-2">
-                                {tokens.slice(0, 5).map((token) => (
+                                {tokens.slice(0, 5).map((token: ApiToken) => (
                                     <div key={token.id} class="flex items-center justify-between gap-3 rounded-lg border border-base-300 bg-base-100 p-3">
                                         <div class="min-w-0 flex-1">
                                             <div class="font-medium text-sm truncate">{token.name}</div>
