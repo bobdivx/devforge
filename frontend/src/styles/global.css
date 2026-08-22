@@ -674,6 +674,28 @@ input {
         width: 100%;
         max-width: 100%;
     }
+
+    .input,
+    .select {
+        font-size: 0.875rem;
+        min-width: 0;
+        width: 100%;
+    }
+
+    .input[type="url"] {
+        word-break: break-all;
+        overflow-wrap: anywhere;
+    }
+
+    .action-toolbar {
+        gap: 0.5rem;
+    }
+
+    .action-toolbar > .btn {
+        min-width: fit-content;
+        flex-shrink: 1;
+        flex-grow: 0;
+    }
 }
 
 /* Mobile chat improvements: composer always accessible, full-width messages */

@@ -295,10 +295,10 @@ export function ApplicationDomainsPanel({
                                                                     </span>
                                                                 )}
                                                             </div>
-                                                            <div class="flex min-w-0 items-center gap-2">
+                                                            <div class="flex min-w-0 items-center gap-2 overflow-hidden">
                                                                 <Globe class="size-3.5 shrink-0 text-base-content/40" aria-hidden />
                                                                 <input
-                                                                    class="input input-bordered input-sm min-w-0 flex-1 font-mono text-sm"
+                                                                    class="input input-bordered input-sm min-w-0 flex-1 font-mono text-xs sm:text-sm"
                                                                     type="url"
                                                                     value={row.url}
                                                                     disabled={!canAct || saving || generating || row.managed}
@@ -418,7 +418,8 @@ export function ApplicationDomainsPanel({
                                                 {generating
                                                     ? <LoaderCircle class="size-3.5 animate-spin" aria-hidden />
                                                     : <Sparkles class="size-3.5" aria-hidden />}
-                                                {managedDomain ? 'Régénérer le domaine DevForge' : 'Générer un domaine'}
+                                                <span class="hidden sm:inline">{managedDomain ? 'Régénérer le domaine DevForge' : 'Générer un domaine'}</span>
+                                                <span class="inline sm:hidden">{managedDomain ? 'Régénérer' : 'Générer'}</span>
                                             </button>
                                         </ActionToolbar>
                                     )}
