@@ -143,6 +143,33 @@
                     </div>
                 @endif
             </div>
+
+            <div class="devforge-auth-card">
+                <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                    <h3 style="margin: 0; font-size: 1rem; font-weight: 600; color: #fff;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: text-bottom; margin-inline-end: 0.5rem; color: var(--df-primary);" aria-hidden="true">
+                            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                            <circle cx="12" cy="12" r="3" />
+                        </svg>
+                        Token API DevForge
+                    </h3>
+                    <p class="devforge-auth-muted" style="margin: 0; line-height: 1.5;">
+                        Les tokens API vous permettent d'accéder à DevForge depuis des outils externes, des scripts ou l'interface MCP.
+                    </p>
+                    <div class="devforge-auth-divider">
+                        <span>Comment générer un token</span>
+                    </div>
+                    <ol class="devforge-auth-muted" style="margin: 0; padding-inline-start: 1.25rem; line-height: 1.6; font-size: 0.875rem;">
+                        <li>Connectez-vous avec vos identifiants ci-dessus</li>
+                        <li>Accédez à <strong style="color: var(--df-content);">Sécurité → Tokens API</strong></li>
+                        <li>Créez un nouveau token avec les permissions appropriées</li>
+                        <li>Copiez le token généré (il ne sera affiché qu'une seule fois)</li>
+                    </ol>
+                    <p class="devforge-auth-muted" style="margin: 0.75rem 0 0; font-size: 0.8125rem;">
+                        <strong style="color: var(--df-primary);">Note :</strong> Les tokens ne peuvent être générés qu'après authentification pour des raisons de sécurité.
+                    </p>
+                </div>
+            </div>
         </div>
     </div>
 
