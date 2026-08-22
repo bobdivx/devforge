@@ -186,33 +186,10 @@ class LlmProviderFactory
             return $fallbacks;
         }
 
-        // Préférer la découverte réseau (DEVFORGE_OLLAMA_URL) — utile si le primaire est cloud.
-        $discovered = $this->ollamaFallbackResolver->discover();
-
-        if ($discovered !== null) {
-            $fallbacks[] = [
-                'provider' => new OllamaProvider($discovered['base_url'], $discovered['model']),
-                'label' => 'ollama/'.$discovered['model'].' (auto)',
-            ];
-
-            return $fallbacks;
-        }
-
-        $dbFallback = AiProviderConfig::query()
-            ->where('team_id', $agent->team_id)
-            ->where('provider', 'ollama')
-            ->whereNotIn('id', $usedIds)
-            ->orderByDesc('is_default')
-            ->orderBy('id')
-            ->first();
-
-        if ($dbFallback) {
-            $fallbacks[] = [
-                'provider' => $this->make($dbFallback, $tier),
-                'label' => $this->label($dbFallback),
-            ];
-        }
-
+        // Le primaire est un cloud provider (Gemini, OpenAI, Anthropic, OpenRouter).
+        // Ne pas fallback vers Ollama sauf si explicitement configuré comme fallback secondaire.
+        // Les cloud providers sont stables — pas besoin d'un fallback local instable.
+        
         return $fallbacks;
     }
 

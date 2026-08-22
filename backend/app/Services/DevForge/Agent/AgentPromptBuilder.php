@@ -18,6 +18,9 @@ class AgentPromptBuilder
             'deployment_failed' => <<<'RULES'
 
             Contexte : échec de déploiement détecté.
+            - PROCÉDURE : skill_load('fix-deploy-failed') — boucle opérateur (observe → hypothèse → action → remesure).
+            - Tu es un OPÉRATEUR : ne devine pas 4 causes. Mesure, change une chose, remesure.
+            - Source de vérité = outils (logs, settings, status). Jamais inventer UUID/commit/logs.
             - Tu es ORCHESTRATEUR : pipeline obligé diagnose → fix → redeploy (1×).
             - Étape 1 : spawn_task(goal=…, leaf_profile=diagnose) puis yield_wait. REVIEW le handoff.
             - Étape 2 : spawn_task(goal=…, leaf_profile=fix) puis yield_wait. REVIEW le handoff.
