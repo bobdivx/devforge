@@ -16,6 +16,7 @@ type Props = {
 /**
  * Détermine si l'erreur est pertinente pour le contexte actuel.
  * Une erreur Ollama n'est pas pertinente si l'agent tourne actuellement sur Gemini.
+ * Les erreurs 502 chroniques sont atténuées.
  */
 function isErrorRelevant(
     agent: Agent,
@@ -33,7 +34,13 @@ function isErrorRelevant(
 
     const lower = errorMessage.toLowerCase();
     const isOllamaError = lower.includes('ollama');
+    const is502Error = lower.includes('502') || lower.includes('error code: 502');
     const isGeminiActive = activeProvider === 'gemini' || agent.provider?.provider === 'gemini';
+
+    // Si l'erreur est Ollama 502 mais que l'agent tourne sur Gemini, on cache l'erreur
+    if (isOllamaError && is502Error && isGeminiActive) {
+        return false;
+    }
 
     // Si l'erreur est Ollama mais que l'agent tourne sur Gemini, on cache l'erreur
     if (isOllamaError && isGeminiActive) {

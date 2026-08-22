@@ -1,4 +1,4 @@
-import { MessageSquarePlus, RefreshCw } from 'lucide-preact';
+import { Menu, MessageSquarePlus, RefreshCw, X } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
 import type { Agent, AgentChatAttachment, AgentChatMessage, AgentChatSession, AgentChatStep, AgentModelRouting } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
@@ -44,6 +44,7 @@ export function AgentConversationView({
     const [draft, setDraft] = useState('');
     const [chatMode, setChatMode] = useState<'plan' | 'build' | 'debug'>('build');
     const [attachments, setAttachments] = useState<AgentChatAttachment[]>([]);
+    const [sessionsDrawerOpen, setSessionsDrawerOpen] = useState(false);
 
     const resetLiveProgress = () => {
         setActiveRunUuid(null);
@@ -93,6 +94,7 @@ export function AgentConversationView({
         setChatMode(session.chat_mode ?? 'build');
         syncSessionQuery(session.uuid);
         setDraft('');
+        setSessionsDrawerOpen(false); // Fermer le drawer après sélection
 
         try {
             await domainApi.activateAgentSession(agent.uuid, session.uuid);
@@ -369,6 +371,7 @@ export function AgentConversationView({
 
     return (
         <div class="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+            {/* Desktop sidebar - visible uniquement sur lg+ */}
             <aside class="hidden shrink-0 flex-col border-e border-base-300 bg-base-200/20 lg:flex lg:w-72 lg:max-w-[40%]">
                 <div class="flex shrink-0 items-center justify-end gap-1 px-3 pt-3">
                     <button
@@ -411,7 +414,93 @@ export function AgentConversationView({
                 )}
             </aside>
 
+            {/* Mobile drawer - overlay avec backdrop */}
+            {sessionsDrawerOpen && (
+                <div class="fixed inset-0 z-50 lg:hidden">
+                    <button
+                        class="absolute inset-0 bg-black/50"
+                        type="button"
+                        aria-label="Fermer"
+                        onClick={() => setSessionsDrawerOpen(false)}
+                    />
+                    <aside class="absolute inset-y-0 start-0 flex w-full max-w-sm flex-col overflow-hidden border-e border-base-300 bg-base-100 shadow-xl">
+                        <div class="flex shrink-0 items-center justify-between border-b border-base-300 px-3 py-2.5">
+                            <span class="text-sm font-semibold">Conversations</span>
+                            <button
+                                class="btn btn-ghost btn-sm btn-square size-9 min-h-9 p-0"
+                                type="button"
+                                onClick={() => setSessionsDrawerOpen(false)}
+                            >
+                                <X class="size-4" aria-hidden />
+                            </button>
+                        </div>
+                        <div class="flex shrink-0 items-center justify-end gap-1 px-3 pt-2 pb-2">
+                            <button
+                                class="btn btn-ghost btn-sm btn-square size-9 min-h-9 p-0"
+                                type="button"
+                                title="Actualiser"
+                                onClick={() => void refreshSessions()}
+                                disabled={loadingSessions}
+                            >
+                                <RefreshCw class="size-4" aria-hidden />
+                            </button>
+                            <button
+                                class="btn btn-primary btn-sm gap-1.5 px-2.5"
+                                type="button"
+                                disabled={creating || loadingSessions}
+                                onClick={() => void handleCreate()}
+                            >
+                                {creating
+                                    ? <span class="loading loading-spinner loading-sm" aria-hidden />
+                                    : <MessageSquarePlus class="size-4" aria-hidden />}
+                                Nouvelle
+                            </button>
+                        </div>
+                        {loadingSessions ? (
+                            <div class="flex flex-1 items-center justify-center px-4 py-10 text-xs text-base-content/50">
+                                <span class="loading loading-spinner loading-sm me-2" />
+                                Chargement…
+                            </div>
+                        ) : (
+                            <SessionHistoryList
+                                agent={agent}
+                                sessions={sessions}
+                                selectedUuid={selectedSessionUuid}
+                                onSelect={handleSelectUuid}
+                                onDelete={(uuid) => void handleDelete(uuid)}
+                                deletingUuid={deletingUuid}
+                                userName={userName}
+                                onOpenPlugins={onOpenPlugins}
+                            />
+                        )}
+                    </aside>
+                </div>
+            )}
+
             <div class="flex min-h-0 min-w-0 flex-1 flex-col bg-base-100">
+                {/* Mobile: bouton menu pour ouvrir le drawer */}
+                <div class="flex shrink-0 items-center justify-between border-b border-base-300 bg-base-100 px-3 py-2 lg:hidden">
+                    <button
+                        class="btn btn-ghost btn-sm gap-1.5 px-2.5"
+                        type="button"
+                        onClick={() => setSessionsDrawerOpen(true)}
+                    >
+                        <Menu class="size-4" aria-hidden />
+                        Conversations ({sessions.length})
+                    </button>
+                    <button
+                        class="btn btn-primary btn-sm btn-square size-9 min-h-9 p-0"
+                        type="button"
+                        title="Nouvelle conversation"
+                        disabled={creating}
+                        onClick={() => void handleCreate()}
+                    >
+                        {creating
+                            ? <span class="loading loading-spinner loading-sm" aria-hidden />
+                            : <MessageSquarePlus class="size-4" aria-hidden />}
+                    </button>
+                </div>
+
                 <AgentChatPanel
                         agent={agent}
                         session={activeSession}

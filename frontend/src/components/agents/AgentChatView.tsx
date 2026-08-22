@@ -175,15 +175,7 @@ export function AgentChatView({ agent, onBack, onAgentUpdated, userName }: Props
                 </div>
             )}
 
-            <div class="hidden sm:block">
-                <AgentViewSwitcher
-                    mode={viewMode}
-                    runsActive={runsActive}
-                    runsCount={runsCount}
-                    sessionsCount={sessionsCount}
-                    onChange={(mode) => switchView(mode, focusedRunUuid ?? agent.latest_run?.uuid ?? null)}
-                />
-            </div>
+            {/* AgentViewSwitcher removed on mobile - conversation is default view */}
 
             <div class="flex min-h-0 min-w-0 flex-1">
                 {viewMode === 'runs' ? (
