@@ -6,6 +6,7 @@ import { Card } from '../../components/ui/Card';
 import { ConnectGithubButton, FinishGithubInstallButton } from '../../components/github/ConnectGithubButton';
 import { isGithubAppInstalled } from '../../lib/onboarding-github';
 import { SharedVariablesPanel } from '../../components/shared-variables/SharedVariablesPanel';
+import { DevForgeMcpTokenCard } from '../../components/sources/DevForgeMcpTokenCard';
 import type { BootstrapPermissions } from '../../lib/bootstrap';
 import { domainApi, type GithubAppSummary } from '../../lib/domain-api';
 import { useApiQuery } from '../../lib/use-api-query';
@@ -224,6 +225,8 @@ export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
                     />
                 </div>
             </Card>
+
+            <DevForgeMcpTokenCard />
 
             <Modal title="Token GitHub (Packages)" open={!!editingGithubApp} onClose={() => setEditingGithubApp(null)}>
                 <div class="p-6">
