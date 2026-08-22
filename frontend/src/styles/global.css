@@ -659,6 +659,23 @@ input {
     font-weight: 600;
 }
 
+@media (max-width: 639px) {
+    .dashboard-shell {
+        overflow-x: hidden;
+    }
+
+    .devforge-panel {
+        max-width: 100vw;
+        overflow-x: hidden;
+    }
+
+    .devforge-card,
+    .card {
+        width: 100%;
+        max-width: 100%;
+    }
+}
+
 /* Mobile chat improvements: composer always accessible, full-width messages */
 @media (max-width: 640px) {
     /* Agent chat composer: safe bottom spacing */

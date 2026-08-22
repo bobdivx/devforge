@@ -726,7 +726,7 @@ export function ApplicationDetailPanel({
         <DataState loading={resourceQuery.loading} error={resourceQuery.error} onRetry={() => void reload()}>
             {resource && config && (
                 <div class="grid min-w-0 max-w-full gap-5 overflow-x-hidden">
-                    <div class="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div class="grid min-w-0 gap-4 sm:flex sm:flex-row sm:items-start sm:justify-between">
                         <div class="grid min-w-0 gap-2">
                             <button class="btn btn-ghost btn-sm -ms-2 w-fit px-3" type="button" onClick={onClose}>
                                 <ArrowLeft class="size-4" aria-hidden />
@@ -819,7 +819,7 @@ export function ApplicationDetailPanel({
                                 </div>
                             </div>
                         </div>
-                        <ActionToolbar class="w-full min-w-0 sm:w-auto">
+                        <ActionToolbar class="w-full min-w-0">
                             {visit && (
                                 <a
                                     class="btn btn-primary btn-sm"
@@ -1083,8 +1083,6 @@ export function ApplicationDetailPanel({
                                 )}
                             </div>
 
-                            <ApplicationReadinessCard applicationUuid={uuid} canAct={canAct} />
-
                             <ApplicationAgentChatCard application={resource} />
 
                             {resource.description && (
@@ -1264,15 +1262,18 @@ export function ApplicationDetailPanel({
                     )}
 
                     {activeTab === 'domains' && (
-                        <ApplicationDomainsPanel
-                            applicationUuid={resource.uuid}
-                            canAct={canAct}
-                            onChanged={reload}
-                            onRedeployQueued={(deploymentUuid) => {
-                                focusDeployment(deploymentUuid, false);
-                                openDeploymentsTab();
-                            }}
-                        />
+                        <div class="grid gap-5">
+                            <ApplicationReadinessCard applicationUuid={uuid} canAct={canAct} />
+                            <ApplicationDomainsPanel
+                                applicationUuid={resource.uuid}
+                                canAct={canAct}
+                                onChanged={reload}
+                                onRedeployQueued={(deploymentUuid) => {
+                                    focusDeployment(deploymentUuid, false);
+                                    openDeploymentsTab();
+                                }}
+                            />
+                        </div>
                     )}
 
                     {activeTab === 'databases' && (
