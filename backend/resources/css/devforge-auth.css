@@ -74,7 +74,13 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 1.5rem;
+    padding: 1rem;
+}
+
+@media (min-width: 640px) {
+    .devforge-auth-shell {
+        padding: 1.5rem;
+    }
 }
 
 .devforge-auth-panel {
@@ -128,12 +134,19 @@
 /* Carte = même langage que Card SPA (rounded-2xl + border-base-300/70 + shadow-sm) */
 .devforge-auth-card {
     display: grid;
-    gap: 1.25rem;
+    gap: 1rem;
     border: 1px solid color-mix(in oklab, var(--df-base-300) 70%, transparent);
     background: var(--df-base-100);
     border-radius: var(--df-radius-box);
     box-shadow: 0 1px 2px color-mix(in oklab, #000 35%, transparent);
-    padding: 1.25rem;
+    padding: 1rem;
+}
+
+@media (min-width: 640px) {
+    .devforge-auth-card {
+        gap: 1.25rem;
+        padding: 1.25rem;
+    }
 }
 
 .devforge-auth-form {
@@ -210,21 +223,32 @@
 
 .devforge-auth-primary {
     display: inline-flex;
-    min-height: 2.75rem;
+    min-height: 2.5rem;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    padding-inline: 1.25rem;
+    padding-inline: 1rem;
+    padding-block: 0.5rem;
     border-radius: 9999px;
     border: 1px solid var(--df-primary);
     background: var(--df-primary);
     color: var(--df-primary-content);
-    font-size: 0.9375rem;
+    font-size: 0.875rem;
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;
     text-decoration: none;
+    white-space: normal;
+    text-align: center;
     transition: background 150ms ease, border-color 150ms ease, transform 120ms ease;
+}
+
+@media (min-width: 640px) {
+    .devforge-auth-primary {
+        min-height: 2.75rem;
+        padding-inline: 1.25rem;
+        font-size: 0.9375rem;
+    }
 }
 
 .devforge-auth-primary-block {
@@ -243,19 +267,30 @@
 .devforge-auth-secondary {
     display: inline-flex;
     width: 100%;
-    min-height: 2.75rem;
+    min-height: 2.5rem;
     align-items: center;
     justify-content: center;
+    padding-inline: 1rem;
+    padding-block: 0.5rem;
     border-radius: 9999px;
     border: 1px solid color-mix(in oklab, var(--df-base-300) 70%, transparent);
     background: transparent;
     color: var(--df-content);
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;
     text-decoration: none;
+    white-space: normal;
+    text-align: center;
     transition: border-color 150ms ease, background 150ms ease;
+}
+
+@media (min-width: 640px) {
+    .devforge-auth-secondary {
+        min-height: 2.75rem;
+        font-size: 0.875rem;
+    }
 }
 
 .devforge-auth-secondary:hover {

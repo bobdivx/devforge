@@ -56,7 +56,7 @@
 
 @layer components {
     .terminal-mobile-key {
-        @apply min-h-10 rounded-md border border-white/10 bg-white/10 px-2 py-2 text-sm font-semibold text-white shadow-inner active:bg-white/25;
+        @apply min-h-9 sm:min-h-10 rounded-md border border-white/10 bg-white/10 px-1.5 sm:px-2 py-1.5 sm:py-2 text-xs sm:text-sm font-semibold text-white shadow-inner active:bg-white/25 whitespace-normal text-center;
     }
 }
 
@@ -106,7 +106,7 @@ body {
 }
 
 body {
-    @apply min-h-screen text-sm font-sans antialiased scrollbar overflow-x-hidden;
+    @apply min-h-screen text-xs sm:text-sm font-sans antialiased scrollbar overflow-x-hidden;
 }
 
 .coolify-monaco-editor {
@@ -185,7 +185,7 @@ tr th:first-child {
 }
 
 tr td {
-    @apply px-3 py-4 whitespace-nowrap;
+    @apply px-3 py-4 whitespace-nowrap text-xs sm:text-sm;
 }
 
 tr td:first-child {

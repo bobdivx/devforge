@@ -29,18 +29,18 @@
             </div>
         </div>
         <div id="terminal" wire:ignore
-            :class="fullscreen ? (mobileToolbarCollapsed ? 'h-[calc(100dvh-3.5rem)] mb-14 px-2 py-1 bg-black' : 'h-[calc(100dvh-6rem)] mb-[6rem] px-2 py-1 bg-black') : 'h-[510px] max-h-[calc(100dvh-10rem)] overflow-hidden px-2 py-1 rounded-sm bg-black'"
+            :class="fullscreen ? (mobileToolbarCollapsed ? 'h-[calc(100dvh-3.5rem)] mb-14 px-1 sm:px-2 py-1 bg-black' : 'h-[calc(100dvh-6rem)] mb-[6rem] px-1 sm:px-2 py-1 bg-black') : 'h-[510px] max-h-[calc(100dvh-10rem)] overflow-hidden px-1 sm:px-2 py-1 rounded-sm bg-black'"
             x-show="terminalActive">
         </div>
         <div x-show="terminalActive" x-cloak
-            :class="fullscreen ? 'absolute inset-x-0 bottom-0 z-[9999] px-2 pb-2' : 'relative mt-2'"
+            :class="fullscreen ? 'absolute inset-x-0 bottom-0 z-[9999] px-1 sm:px-2 pb-2 pb-safe' : 'relative mt-2'"
             class="sm:hidden" data-terminal-mobile-toolbar>
             <div class="mx-auto max-w-3xl rounded-lg border border-white/10 bg-black/90 p-1.5 text-white shadow-lg backdrop-blur">
                 <div class="flex items-center justify-between gap-2">
-                    <span class="px-2 text-[11px] font-medium uppercase tracking-wide text-neutral-400">Terminal keys</span>
-                    <button type="button" class="rounded px-2 py-1 text-xs text-neutral-300 hover:bg-white/10 hover:text-white"
+                    <span class="px-1 sm:px-2 text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-neutral-400 whitespace-normal">Terminal</span>
+                    <button type="button" class="rounded px-2 py-1 text-xs text-neutral-300 hover:bg-white/10 hover:text-white whitespace-nowrap"
                         x-on:click="mobileToolbarCollapsed = !mobileToolbarCollapsed; $nextTick(() => resizeTerminal())"
-                        x-text="mobileToolbarCollapsed ? 'Show' : 'Hide'"
+                        x-text="mobileToolbarCollapsed ? 'Afficher' : 'Masquer'"
                         aria-label="Toggle mobile terminal toolbar"></button>
                 </div>
                 <div x-show="!mobileToolbarCollapsed" class="mt-1 grid grid-cols-6 gap-1">
