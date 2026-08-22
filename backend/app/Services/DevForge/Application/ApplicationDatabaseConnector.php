@@ -151,6 +151,7 @@ class ApplicationDatabaseConnector
 
         $grouped = [];
 
+        // First pass: detect connections with proper comment markers
         foreach ($this->linkedEnvironmentVariables($application) as $variable) {
             $databaseUuid = (string) str($variable->comment)->after(LibsqlConnectionEnvSync::LINK_COMMENT_PREFIX)->value();
 
@@ -178,6 +179,55 @@ class ApplicationDatabaseConnector
             }
         }
 
+        // Second pass: detect Turso/libSQL connections without comment markers (legacy apps)
+        // by parsing URL values for known database UUIDs
+        $legacyTursoVars = $application->environment_variables()
+            ->where('is_preview', false)
+            ->whereIn('key', LibsqlConnectionEnvSync::allowedEnvKeys())
+            ->get()
+            ->filter(function (EnvironmentVariable $variable) use ($grouped): bool {
+                // Skip if already detected via comment marker
+                $hasComment = str($variable->comment ?? '')->startsWith(LibsqlConnectionEnvSync::LINK_COMMENT_PREFIX);
+                if ($hasComment) {
+                    return false;
+                }
+
+                // Skip if this UUID is already in grouped (from comment-marked vars)
+                $detectedUuid = $this->extractDatabaseUuidFromUrl((string) $variable->value);
+                if ($detectedUuid && isset($grouped[$detectedUuid])) {
+                    return false;
+                }
+
+                return true;
+            });
+
+        foreach ($legacyTursoVars as $variable) {
+            $detectedUuid = $this->extractDatabaseUuidFromUrl((string) $variable->value);
+
+            if (! $detectedUuid || ! $knownDatabaseUuids->has($detectedUuid)) {
+                continue;
+            }
+
+            if (! isset($grouped[$detectedUuid])) {
+                $grouped[$detectedUuid] = [
+                    'database_uuid' => $detectedUuid,
+                    'env_keys' => [],
+                    'is_runtime' => (bool) $variable->is_runtime,
+                    'is_buildtime' => (bool) $variable->is_buildtime,
+                    'updated_at' => $variable->updated_at?->toISOString(),
+                ];
+            }
+
+            $grouped[$detectedUuid]['env_keys'][] = $variable->key;
+            $grouped[$detectedUuid]['is_runtime'] = $grouped[$detectedUuid]['is_runtime'] || (bool) $variable->is_runtime;
+            $grouped[$detectedUuid]['is_buildtime'] = $grouped[$detectedUuid]['is_buildtime'] || (bool) $variable->is_buildtime;
+
+            $updatedAt = $variable->updated_at?->toISOString();
+            if ($updatedAt !== null && ($grouped[$detectedUuid]['updated_at'] === null || $updatedAt > $grouped[$detectedUuid]['updated_at'])) {
+                $grouped[$detectedUuid]['updated_at'] = $updatedAt;
+            }
+        }
+
         return collect($grouped)
             ->map(function (array $connection): array {
                 $connection['env_keys'] = collect($connection['env_keys'])
@@ -191,6 +241,53 @@ class ApplicationDatabaseConnector
             ->sortBy('database_uuid')
             ->values()
             ->all();
+    }
+
+    /**
+     * Extract database UUID from a Turso/libSQL URL.
+     * Returns null if URL doesn't contain a valid resource UUID pattern.
+     */
+    private function extractDatabaseUuidFromUrl(string $url): ?string
+    {
+        // Parse URLs like:
+        // - http://{uuid}:8080
+        // - libsql://{uuid}
+        // - http://{uuid}:8080/path
+        // But NOT:
+        // - http://devforge-local-db:8080 (platform DB)
+        // - http://some-random-host:8080
+        
+        // Extract potential UUID from the hostname part
+        if (preg_match('#^(?:https?|libsql)://([a-z0-9]+?)(?::|/|$)#i', $url, $matches)) {
+            $potentialUuid = $matches[1];
+            
+            // DevForge uses CUID2 for UUIDs, which are alphanumeric lowercase strings
+            // Typical pattern: starts with a letter, 24-32 chars
+            // Reject common non-UUID hostnames
+            $rejectedPatterns = [
+                'localhost',
+                'devforge',
+                'local',
+                'db',
+                'database',
+                'turso',
+                'libsql',
+            ];
+            
+            $lowerUuid = strtolower($potentialUuid);
+            foreach ($rejectedPatterns as $pattern) {
+                if (str_contains($lowerUuid, $pattern)) {
+                    return null;
+                }
+            }
+            
+            // CUID2 format validation: starts with letter, 24+ chars, alphanumeric lowercase
+            if (preg_match('/^[a-z][a-z0-9]{23,}$/i', $potentialUuid)) {
+                return $potentialUuid;
+            }
+        }
+        
+        return null;
     }
 
     /**
