@@ -72,7 +72,46 @@ if [[ "${SKIP_BUILD}" != "true" ]]; then
         echo "Aucun fichier DevForge à empaqueter." >&2
         exit 1
     fi
-    tar -czf "${ARTIFACT}" -C "${ROOT}" "${package_paths[@]}"
+    
+    # Détecter le layout monorepo
+    if [[ -f "${ROOT}/backend/artisan" ]]; then
+        LARAVEL_ROOT="${ROOT}/backend"
+    else
+        LARAVEL_ROOT="${ROOT}"
+    fi
+    
+    # Créer un répertoire de staging pour mapper les chemins correctement
+    STAGING_DIR="$(mktemp -d)"
+    trap "rm -rf '${STAGING_DIR}'" EXIT
+    
+    for deploy_path in "${package_paths[@]}"; do
+        # Déterminer le chemin source réel
+        if [[ "${deploy_path}" == "frontend" || "${deploy_path}" == frontend/* || "${deploy_path}" == scripts/* ]]; then
+            src="${ROOT}/${deploy_path}"
+        else
+            src="${LARAVEL_ROOT}/${deploy_path}"
+        fi
+        
+        # Vérifier que le fichier/dossier existe
+        if [[ ! -e "${src}" ]]; then
+            echo "ATTENTION: Fichier absent dans les sources: ${deploy_path} (${src})" >&2
+            continue
+        fi
+        
+        # Créer la structure dans staging
+        dest="${STAGING_DIR}/${deploy_path}"
+        dest_dir="$(dirname "${dest}")"
+        mkdir -p "${dest_dir}"
+        
+        # Copier avec préservation des attributs
+        if [[ -d "${src}" ]]; then
+            cp -a "${src}" "${dest_dir}/"
+        else
+            cp -a "${src}" "${dest}"
+        fi
+    done
+    
+    tar -czf "${ARTIFACT}" -C "${STAGING_DIR}" .
     log "Artefact: ${ARTIFACT}"
 fi
 

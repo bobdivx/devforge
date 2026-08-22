@@ -60,8 +60,13 @@ expand_glob() {
 read_list_file() {
     local file="$1"
     [[ -f "${file}" ]] || return 0
+    # Strip BOM if present and process lines
     while IFS= read -r line || [[ -n "${line}" ]]; do
+        # Remove BOM (EF BB BF) from first line if present
+        line="${line#$'\xef\xbb\xbf'}"
+        # Trim whitespace and CR
         line="$(echo "${line}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        line="${line//$'\r'/}"
         [[ -z "${line}" || "${line}" == \#* ]] && continue
         if [[ "${line}" == glob:* ]]; then
             expand_glob "${line}"
@@ -96,7 +101,11 @@ fi
 
 if [[ -f "${REQUIRED_FILE}" ]]; then
     while IFS= read -r line || [[ -n "${line}" ]]; do
+        # Remove BOM if present
+        line="${line#$'\xef\xbb\xbf'}"
+        # Trim whitespace and CR
         line="$(echo "${line}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        line="${line//$'\r'/}"
         [[ -z "${line}" || "${line}" == \#* ]] && continue
         line="${line//\\//}"
         if [[ -z "${SEEN[$line]+x}" ]]; then
@@ -110,7 +119,8 @@ if [[ -f "${CHECKS_FILE}" ]] && command -v python3 >/dev/null 2>&1; then
     python3 - "${ROOT}" "${LARAVEL_ROOT}" "${CHECKS_FILE}" <<'PY'
 import json, sys, os
 root, laravel_root, checks_file = sys.argv[1], sys.argv[2], sys.argv[3]
-checks = json.load(open(checks_file, encoding="utf-8"))
+# Use utf-8-sig to automatically strip BOM if present
+checks = json.load(open(checks_file, encoding="utf-8-sig"))
 
 def source_path(path: str) -> str:
     path = path.replace("\\", "/").strip("/")

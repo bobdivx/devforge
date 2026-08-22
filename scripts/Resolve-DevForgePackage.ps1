@@ -84,8 +84,10 @@ function Read-DevForgePathListFile {
         throw "Fichier introuvable: $FilePath"
     }
 
+    # Read with UTF-8 encoding (PowerShell automatically strips BOM when using -Encoding UTF8)
+    # Then trim whitespace and carriage returns, filter comments and empty lines
     return @(Get-Content $FilePath -Encoding UTF8 |
-        ForEach-Object { $_.Trim() } |
+        ForEach-Object { $_.Trim().TrimEnd("`r") } |
         Where-Object { $_ -and -not $_.StartsWith('#') })
 }
 
