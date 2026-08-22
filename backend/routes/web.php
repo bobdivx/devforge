@@ -7,6 +7,7 @@ use App\Http\Controllers\UploadController;
 use App\Http\Controllers\Webhook\Github as GithubWebhookController;
 use App\Livewire\Admin\Index as AdminIndex;
 use App\Livewire\Boarding\Index as BoardingIndex;
+use App\Livewire\Connexions\Index as ConnexionsIndex;
 use App\Livewire\Dashboard;
 use App\Livewire\Destination\Index as DestinationIndex;
 use App\Livewire\Destination\Resources as DestinationResources;
@@ -120,6 +121,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/', Dashboard::class)->name('dashboard');
     Route::get('/admin', AdminIndex::class)->name('admin.index');
     Route::get('/onboarding', BoardingIndex::class)->name('onboarding');
+    Route::get('/connexions', ConnexionsIndex::class)->name('connexions.index');
 
     Route::get('/subscription', SubscriptionShow::class)->name('subscription.show');
     Route::get('/subscription/new', SubscriptionIndex::class)->name('subscription.index');
