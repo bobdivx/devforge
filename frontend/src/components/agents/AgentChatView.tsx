@@ -129,9 +129,9 @@ export function AgentChatView({ agent, onBack, onAgentUpdated, userName }: Props
                         status={agent.status}
                     />
                 </div>
-                <div class="col-start-3 row-start-1 min-w-0 self-center">
-                    <h1 class="truncate text-sm font-semibold">{agent.name}</h1>
-                    <p class="mt-0.5 truncate text-[11px] text-base-content/50">
+                <div class="col-start-3 row-start-1 min-w-0 self-center overflow-hidden">
+                    <h1 class="truncate text-xs sm:text-sm font-semibold">{agent.name}</h1>
+                    <p class="mt-0.5 truncate text-[10px] sm:text-[11px] text-base-content/50">
                         {agent.provider
                             ? formatAgentProviderDisplay(agent.provider.provider, activeRouting)
                             : 'Auto (provider par défaut)'}
@@ -145,7 +145,7 @@ export function AgentChatView({ agent, onBack, onAgentUpdated, userName }: Props
                 >
                     <Settings2 class="size-4" aria-hidden />
                 </button>
-                <div class="col-span-3 col-start-2 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5">
+                <div class="col-span-3 col-start-2 row-start-2 flex min-w-0 flex-wrap items-center gap-1 sm:gap-1.5 overflow-hidden">
                     <AgentStatusBadge status={agent.status} />
                     <AgentModelRoutingBadge routing={activeRouting} compact />
                 </div>

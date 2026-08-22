@@ -199,7 +199,7 @@ export function Sidebar({
                 </button>
             </div>
 
-            <nav class="custom-scrollbar flex-1 overflow-y-auto px-2.5 pb-3">
+            <nav class="custom-scrollbar flex-1 overflow-y-auto overscroll-contain px-2.5 pb-2">
                 {collapsed ? (
                     <ul class="flex flex-col gap-1 p-0">
                         {collapsedLinks.map((item) => (
@@ -223,7 +223,7 @@ export function Sidebar({
                 )}
             </nav>
 
-                <div class="grid gap-1 border-t border-white/10 p-2.5">
+                <div class="grid shrink-0 gap-1 border-t border-white/10 p-2.5 pb-safe lg:pb-2.5">
                 {bootstrap.permissions.manage_team && (
                     <a
                         class={linkClass(activeId === 'onboarding')}

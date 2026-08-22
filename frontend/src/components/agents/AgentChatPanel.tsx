@@ -498,7 +498,7 @@ export function AgentChatPanel({
             </div>
 
             {showSuggestions && (
-                <div class="shrink-0 border-t border-base-300 px-3 py-2.5 sm:px-4 sm:py-3">
+                <div class="shrink-0 border-t border-base-300 px-3 py-2.5 pb-safe sm:px-4 sm:py-3">
                     <div class="flex gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                         {suggestions.map((suggestion) => (
                             <button
@@ -568,7 +568,7 @@ export function AgentChatPanel({
                         <div class="flex min-w-0 flex-1 items-end gap-2 rounded-full border border-base-300 bg-base-200/70 px-2 py-1.5">
                             <textarea
                                 ref={textareaRef}
-                                class="max-h-32 min-h-[2.25rem] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-base-content/40"
+                                class="max-h-32 min-h-[2.25rem] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-base-content/40 placeholder:text-xs sm:placeholder:text-sm"
                                 placeholder={composerPlaceholder}
                                 rows={1}
                                 value={draft}

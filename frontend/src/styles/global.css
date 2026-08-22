@@ -146,6 +146,13 @@ body {
     }
 }
 
+code,
+pre,
+.font-mono {
+    word-break: break-all;
+    overflow-wrap: anywhere;
+}
+
 @media (max-width: 639px) {
     .btn:not(.btn-square):not(.btn-circle):not(.btn-xs),
     .btn-sm:not(.btn-square):not(.btn-circle) {
@@ -180,13 +187,15 @@ body {
 
     .action-toolbar > .btn,
     .action-toolbar > a.btn {
-        width: 2.75rem;
-        min-width: 2.75rem;
-        height: 2.75rem;
+        min-width: fit-content;
+        width: auto;
+        height: auto;
         min-height: 2.75rem;
-        padding-inline: 0;
-        padding-block: 0;
-        gap: 0;
+        padding-inline: 0.75rem;
+        padding-block: 0.5rem;
+        flex-shrink: 0;
+        white-space: normal;
+        text-align: center;
     }
 
     .modal-action,
