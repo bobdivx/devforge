@@ -369,7 +369,7 @@ export function AgentConversationView({
 
     return (
         <div class="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
-            <aside class="flex max-h-[min(30vh,14rem)] min-h-0 shrink-0 flex-col border-b border-base-300 bg-base-200/20 lg:max-h-none lg:w-72 lg:max-w-[40%] lg:border-b-0 lg:border-e">
+            <aside class="hidden shrink-0 flex-col border-e border-base-300 bg-base-200/20 lg:flex lg:w-72 lg:max-w-[40%]">
                 <div class="flex shrink-0 items-center justify-end gap-1 px-3 pt-3">
                     <button
                         class="btn btn-ghost btn-sm btn-square size-9 min-h-9 p-0"
@@ -447,6 +447,7 @@ export function AgentConversationView({
                         activeSubagentCount={activeSubagentCount}
                         liveSteps={liveSteps}
                         liveAssistantText={liveAssistantText}
+                        activeRoutingProvider={agent.provider?.provider ?? null}
                     />
             </div>
         </div>
