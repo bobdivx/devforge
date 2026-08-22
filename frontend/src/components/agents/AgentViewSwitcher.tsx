@@ -92,6 +92,7 @@ export function AgentViewSwitcher({ mode, onChange, runsActive = false, runsCoun
                 <select
                     class="select select-bordered select-sm w-full"
                     value={mode}
+                    aria-label="Choisir le mode de vue"
                     onChange={(event) => onChange(event.currentTarget.value as ViewMode)}
                 >
                     <option value="chat">{formatCountLabel('Conversation', sessionsCount)}</option>
