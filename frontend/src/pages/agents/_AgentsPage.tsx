@@ -5,6 +5,7 @@ import { AgentUserRequestsInbox } from '../../components/agents/AgentUserRequest
 import { BotStudio } from '../../components/agents/BotStudio';
 import { CreateAgentModal } from '../../components/agents/CreateAgentModal';
 import { MissionBoardPanel } from '../../components/agents/MissionBoardPanel';
+import { DeployGraftButton } from '../../components/agents/DeployGraftButton';
 import { PageHeader } from '../../components/PageHeader';
 import { DataState } from '../../components/ui/DataState';
 import { domainApi } from '../../lib/domain-api';
@@ -39,6 +40,7 @@ export function AgentsPage({ userName = 'Vous' }: Props) {
                     description="Votre équipe de Bots autonomes qui surveille et améliore la plateforme."
                     actions={(
                         <>
+                            <DeployGraftButton />
                             <button class="btn btn-ghost btn-sm" type="button" onClick={() => void query.reload()}>
                                 <RefreshCw class="size-3.5" aria-hidden />
                                 Actualiser

@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\ServersController;
 use App\Http\Controllers\Api\ServicesController;
 use App\Http\Controllers\Api\TeamController;
 use App\Http\Controllers\DevForge\TaskBoardController;
+use App\Http\Controllers\DevForge\GraftAutomationController;
 use App\Http\Middleware\ApiAllowed;
 use Illuminate\Support\Facades\Route;
 
@@ -211,6 +212,11 @@ Route::group([
     Route::get('/devforge/tasks/{uuid}', [TaskBoardController::class, 'show'])->middleware(['api.ability:read']);
     Route::patch('/devforge/tasks/{uuid}', [TaskBoardController::class, 'update'])->middleware(['api.ability:write']);
     Route::delete('/devforge/tasks/{uuid}', [TaskBoardController::class, 'destroy'])->middleware(['api.ability:write']);
+
+    // DevForge Graft Automation
+    Route::post('/devforge/graft/deploy-all', [GraftAutomationController::class, 'deployToAllRepos'])->middleware(['api.ability:write']);
+    Route::get('/devforge/graft/status', [GraftAutomationController::class, 'status'])->middleware(['api.ability:read']);
+    Route::post('/devforge/graft/deploy/{repo}', [GraftAutomationController::class, 'deployToRepo'])->middleware(['api.ability:write']);
 });
 
 Route::group([
