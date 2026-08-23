@@ -12,7 +12,8 @@
             "args": [
                 "graft",
                 "mcp",
-                "/workspace"
+                "--dir",
+                ".graft"
             ],
             "env": {}
         }
