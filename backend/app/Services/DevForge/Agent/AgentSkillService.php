@@ -375,6 +375,14 @@ class AgentSkillService
                 ]),
             ],
             [
+                'slug' => 'graft-context-engine',
+                'name' => 'Graft Context Engine (graphe codebase)',
+                'description' => 'Graph-based codebase navigation: find symbols, trace calls, analyze blast radius. 3× faster, 70% less tokens.',
+                'tags' => ['graft', 'context', 'codebase', 'search', 'navigation', 'performance'],
+                'priority' => 165,
+                'body' => file_get_contents(base_path('.claude/skills/graft-context/SKILL.md')),
+            ],
+            [
                 'slug' => 'fix-deploy-failed',
                 'name' => 'Corriger un déploiement échoué (opérateur)',
                 'description' => 'Boucle opérateur : observe état réel → une hypothèse → plus petite action → remesure.',

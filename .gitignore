@@ -57,3 +57,6 @@ tests/v4/Browser/Screenshots
 backend/tests/Browser/Screenshots
 backend/tests/v4/Browser/Screenshots
 /.astro
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/.graft/

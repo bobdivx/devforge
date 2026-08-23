@@ -19,6 +19,7 @@
         "test:vite-manifest": "node scripts/normalize-vite-manifest.test.mjs"
     },
     "devDependencies": {
+        "@nanonets/graft": "^0.12.0",
         "@tailwindcss/postcss": "4.1.18",
         "laravel-vite-plugin": "2.0.1",
         "postcss": "8.5.15",
