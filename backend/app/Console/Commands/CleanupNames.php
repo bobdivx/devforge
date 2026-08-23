@@ -192,12 +192,13 @@ class CleanupNames extends Command
 
             $dbConfig = config('database.connections.'.config('database.default'));
             $command = sprintf(
-                'pg_dump -h %s -p %s -U %s -d %s > %s',
-                $dbConfig['host'],
-                $dbConfig['port'],
-                $dbConfig['username'],
-                $dbConfig['database'],
-                $backupFile
+                'PGPASSWORD=%s pg_dump -h %s -p %s -U %s -d %s > %s',
+                escapeshellarg($dbConfig['password'] ?? ''),
+                escapeshellarg($dbConfig['host']),
+                escapeshellarg($dbConfig['port']),
+                escapeshellarg($dbConfig['username']),
+                escapeshellarg($dbConfig['database']),
+                escapeshellarg($backupFile)
             );
 
             exec($command, $output, $returnCode);
