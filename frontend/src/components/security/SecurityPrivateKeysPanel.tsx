@@ -95,7 +95,7 @@ export function SecurityPrivateKeysPanel() {
     };
 
     return (
-        <div class="grid gap-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             <div class="toolbar-row">
                 <p class="text-xs text-base-content/55">
                     Clés SSH et de déploiement accessibles à l’équipe active.

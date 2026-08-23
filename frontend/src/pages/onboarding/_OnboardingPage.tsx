@@ -58,7 +58,7 @@ export function OnboardingPage({ bootstrap }: OnboardingPageProps) {
     };
 
     return (
-        <div class="mx-auto grid w-full max-w-3xl gap-5">
+        <div class="mx-auto grid w-full max-w-3xl gap-3 sm:gap-4 md:gap-5">
             <PageHeader
                 title="Assistant de configuration"
                 description="Quelques questions pour préparer DevForge : URL d’accès, SSO Pocket ID, GitHub, sauvegardes, puis le serveur."

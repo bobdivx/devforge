@@ -15,7 +15,7 @@ export function ProfilePage({ path, user, legacyBaseUrl = '' }: ProfilePageProps
     const activeTab = parseProfileTab(path);
 
     return (
-        <div class="grid gap-5">
+        <div class="grid gap-3 sm:gap-4 md:gap-5">
             <PageHeader
                 title={activeTab === 'appearance' ? 'Apparence' : 'Profil'}
                 description="Compte utilisateur et préférences personnelles DevForge."

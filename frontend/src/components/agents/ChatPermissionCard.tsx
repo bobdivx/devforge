@@ -25,7 +25,7 @@ export function ChatPermissionCard({
 
     return (
         <section class="overflow-hidden rounded-2xl border border-warning/35 bg-warning/10 text-start">
-            <div class="flex items-start gap-2 sm:gap-3 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3">
+            <div class="flex items-start gap-2 sm:gap-3 px-2.5 sm:px-3 md:px-3 sm:px-4 py-2.5 sm:py-3">
                 <ShieldAlert class="mt-0.5 size-3.5 sm:size-4 shrink-0 text-warning" aria-hidden />
                 <div class="min-w-0 flex-1">
                     <p class="text-xs sm:text-sm font-semibold leading-snug">

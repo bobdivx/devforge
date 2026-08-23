@@ -35,7 +35,7 @@ function ApplicationQuickCard({
 }) {
     return (
         <a
-            class="flex min-w-0 items-center justify-between gap-2 sm:gap-3 rounded-2xl bg-base-200/80 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3.5 transition hover:bg-base-200"
+            class="flex min-w-0 items-center justify-between gap-2 sm:gap-3 rounded-2xl bg-base-200/80 px-2.5 sm:px-3 md:px-3 sm:px-4 py-2.5 sm:py-3.5 transition hover:bg-base-200"
             href={routeHref(applicationPath(application.uuid))}
             onClick={(event) => onNavigate(event, applicationPath(application.uuid))}
         >
@@ -140,7 +140,7 @@ export function OverviewPage({ userName = '' }: OverviewPageProps) {
                             )}
                         </div>
 
-                        <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 xl:grid-cols-3">
+                        <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 xl:grid-cols-3">
                             <Card title="Disponibilité" eyebrow="Pipeline" class="min-w-0 xl:col-span-2">
                                 <div class="flex min-w-0 flex-col gap-6 lg:flex-row lg:items-center">
                                     <DonutChart
@@ -152,7 +152,7 @@ export function OverviewPage({ userName = '' }: OverviewPageProps) {
                                             { label: 'Arrêté', value: health.stopped, color: 'var(--color-error)' },
                                         ]}
                                     />
-                                    <div class="grid min-w-0 flex-1 gap-4">
+                                    <div class="grid min-w-0 flex-1 gap-2.5 sm:gap-3 md:gap-4">
                                         <div class="grid gap-2 sm:gap-3 sm:grid-cols-3">
                                             <p class="text-sm"><span class="font-semibold tabular-nums">{health.running}</span> <span class="text-base-content/50">en ligne</span></p>
                                             <p class="text-sm"><span class="font-semibold tabular-nums">{health.degraded}</span> <span class="text-base-content/50">dégradées</span></p>
@@ -204,10 +204,10 @@ export function OverviewPage({ userName = '' }: OverviewPageProps) {
                             </Card>
                         </div>
 
-                        <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 xl:grid-cols-2">
+                        <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 xl:grid-cols-2">
                             <Card title="Déploiements récents" eyebrow="Activité" class="min-w-0">
                                 {overview.recent_deployments.length === 0 ? (
-                                    <p class="py-4 text-center text-xs text-base-content/50">Aucun déploiement récent.</p>
+                                    <p class="py-3 sm:py-4 text-center text-xs text-base-content/50">Aucun déploiement récent.</p>
                                 ) : (
                                     <div class="min-w-0 overflow-x-auto">
                                         <Table headers={['Application', 'Statut', 'Date']} caption="Déploiements récents">

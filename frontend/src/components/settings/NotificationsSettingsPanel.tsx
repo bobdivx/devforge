@@ -58,7 +58,7 @@ function ChannelEventsEditor({
     };
 
     return (
-        <div class="grid gap-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             {canToggleEnabled && (
                 <label class="flex items-center justify-between gap-2 sm:gap-3 rounded-lg border border-base-300/70 px-3 py-2 text-sm">
                     <span>Canal activé</span>
@@ -108,7 +108,7 @@ export function NotificationsSettingsPanel({ activeChannel = null, canManage = f
     const focusedChannel = filtered[0] ?? null;
 
     return (
-        <div class="grid gap-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             <Card title={activeChannel ? `Notifications · ${channelLabels[activeChannel] ?? activeChannel}` : 'Notifications'}>
                 <div class="card-toolbar mb-3">
                     <button class="btn btn-ghost btn-sm" type="button" onClick={() => void notifications.reload()}>
@@ -124,7 +124,7 @@ export function NotificationsSettingsPanel({ activeChannel = null, canManage = f
                     onRetry={() => void notifications.reload()}
                 >
                     {focusedChannel ? (
-                        <div class="grid gap-4">
+                        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                             <ChannelCredentialsEditor
                                 key={`${focusedChannel.channel}-creds-${Boolean(focusedChannel.credentials?.discord_webhook_url_set)}-${Boolean(focusedChannel.credentials?.smtp_password_set)}`}
                                 channel={focusedChannel}

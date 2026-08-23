@@ -117,7 +117,7 @@ export function DevForgeMcpTokenCard() {
     return (
         <>
             <Card title="Token DevForge" eyebrow="MCP & API">
-                <div class="grid gap-4">
+                <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                     <p class="text-xs text-base-content/55">
                         Jetons d'authentification pour l'API REST et le serveur MCP DevForge (Cursor, agents).
                         Endpoint : <code class="font-mono text-[11px]">{endpoint}</code>
@@ -213,7 +213,7 @@ export function DevForgeMcpTokenCard() {
             </Card>
 
             <Modal title="Nouveau jeton DevForge" open={showForm} onClose={() => setShowForm(false)}>
-                <div class="p-6 grid gap-4">
+                <div class="p-6 grid gap-2.5 sm:gap-3 md:gap-4">
                     <label class="grid gap-1.5 text-sm">
                         <span class="font-medium">Nom du jeton</span>
                         <input

@@ -203,7 +203,7 @@ export function ApplicationSourceExplorer({ applicationUuid }: Props) {
 
     return (
         <Card title="Code source Git">
-            <div class="grid gap-4">
+            <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                 <p class="text-sm text-base-content/60">
                     Fichiers du dépôt Git déployé (comme dans Cursor/VS Code), pas la configuration DevForge
                     (<span class="font-mono text-xs">docker-compose.yaml</span>, <span class="font-mono text-xs">.env</span>).
@@ -262,7 +262,7 @@ export function ApplicationSourceExplorer({ applicationUuid }: Props) {
                                 ))}
                             </div>
 
-                            <div class="grid gap-2.5 sm:gap-3 md:gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
+                            <div class="grid gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
                                 <div class="rounded-xl border border-base-300/70 bg-base-100/50">
                                     <div class="border-b border-base-300/60 px-3 py-2 text-xs font-medium uppercase tracking-wide text-base-content/45">
                                         {listing?.entry_count ?? 0} élément(s)
@@ -334,7 +334,7 @@ export function ApplicationSourceExplorer({ applicationUuid }: Props) {
                                     </div>
 
                                     {loadingFile ? (
-                                        <div class="rounded-xl border border-dashed border-base-300/80 px-4 py-10 text-center text-sm text-base-content/55">
+                                        <div class="rounded-xl border border-dashed border-base-300/80 px-3 sm:px-4 py-10 text-center text-sm text-base-content/55">
                                             Chargement du fichier…
                                         </div>
                                     ) : selectedPath ? (
@@ -368,7 +368,7 @@ export function ApplicationSourceExplorer({ applicationUuid }: Props) {
                                             )}
                                             {!truncatedRead && (
                                                 <>
-                                                    <div class="flex flex-wrap gap-2.5 sm:gap-3 md:gap-4 text-xs">
+                                                    <div class="flex flex-wrap gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 text-xs">
                                                         <label class="inline-flex items-center gap-2">
                                                             <input
                                                                 checked={writeMode === 'direct'}
@@ -424,7 +424,7 @@ export function ApplicationSourceExplorer({ applicationUuid }: Props) {
                                             )}
                                         </div>
                                     ) : (
-                                        <div class="rounded-xl border border-dashed border-base-300/80 px-4 py-10 text-center text-sm text-base-content/55">
+                                        <div class="rounded-xl border border-dashed border-base-300/80 px-3 sm:px-4 py-10 text-center text-sm text-base-content/55">
                                             Parcourez le dépôt et ouvrez un fichier source.
                                         </div>
                                     )}

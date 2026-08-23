@@ -62,7 +62,7 @@ export function SsoSettingsPanel({ permissions }: SsoSettingsPanelProps) {
     const canEdit = permissions.instance_admin;
 
     return (
-        <div class="grid gap-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             <Card title="SSO Pocket ID" eyebrow={canEdit ? 'Identité' : 'Lecture seule'}>
                 <div class="card-toolbar mb-3">
                     <button class="btn btn-ghost btn-sm" type="button" onClick={() => void query.reload()}>
@@ -146,7 +146,7 @@ function SsoSettingsForm({
 
     return (
         <form
-            class="grid gap-4"
+            class="grid gap-2.5 sm:gap-3 md:gap-4"
             onSubmit={(event) => {
                 event.preventDefault();
                 if (canEdit && !saving) {

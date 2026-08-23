@@ -44,7 +44,7 @@ function NavGroups({
 
     return (
         <nav aria-label="Sections des paramètres" class="hidden min-w-0 lg:block">
-            <ul class="sticky top-4 grid gap-5">
+            <ul class="sticky top-4 grid gap-3 sm:gap-4 md:gap-5">
                 {groups.map((group) => (
                     <li key={group.id}>
                         <p class="mb-2 px-2 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">

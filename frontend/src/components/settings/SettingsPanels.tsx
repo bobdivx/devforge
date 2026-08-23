@@ -11,7 +11,7 @@ export function SettingsDetailList({ items }: SettingsDetailListProps) {
         <dl class="grid gap-3">
             {items.map(({ label, value }) => (
                 <div
-                    class="grid gap-1 border-b border-base-300/50 pb-3 last:border-b-0 last:pb-0 sm:grid-cols-[minmax(9rem,11rem)_minmax(0,1fr)] sm:items-start sm:gap-4"
+                    class="grid gap-1 border-b border-base-300/50 pb-3 last:border-b-0 last:pb-0 sm:grid-cols-[minmax(9rem,11rem)_minmax(0,1fr)] sm:items-start sm:gap-2.5 sm:gap-3 md:gap-4"
                     key={label}
                 >
                     <dt class="text-xs font-medium text-base-content/45 sm:text-sm">{label}</dt>

@@ -31,7 +31,7 @@ export function RunnerGithubJobsPanel({
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-4 md:px-5 py-3 sm:py-4">
+            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-3 sm:px-4 md:px-5 py-3 sm:py-3 sm:py-4">
                 <div class="flex items-center gap-2">
                     <Activity class="size-3.5 sm:size-4 text-base-content/45" aria-hidden />
                     <div>

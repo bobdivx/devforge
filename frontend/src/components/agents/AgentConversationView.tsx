@@ -396,7 +396,7 @@ export function AgentConversationView({
                     </button>
                 </div>
                 {loadingSessions ? (
-                    <div class="flex flex-1 items-center justify-center px-4 py-10 text-xs text-base-content/50">
+                    <div class="flex flex-1 items-center justify-center px-3 sm:px-4 py-10 text-xs text-base-content/50">
                         <span class="loading loading-spinner loading-sm me-2" />
                         Chargement des sessions…
                     </div>
@@ -457,7 +457,7 @@ export function AgentConversationView({
                             </button>
                         </div>
                         {loadingSessions ? (
-                            <div class="flex flex-1 items-center justify-center px-4 py-10 text-xs text-base-content/50">
+                            <div class="flex flex-1 items-center justify-center px-3 sm:px-4 py-10 text-xs text-base-content/50">
                                 <span class="loading loading-spinner loading-sm me-2" />
                                 Chargement…
                             </div>

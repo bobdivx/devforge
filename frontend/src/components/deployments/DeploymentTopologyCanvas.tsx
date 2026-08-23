@@ -254,7 +254,7 @@ function PipelineRow({
         <article class={`min-w-0 overflow-hidden rounded-2xl border bg-base-100 shadow-sm transition ${expanded ? 'border-primary/35' : 'border-base-300/70'}`}>
             <button
                 type="button"
-                class="flex w-full min-w-0 items-center gap-2 sm:gap-3 px-2.5 sm:px-3 py-2.5 sm:py-3 text-left hover:bg-base-200/40 sm:px-4"
+                class="flex w-full min-w-0 items-center gap-2 sm:gap-3 px-2.5 sm:px-3 py-2.5 sm:py-3 text-left hover:bg-base-200/40 sm:px-3 sm:px-4"
                 onClick={onToggle}
                 aria-expanded={expanded}
             >
@@ -284,7 +284,7 @@ function PipelineRow({
             </button>
 
             {!expanded && (
-                <div class="flex items-center gap-1 overflow-x-auto px-4 pb-3" aria-hidden>
+                <div class="flex items-center gap-1 overflow-x-auto px-3 sm:px-4 pb-3" aria-hidden>
                     {pipeline.stages.map((stage, index) => (
                         <div key={stage.kind} class="flex items-center gap-1">
                             <span class={`size-2.5 rounded-full ${TONE_DOT[stage.tone]}`} />
@@ -303,7 +303,7 @@ function PipelineRow({
             )}
 
             {expanded && (
-                <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 border-t border-base-300/70 p-3 sm:p-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+                <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 border-t border-base-300/70 p-3 sm:p-4 xl:grid-cols-[minmax(0,1fr)_280px]">
                     <div class="grid min-w-0 gap-3">
                         <div class="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-stretch">
                             {pipeline.stages.map((stage, index) => (
@@ -396,7 +396,7 @@ export function OperationsExplorer({ topology }: OperationsExplorerProps) {
     );
 
     return (
-        <div class="grid min-w-0 gap-4">
+        <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4">
             <div class="flex min-w-0 flex-col gap-2 sm:gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <label class="input input-sm flex w-full min-w-0 max-w-md flex-1 items-center gap-2 rounded-full border-base-300 bg-base-100">
                     <Search class="size-3.5 shrink-0 opacity-50" aria-hidden />

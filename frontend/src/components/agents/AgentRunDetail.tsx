@@ -36,7 +36,7 @@ export function AgentRunDetail({ run, agentUuid, tracking = false, onResolved }:
     };
 
     return (
-        <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-2.5 sm:gap-3 md:gap-4 rounded-xl border border-base-300 bg-base-200/20 p-3 sm:p-4">
+        <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 rounded-xl border border-base-300 bg-base-200/20 p-3 sm:p-4">
             <div class="flex flex-col gap-2 border-b border-base-300/80 pb-3 lg:flex-row lg:items-start lg:gap-3">
                 <div class="flex min-w-0 flex-wrap items-center gap-2">
                     <AgentRunStatusBadge status={run.status} />

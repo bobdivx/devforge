@@ -103,7 +103,7 @@ export function StorePage({ path }: Props) {
                     onRetry={() => void detailQuery.reload()}
                 >
                     {listing && (
-                        <div class="grid gap-2.5 sm:gap-3 md:gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
+                        <div class="grid gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
                             <Card title="À propos">
                                 <dl class="grid gap-2 sm:gap-3 text-sm">
                                     <div>

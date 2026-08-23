@@ -118,7 +118,7 @@ export function ApplicationPreviewsPanel({ applicationUuid, canAct }: Props) {
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-4 md:px-5 py-3 sm:py-4">
+            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-3 sm:px-4 md:px-5 py-3 sm:py-3 sm:py-4">
                 <div>
                     <p class="text-xs sm:text-sm font-semibold">Previews</p>
                     <p class="text-xs text-base-content/50">
@@ -133,7 +133,7 @@ export function ApplicationPreviewsPanel({ applicationUuid, canAct }: Props) {
                 </ActionToolbar>
             </div>
 
-            <div class="grid gap-3 sm:gap-4 md:gap-5 p-5">
+            <div class="grid gap-3 sm:gap-2.5 sm:gap-3 md:gap-4 md:gap-5 p-5">
                 {message && (
                     <p class="rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-sm text-success">
                         {message}

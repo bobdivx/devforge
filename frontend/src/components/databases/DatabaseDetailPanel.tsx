@@ -583,7 +583,7 @@ export function DatabaseDetailPanel({
                 </button>
             </div>
 
-            <div class="flex flex-col lg:flex-row gap-2.5 sm:gap-3 md:gap-4 lg:gap-6 mt-4">
+            <div class="flex flex-col lg:flex-row gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 lg:gap-6 mt-4">
                 <div class="lg:w-56 shrink-0">
                     <Tabs
                         active={activeTab}
@@ -592,7 +592,7 @@ export function DatabaseDetailPanel({
                         onChange={(tabId) => selectTab(tabId as DatabaseDetailTabId)}
                     />
                 </div>
-                <div class="min-w-0 flex-1 grid gap-4">
+                <div class="min-w-0 flex-1 grid gap-2.5 sm:gap-3 md:gap-4">
 
             <DataState loading={resourceQuery.loading} error={resourceQuery.error} onRetry={() => void resourceQuery.reload()}>
                 {resource && activeTab === 'overview' && (
@@ -747,7 +747,7 @@ export function DatabaseDetailPanel({
                 )}
 
                 {resource && activeTab === 'data' && isLibsql && (
-                    <section class="grid gap-4">
+                    <section class="grid gap-2.5 sm:gap-3 md:gap-4">
                         <DatabaseExplorerPanel
                             databaseUuid={resource.uuid}
                             isRunning={parseResourceStatus(resource.status).shortLabel !== 'Arrêté'}
@@ -761,7 +761,7 @@ export function DatabaseDetailPanel({
                             </p>
                         </div>
 
-                        <div class="grid gap-2.5 sm:gap-3 md:gap-4 md:grid-cols-2">
+                        <div class="grid gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 md:grid-cols-2">
                             <article class="rounded-xl border border-base-300/70 bg-base-200/20 p-4">
                                 <h3 class="text-xs sm:text-sm font-semibold">Exporter</h3>
                                 <p class="mt-1 text-xs text-base-content/55">
@@ -852,7 +852,7 @@ export function DatabaseDetailPanel({
                 )}
 
                 {resource && activeTab === 'backups' && (
-                    <section class="grid gap-4">
+                    <section class="grid gap-2.5 sm:gap-3 md:gap-4">
                         {!supportsBackups ? (
                             <div class="rounded-2xl border border-base-300/70 bg-base-100 p-4 text-sm text-base-content/65">
                                 Les sauvegardes planifiées ne sont pas disponibles pour ce type de base.

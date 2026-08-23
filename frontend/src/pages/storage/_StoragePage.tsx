@@ -58,7 +58,7 @@ export function StoragePage({ permissions }: Props) {
     const schedulerHealthy = query.data?.meta?.scheduler_healthy ?? true;
 
     return (
-        <div class="grid gap-5">
+        <div class="grid gap-3 sm:gap-4 md:gap-5">
             <PageHeader
                 title="Stockage serveurs"
                 description="Surveillez l’espace disque, configurez le nettoyage Docker automatique et lancez un nettoyage manuel. La sauvegarde DevForge et les buckets S3 sont sur Stockage."
@@ -70,7 +70,7 @@ export function StoragePage({ permissions }: Props) {
             />
 
             {!schedulerHealthy && (
-                <div class="rounded-2xl border border-warning/30 bg-warning/10 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 text-sm text-warning">
+                <div class="rounded-2xl border border-warning/30 bg-warning/10 px-2.5 sm:px-3 md:px-3 sm:px-4 py-2.5 sm:py-3 text-sm text-warning">
                     Le planificateur de tâches semble inactif — les nettoyages automatiques peuvent être retardés.
                 </div>
             )}
@@ -90,7 +90,7 @@ export function StoragePage({ permissions }: Props) {
                     )}
                 </div>
 
-                <div class="grid gap-4">
+                <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                     {servers.map((server) => (
                         <ServerStorageCard
                             key={server.uuid}

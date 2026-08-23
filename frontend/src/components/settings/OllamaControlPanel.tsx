@@ -169,7 +169,7 @@ export function OllamaControlPanel({ canManage = false }: { canManage?: boolean 
 
     return (
         <DataState loading={loading} error={error} onRetry={() => void refreshAll()}>
-            <div class="grid gap-4">
+            <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                 <div class="flex flex-wrap items-center justify-between gap-2">
                     <p class="text-[11px] text-base-content/55">
                         Une instance = un provider Ollama (URL). Ex. PC 3090 et NAS A2000 = 2 providers.
@@ -183,7 +183,7 @@ export function OllamaControlPanel({ canManage = false }: { canManage?: boolean 
                 </div>
 
                 {instances.length === 0 ? (
-                    <p class="rounded-md border border-dashed border-base-300 px-3 py-4 text-center text-[11px] text-base-content/55">
+                    <p class="rounded-md border border-dashed border-base-300 px-3 py-3 sm:py-4 text-center text-[11px] text-base-content/55">
                         Aucun provider Ollama. Créez-en un ci-dessus (ex. « Ollama PC 3090 » → https://ollama.briseteia.me
                         et « Ollama NAS A2000 » → https://ollamanas.briseteia.me).
                     </p>
@@ -283,7 +283,7 @@ export function OllamaControlPanel({ canManage = false }: { canManage?: boolean 
                                 </label>
                             )}
                             {(status?.models ?? []).length === 0 ? (
-                                <p class="rounded-md border border-dashed border-base-300 px-3 py-4 text-center text-[11px] text-base-content/50">
+                                <p class="rounded-md border border-dashed border-base-300 px-3 py-3 sm:py-4 text-center text-[11px] text-base-content/50">
                                     Aucun modèle sur cette instance.
                                 </p>
                             ) : (

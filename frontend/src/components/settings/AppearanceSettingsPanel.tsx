@@ -53,7 +53,7 @@ export function AppearanceSettingsPanel({ onPreferencesChange }: AppearanceSetti
     };
 
     return (
-        <div class="grid gap-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             <Card title="Thème" eyebrow="Affichage">
                 <p class="mb-3 text-sm text-base-content/60">Choisissez l’apparence de DevForge dans ce navigateur.</p>
                 <div class="action-toolbar">

@@ -9,7 +9,7 @@ type SharedVariablesPageProps = {
 
 export function SharedVariablesPage({ path, permissions }: SharedVariablesPageProps) {
     return (
-        <div class="grid gap-5">
+        <div class="grid gap-3 sm:gap-4 md:gap-5">
             <PageHeader
                 title="Variables partagées"
                 description="Variables d’équipe, de projet, d’environnement et de serveur."

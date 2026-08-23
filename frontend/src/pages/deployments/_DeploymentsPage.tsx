@@ -21,7 +21,7 @@ export function DeploymentsPage() {
     }, [topology]);
 
     return (
-        <div class="grid min-w-0 gap-4">
+        <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4">
             <PageHeader
                 eyebrow="Ops"
                 title="Déploiements"

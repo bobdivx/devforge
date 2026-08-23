@@ -48,7 +48,7 @@ export function ServiceImageAutoUpdateToggle({
     };
 
     return (
-        <div class="grid gap-2 rounded-xl border border-base-300/60 bg-base-200/30 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3">
+        <div class="grid gap-2 rounded-xl border border-base-300/60 bg-base-200/30 px-2.5 sm:px-3 md:px-3 sm:px-4 py-2.5 sm:py-3">
             <label class="flex items-start gap-3">
                 <input
                     type="checkbox"

@@ -407,7 +407,7 @@ export function ApplicationEnvironmentVariablesPanel({
     };
 
     return (
-        <section class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 p-5 shadow-sm">
+        <section class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 p-5 shadow-sm">
             <div class="toolbar-row">
                 <div class="min-w-0 grid flex-1 gap-1">
                     <div class="flex items-center gap-2">

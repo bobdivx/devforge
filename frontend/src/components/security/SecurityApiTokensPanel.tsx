@@ -200,7 +200,7 @@ export function SecurityApiTokensPanel() {
     };
 
     return (
-        <div class="grid gap-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             <div class="toolbar-row">
                 <p class="text-xs text-base-content/55">
                     Ces jetons authentifient l’API REST et le MCP DevForge. Ce n’est pas un jeton Hetzner/DigitalOcean

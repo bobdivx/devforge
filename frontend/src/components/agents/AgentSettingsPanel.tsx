@@ -158,7 +158,7 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
     };
 
     return (
-        <div class="grid gap-2.5 sm:gap-3 md:gap-4 p-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 p-4">
             {error && <p class="rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">{error}</p>}
 
             <label class="flex items-center justify-between gap-2 sm:gap-3 rounded-xl border border-base-300/70 px-3 py-2 text-sm">
@@ -230,7 +230,7 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
             <AgentSubAgentsPanel agent={agent} onUpdated={onUpdated} />
 
             <div class="grid gap-3">
-                <div class="grid justify-items-center gap-2 sm:gap-3 rounded-2xl border border-base-300/70 bg-base-200/40 px-3 py-4">
+                <div class="grid justify-items-center gap-2 sm:gap-3 rounded-2xl border border-base-300/70 bg-base-200/40 px-3 py-3 sm:py-4">
                     <BotCharacter
                         name={form.name || agent.name}
                         color={form.avatar_color ?? agent.avatar_color}

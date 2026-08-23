@@ -29,7 +29,7 @@ export function AgentsSettingsShell({ active, onChange, children }: Props) {
     } as const;
 
     return (
-        <div class="grid min-h-[28rem] gap-2.5 sm:gap-3 md:gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
+        <div class="grid min-h-[28rem] gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
             <aside class="rounded-2xl border border-base-300/80 bg-base-100 p-2 lg:sticky lg:top-4 lg:self-start">
                 <nav class="grid gap-3" aria-label="Sections paramètres AI">
                     {groups.map((group) => {

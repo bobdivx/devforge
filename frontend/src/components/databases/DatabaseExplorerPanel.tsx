@@ -83,7 +83,7 @@ export function DatabaseExplorerPanel({ databaseUuid, isRunning }: DatabaseExplo
 
             <DataState loading={loadingOverview} error={error} onRetry={() => void loadOverview()}>
                 {overview && !overview.available && (
-                    <div class="rounded-lg border border-dashed border-base-300/80 bg-base-100/60 px-4 py-6 text-sm text-base-content/60">
+                    <div class="rounded-lg border border-dashed border-base-300/80 bg-base-100/60 px-3 sm:px-4 py-6 text-sm text-base-content/60">
                         <div class="mb-2 flex items-center gap-2 font-medium text-base-content/75">
                             <Database class="size-4" aria-hidden />
                             Base vide ou non initialisée
@@ -93,7 +93,7 @@ export function DatabaseExplorerPanel({ databaseUuid, isRunning }: DatabaseExplo
                 )}
 
                 {overview && overview.available && overview.tables.length === 0 && (
-                    <div class="rounded-lg border border-dashed border-base-300/80 bg-base-100/60 px-4 py-6 text-sm text-base-content/60">
+                    <div class="rounded-lg border border-dashed border-base-300/80 bg-base-100/60 px-3 sm:px-4 py-6 text-sm text-base-content/60">
                         <div class="mb-2 flex items-center gap-2 font-medium text-base-content/75">
                             <Database class="size-4" aria-hidden />
                             Aucune table trouvée
@@ -106,7 +106,7 @@ export function DatabaseExplorerPanel({ databaseUuid, isRunning }: DatabaseExplo
                 )}
 
                 {overview && overview.available && overview.tables.length > 0 && (
-                    <div class="grid gap-2.5 sm:gap-3 md:gap-4 lg:grid-cols-[14rem_minmax(0,1fr)]">
+                    <div class="grid gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 lg:grid-cols-[14rem_minmax(0,1fr)]">
                         <div class="grid gap-1">
                             <p class="text-xs font-medium uppercase tracking-wide text-base-content/45">
                                 Tables ({overview.table_count})

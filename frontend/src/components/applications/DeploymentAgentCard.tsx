@@ -78,7 +78,7 @@ export function DeploymentAgentCard({
 
     return (
         <section class="min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-base-300/70 px-2.5 sm:px-3 py-2.5 sm:py-3 sm:px-5 sm:py-4">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-base-300/70 px-2.5 sm:px-3 py-2.5 sm:py-3 sm:px-5 sm:py-3 sm:py-4">
                 <div class="min-w-0">
                     <p class="text-xs sm:text-sm font-semibold">Agent IA</p>
                     <p class="text-xs text-base-content/50">Correction et surveillance du déploiement</p>
@@ -117,7 +117,7 @@ export function DeploymentAgentCard({
                             )}
 
                             {visibleRuns.length === 0 ? (
-                                <div class="grid gap-2 sm:gap-3 rounded-xl border border-dashed border-base-300 px-3 py-4 text-sm text-base-content/55 sm:px-4 sm:py-5">
+                                <div class="grid gap-2 sm:gap-3 rounded-xl border border-dashed border-base-300 px-3 py-3 sm:py-4 text-sm text-base-content/55 sm:px-4 sm:py-5">
                                     <div class="flex items-start gap-3">
                                         <Bot class="mt-0.5 size-4 sm:size-5 shrink-0 text-base-content/35" aria-hidden />
                                         <p>

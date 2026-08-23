@@ -248,7 +248,7 @@ export function CreateDatabaseModal({ open, onClose, onCreated }: Props) {
                 </>
             )}
         >
-            <form id="create-database-form" class="grid gap-4" onSubmit={handleSubmit}>
+            <form id="create-database-form" class="grid gap-2.5 sm:gap-3 md:gap-4" onSubmit={handleSubmit}>
                 <p class="text-xs text-base-content/60">Déployez une instance gérée sur votre serveur DevForge.</p>
                 {error && <p class="text-xs text-error" role="alert">{error}</p>}
 

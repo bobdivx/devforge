@@ -39,7 +39,7 @@ export function ErrorState({ error, onRetry }: ErrorStateProps) {
     };
 
     return (
-        <div class="grid min-h-[18rem] place-items-center px-4">
+        <div class="grid min-h-[18rem] place-items-center px-3 sm:px-4">
             <div class="w-full max-w-md border border-base-300 bg-base-100 p-5 text-center">
                 <AlertTriangle class="mx-auto size-5 sm:size-6 text-warning" aria-hidden />
                 <h1 class="mt-3 text-sm sm:text-base font-semibold">{message.title}</h1>

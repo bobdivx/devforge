@@ -163,7 +163,7 @@ export function ScheduledTasksPage() {
             case 'skips':
                 if (!data) return null;
                 return (
-                    <div class="grid gap-4">
+                    <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                         <div class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm overflow-hidden">
                             <div class="overflow-x-auto">
                                 <table class="table table-sm">
@@ -267,8 +267,8 @@ export function ScheduledTasksPage() {
     })();
 
     return (
-        <div class="grid gap-5">
-            <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="grid gap-3 sm:gap-4 md:gap-5">
+            <div class="flex flex-wrap items-start justify-between gap-2.5 sm:gap-3 md:gap-4">
                 <PageHeader
                     title="Tâches planifiées"
                     description="Historique des sauvegardes, nettoyages Docker et crons d'applications."

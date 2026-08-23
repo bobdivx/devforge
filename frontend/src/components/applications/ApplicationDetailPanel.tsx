@@ -111,7 +111,7 @@ type DetailRowProps = {
 
 function DetailRow({ label, children }: DetailRowProps) {
     return (
-        <div class="grid gap-1 border-b border-base-300/50 py-3 last:border-b-0 sm:grid-cols-[7.5rem_1fr] sm:gap-4">
+        <div class="grid gap-1 border-b border-base-300/50 py-3 last:border-b-0 sm:grid-cols-[7.5rem_1fr] sm:gap-2.5 sm:gap-3 md:gap-4">
             <dt class="text-xs font-medium uppercase tracking-wide text-base-content/45">{label}</dt>
             <dd class="min-w-0 text-sm">{children}</dd>
         </div>
@@ -380,7 +380,7 @@ function PreviewPanel({
                             </div>
                         </div>
                     )}
-                    <div class="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-base-300/95 via-base-300/55 to-transparent px-4 pb-14 pt-12">
+                    <div class="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-base-300/95 via-base-300/55 to-transparent px-3 sm:px-4 pb-14 pt-12">
                         <p class="text-xs sm:text-sm font-semibold text-base-content">{name}</p>
                         <p class="truncate text-xs text-base-content/70">{domain}</p>
                     </div>
@@ -388,7 +388,7 @@ function PreviewPanel({
             )}
             {href && (
                 <a
-                    class="absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 border-t border-base-300/70 bg-base-100/90 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-primary transition hover:bg-base-100"
+                    class="absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 border-t border-base-300/70 bg-base-100/90 px-2.5 sm:px-3 md:px-3 sm:px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-primary transition hover:bg-base-100"
                     href={href}
                     rel="noreferrer"
                     target="_blank"
@@ -725,7 +725,7 @@ export function ApplicationDetailPanel({
     return (
         <DataState loading={resourceQuery.loading} error={resourceQuery.error} onRetry={() => void reload()}>
             {resource && config && (
-                <div class="grid min-w-0 max-w-full gap-3 sm:gap-4 md:gap-5 overflow-x-hidden">
+                <div class="grid min-w-0 max-w-full gap-3 sm:gap-2.5 sm:gap-3 md:gap-4 md:gap-5 overflow-x-hidden">
                     <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 sm:flex sm:flex-row sm:items-start sm:justify-between">
                         <div class="grid min-w-0 gap-2">
                             <button class="btn btn-ghost btn-sm -ms-2 w-fit px-3" type="button" onClick={onClose}>
@@ -896,7 +896,7 @@ export function ApplicationDetailPanel({
                         </ActionToolbar>
                     </div>
 
-                    <div class="flex flex-col lg:flex-row gap-2.5 sm:gap-3 md:gap-4 lg:gap-6 mt-4">
+                    <div class="flex flex-col lg:flex-row gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 lg:gap-6 mt-4">
                         <div class="lg:w-56 shrink-0">
                             <Tabs
                                 groups={applicationTabGroups}
@@ -912,7 +912,7 @@ export function ApplicationDetailPanel({
                                 }}
                             />
                         </div>
-                        <div class="min-w-0 flex-1 grid gap-4">
+                        <div class="min-w-0 flex-1 grid gap-2.5 sm:gap-3 md:gap-4">
                     {activeTab === 'overview' && (
                         <>
                             <Card
@@ -930,7 +930,7 @@ export function ApplicationDetailPanel({
                                         : ''}
                                 </p>
 
-                                <div class="grid min-w-0 gap-3 sm:gap-4 md:gap-5 lg:grid-cols-[minmax(0,280px)_1fr]">
+                                <div class="grid min-w-0 gap-3 sm:gap-2.5 sm:gap-3 md:gap-4 md:gap-5 lg:grid-cols-[minmax(0,280px)_1fr]">
                                     <PreviewPanel
                                         name={resource.name}
                                         domain={domain}
@@ -1102,10 +1102,10 @@ export function ApplicationDetailPanel({
                                 emptyMessage="Aucun déploiement enregistré pour cette application."
                                 onRetry={() => void deploymentsQuery.reload()}
                             >
-                                <div class="grid min-w-0 gap-5">
+                                <div class="grid min-w-0 gap-3 sm:gap-4 md:gap-5">
                                     {(attemptBuckets.current || attemptBuckets.active.length > 0) && (
                                         <section class="min-w-0 overflow-hidden rounded-2xl border border-primary/25 bg-base-100 shadow-sm">
-                                            <div class="border-b border-base-300/70 px-3 sm:px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 sm:py-4 sm:px-5">
+                                            <div class="border-b border-base-300/70 px-3 sm:px-2.5 sm:px-3 md:px-3 sm:px-4 py-2.5 sm:py-3 sm:py-4 sm:px-5">
                                                 <div class="min-w-0">
                                                     <p class="text-xs sm:text-sm font-semibold">
                                                         {hasActiveDeployment ? 'Déploiement en cours' : 'Déploiement suivi'}
@@ -1116,7 +1116,7 @@ export function ApplicationDetailPanel({
                                                 </div>
                                             </div>
 
-                                            <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 p-4 sm:p-5">
+                                            <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 p-4 sm:p-5">
                                                 {attemptBuckets.current && (
                                                     <DeploymentAttemptGroup
                                                         title="Sélection"
@@ -1185,7 +1185,7 @@ export function ApplicationDetailPanel({
 
                                     {(attemptBuckets.failed.length > 0 || attemptBuckets.history.length > 0) && (
                                         <section class="min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-                                            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 sm:py-4 sm:px-5">
+                                            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-2.5 sm:px-3 md:px-3 sm:px-4 py-2.5 sm:py-3 sm:py-4 sm:px-5">
                                                 <div class="min-w-0">
                                                     <p class="text-xs sm:text-sm font-semibold">Historique</p>
                                                     <p class="text-xs text-base-content/50">
@@ -1195,7 +1195,7 @@ export function ApplicationDetailPanel({
                                                 <Server class="size-3.5 sm:size-4 shrink-0 text-base-content/35" aria-hidden />
                                             </div>
 
-                                            <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 p-4 sm:p-5">
+                                            <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 p-4 sm:p-5">
                                                 {attemptBuckets.failed.length > 0 && (
                                                     <DeploymentAttemptGroup
                                                         title="Échecs précédents"
@@ -1231,7 +1231,7 @@ export function ApplicationDetailPanel({
                     )}
 
                     {activeTab === 'settings' && (
-                        <div class="grid gap-4">
+                        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                             <ApplicationAccessPanel
                                 applicationUuid={resource.uuid}
                                 canAct={canAct}
@@ -1262,7 +1262,7 @@ export function ApplicationDetailPanel({
                     )}
 
                     {activeTab === 'domains' && (
-                        <div class="grid gap-5">
+                        <div class="grid gap-3 sm:gap-4 md:gap-5">
                             <ApplicationReadinessCard applicationUuid={uuid} canAct={canAct} />
                             <ApplicationDomainsPanel
                                 applicationUuid={resource.uuid}

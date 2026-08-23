@@ -186,7 +186,7 @@ export function InstanceBackupPanel({ compact = false }: Props) {
     };
 
     return (
-        <section class="grid gap-4">
+        <section class="grid gap-2.5 sm:gap-3 md:gap-4">
             {!compact && (
                 <div class="grid gap-1">
                     <h2 class="text-xl font-semibold">Sauvegarde DevForge</h2>
@@ -198,15 +198,15 @@ export function InstanceBackupPanel({ compact = false }: Props) {
             )}
 
             {notice && !backupTracker.isTracking && (
-                <div class="rounded-xl border border-success/30 bg-success/10 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 text-sm text-success">{notice}</div>
+                <div class="rounded-xl border border-success/30 bg-success/10 px-2.5 sm:px-3 md:px-3 sm:px-4 py-2.5 sm:py-3 text-sm text-success">{notice}</div>
             )}
             {(error || backupTracker.error) && (
-                <div class="rounded-xl border border-error/30 bg-error/10 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 text-sm text-error">{error ?? backupTracker.error}</div>
+                <div class="rounded-xl border border-error/30 bg-error/10 px-2.5 sm:px-3 md:px-3 sm:px-4 py-2.5 sm:py-3 text-sm text-error">{error ?? backupTracker.error}</div>
             )}
 
             <DataState loading={settingsQuery.loading} error={settingsQuery.error} onRetry={() => void settingsQuery.reload()}>
                 {settings && (
-                    <div class="grid gap-4">
+                    <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                         {(settings.migration.legacy_container_detected || !settings.database) && (
                             <Card title="Instance existante">
                                 <p class="text-sm text-base-content/65">
@@ -497,7 +497,7 @@ export function InstanceBackupPanel({ compact = false }: Props) {
             </DataState>
 
             <Modal title="Configurer la base de données" open={!!dbForm} onClose={() => setDbForm(null)}>
-                <form class="grid gap-4" onSubmit={submitDb}>
+                <form class="grid gap-2.5 sm:gap-3 md:gap-4" onSubmit={submitDb}>
                     <label class="form-control">
                         <span class="label-text">Nom</span>
                         <input class="input input-bordered w-full" value={dbForm?.name ?? ''} required onInput={(e) => setDbForm({ ...dbForm!, name: e.currentTarget.value })} />
@@ -525,7 +525,7 @@ export function InstanceBackupPanel({ compact = false }: Props) {
             </Modal>
 
             <Modal title="Planification & S3" open={!!scheduleForm} onClose={() => setScheduleForm(null)}>
-                <form class="grid gap-4" onSubmit={submitSchedule}>
+                <form class="grid gap-2.5 sm:gap-3 md:gap-4" onSubmit={submitSchedule}>
                     <label class="flex items-center gap-2 text-sm">
                         <input
                             type="checkbox"

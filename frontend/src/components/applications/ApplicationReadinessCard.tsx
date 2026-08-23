@@ -185,7 +185,7 @@ export function ApplicationReadinessCard({ applicationUuid, canAct }: Props) {
         >
             {readiness && (
                 <section class="min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-                    <div class="toolbar-row border-b border-base-300/70 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 sm:px-5">
+                    <div class="toolbar-row border-b border-base-300/70 px-2.5 sm:px-3 md:px-3 sm:px-4 py-2.5 sm:py-3 sm:px-5">
                         <div class="min-w-0">
                             <p class="inline-flex items-center gap-2 text-xs sm:text-sm font-semibold">
                                 <Shield class="size-3.5 sm:size-4 text-base-content/45" aria-hidden />

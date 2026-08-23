@@ -205,7 +205,7 @@ export function BotStudio({
             aria-labelledby={titleId}
         >
             {step === 'missions' && (
-                <section class="mx-auto grid min-h-full max-w-3xl place-items-center gap-10 px-4 py-12">
+                <section class="mx-auto grid min-h-full max-w-3xl place-items-center gap-10 px-3 sm:px-4 py-12">
                     <div class="relative h-72 w-72 sm:h-80 sm:w-80">
                         {BOT_MISSIONS.map((mission, index) => {
                             const position = index === 0
@@ -256,7 +256,7 @@ export function BotStudio({
             )}
 
             {step === 'tools' && (
-                <section class="mx-auto grid min-h-full max-w-2xl content-center gap-8 px-4 py-10">
+                <section class="mx-auto grid min-h-full max-w-2xl content-center gap-8 px-3 sm:px-4 py-10">
                     <div class="flex justify-center gap-6">
                         {BOT_MISSIONS.map((mission) => (
                             <BotCharacter
@@ -370,8 +370,8 @@ export function BotStudio({
                         </div>
                     </aside>
 
-                    <section class="grid content-start gap-8 px-4 py-10 sm:px-8">
-                        <div class="grid justify-items-center gap-5">
+                    <section class="grid content-start gap-8 px-3 sm:px-4 py-10 sm:px-8">
+                        <div class="grid justify-items-center gap-3 sm:gap-4 md:gap-5">
                             <BotCharacter
                                 name={form.name || 'Nouveau Bot'}
                                 color={form.avatar_color}

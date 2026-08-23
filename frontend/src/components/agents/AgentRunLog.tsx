@@ -16,7 +16,7 @@ export function AgentRunLog({ logs, class: className = '' }: Props) {
 
     if (!logs) {
         return (
-            <p class="py-4 text-center text-xs text-base-content/50">Aucun log disponible.</p>
+            <p class="py-3 sm:py-4 text-center text-xs text-base-content/50">Aucun log disponible.</p>
         );
     }
 

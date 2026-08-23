@@ -260,7 +260,7 @@ export function SharedVariablesPanel({ path, embedded = false, canManage = false
     };
 
     return (
-        <div class="grid gap-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             <div class="toolbar-row">
                 {!forceScope && (
                     <p class="text-xs text-base-content/55">

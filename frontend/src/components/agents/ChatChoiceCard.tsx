@@ -23,7 +23,7 @@ export function ChatChoiceCardView({ card, disabled = false, onSelect, onDismiss
                     <X class="size-3.5" aria-hidden />
                 </button>
             )}
-            <div class="grid gap-2 px-4 pb-3 pt-4 pe-10">
+            <div class="grid gap-2 px-3 sm:px-4 pb-3 pt-4 pe-10">
                 <h2 class="text-xs sm:text-sm font-semibold leading-snug">{card.title}</h2>
                 {card.body !== '' && (
                     <p class="text-xs leading-relaxed text-base-content/60">{card.body}</p>

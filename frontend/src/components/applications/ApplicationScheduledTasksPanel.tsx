@@ -201,7 +201,7 @@ export function ApplicationScheduledTasksPanel({
     const executions: ApplicationScheduledTaskExecution[] = executionsQuery.data?.data ?? [];
 
     return (
-        <section class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 p-5 shadow-sm">
+        <section class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 p-5 shadow-sm">
             <div class="toolbar-row">
                 <div class="min-w-0 grid flex-1 gap-1">
                     <div class="flex items-center gap-2">
@@ -235,7 +235,7 @@ export function ApplicationScheduledTasksPanel({
                 emptyMessage="Aucune tâche planifiée pour cette application."
                 onRetry={() => void query.reload()}
             >
-                <div class="grid gap-2.5 sm:gap-3 md:gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+                <div class="grid gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
                     <Table
                         embedded
                         headers={['Nom', 'Fréquence', 'État', 'Dernière exécution', ...(canAct ? [''] : [])]}

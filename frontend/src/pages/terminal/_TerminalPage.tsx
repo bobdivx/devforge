@@ -8,7 +8,7 @@ type TerminalPageProps = {
 
 export function TerminalPage({ canAccess }: TerminalPageProps) {
     return (
-        <div class="grid gap-5">
+        <div class="grid gap-3 sm:gap-4 md:gap-5">
             <PageHeader
                 title="Terminal"
                 description="Connexion SSH interactive aux serveurs de l’équipe active."

@@ -133,7 +133,7 @@ export function ApplicationAccessPanel({
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-4 md:px-5 py-3 sm:py-4">
+            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-3 sm:px-4 md:px-5 py-3 sm:py-3 sm:py-4">
                 <div>
                     <div class="flex items-center gap-2">
                         <KeyRound class="size-3.5 sm:size-4 text-base-content/45" aria-hidden />
@@ -160,7 +160,7 @@ export function ApplicationAccessPanel({
                 )}
             </div>
 
-            <div class="grid gap-2.5 sm:gap-3 md:gap-4 p-5">
+            <div class="grid gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 p-5">
                 <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
                     {data && (
                         <>

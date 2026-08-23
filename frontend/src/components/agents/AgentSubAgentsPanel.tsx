@@ -43,7 +43,7 @@ export function AgentSubAgentsPanel({ agent, onUpdated }: Props) {
                     Cet agent est déjà un sous-agent : pas de niveau supplémentaire.
                 </p>
             ) : children.length === 0 ? (
-                <p class="rounded-md border border-dashed border-base-300 px-3 py-4 text-center text-[11px] text-base-content/50">
+                <p class="rounded-md border border-dashed border-base-300 px-3 py-3 sm:py-4 text-center text-[11px] text-base-content/50">
                     Aucun spécialiste permanent pour l’instant.
                 </p>
             ) : (

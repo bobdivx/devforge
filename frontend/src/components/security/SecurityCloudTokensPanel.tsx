@@ -103,7 +103,7 @@ export function SecurityCloudTokensPanel() {
     };
 
     return (
-        <div class="grid gap-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             <div class="toolbar-row">
                 <p class="text-xs text-base-content/55">
                     Jetons Hetzner / DigitalOcean pour créer des serveurs. Pour Cursor ou l’API DevForge, utilisez

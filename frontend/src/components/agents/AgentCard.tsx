@@ -139,7 +139,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                 onNavigate(e as unknown as MouseEvent, detailPath);
             }}
         >
-            <div class="card-body gap-2.5 sm:gap-3 md:gap-4 p-4">
+            <div class="card-body gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 p-4">
                 <div class="flex items-start gap-3">
                     <AgentAvatar
                         type={agent.type}

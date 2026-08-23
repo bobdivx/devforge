@@ -145,7 +145,7 @@ export function InstallFromStoreModal({ open, listing, onClose, onInstalled }: P
         >
             {!listing && <p class="text-sm text-base-content/55">Sélectionnez une application du Store.</p>}
             {listing && (
-                <div class="grid gap-4">
+                <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                     <p class="text-sm text-base-content/65">
                         DevForge crée une nouvelle application à partir de <span class="font-mono">{listing.git_repository}</span>
                         {' '}({listing.git_branch}), applique les paramètres par défaut, puis déploie.

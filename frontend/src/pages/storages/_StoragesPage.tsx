@@ -38,7 +38,7 @@ export function StoragesPage({ path, permissions }: StoragesPageProps) {
     }
 
     return (
-        <div class="grid gap-5">
+        <div class="grid gap-3 sm:gap-4 md:gap-5">
             <PageHeader
                 title="Stockage"
                 description="Sauvegarde de l’instance DevForge et destinations S3."
@@ -68,7 +68,7 @@ function StorageDetailPage({
     const data = storage.data?.data;
 
     return (
-        <div class="grid gap-5">
+        <div class="grid gap-3 sm:gap-4 md:gap-5">
             <PageHeader
                 title={data?.name ?? 'Stockage S3'}
                 description={showResources ? 'Sauvegardes planifiées utilisant ce stockage.' : 'Configuration du stockage objet.'}

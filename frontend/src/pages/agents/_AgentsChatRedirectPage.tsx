@@ -44,7 +44,7 @@ export function AgentsChatRedirectPage() {
     return (
         <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
             {agents.length === 0 && !query.loading ? (
-                <div class="flex flex-col items-center justify-center gap-2.5 sm:gap-3 md:gap-4 rounded-xl border border-dashed border-base-300 p-12 text-center">
+                <div class="flex flex-col items-center justify-center gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 rounded-xl border border-dashed border-base-300 p-12 text-center">
                     <div class="grid size-14 place-items-center rounded-2xl bg-primary/10 text-primary">
                         <MessageSquare class="size-7" aria-hidden />
                     </div>

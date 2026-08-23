@@ -38,7 +38,7 @@ export function TagsPage({ path, permissions }: TagsPageProps) {
     };
 
     return (
-        <div class="grid gap-5">
+        <div class="grid gap-3 sm:gap-4 md:gap-5">
             <PageHeader
                 title="Tags"
                 description="Regroupez applications et services pour les déploiements par tag."
@@ -128,7 +128,7 @@ function TagDetailPage({ tagName, canManage }: { tagName: string; canManage: boo
     };
 
     return (
-        <div class="grid gap-5">
+        <div class="grid gap-3 sm:gap-4 md:gap-5">
             <PageHeader
                 title={data?.name ?? tagName}
                 description="Applications et services associés à ce tag."

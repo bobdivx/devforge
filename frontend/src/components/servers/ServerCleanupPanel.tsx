@@ -16,7 +16,7 @@ export function ServerCleanupPanel({ serverUuid, canManage }: ServerCleanupPanel
     );
 
     return (
-        <div class="grid gap-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             <div class="flex justify-end">
                 <button class="btn btn-ghost btn-sm" type="button" onClick={() => void storage.reload()}>
                     <RefreshCw class="size-3.5" aria-hidden />

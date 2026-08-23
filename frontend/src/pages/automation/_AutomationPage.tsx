@@ -100,7 +100,7 @@ export function AutomationPage() {
     };
 
     return (
-        <div class="grid min-w-0 gap-5">
+        <div class="grid min-w-0 gap-3 sm:gap-4 md:gap-5">
             <PageHeader
                 title="Automations"
                 description="Agents planifiés : déclencheur, instructions, mémoire. Les crons d’applications restent dans Tâches planifiées."

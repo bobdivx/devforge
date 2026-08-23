@@ -81,7 +81,7 @@ export function DeploymentLogsPanel({
     return (
         <section class={`min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm ${className}`}>
             {showHeader && (
-                <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 sm:py-4 sm:px-5">
+                <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-2.5 sm:px-3 md:px-3 sm:px-4 py-2.5 sm:py-3 sm:py-4 sm:px-5">
                     <div class="min-w-0">
                         <p class="text-xs sm:text-sm font-semibold">Logs de déploiement</p>
                         <p class="text-xs text-base-content/50">

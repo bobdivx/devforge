@@ -3,7 +3,7 @@ import { Brain, ExternalLink } from 'lucide-preact';
 /** Mémoire = par agent ; ici on explique les scopes et on pointe vers les fiches agent. */
 export function AgentsMemoryOverviewPanel() {
     return (
-        <div class="grid gap-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             <div class="rounded-xl border border-base-300 bg-base-100 p-4">
                 <div class="flex items-start gap-3">
                     <div class="grid size-9 place-items-center rounded-xl bg-info/10 text-info">

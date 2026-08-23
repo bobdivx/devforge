@@ -73,7 +73,7 @@ function ToggleRow({
     onChange: (value: boolean) => void;
 }) {
     return (
-        <label class="flex items-start gap-2 sm:gap-3 rounded-xl border border-base-300/60 bg-base-200/30 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3">
+        <label class="flex items-start gap-2 sm:gap-3 rounded-xl border border-base-300/60 bg-base-200/30 px-2.5 sm:px-3 md:px-3 sm:px-4 py-2.5 sm:py-3">
             <input
                 type="checkbox"
                 class="checkbox checkbox-sm mt-0.5"
@@ -236,7 +236,7 @@ export function ApplicationAdvancedSettingsPanel({ applicationUuid, canAct }: Pr
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-4 md:px-5 py-3 sm:py-4">
+            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-3 sm:px-4 md:px-5 py-3 sm:py-3 sm:py-4">
                 <div>
                     <div class="flex items-center gap-2">
                         <Settings2 class="size-3.5 sm:size-4 text-base-content/45" aria-hidden />
@@ -266,7 +266,7 @@ export function ApplicationAdvancedSettingsPanel({ applicationUuid, canAct }: Pr
                 </ActionToolbar>
             </div>
 
-            <div class="grid gap-3 sm:gap-4 md:gap-5 p-5">
+            <div class="grid gap-3 sm:gap-2.5 sm:gap-3 md:gap-4 md:gap-5 p-5">
                 <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
                     {draft && (
                         <>

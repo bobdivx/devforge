@@ -32,7 +32,7 @@ export function AgentsPage({ userName = 'Vous' }: Props) {
         : null;
 
     return (
-        <div class="grid min-w-0 gap-5">
+        <div class="grid min-w-0 gap-3 sm:gap-4 md:gap-5">
             {!(isEmpty && !query.loading && !query.error) && (
                 <PageHeader
                     title="Agents IA"
@@ -53,7 +53,7 @@ export function AgentsPage({ userName = 'Vous' }: Props) {
             )}
 
             {continuePath && continueName && (
-                <div class="mb-0 flex flex-col gap-2 sm:gap-3 rounded-xl border border-primary/25 bg-primary/5 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div class="mb-0 flex flex-col gap-2 sm:gap-3 rounded-xl border border-primary/25 bg-primary/5 px-2.5 sm:px-3 md:px-3 sm:px-4 py-2.5 sm:py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div class="min-w-0">
                         <p class="text-xs sm:text-sm font-semibold">Continuer le chat</p>
                         <p class="truncate text-xs text-base-content/60">

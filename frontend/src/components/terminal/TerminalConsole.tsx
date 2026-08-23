@@ -205,7 +205,7 @@ export function TerminalConsole({ canAccess, initialServerUuid = '' }: TerminalC
     }
 
     return (
-        <div class="grid gap-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             <Card title="Terminal interactif">
                 <div class="card-toolbar mb-3 flex flex-wrap gap-2">
                     <button class="btn btn-ghost btn-sm" type="button" onClick={() => void config.reload()}>

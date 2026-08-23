@@ -70,7 +70,7 @@ export function Tabs({ items, groups, active, variant = 'horizontal', onChange }
                 </label>
 
                 <nav aria-label="Navigation secondaire" class="hidden min-w-0 lg:block">
-                    <ul class="sticky top-4 grid gap-4">
+                    <ul class="sticky top-4 grid gap-2.5 sm:gap-3 md:gap-4">
                         {showGroups && groups
                             ? groups.map((group) => (
                                 <li key={group.id}>

@@ -283,7 +283,7 @@ export function AiProvidersSettings() {
     const showCustomModel = modelSelect === CUSTOM_MODEL_VALUE;
 
     return (
-        <div class="grid gap-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             <div class="toolbar-row">
                 <div>
                     <h3 class="text-xs sm:text-sm font-semibold">LLM providers</h3>
@@ -309,7 +309,7 @@ export function AiProvidersSettings() {
                         <li key={type} class="border-b border-base-300 last:border-b-0">
                             <button
                                 type="button"
-                                class="flex w-full items-center gap-2 sm:gap-3 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 text-start hover:bg-base-200/40"
+                                class="flex w-full items-center gap-2 sm:gap-3 px-2.5 sm:px-3 md:px-3 sm:px-4 py-2.5 sm:py-3 text-start hover:bg-base-200/40"
                                 aria-expanded={isOpen}
                                 onClick={() => setExpanded(isOpen ? null : type)}
                             >
@@ -334,9 +334,9 @@ export function AiProvidersSettings() {
                             </button>
 
                             {isOpen && (
-                                <div class="space-y-2 border-t border-base-300/70 bg-base-200/20 px-2.5 sm:px-3 py-2.5 sm:py-3 sm:px-4">
+                                <div class="space-y-2 border-t border-base-300/70 bg-base-200/20 px-2.5 sm:px-3 py-2.5 sm:py-3 sm:px-3 sm:px-4">
                                     {rows.length === 0 ? (
-                                        <div class="rounded-lg border border-dashed border-base-300 px-3 py-4 text-center">
+                                        <div class="rounded-lg border border-dashed border-base-300 px-3 py-3 sm:py-4 text-center">
                                             <p class="text-xs text-base-content/50">Pas encore configuré.</p>
                                             <button
                                                 class="btn btn-ghost btn-xs mt-2"

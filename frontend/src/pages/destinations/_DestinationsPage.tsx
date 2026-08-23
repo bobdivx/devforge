@@ -51,7 +51,7 @@ export function DestinationsPage({ path, permissions }: DestinationsPageProps) {
     };
 
     return (
-        <div class="grid gap-5">
+        <div class="grid gap-3 sm:gap-4 md:gap-5">
             <PageHeader
                 title="Destinations"
                 description="Réseaux Docker et cibles de déploiement de l’équipe active."
@@ -150,7 +150,7 @@ function DestinationDetailPage({
     };
 
     return (
-        <div class="grid gap-5">
+        <div class="grid gap-3 sm:gap-4 md:gap-5">
             <PageHeader
                 title={data?.name ?? 'Destination'}
                 description={showResources ? 'Ressources déployées sur cette destination.' : 'Détail de la destination Docker.'}

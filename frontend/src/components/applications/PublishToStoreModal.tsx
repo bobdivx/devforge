@@ -149,7 +149,7 @@ export function PublishToStoreModal({ open, applicationUuid, applicationName, on
                 </p>
             )}
             {preview?.publishable && (
-                <div class="grid gap-4">
+                <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                     <p class="text-sm text-base-content/65">
                         Les secrets ne sont jamais copiés. Cochez les variables à publier, oubliez le reste, et définissez les valeurs par défaut.
                     </p>

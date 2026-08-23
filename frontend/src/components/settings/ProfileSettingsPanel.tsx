@@ -48,7 +48,7 @@ export function ProfileSettingsPanel({
     };
 
     return (
-        <div class="grid gap-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             {(forcePasswordReset || profile?.force_password_reset) && (
                 <div class="alert alert-warning text-sm" role="alert">
                     Vous devez changer votre mot de passe avant de continuer. Utilisez le formulaire ci-dessous.
@@ -167,7 +167,7 @@ export function ProfileSettingsPanel({
 
             <Card title="Authentification à deux facteurs" eyebrow="TOTP">
                 <DataState loading={twoFactorQuery.loading} error={twoFactorQuery.error} onRetry={() => void twoFactorQuery.reload()}>
-                    <div class="grid gap-4">
+                    <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                         <div class="flex flex-col gap-2 sm:gap-3 rounded-xl border border-base-300/70 p-4 sm:flex-row sm:items-center sm:justify-between">
                             <div class="grid gap-1">
                                 <p class="text-xs sm:text-sm font-medium">Statut 2FA</p>

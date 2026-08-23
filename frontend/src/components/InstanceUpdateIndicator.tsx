@@ -152,7 +152,7 @@ export function InstanceUpdateIndicator({ enabled, onReload, checkHealth }: Inst
                 )}
 
                 {locked && (
-                    <div class="grid gap-4" role="status" aria-live="polite" aria-busy={phase !== 'complete'}>
+                    <div class="grid gap-2.5 sm:gap-3 md:gap-4" role="status" aria-live="polite" aria-busy={phase !== 'complete'}>
                         <InstanceUpgradeStepper currentStep={uiStep} />
                         <ProgressBar
                             value={phase === 'complete' ? 100 : instanceUpgradeProgressPercent(status)}

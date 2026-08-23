@@ -216,7 +216,7 @@ export function ServerFileExplorer({
 
     return (
         <Card title="Explorateur de fichiers">
-            <div class="grid gap-4">
+            <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                 <div class="flex flex-wrap items-center gap-2 text-xs text-base-content/55">
                     {breadcrumbs.map((segment, index) => (
                         <span key={segment} class="inline-flex items-center gap-2">
@@ -272,7 +272,7 @@ export function ServerFileExplorer({
                 )}
 
                 <DataState loading={loadingListing} error={error} onRetry={() => void loadDirectory(currentPath)}>
-                    <div class="grid gap-2.5 sm:gap-3 md:gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
+                    <div class="grid gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
                         <div class="grid gap-3">
                             <div class="rounded-xl border border-base-300/70 bg-base-100/50">
                                 <div class="border-b border-base-300/60 px-3 py-2 text-xs font-medium uppercase tracking-wide text-base-content/45">
@@ -367,7 +367,7 @@ export function ServerFileExplorer({
                             </div>
 
                             {loadingFile ? (
-                                <div class="rounded-xl border border-dashed border-base-300/80 px-4 py-10 text-center text-sm text-base-content/55">
+                                <div class="rounded-xl border border-dashed border-base-300/80 px-3 sm:px-4 py-10 text-center text-sm text-base-content/55">
                                     Chargement du fichier…
                                 </div>
                             ) : selectedPath ? (
@@ -385,7 +385,7 @@ export function ServerFileExplorer({
                                     />
                                 </div>
                             ) : (
-                                <div class="rounded-xl border border-dashed border-base-300/80 px-4 py-10 text-center text-sm text-base-content/55">
+                                <div class="rounded-xl border border-dashed border-base-300/80 px-3 sm:px-4 py-10 text-center text-sm text-base-content/55">
                                     Ouvrez un fichier dans la liste pour afficher son contenu.
                                 </div>
                             )}

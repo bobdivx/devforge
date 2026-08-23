@@ -33,7 +33,7 @@ export function SubscriptionPage({ bootstrap }: SubscriptionPageProps) {
 
     if (!cloudEnabled && !query.loading) {
         return (
-            <div class="grid gap-5">
+            <div class="grid gap-3 sm:gap-4 md:gap-5">
                 <PageHeader
                     title="Abonnement"
                     description="Gestion de l’abonnement DevForge Cloud."
@@ -49,7 +49,7 @@ export function SubscriptionPage({ bootstrap }: SubscriptionPageProps) {
     }
 
     return (
-        <div class="grid gap-5">
+        <div class="grid gap-3 sm:gap-4 md:gap-5">
             <PageHeader
                 title="Abonnement"
                 description="État de votre abonnement DevForge Cloud."

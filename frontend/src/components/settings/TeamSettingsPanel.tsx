@@ -180,7 +180,7 @@ export function TeamSettingsPanel({
     };
 
     return (
-        <div class="grid gap-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             <Card title="Équipe active">
                 <TeamSwitcher
                     teams={teams}

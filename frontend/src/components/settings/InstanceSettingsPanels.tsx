@@ -811,7 +811,7 @@ export function InstanceSettingsPanels({ section, permissions }: InstanceSetting
     const canEdit = permissions.instance_admin;
 
     return (
-        <div class="grid gap-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             <Card title={titles[section]} eyebrow={canEdit ? 'Administrateur' : 'Lecture seule'}>
                 <div class="card-toolbar mb-3">
                     <button class="btn btn-ghost btn-sm" type="button" onClick={() => void settings.reload()}>
@@ -974,7 +974,7 @@ export function OauthSettingsPanel({ permissions }: { permissions: BootstrapPerm
     const canEdit = permissions.instance_admin;
 
     return (
-        <div class="grid gap-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             <Card title="OAuth" eyebrow={canEdit ? 'Administrateur' : 'Lecture seule'}>
                 <div class="card-toolbar mb-3">
                     <button class="btn btn-ghost btn-sm" type="button" onClick={() => void oauth.reload()}>

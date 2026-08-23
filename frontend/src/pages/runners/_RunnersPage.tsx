@@ -472,7 +472,7 @@ export function RunnersPage() {
                     : null}
                 onRetry={() => void refreshAll()}
             >
-                <div class="grid gap-2.5 sm:gap-3 md:gap-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+                <div class="grid gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
                     <Card
                         title={listFilter === 'gaps' ? 'Applications' : 'Runners'}
                         eyebrow={listFilter === 'gaps'
@@ -591,7 +591,7 @@ export function RunnersPage() {
                         )}
                     </Card>
 
-                    <div class="grid gap-4">
+                    <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                         {listFilter === 'gaps' ? (
                             <Card title="Cohérence CI">
                                 <p class="text-sm text-base-content/60">
@@ -877,7 +877,7 @@ export function RunnersPage() {
                                 />
 
                                 <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-                                    <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-4 md:px-5 py-3 sm:py-4">
+                                    <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-3 sm:px-4 md:px-5 py-3 sm:py-3 sm:py-4">
                                         <button
                                             type="button"
                                             class="flex min-w-0 flex-1 items-center gap-2 text-start"

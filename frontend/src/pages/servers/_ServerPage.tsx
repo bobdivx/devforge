@@ -111,7 +111,7 @@ export function ServerPage({
     }
 
     return (
-        <div class="grid gap-5">
+        <div class="grid gap-3 sm:gap-4 md:gap-5">
             <PageHeader
                 title={resource?.name ?? 'Serveur'}
                 description={sectionMeta.description}
@@ -131,7 +131,7 @@ export function ServerPage({
                     </div>
                     <DataState loading={server.loading} error={server.error} onRetry={() => void server.reload()}>
                         {resource && (
-                            <div class="grid gap-4">
+                            <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                                 <div class="flex items-center justify-between gap-3">
                                     <div>
                                         <p class="text-xs sm:text-sm font-semibold">{resource.name}</p>

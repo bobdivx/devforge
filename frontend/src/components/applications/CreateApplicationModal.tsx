@@ -270,7 +270,7 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
                 </>
             )}
         >
-            <form id="create-application-form" class="grid gap-4" onSubmit={handleSubmit}>
+            <form id="create-application-form" class="grid gap-2.5 sm:gap-3 md:gap-4" onSubmit={handleSubmit}>
                 <p class="text-xs text-base-content/60">
                     Étape {stepIndex + 1} sur {CREATE_APPLICATION_WIZARD_STEPS.length}
                     {' · '}
@@ -322,7 +322,7 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
                 ) : (
                     <>
                         {step === 'source' && (
-                        <div class="grid gap-4">
+                        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                         <div class="grid gap-2 sm:gap-3 sm:grid-cols-2">
                             <div class="grid gap-1.5">
                                 <label class="text-xs font-medium" for="app-project">Projet</label>
@@ -508,7 +508,7 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
                         )}
 
                         {step === 'options' && (
-                        <div class="grid gap-4">
+                        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                         <div class="grid gap-2 rounded-xl border border-base-300/70 bg-base-200/30 p-3">
                             <label class="flex items-start gap-2 text-xs">
                                 <input

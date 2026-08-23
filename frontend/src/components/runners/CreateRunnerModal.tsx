@@ -398,7 +398,7 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
                 </>
             )}
         >
-            <form id="create-runner-form" class="grid gap-4" onSubmit={handleSubmit}>
+            <form id="create-runner-form" class="grid gap-2.5 sm:gap-3 md:gap-4" onSubmit={handleSubmit}>
                 <ol class="grid gap-2 sm:grid-cols-3">
                     {STEPS.map((item) => {
                         const active = step === item.id;
@@ -457,7 +457,7 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
                 )}
 
                 {step === 1 && (
-                    <div class="grid gap-4">
+                    <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                         <p class="text-xs text-base-content/60">
                             Choisissez comment DevForge s’authentifie auprès de GitHub pour enregistrer le runner.
                         </p>
@@ -708,7 +708,7 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
                 )}
 
                 {step === 2 && (
-                    <div class="grid gap-4">
+                    <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                         <p class="text-xs text-base-content/60">
                             Sur quel dépôt GitHub ce runner doit s’enregistrer ?
                         </p>
@@ -780,7 +780,7 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
                 )}
 
                 {step === 3 && (
-                    <div class="grid gap-4">
+                    <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                         <div class="rounded-xl border border-base-300/70 bg-base-200/20 px-3 py-2 text-[11px] text-base-content/65">
                             <p>
                                 Auth : <strong>

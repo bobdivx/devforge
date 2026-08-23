@@ -84,7 +84,7 @@ export function SettingsPage({
                 return <SecurityPage embedded path={path} />;
             case 'storages':
                 return (
-                    <div class="grid gap-4">
+                    <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                         <p class="text-sm text-base-content/60">
                             Gestion complète sur la page{' '}
                             <a class="link link-primary" href={routeHref('/storages')}>Stockage S3</a>.
@@ -105,18 +105,18 @@ export function SettingsPage({
     })();
 
     return (
-        <div class="grid gap-5">
+        <div class="grid gap-3 sm:gap-4 md:gap-5">
             <PageHeader
                 title="Paramètres"
                 description="Équipe, organisation, infrastructure et configuration de l’instance."
             />
-            <div class="grid min-w-0 gap-3 sm:gap-4 md:gap-5 lg:grid-cols-[14rem_minmax(0,1fr)] lg:items-start lg:gap-8">
+            <div class="grid min-w-0 gap-3 sm:gap-2.5 sm:gap-3 md:gap-4 md:gap-5 lg:grid-cols-[14rem_minmax(0,1fr)] lg:items-start lg:gap-8">
                 <SettingsNav
                     activeTab={activeTab}
                     agentsEnabled={agentsEnabled}
                     instanceAdmin={permissions.instance_admin}
                 />
-                <div class="min-w-0 grid gap-4">
+                <div class="min-w-0 grid gap-2.5 sm:gap-3 md:gap-4">
                     {tabContent}
                 </div>
             </div>

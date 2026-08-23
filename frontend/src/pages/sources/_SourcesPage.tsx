@@ -114,7 +114,7 @@ export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
     }, [installedApps]);
 
     return (
-        <div class="grid gap-5">
+        <div class="grid gap-3 sm:gap-4 md:gap-5">
             <PageHeader
                 title="Tokens & Clés API"
                 description="Gestion centralisée de vos tokens d'accès, clés API pour vos agents et identifiants de déploiement."
@@ -154,7 +154,7 @@ export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
                     <p class="mb-4 text-xs text-base-content/70">
                         Certains agents IA sont en pause car ils ont besoin de variables ou clés API pour continuer leur travail.
                     </p>
-                    <div class="grid gap-4">
+                    <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                         {agentRequests.data.data.map((req) => (
                             <div key={req.uuid} class="flex flex-col gap-2 rounded-lg border border-base-300 bg-base-100 p-4">
                                 <div class="flex items-center gap-2">

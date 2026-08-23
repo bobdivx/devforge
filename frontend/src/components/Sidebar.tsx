@@ -76,7 +76,7 @@ function NavEntries({
     onNavigate: (event: MouseEvent, path: string) => void;
 }) {
     return (
-        <ul class="flex flex-col gap-2.5 sm:gap-3 md:gap-4 p-0">
+        <ul class="flex flex-col gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 p-0">
             {entries.map((entry) => {
                 if (entry.type === 'section') {
                     return (
