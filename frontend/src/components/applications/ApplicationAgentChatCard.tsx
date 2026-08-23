@@ -338,30 +338,30 @@ export function ApplicationAgentChatCard({ application }: Props) {
 
     return (
         <section class="min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="flex items-center justify-between gap-3 border-b border-base-300/70 px-3 py-3 sm:px-5 sm:py-4">
+            <div class="flex items-center justify-between gap-2 sm:gap-3 border-b border-base-300/70 px-2.5 sm:px-3 md:px-5 py-2.5 sm:py-3 md:py-4">
                 <div class="min-w-0">
-                    <p class="inline-flex items-center gap-2 text-sm font-semibold">
-                        <Bot class="size-4 shrink-0 text-primary" aria-hidden />
+                    <p class="inline-flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm font-semibold">
+                        <Bot class="size-3.5 sm:size-4 shrink-0 text-primary" aria-hidden />
                         <span class="truncate">Chat</span>
                     </p>
-                    <p class="mt-0.5 truncate text-xs text-base-content/50">
+                    <p class="mt-0.5 truncate text-[10px] sm:text-xs text-base-content/50">
                         {agent ? agent.name : application.name}
                         {agent?.provider ? ` · ${agent.provider.model}` : ''}
                     </p>
                 </div>
                 {agent && (
                     <a
-                        class="btn btn-ghost btn-sm shrink-0 gap-1.5 rounded-full border border-base-300/80 px-2.5 sm:px-3"
+                        class="btn btn-ghost btn-sm shrink-0 gap-1 sm:gap-1.5 rounded-full border border-base-300/80 px-2 sm:px-2.5 md:px-3 text-[10px] sm:text-xs"
                         href={agentDetailPath(agent.uuid, { view: 'chat', session: session?.uuid })}
                         title="Ouvrir l’agent"
                     >
                         <span class="hidden sm:inline">Ouvrir</span>
-                        <ExternalLink class="size-3.5" aria-hidden />
+                        <ExternalLink class="size-3 sm:size-3.5" aria-hidden />
                     </a>
                 )}
             </div>
 
-            <div class="flex h-[min(28rem,70dvh)] min-h-[18rem] flex-col sm:h-[30rem]">
+            <div class="flex h-[min(26rem,65dvh)] min-h-[16rem] sm:h-[min(28rem,70dvh)] sm:min-h-[18rem] md:h-[30rem] flex-col">
                 {loading && (
                     <div class="flex flex-1 items-center justify-center gap-2 text-xs text-base-content/50">
                         <span class="loading loading-spinner loading-sm" />

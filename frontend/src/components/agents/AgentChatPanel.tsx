@@ -331,7 +331,7 @@ export function AgentChatPanel({
                         <p class="text-sm text-base-content/55">Posez votre question ci-dessous</p>
                     </div>
                 ) : (
-                    <div class="mx-auto flex w-full max-w-2xl flex-col gap-5">
+                    <div class="mx-auto flex w-full max-w-2xl flex-col gap-3 sm:gap-5">
                         {messages.map((message, index) => {
                             const pending = parsePendingToolApproval(message.metadata);
                             const needsApproval = isPendingToolApproval(message.metadata);
@@ -365,8 +365,8 @@ export function AgentChatPanel({
                                         </p>
                                     )}
                                     {isUser ? (
-                                        <div class="ms-auto grid max-w-[min(100%,28rem)] justify-items-end gap-2">
-                                            <div class="rounded-2xl bg-base-300/80 px-3.5 py-2.5 text-sm leading-relaxed">
+                                        <div class="ms-auto grid w-full max-w-[min(calc(100%-1rem),28rem)] justify-items-end gap-2">
+                                            <div class="rounded-2xl bg-base-300/80 px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm leading-relaxed">
                                                 <div
                                                     class="break-words text-start [&_strong]:font-semibold"
                                                     dangerouslySetInnerHTML={{ __html: renderChatHtml(displayContent) }}
@@ -377,7 +377,7 @@ export function AgentChatPanel({
                                             </span>
                                         </div>
                                     ) : (
-                                        <div class="grid max-w-[min(100%,34rem)] justify-items-start gap-2">
+                                        <div class="grid w-full max-w-[min(calc(100%-1rem),34rem)] justify-items-start gap-2">
                                             {statusBadge && (
                                                 <span class={`w-fit rounded-full border px-2 py-0.5 text-[11px] font-medium ${statusBadge.className}`}>
                                                     {statusBadge.label}
@@ -387,7 +387,7 @@ export function AgentChatPanel({
                                                 <IdeActionsCard steps={steps} title="Actions" />
                                             )}
                                             {displayContent !== '' && (
-                                                <div class="rounded-2xl bg-base-300/70 px-3.5 py-2.5 text-sm leading-relaxed">
+                                                <div class="rounded-2xl bg-base-300/70 px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm leading-relaxed">
                                                     <div
                                                         class="break-words text-start [&_strong]:font-semibold"
                                                         dangerouslySetInnerHTML={{ __html: renderChatHtml(displayContent) }}
@@ -470,14 +470,14 @@ export function AgentChatPanel({
                         })}
 
                         {sending && (
-                            <article class="grid max-w-[min(100%,34rem)] justify-items-start gap-2">
+                            <article class="grid w-full max-w-[min(calc(100%-1rem),34rem)] justify-items-start gap-2">
                                 <IdeActionsCard
                                     steps={liveSteps}
                                     running
                                     title={activeSubagentCount > 0 ? 'Équipe en cours' : 'Exécution'}
                                 />
                                 {liveAssistantText && (
-                                    <div class="rounded-2xl bg-base-300/70 px-3.5 py-2.5 text-sm leading-relaxed">
+                                    <div class="rounded-2xl bg-base-300/70 px-3 sm:px-3.5 py-2 sm:py-2.5 text-sm leading-relaxed">
                                         <div
                                             class="break-words text-start [&_strong]:font-semibold"
                                             dangerouslySetInnerHTML={{ __html: renderChatHtml(sanitizeAssistantContent(liveAssistantText, liveSteps)) }}
@@ -531,7 +531,7 @@ export function AgentChatPanel({
                 )}
                 <div class="mx-auto flex max-w-2xl flex-col gap-2">
                     {onChatModeChange && (
-                        <div class="flex flex-wrap gap-1 px-0.5" role="group" aria-label="Mode agent">
+                        <div class="flex flex-wrap gap-1 px-0.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="group" aria-label="Mode agent">
                             {([
                                 ['plan', 'Planifier'],
                                 ['build', 'Construire'],
@@ -540,7 +540,7 @@ export function AgentChatPanel({
                                 <button
                                     key={value}
                                     type="button"
-                                    class={`btn btn-xs rounded-full ${chatMode === value ? 'btn-primary' : 'btn-ghost'}`}
+                                    class={`btn btn-xs rounded-full shrink-0 ${chatMode === value ? 'btn-primary' : 'btn-ghost'}`}
                                     disabled={sending}
                                     onClick={() => onChatModeChange(value)}
                                 >
@@ -556,22 +556,22 @@ export function AgentChatPanel({
                             disabled={sending || !agent.provider}
                         />
                     )}
-                    <div class="flex items-end gap-2">
+                    <div class="flex items-end gap-1.5 sm:gap-2">
                         {onAttachmentsChange && (
                             <button
                                 type="button"
-                                class={`btn btn-ghost btn-sm size-10 min-h-10 shrink-0 rounded-full p-0 ${captureOpen ? 'bg-base-300' : ''}`}
+                                class={`btn btn-ghost btn-sm size-9 sm:size-10 min-h-9 sm:min-h-10 shrink-0 rounded-full p-0 ${captureOpen ? 'bg-base-300' : ''}`}
                                 aria-label="Joindre une capture"
                                 disabled={sending || !agent.provider}
                                 onClick={() => setCaptureOpen((open) => !open)}
                             >
-                                <Plus class="size-5" aria-hidden />
+                                <Plus class="size-4 sm:size-5" aria-hidden />
                             </button>
                         )}
-                        <div class="flex min-w-0 flex-1 items-end gap-2 rounded-full border border-base-300 bg-base-200/70 px-2 py-1.5">
+                        <div class="flex min-w-0 flex-1 items-end gap-1.5 sm:gap-2 rounded-full border border-base-300 bg-base-200/70 px-1.5 sm:px-2 py-1.5">
                             <textarea
                                 ref={textareaRef}
-                                class="max-h-32 min-h-[2.25rem] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-base-content/40 placeholder:text-xs sm:placeholder:text-sm"
+                                class="max-h-32 min-h-[2.25rem] flex-1 resize-none bg-transparent px-1.5 sm:px-2 py-1.5 text-sm outline-none placeholder:text-base-content/40 placeholder:text-[10px] xs:placeholder:text-xs sm:placeholder:text-sm"
                                 placeholder={composerPlaceholder}
                                 rows={1}
                                 value={draft}
