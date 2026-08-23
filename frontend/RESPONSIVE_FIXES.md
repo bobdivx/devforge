@@ -108,11 +108,22 @@ Applique systématiquement 17 patterns de correction :
 
 ## 📊 Statistiques
 
-- **Total fichiers analysés** : 191 (164 composants + 27 pages)
-- **Total fichiers modifiés** : 125 (122 automatiques + 3 manuels)
-- **Total fichiers exclus** : 3 (déjà corrigés manuellement)
-- **Total fichiers sans changement** : 66 (déjà responsive)
-- **Total corrections appliquées** : ~500+ instances
+### Phase 1 (commit a76fcd7de)
+- **Fichiers analysés** : 191 (164 composants + 27 pages)
+- **Fichiers modifiés** : 122 (automatiques)
+- **Fichiers exclus** : 3 (corrigés manuellement)
+- **Corrections appliquées** : ~500 instances
+
+### Phase 2 (commit 5dde8c2f3)
+- **Fichiers analysés** : 191 (tous)
+- **Fichiers modifiés** : 98 (patterns manqués)
+- **Corrections supplémentaires** : ~200 instances
+
+### Total final
+- **Total fichiers TSX** : 192
+- **Total fichiers corrigés** : ~170 uniques (certains corrigés 2x)
+- **Total corrections** : ~700+ instances
+- **Taux de couverture** : 88% des fichiers
 
 ## 🎯 Problèmes résolus
 
@@ -146,7 +157,9 @@ Applique systématiquement 17 patterns de correction :
 
 1. **`fe530c12b`** : Fix Gemini OpenAI-compat tool message validation
 2. **`59e51799e`** : Fix responsive mobile des composants chat (3 fichiers)
-3. **`a76fcd7de`** : Fix responsive mobile sur tous les composants (122 fichiers)
+3. **`a76fcd7de`** : Fix responsive mobile sur tous les composants - Phase 1 (122 fichiers)
+4. **`af0a15b0d`** : Documentation récapitulatif responsive
+5. **`5dde8c2f3`** : Fix responsive mobile - Phase 2 patterns manqués (98 fichiers)
 
 ## 🚀 Résultat
 
@@ -159,4 +172,34 @@ L'application DevForge est maintenant **complètement responsive** sur mobile, a
 
 ## 📦 Fichiers générés
 
-- `frontend/scripts/fix-responsive.cjs` : Script Node.js pour automatiser les corrections responsive futures
+- `frontend/scripts/fix-responsive.cjs` : Script Phase 1 (17 patterns principaux)
+- `frontend/scripts/fix-responsive-phase2.cjs` : Script Phase 2 (6 patterns supplémentaires)
+- `frontend/RESPONSIVE_FIXES.md` : Documentation complète
+
+## 🔍 Patterns manqués en Phase 1 (corrigés en Phase 2)
+
+Les patterns suivants n'étaient pas détectés car ils se terminaient sans espace ou étaient en fin de classe :
+- `gap-4` standalone (sans espace après)
+- `py-4` standalone
+- `px-4` standalone  
+- `grid ... gap-4"` (en fin de classe)
+- `flex ... gap-4"` (en fin de classe)
+
+**Exemple avant Phase 2** :
+```tsx
+<div class="grid gap-4">  ❌ Non détecté en Phase 1
+```
+
+**Après Phase 2** :
+```tsx
+<div class="grid gap-2.5 sm:gap-3 md:gap-4">  ✅ Corrigé
+```
+
+## 📋 Patterns intentionnellement non corrigés
+
+Certains patterns restent avec des valeurs fixes car appropriés pour le contexte :
+- **Alertes/badges** : `px-3 py-2` pour bordure/icône/texte compact
+- **Petits éléments intérieurs** : `gap-2` ou `gap-3` pour espacements minimaux
+- **Grilles d'items homogènes** : `gap-3` pour cohérence visuelle
+
+**Total patterns restants** : ~220 (sur 700+ corrigés = 76% de couverture ciblée)
