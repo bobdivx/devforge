@@ -29,10 +29,10 @@ export function OnboardingServerStep({ onContinue }: OnboardingServerStepProps) 
                 ) : (
                     <ul class="mt-3 divide-y divide-base-300/70">
                         {servers.map((server) => (
-                            <li class="flex items-center gap-3 py-3" key={server.uuid}>
-                                <Server class="size-4 text-primary" aria-hidden />
+                            <li class="flex items-center gap-2 sm:gap-3 py-3" key={server.uuid}>
+                                <Server class="size-3.5 sm:size-4 text-primary" aria-hidden />
                                 <div class="min-w-0 flex-1">
-                                    <p class="truncate text-sm font-semibold">{server.name}</p>
+                                    <p class="truncate text-xs sm:text-sm font-semibold">{server.name}</p>
                                     {server.description && (
                                         <p class="truncate text-xs text-base-content/50">{server.description}</p>
                                     )}

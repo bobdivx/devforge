@@ -26,7 +26,7 @@ export function ApplicationBootSequenceBanner({ sequence }: ApplicationBootSeque
                     <Rocket class="size-4" aria-hidden />
                 </div>
                 <div class="min-w-0 flex-1">
-                    <p class="text-sm font-semibold text-base-content">
+                    <p class="text-xs sm:text-sm font-semibold text-base-content">
                         Démarrage des applications
                     </p>
                     <p class="text-xs text-base-content/60">
@@ -37,7 +37,7 @@ export function ApplicationBootSequenceBanner({ sequence }: ApplicationBootSeque
                         <p class="mt-0.5 truncate text-xs text-base-content/50">{current.message}</p>
                     ) : null}
                 </div>
-                <Loader2 class="size-4 shrink-0 animate-spin text-primary" aria-hidden />
+                <Loader2 class="size-3.5 sm:size-4 shrink-0 animate-spin text-primary" aria-hidden />
             </div>
             <ProgressBar value={sequence.completed} max={sequence.total} tone="primary" active />
         </article>

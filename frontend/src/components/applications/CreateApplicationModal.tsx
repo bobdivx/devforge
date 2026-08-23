@@ -323,7 +323,7 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
                     <>
                         {step === 'source' && (
                         <div class="grid gap-4">
-                        <div class="grid gap-3 sm:grid-cols-2">
+                        <div class="grid gap-2 sm:gap-3 sm:grid-cols-2">
                             <div class="grid gap-1.5">
                                 <label class="text-xs font-medium" for="app-project">Projet</label>
                                 <select
@@ -411,7 +411,7 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
                             </div>
                         )}
 
-                        <div class="grid gap-3 sm:grid-cols-2">
+                        <div class="grid gap-2 sm:gap-3 sm:grid-cols-2">
                             <div class="grid gap-1.5">
                                 <label class="text-xs font-medium" for="app-branch">Branche</label>
                                 <select
@@ -452,7 +452,7 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
 
                         {step === 'domain' && (
                             <fieldset class="grid gap-2">
-                                <legend class="text-sm font-medium">Cette application a-t-elle une URL personnalisée ?</legend>
+                                <legend class="text-xs sm:text-sm font-medium">Cette application a-t-elle une URL personnalisée ?</legend>
                                 <p class="text-xs text-base-content/55">
                                     Sinon, DevForge créera automatiquement nomdelapp.votredomaine, par exemple starbasefr.exemple.com.
                                 </p>
@@ -468,7 +468,7 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
                                         onChange={() => setUrlMode('auto')}
                                     />
                                     <span class="grid gap-0.5">
-                                        <span class="text-sm font-semibold">Non, générer une URL automatique</span>
+                                        <span class="text-xs sm:text-sm font-semibold">Non, générer une URL automatique</span>
                                         <span class="text-xs text-base-content/55">
                                             Exemple : https://starbasefr.exemple.com
                                         </span>
@@ -486,7 +486,7 @@ export function CreateApplicationModal({ open, onClose, onCreated }: Props) {
                                         onChange={() => setUrlMode('custom')}
                                     />
                                     <span class="grid gap-0.5">
-                                        <span class="text-sm font-semibold">Oui, j’ai une URL pour cette app</span>
+                                        <span class="text-xs sm:text-sm font-semibold">Oui, j’ai une URL pour cette app</span>
                                         <span class="text-xs text-base-content/55">
                                             Exemple : https://blog.maison.local
                                         </span>

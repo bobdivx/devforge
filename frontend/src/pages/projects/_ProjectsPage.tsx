@@ -283,7 +283,7 @@ export function ProjectsPage({ permissions, embedded = false }: ProjectsPageProp
                 emptyMessage="Aucun projet dans cette équipe."
                 onRetry={() => void reload()}
             >
-                <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div class="grid gap-2 sm:gap-3 md:grid-cols-2 xl:grid-cols-3">
                     {filtered.map((project) => (
                         <ProjectCard project={project} permissions={permissions} onChanged={reload} onMutate={runMutation} key={project.uuid} />
                     ))}

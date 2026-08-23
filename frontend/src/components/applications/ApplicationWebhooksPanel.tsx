@@ -109,9 +109,9 @@ export function ApplicationWebhooksPanel({ applicationUuid, canAct }: Props) {
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="toolbar-row border-b border-base-300/70 px-5 py-4">
+            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-4 md:px-5 py-3 sm:py-4">
                 <div>
-                    <p class="text-sm font-semibold">Webhooks</p>
+                    <p class="text-xs sm:text-sm font-semibold">Webhooks</p>
                     <p class="text-xs text-base-content/50">Déploiement API et webhooks Git manuels</p>
                 </div>
                 <ActionToolbar>
@@ -121,7 +121,7 @@ export function ApplicationWebhooksPanel({ applicationUuid, canAct }: Props) {
                 </ActionToolbar>
             </div>
 
-            <div class="grid gap-5 p-5">
+            <div class="grid gap-3 sm:gap-4 md:gap-5 p-5">
                 <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
                     {data && (
                         <>
@@ -140,7 +140,7 @@ export function ApplicationWebhooksPanel({ applicationUuid, canAct }: Props) {
                             {data.manual_webhooks_available && data.manual && (
                                 <div class="grid gap-4">
                                     <div>
-                                        <p class="text-sm font-semibold">Webhooks Git manuels</p>
+                                        <p class="text-xs sm:text-sm font-semibold">Webhooks Git manuels</p>
                                         <p class="text-xs text-base-content/50">
                                             Configurez l’URL et un secret identique côté GitHub, GitLab, Bitbucket ou Gitea.
                                         </p>
@@ -164,7 +164,7 @@ export function ApplicationWebhooksPanel({ applicationUuid, canAct }: Props) {
                                     <UrlField label="Gitea" value={data.manual.gitea.url} />
 
                                     {canAct && (
-                                        <div class="grid gap-3 rounded-xl border border-base-300/70 p-4">
+                                        <div class="grid gap-2 sm:gap-3 rounded-xl border border-base-300/70 p-4">
                                             <p class="text-xs font-medium text-base-content/70">Secrets (laisser vide pour conserver)</p>
                                             {(
                                                 [

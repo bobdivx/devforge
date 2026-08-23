@@ -129,19 +129,19 @@ export function ConnectDatabasePanel({ applicationUuid, canAct, onConnected }: P
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="flex items-center justify-between gap-3 border-b border-base-300/70 px-5 py-4">
+            <div class="flex items-center justify-between gap-2 sm:gap-3 border-b border-base-300/70 px-3 sm:px-4 md:px-5 py-3 sm:py-4">
                 <div>
-                    <p class="text-sm font-semibold">Bases de données</p>
+                    <p class="text-xs sm:text-sm font-semibold">Bases de données</p>
                     <p class="text-xs text-base-content/50">
                         {connections.length > 0
                             ? 'Cette application utilise déjà une ou plusieurs bases.'
                             : 'Rattacher une base du même environnement et serveur'}
                     </p>
                 </div>
-                <Database class="size-4 text-base-content/35" aria-hidden />
+                <Database class="size-3.5 sm:size-4 text-base-content/35" aria-hidden />
             </div>
 
-            <div class="grid gap-4 p-5">
+            <div class="grid gap-2.5 sm:gap-3 md:gap-4 p-5">
                 {loading && <p class="text-sm text-base-content/55">Chargement des bases disponibles…</p>}
 
                 {!loading && databases.length === 0 && connections.length === 0 && (
@@ -168,7 +168,7 @@ export function ConnectDatabasePanel({ applicationUuid, canAct, onConnected }: P
                         <ul class="grid gap-2">
                             {connections.map((connection) => (
                                 <li
-                                    class="rounded-xl border border-success/25 bg-success/5 px-3 py-3 text-sm"
+                                    class="rounded-xl border border-success/25 bg-success/5 px-2.5 sm:px-3 py-2.5 sm:py-3 text-sm"
                                     key={connection.database_uuid}
                                 >
                                     <div class="flex flex-wrap items-center gap-2">
@@ -288,7 +288,7 @@ export function ConnectDatabasePanel({ applicationUuid, canAct, onConnected }: P
                             )}
                         </label>
 
-                        <div class="flex flex-wrap gap-4 text-sm">
+                        <div class="flex flex-wrap gap-2.5 sm:gap-3 md:gap-4 text-sm">
                             <label class="flex items-center gap-2">
                                 <input
                                     class="checkbox checkbox-sm"

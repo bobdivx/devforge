@@ -73,7 +73,7 @@ export function AgentSkillsPanel({ agent }: Props) {
                     <li key={row.id} class="rounded-lg border border-base-300 bg-base-100 px-3 py-2">
                         <div class="flex items-start justify-between gap-2">
                             <div class="min-w-0">
-                                <p class="truncate text-sm font-medium">
+                                <p class="truncate text-xs sm:text-sm font-medium">
                                     <code class="text-[11px] text-base-content/70">{row.slug}</code>
                                     {' · '}
                                     {row.name}

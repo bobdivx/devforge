@@ -89,7 +89,7 @@ function OverviewCards({
     onNavigate: (scope: SharedVariableScopeTab) => void;
 }) {
     return (
-        <div class="grid gap-3 md:grid-cols-2">
+        <div class="grid gap-2 sm:gap-3 md:grid-cols-2">
             {(Object.keys(scopeLabels) as Array<Exclude<SharedVariableScopeTab, 'overview'>>).map((scope) => {
                 const tab = sharedVariableScopeTabs.find(({ id }) => id === scope);
 
@@ -102,7 +102,7 @@ function OverviewCards({
                     >
                         <div class="flex items-start justify-between gap-3">
                             <div>
-                                <p class="text-sm font-semibold">{scopeLabels[scope]}</p>
+                                <p class="text-xs sm:text-sm font-semibold">{scopeLabels[scope]}</p>
                                 <p class="mt-1 text-xs text-base-content/55">{tab?.description}</p>
                             </div>
                             <span class="text-2xl font-semibold tabular-nums">{counts[scope]}</span>

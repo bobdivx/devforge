@@ -136,11 +136,11 @@ export function S3StoragesSettings({ canManage = true }: S3StoragesSettingsProps
                     ) : (
                         <ul class="divide-y divide-base-300/70">
                             {storages.map((storage) => (
-                                <li class="flex flex-wrap items-center justify-between gap-3 py-3" key={storage.uuid}>
+                                <li class="flex flex-wrap items-center justify-between gap-2 sm:gap-3 py-3" key={storage.uuid}>
                                     <div class="min-w-0">
                                         <div class="flex items-center gap-2">
-                                            <Cloud class="size-4 text-primary" aria-hidden />
-                                            <p class="truncate text-sm font-semibold">{storage.name}</p>
+                                            <Cloud class="size-3.5 sm:size-4 text-primary" aria-hidden />
+                                            <p class="truncate text-xs sm:text-sm font-semibold">{storage.name}</p>
                                             <StatusBadge
                                                 label={storage.is_usable ? 'Connecté' : 'Non testé'}
                                                 tone={storage.is_usable ? 'success' : 'neutral'}
@@ -207,7 +207,7 @@ export function S3StoragesSettings({ canManage = true }: S3StoragesSettingsProps
                         <span class="font-medium">Description</span>
                         <input class="input input-bordered rounded-xl" value={form.description ?? ''} onInput={(e) => setForm({ ...form, description: e.currentTarget.value })} />
                     </label>
-                    <div class="grid gap-3 sm:grid-cols-2">
+                    <div class="grid gap-2 sm:gap-3 sm:grid-cols-2">
                         <label class="grid gap-1 text-sm">
                             <span class="font-medium">Région</span>
                             <input class="input input-bordered rounded-xl" required value={form.region} onInput={(e) => setForm({ ...form, region: e.currentTarget.value })} />
@@ -221,7 +221,7 @@ export function S3StoragesSettings({ canManage = true }: S3StoragesSettingsProps
                         <span class="font-medium">Endpoint</span>
                         <input class="input input-bordered rounded-xl font-mono text-xs" required value={form.endpoint} onInput={(e) => setForm({ ...form, endpoint: e.currentTarget.value })} />
                     </label>
-                    <div class="grid gap-3 sm:grid-cols-2">
+                    <div class="grid gap-2 sm:gap-3 sm:grid-cols-2">
                         <label class="grid gap-1 text-sm">
                             <span class="font-medium">Access Key</span>
                             <input class="input input-bordered rounded-xl font-mono text-xs" required={!editing} value={form.key} onInput={(e) => setForm({ ...form, key: e.currentTarget.value })} />

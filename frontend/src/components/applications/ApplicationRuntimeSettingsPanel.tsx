@@ -217,10 +217,10 @@ export function ApplicationRuntimeSettingsPanel({
         <DataState loading={query.loading && !data} error={query.error} onRetry={() => void query.reload()}>
             {draft && data && (
                 <section class="min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-                    <div class="toolbar-row border-b border-base-300/70 px-4 py-4 sm:px-5">
+                    <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 sm:py-4 sm:px-5">
                         <div class="min-w-0">
-                            <p class="inline-flex items-center gap-2 text-sm font-semibold">
-                                <Settings2 class="size-4 text-base-content/45" aria-hidden />
+                            <p class="inline-flex items-center gap-2 text-xs sm:text-sm font-semibold">
+                                <Settings2 class="size-3.5 sm:size-4 text-base-content/45" aria-hidden />
                                 Paramètres de build & runtime
                             </p>
                             <p class="text-xs text-base-content/50">
@@ -260,7 +260,7 @@ export function ApplicationRuntimeSettingsPanel({
                         )}
                     </div>
 
-                    <div class="grid gap-5 p-4 sm:p-5">
+                    <div class="grid gap-3 sm:gap-4 md:gap-5 p-4 sm:p-5">
                         <label class="grid gap-1.5 text-sm">
                             <span class="text-base-content/55">Build pack</span>
                             <select
@@ -302,7 +302,7 @@ export function ApplicationRuntimeSettingsPanel({
                             </span>
                         </label>
 
-                        <div class="grid gap-4 md:grid-cols-2">
+                        <div class="grid gap-2.5 sm:gap-3 md:gap-4 md:grid-cols-2">
                             <label class="grid gap-1.5 text-sm">
                                 <span class="text-base-content/55">Commande de démarrage</span>
                                 <input
@@ -364,7 +364,7 @@ export function ApplicationRuntimeSettingsPanel({
                         </div>
 
                         <div class="rounded-xl border border-base-300/70 p-4">
-                            <label class="mb-3 inline-flex items-center gap-3 text-sm">
+                            <label class="mb-3 inline-flex items-center gap-2 sm:gap-3 text-sm">
                                 <input
                                     type="checkbox"
                                     class="toggle toggle-sm toggle-primary"
@@ -374,7 +374,7 @@ export function ApplicationRuntimeSettingsPanel({
                                 />
                                 Healthcheck Docker
                             </label>
-                            <div class="grid gap-4 md:grid-cols-2">
+                            <div class="grid gap-2.5 sm:gap-3 md:gap-4 md:grid-cols-2">
                                 <label class="grid gap-1.5 text-sm">
                                     <span class="text-base-content/55">Chemin</span>
                                     <input

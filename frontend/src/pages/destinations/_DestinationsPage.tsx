@@ -114,7 +114,7 @@ function DestinationCard({ destination }: { destination: DestinationSummary }) {
         >
             <div class="mb-2 flex items-start justify-between gap-2">
                 <div class="min-w-0">
-                    <p class="truncate text-sm font-semibold">{destination.name}</p>
+                    <p class="truncate text-xs sm:text-sm font-semibold">{destination.name}</p>
                     <p class="truncate text-xs text-base-content/55">{destination.server.name}</p>
                 </div>
                 <StatusBadge label={destination.type === 'swarm' ? 'Swarm' : 'Standalone'} />

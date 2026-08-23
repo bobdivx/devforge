@@ -77,10 +77,10 @@ export function DatabaseImportProgressCard({ progress }: DatabaseImportProgressC
                 <div class="rounded-lg bg-primary/10 p-2 text-primary">
                     {progress.phase === 'done'
                         ? <Check class="size-4" aria-hidden />
-                        : <Database class="size-4 animate-pulse" aria-hidden />}
+                        : <Database class="size-3.5 sm:size-4 animate-pulse" aria-hidden />}
                 </div>
                 <div class="min-w-0 flex-1">
-                    <p class="text-sm font-semibold">
+                    <p class="text-xs sm:text-sm font-semibold">
                         {progress.phase === 'done' ? 'Import terminé' : 'Importation en cours'}
                     </p>
                     <p class="truncate font-mono text-xs text-base-content/55">{progress.fileName}</p>
@@ -122,15 +122,15 @@ export function DatabaseImportProgressCard({ progress }: DatabaseImportProgressC
                             key={step.id}
                         >
                             {state === 'done' && (
-                                <span class="flex size-4 items-center justify-center rounded-full bg-success/15 text-success">
+                                <span class="flex size-3.5 sm:size-4 items-center justify-center rounded-full bg-success/15 text-success">
                                     <Check class="size-2.5" aria-hidden />
                                 </span>
                             )}
                             {state === 'current' && (
-                                <LoaderCircle class="size-4 animate-spin text-primary" aria-hidden />
+                                <LoaderCircle class="size-3.5 sm:size-4 animate-spin text-primary" aria-hidden />
                             )}
                             {state === 'pending' && (
-                                <span class="size-4 rounded-full border border-base-300/80" aria-hidden />
+                                <span class="size-3.5 sm:size-4 rounded-full border border-base-300/80" aria-hidden />
                             )}
                             <span class={state === 'current' ? 'font-medium text-primary' : undefined}>{step.label}</span>
                         </li>

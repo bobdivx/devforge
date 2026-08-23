@@ -133,11 +133,11 @@ export function ApplicationAccessPanel({
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="toolbar-row border-b border-base-300/70 px-5 py-4">
+            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-4 md:px-5 py-3 sm:py-4">
                 <div>
                     <div class="flex items-center gap-2">
-                        <KeyRound class="size-4 text-base-content/45" aria-hidden />
-                        <p class="text-sm font-semibold">Accès Pocket ID</p>
+                        <KeyRound class="size-3.5 sm:size-4 text-base-content/45" aria-hidden />
+                        <p class="text-xs sm:text-sm font-semibold">Accès Pocket ID</p>
                     </div>
                     <p class="text-xs text-base-content/50">
                         Protège le site si l’app n’a pas de comptes, ou ajoute le SSO dans un login existant
@@ -160,7 +160,7 @@ export function ApplicationAccessPanel({
                 )}
             </div>
 
-            <div class="grid gap-4 p-5">
+            <div class="grid gap-2.5 sm:gap-3 md:gap-4 p-5">
                 <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
                     {data && (
                         <>
@@ -183,7 +183,7 @@ export function ApplicationAccessPanel({
                             )}
 
                             <fieldset class="grid gap-2">
-                                <legend class="text-sm font-medium">Cette application a-t-elle déjà un système d’utilisateurs ?</legend>
+                                <legend class="text-xs sm:text-sm font-medium">Cette application a-t-elle déjà un système d’utilisateurs ?</legend>
                                 <label
                                     class={`flex cursor-pointer items-start gap-3 rounded-2xl border p-3 transition ${
                                         choice === 'yes' ? 'border-primary/40 bg-primary/5' : 'border-base-300/70'
@@ -211,7 +211,7 @@ export function ApplicationAccessPanel({
                                         }}
                                     />
                                     <span class="grid min-w-0 gap-1">
-                                        <span class="text-sm font-semibold">Oui, elle a ses propres comptes</span>
+                                        <span class="text-xs sm:text-sm font-semibold">Oui, elle a ses propres comptes</span>
                                         <span class="text-xs font-normal text-base-content/55">
                                             Le site reste public jusqu’au login de l’app. Pocket ID s’ajoute comme bouton « Continuer avec SSO ».
                                         </span>
@@ -248,7 +248,7 @@ export function ApplicationAccessPanel({
                                         }}
                                     />
                                     <span class="grid min-w-0 gap-1">
-                                        <span class="text-sm font-semibold">Non, pas de login dans l’app</span>
+                                        <span class="text-xs sm:text-sm font-semibold">Non, pas de login dans l’app</span>
                                         <span class="text-xs font-normal text-base-content/55">
                                             Site vitrine, outil interne, doc… Vous pouvez exiger une passkey Pocket ID avant d’ouvrir le site.
                                         </span>
@@ -257,7 +257,7 @@ export function ApplicationAccessPanel({
                             </fieldset>
 
                             {choice === 'no' && (
-                                <label class="flex items-center justify-between gap-3 rounded-xl border border-base-300/70 px-3 py-3 text-sm">
+                                <label class="flex items-center justify-between gap-2 sm:gap-3 rounded-xl border border-base-300/70 px-2.5 sm:px-3 py-2.5 sm:py-3 text-sm">
                                     <span class="grid gap-0.5">
                                         <span class="font-medium">Protéger l’accès au site avec Pocket ID</span>
                                         <span class="text-xs font-normal text-base-content/55">

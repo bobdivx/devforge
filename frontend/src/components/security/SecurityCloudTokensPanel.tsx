@@ -129,7 +129,7 @@ export function SecurityCloudTokensPanel() {
             )}
 
             {showForm && (
-                <div class="grid gap-3 rounded-2xl border border-base-300/70 bg-base-100 p-4">
+                <div class="grid gap-2 sm:gap-3 rounded-2xl border border-base-300/70 bg-base-100 p-4">
                     <label class="grid gap-1.5 text-sm">
                         <span class="font-medium">Fournisseur</span>
                         <select

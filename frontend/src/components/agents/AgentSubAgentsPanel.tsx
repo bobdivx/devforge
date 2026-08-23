@@ -19,7 +19,7 @@ export function AgentSubAgentsPanel({ agent, onUpdated }: Props) {
     const canAddChildren = !agent.parent_agent_id && Boolean(agent.id);
 
     return (
-        <section class="grid gap-3 rounded-xl border border-base-300 p-3">
+        <section class="grid gap-2 sm:gap-3 rounded-xl border border-base-300 p-3">
             <div class="flex items-start justify-between gap-3">
                 <div>
                     <h3 class="flex items-center gap-1.5 text-xs font-semibold">
@@ -51,7 +51,7 @@ export function AgentSubAgentsPanel({ agent, onUpdated }: Props) {
                     {children.map((child) => (
                         <li key={child.uuid}>
                             <a
-                                class="flex items-center gap-3 rounded-lg border border-base-300 px-3 py-2 transition hover:border-primary/30 hover:bg-primary/5"
+                                class="flex items-center gap-2 sm:gap-3 rounded-lg border border-base-300 px-3 py-2 transition hover:border-primary/30 hover:bg-primary/5"
                                 href={routeHref(agentDetailPath(child.uuid))}
                                 onClick={(e) => {
                                     e.preventDefault();

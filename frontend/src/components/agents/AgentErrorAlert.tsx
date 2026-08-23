@@ -90,7 +90,7 @@ export function AgentErrorAlert({ agent, compact = false, onNavigate, activeProv
                 </div>
                 <button
                     type="button"
-                    class="btn btn-ghost btn-xs size-6 min-h-6 shrink-0 rounded-md p-0 text-error/70 hover:bg-error/20 hover:text-error"
+                    class="btn btn-ghost btn-xs size-5 sm:size-6 min-h-6 shrink-0 rounded-md p-0 text-error/70 hover:bg-error/20 hover:text-error"
                     aria-label="Masquer l'erreur"
                     onClick={() => setDismissed(true)}
                 >

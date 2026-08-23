@@ -70,9 +70,9 @@ export function AgentMemoryPanel({ agent }: Props) {
     };
 
     return (
-        <section class="grid gap-3 rounded-xl border border-base-300 bg-base-200/20 p-3">
+        <section class="grid gap-2 sm:gap-3 rounded-xl border border-base-300 bg-base-200/20 p-3">
             <div class="flex flex-wrap items-center justify-between gap-2">
-                <h3 class="text-sm font-semibold">Mémoire agent</h3>
+                <h3 class="text-xs sm:text-sm font-semibold">Mémoire agent</h3>
                 <div class="flex gap-1">
                     {(['agent', 'shared', 'project'] as const).map((value) => (
                         <button

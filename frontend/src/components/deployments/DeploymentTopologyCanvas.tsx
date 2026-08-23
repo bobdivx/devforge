@@ -165,12 +165,12 @@ function DetailPanel({
         : [];
 
     return (
-        <div class="grid min-w-0 gap-3 rounded-2xl border border-base-300/70 bg-base-100 p-4 shadow-sm">
+        <div class="grid min-w-0 gap-2 sm:gap-3 rounded-2xl border border-base-300/70 bg-base-100 p-4 shadow-sm">
             <div class="min-w-0">
                 <p class="text-[11px] font-semibold uppercase tracking-widest text-base-content/45">
                     {STAGE_LABELS[stage.kind]}
                 </p>
-                <h3 class="mt-1 break-words text-base font-semibold">{stage.label}</h3>
+                <h3 class="mt-1 break-words text-sm sm:text-base font-semibold">{stage.label}</h3>
                 <p class="break-words text-xs text-base-content/55">{stage.detail}</p>
             </div>
 
@@ -254,14 +254,14 @@ function PipelineRow({
         <article class={`min-w-0 overflow-hidden rounded-2xl border bg-base-100 shadow-sm transition ${expanded ? 'border-primary/35' : 'border-base-300/70'}`}>
             <button
                 type="button"
-                class="flex w-full min-w-0 items-center gap-3 px-3 py-3 text-left hover:bg-base-200/40 sm:px-4"
+                class="flex w-full min-w-0 items-center gap-2 sm:gap-3 px-2.5 sm:px-3 py-2.5 sm:py-3 text-left hover:bg-base-200/40 sm:px-4"
                 onClick={onToggle}
                 aria-expanded={expanded}
             >
-                {expanded ? <ChevronDown class="size-4 shrink-0 opacity-60" aria-hidden /> : <ChevronRight class="size-4 shrink-0 opacity-60" aria-hidden />}
+                {expanded ? <ChevronDown class="size-3.5 sm:size-4 shrink-0 opacity-60" aria-hidden /> : <ChevronRight class="size-3.5 sm:size-4 shrink-0 opacity-60" aria-hidden />}
                 <div class="min-w-0 flex-1">
                     <div class="flex flex-wrap items-center gap-2">
-                        <h2 class="truncate text-sm font-semibold">{pipeline.application.label}</h2>
+                        <h2 class="truncate text-xs sm:text-sm font-semibold">{pipeline.application.label}</h2>
                         <span class={`badge badge-sm ${HEALTH_PILL[pipeline.health]}`}>
                             {HEALTH_LABELS[pipeline.health]}
                         </span>
@@ -303,7 +303,7 @@ function PipelineRow({
             )}
 
             {expanded && (
-                <div class="grid min-w-0 gap-4 border-t border-base-300/70 p-3 sm:p-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+                <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 border-t border-base-300/70 p-3 sm:p-4 xl:grid-cols-[minmax(0,1fr)_280px]">
                     <div class="grid min-w-0 gap-3">
                         <div class="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-stretch">
                             {pipeline.stages.map((stage, index) => (
@@ -397,7 +397,7 @@ export function OperationsExplorer({ topology }: OperationsExplorerProps) {
 
     return (
         <div class="grid min-w-0 gap-4">
-            <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex min-w-0 flex-col gap-2 sm:gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <label class="input input-sm flex w-full min-w-0 max-w-md flex-1 items-center gap-2 rounded-full border-base-300 bg-base-100">
                     <Search class="size-3.5 shrink-0 opacity-50" aria-hidden />
                     <input

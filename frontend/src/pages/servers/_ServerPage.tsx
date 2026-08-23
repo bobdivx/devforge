@@ -134,7 +134,7 @@ export function ServerPage({
                             <div class="grid gap-4">
                                 <div class="flex items-center justify-between gap-3">
                                     <div>
-                                        <p class="text-sm font-semibold">{resource.name}</p>
+                                        <p class="text-xs sm:text-sm font-semibold">{resource.name}</p>
                                         <p class="font-mono text-[11px] text-base-content/45">{resource.uuid}</p>
                                     </div>
                                     <ResourceStatusIcon status={resourceStatusInput(resource)} />
@@ -159,9 +159,9 @@ export function ServerPage({
                                 ]}
                                 />
 
-                                <div class="grid gap-3 rounded-xl border border-base-300/60 bg-base-200/20 p-4">
+                                <div class="grid gap-2 sm:gap-3 rounded-xl border border-base-300/60 bg-base-200/20 p-4">
                                     <div>
-                                        <p class="text-sm font-semibold">Wildcard Domain</p>
+                                        <p class="text-xs sm:text-sm font-semibold">Wildcard Domain</p>
                                         <p class="text-xs text-base-content/55">
                                             Utilisé pour générer les URLs des nouvelles applications
                                             (ex. <span class="font-mono">https://exemple.com</span>

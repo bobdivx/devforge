@@ -34,9 +34,9 @@ export function SsoAppIdentityGuide({ sso, appsWildcardDomain = null }: SsoAppId
     };
 
     return (
-        <div class="grid gap-3 rounded-xl border border-base-300/70 p-3">
+        <div class="grid gap-2 sm:gap-3 rounded-xl border border-base-300/70 p-3">
             <div>
-                <p class="text-sm font-semibold">SSO dans tes apps</p>
+                <p class="text-xs sm:text-sm font-semibold">SSO dans tes apps</p>
                 <p class="text-xs text-base-content/55">
                     Le login actuel reste. Chaque app peut proposer « Continuer avec Pocket ID ».
                     Une fois qu’un utilisateur a lié le SSO, c’est sa façon de se connecter — les autres gardent email / mot de passe.

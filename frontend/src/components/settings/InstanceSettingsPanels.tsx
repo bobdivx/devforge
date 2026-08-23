@@ -58,7 +58,7 @@ function ToggleField({
     onChange: (value: boolean) => void;
 }) {
     return (
-        <label class="flex items-center justify-between gap-3 rounded-xl border border-base-300/70 px-3 py-2 text-sm">
+        <label class="flex items-center justify-between gap-2 sm:gap-3 rounded-xl border border-base-300/70 px-3 py-2 text-sm">
             <span class="grid gap-0.5">
                 <span>{label}</span>
                 {description && (
@@ -142,7 +142,7 @@ function InstanceForm({
 
     return (
         <div class="grid gap-3">
-            <div class="grid gap-3 md:grid-cols-2">
+            <div class="grid gap-2 sm:gap-3 md:grid-cols-2">
                 <Field label="Nom">
                     <input
                         class="input input-bordered input-sm w-full rounded-xl"
@@ -412,7 +412,7 @@ function AdvancedForm({
             />
 
             <div class="mt-2 grid gap-2 rounded-xl border border-base-300/70 p-3">
-                <p class="text-sm font-medium">Agents autonomes</p>
+                <p class="text-xs sm:text-sm font-medium">Agents autonomes</p>
                 <p class="text-xs text-base-content/55">
                     Activés par défaut. Pas besoin de variables Docker Compose — coupe ici si besoin.
                 </p>
@@ -560,7 +560,7 @@ function EmailForm({
                     resend_enabled: value ? false : current.resend_enabled,
                 }))}
             />
-            <div class="grid gap-3 md:grid-cols-2">
+            <div class="grid gap-2 sm:gap-3 md:grid-cols-2">
                 <Field label="Expéditeur">
                     <input
                         class="input input-bordered input-sm w-full rounded-xl"
@@ -904,7 +904,7 @@ function OauthProviderForm({
         >
             <HiddenUsernameField />
             <div class="mb-3 flex items-center justify-between gap-2">
-                <p class="text-sm font-semibold capitalize">{provider.provider}</p>
+                <p class="text-xs sm:text-sm font-semibold capitalize">{provider.provider}</p>
                 <StatusBadge label={form.enabled ? 'Activé' : 'Désactivé'} tone={form.enabled ? 'success' : 'neutral'} />
             </div>
             <div class="grid gap-3">

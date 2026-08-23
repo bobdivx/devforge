@@ -583,7 +583,7 @@ export function DatabaseDetailPanel({
                 </button>
             </div>
 
-            <div class="flex flex-col lg:flex-row gap-4 lg:gap-6 mt-4">
+            <div class="flex flex-col lg:flex-row gap-2.5 sm:gap-3 md:gap-4 lg:gap-6 mt-4">
                 <div class="lg:w-56 shrink-0">
                     <Tabs
                         active={activeTab}
@@ -616,7 +616,7 @@ export function DatabaseDetailPanel({
                             <div class="mt-4 rounded-xl border border-base-300/70 bg-base-200/30 p-3">
                                 <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                                     <div>
-                                        <p class="text-sm font-medium">Connexion</p>
+                                        <p class="text-xs sm:text-sm font-medium">Connexion</p>
                                         <p class="text-xs text-base-content/55">
                                             Compatible Turso : utilisez <span class="font-mono">TURSO_DATABASE_URL</span> + <span class="font-mono">TURSO_AUTH_TOKEN</span> sans modifier votre code.
                                         </p>
@@ -646,7 +646,7 @@ export function DatabaseDetailPanel({
                                             {credentials.turso_database_url_external && (
                                                 <CredentialField label="TURSO_DATABASE_URL (accès distant)" value={credentials.turso_database_url_external} />
                                             )}
-                                            <div class="flex flex-wrap items-center gap-3 rounded-lg border border-base-300/60 bg-base-100 px-3 py-2 text-sm">
+                                            <div class="flex flex-wrap items-center gap-2 sm:gap-3 rounded-lg border border-base-300/60 bg-base-100 px-3 py-2 text-sm">
                                                 <label class="flex items-center gap-2">
                                                     <input
                                                         class="toggle toggle-sm"
@@ -681,7 +681,7 @@ export function DatabaseDetailPanel({
                         )}
 
                         <div class="mt-4 rounded-xl border border-base-300/70 bg-base-200/30 p-3">
-                            <div class="mb-2 flex items-center gap-2 text-sm font-medium">
+                            <div class="mb-2 flex items-center gap-2 text-xs sm:text-sm font-medium">
                                 <Link2 class="size-3.5 text-base-content/45" aria-hidden />
                                 Applications rattachées
                             </div>
@@ -761,9 +761,9 @@ export function DatabaseDetailPanel({
                             </p>
                         </div>
 
-                        <div class="grid gap-4 md:grid-cols-2">
+                        <div class="grid gap-2.5 sm:gap-3 md:gap-4 md:grid-cols-2">
                             <article class="rounded-xl border border-base-300/70 bg-base-200/20 p-4">
-                                <h3 class="text-sm font-semibold">Exporter</h3>
+                                <h3 class="text-xs sm:text-sm font-semibold">Exporter</h3>
                                 <p class="mt-1 text-xs text-base-content/55">
                                     Télécharge un dump SQL (`sqlite3 .dump`) du fichier `data.db`.
                                 </p>
@@ -781,7 +781,7 @@ export function DatabaseDetailPanel({
                             </article>
 
                             <article class="rounded-xl border border-base-300/70 bg-base-200/20 p-4">
-                                <h3 class="text-sm font-semibold">Importer</h3>
+                                <h3 class="text-xs sm:text-sm font-semibold">Importer</h3>
                                 <p class="mt-1 text-xs text-base-content/55">
                                     Remplace le contenu actuel (<span class="font-medium text-warning">arrête temporairement la base</span>).
                                     Formats : <span class="font-mono">.db</span> (Turso) ou <span class="font-mono">.sql</span>.

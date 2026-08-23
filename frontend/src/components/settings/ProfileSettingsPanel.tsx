@@ -79,7 +79,7 @@ export function ProfileSettingsPanel({
                                 }
                             }}
                         >
-                            <div class="grid gap-3 md:grid-cols-2">
+                            <div class="grid gap-2 sm:gap-3 md:grid-cols-2">
                                 <label class="grid gap-1.5 text-sm">
                                     <span class="font-medium">Nom</span>
                                     <input class="input input-bordered input-sm w-full rounded-xl" name="name" required defaultValue={profile.name} />
@@ -96,7 +96,7 @@ export function ProfileSettingsPanel({
                                     />
                                 </label>
                             </div>
-                            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div class="flex flex-col gap-2 sm:gap-3 sm:flex-row sm:items-center sm:justify-between">
                                 <div class="flex flex-wrap gap-2">
                                     <StatusBadge
                                         label={profile.email_verified ? 'E-mail vérifié' : 'E-mail non vérifié'}
@@ -142,7 +142,7 @@ export function ProfileSettingsPanel({
                     }}
                 >
                     <HiddenUsernameField username={username} />
-                    <div class="grid gap-3 md:grid-cols-3">
+                    <div class="grid gap-2 sm:gap-3 md:grid-cols-3">
                         <label class="grid gap-1.5 text-sm">
                             <span class="font-medium">Mot de passe actuel</span>
                             <input class="input input-bordered input-sm w-full rounded-xl" name="current_password" type="password" required autoComplete="current-password" />
@@ -168,9 +168,9 @@ export function ProfileSettingsPanel({
             <Card title="Authentification à deux facteurs" eyebrow="TOTP">
                 <DataState loading={twoFactorQuery.loading} error={twoFactorQuery.error} onRetry={() => void twoFactorQuery.reload()}>
                     <div class="grid gap-4">
-                        <div class="flex flex-col gap-3 rounded-xl border border-base-300/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div class="flex flex-col gap-2 sm:gap-3 rounded-xl border border-base-300/70 p-4 sm:flex-row sm:items-center sm:justify-between">
                             <div class="grid gap-1">
-                                <p class="text-sm font-medium">Statut 2FA</p>
+                                <p class="text-xs sm:text-sm font-medium">Statut 2FA</p>
                                 <p class="text-xs text-base-content/55">
                                     {isTwoFactorOn
                                         ? 'La 2FA est activée sur votre compte.'
@@ -204,7 +204,7 @@ export function ProfileSettingsPanel({
                         </form>
 
                         {pendingSetup && twoFactor && (
-                            <div class="grid gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4">
+                            <div class="grid gap-2 sm:gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4">
                                 {twoFactor.qr_code_svg && (
                                     <div
                                         class="mx-auto w-fit rounded-xl bg-white p-3 [&_svg]:size-40"
@@ -254,7 +254,7 @@ export function ProfileSettingsPanel({
 
                         {twoFactor && twoFactor.recovery_codes.length > 0 && (
                             <div class="rounded-xl border border-base-300/70 p-4">
-                                <p class="mb-2 text-sm font-medium">Codes de récupération</p>
+                                <p class="mb-2 text-xs sm:text-sm font-medium">Codes de récupération</p>
                                 <ul class="grid gap-1 font-mono text-xs sm:grid-cols-2">
                                     {twoFactor.recovery_codes.map((code) => (
                                         <li key={code}>{code}</li>

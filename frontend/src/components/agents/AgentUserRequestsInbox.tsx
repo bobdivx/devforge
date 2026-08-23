@@ -54,7 +54,7 @@ export function AgentUserRequestsInbox() {
         <section id="agent-user-requests-inbox" class="mb-5 min-w-0 overflow-hidden rounded-xl border border-warning/40 bg-warning/5 p-3 sm:p-4">
             <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div class="min-w-0">
-                    <h3 class="text-sm font-semibold">
+                    <h3 class="text-xs sm:text-sm font-semibold">
                         Actions requises
                         <span class="badge badge-warning badge-sm ml-2">{pendingCount}</span>
                     </h3>
@@ -71,7 +71,7 @@ export function AgentUserRequestsInbox() {
                 {requests.map((req) => (
                     <li key={req.uuid} class="rounded-lg border border-base-300 bg-base-100 p-3">
                         <div class="mb-2 flex flex-wrap items-center gap-2 text-sm">
-                            <Bot class="size-4 text-primary" aria-hidden />
+                            <Bot class="size-3.5 sm:size-4 text-primary" aria-hidden />
                             <span class="font-medium">{req.agent_name ?? req.agent?.name ?? 'Agent'}</span>
                             <span class="text-base-content/55">demande</span>
                             <code class="rounded bg-base-200 px-1.5 py-0.5 font-mono text-xs">{req.key_name}</code>

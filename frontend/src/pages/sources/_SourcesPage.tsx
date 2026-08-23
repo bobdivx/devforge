@@ -158,7 +158,7 @@ export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
                         {agentRequests.data.data.map((req) => (
                             <div key={req.uuid} class="flex flex-col gap-2 rounded-lg border border-base-300 bg-base-100 p-4">
                                 <div class="flex items-center gap-2">
-                                    <Bot class="size-4 text-primary" aria-hidden />
+                                    <Bot class="size-3.5 sm:size-4 text-primary" aria-hidden />
                                     <span class="font-semibold">{req.agent?.name ?? 'Agent'}</span>
                                     <span class="text-xs text-base-content/60">a besoin de</span>
                                     <code class="font-mono text-sm">{req.key_name}</code>

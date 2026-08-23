@@ -55,13 +55,13 @@ function TabButton({ active, icon, label, subtitle, count, showIndicator = false
             aria-label={ariaLabel}
             onClick={onClick}
         >
-            <span class="relative col-start-1 row-start-1 flex size-4 items-center justify-center self-center">
+            <span class="relative col-start-1 row-start-1 flex size-3.5 sm:size-4 items-center justify-center self-center">
                 {icon}
                 {showIndicator && (
                     <span class="absolute -end-0.5 -top-0.5 size-2 rounded-full bg-success ring-2 ring-base-100" />
                 )}
             </span>
-            <span class="col-start-2 row-start-1 truncate text-sm font-semibold leading-tight">{label}</span>
+            <span class="col-start-2 row-start-1 truncate text-xs sm:text-sm font-semibold leading-tight">{label}</span>
             {typeof count === 'number' && count > 0 && (
                 <span
                     aria-hidden="true"
@@ -109,7 +109,7 @@ export function AgentViewSwitcher({ mode, onChange, runsActive = false, runsCoun
             >
                 <TabButton
                     active={mode === 'chat'}
-                    icon={<MessageSquare class="size-4 opacity-90" aria-hidden />}
+                    icon={<MessageSquare class="size-3.5 sm:size-4 opacity-90" aria-hidden />}
                     label="Conversation"
                     subtitle="Discuter avec l'agent"
                     count={sessionsCount}
@@ -117,7 +117,7 @@ export function AgentViewSwitcher({ mode, onChange, runsActive = false, runsCoun
                 />
                 <TabButton
                     active={mode === 'runs'}
-                    icon={<Zap class="size-4 opacity-90" aria-hidden />}
+                    icon={<Zap class="size-3.5 sm:size-4 opacity-90" aria-hidden />}
                     label="Exécutions"
                     subtitle={runsSubtitle}
                     count={runsCount}

@@ -60,12 +60,12 @@ type Props = {
 export function RunHistoryTable({ runs, selectedUuid, onSelect }: Props) {
     if (runs.length === 0) {
         return (
-            <div class="flex flex-col items-center gap-3 px-6 py-10 text-center">
+            <div class="flex flex-col items-center gap-2 sm:gap-3 px-6 py-10 text-center">
                 <div class="grid size-12 place-items-center rounded-2xl bg-base-200 text-base-content/40">
                     <Zap class="size-6" aria-hidden />
                 </div>
                 <div>
-                    <p class="text-sm font-medium text-base-content/80">Aucune exécution pour l&apos;instant</p>
+                    <p class="text-xs sm:text-sm font-medium text-base-content/80">Aucune exécution pour l&apos;instant</p>
                     <p class="mt-1 text-xs text-base-content/50">
                         Les runs webhook et manuels apparaîtront ici avec leurs logs.
                     </p>

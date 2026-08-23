@@ -185,10 +185,10 @@ export function ApplicationReadinessCard({ applicationUuid, canAct }: Props) {
         >
             {readiness && (
                 <section class="min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-                    <div class="toolbar-row border-b border-base-300/70 px-4 py-3 sm:px-5">
+                    <div class="toolbar-row border-b border-base-300/70 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 sm:px-5">
                         <div class="min-w-0">
-                            <p class="inline-flex items-center gap-2 text-sm font-semibold">
-                                <Shield class="size-4 text-base-content/45" aria-hidden />
+                            <p class="inline-flex items-center gap-2 text-xs sm:text-sm font-semibold">
+                                <Shield class="size-3.5 sm:size-4 text-base-content/45" aria-hidden />
                                 Surveillance
                             </p>
                             {!needsAttention(readiness.status) && (
@@ -202,7 +202,7 @@ export function ApplicationReadinessCard({ applicationUuid, canAct }: Props) {
                         </span>
                     </div>
 
-                    <div class="grid gap-3 p-4 sm:p-5">
+                    <div class="grid gap-2 sm:gap-3 p-4 sm:p-5">
                         <div class="flex flex-wrap items-center justify-between gap-3">
                             <label class="inline-flex cursor-pointer items-center gap-2 text-sm">
                                 <input
@@ -259,8 +259,8 @@ export function ApplicationReadinessCard({ applicationUuid, canAct }: Props) {
 
                         {showIntervention && readiness.intervention && (
                             <div class="rounded-xl border border-warning/40 bg-warning/5 p-4">
-                                <div class="mb-3 inline-flex items-center gap-2 text-sm font-semibold text-warning">
-                                    <AlertTriangle class="size-4 shrink-0" aria-hidden />
+                                <div class="mb-3 inline-flex items-center gap-2 text-xs sm:text-sm font-semibold text-warning">
+                                    <AlertTriangle class="size-3.5 sm:size-4 shrink-0" aria-hidden />
                                     Intervention requise
                                 </div>
 
@@ -269,7 +269,7 @@ export function ApplicationReadinessCard({ applicationUuid, canAct }: Props) {
                                         <p class="text-[11px] font-semibold uppercase tracking-wide text-warning/80">
                                             Erreur détectée
                                         </p>
-                                        <p class="mt-1 text-sm font-medium text-base-content">
+                                        <p class="mt-1 text-xs sm:text-sm font-medium text-base-content">
                                             {probeError
                                                 ?? readiness.intervention.summary
                                                 ?? 'Le domaine public ne répond pas correctement.'}
@@ -286,7 +286,7 @@ export function ApplicationReadinessCard({ applicationUuid, canAct }: Props) {
                                             Ce que vous devez faire
                                         </p>
                                         {actionTitle && (
-                                            <p class="mt-1 text-sm font-semibold text-base-content">
+                                            <p class="mt-1 text-xs sm:text-sm font-semibold text-base-content">
                                                 {actionTitle}
                                             </p>
                                         )}

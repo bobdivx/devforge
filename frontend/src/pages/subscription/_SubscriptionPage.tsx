@@ -58,7 +58,7 @@ export function SubscriptionPage({ bootstrap }: SubscriptionPageProps) {
                 {data && (
                     <>
                         <Card title="État du compte">
-                            <dl class="grid gap-3 text-sm">
+                            <dl class="grid gap-2 sm:gap-3 text-sm">
                                 <div class="flex items-center justify-between gap-3">
                                     <dt class="text-base-content/55">Abonnement actif</dt>
                                     <dd>

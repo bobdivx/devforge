@@ -31,7 +31,7 @@ export function ToastRegion({ toasts, onDismiss }: ToastRegionProps) {
 
                 return (
                     <div class={`alert min-h-10 max-w-sm border border-base-300 p-2 text-xs ${toneClasses[toast.tone]}`} role="status" key={toast.id}>
-                        <Icon class="size-4 shrink-0" aria-hidden />
+                        <Icon class="size-3.5 sm:size-4 shrink-0" aria-hidden />
                         <span>{toast.message}</span>
                         <button
                             class="btn btn-ghost btn-xs"

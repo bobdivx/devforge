@@ -110,7 +110,7 @@ export function SettingsPage({
                 title="Paramètres"
                 description="Équipe, organisation, infrastructure et configuration de l’instance."
             />
-            <div class="grid min-w-0 gap-5 lg:grid-cols-[14rem_minmax(0,1fr)] lg:items-start lg:gap-8">
+            <div class="grid min-w-0 gap-3 sm:gap-4 md:gap-5 lg:grid-cols-[14rem_minmax(0,1fr)] lg:items-start lg:gap-8">
                 <SettingsNav
                     activeTab={activeTab}
                     agentsEnabled={agentsEnabled}

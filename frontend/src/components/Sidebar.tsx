@@ -58,7 +58,7 @@ function NavLink({
             aria-current={active ? 'page' : undefined}
             onClick={(event) => onNavigate(event, item.path)}
         >
-            <Icon class="size-4 shrink-0" aria-hidden />
+            <Icon class="size-3.5 sm:size-4 shrink-0" aria-hidden />
             {!collapsed && <span class="truncate">{item.label}</span>}
         </a>
     );
@@ -76,7 +76,7 @@ function NavEntries({
     onNavigate: (event: MouseEvent, path: string) => void;
 }) {
     return (
-        <ul class="flex flex-col gap-4 p-0">
+        <ul class="flex flex-col gap-2.5 sm:gap-3 md:gap-4 p-0">
             {entries.map((entry) => {
                 if (entry.type === 'section') {
                     return (
@@ -232,12 +232,12 @@ export function Sidebar({
                         aria-label="Assistant de configuration"
                         onClick={(event) => onNavigate(event, '/onboarding')}
                     >
-                        <Sparkles class="size-4 shrink-0" aria-hidden />
+                        <Sparkles class="size-3.5 sm:size-4 shrink-0" aria-hidden />
                         {!collapsed && <span class="truncate">Assistant</span>}
                     </a>
                 )}
                 <button
-                    class="hidden h-10 min-h-10 items-center gap-3 rounded-xl px-3 text-xs text-[var(--devforge-sidebar-muted)] hover:bg-[var(--devforge-sidebar-hover)] hover:text-[var(--devforge-sidebar-fg)] lg:flex"
+                    class="hidden h-10 min-h-10 items-center gap-2 sm:gap-3 rounded-xl px-3 text-xs text-[var(--devforge-sidebar-muted)] hover:bg-[var(--devforge-sidebar-hover)] hover:text-[var(--devforge-sidebar-fg)] lg:flex"
                     type="button"
                     aria-label={collapsed ? 'Déployer la barre latérale' : 'Réduire la barre latérale'}
                     onClick={onToggleCollapsed}

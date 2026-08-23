@@ -78,9 +78,9 @@ export function DeploymentAgentCard({
 
     return (
         <section class="min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-base-300/70 px-3 py-3 sm:px-5 sm:py-4">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-base-300/70 px-2.5 sm:px-3 py-2.5 sm:py-3 sm:px-5 sm:py-4">
                 <div class="min-w-0">
-                    <p class="text-sm font-semibold">Agent IA</p>
+                    <p class="text-xs sm:text-sm font-semibold">Agent IA</p>
                     <p class="text-xs text-base-content/50">Correction et surveillance du déploiement</p>
                 </div>
                 <button
@@ -94,7 +94,7 @@ export function DeploymentAgentCard({
                 </button>
             </div>
 
-            <div class="grid min-w-0 gap-3 overflow-hidden p-3 sm:gap-4 sm:p-5">
+            <div class="grid min-w-0 gap-2 sm:gap-3 overflow-hidden p-3 sm:gap-2.5 sm:gap-3 md:gap-4 sm:p-5">
                 <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
                     {monitoring && (
                         <>
@@ -117,9 +117,9 @@ export function DeploymentAgentCard({
                             )}
 
                             {visibleRuns.length === 0 ? (
-                                <div class="grid gap-3 rounded-xl border border-dashed border-base-300 px-3 py-4 text-sm text-base-content/55 sm:px-4 sm:py-5">
+                                <div class="grid gap-2 sm:gap-3 rounded-xl border border-dashed border-base-300 px-3 py-4 text-sm text-base-content/55 sm:px-4 sm:py-5">
                                     <div class="flex items-start gap-3">
-                                        <Bot class="mt-0.5 size-5 shrink-0 text-base-content/35" aria-hidden />
+                                        <Bot class="mt-0.5 size-4 sm:size-5 shrink-0 text-base-content/35" aria-hidden />
                                         <p>
                                             {historyMode
                                                 ? 'Aucune intervention agent pour ce déploiement.'
@@ -166,7 +166,7 @@ export function DeploymentAgentCard({
 
                             {monitoring.redeployments.length > 0 && (
                                 <div class="min-w-0 overflow-hidden rounded-xl border border-primary/20 bg-primary/5 p-3 sm:p-4">
-                                    <p class="mb-2 text-sm font-semibold text-primary sm:mb-3">Redéploiements</p>
+                                    <p class="mb-2 text-xs sm:text-sm font-semibold text-primary sm:mb-3">Redéploiements</p>
                                     <ul class="grid min-w-0 gap-2">
                                         {monitoring.redeployments.map((deployment) => (
                                             <li class="min-w-0" key={deployment.uuid}>
@@ -212,11 +212,11 @@ function CorrectionSummaryBlock({
     onSelectDeployment?: (deploymentUuid: string) => void;
 }) {
     return (
-        <div class="mb-3 grid min-w-0 gap-3 overflow-hidden rounded-lg border border-base-300/60 bg-base-100 p-3">
+        <div class="mb-3 grid min-w-0 gap-2 sm:gap-3 overflow-hidden rounded-lg border border-base-300/60 bg-base-100 p-3">
             <div class="flex min-w-0 flex-wrap items-start justify-between gap-2">
                 <div class="min-w-0 flex-1 overflow-hidden">
                     <p class="text-xs font-semibold uppercase tracking-wide text-base-content/45">Résumé de correction</p>
-                    <p class="mt-1 break-words text-sm font-medium text-base-content">{correction.headline}</p>
+                    <p class="mt-1 break-words text-xs sm:text-sm font-medium text-base-content">{correction.headline}</p>
                     {correction.diagnosis && correction.diagnosis !== correction.headline && (
                         <p class="mt-1 break-words text-xs text-base-content/60">{correction.diagnosis}</p>
                     )}

@@ -227,7 +227,7 @@ function ResourceDetail({ type, uuid, canAct, onClose, onChanged }: {
                         <div class="grid gap-3">
                             <div class="flex flex-wrap items-center justify-between gap-2">
                                 <div>
-                                    <p class="text-sm font-semibold">{resource.name}</p>
+                                    <p class="text-xs sm:text-sm font-semibold">{resource.name}</p>
                                     <p class="font-mono text-[11px] text-base-content/45">{resource.uuid}</p>
                                 </div>
                                 <ResourceStatusIcon status={resourceStatusInput(resource)} />
@@ -608,7 +608,7 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                     )}
 
                     {healthSummary.total > 0 && (
-                        <div class="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div class="grid min-w-0 gap-2 sm:gap-3 sm:grid-cols-2 xl:grid-cols-4">
                             <StatCard label="Total" value={healthSummary.total} hint={labels[type]} />
                             <StatCard label="En ligne" value={healthSummary.running} tone="success" hint="Sains" />
                             <StatCard label="Attention" value={healthSummary.degraded} tone={healthSummary.degraded > 0 ? 'warning' : 'default'} hint="Dégradés" />
@@ -623,7 +623,7 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
                         emptyMessage={`Aucune ressource « ${labels[type].toLowerCase()} ».`}
                         onRetry={() => void query.reload()}
                     >
-                        <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        <div class="grid gap-2 sm:gap-3 md:grid-cols-2 xl:grid-cols-3">
                             {filtered.map((resource) => {
                                 const bootPhase = type === 'applications'
                                     ? bootPhaseForResource(resource.uuid, bootSequence.items, bootSequence.active)

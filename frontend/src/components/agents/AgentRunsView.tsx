@@ -122,12 +122,12 @@ export function AgentRunsView({ agent, initialRunUuid = null, onAgentUpdated }: 
     return (
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">
             {hasLiveRun && (
-                <div class="flex shrink-0 items-center gap-3 border-b border-success/30 bg-success/10 px-3 py-2.5 sm:px-4">
+                <div class="flex shrink-0 items-center gap-2 sm:gap-3 border-b border-success/30 bg-success/10 px-3 py-2.5 sm:px-4">
                     <span class="relative flex size-2.5 shrink-0">
                         <span class="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-75" />
                         <span class="relative inline-flex size-2.5 rounded-full bg-success" />
                     </span>
-                    <Activity class="size-4 shrink-0 text-success" aria-hidden />
+                    <Activity class="size-3.5 sm:size-4 shrink-0 text-success" aria-hidden />
                     <p class="min-w-0 flex-1 text-xs text-success">
                         <span class="font-semibold">Exécution en cours</span>
                         <span class="text-success/80"> — les logs se mettent à jour automatiquement.</span>
@@ -190,12 +190,12 @@ export function AgentRunsView({ agent, initialRunUuid = null, onAgentUpdated }: 
                             }}
                         />
                     ) : (
-                        <div class="flex h-full min-h-[16rem] flex-col items-center justify-center gap-4 px-6 py-12 text-center">
+                        <div class="flex h-full min-h-[16rem] flex-col items-center justify-center gap-2.5 sm:gap-3 md:gap-4 px-6 py-12 text-center">
                             <div class="grid size-14 place-items-center rounded-2xl border border-base-300 bg-base-200/60 text-base-content/40">
                                 <Zap class="size-7" aria-hidden />
                             </div>
                             <div class="max-w-sm">
-                                <p class="text-sm font-semibold text-base-content/85">Sélectionnez une exécution</p>
+                                <p class="text-xs sm:text-sm font-semibold text-base-content/85">Sélectionnez une exécution</p>
                                 <p class="mt-1.5 text-xs leading-relaxed text-base-content/50">
                                     Choisissez un run dans la liste pour consulter le résumé, la progression et les logs détaillés.
                                 </p>

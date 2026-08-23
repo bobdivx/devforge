@@ -40,7 +40,7 @@ export function DonutChart({ segments, size = 120, centerLabel }: DonutChartProp
                 })}
             </svg>
             {centerLabel && (
-                <span class="absolute text-sm font-semibold tabular-nums">{centerLabel}</span>
+                <span class="absolute text-xs sm:text-sm font-semibold tabular-nums">{centerLabel}</span>
             )}
         </div>
     );

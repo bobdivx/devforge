@@ -239,7 +239,7 @@ export function BotStudio({
                             );
                         })}
                     </div>
-                    <div class="grid gap-3 text-center">
+                    <div class="grid gap-2 sm:gap-3 text-center">
                         <h1 id={titleId} class="text-2xl font-semibold tracking-tight sm:text-3xl">
                             Donnez une mission à chaque Bot
                         </h1>
@@ -278,7 +278,7 @@ export function BotStudio({
                         <p class="text-sm text-base-content/55">Les Bots s&apos;appuient sur ces outils pour finir le travail.</p>
                     </div>
                     <label class="input input-bordered mx-auto flex h-12 w-full max-w-md items-center gap-2 rounded-full bg-base-300/70">
-                        <Search class="size-4 opacity-50" aria-hidden />
+                        <Search class="size-3.5 sm:size-4 opacity-50" aria-hidden />
                         <input
                             class="grow bg-transparent"
                             type="search"
@@ -340,7 +340,7 @@ export function BotStudio({
                 <div class="grid min-h-full lg:grid-cols-[16rem_minmax(0,1fr)]">
                     <aside class="hidden flex-col gap-6 border-r border-base-300/70 p-5 lg:flex">
                         <button
-                            class="flex items-center gap-3 rounded-2xl bg-base-300/60 px-3 py-2.5 text-left"
+                            class="flex items-center gap-2 sm:gap-3 rounded-2xl bg-base-300/60 px-3 py-2.5 text-left"
                             type="button"
                             onClick={() => {
                                 if (!isSubAgent) {
@@ -357,16 +357,16 @@ export function BotStudio({
                                 animate={false}
                                 decorative
                             />
-                            <span class="text-sm font-medium">
+                            <span class="text-xs sm:text-sm font-medium">
                                 {isSubAgent ? 'Nouveau sous-agent' : 'Créer votre premier Bot'}
                             </span>
                         </button>
                         <p class="px-1 text-xs text-base-content/45">Aucune conversation pour l&apos;instant</p>
-                        <div class="mt-auto flex items-center gap-3 px-1">
+                        <div class="mt-auto flex items-center gap-2 sm:gap-3 px-1">
                             <span class="grid size-8 place-items-center rounded-full bg-amber-400 text-xs font-bold text-neutral">
                                 {userName.slice(0, 1).toUpperCase()}
                             </span>
-                            <span class="truncate text-sm font-medium">{userName}</span>
+                            <span class="truncate text-xs sm:text-sm font-medium">{userName}</span>
                         </div>
                     </aside>
 
@@ -460,13 +460,13 @@ export function BotStudio({
 
                         {isSubAgent ? (
                             <div class="mx-auto grid w-full max-w-3xl gap-3">
-                                <h2 class="text-sm font-medium text-base-content/60">Spécialistes</h2>
+                                <h2 class="text-xs sm:text-sm font-medium text-base-content/60">Spécialistes</h2>
                                 <div class="grid gap-2 sm:grid-cols-3">
                                     {subPresets.map((preset) => (
                                         <button
                                             key={preset.id}
                                             type="button"
-                                            class="flex items-center gap-3 rounded-2xl border border-base-300 bg-base-100/40 px-3 py-3 text-left hover:border-primary/40"
+                                            class="flex items-center gap-2 sm:gap-3 rounded-2xl border border-base-300 bg-base-100/40 px-2.5 sm:px-3 py-2.5 sm:py-3 text-left hover:border-primary/40"
                                             onClick={() => setForm({
                                                 ...form,
                                                 type: preset.type,
@@ -476,7 +476,7 @@ export function BotStudio({
                                         >
                                             <BotCharacter name={preset.suggestedName} color={form.avatar_color} type={preset.type} size="sm" animate={false} decorative />
                                             <span class="min-w-0">
-                                                <span class="block truncate text-sm font-medium">{preset.label}</span>
+                                                <span class="block truncate text-xs sm:text-sm font-medium">{preset.label}</span>
                                                 <span class="block truncate text-[11px] text-base-content/55">{preset.description}</span>
                                             </span>
                                         </button>
@@ -485,13 +485,13 @@ export function BotStudio({
                             </div>
                         ) : (
                             <div class="mx-auto grid w-full max-w-3xl gap-3">
-                                <h2 class="text-sm font-medium text-base-content/60">Suggestions</h2>
+                                <h2 class="text-xs sm:text-sm font-medium text-base-content/60">Suggestions</h2>
                                 <div class="grid gap-2 sm:grid-cols-3">
                                     {BOT_SUGGESTIONS.map((suggestion) => (
                                         <button
                                             key={suggestion.id}
                                             type="button"
-                                            class="flex items-start gap-3 rounded-2xl border border-base-300 bg-base-100/40 px-3 py-3 text-left hover:border-primary/40"
+                                            class="flex items-start gap-2 sm:gap-3 rounded-2xl border border-base-300 bg-base-100/40 px-2.5 sm:px-3 py-2.5 sm:py-3 text-left hover:border-primary/40"
                                             onClick={() => setForm(applySuggestion(form, suggestion, parentAgent?.id))}
                                         >
                                             <BotCharacter
@@ -504,7 +504,7 @@ export function BotStudio({
                                                 decorative
                                             />
                                             <span class="min-w-0">
-                                                <span class="block truncate text-sm font-medium">{suggestion.name}</span>
+                                                <span class="block truncate text-xs sm:text-sm font-medium">{suggestion.name}</span>
                                                 <span class="mt-0.5 block text-[11px] leading-snug text-base-content/55">{suggestion.description}</span>
                                             </span>
                                         </button>

@@ -62,7 +62,7 @@ export function AgentsMcpSettingsPanel({ canEdit }: { canEdit: boolean }) {
 
     return (
         <div class="grid gap-4">
-            <label class="flex items-start gap-3 rounded-xl border border-base-300 bg-base-100 px-3 py-3">
+            <label class="flex items-start gap-2 sm:gap-3 rounded-xl border border-base-300 bg-base-100 px-2.5 sm:px-3 py-2.5 sm:py-3">
                 <input
                     class="checkbox checkbox-sm mt-0.5"
                     type="checkbox"
@@ -71,7 +71,7 @@ export function AgentsMcpSettingsPanel({ canEdit }: { canEdit: boolean }) {
                     onChange={(e) => setEnabled((e.target as HTMLInputElement).checked)}
                 />
                 <span>
-                    <span class="block text-sm font-medium">Client MCP dans la boucle agent</span>
+                    <span class="block text-xs sm:text-sm font-medium">Client MCP dans la boucle agent</span>
                     <span class="mt-0.5 block text-[11px] text-base-content/55">
                         Expose les outils distants comme <code class="text-[10px]">mcp__serveur__outil</code>.
                     </span>

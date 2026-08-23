@@ -33,13 +33,13 @@ function DeploymentList({
                 return (
                     <li key={deployment.uuid}>
                         <a
-                            class="flex items-start gap-3 rounded-xl border border-base-300/70 bg-base-200/40 px-3 py-2.5 transition-colors hover:border-primary/40 hover:bg-primary/5"
+                            class="flex items-start gap-2 sm:gap-3 rounded-xl border border-base-300/70 bg-base-200/40 px-3 py-2.5 transition-colors hover:border-primary/40 hover:bg-primary/5"
                             href={deploymentHref(deployment)}
                             onClick={onNavigate}
                         >
                             <DeploymentStatusIcon status={deployment.status} />
                             <div class="min-w-0 flex-1">
-                                <p class="truncate text-sm font-semibold text-base-content">
+                                <p class="truncate text-xs sm:text-sm font-semibold text-base-content">
                                     {deployment.application?.name ?? 'Application'}
                                 </p>
                                 <p class="mt-0.5 text-xs text-base-content/55">{parsed.shortLabel}</p>

@@ -286,7 +286,7 @@ export function AiProvidersSettings() {
         <div class="grid gap-4">
             <div class="toolbar-row">
                 <div>
-                    <h3 class="text-sm font-semibold">LLM providers</h3>
+                    <h3 class="text-xs sm:text-sm font-semibold">LLM providers</h3>
                     <p class="text-xs text-base-content/60">
                         {configuredCount} sur {PROVIDER_ORDER.length} types configurés. Plusieurs entrées possibles par type (ex. 2 Ollama).
                     </p>
@@ -309,13 +309,13 @@ export function AiProvidersSettings() {
                         <li key={type} class="border-b border-base-300 last:border-b-0">
                             <button
                                 type="button"
-                                class="flex w-full items-center gap-3 px-4 py-3 text-start hover:bg-base-200/40"
+                                class="flex w-full items-center gap-2 sm:gap-3 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 text-start hover:bg-base-200/40"
                                 aria-expanded={isOpen}
                                 onClick={() => setExpanded(isOpen ? null : type)}
                             >
-                                <Zap class="size-4 shrink-0 text-base-content/45" aria-hidden />
+                                <Zap class="size-3.5 sm:size-4 shrink-0 text-base-content/45" aria-hidden />
                                 <span class="min-w-0 flex-1">
-                                    <span class="block text-sm font-medium">{providerLabels[type]}</span>
+                                    <span class="block text-xs sm:text-sm font-medium">{providerLabels[type]}</span>
                                     <span class="block text-[11px] text-base-content/50">
                                         {rows.length === 0
                                             ? 'Aucune configuration'
@@ -334,7 +334,7 @@ export function AiProvidersSettings() {
                             </button>
 
                             {isOpen && (
-                                <div class="space-y-2 border-t border-base-300/70 bg-base-200/20 px-3 py-3 sm:px-4">
+                                <div class="space-y-2 border-t border-base-300/70 bg-base-200/20 px-2.5 sm:px-3 py-2.5 sm:py-3 sm:px-4">
                                     {rows.length === 0 ? (
                                         <div class="rounded-lg border border-dashed border-base-300 px-3 py-4 text-center">
                                             <p class="text-xs text-base-content/50">Pas encore configuré.</p>
@@ -360,12 +360,12 @@ export function AiProvidersSettings() {
                                     ) : rows.map((provider) => (
                                         <div
                                             key={provider.id}
-                                            class="rounded-xl border border-base-300 bg-base-100 px-3 py-3"
+                                            class="rounded-xl border border-base-300 bg-base-100 px-2.5 sm:px-3 py-2.5 sm:py-3"
                                         >
-                                            <div class="flex flex-col gap-3 sm:flex-row sm:items-start">
+                                            <div class="flex flex-col gap-2 sm:gap-3 sm:flex-row sm:items-start">
                                                 <div class="min-w-0 flex-1">
                                                     <div class="flex flex-wrap items-center gap-2">
-                                                        <p class="text-sm font-medium">{provider.name}</p>
+                                                        <p class="text-xs sm:text-sm font-medium">{provider.name}</p>
                                                         {provider.is_default && (
                                                             <span class="badge badge-xs border-primary/30 bg-primary/10 text-primary">Défaut</span>
                                                         )}
@@ -449,8 +449,8 @@ export function AiProvidersSettings() {
             {showForm && (
                 <form class="rounded-xl border border-primary/30 bg-base-100 p-4" onSubmit={handleSubmit}>
                     <HiddenUsernameField />
-                    <h4 class="mb-4 text-sm font-semibold">{isEditing ? 'Modifier le provider' : 'Nouveau provider'}</h4>
-                    <div class="grid gap-3 sm:grid-cols-2">
+                    <h4 class="mb-4 text-xs sm:text-sm font-semibold">{isEditing ? 'Modifier le provider' : 'Nouveau provider'}</h4>
+                    <div class="grid gap-2 sm:gap-3 sm:grid-cols-2">
                         <label class="grid gap-1 text-xs">
                             <span class="font-medium">Type de provider</span>
                             <select

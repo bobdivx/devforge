@@ -42,9 +42,9 @@ function MemberRow({
 
     return (
         <>
-            <li class="flex flex-col gap-3 border-b border-base-300/50 py-3 last:border-b-0 sm:flex-row sm:items-center sm:justify-between">
+            <li class="flex flex-col gap-2 sm:gap-3 border-b border-base-300/50 py-3 last:border-b-0 sm:flex-row sm:items-center sm:justify-between">
                 <div class="min-w-0">
-                    <p class="truncate text-sm font-medium">{member.name}</p>
+                    <p class="truncate text-xs sm:text-sm font-medium">{member.name}</p>
                     <p class="truncate text-xs text-base-content/55">{member.email}</p>
                 </div>
                 <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">

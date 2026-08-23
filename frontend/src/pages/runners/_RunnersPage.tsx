@@ -472,7 +472,7 @@ export function RunnersPage() {
                     : null}
                 onRetry={() => void refreshAll()}
             >
-                <div class="grid gap-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+                <div class="grid gap-2.5 sm:gap-3 md:gap-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
                     <Card
                         title={listFilter === 'gaps' ? 'Applications' : 'Runners'}
                         eyebrow={listFilter === 'gaps'
@@ -490,7 +490,7 @@ export function RunnersPage() {
                                         <li key={app.uuid} class="flex flex-col gap-2 px-1 py-3">
                                             <div class="flex items-start justify-between gap-2">
                                                 <div class="min-w-0">
-                                                    <p class="truncate text-sm font-medium">{app.name}</p>
+                                                    <p class="truncate text-xs sm:text-sm font-medium">{app.name}</p>
                                                     <p class="truncate font-mono text-[11px] text-base-content/45">{app.repo_key}</p>
                                                 </div>
                                                 <StatusBadge label="sans runner" tone="warning" />
@@ -543,7 +543,7 @@ export function RunnersPage() {
                                                 onClick={() => setSelectedId(runner.id)}
                                             >
                                                 <span class="flex items-center justify-between gap-2">
-                                                    <span class="truncate text-sm font-medium">{runner.name}</span>
+                                                    <span class="truncate text-xs sm:text-sm font-medium">{runner.name}</span>
                                                     <span class="flex shrink-0 gap-1">
                                                         {gh && <StatusBadge label={gh} tone={runnerStateTone(gh)} />}
                                                         <StatusBadge label={runner.state || 'unknown'} tone={runnerStateTone(runner.state)} />
@@ -668,7 +668,7 @@ export function RunnersPage() {
                                         error={detail.error && !detail.data ? detail.error : null}
                                         onRetry={() => void detail.reload()}
                                     >
-                                        <dl class="grid gap-3 text-xs sm:grid-cols-2">
+                                        <dl class="grid gap-2 sm:gap-3 text-xs sm:grid-cols-2">
                                             <div>
                                                 <dt class="text-base-content/45">Docker</dt>
                                                 <dd class="mt-1">
@@ -764,11 +764,11 @@ export function RunnersPage() {
                                                         <li key={app.uuid} class="flex items-stretch gap-2">
                                                             <button
                                                                 type="button"
-                                                                class="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-xl border border-base-300/70 bg-base-200/30 px-3 py-2 text-start transition-colors hover:border-primary/40 hover:bg-primary/5"
+                                                                class="flex min-w-0 flex-1 items-center justify-between gap-2 sm:gap-3 rounded-xl border border-base-300/70 bg-base-200/30 px-3 py-2 text-start transition-colors hover:border-primary/40 hover:bg-primary/5"
                                                                 onClick={() => navigateTo(applicationPath(app.uuid))}
                                                             >
                                                                 <span class="min-w-0">
-                                                                    <span class="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+                                                                    <span class="flex flex-wrap items-center gap-1.5 text-xs sm:text-sm font-medium">
                                                                         <Link2 class="size-3.5 shrink-0 text-primary" aria-hidden />
                                                                         <span class="truncate">{app.name}</span>
                                                                         {runnerRoleLabel(app.role) && (
@@ -877,16 +877,16 @@ export function RunnersPage() {
                                 />
 
                                 <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-                                    <div class="toolbar-row border-b border-base-300/70 px-5 py-4">
+                                    <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-4 md:px-5 py-3 sm:py-4">
                                         <button
                                             type="button"
                                             class="flex min-w-0 flex-1 items-center gap-2 text-start"
                                             aria-expanded={logsOpen}
                                             onClick={() => setLogsOpen((current) => !current)}
                                         >
-                                            <Terminal class="size-4 text-base-content/45" aria-hidden />
+                                            <Terminal class="size-3.5 sm:size-4 text-base-content/45" aria-hidden />
                                             <div class="min-w-0">
-                                                <p class="text-sm font-semibold">Logs Docker</p>
+                                                <p class="text-xs sm:text-sm font-semibold">Logs Docker</p>
                                                 <p class="text-xs text-base-content/50">
                                                     {logsOpen
                                                         ? (logsRefreshing

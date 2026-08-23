@@ -139,7 +139,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                 onNavigate(e as unknown as MouseEvent, detailPath);
             }}
         >
-            <div class="card-body gap-4 p-4">
+            <div class="card-body gap-2.5 sm:gap-3 md:gap-4 p-4">
                 <div class="flex items-start gap-3">
                     <AgentAvatar
                         type={agent.type}
@@ -151,7 +151,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-2">
                             <a
-                                class="truncate text-sm font-semibold hover:underline"
+                                class="truncate text-xs sm:text-sm font-semibold hover:underline"
                                 href={routeHref(detailPath)}
                                 onClick={(e) => onNavigate(e as unknown as MouseEvent, detailPath)}
                             >
@@ -224,7 +224,7 @@ export function AgentCard({ agent, onNavigate, onRefresh }: Props) {
                     </>
                 )}
 
-                <div class="flex flex-col gap-3 border-t border-base-300 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                <div class="flex flex-col gap-2 sm:gap-3 border-t border-base-300 pt-3 sm:flex-row sm:items-center sm:justify-between">
                     <div class="text-[11px] text-base-content/50">
                         {scheduleLabel(agent)}
                         <span class="ms-2 before:me-1 before:content-['·']">

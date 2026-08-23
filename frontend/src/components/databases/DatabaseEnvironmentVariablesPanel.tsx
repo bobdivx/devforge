@@ -310,12 +310,12 @@ export function DatabaseEnvironmentVariablesPanel({
     };
 
     return (
-        <section class="grid min-w-0 gap-4 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 p-5 shadow-sm">
+        <section class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 p-5 shadow-sm">
             <div class="toolbar-row">
                 <div class="min-w-0 grid flex-1 gap-1">
                     <div class="flex items-center gap-2">
-                        <Braces class="size-4 text-base-content/45" aria-hidden />
-                        <p class="text-sm font-semibold">Variables d’environnement</p>
+                        <Braces class="size-3.5 sm:size-4 text-base-content/45" aria-hidden />
+                        <p class="text-xs sm:text-sm font-semibold">Variables d’environnement</p>
                     </div>
                     <p class="text-xs text-base-content/50">
                         Variables injectées au démarrage de {resourceLabel}.
@@ -419,7 +419,7 @@ export function DatabaseEnvironmentVariablesPanel({
             {formOpen && (
                 <div class="fixed inset-0 z-50 grid place-items-center bg-base-300/50 p-4 backdrop-blur-sm">
                     <div class="w-full max-w-lg rounded-2xl border border-base-300/70 bg-base-100 p-5 shadow-xl">
-                        <h3 class="text-base font-semibold">
+                        <h3 class="text-sm sm:text-base font-semibold">
                             {editing ? `Modifier ${editing.key}` : 'Nouvelle variable'}
                         </h3>
                         <p class="mt-1 text-xs text-base-content/55">
@@ -464,7 +464,7 @@ export function DatabaseEnvironmentVariablesPanel({
                                     />
                                     {loadingValue && (
                                         <span class="absolute inset-y-0 right-3 flex items-center text-base-content/50">
-                                            <LoaderCircle class="size-4 animate-spin" aria-hidden />
+                                            <LoaderCircle class="size-3.5 sm:size-4 animate-spin" aria-hidden />
                                             <span class="sr-only">Chargement de la valeur…</span>
                                         </span>
                                     )}
@@ -483,7 +483,7 @@ export function DatabaseEnvironmentVariablesPanel({
                                 />
                             </label>
 
-                            <div class="flex flex-wrap gap-3 text-xs">
+                            <div class="flex flex-wrap gap-2 sm:gap-3 text-xs">
                                 {(['is_runtime', 'is_multiline', 'is_literal'] as const).map((flag) => (
                                     <label class="flex items-center gap-2" key={flag}>
                                         <input

@@ -72,7 +72,7 @@ export function TagsPage({ path, permissions }: TagsPageProps) {
                                 key={tag.name}
                                 onClick={() => navigateTo(`/tags/${encodeURIComponent(tag.name)}`)}
                             >
-                                <p class="truncate text-sm font-semibold">{tag.name}</p>
+                                <p class="truncate text-xs sm:text-sm font-semibold">{tag.name}</p>
                                 <p class="mt-2 text-xs text-base-content/55">
                                     {tag.applications_count} application(s) · {tag.services_count} service(s)
                                 </p>

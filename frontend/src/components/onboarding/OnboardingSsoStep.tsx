@@ -24,7 +24,7 @@ export function OnboardingSsoStep({ canEdit, onSkip, onContinue, onBack }: Onboa
     return (
         <Card title="SSO Pocket ID" eyebrow="Identité">
             <div class="mb-3 flex items-center gap-2 text-sm text-base-content/65">
-                <KeyRound class="size-4 text-primary" aria-hidden />
+                <KeyRound class="size-3.5 sm:size-4 text-primary" aria-hidden />
                 <span>DevForge démarre Pocket ID tout seul — rien à installer.</span>
             </div>
             <DataState
@@ -129,7 +129,7 @@ function OnboardingSsoForm({
                     Indiquez d’abord un domaine (étape précédente) pour que DevForge publie Pocket ID en HTTPS.
                 </p>
             )}
-            <label class="flex items-center justify-between gap-3 rounded-xl border border-base-300/70 px-3 py-2 text-sm">
+            <label class="flex items-center justify-between gap-2 sm:gap-3 rounded-xl border border-base-300/70 px-3 py-2 text-sm">
                 <span>
                     Protéger par défaut les apps sans comptes
                     <span class="mt-0.5 block text-xs text-base-content/55">Barrière Pocket ID pour les sites sans login. Les apps avec utilisateurs gardent leur page publique.</span>
@@ -142,7 +142,7 @@ function OnboardingSsoForm({
                     onChange={(event) => setProtectApps(event.currentTarget.checked)}
                 />
             </label>
-            <label class="flex items-center justify-between gap-3 rounded-xl border border-base-300/70 px-3 py-2 text-sm">
+            <label class="flex items-center justify-between gap-2 sm:gap-3 rounded-xl border border-base-300/70 px-3 py-2 text-sm">
                 <span>Masquer la connexion locale</span>
                 <input
                     class="toggle toggle-sm"

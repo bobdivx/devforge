@@ -25,7 +25,7 @@ export function InstanceUpgradeStepper({ currentStep }: InstanceUpgradeStepperPr
                                 }`}
                             >
                                 {state === 'done' && <Check class="size-4" aria-hidden />}
-                                {state === 'current' && <Loader2 class="size-4 animate-spin" aria-hidden />}
+                                {state === 'current' && <Loader2 class="size-3.5 sm:size-4 animate-spin" aria-hidden />}
                                 {state === 'pending' && <span class="text-xs font-medium">{step.id}</span>}
                             </div>
                             <span

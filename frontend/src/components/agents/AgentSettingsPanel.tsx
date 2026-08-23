@@ -158,10 +158,10 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
     };
 
     return (
-        <div class="grid gap-4 p-4">
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4 p-4">
             {error && <p class="rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">{error}</p>}
 
-            <label class="flex items-center justify-between gap-3 rounded-xl border border-base-300/70 px-3 py-2 text-sm">
+            <label class="flex items-center justify-between gap-2 sm:gap-3 rounded-xl border border-base-300/70 px-3 py-2 text-sm">
                 <span class="grid gap-0.5">
                     <span class="flex items-center gap-1.5 font-medium">
                         <Star class={`size-3.5 ${agent.is_primary_chat ? 'fill-current text-primary' : ''}`} aria-hidden />
@@ -184,7 +184,7 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
 
             {outcome === 'completed' && !isTracking && (
                 <p class="flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs text-success" role="status">
-                    <CheckCircle2 class="size-4 shrink-0" aria-hidden />
+                    <CheckCircle2 class="size-3.5 sm:size-4 shrink-0" aria-hidden />
                     {activeRun?.summary?.trim() || 'Exécution terminée avec succès.'}
                 </p>
             )}
@@ -230,7 +230,7 @@ export function AgentSettingsPanel({ agent, onUpdated, onClose }: Props) {
             <AgentSubAgentsPanel agent={agent} onUpdated={onUpdated} />
 
             <div class="grid gap-3">
-                <div class="grid justify-items-center gap-3 rounded-2xl border border-base-300/70 bg-base-200/40 px-3 py-4">
+                <div class="grid justify-items-center gap-2 sm:gap-3 rounded-2xl border border-base-300/70 bg-base-200/40 px-3 py-4">
                     <BotCharacter
                         name={form.name || agent.name}
                         color={form.avatar_color ?? agent.avatar_color}

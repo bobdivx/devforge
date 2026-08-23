@@ -35,12 +35,12 @@ function ApplicationQuickCard({
 }) {
     return (
         <a
-            class="flex min-w-0 items-center justify-between gap-3 rounded-2xl bg-base-200/80 px-4 py-3.5 transition hover:bg-base-200"
+            class="flex min-w-0 items-center justify-between gap-2 sm:gap-3 rounded-2xl bg-base-200/80 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3.5 transition hover:bg-base-200"
             href={routeHref(applicationPath(application.uuid))}
             onClick={(event) => onNavigate(event, applicationPath(application.uuid))}
         >
             <div class="min-w-0">
-                <p class="truncate text-sm font-semibold">{application.name}</p>
+                <p class="truncate text-xs sm:text-sm font-semibold">{application.name}</p>
                 <p class="truncate text-xs text-base-content/45">Application</p>
             </div>
             <ResourceStatusIcon status={application.status} />
@@ -86,7 +86,7 @@ export function OverviewPage({ userName = '' }: OverviewPageProps) {
             />
 
             {query.loading && (
-                <div class="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div class="grid min-w-0 gap-2 sm:gap-3 sm:grid-cols-2 xl:grid-cols-4">
                     {Array.from({ length: 4 }).map((_, index) => <SkeletonCard key={index} />)}
                 </div>
             )}
@@ -94,7 +94,7 @@ export function OverviewPage({ userName = '' }: OverviewPageProps) {
             <DataState loading={false} error={query.error} onRetry={() => void query.reload()}>
                 {overview && health && (
                     <div class="grid min-w-0 gap-6">
-                        <div class="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                        <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 sm:grid-cols-2 xl:grid-cols-4">
                             <StatCard
                                 label="Santé plateforme"
                                 value={`${health.score}%`}
@@ -140,7 +140,7 @@ export function OverviewPage({ userName = '' }: OverviewPageProps) {
                             )}
                         </div>
 
-                        <div class="grid min-w-0 gap-4 xl:grid-cols-3">
+                        <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 xl:grid-cols-3">
                             <Card title="Disponibilité" eyebrow="Pipeline" class="min-w-0 xl:col-span-2">
                                 <div class="flex min-w-0 flex-col gap-6 lg:flex-row lg:items-center">
                                     <DonutChart
@@ -153,7 +153,7 @@ export function OverviewPage({ userName = '' }: OverviewPageProps) {
                                         ]}
                                     />
                                     <div class="grid min-w-0 flex-1 gap-4">
-                                        <div class="grid gap-3 sm:grid-cols-3">
+                                        <div class="grid gap-2 sm:gap-3 sm:grid-cols-3">
                                             <p class="text-sm"><span class="font-semibold tabular-nums">{health.running}</span> <span class="text-base-content/50">en ligne</span></p>
                                             <p class="text-sm"><span class="font-semibold tabular-nums">{health.degraded}</span> <span class="text-base-content/50">dégradées</span></p>
                                             <p class="text-sm"><span class="font-semibold tabular-nums">{health.stopped}</span> <span class="text-base-content/50">arrêtées</span></p>
@@ -187,7 +187,7 @@ export function OverviewPage({ userName = '' }: OverviewPageProps) {
 
                             <Card title="Applications" eyebrow="État" class="min-w-0">
                                 {applications.length === 0 ? (
-                                    <div class="grid gap-3 py-6 text-center">
+                                    <div class="grid gap-2 sm:gap-3 py-6 text-center">
                                         <p class="text-sm text-base-content/55">Aucune application dans cette équipe.</p>
                                         <a class="btn btn-primary btn-sm mx-auto" href={routeHref('/applications')} onClick={(event) => onNavigate(event, '/applications')}>
                                             <Boxes class="size-3.5" aria-hidden />
@@ -204,7 +204,7 @@ export function OverviewPage({ userName = '' }: OverviewPageProps) {
                             </Card>
                         </div>
 
-                        <div class="grid min-w-0 gap-4 xl:grid-cols-2">
+                        <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 xl:grid-cols-2">
                             <Card title="Déploiements récents" eyebrow="Activité" class="min-w-0">
                                 {overview.recent_deployments.length === 0 ? (
                                     <p class="py-4 text-center text-xs text-base-content/50">Aucun déploiement récent.</p>
@@ -238,7 +238,7 @@ export function OverviewPage({ userName = '' }: OverviewPageProps) {
                                     class="min-w-0"
                                 >
                                     {overview.agent_activity.length === 0 ? (
-                                        <div class="grid gap-3 py-6 text-center">
+                                        <div class="grid gap-2 sm:gap-3 py-6 text-center">
                                             <p class="text-sm text-base-content/55">Aucune activité récente.</p>
                                             <a class="btn btn-ghost btn-sm mx-auto border border-base-300/80" href={routeHref('/agents')} onClick={(event) => onNavigate(event, '/agents')}>
                                                 <Bot class="size-3.5" aria-hidden />
@@ -249,7 +249,7 @@ export function OverviewPage({ userName = '' }: OverviewPageProps) {
                                         <>
                                             <ul class="min-w-0 divide-y divide-base-300/70">
                                                 {overview.agent_activity.map((activity) => (
-                                                    <li class="flex min-w-0 items-start gap-3 py-3 sm:items-center" key={activity.uuid}>
+                                                    <li class="flex min-w-0 items-start gap-2 sm:gap-3 py-3 sm:items-center" key={activity.uuid}>
                                                         {activity.agent && (
                                                             <AgentAvatar
                                                                 type={activity.agent.type}
@@ -262,7 +262,7 @@ export function OverviewPage({ userName = '' }: OverviewPageProps) {
                                                             />
                                                         )}
                                                         <div class="min-w-0 flex-1 overflow-hidden">
-                                                            <p class="truncate text-sm font-medium">{activity.agent?.name ?? 'Agent'}</p>
+                                                            <p class="truncate text-xs sm:text-sm font-medium">{activity.agent?.name ?? 'Agent'}</p>
                                                             <p class="line-clamp-2 break-words text-xs text-base-content/55 sm:line-clamp-1">
                                                                 {activity.summary || 'Exécution sans résumé'}
                                                             </p>

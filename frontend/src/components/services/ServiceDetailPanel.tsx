@@ -120,7 +120,7 @@ export function ServiceDetailPanel({
                 </button>
             </div>
 
-            <div class="flex flex-col lg:flex-row gap-4 lg:gap-6 mt-4">
+            <div class="flex flex-col lg:flex-row gap-2.5 sm:gap-3 md:gap-4 lg:gap-6 mt-4">
                 <div class="lg:w-56 shrink-0">
                     <Tabs
                         active={activeTab}
@@ -133,7 +133,7 @@ export function ServiceDetailPanel({
 
             <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
                 {resource && activeTab === 'overview' && (
-                    <div class="devforge-card grid gap-4 p-5">
+                    <div class="devforge-card grid gap-2.5 sm:gap-3 md:gap-4 p-5">
                         <div class="flex flex-wrap items-start justify-between gap-3">
                             <div class="flex min-w-0 items-start gap-3">
                                 <div class="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">

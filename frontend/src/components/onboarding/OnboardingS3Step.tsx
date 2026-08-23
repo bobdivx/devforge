@@ -54,11 +54,11 @@ export function OnboardingS3Step({ canManage, onSkip, onConnected }: OnboardingS
                 {storages.length > 0 && (
                     <ul class="mt-3 divide-y divide-base-300/70">
                         {storages.map((storage) => (
-                            <li class="flex items-center justify-between gap-3 py-3" key={storage.uuid}>
+                            <li class="flex items-center justify-between gap-2 sm:gap-3 py-3" key={storage.uuid}>
                                 <div class="min-w-0">
                                     <div class="flex items-center gap-2">
-                                        <Cloud class="size-4 text-primary" aria-hidden />
-                                        <p class="truncate text-sm font-semibold">{storage.name}</p>
+                                        <Cloud class="size-3.5 sm:size-4 text-primary" aria-hidden />
+                                        <p class="truncate text-xs sm:text-sm font-semibold">{storage.name}</p>
                                         <StatusBadge
                                             label={storage.is_usable ? 'Validé' : 'Enregistré'}
                                             tone={storage.is_usable ? 'success' : 'neutral'}
@@ -90,7 +90,7 @@ export function OnboardingS3Step({ canManage, onSkip, onConnected }: OnboardingS
                             onInput={(event) => setForm({ ...form, name: event.currentTarget.value })}
                         />
                     </label>
-                    <div class="grid gap-3 sm:grid-cols-2">
+                    <div class="grid gap-2 sm:gap-3 sm:grid-cols-2">
                         <label class="grid gap-1 text-sm">
                             <span class="font-medium">Région</span>
                             <input
@@ -119,7 +119,7 @@ export function OnboardingS3Step({ canManage, onSkip, onConnected }: OnboardingS
                             onInput={(event) => setForm({ ...form, endpoint: event.currentTarget.value })}
                         />
                     </label>
-                    <div class="grid gap-3 sm:grid-cols-2">
+                    <div class="grid gap-2 sm:gap-3 sm:grid-cols-2">
                         <label class="grid gap-1 text-sm">
                             <span class="font-medium">Access Key</span>
                             <input

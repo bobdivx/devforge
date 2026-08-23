@@ -24,7 +24,7 @@ export function TeamSwitcher({
     if (compact) {
         return (
             <div class="grid h-8 place-items-center" title={currentTeam.name} aria-label={`Équipe active : ${currentTeam.name}`}>
-                <Users class="size-4 text-base-content/60" aria-hidden />
+                <Users class="size-3.5 sm:size-4 text-base-content/60" aria-hidden />
             </div>
         );
     }
@@ -67,7 +67,7 @@ export function TeamSwitcher({
                         <Users class="size-4" aria-hidden />
                     </div>
                     <div class="min-w-0">
-                        <p class="text-sm font-semibold">Équipe active</p>
+                        <p class="text-xs sm:text-sm font-semibold">Équipe active</p>
                         <p class="text-xs text-base-content/55">
                             {teams.length < 2
                                 ? 'Une seule équipe disponible sur cette instance.'

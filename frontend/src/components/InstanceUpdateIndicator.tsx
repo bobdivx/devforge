@@ -167,12 +167,12 @@ export function InstanceUpdateIndicator({ enabled, onReload, checkHealth }: Inst
                         }`}
                         >
                             {phase === 'complete' ? (
-                                <CheckCircle2 class="size-5 shrink-0 text-success" aria-hidden />
+                                <CheckCircle2 class="size-4 sm:size-5 shrink-0 text-success" aria-hidden />
                             ) : (
-                                <Loader2 class="size-5 shrink-0 animate-spin text-warning" aria-hidden />
+                                <Loader2 class="size-4 sm:size-5 shrink-0 animate-spin text-warning" aria-hidden />
                             )}
                             <div class="min-w-0">
-                                <p class="text-sm font-medium">{message}</p>
+                                <p class="text-xs sm:text-sm font-medium">{message}</p>
                                 <p class="font-mono text-xs text-base-content/55">
                                     Temps écoulé : {formatInstanceUpgradeElapsed(elapsedSeconds)}
                                 </p>
@@ -191,8 +191,8 @@ export function InstanceUpdateIndicator({ enabled, onReload, checkHealth }: Inst
                 )}
 
                 {phase === 'error' && (
-                    <div class="flex items-start gap-3 rounded-xl border border-error/30 bg-error/10 p-3 text-error">
-                        <AlertTriangle class="size-5 shrink-0" aria-hidden />
+                    <div class="flex items-start gap-2 sm:gap-3 rounded-xl border border-error/30 bg-error/10 p-3 text-error">
+                        <AlertTriangle class="size-4 sm:size-5 shrink-0" aria-hidden />
                         <div class="grid gap-1 text-sm">
                             <p>{message ?? error ?? 'La mise à jour a échoué.'}</p>
                             <p class="text-base-content/60">

@@ -198,10 +198,10 @@ export function InstanceBackupPanel({ compact = false }: Props) {
             )}
 
             {notice && !backupTracker.isTracking && (
-                <div class="rounded-xl border border-success/30 bg-success/10 px-4 py-3 text-sm text-success">{notice}</div>
+                <div class="rounded-xl border border-success/30 bg-success/10 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 text-sm text-success">{notice}</div>
             )}
             {(error || backupTracker.error) && (
-                <div class="rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">{error ?? backupTracker.error}</div>
+                <div class="rounded-xl border border-error/30 bg-error/10 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 text-sm text-error">{error ?? backupTracker.error}</div>
             )}
 
             <DataState loading={settingsQuery.loading} error={settingsQuery.error} onRetry={() => void settingsQuery.reload()}>
@@ -258,7 +258,7 @@ export function InstanceBackupPanel({ compact = false }: Props) {
                             <div class={`grid gap-4 ${compact ? '' : 'md:grid-cols-2'}`}>
                                 <div class="rounded-2xl border border-base-300/70 bg-base-100 p-4 shadow-sm">
                                     <div class="mb-4 flex items-center gap-2">
-                                        <Database class="size-5 text-primary" aria-hidden />
+                                        <Database class="size-4 sm:size-5 text-primary" aria-hidden />
                                         <h3 class="font-semibold">Base d’instance</h3>
                                     </div>
                                     <div class="grid gap-2 text-sm">
@@ -297,7 +297,7 @@ export function InstanceBackupPanel({ compact = false }: Props) {
                                 <div class="rounded-2xl border border-base-300/70 bg-base-100 p-4 shadow-sm">
                                     <div class="mb-4 flex items-center justify-between gap-2">
                                         <div class="flex items-center gap-2">
-                                            <Save class="size-5 text-primary" aria-hidden />
+                                            <Save class="size-4 sm:size-5 text-primary" aria-hidden />
                                             <h3 class="font-semibold">Planification</h3>
                                         </div>
                                         {settings.backup && (

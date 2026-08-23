@@ -39,7 +39,7 @@ export function ServerDestinationsPanel({ serverUuid }: ServerDestinationsPanelP
                         >
                             <div class="mb-2 flex items-start justify-between gap-2">
                                 <div class="min-w-0">
-                                    <p class="truncate text-sm font-semibold">{destination.name}</p>
+                                    <p class="truncate text-xs sm:text-sm font-semibold">{destination.name}</p>
                                     <p class="font-mono text-[11px] text-base-content/45">{destination.network}</p>
                                 </div>
                                 <StatusBadge label={destination.type === 'swarm' ? 'Swarm' : 'Standalone'} />

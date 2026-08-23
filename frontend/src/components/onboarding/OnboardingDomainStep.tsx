@@ -83,7 +83,7 @@ export function OnboardingDomainStep({ canEdit, onBack, onSaved }: OnboardingDom
             </p>
             <DataState loading={query.loading && !initialized} error={query.error} onRetry={() => void query.reload()}>
                 <fieldset class="mt-4 grid gap-2">
-                    <legend class="mb-1 text-sm font-medium">Avez-vous un domaine pour toutes vos applications ?</legend>
+                    <legend class="mb-1 text-xs sm:text-sm font-medium">Avez-vous un domaine pour toutes vos applications ?</legend>
                     <label class={`flex cursor-pointer items-start gap-3 rounded-2xl border p-3 transition ${
                         mode === 'none' ? 'border-primary/40 bg-primary/5' : 'border-base-300/70'
                     }`}
@@ -97,7 +97,7 @@ export function OnboardingDomainStep({ canEdit, onBack, onSaved }: OnboardingDom
                             onChange={() => setMode('none')}
                         />
                         <span class="grid min-w-0 gap-1">
-                            <span class="text-sm font-semibold">Non, pas pour le moment</span>
+                            <span class="text-xs sm:text-sm font-semibold">Non, pas pour le moment</span>
                             <span class="text-xs text-base-content/55">
                                 Les apps recevront une adresse temporaire (sslip.io) tant qu’aucun domaine n’est configuré.
                             </span>
@@ -116,7 +116,7 @@ export function OnboardingDomainStep({ canEdit, onBack, onSaved }: OnboardingDom
                             onChange={() => setMode('custom')}
                         />
                         <span class="grid min-w-0 gap-1">
-                            <span class="text-sm font-semibold">Oui, j’ai un nom de domaine</span>
+                            <span class="text-xs sm:text-sm font-semibold">Oui, j’ai un nom de domaine</span>
                             <span class="text-xs text-base-content/55">
                                 Exemple : exemple.com ou apps.maison.local
                             </span>
@@ -125,8 +125,8 @@ export function OnboardingDomainStep({ canEdit, onBack, onSaved }: OnboardingDom
                 </fieldset>
                 {mode === 'custom' && (
                     <label class="mt-3 grid gap-1.5">
-                        <span class="flex items-center gap-2 text-sm font-medium">
-                            <Globe class="size-4 text-primary" aria-hidden />
+                        <span class="flex items-center gap-2 text-xs sm:text-sm font-medium">
+                            <Globe class="size-3.5 sm:size-4 text-primary" aria-hidden />
                             Domaine des applications
                         </span>
                         <input

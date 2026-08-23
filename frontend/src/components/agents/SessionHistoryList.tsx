@@ -74,7 +74,7 @@ export function SessionHistoryList({
             <div class="min-h-0 flex-1 overflow-y-auto">
                 {filtered.length === 0 ? (
                     <div class="px-6 py-8 text-center">
-                        <p class="text-sm font-medium text-base-content/80">Aucune conversation</p>
+                        <p class="text-xs sm:text-sm font-medium text-base-content/80">Aucune conversation</p>
                         <p class="mt-1 text-xs text-base-content/50">
                             {query.trim() !== ''
                                 ? 'Aucun résultat pour cette recherche.'
@@ -106,7 +106,7 @@ export function SessionHistoryList({
                                             decorative
                                         />
                                         <div class="min-w-0 flex-1">
-                                            <p class="truncate text-sm font-medium">{session.title}</p>
+                                            <p class="truncate text-xs sm:text-sm font-medium">{session.title}</p>
                                             <p class="mt-0.5 truncate text-[11px] text-base-content/50">
                                                 {session.is_legacy ? 'Partagé · ' : ''}
                                                 {sessionPreview(session)}
@@ -142,7 +142,7 @@ export function SessionHistoryList({
                 {onOpenPlugins && (
                     <button
                         type="button"
-                        class="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left text-sm hover:bg-base-200/70"
+                        class="flex w-full items-center gap-2 sm:gap-3 rounded-xl px-2 py-2 text-left text-sm hover:bg-base-200/70"
                         onClick={onOpenPlugins}
                     >
                         <span class="grid size-8 place-items-center rounded-lg bg-base-300 text-base-content/70">
@@ -151,11 +151,11 @@ export function SessionHistoryList({
                         Plugins
                     </button>
                 )}
-                <div class="flex items-center gap-3 px-2 py-2">
+                <div class="flex items-center gap-2 sm:gap-3 px-2 py-2">
                     <span class="grid size-8 place-items-center rounded-full bg-teal-500 text-xs font-bold text-neutral">
                         {userName.trim().slice(0, 1).toUpperCase() || 'V'}
                     </span>
-                    <span class="truncate text-sm font-medium">{userName}</span>
+                    <span class="truncate text-xs sm:text-sm font-medium">{userName}</span>
                 </div>
             </div>
         </div>

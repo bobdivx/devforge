@@ -72,10 +72,10 @@ export function OnboardingGithubStep({ canManage, onSkip, onConnected }: Onboard
                 {pending.length > 0 && (
                     <ul class="mt-3 divide-y divide-base-300/70">
                         {pending.map((app) => (
-                            <li class="flex flex-wrap items-center justify-between gap-3 py-3" key={app.uuid}>
+                            <li class="flex flex-wrap items-center justify-between gap-2 sm:gap-3 py-3" key={app.uuid}>
                                 <div class="flex items-center gap-2">
-                                    <FolderGit2 class="size-4 text-primary" aria-hidden />
-                                    <p class="text-sm font-semibold">{app.display_name ?? app.name}</p>
+                                    <FolderGit2 class="size-3.5 sm:size-4 text-primary" aria-hidden />
+                                    <p class="text-xs sm:text-sm font-semibold">{app.display_name ?? app.name}</p>
                                     <StatusBadge label="À installer sur GitHub" tone="warning" />
                                 </div>
                                 {canManage && <InstallButton app={app} />}

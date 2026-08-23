@@ -282,7 +282,7 @@ export function ServerStorageCard({ server, canManage, onUpdated }: Props) {
             </div>
 
             {diskCritical && hints.length > 0 && (
-                <div class="mt-3 rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">
+                <div class="mt-3 rounded-xl border border-error/30 bg-error/10 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 text-sm text-error">
                     <p class="font-medium">
                         {cleanupHadNoGain
                             ? 'Nettoyage Docker terminé sans libérer d’espace — l’occupation est probablement hors Docker.'
@@ -319,8 +319,8 @@ export function ServerStorageCard({ server, canManage, onUpdated }: Props) {
             {displayError && !cleanupTracker.isTracking && <p class="mt-3 text-xs text-error">{displayError}</p>}
 
             {expanded && (
-                <div class="mt-4 grid gap-4 border-t border-base-300/70 pt-4">
-                    <div class="grid gap-3 md:grid-cols-2">
+                <div class="mt-4 grid gap-2.5 sm:gap-3 md:gap-4 border-t border-base-300/70 pt-4">
+                    <div class="grid gap-2 sm:gap-3 md:grid-cols-2">
                         <CronInput
                             id={`docker-cleanup-${server.uuid}`}
                             label="Fréquence nettoyage Docker"

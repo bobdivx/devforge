@@ -375,7 +375,7 @@ export function AgentConversationView({
             <aside class="hidden shrink-0 flex-col border-e border-base-300 bg-base-200/20 lg:flex lg:w-72 lg:max-w-[40%]">
                 <div class="flex shrink-0 items-center justify-end gap-1 px-3 pt-3">
                     <button
-                        class="btn btn-ghost btn-sm btn-square size-9 min-h-9 p-0"
+                        class="btn btn-ghost btn-sm btn-square size-8 sm:size-9 min-h-8 sm:min-h-9 p-0"
                         type="button"
                         title="Actualiser"
                         onClick={() => void refreshSessions()}
@@ -425,9 +425,9 @@ export function AgentConversationView({
                     />
                     <aside class="absolute inset-y-0 start-0 flex w-full max-w-sm flex-col overflow-hidden border-e border-base-300 bg-base-100 shadow-xl">
                         <div class="flex shrink-0 items-center justify-between border-b border-base-300 px-3 py-2.5">
-                            <span class="text-sm font-semibold">Conversations</span>
+                            <span class="text-xs sm:text-sm font-semibold">Conversations</span>
                             <button
-                                class="btn btn-ghost btn-sm btn-square size-9 min-h-9 p-0"
+                                class="btn btn-ghost btn-sm btn-square size-8 sm:size-9 min-h-8 sm:min-h-9 p-0"
                                 type="button"
                                 onClick={() => setSessionsDrawerOpen(false)}
                             >
@@ -436,7 +436,7 @@ export function AgentConversationView({
                         </div>
                         <div class="flex shrink-0 items-center justify-end gap-1 px-3 pt-2 pb-2">
                             <button
-                                class="btn btn-ghost btn-sm btn-square size-9 min-h-9 p-0"
+                                class="btn btn-ghost btn-sm btn-square size-8 sm:size-9 min-h-8 sm:min-h-9 p-0"
                                 type="button"
                                 title="Actualiser"
                                 onClick={() => void refreshSessions()}
@@ -489,7 +489,7 @@ export function AgentConversationView({
                         Conversations ({sessions.length})
                     </button>
                     <button
-                        class="btn btn-primary btn-sm btn-square size-9 min-h-9 p-0"
+                        class="btn btn-primary btn-sm btn-square size-8 sm:size-9 min-h-8 sm:min-h-9 p-0"
                         type="button"
                         title="Nouvelle conversation"
                         disabled={creating}

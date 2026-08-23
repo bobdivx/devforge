@@ -105,8 +105,8 @@ export function ApplicationDangerPanel({
         >
             <div class="grid gap-4">
                 <section class="overflow-hidden rounded-2xl border border-error/40 bg-error/5 shadow-sm">
-                    <div class="border-b border-error/30 px-4 py-4 sm:px-5">
-                        <p class="inline-flex items-center gap-2 text-sm font-semibold text-error">
+                    <div class="border-b border-error/30 px-3 sm:px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 sm:py-4 sm:px-5">
+                        <p class="inline-flex items-center gap-2 text-xs sm:text-sm font-semibold text-error">
                             <AlertTriangle class="size-4" aria-hidden />
                             Zone dangereuse
                         </p>
@@ -115,13 +115,13 @@ export function ApplicationDangerPanel({
                         </p>
                     </div>
 
-                    <div class="grid gap-4 p-4 sm:p-5">
+                    <div class="grid gap-2.5 sm:gap-3 md:gap-4 p-4 sm:p-5">
                         {linkedLibsql.length > 0 && (
                             <div class="rounded-xl border border-error/25 bg-base-100/80 p-4">
                                 <div class="mb-3 flex items-start gap-3">
-                                    <DatabaseBackup class="mt-0.5 size-4 shrink-0 text-error" aria-hidden />
+                                    <DatabaseBackup class="mt-0.5 size-3.5 sm:size-4 shrink-0 text-error" aria-hidden />
                                     <div class="min-w-0">
-                                        <p class="text-sm font-semibold">Réinitialiser la base liée</p>
+                                        <p class="text-xs sm:text-sm font-semibold">Réinitialiser la base liée</p>
                                         <p class="text-xs text-base-content/55">
                                             Vide toutes les données libSQL rattachées, redémarre la base, puis redéploie l’application.
                                         </p>
@@ -131,10 +131,10 @@ export function ApplicationDangerPanel({
                                     {linkedLibsql.map((database) => (
                                         <li
                                             key={database.uuid}
-                                            class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-base-300/70 px-3 py-2"
+                                            class="flex flex-wrap items-center justify-between gap-2 sm:gap-3 rounded-lg border border-base-300/70 px-3 py-2"
                                         >
                                             <div class="min-w-0">
-                                                <p class="truncate text-sm font-medium">{database.name}</p>
+                                                <p class="truncate text-xs sm:text-sm font-medium">{database.name}</p>
                                                 <p class="truncate font-mono text-[11px] text-base-content/45">
                                                     {database.env_keys.join(', ') || 'libSQL'}
                                                 </p>
@@ -161,16 +161,16 @@ export function ApplicationDangerPanel({
                         )}
 
                         {linkedLibsql.length === 0 && (
-                            <p class="rounded-xl border border-base-300/70 bg-base-100/70 px-4 py-3 text-xs text-base-content/55">
+                            <p class="rounded-xl border border-base-300/70 bg-base-100/70 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 text-xs text-base-content/55">
                                 Aucune base libSQL rattachée — le reset DB n’est disponible que pour les connexions libSQL.
                             </p>
                         )}
 
                         <div class="rounded-xl border border-error/30 bg-base-100/80 p-4">
                             <div class="mb-3 flex items-start gap-3">
-                                <Trash2 class="mt-0.5 size-4 shrink-0 text-error" aria-hidden />
+                                <Trash2 class="mt-0.5 size-3.5 sm:size-4 shrink-0 text-error" aria-hidden />
                                 <div class="min-w-0">
-                                    <p class="text-sm font-semibold">Supprimer l’application</p>
+                                    <p class="text-xs sm:text-sm font-semibold">Supprimer l’application</p>
                                     <p class="text-xs text-base-content/55">
                                         Supprime définitivement l’application, ses conteneurs, volumes et configuration DevForge.
                                     </p>

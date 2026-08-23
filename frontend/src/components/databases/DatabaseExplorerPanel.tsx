@@ -69,7 +69,7 @@ export function DatabaseExplorerPanel({ databaseUuid, isRunning }: DatabaseExplo
         <section class="rounded-xl border border-base-300/70 bg-base-200/20 p-4">
             <div class="toolbar-row mb-3">
                 <div>
-                    <h3 class="text-sm font-semibold">Contenu de la base</h3>
+                    <h3 class="text-xs sm:text-sm font-semibold">Contenu de la base</h3>
                     <p class="text-xs text-base-content/55">
                         Parcourez les tables SQLite importées. L’explorateur lit le fichier <span class="font-mono">data.db</span>
                         {isRunning ? ' (base démarrée).' : ' même si la base est arrêtée.'}
@@ -106,7 +106,7 @@ export function DatabaseExplorerPanel({ databaseUuid, isRunning }: DatabaseExplo
                 )}
 
                 {overview && overview.available && overview.tables.length > 0 && (
-                    <div class="grid gap-4 lg:grid-cols-[14rem_minmax(0,1fr)]">
+                    <div class="grid gap-2.5 sm:gap-3 md:gap-4 lg:grid-cols-[14rem_minmax(0,1fr)]">
                         <div class="grid gap-1">
                             <p class="text-xs font-medium uppercase tracking-wide text-base-content/45">
                                 Tables ({overview.table_count})
@@ -143,7 +143,7 @@ export function DatabaseExplorerPanel({ databaseUuid, isRunning }: DatabaseExplo
                             {selectedTable && preview && !loadingPreview && (
                                 <div class="grid gap-2">
                                     <div class="flex flex-wrap items-center gap-2 text-xs text-base-content/55">
-                                        <span class="font-mono text-sm font-medium text-base-content">{preview.table}</span>
+                                        <span class="font-mono text-xs sm:text-sm font-medium text-base-content">{preview.table}</span>
                                         <span>· {preview.row_count} ligne{preview.row_count > 1 ? 's' : ''}</span>
                                         {preview.truncated && <span>· aperçu limité à {preview.rows.length}</span>}
                                     </div>

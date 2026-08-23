@@ -24,7 +24,7 @@ function ListingCard({ listing, onOpen }: { listing: StoreListing; onOpen: () =>
             onClick={onOpen}
         >
             <div class="flex items-start gap-3">
-                <div class="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-sm font-semibold text-primary">
+                <div class="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-xs sm:text-sm font-semibold text-primary">
                     {listing.icon_url ? (
                         <img src={listing.icon_url} alt="" class="size-11 rounded-xl object-cover" />
                     ) : (
@@ -33,7 +33,7 @@ function ListingCard({ listing, onOpen }: { listing: StoreListing; onOpen: () =>
                 </div>
                 <div class="min-w-0 flex-1">
                     <div class="flex items-center gap-2">
-                        <h2 class="truncate text-base font-semibold">{listing.name}</h2>
+                        <h2 class="truncate text-sm sm:text-base font-semibold">{listing.name}</h2>
                         {listing.status !== 'published' && (
                             <span class="badge badge-ghost badge-sm">Brouillon</span>
                         )}
@@ -103,9 +103,9 @@ export function StorePage({ path }: Props) {
                     onRetry={() => void detailQuery.reload()}
                 >
                     {listing && (
-                        <div class="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
+                        <div class="grid gap-2.5 sm:gap-3 md:gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
                             <Card title="À propos">
-                                <dl class="grid gap-3 text-sm">
+                                <dl class="grid gap-2 sm:gap-3 text-sm">
                                     <div>
                                         <dt class="text-xs uppercase tracking-wide text-base-content/45">Dépôt</dt>
                                         <dd class="font-mono">{listing.git_repository}@{listing.git_branch}</dd>
@@ -179,7 +179,7 @@ export function StorePage({ path }: Props) {
                     </button>
                 )}
             />
-            <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div class="mb-4 flex flex-col gap-2 sm:gap-3 sm:flex-row sm:items-center">
                 <FilterBar query={query} placeholder="Rechercher une app…" onQueryChange={setQuery} />
                 <select class="select select-bordered select-sm w-full sm:w-48" value={category} onChange={(event) => setCategory(event.currentTarget.value)}>
                     <option value="">Toutes les catégories</option>
@@ -195,7 +195,7 @@ export function StorePage({ path }: Props) {
                 emptyMessage="Aucune application publiée pour le moment. Publiez une app en cours d’exécution depuis sa fiche."
                 onRetry={() => void listQuery.reload()}
             >
-                <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                <div class="grid gap-2.5 sm:gap-3 md:gap-4 sm:grid-cols-2 xl:grid-cols-3">
                     {filtered.map((item) => (
                         <ListingCard
                             key={item.uuid}
@@ -207,8 +207,8 @@ export function StorePage({ path }: Props) {
             </DataState>
             {filtered.length === 0 && !listQuery.loading && !listQuery.error && (
                 <Card>
-                    <div class="flex items-start gap-3 text-sm text-base-content/65">
-                        <Store class="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+                    <div class="flex items-start gap-2 sm:gap-3 text-sm text-base-content/65">
+                        <Store class="mt-0.5 size-3.5 sm:size-4 shrink-0 text-primary" aria-hidden />
                         <p>
                             Une application <strong>en cours d’exécution</strong> peut être publiée depuis sa page : choisissez les variables à oublier, les valeurs par défaut, puis installez-la ici.
                         </p>

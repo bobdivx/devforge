@@ -194,8 +194,8 @@ export function InstallFromStoreModal({ open, listing, onClose, onInstalled }: P
                     </label>
                     {githubApps.length === 0 && <ConnectGithubButton />}
                     {requiredVars.length > 0 && (
-                        <div class="grid gap-3 rounded-xl border border-base-300/70 p-3">
-                            <p class="text-sm font-medium">Variables à renseigner</p>
+                        <div class="grid gap-2 sm:gap-3 rounded-xl border border-base-300/70 p-3">
+                            <p class="text-xs sm:text-sm font-medium">Variables à renseigner</p>
                             {requiredVars.map((item) => (
                                 <label class="grid gap-1 text-sm" key={item.key}>
                                     <span class="font-mono text-xs">{item.key}{item.required ? ' *' : ''}</span>

@@ -520,7 +520,7 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
                         </fieldset>
 
                         {form.auth_mode === 'registration' ? (
-                            <div class="grid gap-3 rounded-xl border border-base-300/70 bg-base-200/20 p-3">
+                            <div class="grid gap-2 sm:gap-3 rounded-xl border border-base-300/70 bg-base-200/20 p-3">
                                 {githubApps.length === 0 ? (
                                     <p class="text-xs text-warning">
                                         Aucune GitHub App connectée. Passez en mode PAT, ou connectez une App dans les sources Git.
@@ -555,7 +555,7 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
                                 </div>
                             </div>
                         ) : (
-                            <div class="grid gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
+                            <div class="grid gap-2 sm:gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
                                 <p class="text-[11px] text-base-content/65">
                                     Un PAT appartient au compte GitHub, pas à un dépôt : le même token peut servir
                                     pour plusieurs runners (popcorn-client, popcorn-server, etc.).
@@ -714,7 +714,7 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
                         </p>
 
                         {useManualRepo ? (
-                            <div class="grid gap-3 sm:grid-cols-2">
+                            <div class="grid gap-2 sm:gap-3 sm:grid-cols-2">
                                 <div class="grid gap-1.5">
                                     <label class="text-xs font-medium" for="runner-owner">Owner</label>
                                     <input
@@ -826,7 +826,7 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
                             />
                         </div>
 
-                        <div class="grid gap-3 sm:grid-cols-2">
+                        <div class="grid gap-2 sm:gap-3 sm:grid-cols-2">
                             <div class="grid gap-1.5">
                                 <label class="text-xs font-medium" for="runner-labels">Labels</label>
                                 <input
@@ -906,8 +906,8 @@ export function CreateRunnerModal({ open, prefill = null, onClose, onCreated }: 
                         </button>
 
                         {showAdvanced && (
-                            <div class="grid gap-3 rounded-xl border border-base-300/60 bg-base-200/30 p-3">
-                                <div class="grid gap-3 sm:grid-cols-2">
+                            <div class="grid gap-2 sm:gap-3 rounded-xl border border-base-300/60 bg-base-200/30 p-3">
+                                <div class="grid gap-2 sm:gap-3 sm:grid-cols-2">
                                     <div class="grid gap-1.5">
                                         <label class="text-xs font-medium" for="runner-container-name">Nom du conteneur</label>
                                         <input

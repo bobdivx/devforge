@@ -50,7 +50,7 @@ export function Modal({
         <div class="modal modal-open">
             <div class={`modal-box ${sizeClass[size]}`}>
                 <div class="mb-3 flex items-start justify-between gap-3">
-                    <h2 class="text-sm font-semibold">{title}</h2>
+                    <h2 class="text-xs sm:text-sm font-semibold">{title}</h2>
                     {dismissible && (
                         <button class="btn btn-ghost btn-sm btn-square" type="button" aria-label="Fermer" onClick={onClose}>
                             <X class="size-4" aria-hidden />

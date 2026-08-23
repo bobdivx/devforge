@@ -66,7 +66,7 @@ export function ServerAdvancedPanel({ serverUuid, canManage }: ServerAdvancedPan
             <DataState loading={settings.loading} error={settings.error} onRetry={() => void settings.reload()}>
                 {advanced && (
                     <div class="grid gap-3">
-                        <div class="grid gap-3 md:grid-cols-2">
+                        <div class="grid gap-2 sm:gap-3 md:grid-cols-2">
                             <label class="grid gap-1.5 text-sm">
                                 <span class="font-medium">Builds concurrents</span>
                                 <input

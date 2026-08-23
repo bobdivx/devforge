@@ -262,7 +262,7 @@ export function ApplicationSourceExplorer({ applicationUuid }: Props) {
                                 ))}
                             </div>
 
-                            <div class="grid gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
+                            <div class="grid gap-2.5 sm:gap-3 md:gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
                                 <div class="rounded-xl border border-base-300/70 bg-base-100/50">
                                     <div class="border-b border-base-300/60 px-3 py-2 text-xs font-medium uppercase tracking-wide text-base-content/45">
                                         {listing?.entry_count ?? 0} élément(s)
@@ -275,7 +275,7 @@ export function ApplicationSourceExplorer({ applicationUuid }: Props) {
                                                     type="button"
                                                     onClick={() => void loadDirectory(listing.parent_path ?? '')}
                                                 >
-                                                    <FolderOpen class="size-4 shrink-0 text-warning" aria-hidden />
+                                                    <FolderOpen class="size-3.5 sm:size-4 shrink-0 text-warning" aria-hidden />
                                                     ..
                                                 </button>
                                             </li>
@@ -292,7 +292,7 @@ export function ApplicationSourceExplorer({ applicationUuid }: Props) {
                                                         type="button"
                                                         onClick={() => void openEntry(entry)}
                                                     >
-                                                        <Icon class="mt-0.5 size-4 shrink-0" aria-hidden />
+                                                        <Icon class="mt-0.5 size-3.5 sm:size-4 shrink-0" aria-hidden />
                                                         <span class="min-w-0 flex-1">
                                                             <span class="block truncate font-medium">{entry.name}</span>
                                                             <span class="block text-[11px] text-base-content/45">
@@ -309,7 +309,7 @@ export function ApplicationSourceExplorer({ applicationUuid }: Props) {
                                 <div class="grid gap-2">
                                     <div class="flex flex-wrap items-start justify-between gap-3">
                                         <div>
-                                            <p class="text-sm font-semibold">
+                                            <p class="text-xs sm:text-sm font-semibold">
                                                 {selectedPath ? (isDirty ? 'Édition' : 'Lecture') : 'Sélectionnez un fichier'}
                                             </p>
                                             {selectedPath && (
@@ -368,7 +368,7 @@ export function ApplicationSourceExplorer({ applicationUuid }: Props) {
                                             )}
                                             {!truncatedRead && (
                                                 <>
-                                                    <div class="flex flex-wrap gap-4 text-xs">
+                                                    <div class="flex flex-wrap gap-2.5 sm:gap-3 md:gap-4 text-xs">
                                                         <label class="inline-flex items-center gap-2">
                                                             <input
                                                                 checked={writeMode === 'direct'}

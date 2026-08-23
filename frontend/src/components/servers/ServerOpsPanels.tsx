@@ -114,7 +114,7 @@ export function ServerSwarmPanel({ serverUuid, canManage }: ServerSwarmPanelProp
                     <p class="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
                         Swarm est déprécié dans DevForge. Réservé aux clusters existants.
                     </p>
-                    <label class="flex items-center justify-between gap-3 text-sm">
+                    <label class="flex items-center justify-between gap-2 sm:gap-3 text-sm">
                         <span>Swarm manager</span>
                         <input
                             class="toggle toggle-sm"
@@ -124,7 +124,7 @@ export function ServerSwarmPanel({ serverUuid, canManage }: ServerSwarmPanelProp
                             onChange={(event) => setManager(event.currentTarget.checked)}
                         />
                     </label>
-                    <label class="flex items-center justify-between gap-3 text-sm">
+                    <label class="flex items-center justify-between gap-2 sm:gap-3 text-sm">
                         <span>Swarm worker</span>
                         <input
                             class="toggle toggle-sm"
@@ -241,7 +241,7 @@ export function ServerSentinelPanel({ serverUuid, canManage }: ServerSentinelPan
                                 },
                             ]}
                         />
-                        <label class="flex items-center justify-between gap-3 text-sm">
+                        <label class="flex items-center justify-between gap-2 sm:gap-3 text-sm">
                             <span>Sentinel activé</span>
                             <input
                                 class="toggle toggle-sm"
@@ -254,7 +254,7 @@ export function ServerSentinelPanel({ serverUuid, canManage }: ServerSentinelPan
                                 }))}
                             />
                         </label>
-                        <label class="flex items-center justify-between gap-3 text-sm">
+                        <label class="flex items-center justify-between gap-2 sm:gap-3 text-sm">
                             <span>Métriques activées</span>
                             <input
                                 class="toggle toggle-sm"
@@ -279,7 +279,7 @@ export function ServerSentinelPanel({ serverUuid, canManage }: ServerSentinelPan
                                 }))}
                             />
                         </label>
-                        <div class="grid gap-3 sm:grid-cols-3">
+                        <div class="grid gap-2 sm:gap-3 sm:grid-cols-3">
                             {(
                                 [
                                     ['sentinel_metrics_refresh_rate_seconds', 'Refresh (s)'],

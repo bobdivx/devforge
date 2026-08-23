@@ -145,7 +145,7 @@ export function DevForgeMcpTokenCard() {
 
                     {plainTextToken && (
                         <div class="rounded-lg border border-success/40 bg-success/10 p-4">
-                            <p class="text-sm font-semibold text-success">Jeton créé avec succès</p>
+                            <p class="text-xs sm:text-sm font-semibold text-success">Jeton créé avec succès</p>
                             <p class="mt-1 text-xs text-base-content/65">
                                 Copiez ce jeton maintenant. Il ne sera plus affiché après fermeture.
                             </p>
@@ -161,10 +161,10 @@ export function DevForgeMcpTokenCard() {
 
                     {tokens.length > 0 && (
                         <div class="grid gap-2">
-                            <h4 class="text-sm font-semibold">Jetons actifs ({tokens.length})</h4>
+                            <h4 class="text-xs sm:text-sm font-semibold">Jetons actifs ({tokens.length})</h4>
                             <div class="grid gap-2">
                                 {tokens.slice(0, 5).map((token: ApiToken) => (
-                                    <div key={token.id} class="flex items-center justify-between gap-3 rounded-lg border border-base-300 bg-base-100 p-3">
+                                    <div key={token.id} class="flex items-center justify-between gap-2 sm:gap-3 rounded-lg border border-base-300 bg-base-100 p-3">
                                         <div class="min-w-0 flex-1">
                                             <div class="font-medium text-sm truncate">{token.name}</div>
                                             <div class="text-xs text-base-content/55">
@@ -244,7 +244,7 @@ export function DevForgeMcpTokenCard() {
                     </label>
 
                     <div class="grid gap-2">
-                        <p class="text-sm font-medium">Permissions</p>
+                        <p class="text-xs sm:text-sm font-medium">Permissions</p>
                         <div class="grid gap-2">
                             <label class="flex items-start gap-2 text-sm">
                                 <input

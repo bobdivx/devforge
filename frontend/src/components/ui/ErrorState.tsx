@@ -41,8 +41,8 @@ export function ErrorState({ error, onRetry }: ErrorStateProps) {
     return (
         <div class="grid min-h-[18rem] place-items-center px-4">
             <div class="w-full max-w-md border border-base-300 bg-base-100 p-5 text-center">
-                <AlertTriangle class="mx-auto size-6 text-warning" aria-hidden />
-                <h1 class="mt-3 text-base font-semibold">{message.title}</h1>
+                <AlertTriangle class="mx-auto size-5 sm:size-6 text-warning" aria-hidden />
+                <h1 class="mt-3 text-sm sm:text-base font-semibold">{message.title}</h1>
                 <p class="mt-1 text-sm text-base-content/60">{message.description}</p>
                 <ActionToolbar class="mt-4 justify-center sm:justify-center">
                     {(status === 401 || status === 419) && (

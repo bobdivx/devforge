@@ -130,7 +130,7 @@ export function ChannelCredentialsEditor({ channel, canManage, onUpdated }: Chan
 
     return (
         <form
-            class="grid gap-3 rounded-lg border border-base-300/70 p-3"
+            class="grid gap-2 sm:gap-3 rounded-lg border border-base-300/70 p-3"
             onSubmit={(event) => {
                 event.preventDefault();
                 if (canManage && !saving) {
@@ -140,7 +140,7 @@ export function ChannelCredentialsEditor({ channel, canManage, onUpdated }: Chan
         >
             <HiddenUsernameField />
             <div>
-                <h3 class="text-sm font-semibold">Identifiants du canal</h3>
+                <h3 class="text-xs sm:text-sm font-semibold">Identifiants du canal</h3>
                 <p class="text-xs text-base-content/55">
                     Les secrets déjà configurés restent inchangés si le champ est laissé vide.
                 </p>
@@ -151,7 +151,7 @@ export function ChannelCredentialsEditor({ channel, canManage, onUpdated }: Chan
 
                     if (field.kind === 'boolean') {
                         return (
-                            <label class="flex items-center justify-between gap-3 text-sm" key={field.key}>
+                            <label class="flex items-center justify-between gap-2 sm:gap-3 text-sm" key={field.key}>
                                 <span>{field.label}</span>
                                 <input
                                     class="toggle toggle-sm"

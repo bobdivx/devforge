@@ -24,7 +24,7 @@ export function ChatChoiceCardView({ card, disabled = false, onSelect, onDismiss
                 </button>
             )}
             <div class="grid gap-2 px-4 pb-3 pt-4 pe-10">
-                <h2 class="text-sm font-semibold leading-snug">{card.title}</h2>
+                <h2 class="text-xs sm:text-sm font-semibold leading-snug">{card.title}</h2>
                 {card.body !== '' && (
                     <p class="text-xs leading-relaxed text-base-content/60">{card.body}</p>
                 )}
@@ -49,11 +49,11 @@ export function ChatChoiceCardView({ card, disabled = false, onSelect, onDismiss
                                 }`}
                                 onClick={() => onSelect(option.id, option.prompt)}
                             >
-                                <span class="mt-0.5 grid size-6 shrink-0 place-items-center rounded-md border border-base-300 bg-base-200 text-[11px] font-semibold">
+                                <span class="mt-0.5 grid size-5 sm:size-6 shrink-0 place-items-center rounded-md border border-base-300 bg-base-200 text-[11px] font-semibold">
                                     {isSelected ? <Check class="size-3.5 text-success" aria-hidden /> : letter}
                                 </span>
                                 <span class="min-w-0 flex-1">
-                                    <span class="block text-sm font-medium">{option.label}</span>
+                                    <span class="block text-xs sm:text-sm font-medium">{option.label}</span>
                                     {option.hint && (
                                         <span class="mt-0.5 block text-[11px] text-base-content/50">{option.hint}</span>
                                     )}

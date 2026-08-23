@@ -10,7 +10,7 @@ export function AgentsMemoryOverviewPanel() {
                         <Brain class="size-4" aria-hidden />
                     </div>
                     <div class="min-w-0">
-                        <p class="text-sm font-semibold">Mémoire persistante</p>
+                        <p class="text-xs sm:text-sm font-semibold">Mémoire persistante</p>
                         <p class="mt-1 text-xs leading-relaxed text-base-content/60">
                             Les agents mémorisent des faits via <code class="text-[11px]">memory_write</code> /
                             {' '}<code class="text-[11px]">memory_read</code>. La gestion fine (liste, clear)
@@ -26,9 +26,9 @@ export function AgentsMemoryOverviewPanel() {
                     { scope: 'shared', title: 'Équipe', text: 'Conventions partagées à toute l’équipe.' },
                     { scope: 'project', title: 'Projet', text: 'Lié à une application / ressource.' },
                 ].map((item) => (
-                    <li key={item.scope} class="rounded-xl border border-base-300 bg-base-100 px-3 py-3">
+                    <li key={item.scope} class="rounded-xl border border-base-300 bg-base-100 px-2.5 sm:px-3 py-2.5 sm:py-3">
                         <p class="text-xs font-semibold uppercase tracking-wide text-base-content/45">{item.scope}</p>
-                        <p class="mt-1 text-sm font-medium">{item.title}</p>
+                        <p class="mt-1 text-xs sm:text-sm font-medium">{item.title}</p>
                         <p class="mt-1 text-[11px] text-base-content/60">{item.text}</p>
                     </li>
                 ))}

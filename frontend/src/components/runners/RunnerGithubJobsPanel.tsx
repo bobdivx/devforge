@@ -31,11 +31,11 @@ export function RunnerGithubJobsPanel({
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="toolbar-row border-b border-base-300/70 px-5 py-4">
+            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-4 md:px-5 py-3 sm:py-4">
                 <div class="flex items-center gap-2">
-                    <Activity class="size-4 text-base-content/45" aria-hidden />
+                    <Activity class="size-3.5 sm:size-4 text-base-content/45" aria-hidden />
                     <div>
-                        <p class="text-sm font-semibold">Actions GitHub</p>
+                        <p class="text-xs sm:text-sm font-semibold">Actions GitHub</p>
                         <p class="text-xs text-base-content/50">
                             {jobs?.repo
                                 ? `${jobs.repo} · jobs de ce runner · refresh auto 20s`
@@ -55,7 +55,7 @@ export function RunnerGithubJobsPanel({
                     Actualiser
                 </button>
             </div>
-            <div class="grid gap-3 p-5">
+            <div class="grid gap-2 sm:gap-3 p-5">
                 <div class="flex flex-wrap gap-2">
                     {RUNNER_JOB_BUCKETS.map((bucket) => (
                         <StatusBadge
@@ -86,9 +86,9 @@ export function RunnerGithubJobsPanel({
                     {jobs && runnerHasTrackedJobs(jobs) && (
                         <ul class="divide-y divide-base-300/80 rounded-xl border border-base-300/70">
                             {jobs.items.map((job) => (
-                                <li key={job.id} class="flex items-start justify-between gap-3 px-3 py-2.5">
+                                <li key={job.id} class="flex items-start justify-between gap-2 sm:gap-3 px-3 py-2.5">
                                     <div class="min-w-0">
-                                        <p class="truncate text-sm font-medium">{runnerJobSummary(job)}</p>
+                                        <p class="truncate text-xs sm:text-sm font-medium">{runnerJobSummary(job)}</p>
                                         <p class="mt-0.5 truncate text-[11px] text-base-content/50">
                                             {[
                                                 job.head_branch,

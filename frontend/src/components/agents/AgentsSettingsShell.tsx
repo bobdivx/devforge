@@ -29,7 +29,7 @@ export function AgentsSettingsShell({ active, onChange, children }: Props) {
     } as const;
 
     return (
-        <div class="grid min-h-[28rem] gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
+        <div class="grid min-h-[28rem] gap-2.5 sm:gap-3 md:gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
             <aside class="rounded-2xl border border-base-300/80 bg-base-100 p-2 lg:sticky lg:top-4 lg:self-start">
                 <nav class="grid gap-3" aria-label="Sections paramètres AI">
                     {groups.map((group) => {
@@ -54,9 +54,9 @@ export function AgentsSettingsShell({ active, onChange, children }: Props) {
                                             aria-current={isActive ? 'page' : undefined}
                                             onClick={() => onChange(section.id)}
                                         >
-                                            <Icon class="mt-0.5 size-4 shrink-0 opacity-80" aria-hidden />
+                                            <Icon class="mt-0.5 size-3.5 sm:size-4 shrink-0 opacity-80" aria-hidden />
                                             <span class="min-w-0">
-                                                <span class="block text-sm font-medium leading-tight">{section.label}</span>
+                                                <span class="block text-xs sm:text-sm font-medium leading-tight">{section.label}</span>
                                                 <span class="mt-0.5 block text-[11px] leading-snug text-base-content/50">
                                                     {section.description}
                                                 </span>

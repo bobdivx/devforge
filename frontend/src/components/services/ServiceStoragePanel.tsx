@@ -32,11 +32,11 @@ export function ServiceStoragePanel({ serviceUuid }: Props) {
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="toolbar-row border-b border-base-300/70 px-5 py-4">
+            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-4 md:px-5 py-3 sm:py-4">
                 <div>
                     <div class="flex items-center gap-2">
-                        <HardDrive class="size-4 text-base-content/45" aria-hidden />
-                        <p class="text-sm font-semibold">Storages</p>
+                        <HardDrive class="size-3.5 sm:size-4 text-base-content/45" aria-hidden />
+                        <p class="text-xs sm:text-sm font-semibold">Storages</p>
                     </div>
                     <p class="text-xs text-base-content/50">
                         Volumes gérés par le compose — lecture seule
@@ -50,7 +50,7 @@ export function ServiceStoragePanel({ serviceUuid }: Props) {
                 </ActionToolbar>
             </div>
 
-            <div class="grid gap-4 p-5">
+            <div class="grid gap-2.5 sm:gap-3 md:gap-4 p-5">
                 <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
                     {groups.length === 0 ? (
                         <p class="text-sm text-base-content/55">Aucun storage détecté sur ce service.</p>
@@ -58,7 +58,7 @@ export function ServiceStoragePanel({ serviceUuid }: Props) {
                         groups.map((group) => (
                             <div key={group.child_uuid} class="grid gap-2">
                                 <div class="flex flex-wrap items-center gap-2">
-                                    <p class="text-sm font-semibold">{group.child_name}</p>
+                                    <p class="text-xs sm:text-sm font-semibold">{group.child_name}</p>
                                     <StatusBadge tone="neutral" label={childTypeLabel(group.child_type)} />
                                 </div>
                                 <Table headers={['Type', 'Nom / chemin', 'Mount']} embedded>

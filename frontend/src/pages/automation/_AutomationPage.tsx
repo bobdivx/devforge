@@ -126,10 +126,10 @@ export function AutomationPage() {
 
                             return (
                                 <li key={agent.uuid} class="rounded-2xl border border-base-300/70 bg-base-100 p-5 shadow-sm">
-                                    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <div class="flex flex-col gap-2 sm:gap-3 sm:flex-row sm:items-start sm:justify-between">
                                         <div class="min-w-0 grid gap-1">
                                             <div class="flex flex-wrap items-center gap-2">
-                                                <h2 class="text-base font-semibold">{agent.name}</h2>
+                                                <h2 class="text-sm sm:text-base font-semibold">{agent.name}</h2>
                                                 <AgentStatusBadge status={agent.status} />
                                             </div>
                                             <p class="text-xs text-base-content/60">{scheduleLabel(agent)}</p>

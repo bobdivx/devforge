@@ -39,7 +39,7 @@ export function MonitoringPage() {
             </Card>
             <DataState loading={statuses.loading} error={statuses.error} onRetry={() => void statuses.reload()}>
                 {statuses.data && (
-                    <div class="grid gap-3 md:grid-cols-2">
+                    <div class="grid gap-2 sm:gap-3 md:grid-cols-2">
                         {Object.entries(statuses.data.data).map(([type, resources]) => (
                             <Card title={type} eyebrow={`${resources.length} ressource(s)`} key={type}>
                                 {resources.length === 0 ? (

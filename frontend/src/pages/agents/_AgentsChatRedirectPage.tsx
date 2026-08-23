@@ -44,12 +44,12 @@ export function AgentsChatRedirectPage() {
     return (
         <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
             {agents.length === 0 && !query.loading ? (
-                <div class="flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-base-300 p-12 text-center">
+                <div class="flex flex-col items-center justify-center gap-2.5 sm:gap-3 md:gap-4 rounded-xl border border-dashed border-base-300 p-12 text-center">
                     <div class="grid size-14 place-items-center rounded-2xl bg-primary/10 text-primary">
                         <MessageSquare class="size-7" aria-hidden />
                     </div>
                     <div>
-                        <h3 class="text-sm font-semibold">Aucun agent pour chatter</h3>
+                        <h3 class="text-xs sm:text-sm font-semibold">Aucun agent pour chatter</h3>
                         <p class="mt-1 max-w-sm text-xs text-base-content/60">
                             Créez un agent dans Équipe, puis revenez ici pour ouvrir le chat en un clic.
                         </p>

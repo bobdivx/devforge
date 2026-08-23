@@ -212,9 +212,9 @@ export function ApplicationStoragePanel({
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="toolbar-row border-b border-base-300/70 px-5 py-4">
+            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-4 md:px-5 py-3 sm:py-4">
                 <div>
-                    <p class="text-sm font-semibold">Storages</p>
+                    <p class="text-xs sm:text-sm font-semibold">Storages</p>
                     <p class="text-xs text-base-content/50">
                         Volumes persistants et montages fichiers pour {resourceLabel}
                     </p>
@@ -233,7 +233,7 @@ export function ApplicationStoragePanel({
                 </ActionToolbar>
             </div>
 
-            <div class="grid gap-4 p-5">
+            <div class="grid gap-2.5 sm:gap-3 md:gap-4 p-5">
                 {message && (
                     <p class="rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-sm text-success">
                         {message}
@@ -263,7 +263,7 @@ export function ApplicationStoragePanel({
                                 <td>
                                     <div class="flex items-center gap-2">
                                         <HardDrive class="size-3.5 text-base-content/45" aria-hidden />
-                                        <span class="text-sm font-medium">{typeLabel(storage)}</span>
+                                        <span class="text-xs sm:text-sm font-medium">{typeLabel(storage)}</span>
                                     </div>
                                 </td>
                                 <td class="max-w-[14rem] truncate font-mono text-xs">
@@ -315,7 +315,7 @@ export function ApplicationStoragePanel({
             {formOpen && (
                 <div class="fixed inset-0 z-50 grid place-items-center bg-base-300/50 p-4 backdrop-blur-sm">
                     <div class="w-full max-w-lg rounded-2xl border border-base-300/70 bg-base-100 p-5 shadow-xl">
-                        <h3 class="text-base font-semibold">
+                        <h3 class="text-sm sm:text-base font-semibold">
                             {editing ? 'Modifier le storage' : 'Nouveau storage'}
                         </h3>
 

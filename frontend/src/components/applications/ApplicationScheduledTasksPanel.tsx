@@ -201,12 +201,12 @@ export function ApplicationScheduledTasksPanel({
     const executions: ApplicationScheduledTaskExecution[] = executionsQuery.data?.data ?? [];
 
     return (
-        <section class="grid min-w-0 gap-4 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 p-5 shadow-sm">
+        <section class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 p-5 shadow-sm">
             <div class="toolbar-row">
                 <div class="min-w-0 grid flex-1 gap-1">
                     <div class="flex items-center gap-2">
-                        <Clock class="size-4 text-base-content/45" aria-hidden />
-                        <p class="text-sm font-semibold">Tâches planifiées</p>
+                        <Clock class="size-3.5 sm:size-4 text-base-content/45" aria-hidden />
+                        <p class="text-xs sm:text-sm font-semibold">Tâches planifiées</p>
                     </div>
                     <p class="text-xs text-base-content/50">
                         Cron et commandes exécutées dans le conteneur {resourceType === 'services' ? 'du service' : 'de l’application'}.
@@ -235,7 +235,7 @@ export function ApplicationScheduledTasksPanel({
                 emptyMessage="Aucune tâche planifiée pour cette application."
                 onRetry={() => void query.reload()}
             >
-                <div class="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+                <div class="grid gap-2.5 sm:gap-3 md:gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
                     <Table
                         embedded
                         headers={['Nom', 'Fréquence', 'État', 'Dernière exécution', ...(canAct ? [''] : [])]}
@@ -321,7 +321,7 @@ export function ApplicationScheduledTasksPanel({
                     </Table>
 
                     <div class="rounded-xl border border-base-300/70 p-4">
-                        <p class="mb-3 text-sm font-semibold">Historique</p>
+                        <p class="mb-3 text-xs sm:text-sm font-semibold">Historique</p>
                         {!selectedUuid ? (
                             <p class="text-xs text-base-content/50">Sélectionnez une tâche.</p>
                         ) : (
@@ -361,7 +361,7 @@ export function ApplicationScheduledTasksPanel({
             {formOpen && (
                 <div class="fixed inset-0 z-50 grid place-items-center bg-base-300/50 p-4 backdrop-blur-sm">
                     <div class="w-full max-w-lg rounded-2xl border border-base-300/70 bg-base-100 p-5 shadow-xl">
-                        <h3 class="text-base font-semibold">
+                        <h3 class="text-sm sm:text-base font-semibold">
                             {editing ? `Modifier ${editing.name}` : 'Nouvelle tâche planifiée'}
                         </h3>
 

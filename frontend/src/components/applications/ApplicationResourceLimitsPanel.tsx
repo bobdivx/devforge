@@ -85,11 +85,11 @@ export function ApplicationResourceLimitsPanel({ applicationUuid, canAct }: Prop
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="toolbar-row border-b border-base-300/70 px-5 py-4">
+            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-4 md:px-5 py-3 sm:py-4">
                 <div>
                     <div class="flex items-center gap-2">
-                        <Gauge class="size-4 text-base-content/45" aria-hidden />
-                        <p class="text-sm font-semibold">Limites de ressources</p>
+                        <Gauge class="size-3.5 sm:size-4 text-base-content/45" aria-hidden />
+                        <p class="text-xs sm:text-sm font-semibold">Limites de ressources</p>
                     </div>
                     <p class="text-xs text-base-content/50">
                         CPU et mémoire Docker — utilisez 0 pour illimité
@@ -115,7 +115,7 @@ export function ApplicationResourceLimitsPanel({ applicationUuid, canAct }: Prop
                 </ActionToolbar>
             </div>
 
-            <div class="grid gap-4 p-5">
+            <div class="grid gap-2.5 sm:gap-3 md:gap-4 p-5">
                 <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
                     {draft && (
                         <div class="grid gap-4">
@@ -126,7 +126,7 @@ export function ApplicationResourceLimitsPanel({ applicationUuid, canAct }: Prop
                             )}
                             {error && <p class="text-sm text-error" role="alert">{error}</p>}
 
-                            <div class="grid gap-3 sm:grid-cols-2">
+                            <div class="grid gap-2 sm:gap-3 sm:grid-cols-2">
                                 <label class="grid gap-1.5 text-sm">
                                     <span class="font-medium text-base-content/80">CPUs</span>
                                     <input

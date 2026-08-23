@@ -73,11 +73,11 @@ export function DatabaseHealthcheckPanel({ databaseUuid, canAct }: Props) {
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="toolbar-row border-b border-base-300/70 px-5 py-4">
+            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-4 md:px-5 py-3 sm:py-4">
                 <div>
                     <div class="flex items-center gap-2">
-                        <Activity class="size-4 text-base-content/45" aria-hidden />
-                        <p class="text-sm font-semibold">Healthcheck</p>
+                        <Activity class="size-3.5 sm:size-4 text-base-content/45" aria-hidden />
+                        <p class="text-xs sm:text-sm font-semibold">Healthcheck</p>
                     </div>
                     <p class="text-xs text-base-content/50">
                         Timing Docker Compose — la probe est fixe selon le moteur
@@ -103,7 +103,7 @@ export function DatabaseHealthcheckPanel({ databaseUuid, canAct }: Props) {
                 </ActionToolbar>
             </div>
 
-            <div class="grid gap-4 p-5">
+            <div class="grid gap-2.5 sm:gap-3 md:gap-4 p-5">
                 <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
                     {draft && data && (
                         <div class="grid gap-4">
@@ -126,7 +126,7 @@ export function DatabaseHealthcheckPanel({ databaseUuid, canAct }: Props) {
                                 </p>
                             )}
 
-                            <label class="flex items-center gap-3 text-sm">
+                            <label class="flex items-center gap-2 sm:gap-3 text-sm">
                                 <input
                                     class="toggle toggle-sm"
                                     type="checkbox"
@@ -137,7 +137,7 @@ export function DatabaseHealthcheckPanel({ databaseUuid, canAct }: Props) {
                                 <span>Activer le healthcheck</span>
                             </label>
 
-                            <div class="grid gap-3 sm:grid-cols-2">
+                            <div class="grid gap-2 sm:gap-3 sm:grid-cols-2">
                                 {(
                                     [
                                         ['health_check_interval', 'Intervalle (s)', 1],

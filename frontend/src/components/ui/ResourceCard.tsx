@@ -40,7 +40,7 @@ export function ResourceCard({
                 <div class="flex min-w-0 items-start gap-3">
                     {logo}
                     <div class="min-w-0">
-                        <p class="truncate text-sm font-semibold tracking-tight">{title}</p>
+                        <p class="truncate text-xs sm:text-sm font-semibold tracking-tight">{title}</p>
                         <p class="truncate text-xs text-base-content/45">{subtitle}</p>
                     </div>
                 </div>

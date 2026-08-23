@@ -92,7 +92,7 @@ export function OnboardingDeployProgress({ items, onContinue }: OnboardingDeploy
                             <PhaseIcon phase={item.phase} />
                             <div class="min-w-0 flex-1">
                                 <div class="flex flex-wrap items-center gap-2">
-                                    <p class="truncate text-sm font-semibold">{item.fullName}</p>
+                                    <p class="truncate text-xs sm:text-sm font-semibold">{item.fullName}</p>
                                     <StatusBadge label={phaseLabel(item.phase)} tone={phaseTone[item.phase]} />
                                 </div>
                                 {item.message && (
@@ -116,18 +116,18 @@ export function OnboardingDeployProgress({ items, onContinue }: OnboardingDeploy
 
 function PhaseIcon({ phase }: { phase: OnboardingDeployPhase }) {
     if (phase === 'healthy') {
-        return <Check class="mt-0.5 size-4 text-success" aria-hidden />;
+        return <Check class="mt-0.5 size-3.5 sm:size-4 text-success" aria-hidden />;
     }
 
     if (phase === 'failed') {
-        return <CircleAlert class="mt-0.5 size-4 text-error" aria-hidden />;
+        return <CircleAlert class="mt-0.5 size-3.5 sm:size-4 text-error" aria-hidden />;
     }
 
     if (phase === 'waiting') {
-        return <Rocket class="mt-0.5 size-4 text-base-content/35" aria-hidden />;
+        return <Rocket class="mt-0.5 size-3.5 sm:size-4 text-base-content/35" aria-hidden />;
     }
 
-    return <LoaderCircle class="mt-0.5 size-4 animate-spin text-primary" aria-hidden />;
+    return <LoaderCircle class="mt-0.5 size-3.5 sm:size-4 animate-spin text-primary" aria-hidden />;
 }
 
 function MiniTrack({ phase }: { phase: OnboardingDeployPhase }) {

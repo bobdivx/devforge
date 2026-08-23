@@ -194,7 +194,7 @@ export function CaptureToolbar({ attachments, onChange, disabled = false }: Prop
                     {attachments.map((item, index) => (
                         <li key={`${item.type}-${item.label}-${index}`} class="flex max-w-full items-center gap-1 rounded-full border border-base-300 bg-base-200/60 px-2 py-0.5 text-[10px]">
                             <span class="truncate">{item.label || item.type || 'capture'}</span>
-                            <button type="button" class="btn btn-ghost btn-xs size-5 min-h-0 p-0" aria-label="Retirer" onClick={() => remove(index)}>
+                            <button type="button" class="btn btn-ghost btn-xs size-4 sm:size-5 min-h-0 p-0" aria-label="Retirer" onClick={() => remove(index)}>
                                 <X class="size-3" aria-hidden />
                             </button>
                         </li>

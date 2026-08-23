@@ -242,7 +242,7 @@ export function SharedVariableFormModal({
                         onInput={(event) => setComment(event.currentTarget.value)}
                     />
                 </label>
-                <div class="flex flex-wrap gap-3 text-xs">
+                <div class="flex flex-wrap gap-2 sm:gap-3 text-xs">
                     <label class="flex items-center gap-2">
                         <input class="checkbox checkbox-sm" type="checkbox" checked={isMultiline} onChange={(event) => setIsMultiline(event.currentTarget.checked)} />
                         Multiligne

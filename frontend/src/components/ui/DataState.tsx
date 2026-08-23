@@ -57,7 +57,7 @@ export function DataState({
     if (error) {
         return (
             <div class="devforge-card flex min-h-28 flex-col items-center justify-center gap-2 p-6 text-center">
-                <AlertTriangle class="size-4 text-error" aria-hidden />
+                <AlertTriangle class="size-3.5 sm:size-4 text-error" aria-hidden />
                 <p class="text-xs text-base-content/70">{resolveErrorMessage(error)}</p>
                 <button class="btn btn-ghost btn-sm" type="button" onClick={onRetry}>
                     <RefreshCw class="size-3.5" aria-hidden />

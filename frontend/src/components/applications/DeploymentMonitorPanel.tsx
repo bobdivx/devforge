@@ -13,7 +13,7 @@ export function DeploymentMonitorPanel({ deploymentUuid, deployment = null, onSe
     const historyMode = deployment ? !isDeploymentActive(deployment.status) : false;
 
     return (
-        <div class="grid min-w-0 gap-4 lg:grid-cols-2 lg:[&>*]:min-w-0">
+        <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 lg:grid-cols-2 lg:[&>*]:min-w-0">
             <DeploymentLogsPanel class="min-w-0" deploymentUuid={deploymentUuid} deployment={deployment} />
             <DeploymentAgentCard
                 deploymentUuid={deploymentUuid}

@@ -223,9 +223,9 @@ export function SecurityApiTokensPanel() {
                 </div>
             </div>
 
-            <section class="grid gap-3 rounded-2xl border border-primary/25 bg-primary/5 p-4">
+            <section class="grid gap-2 sm:gap-3 rounded-2xl border border-primary/25 bg-primary/5 p-4">
                 <div class="grid gap-1">
-                    <h3 class="text-sm font-semibold text-primary">MCP DevForge (Cursor)</h3>
+                    <h3 class="text-xs sm:text-sm font-semibold text-primary">MCP DevForge (Cursor)</h3>
                     <p class="text-xs text-base-content/65">
                         Endpoint : <code class="font-mono text-[11px]">{endpoint}</code>
                         {' · '}40+ outils (infra, déploiements, SSH, GitHub). Abilities :{' '}
@@ -275,7 +275,7 @@ export function SecurityApiTokensPanel() {
 
             {plainTextToken && (
                 <div class="rounded-xl border border-warning/40 bg-warning/10 p-4">
-                    <p class="text-sm font-semibold text-warning">Copiez ce jeton maintenant</p>
+                    <p class="text-xs sm:text-sm font-semibold text-warning">Copiez ce jeton maintenant</p>
                     <p class="mt-1 text-xs text-base-content/60">
                         Il ne sera plus affiché après actualisation. Collez-le dans Cursor (`Authorization: Bearer …`)
                         ou dans la variable `DEVFORGE_MCP_TOKEN`.
@@ -289,7 +289,7 @@ export function SecurityApiTokensPanel() {
             )}
 
             {showForm && meta?.is_api_enabled !== false && (
-                <div class="grid gap-3 rounded-2xl border border-base-300/70 bg-base-100 p-4">
+                <div class="grid gap-2 sm:gap-3 rounded-2xl border border-base-300/70 bg-base-100 p-4">
                     <label class="grid gap-1.5 text-sm">
                         <span class="font-medium">Nom</span>
                         <input
@@ -317,7 +317,7 @@ export function SecurityApiTokensPanel() {
                         </select>
                     </label>
                     <div class="grid gap-2">
-                        <p class="text-sm font-medium">Permissions</p>
+                        <p class="text-xs sm:text-sm font-medium">Permissions</p>
                         <div class="grid gap-2 sm:grid-cols-2">
                             {availableAbilities.map((ability) => (
                                 <label key={ability.id} class="flex items-start gap-2 text-sm">

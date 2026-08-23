@@ -330,7 +330,7 @@ export function MissionBoardPanel() {
         <section class="min-w-0 overflow-hidden rounded-xl border border-base-300 bg-base-100 p-3 sm:p-4">
             <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div class="min-w-0">
-                    <h3 class="text-sm font-semibold">
+                    <h3 class="text-xs sm:text-sm font-semibold">
                         Kanban — Travail de l’équipe
                         <span class="badge badge-primary badge-sm ml-2">missions</span>
                     </h3>
@@ -392,7 +392,7 @@ export function MissionBoardPanel() {
             {query.loading && missions.length === 0 ? (
                 <p class="text-xs text-base-content/50">Chargement…</p>
             ) : (
-                <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div class="grid gap-2 sm:gap-3 md:grid-cols-2 xl:grid-cols-4">
                     {columns.map((column) => (
                         <MissionColumn
                             key={column.id}

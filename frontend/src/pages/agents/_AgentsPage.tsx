@@ -53,9 +53,9 @@ export function AgentsPage({ userName = 'Vous' }: Props) {
             )}
 
             {continuePath && continueName && (
-                <div class="mb-0 flex flex-col gap-3 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div class="mb-0 flex flex-col gap-2 sm:gap-3 rounded-xl border border-primary/25 bg-primary/5 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div class="min-w-0">
-                        <p class="text-sm font-semibold">Continuer le chat</p>
+                        <p class="text-xs sm:text-sm font-semibold">Continuer le chat</p>
                         <p class="truncate text-xs text-base-content/60">
                             {continueAgent?.is_primary_chat ? 'Chat principal · ' : 'Dernier ouvert · '}
                             {continueName}
@@ -100,7 +100,7 @@ export function AgentsPage({ userName = 'Vous' }: Props) {
                         }}
                     />
                 ) : (
-                    <div class="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 sm:grid-cols-2 xl:grid-cols-3">
                         {agents.map((agent) => (
                             <AgentCard
                                 key={agent.uuid}

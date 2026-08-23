@@ -25,7 +25,7 @@ function ToggleField({
     onChange: (value: boolean) => void;
 }) {
     return (
-        <label class="flex items-center justify-between gap-3 rounded-xl border border-base-300/70 px-3 py-2 text-sm">
+        <label class="flex items-center justify-between gap-2 sm:gap-3 rounded-xl border border-base-300/70 px-3 py-2 text-sm">
             <span class="grid gap-0.5">
                 <span>{label}</span>
                 {description && (

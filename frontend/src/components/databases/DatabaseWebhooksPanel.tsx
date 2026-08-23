@@ -37,9 +37,9 @@ export function DatabaseWebhooksPanel({
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="toolbar-row border-b border-base-300/70 px-5 py-4">
+            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-4 md:px-5 py-3 sm:py-4">
                 <div>
-                    <p class="text-sm font-semibold">Webhooks</p>
+                    <p class="text-xs sm:text-sm font-semibold">Webhooks</p>
                     <p class="text-xs text-base-content/50">
                         Déploiement API de {resourceLabel}
                     </p>
@@ -52,7 +52,7 @@ export function DatabaseWebhooksPanel({
                 </ActionToolbar>
             </div>
 
-            <div class="grid gap-4 p-5">
+            <div class="grid gap-2.5 sm:gap-3 md:gap-4 p-5">
                 <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
                     <label class="grid gap-1.5 text-sm">
                         <span class="font-medium text-base-content/80">Deploy webhook (authentification API requise)</span>

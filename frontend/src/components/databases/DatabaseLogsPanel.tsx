@@ -34,9 +34,9 @@ export function DatabaseLogsPanel({ databaseUuid, autoRefresh = true }: Props) {
 
     return (
         <section class="rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-            <div class="toolbar-row border-b border-base-300/70 px-5 py-4">
+            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-4 md:px-5 py-3 sm:py-4">
                 <div>
-                    <p class="text-sm font-semibold">Logs du conteneur</p>
+                    <p class="text-xs sm:text-sm font-semibold">Logs du conteneur</p>
                     <p class="text-xs text-base-content/50">Sortie stdout/stderr en temps réel</p>
                 </div>
                 <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">

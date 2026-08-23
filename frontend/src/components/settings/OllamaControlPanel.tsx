@@ -363,7 +363,7 @@ export function OllamaControlPanel({ canManage = false }: { canManage?: boolean 
                         Inventaire du serveur qui héberge DevForge (souvent le NAS / A2000), pas forcément l’instance Ollama sélectionnée (ex. PC 3090).
                     </p>
                     {status?.host?.probed ? (
-                        <div class="grid gap-3 sm:grid-cols-2">
+                        <div class="grid gap-2 sm:gap-3 sm:grid-cols-2">
                             <div class="rounded-lg border border-base-300 bg-base-200/30 px-3 py-2 text-[11px]">
                                 <p class="flex items-center gap-1 font-medium">
                                     <Cpu class="size-3" aria-hidden />

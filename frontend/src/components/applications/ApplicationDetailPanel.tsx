@@ -159,7 +159,7 @@ function DeploymentAttemptGroup({
     const header = (
         <div class="flex min-w-0 items-start justify-between gap-2">
             <div class="min-w-0">
-                <p class="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                <p class="flex flex-wrap items-center gap-2 text-xs sm:text-sm font-semibold">
                     <span>{title}</span>
                     {collapsible && (
                         <span class="rounded-full border border-base-300/70 bg-base-100 px-2 py-0.5 text-[11px] font-medium text-base-content/60">
@@ -333,12 +333,12 @@ function PreviewPanel({
     return (
         <div class="relative overflow-hidden rounded-[1.25rem] bg-base-200/70">
             {showPlaceholder ? (
-                <div class="aspect-[4/3] flex flex-col items-center justify-center gap-3 p-6 text-center">
+                <div class="aspect-[4/3] flex flex-col items-center justify-center gap-2 sm:gap-3 p-6 text-center">
                     <div class="grid size-16 place-items-center rounded-2xl bg-base-100 text-xl font-bold shadow-sm">
                         {initials || 'A'}
                     </div>
                     <div>
-                        <p class="text-sm font-semibold">{name}</p>
+                        <p class="text-xs sm:text-sm font-semibold">{name}</p>
                         <p class="text-xs text-base-content/50">{domain ?? 'Aucun domaine configuré'}</p>
                     </div>
                     {!availability.ready && availability.label ? (
@@ -381,14 +381,14 @@ function PreviewPanel({
                         </div>
                     )}
                     <div class="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-base-300/95 via-base-300/55 to-transparent px-4 pb-14 pt-12">
-                        <p class="text-sm font-semibold text-base-content">{name}</p>
+                        <p class="text-xs sm:text-sm font-semibold text-base-content">{name}</p>
                         <p class="truncate text-xs text-base-content/70">{domain}</p>
                     </div>
                 </div>
             )}
             {href && (
                 <a
-                    class="absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 border-t border-base-300/70 bg-base-100/90 px-4 py-3 text-sm font-medium text-primary transition hover:bg-base-100"
+                    class="absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 border-t border-base-300/70 bg-base-100/90 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-primary transition hover:bg-base-100"
                     href={href}
                     rel="noreferrer"
                     target="_blank"
@@ -725,8 +725,8 @@ export function ApplicationDetailPanel({
     return (
         <DataState loading={resourceQuery.loading} error={resourceQuery.error} onRetry={() => void reload()}>
             {resource && config && (
-                <div class="grid min-w-0 max-w-full gap-5 overflow-x-hidden">
-                    <div class="grid min-w-0 gap-4 sm:flex sm:flex-row sm:items-start sm:justify-between">
+                <div class="grid min-w-0 max-w-full gap-3 sm:gap-4 md:gap-5 overflow-x-hidden">
+                    <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 sm:flex sm:flex-row sm:items-start sm:justify-between">
                         <div class="grid min-w-0 gap-2">
                             <button class="btn btn-ghost btn-sm -ms-2 w-fit px-3" type="button" onClick={onClose}>
                                 <ArrowLeft class="size-4" aria-hidden />
@@ -739,7 +739,7 @@ export function ApplicationDetailPanel({
                                             <input
                                                 aria-label="Nom de l’application"
                                                 autoFocus
-                                                class="input input-bordered input-sm min-w-0 flex-1 text-base font-semibold sm:text-lg"
+                                                class="input input-bordered input-sm min-w-0 flex-1 text-sm sm:text-base font-semibold sm:text-lg"
                                                 disabled={renaming}
                                                 maxLength={255}
                                                 type="text"
@@ -792,7 +792,7 @@ export function ApplicationDetailPanel({
                                                 title="Modifier le nom"
                                                 onClick={startRename}
                                             >
-                                                <Pencil class="size-4 stroke-[2.25]" aria-hidden />
+                                                <Pencil class="size-3.5 sm:size-4 stroke-[2.25]" aria-hidden />
                                             </button>
                                         )}
                                     </div>
@@ -896,7 +896,7 @@ export function ApplicationDetailPanel({
                         </ActionToolbar>
                     </div>
 
-                    <div class="flex flex-col lg:flex-row gap-4 lg:gap-6 mt-4">
+                    <div class="flex flex-col lg:flex-row gap-2.5 sm:gap-3 md:gap-4 lg:gap-6 mt-4">
                         <div class="lg:w-56 shrink-0">
                             <Tabs
                                 groups={applicationTabGroups}
@@ -930,7 +930,7 @@ export function ApplicationDetailPanel({
                                         : ''}
                                 </p>
 
-                                <div class="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,280px)_1fr]">
+                                <div class="grid min-w-0 gap-3 sm:gap-4 md:gap-5 lg:grid-cols-[minmax(0,280px)_1fr]">
                                     <PreviewPanel
                                         name={resource.name}
                                         domain={domain}
@@ -1105,9 +1105,9 @@ export function ApplicationDetailPanel({
                                 <div class="grid min-w-0 gap-5">
                                     {(attemptBuckets.current || attemptBuckets.active.length > 0) && (
                                         <section class="min-w-0 overflow-hidden rounded-2xl border border-primary/25 bg-base-100 shadow-sm">
-                                            <div class="border-b border-base-300/70 px-4 py-4 sm:px-5">
+                                            <div class="border-b border-base-300/70 px-3 sm:px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 sm:py-4 sm:px-5">
                                                 <div class="min-w-0">
-                                                    <p class="text-sm font-semibold">
+                                                    <p class="text-xs sm:text-sm font-semibold">
                                                         {hasActiveDeployment ? 'Déploiement en cours' : 'Déploiement suivi'}
                                                     </p>
                                                     <p class="text-xs text-base-content/50">
@@ -1116,7 +1116,7 @@ export function ApplicationDetailPanel({
                                                 </div>
                                             </div>
 
-                                            <div class="grid min-w-0 gap-4 p-4 sm:p-5">
+                                            <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 p-4 sm:p-5">
                                                 {attemptBuckets.current && (
                                                     <DeploymentAttemptGroup
                                                         title="Sélection"
@@ -1165,9 +1165,9 @@ export function ApplicationDetailPanel({
                                     )}
 
                                     {!attemptBuckets.current && attemptBuckets.active.length === 0 && focusedDeploymentUuid && (
-                                        <section class="grid min-w-0 gap-3 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 p-4 shadow-sm sm:p-5">
+                                        <section class="grid min-w-0 gap-2 sm:gap-3 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 p-4 shadow-sm sm:p-5">
                                             <div class="min-w-0">
-                                                <p class="text-sm font-semibold">Suivi du déploiement</p>
+                                                <p class="text-xs sm:text-sm font-semibold">Suivi du déploiement</p>
                                                 <p class="text-xs text-base-content/50">
                                                     Logs et agent liés à cette tentative
                                                 </p>
@@ -1185,17 +1185,17 @@ export function ApplicationDetailPanel({
 
                                     {(attemptBuckets.failed.length > 0 || attemptBuckets.history.length > 0) && (
                                         <section class="min-w-0 overflow-hidden rounded-2xl border border-base-300/70 bg-base-100 shadow-sm">
-                                            <div class="toolbar-row border-b border-base-300/70 px-4 py-4 sm:px-5">
+                                            <div class="toolbar-row border-b border-base-300/70 px-3 sm:px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3 sm:py-4 sm:px-5">
                                                 <div class="min-w-0">
-                                                    <p class="text-sm font-semibold">Historique</p>
+                                                    <p class="text-xs sm:text-sm font-semibold">Historique</p>
                                                     <p class="text-xs text-base-content/50">
                                                         Échecs précédents et déploiements terminés
                                                     </p>
                                                 </div>
-                                                <Server class="size-4 shrink-0 text-base-content/35" aria-hidden />
+                                                <Server class="size-3.5 sm:size-4 shrink-0 text-base-content/35" aria-hidden />
                                             </div>
 
-                                            <div class="grid min-w-0 gap-4 p-4 sm:p-5">
+                                            <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 p-4 sm:p-5">
                                                 {attemptBuckets.failed.length > 0 && (
                                                     <DeploymentAttemptGroup
                                                         title="Échecs précédents"

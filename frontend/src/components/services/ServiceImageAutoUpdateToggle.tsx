@@ -48,7 +48,7 @@ export function ServiceImageAutoUpdateToggle({
     };
 
     return (
-        <div class="grid gap-2 rounded-xl border border-base-300/60 bg-base-200/30 px-4 py-3">
+        <div class="grid gap-2 rounded-xl border border-base-300/60 bg-base-200/30 px-2.5 sm:px-3 md:px-4 py-2.5 sm:py-3">
             <label class="flex items-start gap-3">
                 <input
                     type="checkbox"
@@ -58,7 +58,7 @@ export function ServiceImageAutoUpdateToggle({
                     onChange={(event) => void save((event.target as HTMLInputElement).checked)}
                 />
                 <span class="min-w-0">
-                    <span class="flex items-center gap-2 text-sm font-medium">
+                    <span class="flex items-center gap-2 text-xs sm:text-sm font-medium">
                         Auto-update image Docker Hub
                         {saving && <LoaderCircle class="size-3.5 animate-spin text-base-content/45" aria-hidden />}
                     </span>

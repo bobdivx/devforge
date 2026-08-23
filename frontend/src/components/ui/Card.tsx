@@ -11,7 +11,7 @@ type CardProps = {
 export function Card({ title, eyebrow, children, class: className = '', actions }: CardProps) {
     return (
         <section class={`devforge-card min-w-0 overflow-hidden rounded-[1.25rem] bg-base-100 ${className}`}>
-            <div class="grid min-w-0 gap-4 overflow-hidden p-5 md:p-6">
+            <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 overflow-hidden p-5 md:p-6">
                 {(title || eyebrow || actions) && (
                     <header class="flex min-w-0 items-start justify-between gap-3">
                         <div class="grid min-w-0 gap-1">
@@ -20,7 +20,7 @@ export function Card({ title, eyebrow, children, class: className = '', actions 
                                     {eyebrow}
                                 </p>
                             )}
-                            {title && <h2 class="text-base font-semibold tracking-tight">{title}</h2>}
+                            {title && <h2 class="text-sm sm:text-base font-semibold tracking-tight">{title}</h2>}
                         </div>
                         {actions}
                     </header>

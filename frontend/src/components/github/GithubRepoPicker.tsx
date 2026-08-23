@@ -43,7 +43,7 @@ function OrganizationAvatar({ label, avatarUrl }: { label: string; avatarUrl: st
     }
 
     return (
-        <span class="flex size-8 shrink-0 items-center justify-center rounded-full bg-warning text-sm font-semibold text-warning-content">
+        <span class="flex size-8 shrink-0 items-center justify-center rounded-full bg-warning text-xs sm:text-sm font-semibold text-warning-content">
             {label.slice(0, 1).toUpperCase()}
         </span>
     );
@@ -209,12 +209,12 @@ export function GithubRepoPicker({
                         <ArrowLeft class="size-4" aria-hidden />
                     </button>
                     <OrganizationAvatar label={selectedOrganization.label} avatarUrl={selectedOrganization.avatarUrl} />
-                    <p class="min-w-0 truncate text-sm font-semibold">{selectedOrganization.label}</p>
+                    <p class="min-w-0 truncate text-xs sm:text-sm font-semibold">{selectedOrganization.label}</p>
                 </div>
             ) : null}
 
             <label class="m-3 flex items-center gap-2 rounded-xl border border-base-300/70 bg-base-100 px-3 py-2">
-                <Search class="size-4 text-base-content/40" aria-hidden />
+                <Search class="size-3.5 sm:size-4 text-base-content/40" aria-hidden />
                 <input
                     class="min-w-0 flex-1 bg-transparent text-sm outline-none"
                     type="search"
@@ -247,13 +247,13 @@ export function GithubRepoPicker({
                                 return (
                                     <li key={organization.key}>
                                         <button
-                                            class="flex w-full items-center gap-3 px-3 py-3 text-left transition hover:bg-base-200/80"
+                                            class="flex w-full items-center gap-2 sm:gap-3 px-2.5 sm:px-3 py-2.5 sm:py-3 text-left transition hover:bg-base-200/80"
                                             type="button"
                                             onClick={() => openOrganization(organization)}
                                         >
                                             <OrganizationAvatar label={organization.label} avatarUrl={organization.avatarUrl} />
                                             <span class="min-w-0 flex-1">
-                                                <span class="block truncate text-sm font-semibold">{organization.label}</span>
+                                                <span class="block truncate text-xs sm:text-sm font-semibold">{organization.label}</span>
                                                 {organization.subtitle && (
                                                     <span class="block text-[11px] text-base-content/50">{organization.subtitle}</span>
                                                 )}
@@ -261,7 +261,7 @@ export function GithubRepoPicker({
                                             {selectedCount > 0 && (
                                                 <span class="badge badge-primary badge-sm">{selectedCount}</span>
                                             )}
-                                            <ChevronRight class="size-4 text-base-content/35" aria-hidden />
+                                            <ChevronRight class="size-3.5 sm:size-4 text-base-content/35" aria-hidden />
                                         </button>
                                     </li>
                                 );
@@ -304,7 +304,7 @@ export function GithubRepoPicker({
                                 return (
                                     <li key={repository.id}>
                                         {mode === 'multiple' ? (
-                                            <label class="flex cursor-pointer items-center gap-3 px-3 py-2.5 hover:bg-base-200/80">
+                                            <label class="flex cursor-pointer items-center gap-2 sm:gap-3 px-3 py-2.5 hover:bg-base-200/80">
                                                 <input
                                                     class="checkbox checkbox-sm"
                                                     type="checkbox"
@@ -312,9 +312,9 @@ export function GithubRepoPicker({
                                                     disabled={locked}
                                                     onChange={() => onChange(togglePickedRepository(selected, repository, mode))}
                                                 />
-                                                <FolderGit2 class="size-4 shrink-0 text-base-content/40" aria-hidden />
+                                                <FolderGit2 class="size-3.5 sm:size-4 shrink-0 text-base-content/40" aria-hidden />
                                                 <span class="min-w-0">
-                                                    <span class="block truncate text-sm font-medium">{repository.name}</span>
+                                                    <span class="block truncate text-xs sm:text-sm font-medium">{repository.name}</span>
                                                     {repository.description && (
                                                         <span class="block truncate text-[11px] text-base-content/50">{repository.description}</span>
                                                     )}
@@ -334,9 +334,9 @@ export function GithubRepoPicker({
                                                 }`}>
                                                     {checked && <span class="size-1.5 rounded-sm bg-primary-content" />}
                                                 </span>
-                                                <FolderGit2 class="size-4 shrink-0 text-base-content/40" aria-hidden />
+                                                <FolderGit2 class="size-3.5 sm:size-4 shrink-0 text-base-content/40" aria-hidden />
                                                 <span class="min-w-0">
-                                                    <span class="block truncate text-sm font-medium">{repository.name}</span>
+                                                    <span class="block truncate text-xs sm:text-sm font-medium">{repository.name}</span>
                                                     {repository.description && (
                                                         <span class="block truncate text-[11px] text-base-content/50">{repository.description}</span>
                                                     )}

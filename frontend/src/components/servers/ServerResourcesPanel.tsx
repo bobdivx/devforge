@@ -73,7 +73,7 @@ export function ServerResourcesPanel({ serverUuid }: ServerResourcesPanelProps) 
                         >
                             <div class="mb-2 flex items-start justify-between gap-2">
                                 <div class="min-w-0">
-                                    <p class="truncate text-sm font-semibold">{resource.name}</p>
+                                    <p class="truncate text-xs sm:text-sm font-semibold">{resource.name}</p>
                                     <p class="text-[11px] uppercase tracking-wide text-base-content/45">{resource.type}</p>
                                 </div>
                                 <ResourceStatusIcon status={resourceStatusInput(resource)} />

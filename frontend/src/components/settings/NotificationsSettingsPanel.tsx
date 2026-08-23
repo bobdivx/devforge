@@ -60,7 +60,7 @@ function ChannelEventsEditor({
     return (
         <div class="grid gap-4">
             {canToggleEnabled && (
-                <label class="flex items-center justify-between gap-3 rounded-lg border border-base-300/70 px-3 py-2 text-sm">
+                <label class="flex items-center justify-between gap-2 sm:gap-3 rounded-lg border border-base-300/70 px-3 py-2 text-sm">
                     <span>Canal activé</span>
                     <input
                         class="toggle toggle-sm"
@@ -151,7 +151,7 @@ export function NotificationsSettingsPanel({ activeChannel = null, canManage = f
                                         onClick={() => navigateTo(`/notifications/${channel.channel}`)}
                                     >
                                         <div class="mb-2 flex items-start justify-between gap-2">
-                                            <p class="text-sm font-semibold capitalize">{channelLabels[channel.channel] ?? channel.channel}</p>
+                                            <p class="text-xs sm:text-sm font-semibold capitalize">{channelLabels[channel.channel] ?? channel.channel}</p>
                                             <StatusBadge
                                                 label={channel.enabled ? 'Activé' : 'Désactivé'}
                                                 tone={channel.enabled ? 'success' : 'neutral'}

@@ -22,7 +22,7 @@ export function Topbar({ bootstrap, theme, onOpenMenu, onToggleTheme, onSwitchTe
         .toUpperCase();
 
     return (
-        <header class="devforge-topbar sticky top-0 z-20 flex h-16 shrink-0 items-center justify-between gap-3 px-4 md:px-8">
+        <header class="devforge-topbar sticky top-0 z-20 flex h-16 shrink-0 items-center justify-between gap-2 sm:gap-3 px-4 md:px-8">
             <div class="flex min-w-0 items-center gap-3">
                 <button class="btn btn-ghost btn-sm lg:hidden" type="button" aria-label="Ouvrir le menu" onClick={onOpenMenu}>
                     <Menu class="size-4" aria-hidden />
@@ -58,7 +58,7 @@ export function Topbar({ bootstrap, theme, onOpenMenu, onToggleTheme, onSwitchTe
                         {initials || 'U'}
                     </div>
                     <div class="hidden min-w-0 lg:block">
-                        <p class="truncate text-sm font-semibold leading-tight">{bootstrap.user.name}</p>
+                        <p class="truncate text-xs sm:text-sm font-semibold leading-tight">{bootstrap.user.name}</p>
                         <p class="truncate text-xs text-base-content/45">{bootstrap.current_team.name}</p>
                     </div>
                 </div>

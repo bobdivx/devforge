@@ -123,8 +123,8 @@ export function SecurityCloudInitScriptsPanel() {
             {message && <p class="text-sm text-success" role="status">{message}</p>}
 
             {showForm && (
-                <div class="grid gap-3 rounded-2xl border border-base-300/70 p-4">
-                    <p class="text-sm font-semibold">
+                <div class="grid gap-2 sm:gap-3 rounded-2xl border border-base-300/70 p-4">
+                    <p class="text-xs sm:text-sm font-semibold">
                         {editingId === null ? 'Nouveau script cloud-init' : 'Modifier le script'}
                     </p>
                     <label class="grid gap-1.5 text-sm">
@@ -183,11 +183,11 @@ export function SecurityCloudInitScriptsPanel() {
                 emptyMessage="Aucun script cloud-init. Créez-en un pour démarrer."
                 onRetry={() => void query.reload()}
             >
-                <ul class="grid gap-3 md:grid-cols-2">
+                <ul class="grid gap-2 sm:gap-3 md:grid-cols-2">
                     {scripts.map((script) => (
-                        <li class="grid gap-3 rounded-2xl border border-base-300/70 p-4" key={script.id}>
+                        <li class="grid gap-2 sm:gap-3 rounded-2xl border border-base-300/70 p-4" key={script.id}>
                             <div class="min-w-0">
-                                <p class="truncate text-sm font-semibold">{script.name}</p>
+                                <p class="truncate text-xs sm:text-sm font-semibold">{script.name}</p>
                                 <p class="text-xs text-base-content/50">
                                     Créé {formatDate(script.created_at)}
                                 </p>
