@@ -375,6 +375,14 @@ class AgentSkillService
                 ]),
             ],
             [
+                'slug' => 'deploy-graft-all-repos',
+                'name' => 'Déployer Graft sur tous les repos (automation)',
+                'description' => 'Automation : déploie Graft context graph sur tous les repos de l\'équipe via GitHub API.',
+                'tags' => ['graft', 'deployment', 'automation', 'github', 'ops'],
+                'priority' => 170,
+                'body' => file_get_contents(base_path('.claude/skills/deploy-graft-all-repos/SKILL.md')),
+            ],
+            [
                 'slug' => 'graft-context-engine',
                 'name' => 'Graft Context Engine (graphe codebase)',
                 'description' => 'Graph-based codebase navigation: find symbols, trace calls, analyze blast radius. 3× faster, 70% less tokens.',
