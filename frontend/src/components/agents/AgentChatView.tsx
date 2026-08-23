@@ -5,7 +5,6 @@ import { AgentSettingsPanel } from './AgentSettingsPanel';
 import { AgentStatusBadge } from './AgentStatusBadge';
 import { AgentConversationView } from './AgentConversationView';
 import { AgentRunsView } from './AgentRunsView';
-import { AgentViewSwitcher } from './AgentViewSwitcher';
 import type { Agent, AgentModelRouting } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
 import {
