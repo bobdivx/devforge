@@ -188,8 +188,14 @@ class GeminiProvider implements LlmProvider
                 'content' => $this->formatMessageContent($message['content'] ?? '', $role),
             ];
 
+            // Messages assistant avec tool_calls : content peut être vide/null
             if ($hasToolCalls && ($formatted['content'] === '' || $formatted['content'] === null)) {
                 unset($formatted['content']);
+            }
+
+            // Messages tool : content DOIT être présent et non-vide (Gemini OpenAI-compat)
+            if ($role === 'tool' && ($formatted['content'] === '' || $formatted['content'] === null)) {
+                $formatted['content'] = '{}';
             }
 
             if ($hasToolCalls) {
@@ -211,16 +217,25 @@ class GeminiProvider implements LlmProvider
     private function formatMessageContent(mixed $content, string $role): ?string
     {
         if ($role === 'tool') {
-            $text = is_string($content) ? $content : (json_encode($content, JSON_UNESCAPED_UNICODE) ?: '');
+            $text = is_string($content) ? $content : (json_encode($content, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) ?: '{}');
+
+            // Gemini OpenAI-compat exige un content non-vide pour role=tool
+            if ($text === '' || $text === null) {
+                return '{}';
+            }
 
             return $this->truncateToolContent($text);
         }
 
         if (is_string($content)) {
-            return $content;
+            return $content !== '' ? $content : null;
         }
 
-        return json_encode($content, JSON_UNESCAPED_UNICODE) ?: '';
+        if ($content === null || $content === []) {
+            return null;
+        }
+
+        return json_encode($content, JSON_UNESCAPED_UNICODE) ?: null;
     }
 
     private function truncateToolContent(string $content): string
