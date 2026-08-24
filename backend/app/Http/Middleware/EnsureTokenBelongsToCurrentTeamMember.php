@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use Laravel\Sanctum\TransientToken;
 use Symfony\Component\HttpFoundation\Response;
 
 class EnsureTokenBelongsToCurrentTeamMember
@@ -12,9 +13,19 @@ class EnsureTokenBelongsToCurrentTeamMember
     {
         $user = $request->user();
         $token = $user?->currentAccessToken();
-        $teamId = $token?->team_id;
 
-        if (! $user || ! $token || is_null($teamId)) {
+        if (! $user || ! $token) {
+            return response()->json(['message' => 'Invalid token.'], 401);
+        }
+
+        // SPA session: Sanctum uses TransientToken, which has no team_id.
+        if ($token instanceof TransientToken) {
+            return $next($request);
+        }
+
+        $teamId = $token->team_id ?? null;
+
+        if (is_null($teamId)) {
             return response()->json(['message' => 'Invalid token.'], 401);
         }
 
