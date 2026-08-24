@@ -217,6 +217,7 @@ export function AgentChatPanel({
     activeRoutingProvider = null,
 }: Props) {
     const scrollRef = useRef<HTMLDivElement>(null);
+    const userScrolledUpRef = useRef(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [captureOpen, setCaptureOpen] = useState(false);
     const [listening, setListening] = useState(false);
@@ -224,6 +225,16 @@ export function AgentChatPanel({
     const composerPlaceholder = placeholder === 'Écrire un message…'
         ? `Envoyer un message à ${agent.name}`
         : placeholder;
+
+    const handleScroll = () => {
+        const el = scrollRef.current;
+        if (!el) {
+            return;
+        }
+        // Si l'utilisateur est à plus de 100px du bas, il consulte l'historique
+        const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+        userScrolledUpRef.current = !isNearBottom;
+    };
 
     const startDictation = () => {
         const ctor = (window as unknown as { webkitSpeechRecognition?: new () => {
@@ -254,9 +265,25 @@ export function AgentChatPanel({
         recognition.start();
     };
 
+    // Auto-scroll vers le bas uniquement si l'utilisateur n'est pas remonté dans l'historique
     useEffect(() => {
+        if (!userScrolledUpRef.current && scrollRef.current) {
+            scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+        }
+    }, [messages, liveAssistantText, liveSteps.length, activeSubagentCount]);
+
+    // Réinitialiser le scroll et forcer le bas lors d'une nouvelle session ou d'un envoi
+    useEffect(() => {
+        userScrolledUpRef.current = false;
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-    }, [messages, sending, session?.uuid, liveAssistantText, liveSteps.length, activeSubagentCount]);
+    }, [session?.uuid]);
+
+    useEffect(() => {
+        if (sending) {
+            userScrolledUpRef.current = false;
+            scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+        }
+    }, [sending]);
 
     useEffect(() => {
         const el = textareaRef.current;
@@ -319,7 +346,11 @@ export function AgentChatPanel({
                 </div>
             )}
 
-            <div ref={scrollRef} class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4 sm:py-4">
+            <div
+                ref={scrollRef}
+                class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4 sm:py-4"
+                onScroll={handleScroll}
+            >
                 {loading ? (
                     <div class="flex h-full items-center justify-center text-xs text-base-content/50">
                         <span class="loading loading-spinner loading-sm me-2" />

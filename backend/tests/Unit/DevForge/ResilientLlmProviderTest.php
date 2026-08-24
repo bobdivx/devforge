@@ -84,6 +84,52 @@ it('falls back when ollama returns a 502 bad gateway', function () {
     );
 
     expect($provider->chat([['role' => 'user', 'content' => 'test']])->text)->toBe('via gemini');
+    // Subsequent calls stay on fallback without calling primary
+    expect($provider->chat([['role' => 'user', 'content' => 'test2']])->text)->toBe('via gemini');
+});
+
+it('starts directly with fallback when startWithFallback is true', function () {
+    $primaryCalled = false;
+    $primary = new class($primaryCalled) implements \App\Services\DevForge\Agent\Contracts\LlmProvider
+    {
+        public function __construct(public bool &$primaryCalled) {}
+
+        public function chat(array $messages, array $tools = []): LlmResponse
+        {
+            $this->primaryCalled = true;
+            throw new RuntimeException('Ollama API error [502]: error code: 502');
+        }
+
+        public function testConnection(): bool
+        {
+            return false;
+        }
+    };
+
+    $fallback = new class implements \App\Services\DevForge\Agent\Contracts\LlmProvider
+    {
+        public function chat(array $messages, array $tools = []): LlmResponse
+        {
+            return new LlmResponse(text: 'direct gemini', toolCalls: [], tokensUsed: 1, isFinished: true);
+        }
+
+        public function testConnection(): bool
+        {
+            return true;
+        }
+    };
+
+    $provider = new ResilientLlmProvider(
+        primary: $primary,
+        fallback: $fallback,
+        primaryLabel: 'ollama/llama3.2',
+        fallbackLabel: 'gemini/gemini-2.5-flash',
+        startWithFallback: true,
+    );
+
+    $response = $provider->chat([['role' => 'user', 'content' => 'test']]);
+    expect($response->text)->toBe('direct gemini');
+    expect($primaryCalled)->toBeFalse();
 });
 
 it('falls back when gemini quota message is raised', function () {

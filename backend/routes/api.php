@@ -216,7 +216,9 @@ Route::group([
     // DevForge Graft Automation
     Route::post('/devforge/graft/deploy-all', [GraftAutomationController::class, 'deployToAllRepos'])->middleware(['api.ability:write']);
     Route::get('/devforge/graft/status', [GraftAutomationController::class, 'status'])->middleware(['api.ability:read']);
-    Route::post('/devforge/graft/deploy/{repo}', [GraftAutomationController::class, 'deployToRepo'])->middleware(['api.ability:write']);
+    Route::post('/devforge/graft/deploy/{repo}', [GraftAutomationController::class, 'deployToRepo'])
+        ->where('repo', '.*')
+        ->middleware(['api.ability:write']);
 });
 
 Route::group([

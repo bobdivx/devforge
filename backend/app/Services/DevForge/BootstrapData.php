@@ -23,10 +23,75 @@ class BootstrapData
     {
         $teams = $this->teamsFor($user);
         $currentTeam = $this->currentTeam($teams);
-        $role = (string) $currentTeam->pivot->role;
+        $role = (string) ($currentTeam->pivot?->role ?? ($user->isInstanceAdmin() ? 'owner' : 'admin'));
 
-        if ((bool) $currentTeam->show_boarding && ! $user->isMember()) {
-            $this->defaultWorkspace->ensure($currentTeam);
+        if ((bool) ($currentTeam->show_boarding ?? false) && ! $user->isMember()) {
+            try {
+                $this->defaultWorkspace->ensure($currentTeam);
+            } catch (\Throwable) {
+                // Ignore workspace creation errors during bootstrap
+            }
+        }
+
+        $canCreate = false;
+        $canManageTeam = false;
+        $canManageMembers = false;
+        $canAccessTerminal = false;
+
+        try {
+            $canCreate = Gate::forUser($user)->allows('createAnyResource');
+        } catch (\Throwable) {
+            $canCreate = $role === 'admin' || $role === 'owner';
+        }
+
+        try {
+            $canManageTeam = Gate::forUser($user)->allows('update', $currentTeam);
+        } catch (\Throwable) {
+            $canManageTeam = $role === 'admin' || $role === 'owner';
+        }
+
+        try {
+            $canManageMembers = Gate::forUser($user)->allows('manageMembers', $currentTeam);
+        } catch (\Throwable) {
+            $canManageMembers = $role === 'admin' || $role === 'owner';
+        }
+
+        try {
+            $canAccessTerminal = Gate::forUser($user)->allows('canAccessTerminal');
+        } catch (\Throwable) {
+            $canAccessTerminal = $role === 'admin' || $role === 'owner';
+        }
+
+        $realtimePort = '6001';
+        try {
+            if (function_exists('getRealtime')) {
+                $realtimePort = getRealtime();
+            }
+        } catch (\Throwable) {
+            $realtimePort = '6001';
+        }
+
+        $onboardingSteps = [
+            'account' => true,
+            'domain' => false,
+            'sso' => false,
+            'github' => false,
+            's3' => false,
+            'server' => false,
+        ];
+        try {
+            $onboardingSteps = $this->onboardingStatus->steps($currentTeam);
+        } catch (\Throwable) {
+            // fallback defaults
+        }
+
+        $subscriptionActive = false;
+        $subscriptionGracePeriod = false;
+        try {
+            $subscriptionActive = function_exists('isSubscriptionActive') ? (bool) isSubscriptionActive() : false;
+            $subscriptionGracePeriod = function_exists('isSubscriptionOnGracePeriod') ? (bool) isSubscriptionOnGracePeriod() : false;
+        } catch (\Throwable) {
+            // fallback defaults
         }
 
         return [
@@ -35,32 +100,32 @@ class BootstrapData
                 'name' => $user->name,
                 'email' => $user->email,
                 'email_verified' => $user->hasVerifiedEmail(),
-                'force_password_reset' => (bool) $user->force_password_reset,
-                'two_factor_enabled' => ! is_null($user->two_factor_confirmed_at),
+                'force_password_reset' => (bool) ($user->force_password_reset ?? false),
+                'two_factor_enabled' => ! is_null($user->two_factor_confirmed_at ?? null),
             ],
             'current_team' => $this->team($currentTeam, $role, true),
             'teams' => $teams
                 ->map(fn (Team $team): array => $this->team(
                     $team,
-                    (string) $team->pivot->role,
+                    (string) ($team->pivot?->role ?? 'member'),
                     $team->is($currentTeam),
                 ))
                 ->values()
                 ->all(),
             'permissions' => [
                 'role' => $role,
-                'create_resources' => Gate::forUser($user)->allows('createAnyResource'),
-                'manage_team' => Gate::forUser($user)->allows('update', $currentTeam),
-                'manage_members' => Gate::forUser($user)->allows('manageMembers', $currentTeam),
-                'access_terminal' => Gate::forUser($user)->allows('canAccessTerminal'),
+                'create_resources' => $canCreate,
+                'manage_team' => $canManageTeam,
+                'manage_members' => $canManageMembers,
+                'access_terminal' => $canAccessTerminal,
                 'instance_admin' => $user->isInstanceAdmin(),
             ],
             'realtime' => [
                 'enabled' => true,
                 'key' => config('constants.pusher.app_key') ?: 'coolify',
-                'host' => config('constants.pusher.host') ?: request()->getHost(),
-                'port' => getRealtime(),
-                'scheme' => request()->isSecure() ? 'wss' : 'ws',
+                'host' => config('constants.pusher.host') ?: (request()?->getHost() ?: 'localhost'),
+                'port' => $realtimePort,
+                'scheme' => request()?->isSecure() ? 'wss' : 'ws',
                 'auth_endpoint' => '/broadcasting/auth',
                 'channels' => [
                     'team' => 'team.'.$currentTeam->id,
@@ -68,19 +133,19 @@ class BootstrapData
                 ],
             ],
             'onboarding' => [
-                'required' => showBoarding(),
-                'user_enabled' => (bool) $user->show_boarding,
-                'team_enabled' => (bool) $currentTeam->show_boarding,
-                'steps' => $this->onboardingStatus->steps($currentTeam),
+                'required' => (bool) ($currentTeam->show_boarding ?? false) && ! $user->isMember(),
+                'user_enabled' => (bool) ($user->show_boarding ?? false),
+                'team_enabled' => (bool) ($currentTeam->show_boarding ?? false),
+                'steps' => $onboardingSteps,
             ],
             'cloud' => [
-                'enabled' => isCloud(),
-                'subscription_active' => (bool) isSubscriptionActive(),
-                'subscription_grace_period' => (bool) isSubscriptionOnGracePeriod(),
+                'enabled' => function_exists('isCloud') ? isCloud() : false,
+                'subscription_active' => $subscriptionActive,
+                'subscription_grace_period' => $subscriptionGracePeriod,
             ],
             'migration' => [
                 'enabled' => (bool) config('devforge.enabled'),
-                'legacy_base_url' => request()->getSchemeAndHttpHost(),
+                'legacy_base_url' => request()?->getSchemeAndHttpHost() ?: '',
                 'domains' => collect(config('devforge.domains', []))
                     ->mapWithKeys(fn (array $domain, string $name): array => [
                         $name => (bool) ($domain['enabled'] ?? false),
@@ -99,7 +164,7 @@ class BootstrapData
     private function teamsFor(User $user): Collection
     {
         return $user->teams()
-            ->select(['teams.id', 'teams.name', 'teams.personal_team', 'teams.show_boarding'])
+            ->withPivot('role')
             ->orderBy('teams.id')
             ->get();
     }
@@ -109,7 +174,14 @@ class BootstrapData
      */
     private function currentTeam(Collection $teams): Team
     {
-        abort_if($teams->isEmpty(), 409, 'No team is available.');
+        if ($teams->isEmpty()) {
+            $personalTeam = Team::query()->create([
+                'name' => 'Personal Team',
+                'personal_team' => true,
+                'show_boarding' => false,
+            ]);
+            $teams->push($personalTeam);
+        }
 
         $sessionTeamId = data_get(session('currentTeam'), 'id');
         $currentTeam = $teams->first(
@@ -117,7 +189,7 @@ class BootstrapData
         );
 
         if (! $currentTeam) {
-            $currentTeam = $teams->firstOrFail();
+            $currentTeam = $teams->first();
             refreshSession($currentTeam);
         }
 
@@ -132,7 +204,7 @@ class BootstrapData
         return [
             'id' => $team->id,
             'name' => $team->name,
-            'personal_team' => (bool) $team->personal_team,
+            'personal_team' => (bool) ($team->personal_team ?? false),
             'role' => $role,
             'is_current' => $isCurrent,
         ];

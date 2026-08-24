@@ -84,6 +84,7 @@ class LlmProviderFactory
         }
 
         $override = $agent->preferredLlmModel();
+        $startWithFallback = false;
 
         if (
             config('devforge.agents_provider_probe', true)
@@ -91,6 +92,9 @@ class LlmProviderFactory
         ) {
             $ollamaReport = $this->providerProbe->diagnose($primaryConfig);
             $this->emitDiagnostic($ollamaReport);
+            if (! empty($ollamaReport) && ! ($ollamaReport['ok'] ?? true)) {
+                $startWithFallback = true;
+            }
         }
 
         $primary = $this->make($primaryConfig, $tier, $override);
@@ -123,6 +127,7 @@ class LlmProviderFactory
             primaryLabel: $this->label($primaryConfig, $override),
             fallbackLabel: $label,
             onFallback: $onFallback,
+            startWithFallback: $startWithFallback,
         );
     }
 

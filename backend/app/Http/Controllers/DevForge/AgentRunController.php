@@ -5,6 +5,7 @@ namespace App\Http\Controllers\DevForge;
 use App\Http\Controllers\Controller;
 use App\Models\AiAgent;
 use App\Models\AiAgentRun;
+use App\Models\AiAgentSubagentRun;
 use App\Models\User;
 use App\Services\DevForge\Agent\AgentRunCancellation;
 use App\Services\DevForge\Agent\AgentRunLauncher;
@@ -43,6 +44,30 @@ class AgentRunController extends Controller
         ]);
     }
 
+    public function clear(Request $request, string $agentUuid): JsonResponse
+    {
+        $agent = $this->findAgent($request, $agentUuid);
+        $this->authorize('update', $agent);
+
+        $count = AiAgentRun::query()
+            ->where('agent_id', $agent->id)
+            ->delete();
+
+        AiAgentSubagentRun::query()
+            ->where('parent_agent_id', $agent->id)
+            ->orWhere('child_agent_id', $agent->id)
+            ->delete();
+
+        $agent->update(['last_run_at' => null]);
+        $agent->syncOperationalStatus();
+
+        return response()->json([
+            'data' => [
+                'cleared' => $count,
+            ],
+        ]);
+    }
+
     public function show(Request $request, string $agentUuid, string $runUuid): JsonResponse
     {
         $agent = $this->findAgent($request, $agentUuid);
@@ -55,6 +80,28 @@ class AgentRunController extends Controller
         abort_unless($run, 404, 'Run introuvable.');
 
         return response()->json(['data' => $this->presentRun($run, withLogs: true)]);
+    }
+
+    public function destroy(Request $request, string $agentUuid, string $runUuid): JsonResponse
+    {
+        $agent = $this->findAgent($request, $agentUuid);
+        $this->authorize('update', $agent);
+
+        $run = AiAgentRun::query()
+            ->where('agent_id', $agent->id)
+            ->where('uuid', $runUuid)
+            ->first();
+
+        abort_unless($run, 404, 'Run introuvable.');
+
+        $run->delete();
+        $agent->syncOperationalStatus();
+
+        return response()->json([
+            'data' => [
+                'deleted' => true,
+            ],
+        ]);
     }
 
     public function cancel(Request $request, string $agentUuid, string $runUuid): JsonResponse

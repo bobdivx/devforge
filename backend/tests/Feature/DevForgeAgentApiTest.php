@@ -592,6 +592,40 @@ it('shows a single run with logs', function () {
         ->assertJsonStructure(['data' => ['logs']]);
 });
 
+it('clears all runs for an agent', function () {
+    $agent = AiAgent::factory()->create([
+        'team_id' => $this->team->id,
+        'status' => 'error',
+        'last_run_at' => now(),
+    ]);
+    AiAgentRun::factory()->count(3)->create(['agent_id' => $agent->id, 'status' => 'failed']);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->deleteJson("/api/devforge/v1/agents/{$agent->uuid}/runs")
+        ->assertSuccessful()
+        ->assertJsonPath('data.cleared', 3);
+
+    expect(AiAgentRun::where('agent_id', $agent->id)->count())->toBe(0);
+    expect($agent->fresh()->last_run_at)->toBeNull();
+    expect($agent->fresh()->status)->toBe('idle');
+});
+
+it('deletes a single run for an agent', function () {
+    $agent = AiAgent::factory()->create(['team_id' => $this->team->id]);
+    $run = AiAgentRun::factory()->create(['agent_id' => $agent->id]);
+    $keep = AiAgentRun::factory()->create(['agent_id' => $agent->id]);
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->deleteJson("/api/devforge/v1/agents/{$agent->uuid}/runs/{$run->uuid}")
+        ->assertSuccessful()
+        ->assertJsonPath('data.deleted', true);
+
+    expect(AiAgentRun::where('id', $run->id)->exists())->toBeFalse();
+    expect(AiAgentRun::where('id', $keep->id)->exists())->toBeTrue();
+});
+
 // ── AI Providers ──────────────────────────────────────────────────────────────
 
 it('lists ai providers scoped to current team', function () {

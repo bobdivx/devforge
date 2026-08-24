@@ -3,6 +3,7 @@ import {
     Bot,
     Boxes,
     CalendarClock,
+    Container,
     Cpu,
     Database,
     Gauge,
@@ -103,6 +104,13 @@ export const sidebarNav: SidebarNavEntry[] = [
                 path: '/deployments',
                 pages: ['deployments'],
                 icon: Rocket,
+            },
+            {
+                id: 'docker',
+                label: 'Docker',
+                path: '/docker',
+                pages: ['docker'],
+                icon: Container,
             },
             {
                 id: 'monitoring',

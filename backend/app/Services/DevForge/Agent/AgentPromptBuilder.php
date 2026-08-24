@@ -142,6 +142,14 @@ class AgentPromptBuilder
             - Tu es proposeur : mission_list, enrichis les descriptions, memory_write(scope=shared).
             - INTERDIT write_application_source / control_resource deploy — assigne assignee_type=devforge.
             RULES,
+            'deploy_graft_all_repos' => <<<'RULES'
+
+            Contexte : Déploiement automatique de Graft sur tous les repos de l'équipe.
+            - Utilise le skill `deploy-graft-all-repos`.
+            - Pour chaque repo de l'équipe : vérifie package.json, configure .mcp.json, .gitignore et GRAFT.md.
+            - Utilise write_github_file / read_github_file.
+            - Fournis un résumé clair à la fin avec le nombre de repos configurés / PRs créées / erreurs.
+            RULES,
             default => '',
         };
 
@@ -285,6 +293,19 @@ class AgentPromptBuilder
             $handoff = (string) ($context['user_input_handoff_message'] ?? 'Entrée utilisateur reçue — reprends.');
 
             return $handoff;
+        }
+
+        if (($context['event'] ?? null) === 'deploy_graft_all_repos') {
+            $goal = (string) ($context['delegated_goal'] ?? 'Déploie Graft sur tous les repos de l\'équipe.');
+
+            return trim(<<<CONTEXT
+            AUTOMATION — DÉPLOIEMENT GRAFT SUR TOUS LES REPOS DE L'ÉQUIPE
+
+            Consigne :
+            {$goal}
+
+            Exécute les étapes avec tes outils natifs (skill_load, read_github_file, write_github_file). Première action = appel d'outil.
+            CONTEXT);
         }
 
         $now = now()->format('d/m/Y H:i');

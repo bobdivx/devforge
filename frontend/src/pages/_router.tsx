@@ -9,6 +9,7 @@ import { AgentsChatRedirectPage } from './agents/_AgentsChatRedirectPage';
 import { AgentsSettingsPage } from './agents/_AgentsSettingsPage';
 import { CoreResourcesPage } from './resources/_CoreResourcesPage';
 import { DeploymentsPage } from './deployments/_DeploymentsPage';
+import { DockerPage } from './docker/_DockerPage';
 import { DestinationsPage } from './destinations/_DestinationsPage';
 import { MonitoringPage } from './monitoring/_MonitoringPage';
 import { RunnersPage } from './runners/_RunnersPage';
@@ -58,6 +59,8 @@ export function DomainPage({ bootstrap, route, onSwitchTeam }: DomainPageProps) 
             return <CoreResourcesPage key="services" type="services" permissions={bootstrap.permissions} />;
         case 'deployments':
             return <DeploymentsPage />;
+        case 'docker':
+            return <DockerPage />;
         case 'monitoring':
             return <MonitoringPage />;
         case 'github-runners':

@@ -2,10 +2,10 @@
 
 namespace App\Jobs;
 
-use App\Models\Team;
-use App\Services\DevForge\Agent\AgentSkillService;
-use App\Services\DevForge\Agent\AgentRunner;
 use App\Models\AiAgent;
+use App\Models\Team;
+use App\Services\DevForge\Agent\AgentRunLauncher;
+use App\Services\DevForge\Agent\AgentSkillService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -27,12 +27,13 @@ class DeployGraftToAllReposJob implements ShouldQueue
         public readonly int $teamId,
     ) {}
 
-    public function handle(AgentRunner $runner, AgentSkillService $skillService): void
+    public function handle(AgentRunLauncher $launcher, AgentSkillService $skillService): void
     {
         $team = Team::find($this->teamId);
 
         if (! $team) {
             Log::error("[DeployGraftToAllReposJob] Team {$this->teamId} not found");
+
             return;
         }
 
@@ -48,15 +49,29 @@ class DeployGraftToAllReposJob implements ShouldQueue
             ->first();
 
         if (! $worker) {
-            Log::error("[DeployGraftToAllReposJob] Worker agent not found for team {$this->teamId}");
+            $worker = AiAgent::query()
+                ->where('team_id', $team->id)
+                ->where('is_active', true)
+                ->first();
+        }
+
+        if (! $worker) {
+            Log::error("[DeployGraftToAllReposJob] No active agent found for team {$this->teamId}");
+
             return;
         }
 
-        // Vérifier que le skill existe
+        // Vérifier que le skill existe (ou le créer s'il manque)
         $skill = $skillService->findBySlug($team, 'deploy-graft-all-repos');
 
         if (! $skill) {
+            $skillService->ensureBuiltins($team);
+            $skill = $skillService->findBySlug($team, 'deploy-graft-all-repos');
+        }
+
+        if (! $skill) {
             Log::error("[DeployGraftToAllReposJob] Skill deploy-graft-all-repos not found");
+
             return;
         }
 
@@ -101,19 +116,18 @@ Commence maintenant.
 PROMPT;
 
         try {
-            // Lancer l'agent avec le prompt
-            $runner->run($worker, $prompt, [
+            $run = $launcher->queue($worker, 'event', [
+                'event' => 'deploy_graft_all_repos',
+                'delegated_goal' => $prompt,
                 'source' => 'graft_automation_job',
-                'metadata' => [
-                    'job_id' => $this->job?->getJobId(),
-                    'team_id' => $this->teamId,
-                ],
+                'team_id' => $this->teamId,
             ]);
 
-            Log::info("[DeployGraftToAllReposJob] Graft deployment completed for team {$this->teamId}");
+            Log::info("[DeployGraftToAllReposJob] Graft deployment queued (run: {$run?->uuid}) for team {$this->teamId}");
         } catch (\Throwable $e) {
             Log::error("[DeployGraftToAllReposJob] Error deploying Graft for team {$this->teamId}: {$e->getMessage()}");
             throw $e;
         }
     }
 }
+

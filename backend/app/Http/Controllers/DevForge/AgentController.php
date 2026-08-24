@@ -113,17 +113,6 @@ class AgentController extends Controller
             }
         }
 
-        if (empty($validated['provider_config_id'])) {
-            $defaultProvider = AiProviderConfig::query()
-                ->where('team_id', $team->id)
-                ->where('is_default', true)
-                ->first();
-
-            if ($defaultProvider) {
-                $validated['provider_config_id'] = $defaultProvider->id;
-            }
-        }
-
         $agent = AiAgent::create([
             'team_id' => $team->id,
             ...$this->normalizeAgentInput($validated),

@@ -1,15 +1,8 @@
 import { Zap, Check, X, Loader2 } from 'lucide-preact';
 import { useState } from 'preact/hooks';
-import { apiFetch, ensureCsrfCookie } from '../../lib/api-client';
+import { domainApi } from '../../lib/domain-api';
 
 type DeployStatus = 'idle' | 'deploying' | 'success' | 'error';
-
-type DeployResponse = {
-    data: {
-        message: string;
-        job_dispatched: boolean;
-    };
-};
 
 export function DeployGraftButton() {
     const [status, setStatus] = useState<DeployStatus>('idle');
@@ -20,15 +13,12 @@ export function DeployGraftButton() {
             setStatus('deploying');
             setMessage('');
 
-            await ensureCsrfCookie();
-            const response = await apiFetch<DeployResponse>(
-                '/api/v1/devforge/graft/deploy-all',
-                { method: 'POST' }
-            );
-            
+            const response = await domainApi.deployGraftAll();
+
             setStatus('success');
-            setMessage(response.data.message || 'Déploiement Graft lancé ! (~2-3 min)');
-            
+            const successMsg = response.data?.message || (response as unknown as { message?: string }).message || 'Déploiement Graft lancé ! (~2-3 min)';
+            setMessage(successMsg);
+
             // Reset après 5 secondes
             setTimeout(() => {
                 setStatus('idle');
@@ -39,7 +29,7 @@ export function DeployGraftButton() {
             setMessage(
                 error instanceof Error ? error.message : 'Erreur lors du déploiement Graft'
             );
-            
+
             // Reset après 5 secondes
             setTimeout(() => {
                 setStatus('idle');

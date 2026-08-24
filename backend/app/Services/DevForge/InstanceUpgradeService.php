@@ -67,7 +67,7 @@ class InstanceUpgradeService
         $hasNewerVersion = version_compare($latestVersion, $currentVersion, '>');
 
         return [
-            'available' => ! $cloud && $flagged && $hasNewerVersion,
+            'available' => ! $cloud && ($flagged || $hasNewerVersion) && $hasNewerVersion,
             'current_version' => $currentVersion,
             'latest_version' => $latestVersion,
             'stale_flag' => $flagged && ! $hasNewerVersion,
@@ -86,7 +86,7 @@ class InstanceUpgradeService
 
         try {
             $content = instant_remote_process(
-                ["cat /data/coolify/source/.upgrade-status 2>/dev/null || echo ''"],
+                ["cat /data/coolify/source/.upgrade-status 2>/dev/null || cat /data/devforge/.upgrade-status 2>/dev/null || cat /tmp/.upgrade-status 2>/dev/null || cat /DATA/AppData/devforge/.upgrade-status 2>/dev/null || cat /media/Docker/AppData/devforge/.upgrade-status 2>/dev/null || echo ''"],
                 $server,
                 false
             );

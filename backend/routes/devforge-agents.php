@@ -12,6 +12,7 @@ use App\Http\Controllers\DevForge\AgentRunController;
 use App\Http\Controllers\DevForge\AgentRunStreamController;
 use App\Http\Controllers\DevForge\AgentSessionController;
 use App\Http\Controllers\DevForge\AiProviderController;
+use App\Http\Controllers\DevForge\GraftAutomationController;
 use App\Http\Controllers\DevForge\OllamaController;
 use App\Http\Middleware\EnsureDevForgeAgentsEnabled;
 use Illuminate\Support\Facades\Route;
@@ -92,10 +93,20 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
         Route::get('/{uuid}/runs', [AgentRunController::class, 'index'])
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->name('runs.index');
+        Route::delete('/{uuid}/runs', [AgentRunController::class, 'clear'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->name('runs.clear');
+        Route::post('/{uuid}/runs/clear', [AgentRunController::class, 'clear'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->name('runs.clear.post');
         Route::get('/{uuid}/runs/{runUuid}', [AgentRunController::class, 'show'])
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->where('runUuid', '[A-Za-z0-9-]{8,64}')
             ->name('runs.show');
+        Route::delete('/{uuid}/runs/{runUuid}', [AgentRunController::class, 'destroy'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->where('runUuid', '[A-Za-z0-9-]{8,64}')
+            ->name('runs.destroy');
         Route::get('/{uuid}/runs/{runUuid}/stream', AgentRunStreamController::class)
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->where('runUuid', '[A-Za-z0-9-]{8,64}')
@@ -169,5 +180,25 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
         Route::delete('/skills/{id}', [AgentSkillController::class, 'destroy'])
             ->whereNumber('id')
             ->name('skills.destroy');
+    });
+
+    Route::prefix('graft')->name('graft.')->group(function () {
+        Route::post('/deploy-all', [GraftAutomationController::class, 'deployToAllRepos'])->name('deploy-all');
+        Route::get('/status', [GraftAutomationController::class, 'status'])->name('status');
+        Route::post('/deploy/{repo}', [GraftAutomationController::class, 'deployToRepo'])
+            ->where('repo', '.*')
+            ->name('deploy-repo');
+    });
+
+    Route::prefix('ai/graft')->group(function () {
+        Route::post('/deploy-all', [GraftAutomationController::class, 'deployToAllRepos']);
+        Route::get('/status', [GraftAutomationController::class, 'status']);
+        Route::post('/deploy/{repo}', [GraftAutomationController::class, 'deployToRepo'])->where('repo', '.*');
+    });
+
+    Route::prefix('devforge/graft')->group(function () {
+        Route::post('/deploy-all', [GraftAutomationController::class, 'deployToAllRepos']);
+        Route::get('/status', [GraftAutomationController::class, 'status']);
+        Route::post('/deploy/{repo}', [GraftAutomationController::class, 'deployToRepo'])->where('repo', '.*');
     });
 });

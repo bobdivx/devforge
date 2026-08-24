@@ -11,6 +11,7 @@ use App\Livewire\Dashboard;
 use App\Livewire\Destination\Index as DestinationIndex;
 use App\Livewire\Destination\Resources as DestinationResources;
 use App\Livewire\Destination\Show as DestinationShow;
+use App\Livewire\Docker\Index as DockerIndex;
 use App\Livewire\ForcePasswordReset;
 use App\Livewire\Notifications\Discord as NotificationDiscord;
 use App\Livewire\Notifications\Email as NotificationEmail;
@@ -118,6 +119,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     });
 
     Route::get('/', Dashboard::class)->name('dashboard');
+    Route::get('/docker', DockerIndex::class)->name('docker.index');
     Route::get('/admin', AdminIndex::class)->name('admin.index');
     Route::get('/onboarding', BoardingIndex::class)->name('onboarding');
 

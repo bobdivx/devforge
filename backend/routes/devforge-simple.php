@@ -12,6 +12,8 @@ use App\Http\Controllers\DevForge\InstanceBackupController;
 use App\Http\Controllers\DevForge\ScheduledJobsController;
 use App\Http\Controllers\DevForge\SharedVariableController;
 use App\Http\Controllers\DevForge\AgentKeyRequestController;
+use App\Http\Controllers\DevForge\DockerController;
+use App\Http\Controllers\DevForge\GraftAutomationController;
 use App\Http\Controllers\DevForge\SubscriptionController;
 use Illuminate\Support\Facades\Route;
 
@@ -117,3 +119,33 @@ Route::post('/agent-key-requests/{uuid}/fulfill', [AgentKeyRequestController::cl
 
 Route::get('/subscription', [SubscriptionController::class, 'show'])->name('subscription.show');
 Route::post('/subscription/portal', [SubscriptionController::class, 'portal'])->name('subscription.portal');
+
+Route::get('/docker/containers', [DockerController::class, 'containers'])->name('docker.containers');
+Route::post('/docker/containers/{serverUuid}/{containerId}/{action}', [DockerController::class, 'containerAction'])
+    ->where('action', 'start|stop|restart')
+    ->name('docker.containers.action');
+Route::get('/docker/images', [DockerController::class, 'images'])->name('docker.images');
+Route::post('/docker/images/check', [DockerController::class, 'checkImageUpdates'])->name('docker.images.check');
+Route::post('/docker/images/update', [DockerController::class, 'updateImage'])->name('docker.images.update');
+Route::post('/docker/images/update-all', [DockerController::class, 'updateAllImages'])->name('docker.images.update-all');
+Route::put('/docker/images/auto-update', [DockerController::class, 'toggleAutoUpdate'])->name('docker.images.auto-update');
+
+Route::prefix('graft')->name('graft.')->group(function () {
+    Route::post('/deploy-all', [GraftAutomationController::class, 'deployToAllRepos'])->name('deploy-all');
+    Route::get('/status', [GraftAutomationController::class, 'status'])->name('status');
+    Route::post('/deploy/{repo}', [GraftAutomationController::class, 'deployToRepo'])
+        ->where('repo', '.*')
+        ->name('deploy-repo');
+});
+
+Route::prefix('ai/graft')->group(function () {
+    Route::post('/deploy-all', [GraftAutomationController::class, 'deployToAllRepos']);
+    Route::get('/status', [GraftAutomationController::class, 'status']);
+    Route::post('/deploy/{repo}', [GraftAutomationController::class, 'deployToRepo'])->where('repo', '.*');
+});
+
+Route::prefix('devforge/graft')->group(function () {
+    Route::post('/deploy-all', [GraftAutomationController::class, 'deployToAllRepos']);
+    Route::get('/status', [GraftAutomationController::class, 'status']);
+    Route::post('/deploy/{repo}', [GraftAutomationController::class, 'deployToRepo'])->where('repo', '.*');
+});

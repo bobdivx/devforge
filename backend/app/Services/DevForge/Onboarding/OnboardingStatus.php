@@ -37,15 +37,23 @@ class OnboardingStatus
 
     private function hasConfiguredDomain(): bool
     {
-        $settings = InstanceSettings::query()->whereKey(0)->first();
+        try {
+            $settings = InstanceSettings::query()->whereKey(0)->first() ?? InstanceSettings::query()->first();
 
-        return filled($settings?->apps_wildcard_domain);
+            return filled($settings?->apps_wildcard_domain);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     private function hasConfiguredSso(): bool
     {
-        $settings = InstanceSettings::query()->whereKey(0)->first();
+        try {
+            $settings = InstanceSettings::query()->whereKey(0)->first() ?? InstanceSettings::query()->first();
 
-        return SsoProtection::pocketIdLoginEnabled() || filled($settings?->sso_forward_auth_address);
+            return SsoProtection::pocketIdLoginEnabled() || filled($settings?->sso_forward_auth_address);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 }

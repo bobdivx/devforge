@@ -48,6 +48,8 @@ export type PageKey =
 
     | 'deployments'
 
+    | 'docker'
+
     | 'monitoring'
 
     | 'settings'
@@ -131,6 +133,8 @@ export const appRoutes: AppRoute[] = [
     { path: '/services', label: 'Services', description: 'Stacks et services gérés.', icon: Wrench, page: 'services' },
 
     { path: '/deployments', label: 'Déploiements', description: 'Pipeline apps, GitHub, déploiements et agents.', icon: Rocket, page: 'deployments' },
+
+    { path: '/docker', label: 'Docker', description: 'Supervision des conteneurs et mise à jour automatique des images.', icon: Boxes, page: 'docker' },
 
     { path: '/storage', label: 'Stockage', description: 'Espace disque, nettoyage Docker et surveillance.', icon: HardDrive, page: 'storage' },
 
@@ -507,6 +511,8 @@ const databasesRoute = appRouteByPage('databases');
 
 const servicesRoute = appRouteByPage('services');
 
+const dockerRoute = appRouteByPage('docker');
+
 const settingsRoute = appRouteByPage('settings');
 
 const sharedVariablesRoute: AppRoute = {
@@ -622,6 +628,8 @@ const dynamicRoutes: Array<{ pattern: RegExp; route: AppRoute }> = [
     { pattern: /^\/project\/[^/]+\/environment\/[^/]+\/database\/[^/]+(?:\/.*)?$/, route: databasesRoute },
 
     { pattern: /^\/project\/[^/]+\/environment\/[^/]+\/service\/[^/]+(?:\/.*)?$/, route: servicesRoute },
+
+    { pattern: /^\/docker(?:\/.*)?$/, route: dockerRoute },
 
     { pattern: /^\/project\/[^/]+(?:\/.*)?$/, route: { ...settingsRoute, path: '/settings/projects', label: 'Projets' } },
 

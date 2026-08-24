@@ -1,4 +1,4 @@
-import { Activity, RefreshCw, Zap } from 'lucide-preact';
+import { Activity, RefreshCw, Trash2, Zap } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
 import type { Agent } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
@@ -19,11 +19,60 @@ export function AgentRunsView({ agent, initialRunUuid = null, onAgentUpdated }: 
     const [selectedRunUuid, setSelectedRunUuid] = useState<string | null>(initialRunUuid);
     const [selectedRun, setSelectedRun] = useState<Awaited<ReturnType<typeof domainApi.agentRun>>['data'] | null>(null);
     const [loading, setLoading] = useState(true);
+    const [clearing, setClearing] = useState(false);
 
     const refreshRuns = async () => {
         const response = await domainApi.agentRuns(agent.uuid);
         setRuns(response.data);
         return response.data;
+    };
+
+    const handleClearRuns = async () => {
+        if (!window.confirm('Purger toutes les exécutions de cet agent ? Cette action est irréversible.')) {
+            return;
+        }
+
+        setClearing(true);
+        try {
+            await domainApi.clearAgentRuns(agent.uuid);
+            setRuns([]);
+            setSelectedRunUuid(null);
+            setSelectedRun(null);
+            syncAgentDetailQuery({
+                settings: shouldOpenAgentSettings(window.location.search),
+                view: 'runs',
+                run: null,
+            });
+            onAgentUpdated();
+        } catch (err) {
+            console.error('Impossible de purger les runs:', err);
+        } finally {
+            setClearing(false);
+        }
+    };
+
+    const handleDeleteRun = async (runUuid: string) => {
+        if (!window.confirm('Supprimer cette exécution ?')) {
+            return;
+        }
+
+        try {
+            await domainApi.deleteAgentRun(agent.uuid, runUuid);
+            const remaining = runs.filter((r) => r.uuid !== runUuid);
+            setRuns(remaining);
+            if (selectedRunUuid === runUuid) {
+                const nextPreferred = remaining[0]?.uuid ?? null;
+                setSelectedRunUuid(nextPreferred);
+                syncAgentDetailQuery({
+                    settings: shouldOpenAgentSettings(window.location.search),
+                    view: 'runs',
+                    run: nextPreferred,
+                });
+            }
+            onAgentUpdated();
+        } catch (err) {
+            console.error('Impossible de supprimer ce run:', err);
+        }
     };
 
     const {
@@ -139,14 +188,31 @@ export function AgentRunsView({ agent, initialRunUuid = null, onAgentUpdated }: 
                 <p class="min-w-0 truncate text-xs text-base-content/60">
                     Historique des runs
                 </p>
-                <button
-                    class="btn btn-ghost btn-xs gap-1.5"
-                    type="button"
-                    onClick={() => void refreshRuns()}
-                >
-                    <RefreshCw class="size-3.5" aria-hidden />
-                    Actualiser
-                </button>
+                <div class="flex items-center gap-1.5 sm:gap-2">
+                    {runs.length > 0 && (
+                        <button
+                            class="btn btn-ghost btn-xs text-error hover:bg-error/15 hover:text-error gap-1.5"
+                            type="button"
+                            disabled={clearing}
+                            onClick={() => void handleClearRuns()}
+                        >
+                            {clearing ? (
+                                <span class="loading loading-spinner loading-xs" aria-hidden />
+                            ) : (
+                                <Trash2 class="size-3.5" aria-hidden />
+                            )}
+                            Purger tout
+                        </button>
+                    )}
+                    <button
+                        class="btn btn-ghost btn-xs gap-1.5"
+                        type="button"
+                        onClick={() => void refreshRuns()}
+                    >
+                        <RefreshCw class="size-3.5" aria-hidden />
+                        Actualiser
+                    </button>
+                </div>
             </div>
 
             <div class="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
@@ -168,6 +234,7 @@ export function AgentRunsView({ agent, initialRunUuid = null, onAgentUpdated }: 
                                     run: uuid,
                                 });
                             }}
+                            onDelete={handleDeleteRun}
                         />
                     )}
                 </aside>

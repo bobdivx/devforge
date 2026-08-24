@@ -183,6 +183,19 @@
                     </li>
 
                     <li>
+                        <a title="Docker" {{ wireNavigate() }}
+                            class="{{ request()->is('docker*') ? 'menu-item-active menu-item' : 'menu-item' }}"
+                            href="{{ route('docker.index') }}">
+                            <svg class="menu-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M4 14.5c0 3.5 3 6.5 8 6.5s8.5-3 9-6.5H4z" />
+                                <path d="M3 14.5h18" />
+                                <path d="M4 11h2.5v2.5H4V11zm3.5 0H10v2.5H7.5V11zm3.5 0h2.5v2.5H11V11zm3.5 0H17v2.5h-2.5V11zm-7-3.5H10V10H7.5V7.5zm3.5 0h2.5V10H11V7.5zm3.5 0H17V10h-2.5V7.5zm0-3.5H17V6h-2.5V4z" />
+                            </svg>
+                            <span class="menu-item-label" :class="collapsed && 'lg:hidden'">Docker</span>
+                        </a>
+                    </li>
+
+                    <li>
                         <a title="Sources" {{ wireNavigate() }}
                             class="{{ request()->is('source*') ? 'menu-item-active menu-item' : 'menu-item' }}"
                             href="{{ route('source.all') }}">

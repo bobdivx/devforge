@@ -1,4 +1,4 @@
-import { ChevronRight, Clock, Zap } from 'lucide-preact';
+import { ChevronRight, Clock, Trash2, Zap } from 'lucide-preact';
 import type { AgentRun } from '../../lib/domain-api';
 import { AgentRunStatusBadge } from './AgentRunStatusBadge';
 import { AgentModelRoutingBadge } from './AgentModelRoutingBadge';
@@ -55,9 +55,10 @@ type Props = {
     runs: AgentRun[];
     selectedUuid: string | null;
     onSelect: (uuid: string) => void;
+    onDelete?: (uuid: string) => void;
 };
 
-export function RunHistoryTable({ runs, selectedUuid, onSelect }: Props) {
+export function RunHistoryTable({ runs, selectedUuid, onSelect, onDelete }: Props) {
     if (runs.length === 0) {
         return (
             <div class="flex flex-col items-center gap-2 sm:gap-3 px-6 py-10 text-center">
@@ -81,9 +82,11 @@ export function RunHistoryTable({ runs, selectedUuid, onSelect }: Props) {
                 const isLive = run.status === 'running' || run.status === 'pending';
 
                 return (
-                    <li key={run.uuid}>
+                    <li key={run.uuid} class="relative group/item">
                         <button
                             class={`group flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition-all ${
+                                onDelete ? 'pe-9' : ''
+                            } ${
                                 selected
                                     ? 'border-primary/40 bg-primary/10 shadow-sm ring-1 ring-primary/20'
                                     : 'border-base-300/80 bg-base-100 hover:border-base-content/20 hover:bg-base-200/50'
@@ -115,10 +118,10 @@ export function RunHistoryTable({ runs, selectedUuid, onSelect }: Props) {
                                     <span aria-hidden>·</span>
                                     <span>
                                         {new Date(run.created_at).toLocaleString('fr-FR', {
-                                            day: '2-digit',
-                                            month: '2-digit',
-                                            hour: '2-digit',
-                                            minute: '2-digit',
+                                             day: '2-digit',
+                                             month: '2-digit',
+                                             hour: '2-digit',
+                                             minute: '2-digit',
                                         })}
                                     </span>
                                     <span aria-hidden>·</span>
@@ -127,6 +130,21 @@ export function RunHistoryTable({ runs, selectedUuid, onSelect }: Props) {
                             </div>
                             <ChevronRight class={`mt-2 size-4 shrink-0 ${selected ? 'text-primary' : 'text-base-content/30'}`} aria-hidden />
                         </button>
+                        {onDelete && (
+                            <button
+                                type="button"
+                                class="btn btn-ghost btn-xs absolute end-1.5 top-2.5 z-10 size-7 min-h-7 p-0 text-base-content/40 opacity-0 group-hover/item:opacity-100 hover:bg-error/15 hover:text-error transition focus:opacity-100"
+                                title="Supprimer ce run"
+                                aria-label={`Supprimer run ${run.uuid}`}
+                                onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    onDelete(run.uuid);
+                                }}
+                            >
+                                <Trash2 class="size-3.5" aria-hidden />
+                            </button>
+                        )}
                     </li>
                 );
             })}

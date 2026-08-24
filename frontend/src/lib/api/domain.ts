@@ -2551,6 +2551,75 @@ export interface AgentKeyRequest {
     resolved_at?: string | null;
 }
 
+export interface DockerContainer {
+    ID: string;
+    Names: string;
+    Image: string;
+    State: 'running' | 'exited' | 'restarting' | 'paused' | string;
+    Status: string;
+    Ports: string;
+    RunningFor: string;
+    CreatedAt: string;
+    Labels: string;
+}
+
+export interface DockerContainersResponse {
+    data: DockerContainer[];
+    meta?: {
+        server?: {
+            uuid: string;
+            name: string;
+            ip?: string;
+            is_functional: boolean;
+        } | null;
+        total?: number;
+        running?: number;
+        exited?: number;
+    };
+}
+
+export interface DockerResourceImageItem {
+    uuid: string;
+    name: string;
+    type: 'application' | 'service';
+    image: string | null;
+    tag: string | null;
+    is_image_auto_update_enabled: boolean;
+    project: string | null;
+    environment: string | null;
+    server: string | null;
+    status: string | null;
+}
+
+export interface DockerImagesResponse {
+    data: {
+        applications: DockerResourceImageItem[];
+        services: DockerResourceImageItem[];
+    };
+    meta?: {
+        total: number;
+        auto_update_enabled: number;
+    };
+}
+
+export interface DockerImageCheckResult {
+    ok?: boolean;
+    update_available?: boolean | null;
+    configured_image?: string;
+    configured_tag?: string;
+    latest_tag?: string | null;
+    configured_digest?: string | null;
+    target_digest?: string | null;
+    latest_digest?: string | null;
+    comparison?: string;
+    error?: string;
+    running?: {
+        image?: string | null;
+        tag?: string | null;
+        digest?: string | null;
+    } | null;
+}
+
 export const domainApi = {
     agentKeyRequests: (options?: { status?: string }) => {
         const params = new URLSearchParams();
@@ -4192,7 +4261,13 @@ export const domainApi = {
         body: JSON.stringify({ feedback }),
     }),
     agentRuns: (agentUuid: string, page = 1) => apiFetch<ApiListResponse<AgentRun>>(`${API_BASE}/agents/${encodeURIComponent(agentUuid)}/runs?page=${page}`),
+    clearAgentRuns: (agentUuid: string) => mutate<ApiResponse<{ cleared: number }>>(`/agents/${encodeURIComponent(agentUuid)}/runs`, {
+        method: 'DELETE',
+    }),
     agentRun: (agentUuid: string, runUuid: string) => apiFetch<ApiResponse<AgentRun>>(`${API_BASE}/agents/${encodeURIComponent(agentUuid)}/runs/${encodeURIComponent(runUuid)}`),
+    deleteAgentRun: (agentUuid: string, runUuid: string) => mutate<ApiResponse<{ deleted: boolean }>>(`/agents/${encodeURIComponent(agentUuid)}/runs/${encodeURIComponent(runUuid)}`, {
+        method: 'DELETE',
+    }),
     cancelAgentRun: (agentUuid: string, runUuid: string, reason?: string) => mutate<ApiResponse<{
         cancelled: boolean;
         already_finished: boolean;
@@ -4266,4 +4341,47 @@ export const domainApi = {
         method: 'POST',
         body: JSON.stringify(input),
     }),
+
+    dockerContainers: (serverUuid?: string) => {
+        const params = new URLSearchParams();
+        if (serverUuid) params.set('server_uuid', serverUuid);
+        const qs = params.toString();
+        return apiFetch<DockerContainersResponse>(`${API_BASE}/docker/containers${qs ? `?${qs}` : ''}`);
+    },
+    dockerContainerAction: (serverUuid: string, containerId: string, action: 'start' | 'stop' | 'restart') => mutate<{ message: string }>(
+        `/docker/containers/${encodeURIComponent(serverUuid)}/${encodeURIComponent(containerId)}/${encodeURIComponent(action)}`,
+        { method: 'POST' },
+    ),
+    dockerImages: () => apiFetch<DockerImagesResponse>(`${API_BASE}/docker/images`),
+    dockerCheckImageUpdates: (type?: 'application' | 'service', uuid?: string) => mutate<{ data: Record<string, DockerImageCheckResult> | DockerImageCheckResult }>(
+        '/docker/images/check',
+        {
+            method: 'POST',
+            body: JSON.stringify(type && uuid ? { type, uuid } : {}),
+        },
+    ),
+    dockerUpdateImage: (type: 'application' | 'service', uuid: string) => mutate<{ data: { status: string; reason?: string; error?: string; deployment_uuid?: string } }>(
+        '/docker/images/update',
+        {
+            method: 'POST',
+            body: JSON.stringify({ type, uuid }),
+        },
+    ),
+    dockerUpdateAllImages: () => mutate<{ data: { checked: number; updated: number; skipped: number; errors: number } }>(
+        '/docker/images/update-all',
+        {
+            method: 'POST',
+        },
+    ),
+    dockerToggleAutoUpdate: (type: 'application' | 'service', uuid: string, is_image_auto_update_enabled: boolean) => mutate<{ message: string; data: { uuid: string; is_image_auto_update_enabled: boolean } }>(
+        '/docker/images/auto-update',
+        {
+            method: 'PUT',
+            body: JSON.stringify({ type, uuid, is_image_auto_update_enabled }),
+        },
+    ),
+    deployGraftAll: () => mutate<ApiResponse<{ message: string; status: string; job_dispatched: boolean }>>('/graft/deploy-all', {
+        method: 'POST',
+    }),
+    graftStatus: () => apiFetch<ApiResponse<{ status: string; last_deployment: string | null; repos_configured: number; total_repos: number }>>(`${API_BASE}/graft/status`),
 };

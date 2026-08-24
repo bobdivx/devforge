@@ -46,6 +46,7 @@ bootstrap/helpers/shared.php
 bootstrap/helpers/devforge-domains.php
 routes/devforge-api.php
 routes/devforge-applications.php
+routes/devforge-store.php
 routes/devforge-services.php
 routes/devforge-databases.php
 routes/devforge-database-backups.php
@@ -86,3 +87,16 @@ app/Models/StandaloneDocker.php
 app/Models/SwarmDocker.php
 app/Policies/ResourceCreatePolicy.php
 app/Livewire/Project/Resource/Create.php
+
+# Update system
+config/constants.php
+versions.json
+app/Actions/Server/UpdateCoolify.php
+app/Jobs/CheckForUpdatesJob.php
+app/Jobs/DeployGraftToAllReposJob.php
+scripts/upgrade.sh
+
+# UI / Docker Livewire & Navbar
+app/Livewire/Docker
+resources/views/livewire/docker
+resources/views/components/navbar.blade.php

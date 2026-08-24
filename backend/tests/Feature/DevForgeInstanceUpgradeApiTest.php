@@ -74,6 +74,13 @@ it('starts a manual instance upgrade when a newer version is available', functio
 });
 
 it('rejects a manual upgrade when no newer version is available', function () {
+    Cache::put('coolify:versions:all', [
+        'coolify' => [
+            'v4' => [
+                'version' => '4.0.0-beta.998',
+            ],
+        ],
+    ], 3600);
     InstanceSettings::query()->whereKey(0)->update(['new_version_available' => false]);
     Once::flush();
 

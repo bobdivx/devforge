@@ -1,303 +1,216 @@
-#!/bin/bash
-## Do not modify this file. You will lose the ability to autoupdate!
+#!/usr/bin/env bash
+## DevForge Upgrade Script
+## Usage: bash upgrade.sh [LATEST_IMAGE] [LATEST_HELPER_VERSION] [REGISTRY_URL] [SKIP_BACKUP]
 
-CDN="https://cdn.coollabs.io/coolify"
-LATEST_IMAGE=${1:-latest}
-LATEST_HELPER_VERSION=${2:-latest}
-REGISTRY_URL=${3:-ghcr.io}
-SKIP_BACKUP=${4:-false}
-ENV_FILE="/data/coolify/source/.env"
-STATUS_FILE="/data/coolify/source/.upgrade-status"
+set -euo pipefail
+
+LATEST_IMAGE="${1:-latest}"
+LATEST_HELPER_VERSION="${2:-latest}"
+REGISTRY_URL="${3:-docker.io}"
+SKIP_BACKUP="${4:-false}"
+
+DEVFORGE_IMAGE="${DEVFORGE_IMAGE:-bobdivx/devforge}"
+API_IMAGE="${DEVFORGE_IMAGE}:${LATEST_IMAGE}"
+WEB_IMAGE="${DEVFORGE_IMAGE}:web"
+REALTIME_IMAGE="${DEVFORGE_IMAGE}:realtime"
+HELPER_IMAGE="${DEVFORGE_IMAGE}:helper"
+PROXY_IMAGE="${DEVFORGE_PROXY_IMAGE:-nginx:1.27.5-alpine}"
+
+# Find or initialize working directory
+WORK_DIR="/data/devforge"
+if [ -d "/data/coolify/source" ]; then
+    WORK_DIR="/data/coolify/source"
+elif [ -d "/DATA/AppData/devforge" ]; then
+    WORK_DIR="/DATA/AppData/devforge"
+elif [ -d "/media/Docker/AppData/devforge" ]; then
+    WORK_DIR="/media/Docker/AppData/devforge"
+fi
+mkdir -p "${WORK_DIR}" /data/coolify/source /data/devforge /tmp 2>/dev/null || true
 
 DATE=$(date +%Y-%m-%d-%H-%M-%S)
-LOGFILE="/data/coolify/source/upgrade-${DATE}.log"
+LOGFILE="${WORK_DIR}/upgrade-${DATE}.log"
 
-# Helper function to log with timestamp
+# Status file locations to notify all listeners
+STATUS_FILES=(
+    "/data/coolify/source/.upgrade-status"
+    "/data/devforge/.upgrade-status"
+    "/tmp/.upgrade-status"
+)
+if [ -d "/DATA/AppData/devforge" ]; then
+    STATUS_FILES+=("/DATA/AppData/devforge/.upgrade-status")
+fi
+if [ -d "/media/Docker/AppData/devforge" ]; then
+    STATUS_FILES+=("/media/Docker/AppData/devforge/.upgrade-status")
+fi
+
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >>"$LOGFILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOGFILE"
 }
 
-# Helper function to log section headers
 log_section() {
     echo "" >>"$LOGFILE"
-    echo "============================================================" >>"$LOGFILE"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >>"$LOGFILE"
-    echo "============================================================" >>"$LOGFILE"
+    echo "============================================================" | tee -a "$LOGFILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOGFILE"
+    echo "============================================================" | tee -a "$LOGFILE"
 }
 
-# Helper function to write upgrade status for API polling
 write_status() {
     local step="$1"
     local message="$2"
-    echo "${step}|${message}|$(date -Iseconds)" > "$STATUS_FILE"
+    local payload="${step}|${message}|$(date -Iseconds)"
+    for sf in "${STATUS_FILES[@]}"; do
+        mkdir -p "$(dirname "$sf")" 2>/dev/null || true
+        echo "$payload" > "$sf" 2>/dev/null || true
+    done
 }
 
 echo ""
 echo "=========================================="
-echo "   Coolify Upgrade - ${DATE}"
+echo "   DevForge Upgrade - ${DATE}"
 echo "=========================================="
+echo "Target Version: ${LATEST_IMAGE}"
+echo "Helper Version: ${LATEST_HELPER_VERSION}"
+echo "Registry:       ${REGISTRY_URL}"
 echo ""
 
-# Initialize log file with header
-echo "============================================================" >>"$LOGFILE"
-echo "Coolify Upgrade Log" >>"$LOGFILE"
-echo "Started: $(date '+%Y-%m-%d %H:%M:%S')" >>"$LOGFILE"
-echo "Target Version: ${LATEST_IMAGE}" >>"$LOGFILE"
-echo "Helper Version: ${LATEST_HELPER_VERSION}" >>"$LOGFILE"
-echo "Registry URL: ${REGISTRY_URL}" >>"$LOGFILE"
-echo "============================================================" >>"$LOGFILE"
+log_section "Step 1/6: Preparing upgrade environment"
+write_status "1" "Préparation de la mise à jour DevForge"
 
-log_section "Step 1/6: Downloading configuration files"
-write_status "1" "Downloading configuration files"
-echo "1/6 Downloading latest configuration files..."
-log "Downloading docker-compose.yml from ${CDN}/docker-compose.yml"
-curl -fsSL -L $CDN/docker-compose.yml -o /data/coolify/source/docker-compose.yml
-log "Downloading docker-compose.prod.yml from ${CDN}/docker-compose.prod.yml"
-curl -fsSL -L $CDN/docker-compose.prod.yml -o /data/coolify/source/docker-compose.prod.yml
-log "Downloading .env.production from ${CDN}/.env.production"
-curl -fsSL -L $CDN/.env.production -o /data/coolify/source/.env.production
-log "Downloading upgrade-postgres.sh from ${CDN}/upgrade-postgres.sh"
-curl -fsSL -L $CDN/upgrade-postgres.sh -o /data/coolify/source/upgrade-postgres.sh
-chmod +x /data/coolify/source/upgrade-postgres.sh
-log "Configuration files downloaded successfully"
-echo "     Done."
-
-# Extract all images from docker-compose configuration
-log "Extracting all images from docker-compose configuration..."
-COMPOSE_FILES="-f /data/coolify/source/docker-compose.yml -f /data/coolify/source/docker-compose.prod.yml"
-
-# Check if custom compose file exists
-if [ -f /data/coolify/source/docker-compose.custom.yml ]; then
-    COMPOSE_FILES="$COMPOSE_FILES -f /data/coolify/source/docker-compose.custom.yml"
-    log "Including custom docker-compose.yml in image extraction"
-fi
-
-# Check if PostgreSQL upgrade override exists
-if [ -f /data/coolify/source/docker-compose.postgres-upgrade.yml ]; then
-    COMPOSE_FILES="$COMPOSE_FILES -f /data/coolify/source/docker-compose.postgres-upgrade.yml"
-    log "Including PostgreSQL upgrade compose override in image extraction"
-fi
-
-# Get all unique images from docker compose config
-# LATEST_IMAGE env var is needed for image substitution in compose files
-IMAGES=$(LATEST_IMAGE=${LATEST_IMAGE} docker compose --env-file "$ENV_FILE" $COMPOSE_FILES config --images 2>/dev/null | sort -u)
-
-if [ -z "$IMAGES" ]; then
-    log "ERROR: Failed to extract images from docker-compose files"
-    write_status "error" "Failed to parse docker-compose configuration"
-    echo "     ERROR: Failed to parse docker-compose configuration. Aborting upgrade."
-    exit 1
-fi
-
-log "Images to pull:"
-echo "$IMAGES" | while read img; do log "  - $img"; done
-
-# Backup existing .env file before making any changes
-if [ "$SKIP_BACKUP" != "true" ]; then
-    if [ -f "$ENV_FILE" ]; then
-        echo "     Creating backup of .env file..."
-        log "Creating backup of .env file to .env-$DATE"
-        cp "$ENV_FILE" "$ENV_FILE-$DATE"
-        log "Backup created: ${ENV_FILE}-${DATE}"
-    else
-        log "WARNING: No existing .env file found to backup"
-    fi
-fi
-
-log_section "Step 2/6: Updating environment configuration"
-write_status "2" "Updating environment configuration"
-echo ""
-echo "2/6 Updating environment configuration..."
-log "Merging .env.production values into .env"
-awk -F '=' '!seen[$1]++' "$ENV_FILE" /data/coolify/source/.env.production > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
-log "Environment file merged successfully"
-
-update_env_var() {
-    local key="$1"
-    local value="$2"
-
-    # If variable "key=" exists but has no value, update the value of the existing line
-    if grep -q "^${key}=$" "$ENV_FILE"; then
-        sed -i "s|^${key}=$|${key}=${value}|" "$ENV_FILE"
-        log "Updated ${key} (was empty)"
-    # If variable "key=" doesn't exist, append it to the file with value
-    elif ! grep -q "^${key}=" "$ENV_FILE"; then
-        printf '%s=%s\n' "$key" "$value" >>"$ENV_FILE"
-        log "Added ${key} (was missing)"
-    fi
-}
-
-log "Checking environment variables..."
-update_env_var "PUSHER_APP_ID" "$(openssl rand -hex 32)"
-update_env_var "PUSHER_APP_KEY" "$(openssl rand -hex 32)"
-update_env_var "PUSHER_APP_SECRET" "$(openssl rand -hex 32)"
-log "Environment variables check complete"
-echo "     Done."
-
-# Make sure coolify network exists
-# It is created when starting Coolify with docker compose
-log "Checking Docker network 'coolify'..."
-if ! docker network inspect coolify >/dev/null 2>&1; then
-    log "Network 'coolify' does not exist, creating..."
-    if ! docker network create --attachable --ipv6 coolify 2>/dev/null; then
-        log "Failed to create network with IPv6, trying without IPv6..."
-        docker network create --attachable coolify 2>/dev/null
-        log "Network 'coolify' created without IPv6"
-    else
-        log "Network 'coolify' created with IPv6 support"
-    fi
-else
-    log "Network 'coolify' already exists"
-fi
-
-# Fix SSH directory ownership if not owned by container user UID 9999 (fixes #6621)
-# Only changes owner — preserves existing group to respect custom setups
-SSH_OWNER=$(stat -c '%u' /data/coolify/ssh 2>/dev/null || echo "unknown")
-if [ "$SSH_OWNER" != "9999" ]; then
-    log "Fixing SSH directory ownership (was owned by UID $SSH_OWNER)"
-    chown -R 9999 /data/coolify/ssh
-    chmod -R 700 /data/coolify/ssh
-fi
-
-# Check if Docker config file exists
-DOCKER_CONFIG_MOUNT=""
-if [ -f /root/.docker/config.json ]; then
-    DOCKER_CONFIG_MOUNT="-v /root/.docker/config.json:/root/.docker/config.json"
-    log "Docker config mount enabled: /root/.docker/config.json"
-fi
-
-log_section "Step 3/6: Pulling Docker images"
-write_status "3" "Pulling Docker images"
-echo ""
-echo "3/6 Pulling Docker images..."
-echo "     This may take a few minutes depending on your connection."
-
-# Also pull the helper image (not in compose files but needed for upgrade)
-HELPER_IMAGE="${REGISTRY_URL:-ghcr.io}/coollabsio/coolify-helper:${LATEST_HELPER_VERSION}"
-echo "     - Pulling $HELPER_IMAGE..."
-log "Pulling image: $HELPER_IMAGE"
-if docker pull "$HELPER_IMAGE" >>"$LOGFILE" 2>&1; then
-    log "Successfully pulled $HELPER_IMAGE"
-else
-    log "ERROR: Failed to pull $HELPER_IMAGE"
-    write_status "error" "Failed to pull $HELPER_IMAGE"
-    echo "     ERROR: Failed to pull $HELPER_IMAGE. Aborting upgrade."
-    exit 1
-fi
-
-# Pull all images from compose config
-# Using a for loop to avoid subshell issues with exit
-for IMAGE in $IMAGES; do
-    if [ -n "$IMAGE" ]; then
-        echo "     - Pulling $IMAGE..."
-        log "Pulling image: $IMAGE"
-        if docker pull "$IMAGE" >>"$LOGFILE" 2>&1; then
-            log "Successfully pulled $IMAGE"
-        else
-            log "ERROR: Failed to pull $IMAGE"
-            write_status "error" "Failed to pull $IMAGE"
-            echo "     ERROR: Failed to pull $IMAGE. Aborting upgrade."
-            exit 1
-        fi
+# Detect docker compose file if available
+COMPOSE_FILE=""
+for candidate in \
+    "${WORK_DIR}/docker-compose.yml" \
+    "${WORK_DIR}/docker-compose.prod.yml" \
+    "/DATA/AppData/devforge/docker-compose.yml" \
+    "/DATA/AppData/io.github.bobdivx.devforge/docker-compose.yml" \
+    "/media/Docker/AppData/devforge/docker-compose.yml" \
+    "/data/coolify/source/docker-compose.yml"; do
+    if [ -f "$candidate" ]; then
+        COMPOSE_FILE="$candidate"
+        log "Found compose file: $COMPOSE_FILE"
+        break
     fi
 done
 
-log "All images pulled successfully"
-echo "     All images pulled successfully."
+log_section "Step 2/6: Checking network configuration"
+write_status "2" "Vérification des configurations réseau"
 
-log_section "Step 4/6: Stopping and restarting containers"
-write_status "4" "Stopping containers"
-echo ""
-echo "4/6 Stopping containers and starting new ones..."
-echo "     This step will restart all Coolify containers."
-echo "     Check the log file for details: ${LOGFILE}"
+# Ensure docker network exists
+if ! docker network inspect devforge >/dev/null 2>&1 && ! docker network inspect coolify >/dev/null 2>&1; then
+    log "Creating devforge Docker network..."
+    docker network create --attachable devforge 2>/dev/null || docker network create devforge 2>/dev/null || true
+fi
 
-# From this point forward, we need to ensure the script continues even if
-# the SSH connection is lost (which happens when coolify container stops)
-# We use a subshell with nohup to ensure completion
-log "Starting container restart sequence (detached)..."
+# Fix SSH directory permissions if present
+for ssh_dir in /data/devforge/ssh /data/coolify/ssh /DATA/AppData/devforge/ssh /media/Docker/AppData/devforge/ssh; do
+    if [ -d "$ssh_dir" ]; then
+        chmod -R 700 "$ssh_dir" 2>/dev/null || true
+    fi
+done
+
+log_section "Step 3/6: Pulling Docker images"
+write_status "3" "Téléchargement des images DevForge (${LATEST_IMAGE})"
+
+log "Pulling API image: ${API_IMAGE}..."
+docker pull "${API_IMAGE}" || docker pull "${DEVFORGE_IMAGE}:latest" || true
+
+log "Pulling Web SPA image: ${WEB_IMAGE}..."
+docker pull "${WEB_IMAGE}" || true
+
+log "Pulling Realtime image: ${REALTIME_IMAGE}..."
+docker pull "${REALTIME_IMAGE}" || true
+
+log "Pulling Helper image: ${HELPER_IMAGE}..."
+docker pull "${HELPER_IMAGE}" || true
+
+log "Pulling Proxy image: ${PROXY_IMAGE}..."
+docker pull "${PROXY_IMAGE}" || true
+
+log_section "Step 4/6: Restarting containers (detached)"
+write_status "4" "Redémarrage des conteneurs DevForge"
 
 nohup bash -c "
-    LOGFILE='$LOGFILE'
-    STATUS_FILE='$STATUS_FILE'
-    DOCKER_CONFIG_MOUNT='$DOCKER_CONFIG_MOUNT'
-    REGISTRY_URL='$REGISTRY_URL'
-    LATEST_HELPER_VERSION='$LATEST_HELPER_VERSION'
-    LATEST_IMAGE='$LATEST_IMAGE'
+    LOGFILE='${LOGFILE}'
+    LATEST_IMAGE='${LATEST_IMAGE}'
+    COMPOSE_FILE='${COMPOSE_FILE}'
+    WORK_DIR='${WORK_DIR}'
 
     log() {
         echo \"[\$(date '+%Y-%m-%d %H:%M:%S')] \$1\" >>\"\$LOGFILE\"
     }
 
     write_status() {
-        echo \"\$1|\$2|\$(date -Iseconds)\" > \"\$STATUS_FILE\"
+        local step=\"\$1\"
+        local message=\"\$2\"
+        local payload=\"\${step}|\${message}|\$(date -Iseconds)\"
+        for sf in '/data/coolify/source/.upgrade-status' '/data/devforge/.upgrade-status' '/tmp/.upgrade-status' '/DATA/AppData/devforge/.upgrade-status' '/media/Docker/AppData/devforge/.upgrade-status'; do
+            mkdir -p \"\$(dirname \"\$sf\")\" 2>/dev/null || true
+            echo \"\$payload\" > \"\$sf\" 2>/dev/null || true
+        done
     }
 
-    # Stop and remove containers
-    for container in coolify coolify-db coolify-redis coolify-realtime; do
-        if docker ps -a --format '{{.Names}}' | grep -q \"^\${container}\$\"; then
-            log \"Stopping container: \${container}\"
-            docker stop \"\$container\" >>\"\$LOGFILE\" 2>&1 || true
-            log \"Removing container: \${container}\"
-            docker rm \"\$container\" >>\"\$LOGFILE\" 2>&1 || true
-            log \"Container \${container} stopped and removed\"
-        else
-            log \"Container \${container} not found (skipping)\"
+    log 'Starting container reload...'
+    write_status '5' 'Démarrage des nouveaux conteneurs et migrations'
+
+    # If compose file exists, use docker compose
+    if [ -n \"\$COMPOSE_FILE\" ] && [ -f \"\$COMPOSE_FILE\" ]; then
+        log \"Using compose file: \$COMPOSE_FILE\"
+        COMPOSE_DIR=\"\$(dirname \"\$COMPOSE_FILE\")\"
+        cd \"\$COMPOSE_DIR\"
+        LATEST_IMAGE=\"\${LATEST_IMAGE}\" docker compose pull --ignore-pull-failures 2>>\"\$LOGFILE\" || true
+        LATEST_IMAGE=\"\${LATEST_IMAGE}\" docker compose up -d --remove-orphans 2>>\"\$LOGFILE\" || true
+    else
+        # Direct container recreation / restart
+        for c in devforge-realtime devforge-web devforge-api devforge-proxy; do
+            if docker ps -a --format '{{.Names}}' | grep -qx \"\$c\"; then
+                log \"Restarting container: \$c\"
+                docker restart \"\$c\" >>\"\$LOGFILE\" 2>&1 || true
+            fi
+        done
+    fi
+
+    # Wait for API container to come online
+    log 'Waiting for DevForge API container...'
+    API_C=\"devforge-api\"
+    if ! docker ps --format '{{.Names}}' | grep -qx \"\$API_C\"; then
+        if docker ps --format '{{.Names}}' | grep -qx 'api'; then
+            API_C=\"api\"
+        elif docker ps --format '{{.Names}}' | grep -qx 'coolify'; then
+            API_C=\"coolify\"
         fi
+    fi
+
+    sleep 5
+    for attempt in \$(seq 1 12); do
+        if docker ps --format '{{.Names}}' | grep -qx \"\$API_C\"; then
+            log \"API container \$API_C is running (attempt \$attempt)\"
+            break
+        fi
+        sleep 3
     done
-    log \"Container cleanup complete\"
 
-    # Start new containers
-    echo '' >>\"\$LOGFILE\"
-    echo '============================================================' >>\"\$LOGFILE\"
-    log 'Step 5/6: Starting new containers'
-    echo '============================================================' >>\"\$LOGFILE\"
-    write_status '5' 'Starting new containers'
+    # Run database migrations
+    if docker ps --format '{{.Names}}' | grep -qx \"\$API_C\"; then
+        log 'Running Laravel migrations...'
+        docker exec -w /var/www/html \"\$API_C\" php artisan migrate --force >>\"\$LOGFILE\" 2>&1 || true
 
-    COMPOSE_FILES='-f /data/coolify/source/docker-compose.yml -f /data/coolify/source/docker-compose.prod.yml'
-    if [ -f /data/coolify/source/docker-compose.custom.yml ]; then
-        log 'Using custom docker-compose.yml'
-        COMPOSE_FILES=\"\$COMPOSE_FILES -f /data/coolify/source/docker-compose.custom.yml\"
-    fi
-    if [ -f /data/coolify/source/docker-compose.postgres-upgrade.yml ]; then
-        log 'Using PostgreSQL upgrade compose override'
-        COMPOSE_FILES=\"\$COMPOSE_FILES -f /data/coolify/source/docker-compose.postgres-upgrade.yml\"
+        log 'Clearing Laravel optimization and cache...'
+        docker exec -w /var/www/html \"\$API_C\" php artisan optimize:clear >>\"\$LOGFILE\" 2>&1 || true
+        docker exec -w /var/www/html \"\$API_C\" php artisan queue:restart >>\"\$LOGFILE\" 2>&1 || true
+        docker exec -w /var/www/html \"\$API_C\" php artisan horizon:terminate >>\"\$LOGFILE\" 2>&1 || true
     fi
 
-    log 'Running docker compose up...'
-    docker run -v /data/coolify/source:/data/coolify/source -v /var/run/docker.sock:/var/run/docker.sock \${DOCKER_CONFIG_MOUNT} --rm \${REGISTRY_URL:-ghcr.io}/coollabsio/coolify-helper:\${LATEST_HELPER_VERSION} bash -c \"LATEST_IMAGE=\${LATEST_IMAGE} docker compose --env-file /data/coolify/source/.env \${COMPOSE_FILES} up -d --remove-orphans --wait --wait-timeout 60\" >>\"\$LOGFILE\" 2>&1
-    log 'Docker compose up completed'
-
-    # Final log entry
-    echo '' >>\"\$LOGFILE\"
-    echo '============================================================' >>\"\$LOGFILE\"
     log 'Step 6/6: Upgrade complete'
-    echo '============================================================' >>\"\$LOGFILE\"
-    write_status '6' 'Upgrade complete'
-    log 'Coolify upgrade completed successfully'
-    log \"Version: \${LATEST_IMAGE}\"
-    echo '' >>\"\$LOGFILE\"
-    echo '============================================================' >>\"\$LOGFILE\"
-    echo \"Upgrade completed: \$(date '+%Y-%m-%d %H:%M:%S')\" >>\"\$LOGFILE\"
-    echo '============================================================' >>\"\$LOGFILE\"
+    write_status '6' 'Mise à jour terminée avec succès'
+    log \"DevForge successfully upgraded to \${LATEST_IMAGE}\"
 
-    # Clean up status file after a short delay to allow frontend to read completion
-    sleep 10
-    rm -f \"\$STATUS_FILE\"
-    log 'Status file cleaned up'
+    sleep 15
+    for sf in '/data/coolify/source/.upgrade-status' '/data/devforge/.upgrade-status' '/tmp/.upgrade-status'; do
+        rm -f \"\$sf\" 2>/dev/null || true
+    done
+    log 'Status files cleaned up.'
 " >>"$LOGFILE" 2>&1 &
 
-# Give the background process a moment to start
 sleep 2
-log "Container restart sequence started in background (PID: $!)"
-echo ""
-echo "5/6 Containers are being restarted in the background..."
-echo "6/6 Upgrade process initiated!"
-echo ""
-echo "=========================================="
-echo "   Coolify upgrade to ${LATEST_IMAGE} in progress"
-echo "=========================================="
-echo ""
-echo "   The upgrade will continue in the background."
-echo "   Coolify will be available again shortly."
-echo "   Log file: ${LOGFILE}"
+echo "Upgrade process initiated in the background."
+echo "Log file: ${LOGFILE}"

@@ -8,23 +8,37 @@ use App\Services\DevForge\Agent\OllamaMessageNormalizer;
 
 class ResilientLlmProvider implements LlmProvider
 {
+    private bool $useFallback;
+
     public function __construct(
         private readonly LlmProvider $primary,
         private readonly LlmProvider $fallback,
         private readonly string $primaryLabel,
         private readonly string $fallbackLabel,
         private readonly ?\Closure $onFallback = null,
-    ) {}
+        bool $startWithFallback = false,
+    ) {
+        $this->useFallback = $startWithFallback;
+    }
 
     /** {@inheritdoc} */
     public function chat(array $messages, array $tools = []): LlmResponse
     {
+        if ($this->useFallback) {
+            return $this->fallback->chat(
+                $this->prepareFallbackMessages($messages),
+                $tools,
+            );
+        }
+
         try {
             return $this->primary->chat($messages, $tools);
         } catch (\Throwable $exception) {
             if (! $this->shouldFallback($exception)) {
                 throw $exception;
             }
+
+            $this->useFallback = true;
 
             if ($this->onFallback) {
                 ($this->onFallback)($exception, $this->primaryLabel, $this->fallbackLabel);

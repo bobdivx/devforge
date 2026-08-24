@@ -25,7 +25,7 @@ it('ignores the update flag in cloud and when versions are not newer', function 
 })->with([
     'same version' => ['4.0.0-beta.999', '4.0.0-beta.999', true, false, false, true],
     'older latest' => ['4.0.0-beta.1000', '4.0.0-beta.999', true, false, false, true],
-    'not flagged' => ['4.0.0-beta.998', '4.0.0-beta.999', false, false, false, false],
+    'not flagged but newer' => ['4.0.0-beta.998', '4.0.0-beta.999', false, false, true, false],
     'cloud' => ['4.0.0-beta.998', '4.0.0-beta.999', true, true, false, false],
 ]);
 

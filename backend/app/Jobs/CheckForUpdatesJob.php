@@ -27,7 +27,7 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
             if ($response->successful()) {
                 $versions = $response->json();
 
-                $latest_version = data_get($versions, 'coolify.v4.version');
+                $latest_version = data_get($versions, 'coolify.v4.version') ?? data_get($versions, 'devforge.version');
                 $current_version = config('constants.coolify.version');
 
                 // Read existing cached version
@@ -35,7 +35,7 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
                 $existingCoolifyVersion = null;
                 if (File::exists(base_path('versions.json'))) {
                     $existingVersions = json_decode(File::get(base_path('versions.json')), true);
-                    $existingCoolifyVersion = data_get($existingVersions, 'coolify.v4.version');
+                    $existingCoolifyVersion = data_get($existingVersions, 'coolify.v4.version') ?? data_get($existingVersions, 'devforge.version');
                 }
 
                 // Determine the BEST version to use (CDN, cache, or current)
