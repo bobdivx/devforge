@@ -4346,19 +4346,21 @@ export const domainApi = {
         const params = new URLSearchParams();
         if (serverUuid) params.set('server_uuid', serverUuid);
         const qs = params.toString();
-        return apiFetch<DockerContainersResponse>(`${API_BASE}/docker/containers${qs ? `?${qs}` : ''}`);
+        return apiFetch<DockerContainersResponse>(`${API_BASE}/docker/containers${qs ? `?${qs}` : ''}`, {}, 60_000);
     },
     dockerContainerAction: (serverUuid: string, containerId: string, action: 'start' | 'stop' | 'restart') => mutate<{ message: string }>(
         `/docker/containers/${encodeURIComponent(serverUuid)}/${encodeURIComponent(containerId)}/${encodeURIComponent(action)}`,
         { method: 'POST' },
+        60_000,
     ),
-    dockerImages: () => apiFetch<DockerImagesResponse>(`${API_BASE}/docker/images`),
+    dockerImages: () => apiFetch<DockerImagesResponse>(`${API_BASE}/docker/images`, {}, 60_000),
     dockerCheckImageUpdates: (type?: 'application' | 'service', uuid?: string) => mutate<{ data: Record<string, DockerImageCheckResult> | DockerImageCheckResult }>(
         '/docker/images/check',
         {
             method: 'POST',
             body: JSON.stringify(type && uuid ? { type, uuid } : {}),
         },
+        120_000,
     ),
     dockerUpdateImage: (type: 'application' | 'service', uuid: string) => mutate<{ data: { status: string; reason?: string; error?: string; deployment_uuid?: string } }>(
         '/docker/images/update',
@@ -4366,12 +4368,14 @@ export const domainApi = {
             method: 'POST',
             body: JSON.stringify({ type, uuid }),
         },
+        120_000,
     ),
     dockerUpdateAllImages: () => mutate<{ data: { checked: number; updated: number; skipped: number; errors: number } }>(
         '/docker/images/update-all',
         {
             method: 'POST',
         },
+        180_000,
     ),
     dockerToggleAutoUpdate: (type: 'application' | 'service', uuid: string, is_image_auto_update_enabled: boolean) => mutate<{ message: string; data: { uuid: string; is_image_auto_update_enabled: boolean } }>(
         '/docker/images/auto-update',
@@ -4379,6 +4383,7 @@ export const domainApi = {
             method: 'PUT',
             body: JSON.stringify({ type, uuid, is_image_auto_update_enabled }),
         },
+        30_000,
     ),
     deployGraftAll: () => mutate<ApiResponse<{ message: string; status: string; job_dispatched: boolean }>>('/graft/deploy-all', {
         method: 'POST',

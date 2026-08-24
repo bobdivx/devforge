@@ -49,10 +49,16 @@ class DockerController extends Controller
         }
 
         try {
-            $containers = $server->loadAllContainers()->values();
+            $output = instant_remote_process(
+                ["docker ps -a --format '{{json .}}'"],
+                $server,
+                throwError: false,
+                timeout: 10,
+            );
+            $containers = collect(format_docker_command_output_to_json($output));
 
             return response()->json([
-                'data' => $containers,
+                'data' => $containers->values(),
                 'meta' => [
                     'server' => [
                         'uuid' => $server->uuid,
@@ -69,7 +75,18 @@ class DockerController extends Controller
             return response()->json([
                 'error' => $e->getMessage(),
                 'data' => [],
-            ], 500);
+                'meta' => [
+                    'server' => [
+                        'uuid' => $server->uuid,
+                        'name' => $server->name,
+                        'ip' => $server->ip,
+                        'is_functional' => false,
+                    ],
+                    'total' => 0,
+                    'running' => 0,
+                    'exited' => 0,
+                ],
+            ], 200);
         }
     }
 
