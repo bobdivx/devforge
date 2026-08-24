@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use Laravel\Sanctum\TransientToken;
 use Symfony\Component\HttpFoundation\Response;
 
 class ApiAllowed
@@ -13,6 +14,13 @@ class ApiAllowed
         if (isCloud()) {
             return $next($request);
         }
+
+        // SPA session (cookie Sanctum): the public REST API switch must not block the UI.
+        $token = $request->user()?->currentAccessToken();
+        if ($token instanceof TransientToken) {
+            return $next($request);
+        }
+
         $settings = instanceSettings();
         if ($settings->is_api_enabled === false) {
             return response()->json(['success' => true, 'message' => 'API is disabled.'], 403);
