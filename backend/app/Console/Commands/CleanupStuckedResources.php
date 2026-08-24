@@ -39,9 +39,9 @@ class CleanupStuckedResources extends Command
     private function cleanup_stucked_resources()
     {
         try {
-            $teams = Team::all()->filter(function ($team) {
-                return $team->members()->count() === 0 && $team->servers()->count() === 0;
-            });
+            // Bolt: Optimize finding stuck teams by executing a single database query
+            // instead of fetching all teams and running N+1 queries for members and servers.
+            $teams = Team::doesntHave('members')->doesntHave('servers')->get();
             foreach ($teams as $team) {
                 $team->delete();
             }
@@ -263,7 +263,8 @@ class CleanupStuckedResources extends Command
             echo "Error in application: {$e->getMessage()}\n";
         }
         try {
-            $postgresqls = StandalonePostgresql::all()->where('id', '!=', 0);
+            // Bolt: Filter id != 0 at the database level instead of fetching everything into memory
+            $postgresqls = StandalonePostgresql::where('id', '!=', 0)->get();
             foreach ($postgresqls as $postgresql) {
                 if (! data_get($postgresql, 'environment')) {
                     echo 'Postgresql without environment: '.$postgresql->name.'\n';
