@@ -132,6 +132,21 @@ class AgentMissionController extends Controller
         ]);
     }
 
+    public function claim(Request $request, string $uuid): JsonResponse
+    {
+        $team = $this->currentTeam($request);
+        $this->authorize('create', \App\Models\AiAgent::class);
+
+        $result = $this->missionBoard->claimAndRun($team, $uuid);
+
+        if (is_array($result) && isset($result['error'])) {
+            abort(422, $result['error']);
+        }
+
+        /** @var AiAgentMission $result */
+        return response()->json(['data' => $this->present($result)]);
+    }
+
     private function currentTeam(Request $request): Team
     {
         $user = $request->user();

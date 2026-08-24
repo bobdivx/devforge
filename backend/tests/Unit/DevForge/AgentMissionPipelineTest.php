@@ -142,3 +142,76 @@ it('mission work dispatcher claims open missions for idle workers', function () 
     $mission->refresh();
     expect($mission->status)->toBe('in_progress');
 });
+
+it('mission work dispatcher falls back to worker agent when debug agent is absent', function () {
+    $team = Team::factory()->create();
+    $worker = AiAgent::factory()->create([
+        'team_id' => $team->id,
+        'type' => 'worker',
+        'name' => 'Worker',
+        'is_active' => true,
+        'status' => 'idle',
+    ]);
+
+    $board = app(AgentMissionBoard::class);
+    $mission = $board->create($team, [
+        'title' => 'Fix bug without debug agent',
+        'kind' => 'bug',
+        'assignee_type' => 'debug',
+    ]);
+    expect($mission)->toBeInstanceOf(AiAgentMission::class);
+
+    $fakeRun = AiAgentRun::factory()->create([
+        'agent_id' => $worker->id,
+        'status' => 'pending',
+        'trigger' => 'event',
+    ]);
+
+    $launcher = Mockery::mock(\App\Services\DevForge\Agent\AgentRunLauncher::class);
+    $launcher->shouldReceive('queue')->once()->andReturn($fakeRun);
+    app()->instance(\App\Services\DevForge\Agent\AgentRunLauncher::class, $launcher);
+
+    config()->set('devforge.agents_enabled', true);
+    config()->set('devforge.agents_mission_work_cooldown_minutes', 0);
+
+    $result = app(MissionWorkDispatcher::class)->dispatchDue(5);
+
+    expect($result['claimed'])->toBeGreaterThanOrEqual(1)
+        ->and($result['runs'])->toBeGreaterThanOrEqual(1);
+
+    $mission->refresh();
+    expect($mission->status)->toBe('in_progress')
+        ->and($mission->assignee_agent_id)->toBe($worker->id);
+});
+
+it('claims and runs mission on demand via claimAndRun', function () {
+    $team = Team::factory()->create();
+    $worker = AiAgent::factory()->create([
+        'team_id' => $team->id,
+        'type' => 'worker',
+        'is_active' => true,
+        'status' => 'idle',
+    ]);
+
+    $board = app(AgentMissionBoard::class);
+    $mission = $board->create($team, [
+        'title' => 'Manual run mission',
+        'kind' => 'feature',
+    ]);
+    expect($mission)->toBeInstanceOf(AiAgentMission::class);
+
+    $fakeRun = AiAgentRun::factory()->create([
+        'agent_id' => $worker->id,
+        'status' => 'pending',
+        'trigger' => 'event',
+    ]);
+
+    $launcher = Mockery::mock(\App\Services\DevForge\Agent\AgentRunLauncher::class);
+    $launcher->shouldReceive('queue')->once()->andReturn($fakeRun);
+    app()->instance(\App\Services\DevForge\Agent\AgentRunLauncher::class, $launcher);
+
+    $claimed = $board->claimAndRun($team, $mission->uuid);
+    expect($claimed)->toBeInstanceOf(AiAgentMission::class)
+        ->and($claimed->status)->toBe('in_progress')
+        ->and($claimed->assignee_agent_id)->toBe($worker->id);
+});

@@ -103,39 +103,15 @@ class LlmProviderProbe
             .(count($available) > 8 ? '…' : '').').';
 
         $candidates = $this->candidates($preferredModels, $available, LlmModelResolver::defaultAutoGeminiModels());
-        $probed = [];
-        $working = [];
-
-        foreach (array_slice($candidates, 0, self::MAX_PROBE_MODELS) as $modelId) {
-            $probe = $this->probeGeminiChat($apiKey, $baseUrl, $modelId);
-            $probed[] = $probe;
-            if ($probe['ok']) {
-                $working[] = $modelId;
-                $lines[] = "Probe OK : {$modelId}";
-            } else {
-                $lines[] = "Probe KO : {$modelId} — ".mb_substr((string) $probe['error'], 0, 180);
-            }
-        }
-
-        if ($working === [] && $available !== []) {
-            // Si le micro-chat échoue partout (RPM), garder les modèles listés prioritaires.
-            $working = $candidates !== [] ? $candidates : $available;
-            $lines[] = 'Aucun micro-chat OK — on garde l’ordre des modèles listés (rate-limit probable).';
-        }
-
-        $ok = $available !== [];
-        $summary = $ok
-            ? (count(array_filter($probed, fn (array $row): bool => $row['ok'])).' modèle(s) répondent au micro-chat sur '
-                .count($probed).' testé(s) ; '.count($available).' listé(s).')
-            : 'Aucun modèle Gemini listé pour cette clé/projet.';
+        $recommended = LlmModelResolver::prioritizeGeminiModels($candidates !== [] ? $candidates : $available);
 
         return [
-            'ok' => $ok,
+            'ok' => $available !== [],
             'provider' => 'gemini',
             'models_available' => $available,
-            'models_probed' => $probed,
-            'recommended' => array_values(array_unique($working)),
-            'summary' => $summary,
+            'models_probed' => [],
+            'recommended' => array_values(array_unique($recommended)),
+            'summary' => count($available).' modèle(s) Gemini disponible(s) (quota chat préservé).',
             'lines' => $lines,
         ];
     }

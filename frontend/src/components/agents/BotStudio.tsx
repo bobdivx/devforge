@@ -32,11 +32,12 @@ type Props = {
     onClose: () => void;
     onCreated: (agent?: Agent) => void;
     parentAgent?: Agent | null;
+    resourceUuid?: string | null;
     variant?: 'overlay' | 'page';
     userName?: string;
 };
 
-function emptyForm(type: AgentType = 'deployment', parentId?: number | null): AgentInput {
+function emptyForm(type: AgentType = 'deployment', parentId?: number | null, resourceUuid?: string | null): AgentInput {
     return {
         type,
         name: '',
@@ -48,6 +49,7 @@ function emptyForm(type: AgentType = 'deployment', parentId?: number | null): Ag
         fallback_provider_config_id: null,
         preferred_model: null,
         parent_agent_id: parentId ?? null,
+        resource_uuid: resourceUuid ?? null,
         is_active: true,
     };
 }
@@ -93,12 +95,13 @@ export function BotStudio({
     onClose,
     onCreated,
     parentAgent = null,
-    variant = 'overlay',
+    resourceUuid = null,
+    variant = 'page',
     userName = 'Vous',
 }: Props) {
-    const isSubAgent = Boolean(parentAgent?.id);
+    const isSubAgent = Boolean(parentAgent);
     const [step, setStep] = useState<Step>('missions');
-    const [form, setForm] = useState<AgentInput>(() => emptyForm('deployment', parentAgent?.id));
+    const [form, setForm] = useState<AgentInput>(() => emptyForm('deployment', parentAgent?.id, resourceUuid));
     const [tools, setTools] = useState<string[]>([]);
     const [toolQuery, setToolQuery] = useState('');
     const [submitting, setSubmitting] = useState(false);
@@ -120,7 +123,7 @@ export function BotStudio({
         setTools(selected);
         setToolQuery('');
         setError(null);
-        setForm(emptyForm(isSubAgent ? (parentAgent?.type ?? 'debug') : 'deployment', parentAgent?.id ?? null));
+        setForm(emptyForm(isSubAgent ? (parentAgent?.type ?? 'debug') : 'deployment', parentAgent?.id ?? null, resourceUuid));
 
         if (isSubAgent) {
             setStep('character');
@@ -131,7 +134,7 @@ export function BotStudio({
         }
 
         domainApi.aiProviders().then((response) => setProviders(response.data)).catch(() => {});
-    }, [open, isSubAgent, parentAgent?.id, parentAgent?.type, variant]);
+    }, [open, isSubAgent, parentAgent?.id, parentAgent?.type, resourceUuid, variant]);
 
     useEffect(() => {
         if (!open || variant !== 'overlay') {
@@ -178,6 +181,7 @@ export function BotStudio({
                 schedule_minutes: isSubAgent || isEventOnlyAgentType(form.type) ? 0 : form.schedule_minutes,
                 schedule_cron: isSubAgent || isEventOnlyAgentType(form.type) ? null : (form.schedule_cron ?? null),
                 parent_agent_id: parentAgent?.id ?? null,
+                resource_uuid: resourceUuid ?? form.resource_uuid ?? null,
             };
             const response = await domainApi.createAgent(payload);
             onCreated(response.data);

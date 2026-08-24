@@ -192,9 +192,25 @@ class LlmProviderFactory
         }
 
         // Le primaire est un cloud provider (Gemini, OpenAI, Anthropic, OpenRouter).
-        // Ne pas fallback vers Ollama sauf si explicitement configuré comme fallback secondaire.
-        // Les cloud providers sont stables — pas besoin d'un fallback local instable.
-        
+        // En cas de rate-limit (429) ou surcharge (503), basculer vers d'autres providers
+        // configurés dans l'équipe (OpenRouter, OpenAI, Anthropic, autre Gemini, ou Ollama).
+        $otherConfigs = AiProviderConfig::query()
+            ->where('team_id', $agent->team_id)
+            ->whereNotIn('id', $usedIds)
+            ->orderByDesc('is_default')
+            ->orderByRaw("CASE provider WHEN 'openrouter' THEN 0 WHEN 'openai' THEN 1 WHEN 'anthropic' THEN 2 WHEN 'gemini' THEN 3 WHEN 'ollama' THEN 4 ELSE 9 END")
+            ->orderBy('id')
+            ->limit(2)
+            ->get();
+
+        foreach ($otherConfigs as $otherConfig) {
+            $fallbacks[] = [
+                'provider' => $this->make($otherConfig, $tier),
+                'label' => $this->label($otherConfig).' (auto)',
+            ];
+            $usedIds[] = (int) $otherConfig->id;
+        }
+
         return $fallbacks;
     }
 

@@ -21,6 +21,8 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
     Route::prefix('agents')->name('agents.')->group(function () {
         Route::get('/', [AgentController::class, 'index'])->name('index');
         Route::post('/', [AgentController::class, 'store'])->name('store');
+        Route::post('/reset', [AgentController::class, 'reset'])->name('reset');
+        Route::delete('/all', [AgentController::class, 'destroyAll'])->name('destroyAll');
         Route::get('/{uuid}', [AgentController::class, 'show'])
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->name('show');
@@ -155,6 +157,9 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
         Route::patch('/missions/{uuid}', [AgentMissionController::class, 'update'])
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->name('missions.update');
+        Route::post('/missions/{uuid}/claim', [AgentMissionController::class, 'claim'])
+            ->where('uuid', '[A-Za-z0-9-]{8,64}')
+            ->name('missions.claim');
         Route::get('/missions/{uuid}/delivery', [AgentFeatureDeliveryController::class, 'show'])
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->name('missions.delivery.show');

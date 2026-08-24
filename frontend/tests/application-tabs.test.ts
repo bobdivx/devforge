@@ -27,6 +27,7 @@ describe('onglets applications / databases', () => {
         expect(applicationTabs.map(({ id }) => id)).toEqual([
             'overview',
             'deployments',
+            'agents',
             'logs',
             'previews',
             'domains',
@@ -42,6 +43,7 @@ describe('onglets applications / databases', () => {
         ]);
     });
     it('parse les onglets applications connus', () => {
+        expect(parseApplicationTab('agents')).toBe('agents');
         expect(parseApplicationTab('logs')).toBe('logs');
         expect(parseApplicationTab('webhooks')).toBe('webhooks');
         expect(parseApplicationTab('tasks')).toBe('tasks');
@@ -49,6 +51,7 @@ describe('onglets applications / databases', () => {
         expect(parseApplicationTab('storage')).toBe('storage');
         expect(parseApplicationTab('limits')).toBe('limits');
         expect(parseApplicationTab('inconnu')).toBe('overview');
+        expect(applicationPath('app-uuid', 'agents')).toBe('/applications/app-uuid?tab=agents');
         expect(applicationPath('app-uuid', 'logs')).toBe('/applications/app-uuid?tab=logs');
         expect(applicationPath('app-uuid', 'tasks')).toBe('/applications/app-uuid?tab=tasks');
         expect(applicationPath('app-uuid', 'previews')).toBe('/applications/app-uuid?tab=previews');

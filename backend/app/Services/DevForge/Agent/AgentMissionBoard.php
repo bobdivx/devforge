@@ -397,7 +397,7 @@ class AgentMissionBoard
     }
 
     /**
-     * Résout le premier agent actif d'un type dans l'équipe.
+     * Résout le premier agent actif d'un type dans l'équipe (ou par rôle).
      */
     public function findAgentByType(Team $team, string $type): ?AiAgent
     {
@@ -406,12 +406,146 @@ class AgentMissionBoard
             return null;
         }
 
-        return AiAgent::query()
+        $agent = AiAgent::query()
             ->where('team_id', $team->id)
             ->where('type', $type)
             ->where('is_active', true)
             ->orderBy('id')
             ->first();
+
+        if ($agent instanceof AiAgent) {
+            return $agent;
+        }
+
+        return AiAgent::query()
+            ->where('team_id', $team->id)
+            ->where('is_active', true)
+            ->where(function ($q) use ($type): void {
+                $q->where('metadata->role', $type)
+                    ->orWhere('name', 'like', '%'.$type.'%');
+            })
+            ->orderBy('id')
+            ->first();
+    }
+
+    /**
+     * Résout de manière fiable un agent capable d'exécuter une mission.
+     */
+    public function resolveWorkerAgent(Team $team, ?string $preferredType = null): ?AiAgent
+    {
+        if ($preferredType !== null && trim($preferredType) !== '') {
+            $agent = $this->findAgentByType($team, $preferredType);
+            if ($agent instanceof AiAgent && $agent->is_active && $agent->hasLlmProvider()) {
+                return $agent;
+            }
+        }
+
+        // 1. Chercher un agent de type worker ou avec le rôle worker
+        $worker = AiAgent::query()
+            ->where('team_id', $team->id)
+            ->where('is_active', true)
+            ->where(function ($q): void {
+                $q->where('type', 'worker')
+                    ->orWhere('metadata->role', 'worker')
+                    ->orWhere('name', 'like', '%Worker%');
+            })
+            ->orderBy('id')
+            ->first();
+
+        if ($worker instanceof AiAgent && $worker->hasLlmProvider()) {
+            return $worker;
+        }
+
+        // 2. Chercher un agent d'implémentation / devforge / debug / deployment
+        $implementer = AiAgent::query()
+            ->where('team_id', $team->id)
+            ->where('is_active', true)
+            ->whereIn('type', ['devforge', 'debug', 'deployment'])
+            ->orderBy('id')
+            ->first();
+
+        if ($implementer instanceof AiAgent && $implementer->hasLlmProvider()) {
+            return $implementer;
+        }
+
+        // 3. N'importe quel agent actif avec LLM provider (hors agents de scan webhook)
+        return AiAgent::query()
+            ->where('team_id', $team->id)
+            ->where('is_active', true)
+            ->whereNotIn('type', ['github-actions'])
+            ->orderBy('id')
+            ->get()
+            ->first(fn (AiAgent $a): bool => $a->hasLlmProvider());
+    }
+
+    /**
+     * Claim une mission et lance immédiatement le run associé.
+     *
+     * @return AiAgentMission|array{error: string}
+     */
+    public function claimAndRun(Team $team, string $missionUuid, ?AiAgent $agent = null): array|AiAgentMission
+    {
+        $mission = $this->show($team, $missionUuid);
+        if (is_array($mission) && isset($mission['error'])) {
+            return $mission;
+        }
+
+        /** @var AiAgentMission $mission */
+        $worker = $agent;
+        if (! $worker instanceof AiAgent) {
+            $metadata = is_array($mission->metadata) ? $mission->metadata : [];
+            $preferredType = is_string($metadata['assignee_type'] ?? null) && $metadata['assignee_type'] !== ''
+                ? $metadata['assignee_type']
+                : $this->defaultAssigneeTypeForKind((string) $mission->kind);
+
+            if ($mission->assignee_agent_id !== null) {
+                $worker = AiAgent::query()
+                    ->where('team_id', $team->id)
+                    ->whereKey($mission->assignee_agent_id)
+                    ->where('is_active', true)
+                    ->first();
+            }
+
+            if (! $worker instanceof AiAgent) {
+                $worker = $this->resolveWorkerAgent($team, $preferredType);
+            }
+        }
+
+        if (! $worker instanceof AiAgent) {
+            return ['error' => 'Aucun agent disponible pour prendre en charge cette mission.'];
+        }
+
+        if (! $worker->hasLlmProvider()) {
+            return ['error' => 'L’agent assigné n’a aucun provider LLM configuré.'];
+        }
+
+        $worker->prepareForEventDispatch();
+        $worker->refresh();
+
+        $claimed = $this->claim($team, $mission->uuid, $worker);
+        if (is_array($claimed) && isset($claimed['error'])) {
+            return $claimed;
+        }
+
+        /** @var AiAgentMission $claimed */
+        $runLauncher = app(AgentRunLauncher::class);
+        $run = $runLauncher->queue($worker, 'event', [
+            'event' => 'mission_work',
+            'mission_uuid' => $claimed->uuid,
+            'mission_kind' => $claimed->kind,
+            'mission_title' => $claimed->title,
+            'application_uuid' => $claimed->resource_uuid,
+            'resource_uuid' => $claimed->resource_uuid,
+        ]);
+
+        $meta = is_array($claimed->metadata) ? $claimed->metadata : [];
+        $meta['last_dispatched_at'] = now()->toISOString();
+        if ($run !== null) {
+            $meta['run_uuid'] = $run->uuid;
+        }
+        $claimed->update(['metadata' => $meta]);
+
+        return $claimed->fresh(['assignee', 'agent']) ?? $claimed;
     }
 
     /**

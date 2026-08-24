@@ -1,4 +1,4 @@
-import { CheckCircle, CheckCheck, ChevronDown, ChevronUp, Circle, KeyRound, Plus, RefreshCw, RotateCcw } from 'lucide-preact';
+import { CheckCircle, CheckCheck, ChevronDown, ChevronUp, KeyRound, Play, Plus, RefreshCw, RotateCcw } from 'lucide-preact';
 import { useMemo, useState } from 'preact/hooks';
 import type { AgentMission, AgentMissionStatus } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
@@ -25,11 +25,15 @@ const columns: Array<{ id: AgentMissionStatus; status: AgentMissionStatus; title
 function MissionCard({
     mission,
     onStatus,
+    onClaim,
+    claiming = false,
     onFocusInbox,
     onReload,
 }: {
     mission: AgentMission;
     onStatus: (mission: AgentMission, status: AgentMissionStatus) => void;
+    onClaim: (mission: AgentMission) => void;
+    claiming?: boolean;
     onFocusInbox: () => void;
     onReload: () => void;
 }) {
@@ -88,13 +92,18 @@ function MissionCard({
                     <div class="flex flex-wrap gap-1">
                         {mission.status === 'open' && (
                             <button
-                                class="btn btn-ghost btn-xs h-7 min-h-7 gap-1"
+                                class="btn btn-primary btn-xs h-7 min-h-7 gap-1"
                                 type="button"
-                                title="Marquer en cours"
-                                onClick={() => onStatus(mission, 'in_progress')}
+                                title="Prendre et lancer l'agent"
+                                disabled={claiming}
+                                onClick={() => onClaim(mission)}
                             >
-                                <Circle class="size-3.5" aria-hidden />
-                                Prendre
+                                {claiming ? (
+                                    <span class="loading loading-spinner loading-xs" aria-hidden />
+                                ) : (
+                                    <Play class="size-3.5" aria-hidden />
+                                )}
+                                Prendre & Lancer
                             </button>
                         )}
                         {mission.status === 'blocked' && (
@@ -152,6 +161,8 @@ function MissionColumn({
     column,
     missions,
     onStatus,
+    onClaim,
+    claimingUuid,
     onFocusInbox,
     onReload,
     onBulkComplete,
@@ -160,6 +171,8 @@ function MissionColumn({
     column: (typeof columns)[number];
     missions: AgentMission[];
     onStatus: (mission: AgentMission, status: AgentMissionStatus) => void;
+    onClaim: (mission: AgentMission) => void;
+    claimingUuid: string | null;
     onFocusInbox: () => void;
     onReload: () => void;
     onBulkComplete?: () => void;
@@ -204,6 +217,8 @@ function MissionColumn({
                             key={mission.uuid}
                             mission={mission}
                             onStatus={onStatus}
+                            onClaim={onClaim}
+                            claiming={claimingUuid === mission.uuid}
                             onFocusInbox={onFocusInbox}
                             onReload={onReload}
                         />
@@ -237,6 +252,7 @@ export function MissionBoardPanel() {
     const [title, setTitle] = useState('');
     const [kind, setKind] = useState('other');
     const [submitting, setSubmitting] = useState(false);
+    const [claimingUuid, setClaimingUuid] = useState<string | null>(null);
     const [bulkCompleting, setBulkCompleting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -268,7 +284,7 @@ export function MissionBoardPanel() {
                 kind,
                 status: 'open',
                 priority: 'normal',
-                assignee_type: kind === 'bug' ? 'debug' : 'devforge',
+                assignee_type: kind === 'bug' ? 'debug' : 'worker',
             });
             setTitle('');
             await query.reload({ silent: true });
@@ -276,6 +292,19 @@ export function MissionBoardPanel() {
             setError(err instanceof ApiError ? err.message : 'Création impossible.');
         } finally {
             setSubmitting(false);
+        }
+    };
+
+    const handleClaim = async (mission: AgentMission) => {
+        setClaimingUuid(mission.uuid);
+        setError(null);
+        try {
+            await domainApi.claimAgentMission(mission.uuid);
+            await query.reload({ silent: true });
+        } catch (err) {
+            setError(err instanceof ApiError ? err.message : 'Prise en charge impossible.');
+        } finally {
+            setClaimingUuid(null);
         }
     };
 
@@ -399,6 +428,8 @@ export function MissionBoardPanel() {
                             column={column}
                             missions={byStatus[column.status]}
                             onStatus={(m, s) => void setStatus(m, s)}
+                            onClaim={(m) => void handleClaim(m)}
+                            claimingUuid={claimingUuid}
                             onFocusInbox={focusInbox}
                             onReload={() => void query.reload({ silent: true })}
                             onBulkComplete={column.status === 'in_progress' ? () => void completeInProgress() : undefined}

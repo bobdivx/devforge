@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Http;
 
 uses(RefreshDatabase::class);
 
-it('lists gemini models and probes which ones answer a micro-chat', function () {
+it('lists gemini models and prioritizes compatible models without burning chat quota', function () {
     Cache::flush();
 
     Http::fake([
@@ -20,15 +20,6 @@ it('lists gemini models and probes which ones answer a micro-chat', function () 
                 ['id' => 'text-embedding-004', 'owned_by' => 'google'],
             ],
         ]),
-        'generativelanguage.googleapis.com/*/chat/completions' => Http::sequence()
-            ->push([
-                'error' => ['message' => 'You exceeded your current quota'],
-            ], 429)
-            ->push([
-                'choices' => [
-                    ['message' => ['role' => 'assistant', 'content' => 'OK'], 'finish_reason' => 'stop'],
-                ],
-            ]),
     ]);
 
     $team = Team::factory()->create();
@@ -48,13 +39,10 @@ it('lists gemini models and probes which ones answer a micro-chat', function () 
     expect($report['ok'])->toBeTrue()
         ->and($report['models_available'])->toContain('gemini-2.5-flash')
         ->and($report['models_available'])->toContain('gemini-2.0-flash-lite')
-        ->and($report['recommended'][0])->toBe('gemini-2.5-flash');
-
-    $failed = collect($report['models_probed'])->firstWhere('id', 'gemini-2.0-flash-lite');
-    $ok = collect($report['models_probed'])->firstWhere('id', 'gemini-2.5-flash');
-
-    expect($failed['ok'])->toBeFalse()
-        ->and($ok['ok'])->toBeTrue();
+        ->and($report['models_available'])->not->toContain('text-embedding-004')
+        ->and($report['recommended'])->toContain('gemini-2.5-flash')
+        ->and($report['recommended'])->toContain('gemini-2.0-flash-lite')
+        ->and($report['summary'])->toContain('Gemini');
 });
 
 it('reports ollama as down when tags endpoint is unreachable', function () {

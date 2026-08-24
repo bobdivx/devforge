@@ -190,6 +190,50 @@ class AgentController extends Controller
         return response()->json(['data' => ['deleted' => true]]);
     }
 
+    public function reset(Request $request): JsonResponse
+    {
+        $team = $this->currentTeam($request);
+        $this->authorize('create', AiAgent::class);
+
+        AiAgent::query()->where('team_id', $team->id)->delete();
+
+        $provisioner = app(DefaultAgentProvisioner::class);
+        $provisioner->ensureDefaultAgents($team);
+
+        $agents = AiAgent::query()
+            ->where('team_id', $team->id)
+            ->with($this->agentRelations(false))
+            ->withCount('subAgents')
+            ->orderBy('id')
+            ->get();
+
+        return response()->json([
+            'ok' => true,
+            'data' => $agents->map(fn (AiAgent $agent): array => $this->present($agent))->values()->all(),
+            'message' => 'Équipe d’agents réinitialisée avec succès.',
+        ]);
+    }
+
+    public function destroyAll(Request $request): JsonResponse
+    {
+        $team = $this->currentTeam($request);
+        $this->authorize('create', AiAgent::class);
+
+        $resourceUuid = $request->query('resource_uuid');
+        $query = AiAgent::query()->where('team_id', $team->id);
+        if (is_string($resourceUuid) && $resourceUuid !== '') {
+            $query->where('resource_uuid', $resourceUuid);
+        }
+
+        $count = $query->count();
+        $query->delete();
+
+        return response()->json([
+            'ok' => true,
+            'deleted_count' => $count,
+        ]);
+    }
+
     public function run(Request $request, string $uuid): JsonResponse
     {
         $agent = $this->findAgent($request, $uuid);

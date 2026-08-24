@@ -81,6 +81,9 @@ class MissionWorkDispatcher
                 continue;
             }
 
+            $worker->prepareForEventDispatch();
+            $worker->refresh();
+
             if (! $worker->hasLlmProvider() || $worker->status === 'running') {
                 $skipped++;
 
@@ -133,7 +136,7 @@ class MissionWorkDispatcher
                 ->where('is_active', true)
                 ->first();
 
-            if ($agent instanceof AiAgent) {
+            if ($agent instanceof AiAgent && $agent->hasLlmProvider()) {
                 return $agent;
             }
         }
@@ -143,6 +146,11 @@ class MissionWorkDispatcher
             ? $metadata['assignee_type']
             : $this->missionBoard->defaultAssigneeTypeForKind((string) $mission->kind);
 
-        return $this->missionBoard->findAgentByType($team, $type);
+        $found = $this->missionBoard->findAgentByType($team, $type);
+        if ($found instanceof AiAgent && $found->is_active && $found->hasLlmProvider()) {
+            return $found;
+        }
+
+        return $this->missionBoard->resolveWorkerAgent($team, $type);
     }
 }

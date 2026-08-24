@@ -24,7 +24,7 @@ function formatRawError(summary: string): string {
     }
 
     if (lower.includes('[429]') || lower.includes('quota') || lower.includes('rate limit')) {
-        return 'Quota ou limite de débit Gemini atteint. Réessayez plus tard ou vérifiez votre clé API.';
+        return 'Limite de débit ou quota Gemini atteint (429). L\'agent réessaie et bascule automatiquement sur un provider de secours si configuré (OpenRouter, OpenAI, Ollama).';
     }
 
     if (lower.includes('[400]') && lower.includes('contents')) {

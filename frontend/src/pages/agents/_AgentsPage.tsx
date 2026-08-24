@@ -1,4 +1,4 @@
-import { MessageSquare, Plus, RefreshCw } from 'lucide-preact';
+import { MessageSquare, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-preact';
 import { useState } from 'preact/hooks';
 import { AgentCard } from '../../components/agents/AgentCard';
 import { AgentUserRequestsInbox } from '../../components/agents/AgentUserRequestsInbox';
@@ -14,6 +14,7 @@ import { routeHref } from '../../lib/routes';
 import { useApiQuery } from '../../lib/use-api-query';
 import { navigateTo, useNavigate } from '../../lib/use-navigate';
 import { useTeamContext } from '../../lib/team-context';
+import { ApiError } from '../../lib/api-client';
 
 type Props = {
     userName?: string;
@@ -23,6 +24,10 @@ export function AgentsPage({ userName = 'Vous' }: Props) {
     const onNavigate = useNavigate();
     const { agentsEnabled } = useTeamContext();
     const [createOpen, setCreateOpen] = useState(false);
+    const [resetting, setResetting] = useState(false);
+    const [deletingAll, setDeletingAll] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
     const query = useApiQuery(agentsEnabled ? 'agents' : null, () => domainApi.agents());
     const agents = query.data?.data ?? [];
     const isEmpty = agents.length === 0;
@@ -32,8 +37,44 @@ export function AgentsPage({ userName = 'Vous' }: Props) {
         ? (agents.find((agent) => agent.uuid === continueAgent.uuid)?.name ?? 'agent')
         : null;
 
+    const handleResetTeam = async () => {
+        if (!window.confirm(
+            'Réinitialiser toute l’équipe d’agents ?\n'
+            + 'Cela recréera une équipe propre avec les 3 agents par défaut : Relanceur, Veille et Worker.',
+        )) {
+            return;
+        }
+        setResetting(true);
+        setError(null);
+        try {
+            await domainApi.resetAgents();
+            await query.reload();
+        } catch (err) {
+            setError(err instanceof ApiError ? err.message : 'Réinitialisation impossible.');
+        } finally {
+            setResetting(false);
+        }
+    };
+
+    const handleDeleteAll = async () => {
+        if (!window.confirm('Supprimer TOUS les agents de l’équipe ? Cette action est irréversible.')) {
+            return;
+        }
+        setDeletingAll(true);
+        setError(null);
+        try {
+            await domainApi.deleteAllAgents();
+            await query.reload();
+        } catch (err) {
+            setError(err instanceof ApiError ? err.message : 'Suppression totale impossible.');
+        } finally {
+            setDeletingAll(false);
+        }
+    };
+
     return (
         <div class="grid min-w-0 gap-3 sm:gap-4 md:gap-5">
+            {error && <p class="text-xs text-error">{error}</p>}
             {!(isEmpty && !query.loading && !query.error) && (
                 <PageHeader
                     title="Agents IA"
@@ -41,6 +82,36 @@ export function AgentsPage({ userName = 'Vous' }: Props) {
                     actions={(
                         <>
                             <DeployGraftButton />
+                            <button
+                                class="btn btn-ghost btn-sm border border-base-300/80 gap-1.5"
+                                type="button"
+                                disabled={resetting}
+                                title="Nettoie et recrée l'équipe propre par défaut (Relanceur, Veille, Worker)"
+                                onClick={() => void handleResetTeam()}
+                            >
+                                {resetting ? (
+                                    <span class="loading loading-spinner loading-xs" aria-hidden />
+                                ) : (
+                                    <RotateCcw class="size-3.5" aria-hidden />
+                                )}
+                                <span class="hidden sm:inline">Réinitialiser l'équipe</span>
+                            </button>
+                            {agents.length > 0 && (
+                                <button
+                                    class="btn btn-ghost btn-sm border border-base-300/80 text-error/80 hover:text-error gap-1.5"
+                                    type="button"
+                                    disabled={deletingAll}
+                                    title="Supprimer tous les agents"
+                                    onClick={() => void handleDeleteAll()}
+                                >
+                                    {deletingAll ? (
+                                        <span class="loading loading-spinner loading-xs" aria-hidden />
+                                    ) : (
+                                        <Trash2 class="size-3.5" aria-hidden />
+                                    )}
+                                    <span class="hidden md:inline">Tout supprimer</span>
+                                </button>
+                            )}
                             <button class="btn btn-ghost btn-sm" type="button" onClick={() => void query.reload()}>
                                 <RefreshCw class="size-3.5" aria-hidden />
                                 Actualiser

@@ -3,6 +3,7 @@ export type ApplicationTabId =
     | 'settings'
     | 'domains'
     | 'deployments'
+    | 'agents'
     | 'previews'
     | 'databases'
     | 'logs'
@@ -32,6 +33,7 @@ export const applicationTabGroups: ApplicationTabGroup[] = [
         items: [
             { id: 'overview', label: 'Vue d’ensemble' },
             { id: 'deployments', label: 'Déploiements' },
+            { id: 'agents', label: 'Agents IA' },
             { id: 'logs', label: 'Logs' },
             { id: 'previews', label: 'Previews' },
         ],
@@ -85,6 +87,8 @@ const legacyApplicationSegmentToTab: Record<string, ApplicationTabId> = {
     'scheduled-tasks': 'tasks',
     tasks: 'tasks',
     deployment: 'deployments',
+    agents: 'agents',
+    'ai-agents': 'agents',
     logs: 'logs',
     danger: 'danger',
     'preview-deployments': 'previews',

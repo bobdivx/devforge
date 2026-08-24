@@ -103,4 +103,75 @@ describe('MissionBoardPanel', () => {
             expect(screen.queryByRole('button', { name: /Terminer les en cours/i })).toBeNull();
         });
     });
+
+    it('claime et lance une mission ouverte via le bouton Prendre & Lancer', async () => {
+        let status = 'open';
+        let claimCalled = false;
+
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+            const url = String(input);
+            const method = String(init?.method ?? 'GET').toUpperCase();
+
+            if (url.includes('/sanctum/csrf-cookie')) {
+                return new Response(null, { status: 204 });
+            }
+
+            if (url.includes('/ai/missions/m-open/claim') && method === 'POST') {
+                claimCalled = true;
+                status = 'in_progress';
+                return jsonResponse({
+                    data: {
+                        uuid: 'm-open',
+                        kind: 'bug',
+                        status: 'in_progress',
+                        priority: 'normal',
+                        title: 'Test mission ouverte',
+                        assignee_name: 'Worker',
+                        assignee_type: 'worker',
+                    },
+                });
+            }
+
+            if (url.includes('/ai/missions')) {
+                return jsonResponse({
+                    data: [
+                        {
+                            uuid: 'm-open',
+                            kind: 'bug',
+                            status,
+                            priority: 'normal',
+                            title: 'Test mission ouverte',
+                            description: 'Description détaillée',
+                            source: 'user',
+                            resource_uuid: null,
+                            assignee_name: status === 'in_progress' ? 'Worker' : null,
+                            assignee_type: 'worker',
+                            blocked_reason: null,
+                            timeline: [],
+                            metadata: {},
+                            is_feature_delivery: false,
+                            created_at: '2026-08-24T10:00:00.000Z',
+                            updated_at: '2026-08-24T10:00:00.000Z',
+                            completed_at: null,
+                        },
+                    ],
+                    meta: { count: 1, available: true },
+                });
+            }
+
+            return jsonResponse({ data: [] });
+        });
+
+        render(<MissionBoardPanel />);
+
+        const cardToggle = await screen.findByRole('button', { name: /Test mission ouverte/i });
+        fireEvent.click(cardToggle);
+
+        const claimButton = await screen.findByRole('button', { name: /Prendre & Lancer/i });
+        fireEvent.click(claimButton);
+
+        await waitFor(() => {
+            expect(claimCalled).toBe(true);
+        });
+    });
 });

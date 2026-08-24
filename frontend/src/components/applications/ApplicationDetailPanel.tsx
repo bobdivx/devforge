@@ -32,6 +32,7 @@ import { DeploymentStatusIcon } from '../ui/DeploymentStatusIcon';
 import { ResourceStatusIcon } from '../ui/ResourceStatusIcon';
 import { Tabs } from '../ui/Tabs';
 import { ApplicationAgentChatCard } from './ApplicationAgentChatCard';
+import { ApplicationAgentsPanel } from './ApplicationAgentsPanel';
 import { ApplicationDomainsPanel } from './ApplicationDomainsPanel';
 import { ApplicationDangerPanel } from './ApplicationDangerPanel';
 import { ApplicationReadinessCard } from './ApplicationReadinessCard';
@@ -1228,6 +1229,10 @@ export function ApplicationDetailPanel({
                                 </div>
                             </DataState>
                         </>
+                    )}
+
+                    {activeTab === 'agents' && (
+                        <ApplicationAgentsPanel application={resource} />
                     )}
 
                     {activeTab === 'settings' && (

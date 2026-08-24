@@ -3983,6 +3983,11 @@ export const domainApi = {
         body: JSON.stringify(input),
     }),
     deleteAgent: (uuid: string) => mutate<void>(`/agents/${encodeURIComponent(uuid)}`, { method: 'DELETE' }),
+    resetAgents: () => mutate<ApiResponse<Agent[]> & { ok: boolean; message: string }>('/agents/reset', { method: 'POST' }),
+    deleteAllAgents: (resourceUuid?: string) => {
+        const query = resourceUuid ? `?resource_uuid=${encodeURIComponent(resourceUuid)}` : '';
+        return mutate<{ ok: boolean; deleted_count: number }>(`/agents/all${query}`, { method: 'DELETE' });
+    },
     runAgent: (uuid: string) => mutate<ApiResponse<{ queued: boolean; agent_uuid: string; run_uuid: string; status: AgentStatus }>>(`/agents/${encodeURIComponent(uuid)}/run`, { method: 'POST' }),
     agentMessages: (uuid: string, sessionUuid?: string) => {
         const query = sessionUuid ? `?session_uuid=${encodeURIComponent(sessionUuid)}` : '';
@@ -4205,6 +4210,9 @@ export const domainApi = {
     }>) => mutate<ApiResponse<AgentMission>>(`/ai/missions/${encodeURIComponent(uuid)}`, {
         method: 'PATCH',
         body: JSON.stringify(input),
+    }),
+    claimAgentMission: (uuid: string) => mutate<ApiResponse<AgentMission>>(`/ai/missions/${encodeURIComponent(uuid)}/claim`, {
+        method: 'POST',
     }),
     bulkUpdateAgentMissions: (input: {
         from_status: 'open' | 'in_progress' | 'blocked';

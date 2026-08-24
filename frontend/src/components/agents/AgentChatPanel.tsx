@@ -268,20 +268,20 @@ export function AgentChatPanel({
     // Auto-scroll vers le bas uniquement si l'utilisateur n'est pas remonté dans l'historique
     useEffect(() => {
         if (!userScrolledUpRef.current && scrollRef.current) {
-            scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+            scrollRef.current?.scrollTo?.({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
         }
     }, [messages, liveAssistantText, liveSteps.length, activeSubagentCount]);
 
     // Réinitialiser le scroll et forcer le bas lors d'une nouvelle session ou d'un envoi
     useEffect(() => {
         userScrolledUpRef.current = false;
-        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+        scrollRef.current?.scrollTo?.({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }, [session?.uuid]);
 
     useEffect(() => {
         if (sending) {
             userScrolledUpRef.current = false;
-            scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+            scrollRef.current?.scrollTo?.({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
         }
     }, [sending]);
 
