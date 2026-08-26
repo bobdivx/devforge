@@ -23,6 +23,7 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
         Route::post('/', [AgentController::class, 'store'])->name('store');
         Route::post('/reset', [AgentController::class, 'reset'])->name('reset');
         Route::delete('/all', [AgentController::class, 'destroyAll'])->name('destroyAll');
+        Route::get('/runs', [AgentRunController::class, 'teamIndex'])->name('runs.team');
         Route::get('/{uuid}', [AgentController::class, 'show'])
             ->where('uuid', '[A-Za-z0-9-]{8,64}')
             ->name('show');
