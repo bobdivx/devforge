@@ -88,9 +88,9 @@ export const sidebarNav: SidebarNavEntry[] = [
             },
             {
                 id: 'services',
-                label: 'Services',
+                label: 'Connexions',
                 path: '/services',
-                pages: ['services'],
+                pages: ['connexions', 'services'],
                 icon: Wrench,
             },
         ],

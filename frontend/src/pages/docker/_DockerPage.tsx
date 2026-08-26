@@ -33,6 +33,7 @@ export function DockerPage() {
 
     const containers = containersQuery.data?.data || [];
     const serverMeta = containersQuery.data?.meta?.server;
+    const serverError = (containersQuery.data as any)?.error;
     const imagesData = imagesQuery.data?.data;
     const apps = imagesData?.applications || [];
     const services = imagesData?.services || [];
@@ -211,6 +212,17 @@ export function DockerPage() {
                     class={`alert alert-${bannerMessage.type === 'error' ? 'error' : bannerMessage.type === 'success' ? 'success' : 'info'} text-xs shadow-sm`}
                 >
                     <span>{bannerMessage.text}</span>
+                </div>
+            )}
+            
+            {serverError && !bannerMessage && (
+                <div class="alert alert-warning text-xs shadow-sm">
+                    <span>⚠️ Serveur Docker inaccessible : {serverError}</span>
+                    {serverMeta && (
+                        <span class="text-[11px] opacity-70">
+                            (Serveur : {serverMeta.name || serverMeta.ip || 'localhost'})
+                        </span>
+                    )}
                 </div>
             )}
 
