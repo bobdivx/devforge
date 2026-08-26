@@ -9,6 +9,9 @@ set -euo pipefail
 #   ./scripts/bump-devforge-version.sh          # bump patch (4.1.3 -> 4.1.4)
 #   ./scripts/bump-devforge-version.sh minor    # bump minor (4.1.3 -> 4.2.0)
 #   ./scripts/bump-devforge-version.sh major    # bump major (4.1.3 -> 5.0.0)
+#
+# Note: This script is for LOCAL development. The CI workflow automatically
+# bumps versions on every Docker Images build. See docs/VERSIONING.md
 
 BUMP_TYPE="${1:-patch}"
 
@@ -17,8 +20,14 @@ if [[ ! "$BUMP_TYPE" =~ ^(patch|minor|major)$ ]]; then
   exit 1
 fi
 
-# Read current version from constants.php
-CURRENT=$(grep -oP "(?<='version' => ')[^']*" backend/config/constants.php | head -1)
+# Read current version from constants.php (coolify.version only)
+CURRENT=$(awk -F"'" '/coolify.*=>.*\[/,/\]/ { if (/'\''version'\''/) { print $4; exit } }' backend/config/constants.php)
+
+if [ -z "$CURRENT" ]; then
+  echo "Error: Could not extract coolify.version from constants.php"
+  exit 1
+fi
+
 echo "Current version: $CURRENT"
 
 # Parse semver
@@ -46,8 +55,16 @@ esac
 
 echo "New version: $NEW_VERSION"
 
-# Update backend/config/constants.php
-sed -i "s/'version' => '${CURRENT}'/'version' => '${NEW_VERSION}'/" backend/config/constants.php
+# Update backend/config/constants.php (coolify.version only, using awk for precision)
+awk -v old="$CURRENT" -v new="$NEW_VERSION" '
+  /coolify.*=>.*\[/,/\]/ {
+    if (/'\''version'\'' =>/) {
+      sub(old, new)
+    }
+  }
+  { print }
+' backend/config/constants.php > backend/config/constants.php.tmp
+mv backend/config/constants.php.tmp backend/config/constants.php
 
 # Update backend/versions.json (devforge.version and coolify.v4.version)
 sed -i "s/\"version\": \"${CURRENT}\"/\"version\": \"${NEW_VERSION}\"/g" backend/versions.json
