@@ -184,3 +184,117 @@ it('preserves other component versions when preventing Coolify downgrade', funct
     $job = new CheckForUpdatesJob;
     $job->handle();
 });
+
+it('falls back to Docker Hub when GitHub fails with 404', function () {
+    // GitHub returns 404
+    Http::fake([
+        'https://raw.githubusercontent.com/bobdivx/devforge-store/main/versions.json' => Http::response('', 404),
+        'https://hub.docker.com/v2/repositories/bobdivx/devforge/tags?page_size=100' => Http::response([
+            'results' => [
+                ['name' => '4.1.5'],
+                ['name' => '4.1.4'],
+                ['name' => 'api-4.1.5'],
+                ['name' => 'sha-abc123'],
+                ['name' => 'latest'],
+            ],
+        ], 200),
+    ]);
+
+    File::shouldReceive('exists')->andReturn(false);
+    File::shouldReceive('put')
+        ->once()
+        ->with(base_path('versions.json'), Mockery::on(function ($json) {
+            $data = json_decode($json, true);
+            // Should use Docker Hub's highest semver tag
+            return $data['devforge']['version'] === '4.1.5'
+                && $data['coolify']['v4']['version'] === '4.1.5';
+        }));
+
+    Cache::shouldReceive('forget')->once();
+
+    config(['constants.coolify.version' => '4.1.3']);
+
+    \Illuminate\Support\Facades\Log::shouldReceive('warning')
+        ->once()
+        ->with('GitHub versions URL returned non-2xx status', Mockery::type('array'));
+
+    \Illuminate\Support\Facades\Log::shouldReceive('warning')
+        ->once()
+        ->with('GitHub versions URL failed, falling back to Docker Hub');
+
+    \Illuminate\Support\Facades\Log::shouldReceive('info')
+        ->once()
+        ->with('Docker Hub fallback found version', Mockery::type('array'));
+
+    $this->app->instance('App\Models\InstanceSettings', function () {
+        return $this->settings;
+    });
+
+    $job = new CheckForUpdatesJob;
+    $job->handle();
+});
+
+it('filters Docker Hub tags correctly to plain semver', function () {
+    Http::fake([
+        'https://raw.githubusercontent.com/bobdivx/devforge-store/main/versions.json' => Http::response('', 500),
+        'https://hub.docker.com/v2/repositories/bobdivx/devforge/tags?page_size=100' => Http::response([
+            'results' => [
+                ['name' => '4.1.10'],
+                ['name' => 'api-4.1.20'],
+                ['name' => '4.1.5'],
+                ['name' => 'sha-abc123'],
+                ['name' => 'latest'],
+                ['name' => '4.2.0'],
+                ['name' => 'web-4.3.0'],
+            ],
+        ], 200),
+    ]);
+
+    File::shouldReceive('exists')->andReturn(false);
+    File::shouldReceive('put')
+        ->once()
+        ->with(base_path('versions.json'), Mockery::on(function ($json) {
+            $data = json_decode($json, true);
+            // Should use 4.2.0 (highest plain semver, ignoring api-4.1.20 and web-4.3.0)
+            return $data['devforge']['version'] === '4.2.0'
+                && $data['coolify']['v4']['version'] === '4.2.0';
+        }));
+
+    Cache::shouldReceive('forget')->once();
+
+    config(['constants.coolify.version' => '4.1.3']);
+
+    \Illuminate\Support\Facades\Log::shouldReceive('warning')->atLeast()->once();
+    \Illuminate\Support\Facades\Log::shouldReceive('info')->once();
+
+    $this->app->instance('App\Models\InstanceSettings', function () {
+        return $this->settings;
+    });
+
+    $job = new CheckForUpdatesJob;
+    $job->handle();
+});
+
+it('logs error when both GitHub and Docker Hub fail', function () {
+    Http::fake([
+        'https://raw.githubusercontent.com/bobdivx/devforge-store/main/versions.json' => Http::response('', 404),
+        'https://hub.docker.com/v2/repositories/bobdivx/devforge/tags?page_size=100' => Http::response('', 500),
+    ]);
+
+    \Illuminate\Support\Facades\Log::shouldReceive('warning')->atLeast()->once();
+    \Illuminate\Support\Facades\Log::shouldReceive('error')
+        ->once()
+        ->with('Docker Hub API returned non-2xx status', Mockery::type('array'));
+    \Illuminate\Support\Facades\Log::shouldReceive('error')
+        ->once()
+        ->with('Both GitHub and Docker Hub version checks failed');
+
+    $this->app->instance('App\Models\InstanceSettings', function () {
+        return $this->settings;
+    });
+
+    $job = new CheckForUpdatesJob;
+    $job->handle();
+
+    // Job should exit gracefully without writing versions.json
+});
