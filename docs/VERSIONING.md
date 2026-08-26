@@ -48,12 +48,19 @@ Every push to `main` that triggers the **DevForge Docker Images** workflow will:
 
 The live DevForge instance:
 - Reads its **running version** from `backend/config/constants.php` (baked into the image)
-- Fetches the **latest available version** from GitHub:
-  ```
-  https://raw.githubusercontent.com/bobdivx/devforge/main/backend/versions.json
-  ```
+- Fetches the **latest available version** from two sources:
+  1. **Primary**: Public `versions.json` from devforge-store repo:
+     ```
+     https://raw.githubusercontent.com/bobdivx/devforge-store/main/versions.json
+     ```
+  2. **Fallback**: Docker Hub API (if primary fails, e.g., private repo 404)
+     - Queries `https://hub.docker.com/v2/repositories/bobdivx/devforge/tags`
+     - Filters plain semver tags (e.g., `4.1.4`, ignores `api-4.1.4`, `sha-*`, `latest`)
+     - Uses the highest version available
 - Compares semver strings
 - Shows an update notification at `/settings/updates/` when a newer version is available
+
+**Note**: The main `bobdivx/devforge` repo is private, so raw GitHub URLs return 404 for unauthenticated requests. The public `devforge-store` repo hosts `versions.json` for update checks. If that file is stale or unavailable, Docker Hub serves as the source of truth.
 
 ### Loop Prevention
 
