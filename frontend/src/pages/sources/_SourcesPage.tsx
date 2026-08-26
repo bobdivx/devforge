@@ -116,8 +116,8 @@ export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
     return (
         <div class="grid gap-3 sm:gap-4 md:gap-5">
             <PageHeader
-                title="Tokens & Clés API"
-                description="Gestion centralisée de vos tokens d'accès, clés API pour vos agents et identifiants de déploiement."
+                title="Connexions & Intégrations"
+                description="Hub central pour GitHub, tokens API, clés d'agents, MCP et tous vos services connectés."
             />
             {(feedback || error) && (
                 <p class={`text-sm ${error ? 'text-error' : 'text-success'}`}>{error ?? feedback}</p>
@@ -157,31 +157,47 @@ export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
                     <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                         {agentRequests.data.data.map((req) => (
                             <div key={req.uuid} class="flex flex-col gap-2 rounded-lg border border-base-300 bg-base-100 p-4">
-                                <div class="flex items-center gap-2">
+                                <div class="flex items-center gap-2 flex-wrap">
                                     <Bot class="size-3.5 sm:size-4 text-primary" aria-hidden />
                                     <span class="font-semibold">{req.agent?.name ?? 'Agent'}</span>
                                     <span class="text-xs text-base-content/60">a besoin de</span>
                                     <code class="font-mono text-sm">{req.key_name}</code>
                                 </div>
+                                {req.application_name && (
+                                    <div class="flex items-center gap-2 text-xs text-base-content/70">
+                                        <span>Pour l'application :</span>
+                                        <a 
+                                            href={`/application/${req.application_uuid}`}
+                                            class="font-medium hover:text-primary underline"
+                                        >
+                                            {req.application_name}
+                                        </a>
+                                    </div>
+                                )}
                                 {req.reason && <p class="text-xs text-base-content/70">{req.reason}</p>}
-                                <div class="mt-2 flex gap-2">
+                                <form 
+                                    class="mt-2 flex gap-2" 
+                                    onSubmit={(e) => {
+                                        e.preventDefault();
+                                        void fulfillAgentRequest(req.uuid);
+                                    }}
+                                >
                                     <input
                                         class="input input-sm input-bordered flex-1 font-mono"
                                         type="password"
                                         placeholder={`Valeur pour ${req.key_name}`}
                                         value={requestDrafts[req.uuid] ?? ''}
                                         onInput={(e) => setRequestDrafts(cur => ({ ...cur, [req.uuid]: (e.target as HTMLInputElement).value }))}
-                                        onKeyDown={(e) => e.key === 'Enter' && fulfillAgentRequest(req.uuid)}
                                     />
                                     <button
                                         class="btn btn-primary btn-sm"
+                                        type="submit"
                                         disabled={savingUuid === req.uuid || !(requestDrafts[req.uuid]?.trim())}
-                                        onClick={() => void fulfillAgentRequest(req.uuid)}
                                     >
                                         <KeyRound class="size-3.5" aria-hidden />
                                         Fournir
                                     </button>
-                                </div>
+                                </form>
                             </div>
                         ))}
                     </div>
@@ -229,7 +245,13 @@ export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
             <DevForgeMcpTokenCard />
 
             <Modal title="Token GitHub (Packages)" open={!!editingGithubApp} onClose={() => setEditingGithubApp(null)}>
-                <div class="p-6">
+                <form 
+                    class="p-6"
+                    onSubmit={(e) => {
+                        e.preventDefault();
+                        if (editingGithubApp) void savePackagesToken(editingGithubApp);
+                    }}
+                >
                     <h3 class="text-lg font-bold">Token GitHub (Packages)</h3>
                     <p class="mt-2 text-sm text-base-content/70">
                         Saisissez le Personal Access Token (PAT) avec la permission <code class="font-mono text-xs">read:packages</code> pour le compte {editingGithubApp ? accountLabel(editingGithubApp) : ''}.
@@ -252,17 +274,14 @@ export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
                         <button class="btn btn-ghost" type="button" onClick={() => setEditingGithubApp(null)}>Annuler</button>
                         <button
                             class="btn btn-primary"
-                            type="button"
+                            type="submit"
                             disabled={!editingGithubApp || savingUuid === editingGithubApp?.uuid}
-                            onClick={() => {
-                                if (editingGithubApp) void savePackagesToken(editingGithubApp);
-                            }}
                         >
                             <KeyRound class="size-3.5" aria-hidden />
                             Enregistrer
                         </button>
                     </div>
-                </div>
+                </form>
             </Modal>
 
 

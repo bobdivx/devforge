@@ -26,7 +26,7 @@ class AgentKeyRequestController extends Controller
         $status = is_string($request->query('status')) ? $request->query('status') : 'pending';
 
         $query = AiAgentKeyRequest::query()
-            ->with(['agent:id,uuid,name,type'])
+            ->with(['agent:id,uuid,name,type', 'application:uuid,name'])
             ->where('team_id', $teamId)
             ->orderByDesc('created_at')
             ->limit(50);
@@ -190,6 +190,12 @@ class AgentKeyRequestController extends Controller
             'agent_uuid' => $request->agent?->uuid,
             'agent_name' => $request->agent?->name,
             'agent_type' => $request->agent?->type,
+            'application' => $request->application ? [
+                'uuid' => $request->application->uuid,
+                'name' => $request->application->name,
+            ] : null,
+            'application_uuid' => $request->application?->uuid,
+            'application_name' => $request->application?->name,
             'created_at' => $request->created_at?->toISOString(),
             'resolved_at' => $request->resolved_at?->toISOString(),
         ];

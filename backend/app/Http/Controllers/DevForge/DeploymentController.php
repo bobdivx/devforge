@@ -18,41 +18,55 @@ class DeploymentController extends Controller
 {
     public function index(Request $request, CurrentTeamContext $teamContext, DeploymentData $deploymentData): JsonResponse
     {
-        $validated = $request->validate([
-            'application_uuid' => ['nullable', 'string', 'max:255'],
-            'status' => ['nullable', Rule::enum(ApplicationDeploymentStatus::class)],
-            'active' => ['nullable', 'boolean'],
-            'page' => ['nullable', 'integer', 'min:1'],
-            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
-        ]);
-        $team = $teamContext->resolve($request->user());
-        $activeOnly = $request->boolean('active');
-        $deployments = $deploymentData->paginate(
-            $team,
-            (int) ($validated['page'] ?? 1),
-            (int) ($validated['per_page'] ?? 25),
-            $validated['application_uuid'] ?? null,
-            $activeOnly ? null : ($validated['status'] ?? null),
-            $activeOnly
-                ? [
-                    ApplicationDeploymentStatus::QUEUED->value,
-                    ApplicationDeploymentStatus::IN_PROGRESS->value,
-                ]
-                : null,
-        );
+        try {
+            $validated = $request->validate([
+                'application_uuid' => ['nullable', 'string', 'max:255'],
+                'status' => ['nullable', Rule::enum(ApplicationDeploymentStatus::class)],
+                'active' => ['nullable', 'boolean'],
+                'page' => ['nullable', 'integer', 'min:1'],
+                'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+            ]);
+            $team = $teamContext->resolve($request->user());
+            $activeOnly = $request->boolean('active');
+            $deployments = $deploymentData->paginate(
+                $team,
+                (int) ($validated['page'] ?? 1),
+                (int) ($validated['per_page'] ?? 25),
+                $validated['application_uuid'] ?? null,
+                $activeOnly ? null : ($validated['status'] ?? null),
+                $activeOnly
+                    ? [
+                        ApplicationDeploymentStatus::QUEUED->value,
+                        ApplicationDeploymentStatus::IN_PROGRESS->value,
+                    ]
+                    : null,
+            );
 
-        return response()->json([
-            'data' => $deployments->getCollection()
-                ->map(fn ($deployment): array => $deploymentData->deployment($deployment))
-                ->values()
-                ->all(),
-            'meta' => [
-                'current_page' => $deployments->currentPage(),
-                'per_page' => $deployments->perPage(),
-                'total' => $deployments->total(),
-                'last_page' => $deployments->lastPage(),
-            ],
-        ]);
+            return response()->json([
+                'data' => $deployments->getCollection()
+                    ->map(fn ($deployment): array => $deploymentData->deployment($deployment))
+                    ->values()
+                    ->all(),
+                'meta' => [
+                    'current_page' => $deployments->currentPage(),
+                    'per_page' => $deployments->perPage(),
+                    'total' => $deployments->total(),
+                    'last_page' => $deployments->lastPage(),
+                ],
+            ]);
+        } catch (Throwable $e) {
+            return response()->json([
+                'error' => 'Impossible de charger les déploiements.',
+                'message' => $e->getMessage(),
+                'data' => [],
+                'meta' => [
+                    'current_page' => 1,
+                    'per_page' => 25,
+                    'total' => 0,
+                    'last_page' => 1,
+                ],
+            ], 200);
+        }
     }
 
     public function show(

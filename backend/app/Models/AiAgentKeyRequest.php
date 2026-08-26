@@ -51,4 +51,9 @@ class AiAgentKeyRequest extends Model
     {
         return $this->belongsTo(AiAgentRun::class, 'run_id');
     }
+
+    public function application(): BelongsTo
+    {
+        return $this->belongsTo(Application::class, 'resource_uuid', 'uuid');
+    }
 }

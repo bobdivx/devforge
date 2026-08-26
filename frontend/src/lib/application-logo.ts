@@ -59,7 +59,9 @@ export function resolveApplicationLogoUrl(configuration: Record<string, unknown>
     for (const domain of domains) {
         const hostname = hostnameFromCandidate(domain);
         if (hostname && !isGeneratedApplicationHostname(hostname)) {
-            return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=64`;
+            // Try app's own favicon first, fallback to Google if it fails
+            const withScheme = hostname.includes('://') ? hostname : `https://${hostname}`;
+            return `${withScheme}/favicon.ico`;
         }
     }
 
