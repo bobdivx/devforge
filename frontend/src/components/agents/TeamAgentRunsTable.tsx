@@ -2,7 +2,8 @@ import { Activity, Bot, ChevronRight, Clock, Layers, Zap } from 'lucide-preact';
 import type { AgentRunWithAgent } from '../../lib/domain-api';
 import { AgentRunStatusBadge } from './AgentRunStatusBadge';
 import { AgentAvatar } from './AgentAvatar';
-import { routeHref, agentDetailPath } from '../../lib/routes';
+import { routeHref } from '../../lib/routes';
+import { agentDetailPath } from '../../lib/agent-routes';
 import { useNavigate } from '../../lib/use-navigate';
 
 const triggerLabels: Record<string, string> = {
@@ -23,16 +24,6 @@ const triggerIcons: Record<string, typeof Activity> = {
     chat_continue: Bot,
 };
 
-function formatDuration(seconds: number | null): string {
-    if (seconds === null) {
-        return '—';
-    }
-    if (seconds < 60) {
-        return `${seconds}s`;
-    }
-    return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-}
-
 function runSummary(run: AgentRunWithAgent): string {
     const summary = run.summary?.trim();
     if (summary && summary.length <= 100) {
@@ -50,12 +41,15 @@ function getResourceInfo(run: AgentRunWithAgent): { type: string; name: string }
         return null;
     }
 
-    if (meta.application_name) {
-        return { type: 'App', name: meta.application_name };
+    // Access metadata fields safely - they are part of a flexible Record type
+    const metaRecord = meta as Record<string, unknown>;
+    
+    if (metaRecord.application_name && typeof metaRecord.application_name === 'string') {
+        return { type: 'App', name: metaRecord.application_name };
     }
 
-    if (meta.deployment_uuid) {
-        return { type: 'Déploiement', name: meta.deployment_uuid.substring(0, 8) };
+    if (metaRecord.deployment_uuid && typeof metaRecord.deployment_uuid === 'string') {
+        return { type: 'Déploiement', name: metaRecord.deployment_uuid.substring(0, 8) };
     }
 
     return null;
