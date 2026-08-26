@@ -1105,6 +1105,16 @@ export type AgentRun = {
     logs?: string | null;
 };
 
+export type AgentRunWithAgent = AgentRun & {
+    agent: {
+        uuid: string;
+        name: string;
+        type: AgentType;
+        avatar_color: string;
+        avatar_shape?: string | null;
+    } | null;
+};
+
 export type AgentTriggerMode = 'manual' | 'schedule' | 'webhook' | 'cron';
 
 export type Agent = {
@@ -4269,6 +4279,7 @@ export const domainApi = {
         body: JSON.stringify({ feedback }),
     }),
     agentRuns: (agentUuid: string, page = 1) => apiFetch<ApiListResponse<AgentRun>>(`${API_BASE}/agents/${encodeURIComponent(agentUuid)}/runs?page=${page}`),
+    teamAgentRuns: (page = 1) => apiFetch<ApiListResponse<AgentRunWithAgent>>(`${API_BASE}/agents/runs?page=${page}`),
     clearAgentRuns: (agentUuid: string) => mutate<ApiResponse<{ cleared: number }>>(`/agents/${encodeURIComponent(agentUuid)}/runs`, {
         method: 'DELETE',
     }),

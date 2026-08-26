@@ -46,8 +46,10 @@ export type SidebarNavItem = {
 export type SidebarNavEntry = SidebarNavItem | SidebarNavSection;
 
 /**
- * Navigation principale par sections toujours visibles.
- * Les groupes accordéon rendaient les pages difficiles à trouver.
+ * Navigation principale organisée par les 3 jobs de DevForge :
+ * 1. Déployer les apps
+ * 2. Correction/amélioration automatique via agents
+ * 3. Continuer à développer sur DevForge
  */
 export const sidebarNav: SidebarNavEntry[] = [
     {
@@ -60,8 +62,8 @@ export const sidebarNav: SidebarNavEntry[] = [
     },
     {
         type: 'section',
-        id: 'resources',
-        label: 'Ressources',
+        id: 'deploy',
+        label: 'Déployer',
         items: [
             {
                 id: 'applications',
@@ -69,6 +71,13 @@ export const sidebarNav: SidebarNavEntry[] = [
                 path: '/applications',
                 pages: ['applications', 'application-detail'],
                 icon: Boxes,
+            },
+            {
+                id: 'deployments',
+                label: 'Déploiements',
+                path: '/deployments',
+                pages: ['deployments'],
+                icon: Rocket,
             },
             {
                 id: 'databases',
@@ -84,27 +93,42 @@ export const sidebarNav: SidebarNavEntry[] = [
                 pages: ['services'],
                 icon: Wrench,
             },
+        ],
+    },
+    {
+        type: 'section',
+        id: 'agents',
+        label: 'Équipe IA',
+        requiresAgents: true,
+        items: [
             {
-                id: 'store',
-                label: 'Store',
-                path: '/store',
-                pages: ['store'],
-                icon: Store,
+                id: 'agents-manage',
+                label: 'Activité & membres',
+                path: '/agents',
+                pages: ['agents'],
+                icon: Bot,
+            },
+            {
+                id: 'agents-chat',
+                label: 'Chat',
+                path: '/agents/chat',
+                pages: ['agents-chat', 'agent-detail'],
+                icon: MessageSquare,
+            },
+            {
+                id: 'automation',
+                label: 'Automations',
+                path: '/automation',
+                pages: ['automation'],
+                icon: Sparkles,
             },
         ],
     },
     {
         type: 'section',
         id: 'operations',
-        label: 'Opérations',
+        label: 'Infrastructure',
         items: [
-            {
-                id: 'deployments',
-                label: 'Déploiements',
-                path: '/deployments',
-                pages: ['deployments'],
-                icon: Rocket,
-            },
             {
                 id: 'docker',
                 label: 'Docker',
@@ -158,35 +182,22 @@ export const sidebarNav: SidebarNavEntry[] = [
         pages: ['connexions', 'github', 'sources'],
     },
     {
+        type: 'link',
+        id: 'store',
+        label: 'Store',
+        path: '/store',
+        icon: Store,
+        pages: ['store'],
+    },
+    {
         type: 'section',
-        id: 'agents',
-        label: 'Agents IA',
+        id: 'ai-settings',
+        label: 'Paramètres IA',
         requiresAgents: true,
         items: [
             {
-                id: 'agents-chat',
-                label: 'Chat',
-                path: '/agents/chat',
-                pages: ['agents-chat', 'agent-detail'],
-                icon: MessageSquare,
-            },
-            {
-                id: 'agents-manage',
-                label: 'Équipe',
-                path: '/agents',
-                pages: ['agents'],
-                icon: Bot,
-            },
-            {
-                id: 'automation',
-                label: 'Automations',
-                path: '/automation',
-                pages: ['automation'],
-                icon: Sparkles,
-            },
-            {
                 id: 'agents-settings',
-                label: 'Paramètres AI',
+                label: 'Configuration AI',
                 path: '/agents/settings',
                 pages: ['agents-settings'],
                 icon: Settings,

@@ -1,4 +1,4 @@
-import { MessageSquare, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-preact';
+import { MessageSquare, Plus, RefreshCw, RotateCcw, Trash2, Users, Zap } from 'lucide-preact';
 import { useState } from 'preact/hooks';
 import { AgentCard } from '../../components/agents/AgentCard';
 import { AgentUserRequestsInbox } from '../../components/agents/AgentUserRequestsInbox';
@@ -6,6 +6,7 @@ import { BotStudio } from '../../components/agents/BotStudio';
 import { CreateAgentModal } from '../../components/agents/CreateAgentModal';
 import { MissionBoardPanel } from '../../components/agents/MissionBoardPanel';
 import { DeployGraftButton } from '../../components/agents/DeployGraftButton';
+import { TeamAgentRunsTable } from '../../components/agents/TeamAgentRunsTable';
 import { PageHeader } from '../../components/PageHeader';
 import { DataState } from '../../components/ui/DataState';
 import { domainApi } from '../../lib/domain-api';
@@ -20,6 +21,8 @@ type Props = {
     userName?: string;
 };
 
+type Tab = 'runs' | 'team' | 'board';
+
 export function AgentsPage({ userName = 'Vous' }: Props) {
     const onNavigate = useNavigate();
     const { agentsEnabled } = useTeamContext();
@@ -27,9 +30,12 @@ export function AgentsPage({ userName = 'Vous' }: Props) {
     const [resetting, setResetting] = useState(false);
     const [deletingAll, setDeletingAll] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [activeTab, setActiveTab] = useState<Tab>('runs');
 
     const query = useApiQuery(agentsEnabled ? 'agents' : null, () => domainApi.agents());
+    const runsQuery = useApiQuery(agentsEnabled && activeTab === 'runs' ? 'team-agent-runs' : null, () => domainApi.teamAgentRuns());
     const agents = query.data?.data ?? [];
+    const runs = runsQuery.data?.data ?? [];
     const isEmpty = agents.length === 0;
     const continueAgent = resolveContinueChatAgent(agents);
     const continuePath = continueAgent ? agentDetailPath(continueAgent.uuid) : null;
@@ -77,8 +83,8 @@ export function AgentsPage({ userName = 'Vous' }: Props) {
             {error && <p class="text-xs text-error">{error}</p>}
             {!(isEmpty && !query.loading && !query.error) && (
                 <PageHeader
-                    title="Agents IA"
-                    description="Votre équipe de Bots autonomes qui surveille et améliore la plateforme."
+                    title="Équipe IA"
+                    description="Votre équipe de bots autonomes : travaux en cours, membres, et tâches planifiées."
                     actions={(
                         <>
                             <DeployGraftButton />
@@ -94,7 +100,7 @@ export function AgentsPage({ userName = 'Vous' }: Props) {
                                 ) : (
                                     <RotateCcw class="size-3.5" aria-hidden />
                                 )}
-                                <span class="hidden sm:inline">Réinitialiser l'équipe</span>
+                                <span class="hidden sm:inline">Réinitialiser</span>
                             </button>
                             {agents.length > 0 && (
                                 <button
@@ -149,6 +155,50 @@ export function AgentsPage({ userName = 'Vous' }: Props) {
 
             {!isEmpty && (
                 <div class="min-w-0">
+                    <div class="tabs tabs-boxed mb-3 sm:mb-4">
+                        <button
+                            type="button"
+                            class={`tab gap-1.5 ${activeTab === 'runs' ? 'tab-active' : ''}`}
+                            onClick={() => setActiveTab('runs')}
+                        >
+                            <Zap class="size-3.5" aria-hidden />
+                            Activité
+                        </button>
+                        <button
+                            type="button"
+                            class={`tab gap-1.5 ${activeTab === 'team' ? 'tab-active' : ''}`}
+                            onClick={() => setActiveTab('team')}
+                        >
+                            <Users class="size-3.5" aria-hidden />
+                            Membres
+                        </button>
+                    </div>
+
+                    {activeTab === 'runs' && (
+                        <div class="min-w-0 rounded-xl border border-base-300 bg-base-100">
+                            <TeamAgentRunsTable runs={runs} loading={runsQuery.loading} />
+                        </div>
+                    )}
+
+                    {activeTab === 'team' && (
+                        <DataState
+                            loading={query.loading}
+                            error={query.error}
+                            onRetry={() => void query.reload()}
+                        >
+                            <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                                {agents.map((agent) => (
+                                    <AgentCard
+                                        key={agent.uuid}
+                                        agent={agent}
+                                        onNavigate={onNavigate}
+                                        onRefresh={() => void query.reload({ silent: true })}
+                                    />
+                                ))}
+                            </div>
+                        </DataState>
+                    )}
+
                     <MissionBoardPanel />
                 </div>
             )}

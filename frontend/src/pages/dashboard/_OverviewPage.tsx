@@ -63,6 +63,7 @@ export function OverviewPage({ userName = '' }: OverviewPageProps) {
     const health = overview?.health;
     const appHealth = summarizeResources(applications);
     const agentsEnabled = overview?.agents_summary !== null && overview?.agents_summary !== undefined;
+    const hasFailedDeploys = (overview?.recent_deployments ?? []).some((d) => d.status === 'failed');
     const healthTone = !health
         ? 'default'
         : health.score >= 80

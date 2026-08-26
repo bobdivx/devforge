@@ -21,6 +21,30 @@ class AgentRunController extends Controller
         private readonly AgentRunCancellation $cancellation,
     ) {}
 
+    public function teamIndex(Request $request): JsonResponse
+    {
+        $team = $this->currentTeamContext->resolve($request->user());
+
+        $runs = AiAgentRun::query()
+            ->whereHas('agent', fn ($query) => $query->where('team_id', $team->id))
+            ->with(['agent:id,uuid,name,type,avatar_color,avatar_shape'])
+            ->latest()
+            ->paginate(50);
+
+        return response()->json([
+            'data' => $runs->items() === [] ? [] : array_map(
+                fn (AiAgentRun $run) => $this->presentRunWithAgent($run),
+                $runs->items(),
+            ),
+            'meta' => [
+                'total' => $runs->total(),
+                'per_page' => $runs->perPage(),
+                'current_page' => $runs->currentPage(),
+                'last_page' => $runs->lastPage(),
+            ],
+        ]);
+    }
+
     public function index(Request $request, string $agentUuid): JsonResponse
     {
         $agent = $this->findAgent($request, $agentUuid);
@@ -250,6 +274,21 @@ class AgentRunController extends Controller
         if ($withLogs) {
             $data['logs'] = $run->logs;
         }
+
+        return $data;
+    }
+
+    /** @return array<string, mixed> */
+    private function presentRunWithAgent(AiAgentRun $run): array
+    {
+        $data = $this->presentRun($run, withLogs: false);
+        $data['agent'] = $run->agent ? [
+            'uuid' => $run->agent->uuid,
+            'name' => $run->agent->name,
+            'type' => $run->agent->type,
+            'avatar_color' => $run->agent->avatar_color,
+            'avatar_shape' => $run->agent->avatar_shape,
+        ] : null;
 
         return $data;
     }
