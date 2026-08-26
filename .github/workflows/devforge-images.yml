@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:
@@ -35,8 +35,61 @@ env:
   GHCR_REGISTRY: ghcr.io
 
 jobs:
+  bump-version:
+    runs-on: ubuntu-24.04
+    # Skip if commit message already contains version bump marker
+    if: "!contains(github.event.head_commit.message, '[skip version bump]')"
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      bumped: ${{ steps.bump.outputs.bumped }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          # Read current version from constants.php
+          CURRENT=$(grep -oP "(?<='version' => ')[^']*" backend/config/constants.php | head -1)
+          echo "Current version: $CURRENT"
+          
+          # Parse semver and increment patch
+          if [[ "$CURRENT" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            MAJOR="${BASH_REMATCH[1]}"
+            MINOR="${BASH_REMATCH[2]}"
+            PATCH="${BASH_REMATCH[3]}"
+            NEW_PATCH=$((PATCH + 1))
+            NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+          else
+            echo "Error: Invalid version format: $CURRENT"
+            exit 1
+          fi
+          
+          echo "New version: $NEW_VERSION"
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "bumped=true" >> "$GITHUB_OUTPUT"
+          
+          # Update backend/config/constants.php
+          sed -i "s/'version' => '${CURRENT}'/'version' => '${NEW_VERSION}'/" backend/config/constants.php
+          
+          # Update backend/versions.json (devforge.version and coolify.v4.version)
+          sed -i "s/\"version\": \"${CURRENT}\"/\"version\": \"${NEW_VERSION}\"/g" backend/versions.json
+          
+          echo "Updated files:"
+          git diff backend/config/constants.php backend/versions.json
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add backend/config/constants.php backend/versions.json
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.version }} [skip version bump]"
+          git push
+
   build:
     runs-on: ubuntu-24.04
+    needs: bump-version
     strategy:
       fail-fast: false
       matrix:
@@ -54,6 +107,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: main
           persist-credentials: false
 
       - uses: docker/setup-buildx-action@v3
