@@ -5,7 +5,7 @@ INTERVAL="${DEVFORGE_KEEPER_INTERVAL:-15}"
 
 while true; do
     need_reload=0
-    for c in devforge-api devforge-web devforge-proxy devforge-db devforge-redis devforge-realtime; do
+    for c in devforge-api devforge-web devforge-proxy devforge-db devforge-redis devforge-realtime devforge-agent; do
         s=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || true)
         if [ "$s" = created ] || [ "$s" = exited ]; then
             docker start "$c" >/dev/null 2>&1 || true
