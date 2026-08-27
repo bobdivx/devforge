@@ -8,9 +8,19 @@ use axum::{
 use rig::completion::Prompt;
 use rig::prelude::*;
 use rig::providers::openai;
+use rmcp::model::{ClientCapabilities, ClientInfo, Implementation};
+use rmcp::service::RunningService;
+use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use rmcp::transport::StreamableHttpClientTransport;
+use rmcp::RoleClient;
+use rmcp::ServiceExt;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
+
+const DUMMY_OPENAI_KEY: &str = "sk-local-devforge-agent";
+const DEFAULT_PREAMBLE: &str = "You are the DevForge agent runtime (Rig).";
+const DEFAULT_MCP_URL: &str = "http://api:8080/mcp/devforge";
 
 #[derive(Clone)]
 struct AppState {
@@ -34,6 +44,11 @@ struct ChatRequest {
     prompt: String,
     preamble: Option<String>,
     model: Option<String>,
+    provider: Option<String>,
+    base_url: Option<String>,
+    api_key: Option<String>,
+    mcp_url: Option<String>,
+    mcp_token: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -58,10 +73,10 @@ async fn main() {
 
     let listen = std::env::var("AGENT_LISTEN").unwrap_or_else(|_| "0.0.0.0:8090".to_string());
     let state = Arc::new(AppState {
-        provider: std::env::var("AGENT_PROVIDER").unwrap_or_else(|_| "openai".to_string()),
+        provider: std::env::var("AGENT_PROVIDER").unwrap_or_default(),
         base_url: env_nonempty("AGENT_BASE_URL"),
         api_key: env_nonempty("AGENT_API_KEY"),
-        model: std::env::var("AGENT_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_string()),
+        model: std::env::var("AGENT_MODEL").unwrap_or_default(),
     });
 
     let app = Router::new()
@@ -74,9 +89,7 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("bind AGENT_LISTEN");
-    axum::serve(listener, app)
-        .await
-        .expect("server");
+    axum::serve(listener, app).await.expect("server");
 }
 
 fn env_nonempty(key: &str) -> Option<String> {
@@ -86,11 +99,47 @@ fn env_nonempty(key: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-fn is_configured(state: &AppState) -> bool {
-    match state.provider.as_str() {
-        "ollama" => state.base_url.is_some(),
-        _ => state.api_key.is_some(),
+fn pick_owned(request: Option<&str>, fallback: Option<&str>) -> Option<String> {
+    if let Some(value) = request.map(str::trim).filter(|value| !value.is_empty()) {
+        return Some(value.to_string());
     }
+
+    fallback
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn is_openai_compat(provider: &str) -> bool {
+    matches!(
+        provider,
+        "ollama" | "openai-compat" | "openai" | "openrouter" | "gemini"
+    )
+}
+
+fn request_usable(provider: &str, base_url: Option<&str>, api_key: Option<&str>) -> bool {
+    let has_key = api_key.map(|key| !key.is_empty()).unwrap_or(false);
+    let has_url = base_url.map(|url| !url.is_empty()).unwrap_or(false);
+
+    (is_openai_compat(provider) && has_url) || has_key
+}
+
+fn openai_compat_base_url(provider: &str, url: &str) -> String {
+    let trimmed = url.trim().trim_end_matches('/');
+    if matches!(provider, "ollama" | "openai-compat") && !trimmed.ends_with("/v1") {
+        format!("{trimmed}/v1")
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn err(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<ErrorBody>) {
+    (
+        status,
+        Json(ErrorBody {
+            error: message.into(),
+        }),
+    )
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> Json<Health> {
@@ -99,7 +148,7 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<Health> {
         service: "devforge-agent",
         provider: state.provider.clone(),
         model: state.model.clone(),
-        configured: is_configured(&state),
+        configured: true,
     })
 }
 
@@ -107,63 +156,102 @@ async fn chat(
     State(state): State<Arc<AppState>>,
     Json(body): Json<ChatRequest>,
 ) -> Result<Json<ChatResponse>, (StatusCode, Json<ErrorBody>)> {
-    if !is_configured(&state) {
-        return Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ErrorBody {
-                error: "Agent LLM is not configured (set AGENT_API_KEY and/or AGENT_BASE_URL)"
-                    .into(),
-            }),
-        ));
-    }
-
     if body.prompt.trim().is_empty() {
-        return Err((
+        return Err(err(StatusCode::BAD_REQUEST, "prompt is required"));
+    }
+
+    let provider = pick_owned(body.provider.as_deref(), Some(state.provider.as_str()))
+        .unwrap_or_default();
+    let base_url = pick_owned(body.base_url.as_deref(), state.base_url.as_deref());
+    let api_key = pick_owned(body.api_key.as_deref(), state.api_key.as_deref());
+    let model = pick_owned(body.model.as_deref(), Some(state.model.as_str()));
+
+    if !request_usable(&provider, base_url.as_deref(), api_key.as_deref()) {
+        return Err(err(
             StatusCode::BAD_REQUEST,
-            Json(ErrorBody {
-                error: "prompt is required".into(),
-            }),
+            "LLM is not configured: send provider+base_url (Ollama / OpenAI-compat) or api_key from DevForge providers",
         ));
     }
 
-    let model = body
-        .model
+    let Some(model) = model else {
+        return Err(err(StatusCode::BAD_REQUEST, "model is required"));
+    };
+
+    let key = api_key.unwrap_or_else(|| DUMMY_OPENAI_KEY.to_string());
+    let url = base_url
         .as_deref()
-        .filter(|m| !m.trim().is_empty())
-        .unwrap_or(&state.model)
-        .to_string();
+        .map(|value| openai_compat_base_url(&provider, value));
+
+    let mut builder = openai::Client::builder().api_key(&key);
+    if let Some(ref url) = url {
+        builder = builder.base_url(url);
+    }
+
+    let client = builder
+        .build()
+        .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("llm client: {e}")))?;
     let preamble = body
         .preamble
         .clone()
-        .unwrap_or_else(|| "You are the DevForge agent runtime (Rig).".to_string());
+        .unwrap_or_else(|| DEFAULT_PREAMBLE.to_string());
 
-    if let Some(key) = &state.api_key {
-        std::env::set_var("OPENAI_API_KEY", key);
-    } else {
-        std::env::set_var("OPENAI_API_KEY", "sk-local-devforge-agent");
-    }
-    if let Some(url) = &state.base_url {
-        std::env::set_var("OPENAI_BASE_URL", url);
-    }
+    let mcp_url = pick_owned(body.mcp_url.as_deref(), env_nonempty("AGENT_MCP_URL").as_deref())
+        .unwrap_or_else(|| DEFAULT_MCP_URL.to_string());
+    let mcp_token = pick_owned(body.mcp_token.as_deref(), env_nonempty("AGENT_MCP_TOKEN").as_deref());
 
-    let client = openai::Client::from_env().map_err(|e| {
-        (
-            StatusCode::BAD_GATEWAY,
-            Json(ErrorBody {
-                error: format!("llm client: {e}"),
-            }),
-        )
-    })?;
-
-    let agent = client.agent(&model).preamble(&preamble).build();
-    let text = agent.prompt(&body.prompt).await.map_err(|e| {
-        (
-            StatusCode::BAD_GATEWAY,
-            Json(ErrorBody {
-                error: format!("llm: {e}"),
-            }),
-        )
-    })?;
+    let text = match connect_mcp(&mcp_url, mcp_token.as_deref()).await {
+        Ok(mcp) => {
+            match mcp.list_tools(Default::default()).await {
+                Ok(list) => {
+                    tracing::info!(count = list.tools.len(), url = %mcp_url, "mcp tools loaded");
+                    let agent = client
+                        .agent(&model)
+                        .preamble(&preamble)
+                        .rmcp_tools(list.tools, mcp.peer().to_owned())
+                        .build();
+                    agent.prompt(&body.prompt).await.map_err(|e| {
+                        err(StatusCode::BAD_GATEWAY, format!("llm: {e}"))
+                    })?
+                }
+                Err(e) => {
+                    tracing::warn!("mcp tools/list failed ({e}); falling back to LLM without tools");
+                    let agent = client.agent(&model).preamble(&preamble).build();
+                    agent.prompt(&body.prompt).await.map_err(|e| {
+                        err(StatusCode::BAD_GATEWAY, format!("llm: {e}"))
+                    })?
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("mcp connect failed ({e}); falling back to LLM without tools");
+            let agent = client.agent(&model).preamble(&preamble).build();
+            agent
+                .prompt(&body.prompt)
+                .await
+                .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("llm: {e}")))?
+        }
+    };
 
     Ok(Json(ChatResponse { text, model }))
+}
+
+async fn connect_mcp(
+    url: &str,
+    token: Option<&str>,
+) -> Result<RunningService<RoleClient, ()>, String> {
+    let mut config = StreamableHttpClientTransportConfig::with_uri(url.to_string());
+    if let Some(token) = token.filter(|value| !value.is_empty()) {
+        config = config.auth_header(token.to_string());
+    }
+    let transport = StreamableHttpClientTransport::from_config(config);
+    let client_info = ClientInfo {
+        protocol_version: Default::default(),
+        capabilities: ClientCapabilities::default(),
+        client_info: Implementation::new("devforge-agent", "0.1.0"),
+        ..Default::default()
+    };
+    client_info
+        .serve(transport)
+        .await
+        .map_err(|e| format!("{e}"))
 }
