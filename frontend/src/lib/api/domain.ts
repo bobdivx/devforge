@@ -2557,6 +2557,8 @@ export interface AgentKeyRequest {
         name: string;
         type?: string;
     };
+    application_uuid?: string | null;
+    application_name?: string | null;
     created_at?: string | null;
     resolved_at?: string | null;
 }
