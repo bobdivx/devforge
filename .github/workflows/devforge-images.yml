@@ -1,7 +1,8 @@
 name: DevForge Docker Images
 
 # Build & push to Docker Hub: bobdivx/devforge
-# Tags per component: api / web / realtime / helper (+ -latest, -sha-*, -version)
+# Tags per component: api / web / realtime / helper / agent (+ -latest, -sha-*, -version)
+# Hub :agent and GHCR devforge-agent:latest are published from docker/devforge-agent/Dockerfile
 # Also mirrors to GHCR: ghcr.io/<owner>/devforge-<component>
 #
 # Note: :helper is required on every deployment server (pulled on demand by
@@ -17,6 +18,8 @@ on:
       - docker/devforge-web/**
       - docker/devforge-realtime/**
       - docker/devforge-helper/**
+      - docker/devforge-agent/**
+      - agent/**
       - docker/devforge-proxy/**
       - docker/production/**
       - scripts/**
@@ -87,6 +90,8 @@ jobs:
             file: docker/devforge-helper/Dockerfile
           - name: proxy
             file: docker/devforge-proxy/Dockerfile
+          - name: agent
+            file: docker/devforge-agent/Dockerfile
     steps:
       - uses: actions/checkout@v5
         with:
@@ -214,12 +219,14 @@ jobs:
           echo "  bobdivx/devforge:realtime"
           echo "  bobdivx/devforge:helper"
           echo "  bobdivx/devforge:proxy"
+          echo "  bobdivx/devforge:agent"
           echo "GHCR mirrors:"
           echo "  ghcr.io/bobdivx/devforge-api:latest"
           echo "  ghcr.io/bobdivx/devforge-web:latest"
           echo "  ghcr.io/bobdivx/devforge-realtime:latest"
           echo "  ghcr.io/bobdivx/devforge-helper:latest"
           echo "  ghcr.io/bobdivx/devforge-proxy:latest"
+          echo "  ghcr.io/bobdivx/devforge-agent:latest"
 
   commit-version:
     runs-on: ubuntu-24.04
