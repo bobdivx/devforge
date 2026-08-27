@@ -43,7 +43,7 @@ chmod +x train.sh
 ```
 
 Image : `nvidia/cuda:12.4.1-runtime` + Unsloth.
-Base : `Qwen2.5-Coder-7B-Instruct` 4-bit, LoRA `r=16`, séquence 2048.
+Base : `unsloth/Qwen2.5-Coder-7B-Instruct-bnb-4bit`, LoRA `r=16`, séquence 2048.
 Sortie : `output/adapter/` (LoRA), GGUF `q4_k_m`, `output/Modelfile` et `output/devforge-relanceur`.
 
 ## 3. Publier dans Ollama (même hôte GPU)

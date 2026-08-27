@@ -78,7 +78,7 @@ docker run --rm --gpus all \
   -e QLORA_EPOCHS="${QLORA_EPOCHS:-0}" \
   -e QLORA_BATCH="${QLORA_BATCH:-2}" \
   -e QLORA_GRAD_ACCUM="${QLORA_GRAD_ACCUM:-4}" \
-  -e QLORA_BASE_MODEL="${QLORA_BASE_MODEL:-unsloth/Qwen2.5-Coder-7B-Instruct}" \
+  -e QLORA_BASE_MODEL="${QLORA_BASE_MODEL:-unsloth/Qwen2.5-Coder-7B-Instruct-bnb-4bit}" \
   -e HF_HOME=/output/.cache/huggingface \
   -v "$DATA_ABS:/data/agent-sft.jsonl:ro" \
   -v "$OUT_ABS:/output" \

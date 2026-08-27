@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 
-MODEL_NAME = "unsloth/Qwen2.5-Coder-7B-Instruct"
+MODEL_NAME = "unsloth/Qwen2.5-Coder-7B-Instruct-bnb-4bit"
 OLLAMA_MODEL = "devforge-relanceur"
 LORA_R = 16
 MAX_SEQ_LENGTH = 2048
