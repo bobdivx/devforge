@@ -342,6 +342,11 @@ return [
     'agent_url' => env('AGENT_URL', ''),
 
     /*
+    | URL MCP DevForge vue du sidecar Rig (réseau Docker).
+    */
+    'agent_mcp_url' => env('AGENT_MCP_URL', 'http://api:8080/mcp/devforge'),
+
+    /*
     |--------------------------------------------------------------------------
     | Livewire to DevForge migration matrix
     |--------------------------------------------------------------------------
