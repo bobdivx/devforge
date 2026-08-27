@@ -101,7 +101,12 @@ class AgentRunner
         $run->appendLog('Agent démarré — '.$routing['display'].' ('.$routing['tier_label'].') ['.$role.' depth='.$depth.']');
         $run->appendLog('Modèle LLM : '.$this->providerFactory->describeResolvedModel($providerConfig));
         $run->appendLog('Routage : '.$reason);
-        $run->appendLog('Initialisation du provider LLM...');
+        $useRig = app(RigAgentClient::class)->enabled();
+        if ($useRig) {
+            $run->appendLog('Runtime Rig : sidecar AGENT_URL — boucle modèle/outils via MCP.');
+        } else {
+            $run->appendLog('Initialisation du provider LLM...');
+        }
 
         foreach ($context['approved_approval_keys'] ?? [] as $approvalKey) {
             if (is_string($approvalKey) && $approvalKey !== '') {
@@ -110,24 +115,27 @@ class AgentRunner
             }
         }
 
-        $provider = $this->providerFactory->makeForAgent(
-            $agent,
-            function (\Throwable $exception, string $primaryLabel, string $fallbackLabel) use ($run): void {
-                $run->appendLog("Provider {$primaryLabel} indisponible : ".mb_substr($exception->getMessage(), 0, 200));
-                $run->appendLog("Bascule vers le provider de secours : {$fallbackLabel}");
-            },
-            config('devforge.agents_smart_routing', true) ? $tier : null,
-            function (array $report) use ($run): void {
-                $provider = (string) ($report['provider'] ?? 'llm');
-                $run->appendLog('Diagnostic '.$provider.' : '.(string) ($report['summary'] ?? ''));
-                foreach (array_slice($report['lines'] ?? [], 0, 8) as $line) {
-                    if (is_string($line) && $line !== '') {
-                        $run->appendLog($line);
+        $provider = null;
+        if (! $useRig) {
+            $provider = $this->providerFactory->makeForAgent(
+                $agent,
+                function (\Throwable $exception, string $primaryLabel, string $fallbackLabel) use ($run): void {
+                    $run->appendLog("Provider {$primaryLabel} indisponible : ".mb_substr($exception->getMessage(), 0, 200));
+                    $run->appendLog("Bascule vers le provider de secours : {$fallbackLabel}");
+                },
+                config('devforge.agents_smart_routing', true) ? $tier : null,
+                function (array $report) use ($run): void {
+                    $provider = (string) ($report['provider'] ?? 'llm');
+                    $run->appendLog('Diagnostic '.$provider.' : '.(string) ($report['summary'] ?? ''));
+                    foreach (array_slice($report['lines'] ?? [], 0, 8) as $line) {
+                        if (is_string($line) && $line !== '') {
+                            $run->appendLog($line);
+                        }
                     }
-                }
-            },
-        );
-        $run->appendLog('Provider LLM prêt.');
+                },
+            );
+            $run->appendLog('Provider LLM prêt.');
+        }
 
         $delegator = new AgentDelegator($this, new AgentSubagentRegistry, $this->taskModelRouter);
         $toolkit = new AgentToolkit(
@@ -177,6 +185,17 @@ class AgentRunner
                 return;
             }
 
+            if ($useRig) {
+                $prompt = $taskMessage !== ''
+                    ? $taskMessage
+                    : $this->promptBuilder->autonomousInitialMessage($agent, $context, $run->trigger);
+                $summary = app(RigChatRuntime::class)->complete(
+                    $agent,
+                    $run,
+                    $prompt,
+                    $this->messages,
+                )['text'];
+            } else {
             while ($budget->consume()) {
                 if (app(AgentRunCancellation::class)->wasRequested($run)) {
                     $run->appendLog('Arrêt autonome : annulation demandée.');
@@ -414,6 +433,8 @@ class AgentRunner
                     $summary = $summary ?: 'Limite d\'itérations atteinte sans conclusion.';
                 }
             }
+
+            } // ! $useRig
 
             $pendingApproval = is_array($run->metadata['pending_approval'] ?? null)
                 ? $run->metadata['pending_approval']

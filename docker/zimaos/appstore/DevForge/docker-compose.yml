@@ -65,6 +65,10 @@ services:
         condition: service_healthy
       realtime:
         condition: service_started
+      agent:
+        condition: service_started
+    extra_hosts:
+      - host.docker.internal:host-gateway
     restart: unless-stopped
     deploy:
       resources:
@@ -88,6 +92,7 @@ services:
       - DEVFORGE_MCP_ENABLED=true
       - DEVFORGE_DATA_DIR=/DATA/AppData/$AppID/data
       - HELPER_IMAGE=bobdivx/devforge
+      - AGENT_URL=http://agent:8090
       - PUSHER_APP_ID=devforge
       - PUSHER_APP_KEY=devforge
       - PUSHER_APP_SECRET=devforge
@@ -234,6 +239,27 @@ services:
       - devforge
     privileged: false
 
+  agent:
+    container_name: devforge-agent
+    image: bobdivx/devforge:agent
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    environment:
+      - AGENT_LISTEN=0.0.0.0:8090
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8090/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - devforge
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+    privileged: false
+
   redis:
     container_name: devforge-redis
     image: redis:7.4.5-alpine
@@ -283,7 +309,7 @@ services:
         INTERVAL="$${DEVFORGE_KEEPER_INTERVAL:-15}"
         while true; do
           need_reload=0
-          for c in devforge-api devforge-web devforge-proxy devforge-db devforge-redis devforge-realtime; do
+          for c in devforge-api devforge-web devforge-proxy devforge-db devforge-redis devforge-realtime devforge-agent; do
             s=$$(docker inspect -f '{{.State.Status}}' "$$c" 2>/dev/null || true)
             if [ "$$s" = created ] || [ "$$s" = exited ]; then
               docker start "$$c" >/dev/null 2>&1 || true
@@ -392,6 +418,7 @@ x-casaos:
         5. Keep at least **20 GB** free: builds and application images live on the Docker disk.
         6. First registered user is the administrator.
         7. HTTP is used by default (`SESSION_SECURE_COOKIE=false`). Put a TLS proxy in front if you expose it beyond your LAN.
+        8. Images: `bobdivx/devforge:4.1.3`, `:web-4.1.3`, `:realtime-4.1.3`, and pull `:agent` for the sidecar LLM agent.
       fr_FR: |
         **Avant d'installer**
 
@@ -402,6 +429,7 @@ x-casaos:
         5. Gardez au moins **20 Go** libres : les builds et images d'apps vivent sur le disque Docker.
         6. Le premier compte créé est administrateur.
         7. HTTP par défaut (`SESSION_SECURE_COOKIE=false`). Ajoutez un proxy TLS si vous l'exposez hors du LAN.
+        8. Images : `bobdivx/devforge:4.1.3`, `:web-4.1.3`, `:realtime-4.1.3`, et `docker pull bobdivx/devforge:agent` pour le sidecar LLM.
       zh_CN: |
         **安装前请阅读**
 
@@ -412,24 +440,25 @@ x-casaos:
         5. 请保留至少 **20 GB** 可用空间：构建和应用镜像会占用 Docker 磁盘。
         6. 第一个注册用户将成为管理员。
         7. 默认使用 HTTP（`SESSION_SECURE_COOKIE=false`）。若暴露到公网，请在前面加 TLS 代理。
+        8. 镜像：`bobdivx/devforge:4.1.3`、`:web-4.1.3`、`:realtime-4.1.3`，并 pull `:agent` 侧车 LLM 代理。
   index: /
   port_map: "8080"
   scheme: http
   version: "4.1.3"
-  update_at: "2026-08-24"
+  update_at: "2026-08-27"
   release_notes:
     en_US: |-
-      - DevForge 4.1.3 update with SPA API authentication and upgrade fixes.
-      - Stack: API, web SPA, realtime, PostgreSQL 15, Redis 7, nginx gateway.
-      - amd64 images from Docker Hub (`bobdivx/devforge`).
+      - DevForge 4.1.3: adds sidecar LLM agent (`devforge-agent`, image `bobdivx/devforge:agent`).
+      - Stack: API, web SPA, realtime, sidecar agent, PostgreSQL 15, Redis 7, nginx gateway.
+      - amd64 images from Docker Hub (`bobdivx/devforge`). Pull `:agent` as well as `:4.1.3` / `:web-4.1.3` / `:realtime-4.1.3`.
     fr_FR: |-
-      - Mise à jour DevForge 4.1.3 avec correctifs d'authentification API SPA et mises à jour.
-      - Pile : API, SPA web, realtime, PostgreSQL 15, Redis 7, passerelle nginx.
-      - Images amd64 depuis Docker Hub (`bobdivx/devforge`).
+      - DevForge 4.1.3 : ajout du sidecar agent LLM (`devforge-agent`, image `bobdivx/devforge:agent`).
+      - Pile : API, SPA web, realtime, sidecar agent, PostgreSQL 15, Redis 7, passerelle nginx.
+      - Images amd64 depuis Docker Hub (`bobdivx/devforge`). Tirez aussi `:agent` en plus de `:4.1.3` / `:web-4.1.3` / `:realtime-4.1.3`.
     zh_CN: |-
-      - DevForge 4.1.2 的首个 ZimaOS App Store 软件包。
-      - 包含 API、Web SPA、realtime、PostgreSQL 15、Redis 7 与 nginx 网关。
-      - amd64 镜像来自 Docker Hub（`bobdivx/devforge`）。
+      - DevForge 4.1.3：新增 sidecar LLM 代理（`devforge-agent`，镜像 `bobdivx/devforge:agent`）。
+      - 包含 API、Web SPA、realtime、sidecar agent、PostgreSQL 15、Redis 7 与 nginx 网关。
+      - amd64 镜像来自 Docker Hub（`bobdivx/devforge`）。请同时 pull `:agent` 以及 `:4.1.3` / `:web-4.1.3` / `:realtime-4.1.3`。
   website: "https://github.com/bobdivx/devforge"
   repo: "https://github.com/bobdivx/devforge"
   support: "https://github.com/bobdivx/devforge/issues"

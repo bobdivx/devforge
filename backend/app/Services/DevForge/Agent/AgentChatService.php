@@ -146,7 +146,9 @@ class AgentChatService
 
         try {
 
-            $reply = $this->generateReply($agent, $run, $userMessage);
+            $reply = app(RigAgentClient::class)->enabled()
+                ? app(RigChatRuntime::class)->completeFromChat($agent, $run, $userMessage, $this->promptBuilder)
+                : $this->generateReply($agent, $run, $userMessage);
 
             $run->refresh();
             if ($run->status === AgentRunCancellation::STATUS || ! empty($reply['cancelled'])) {

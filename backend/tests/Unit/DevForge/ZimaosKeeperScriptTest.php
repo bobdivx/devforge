@@ -14,5 +14,6 @@ it('ships a ZimaOS keeper that starts Created containers and reloads nginx', fun
         ->and($contents)->toContain('devforge-api')
         ->and($contents)->toContain('devforge-web')
         ->and($contents)->toContain('devforge-proxy')
+        ->and($contents)->toContain('devforge-agent')
         ->and($contents)->toContain('host.docker.internal');
 });
