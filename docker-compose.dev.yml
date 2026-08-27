@@ -186,7 +186,7 @@ services:
       - "${FORWARD_MINIO_PORT_CONSOLE:-9001}:9001"
     environment:
       MINIO_ACCESS_KEY: "${MINIO_ACCESS_KEY:-minioadmin}"
-      MINIO_SECRET_KEY: "${MINIO_SECRET_KEY:-devforge}"
+      MINIO_SECRET_KEY: "${MINIO_SECRET_KEY:-minioadmin}"
     volumes:
       - dev_minio_data:/data
     networks:
