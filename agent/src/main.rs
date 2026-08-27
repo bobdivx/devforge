@@ -5,22 +5,19 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use rig::completion::message::Message;
 use rig::completion::Prompt;
 use rig::prelude::*;
 use rig::providers::openai;
 use rmcp::model::{ClientCapabilities, ClientInfo, Implementation};
-use rmcp::service::RunningService;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::transport::StreamableHttpClientTransport;
-use rmcp::RoleClient;
 use rmcp::ServiceExt;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 const DUMMY_OPENAI_KEY: &str = "sk-local-devforge-agent";
-const DEFAULT_PREAMBLE: &str = "You are the DevForge agent runtime (Rig).";
-const DEFAULT_MCP_URL: &str = "http://api:8080/mcp/devforge";
 
 #[derive(Clone)]
 struct AppState {
@@ -40,13 +37,22 @@ struct Health {
 }
 
 #[derive(Deserialize)]
+struct ChatMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Deserialize)]
 struct ChatRequest {
+    #[serde(default)]
     prompt: String,
     preamble: Option<String>,
     model: Option<String>,
     provider: Option<String>,
     base_url: Option<String>,
     api_key: Option<String>,
+    #[serde(default)]
+    messages: Vec<ChatMessage>,
     mcp_url: Option<String>,
     mcp_token: Option<String>,
 }
@@ -89,7 +95,9 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("bind AGENT_LISTEN");
-    axum::serve(listener, app).await.expect("server");
+    axum::serve(listener, app)
+        .await
+        .expect("server");
 }
 
 fn env_nonempty(key: &str) -> Option<String> {
@@ -142,6 +150,33 @@ fn err(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<Erro
     )
 }
 
+fn last_user_prompt(messages: &[ChatMessage]) -> Option<String> {
+    messages
+        .iter()
+        .rev()
+        .find(|message| message.role == "user" && !message.content.trim().is_empty())
+        .map(|message| message.content.clone())
+}
+
+fn history_messages(messages: &[ChatMessage], prompt: &str) -> Vec<Message> {
+    let mut history = Vec::new();
+    for message in messages {
+        let content = message.content.trim();
+        if content.is_empty() || message.role == "system" {
+            continue;
+        }
+        if message.role == "user" && content == prompt.trim() {
+            continue;
+        }
+        history.push(if message.role == "assistant" {
+            Message::assistant(content)
+        } else {
+            Message::user(content)
+        });
+    }
+    history
+}
+
 async fn health(State(state): State<Arc<AppState>>) -> Json<Health> {
     Json(Health {
         ok: true,
@@ -156,8 +191,16 @@ async fn chat(
     State(state): State<Arc<AppState>>,
     Json(body): Json<ChatRequest>,
 ) -> Result<Json<ChatResponse>, (StatusCode, Json<ErrorBody>)> {
-    if body.prompt.trim().is_empty() {
-        return Err(err(StatusCode::BAD_REQUEST, "prompt is required"));
+    let prompt = if !body.prompt.trim().is_empty() {
+        body.prompt.clone()
+    } else {
+        last_user_prompt(&body.messages).unwrap_or_default()
+    };
+    if prompt.trim().is_empty() {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "prompt is required (or send messages with a user turn)",
+        ));
     }
 
     let provider = pick_owned(body.provider.as_deref(), Some(state.provider.as_str()))
@@ -190,68 +233,61 @@ async fn chat(
     let client = builder
         .build()
         .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("llm client: {e}")))?;
-    let preamble = body
-        .preamble
-        .clone()
-        .unwrap_or_else(|| DEFAULT_PREAMBLE.to_string());
+    let preamble = body.preamble.clone().unwrap_or_else(|| {
+        "You are the DevForge agent runtime (Rig). Use tools when they help.".to_string()
+    });
+    let history = history_messages(&body.messages, &prompt);
 
-    let mcp_url = pick_owned(body.mcp_url.as_deref(), env_nonempty("AGENT_MCP_URL").as_deref())
-        .unwrap_or_else(|| DEFAULT_MCP_URL.to_string());
-    let mcp_token = pick_owned(body.mcp_token.as_deref(), env_nonempty("AGENT_MCP_TOKEN").as_deref());
+    let mcp_url = body
+        .mcp_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let mcp_token = body
+        .mcp_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
 
-    let text = match connect_mcp(&mcp_url, mcp_token.as_deref()).await {
-        Ok(mcp) => {
-            match mcp.list_tools(Default::default()).await {
-                Ok(list) => {
-                    tracing::info!(count = list.tools.len(), url = %mcp_url, "mcp tools loaded");
-                    let agent = client
-                        .agent(&model)
-                        .preamble(&preamble)
-                        .rmcp_tools(list.tools, mcp.peer().to_owned())
-                        .build();
-                    agent.prompt(&body.prompt).await.map_err(|e| {
-                        err(StatusCode::BAD_GATEWAY, format!("llm: {e}"))
-                    })?
-                }
-                Err(e) => {
-                    tracing::warn!("mcp tools/list failed ({e}); falling back to LLM without tools");
-                    let agent = client.agent(&model).preamble(&preamble).build();
-                    agent.prompt(&body.prompt).await.map_err(|e| {
-                        err(StatusCode::BAD_GATEWAY, format!("llm: {e}"))
-                    })?
-                }
-            }
-        }
-        Err(e) => {
-            tracing::warn!("mcp connect failed ({e}); falling back to LLM without tools");
-            let agent = client.agent(&model).preamble(&preamble).build();
-            agent
-                .prompt(&body.prompt)
-                .await
-                .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("llm: {e}")))?
-        }
+    let text = if let (Some(mcp_url), Some(mcp_token)) = (mcp_url, mcp_token) {
+        tracing::info!("connecting MCP at {mcp_url}");
+        let config =
+            StreamableHttpClientTransportConfig::with_uri(mcp_url.to_string()).auth_header(mcp_token);
+        let transport = StreamableHttpClientTransport::from_config(config);
+        let client_info = ClientInfo {
+            protocol_version: Default::default(),
+            capabilities: ClientCapabilities::default(),
+            client_info: Implementation::new("devforge-agent", env!("CARGO_PKG_VERSION")),
+            ..Default::default()
+        };
+        let mcp = client_info
+            .serve(transport)
+            .await
+            .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("mcp connect: {e}")))?;
+        let tools = mcp
+            .list_tools(Default::default())
+            .await
+            .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("mcp list_tools: {e}")))?
+            .tools;
+        let agent = client
+            .agent(&model)
+            .preamble(&preamble)
+            .rmcp_tools(tools, mcp.peer().to_owned())
+            .build();
+        agent
+            .prompt(prompt.as_str())
+            .with_history(history)
+            .multi_turn(40)
+            .await
+            .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("llm: {e}")))?
+    } else {
+        let agent = client.agent(&model).preamble(&preamble).build();
+        agent
+            .prompt(prompt.as_str())
+            .with_history(history)
+            .await
+            .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("llm: {e}")))?
     };
 
     Ok(Json(ChatResponse { text, model }))
-}
-
-async fn connect_mcp(
-    url: &str,
-    token: Option<&str>,
-) -> Result<RunningService<RoleClient, ()>, String> {
-    let mut config = StreamableHttpClientTransportConfig::with_uri(url.to_string());
-    if let Some(token) = token.filter(|value| !value.is_empty()) {
-        config = config.auth_header(token.to_string());
-    }
-    let transport = StreamableHttpClientTransport::from_config(config);
-    let client_info = ClientInfo {
-        protocol_version: Default::default(),
-        capabilities: ClientCapabilities::default(),
-        client_info: Implementation::new("devforge-agent", "0.1.0"),
-        ..Default::default()
-    };
-    client_info
-        .serve(transport)
-        .await
-        .map_err(|e| format!("{e}"))
 }
