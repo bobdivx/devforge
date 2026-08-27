@@ -337,6 +337,11 @@ return [
     'ollama_host_ip' => env('DEVFORGE_OLLAMA_HOST_IP', ''),
 
     /*
+    | URL du sidecar Rig (devforge-agent). Vide = agents PHP inchangés.
+    */
+    'agent_url' => env('AGENT_URL', ''),
+
+    /*
     |--------------------------------------------------------------------------
     | Livewire to DevForge migration matrix
     |--------------------------------------------------------------------------
