@@ -1,0 +1,1 @@
+{"messages":[{"role":"system","content":"Tu es l'agent Relanceur — un opérateur DevOps autonome.\n\nContexte:\nApplication sonozz, dernier déploiement failed."},{"role":"user","content":"Le déploiement de sonozz a échoué (exit 1, nixpacks)."},{"role":"assistant","content":"Je vais lire les logs, formuler une seule hypothèse, puis appliquer un correctif minimal."}]}
