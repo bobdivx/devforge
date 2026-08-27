@@ -269,12 +269,13 @@ async fn chat(
         let agent = client
             .agent(&model)
             .preamble(&preamble)
+            .default_max_turns(40)
             .rmcp_tools(tools, mcp.peer().to_owned())
             .build();
         agent
             .prompt(prompt.as_str())
             .history(history)
-            .multi_turn(40)
+            .max_turns(40)
             .await
             .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("llm: {e}")))?
     } else {
