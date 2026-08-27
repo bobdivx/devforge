@@ -9,7 +9,7 @@ use rig::completion::message::Message;
 use rig::completion::Prompt;
 use rig::prelude::*;
 use rig::providers::openai;
-use rmcp::model::{ClientCapabilities, ClientInfo, Implementation};
+use rmcp::model::{ClientInfo, Implementation};
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::ServiceExt;
@@ -254,12 +254,9 @@ async fn chat(
         let config =
             StreamableHttpClientTransportConfig::with_uri(mcp_url.to_string()).auth_header(mcp_token);
         let transport = StreamableHttpClientTransport::from_config(config);
-        let client_info = ClientInfo {
-            protocol_version: Default::default(),
-            capabilities: ClientCapabilities::default(),
-            client_info: Implementation::new("devforge-agent", env!("CARGO_PKG_VERSION")),
-            ..Default::default()
-        };
+        let mut client_info = ClientInfo::default();
+        client_info.client_info =
+            Implementation::new("devforge-agent", env!("CARGO_PKG_VERSION"));
         let mcp = client_info
             .serve(transport)
             .await
@@ -276,7 +273,7 @@ async fn chat(
             .build();
         agent
             .prompt(prompt.as_str())
-            .with_history(history)
+            .history(history)
             .multi_turn(40)
             .await
             .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("llm: {e}")))?
@@ -284,7 +281,7 @@ async fn chat(
         let agent = client.agent(&model).preamble(&preamble).build();
         agent
             .prompt(prompt.as_str())
-            .with_history(history)
+            .history(history)
             .await
             .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("llm: {e}")))?
     };
