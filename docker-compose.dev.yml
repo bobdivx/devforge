@@ -132,7 +132,7 @@ services:
       - "${VITE_PORT:-5173}:${VITE_PORT:-5173}"
     volumes:
       - .:/repo/:cached
-    command: sh -c "npm install && npm run dev"
+    command: PLACEHOLDER_VITE_CMD
     networks:
       - devforge
 
@@ -145,7 +145,7 @@ services:
       - "${DEVFORGE_PORT:-4321}:4321"
     volumes:
       - .:/repo/:cached
-    command: sh -c "npm install && npm run dev:frontend"
+    command: PLACEHOLDER_FRONTEND_CMD
     networks:
       - devforge
 
@@ -186,7 +186,7 @@ services:
       - "${FORWARD_MINIO_PORT_CONSOLE:-9001}:9001"
     environment:
       MINIO_ACCESS_KEY: "${MINIO_ACCESS_KEY:-minioadmin}"
-      MINIO_SECRET_KEY: "${MINIO_SECRET_KEY:-minioadmin}"
+      MINIO_SECRET_KEY: "${MINIO_SECRET_KEY:-devforge}"
     volumes:
       - dev_minio_data:/data
     networks:
@@ -199,17 +199,7 @@ services:
     restart: "no"
     depends_on:
       - minio
-    entrypoint: >
-      /bin/sh -c "
-      echo 'Waiting for MinIO to be ready...';
-      until mc alias set local http://devforge-minio:9000 minioadmin minioadmin 2>/dev/null; do
-        echo 'MinIO not ready yet, waiting...';
-        sleep 2;
-      done;
-      echo 'MinIO is ready, creating bucket if needed...';
-      mc mb local/local --ignore-existing;
-      echo 'MinIO initialization complete - bucket local is ready';
-      "
+    entrypoint: PLACEHOLDER_MINIO_ENTRY
     networks:
       - devforge
 
