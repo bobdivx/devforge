@@ -95,27 +95,40 @@ it('prefers the agent llm model override from metadata', function () {
     ]);
 });
 
-it('sends mcp url and token on chat', function () {
+it('sends mcp_url, mcp_token and messages on chat', function () {
     config(['devforge.agent_url' => 'http://agent.test']);
 
     Http::fake([
         'http://agent.test/v1/chat' => Http::response(['text' => 'ok']),
     ]);
 
-    (new RigAgentClient)->chat('hello', null, null, [], [
+    $text = (new RigAgentClient)->chat('hello', null, 'gpt-4o-mini', [
+        'provider' => 'openai',
+        'api_key' => 'sk-test',
+        'model' => 'gpt-4o-mini',
+    ], [
+        'messages' => [
+            ['role' => 'system', 'content' => 'sys'],
+            ['role' => 'user', 'content' => 'hello'],
+        ],
         'mcp_url' => 'http://api:8080/mcp/devforge',
-        'mcp_token' => '1|test-token',
+        'mcp_token' => '99|plain',
     ]);
+
+    expect($text)->toBe('ok');
 
     Http::assertSent(function ($request) {
         $data = $request->data();
 
         return $request->url() === 'http://agent.test/v1/chat'
             && ($data['mcp_url'] ?? null) === 'http://api:8080/mcp/devforge'
-            && ($data['mcp_token'] ?? null) === '1|test-token';
+            && ($data['mcp_token'] ?? null) === '99|plain'
+            && ($data['messages'][1]['content'] ?? null) === 'hello';
     });
 });
 
-it('defaults mcp url to the in-cluster Laravel MCP path', function () {
-    expect((new RigAgentClient)->mcpUrl())->toBe('http://api:8080/mcp/devforge');
+it('is disabled when AGENT_URL is empty', function () {
+    config(['devforge.agent_url' => '']);
+
+    expect((new RigAgentClient)->enabled())->toBeFalse();
 });
