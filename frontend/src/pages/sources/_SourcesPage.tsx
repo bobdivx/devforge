@@ -10,6 +10,7 @@ import { DevForgeMcpTokenCard } from '../../components/sources/DevForgeMcpTokenC
 import type { BootstrapPermissions } from '../../lib/bootstrap';
 import { domainApi, type GithubAppSummary } from '../../lib/domain-api';
 import { useApiQuery } from '../../lib/use-api-query';
+import { applicationPath } from '../../lib/routing/routes';
 
 type ConnexionsPageProps = {
     legacyBaseUrl?: string;
@@ -167,7 +168,7 @@ export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
                                     <div class="flex items-center gap-2 text-xs text-base-content/70">
                                         <span>Pour l'application :</span>
                                         <a 
-                                            href={`/application/${req.application_uuid}`}
+                                            href={applicationPath(req.application_uuid ?? '')}
                                             class="font-medium hover:text-primary underline"
                                         >
                                             {req.application_name}

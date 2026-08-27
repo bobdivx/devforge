@@ -509,8 +509,6 @@ const applicationsRoute = appRouteByPage('applications');
 
 const databasesRoute = appRouteByPage('databases');
 
-const servicesRoute = appRouteByPage('services');
-
 const dockerRoute = appRouteByPage('docker');
 
 const settingsRoute = appRouteByPage('settings');
@@ -627,7 +625,7 @@ const dynamicRoutes: Array<{ pattern: RegExp; route: AppRoute }> = [
 
     { pattern: /^\/project\/[^/]+\/environment\/[^/]+\/database\/[^/]+(?:\/.*)?$/, route: databasesRoute },
 
-    { pattern: /^\/project\/[^/]+\/environment\/[^/]+\/service\/[^/]+(?:\/.*)?$/, route: servicesRoute },
+    { pattern: /^\/project\/[^/]+\/environment\/[^/]+\/service\/[^/]+(?:\/.*)?$/, route: connexionsRoute },
 
     { pattern: /^\/docker(?:\/.*)?$/, route: dockerRoute },
 
@@ -800,11 +798,11 @@ export function findRoute(pathname: string): AppRoute {
             };
         }
 
-        if (dynamicRoute.route.page === 'services' && normalizedPath.startsWith('/project/')) {
+        if (dynamicRoute.route.page === 'connexions' && normalizedPath.startsWith('/project/')) {
             return {
-                ...servicesRoute,
-                path: '/services',
-                label: `${servicesRoute.label} · Détail`,
+                ...connexionsRoute,
+                path: '/connexions',
+                label: `${connexionsRoute.label} · Détail`,
             };
         }
 
