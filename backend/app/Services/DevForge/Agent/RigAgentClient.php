@@ -5,19 +5,17 @@ namespace App\Services\DevForge\Agent;
 use App\Models\AiAgent;
 use App\Models\AiAgentSession;
 use App\Models\AiProviderConfig;
-use App\Models\Team;
+use App\Models\PersonalAccessToken;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
-use Laravel\Sanctum\PersonalAccessToken;
+use Illuminate\Support\Str;
 
 /**
- * Client HTTP mince vers le sidecar Rig (devforge-agent).
- * AGENT_URL vide = no-op (chemin PHP historique).
+ * Client HTTP vers le sidecar Rig (devforge-agent).
+ * AGENT_URL vide = no-op (boucle PHP inchangée).
  */
 class RigAgentClient
 {
-    public const DEFAULT_MCP_URL = 'http://api:8080/mcp/devforge';
-
     public function enabled(): bool
     {
         return filled(config('devforge.agent_url'));
@@ -37,9 +35,9 @@ class RigAgentClient
 
     /**
      * @param  array{provider?: string|null, base_url?: string|null, api_key?: string|null, model?: string|null}  $llm
-     * @param  array{mcp_url?: string|null, mcp_token?: string|null, messages?: list<array<string, mixed>>}  $extra
+     * @param  array{messages?: list<array{role: string, content: string}>, mcp_url?: string|null, mcp_token?: string|null}  $runtime
      */
-    public function chat(string $prompt, ?string $preamble = null, ?string $model = null, array $llm = [], array $extra = []): string
+    public function chat(string $prompt, ?string $preamble = null, ?string $model = null, array $llm = [], array $runtime = []): string
     {
         $payload = ['prompt' => $prompt];
 
@@ -59,18 +57,26 @@ class RigAgentClient
             }
         }
 
+        $messages = $runtime['messages'] ?? null;
+        if (is_array($messages) && $messages !== []) {
+            $payload['messages'] = array_values(array_map(function (mixed $message): array {
+                $row = is_array($message) ? $message : [];
+
+                return [
+                    'role' => (string) ($row['role'] ?? 'user'),
+                    'content' => (string) ($row['content'] ?? ''),
+                ];
+            }, $messages));
+        }
+
         foreach (['mcp_url', 'mcp_token'] as $key) {
-            $value = $this->nonEmptyString($extra[$key] ?? null);
+            $value = $this->nonEmptyString($runtime[$key] ?? null);
             if ($value !== null) {
                 $payload[$key] = $value;
             }
         }
 
-        if (isset($extra['messages']) && is_array($extra['messages']) && $extra['messages'] !== []) {
-            $payload['messages'] = $extra['messages'];
-        }
-
-        $response = Http::timeout(180)->post($this->baseUrl().'/v1/chat', $payload);
+        $response = Http::timeout(120)->post($this->baseUrl().'/v1/chat', $payload);
 
         if ($response->failed()) {
             throw new \RuntimeException(
@@ -85,6 +91,60 @@ class RigAgentClient
         }
 
         return $text;
+    }
+
+    /**
+     * @return array{id: int|string, token: string, url: string}
+     */
+    public function issueMcpCredentials(AiAgent $agent, ?AiAgentSession $session = null): array
+    {
+        $agent->loadMissing(['team']);
+        $team = $agent->team;
+        if ($team === null) {
+            throw new \RuntimeException('Agent sans équipe pour MCP.');
+        }
+
+        $user = $session?->user;
+        if (! $user instanceof User) {
+            $user = $team->members()
+                ->wherePivotIn('role', ['owner', 'admin'])
+                ->orderBy('users.id')
+                ->first();
+        }
+
+        if (! $user instanceof User) {
+            throw new \RuntimeException('Aucun owner/admin pour émettre le jeton MCP.');
+        }
+
+        $plainTextToken = sprintf(
+            '%s%s%s',
+            config('sanctum.token_prefix', ''),
+            $tokenEntropy = Str::random(40),
+            hash('crc32b', $tokenEntropy)
+        );
+
+        $token = $user->tokens()->create([
+            'name' => 'devforge-agent-mcp',
+            'token' => hash('sha256', $plainTextToken),
+            'abilities' => ['read', 'write'],
+            'expires_at' => now()->addMinutes(30),
+            'team_id' => $team->id,
+        ]);
+
+        return [
+            'id' => $token->getKey(),
+            'token' => $token->getKey().'|'.$plainTextToken,
+            'url' => rtrim((string) config('devforge.agent_mcp_url', 'http://api:8080/mcp/devforge'), '/'),
+        ];
+    }
+
+    public function revokeMcpCredentials(mixed $id): void
+    {
+        if ($id === null || $id === '') {
+            return;
+        }
+
+        PersonalAccessToken::query()->whereKey($id)->delete();
     }
 
     /**
@@ -126,73 +186,6 @@ class RigAgentClient
             'api_key' => $this->nonEmptyString($config->api_key),
             'model' => $this->nonEmptyString($model),
         ];
-    }
-
-    /**
-     * Mint un token Sanctum (abilities read+write) lié à l'équipe de l'agent.
-     *
-     * @return array{url: string, token: string|null, id: int|null}
-     */
-    public function issueMcpCredentials(AiAgent $agent, ?AiAgentSession $session = null): array
-    {
-        $url = $this->mcpUrl();
-        $agent->loadMissing(['team']);
-        $team = $agent->team;
-
-        if (! $team instanceof Team) {
-            return ['url' => $url, 'token' => null, 'id' => null];
-        }
-
-        $user = $this->tokenUser($team);
-        if (! $user instanceof User) {
-            return ['url' => $url, 'token' => null, 'id' => null];
-        }
-
-        $previousTeam = session('currentTeam');
-        session(['currentTeam' => $team]);
-
-        try {
-            $issued = $user->createToken('mcp-write', ['read', 'write']);
-            $id = $issued->accessToken->id ?? null;
-
-            return [
-                'url' => $url,
-                'token' => $issued->plainTextToken,
-                'id' => is_numeric($id) ? (int) $id : null,
-            ];
-        } finally {
-            if ($previousTeam === null) {
-                session()->forget('currentTeam');
-            } else {
-                session(['currentTeam' => $previousTeam]);
-            }
-        }
-    }
-
-    public function revokeMcpCredentials(int|string|null $id): void
-    {
-        if ($id === null || $id === '') {
-            return;
-        }
-
-        PersonalAccessToken::query()->whereKey($id)->delete();
-    }
-
-    public function mcpUrl(): string
-    {
-        $configured = $this->nonEmptyString(env('AGENT_MCP_URL'));
-
-        return $configured ?? self::DEFAULT_MCP_URL;
-    }
-
-    private function tokenUser(Team $team): ?User
-    {
-        $user = $team->members()
-            ->orderByRaw("CASE WHEN team_user.role = 'owner' THEN 0 WHEN team_user.role = 'admin' THEN 1 ELSE 2 END")
-            ->orderBy('users.id')
-            ->first();
-
-        return $user instanceof User ? $user : null;
     }
 
     private function resolveBaseUrl(AiProviderConfig $config): ?string
