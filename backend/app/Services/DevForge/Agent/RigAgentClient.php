@@ -191,7 +191,7 @@ class RigAgentClient
             ->orderByRaw("CASE WHEN team_user.role = 'owner' THEN 0 WHEN team_user.role = 'admin' THEN 1 ELSE 2 END")
             ->orderBy('users.id')
             ->first();
- mar
+
         return $user instanceof User ? $user : null;
     }
 
