@@ -96,6 +96,7 @@ class AgentRunner
                 : null,
         ]);
 
+        // Marquer running avant l'init provider (peut être lent : healthcheck Ollama, etc.)
         $run->update(['status' => 'running', 'started_at' => now()]);
         $run->appendLog('Agent démarré — '.$routing['display'].' ('.$routing['tier_label'].') ['.$role.' depth='.$depth.']');
         $run->appendLog('Modèle LLM : '.$this->providerFactory->describeResolvedModel($providerConfig));
@@ -291,6 +292,8 @@ class AgentRunner
                         continue;
                     }
 
+                    // Même après get_deployment_logs (anyToolUsed=true) : si aucune
+                    // correction enregistrée, forcer le harness déterministe.
                     $run->refresh();
                     $harnessText = $this->tryRepairHarnessFallback(
                         $toolkit,
@@ -385,6 +388,7 @@ class AgentRunner
 
                 if ($waitingForSubagents) {
                     $run->refresh();
+                    // yield_wait a déjà posé waiting_for_subagents
                     if ($run->status !== 'waiting_for_subagents') {
                         $run->update([
                             'status' => 'waiting_for_subagents',
@@ -403,7 +407,7 @@ class AgentRunner
                     $run->update([
                         'status' => 'waiting_for_input',
                         'summary' => 'En attente de saisie utilisateur.',
-                        'finished_at' => now(),
+                        'finished_at' => now(), // Technically paused, but finished for this job execution
                     ]);
                     $this->publishOverviewInterventionReport($agent, $run->fresh() ?? $run, $context);
                     $agent->update(['status' => 'idle', 'last_run_at' => now()]);
@@ -430,7 +434,7 @@ class AgentRunner
                 }
             }
 
-            }
+            } // ! $useRig
 
             $pendingApproval = is_array($run->metadata['pending_approval'] ?? null)
                 ? $run->metadata['pending_approval']
@@ -454,6 +458,7 @@ class AgentRunner
                 return;
             }
 
+            // Harness / request_user_input peut déjà avoir mis le run en pause.
             $run->refresh();
             if ($run->status === 'waiting_for_input') {
                 if ($summary !== '') {
@@ -527,9 +532,13 @@ class AgentRunner
         try {
             app(AgentMissionRunFinalizer::class)->finalizeFromRun($run);
         } catch (\Throwable) {
+            // Ne jamais casser le cycle de vie du run pour une clôture de mission.
         }
     }
 
+    /**
+     * @param  array<string, mixed>  $context
+     */
     private function notifyLeafFinished(AiAgent $agent, AiAgentRun $run, array $context): void
     {
         $role = AgentSubagentCapabilities::resolveRole($context);
@@ -545,6 +554,9 @@ class AgentRunner
         }
     }
 
+    /**
+     * @param  array<string, mixed>  $context
+     */
     private function publishOverviewInterventionReport(AiAgent $agent, AiAgentRun $run, array $context): void
     {
         $event = $context['event'] ?? ($run->metadata['event'] ?? null);
@@ -559,6 +571,11 @@ class AgentRunner
         }
     }
 
+    /**
+     * Filet déterministe quand le LLM diagnostique sans corriger (logs lus, 0 correction_actions).
+     *
+     * @param  array<string, mixed>  $context
+     */
     private function tryRepairHarnessFallback(
         AgentToolkit $toolkit,
         AiAgent $agent,
@@ -597,6 +614,9 @@ class AgentRunner
         return $harness['text'];
     }
 
+    /**
+     * @param  array<string, mixed>  $context
+     */
     private function maybeAutoFixDeploymentInfrastructure(AgentToolkit $toolkit, AiAgentRun $run, array $context): void
     {
         $event = $context['event'] ?? null;
@@ -743,6 +763,7 @@ class AgentRunner
                 'redeploy' => true,
                 'reason' => "Auto-fix: publish_directory={$publishDirectory} (déduit logs/source)",
             ];
+            // Never flip a Node/SSR (nixpacks) app to static — only reinforce an already-static site.
             if ($this->contextIndicatesStaticSite($context, $applicationUuid)) {
                 $settingsArgs['is_static'] = true;
             }
@@ -758,6 +779,10 @@ class AgentRunner
         }
     }
 
+    /**
+     * @param  array<string, mixed>  $context
+     * @param  array<int, mixed>  $excerpt
+     */
     private function resolveStaticPublishDirectory(
         AgentToolkit $toolkit,
         AiAgentRun $run,
@@ -801,6 +826,7 @@ class AgentRunner
             return $publishDirectory;
         }
 
+        // Nested Next/Nuxt style outputs
         foreach (['.output', 'dist'] as $nestedRoot) {
             $nested = $toolkit->execute('list_application_source', [
                 'application_uuid' => $applicationUuid,
@@ -822,6 +848,7 @@ class AgentRunner
             }
         }
 
+        // Dernier recours : exemple cité dans le message probe (« ex. /dist manquant »).
         $probeHint = is_string($context['probe_error'] ?? null) ? (string) $context['probe_error'] : '';
         if (
             $probeHint !== ''
@@ -838,8 +865,13 @@ class AgentRunner
         return null;
     }
 
+    /**
+     * @param  array<string, mixed>  $context
+     * @param  array<int, mixed>  $excerpt
+     */
     private function shouldAutoFixStaticPublishDirectory(array $context, array $excerpt, string $applicationUuid): bool
     {
+        // nixpacks/railpack ≠ static: only auto-fix publish_directory for genuine static sites.
         if (! $this->contextIndicatesStaticSite($context, $applicationUuid)) {
             return false;
         }
@@ -870,9 +902,13 @@ class AgentRunner
             return true;
         }
 
+        // Build logs mention a publishable output dir while publish_directory is empty.
         return $isEmptyPublish && AgentDirectives::inferStaticPublishDirectory($excerpt) !== null;
     }
 
+    /**
+     * @param  array<string, mixed>  $context
+     */
     private function contextIndicatesStaticSite(array $context, string $applicationUuid): bool
     {
         if (array_key_exists('is_static', $context)) {
@@ -880,6 +916,7 @@ class AgentRunner
                 return true;
             }
 
+            // Explicit non-static in context: never treat nixpacks/railpack as static.
             return strtolower((string) ($context['build_pack'] ?? '')) === 'static';
         }
 
@@ -899,6 +936,12 @@ class AgentRunner
         return strtolower((string) $application->build_pack) === 'static';
     }
 
+    /**
+     * Issues où le LLM n’apporte rien (secret manquant, etc.) — harness immédiat.
+     *
+     * @param  array<string, mixed>  $context
+     * @return array{text: string, steps: list<array<string, mixed>>, pending_approval?: array<string, mixed>}|null
+     */
     private function maybeRunEarlyDeterministicHarness(
         AgentToolkit $toolkit,
         AiAgent $agent,
@@ -939,6 +982,7 @@ class AgentRunner
                 is_string($context['probe_error'] ?? null) ? (string) $context['probe_error'] : null,
             )
         ) {
+            // maybeAutoFix a déjà tenté ; si on arrive ici sans correction, le harness nginx sert de filet.
             if ($this->anyToolUsed) {
                 return null;
             }
@@ -960,6 +1004,9 @@ class AgentRunner
         return null;
     }
 
+    /**
+     * @param  array<string, mixed>  $result
+     */
     private function recordAutoFixOutcome(AiAgentRun $run, string $tool, array $result, string $successLog): void
     {
         $this->anyToolUsed = true;
@@ -982,6 +1029,10 @@ class AgentRunner
         $run->appendLog($successLog.(isset($result['redeploy']) ? ' + redeploy lancé' : ''));
     }
 
+    /**
+     * @param  array<string, mixed>  $context
+     * @return array<string, mixed>
+     */
     private function hydrateContextFromRunMetadata(AiAgentRun $run, array $context): array
     {
         $metadata = is_array($run->metadata) ? $run->metadata : [];
