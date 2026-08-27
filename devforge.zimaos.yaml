@@ -296,10 +296,6 @@ services:
       - host.docker.internal:host-gateway
     environment:
       - AGENT_LISTEN=0.0.0.0:8090
-      - AGENT_PROVIDER=openai
-      - AGENT_BASE_URL=
-      - AGENT_API_KEY=
-      - AGENT_MODEL=gpt-4o-mini
     image: bobdivx/devforge:agent
     pull_policy: always
     labels:
