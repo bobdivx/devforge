@@ -29,6 +29,7 @@ services:
       - postgres
       - redis
       - realtime
+      - agent
     logging: *default-logging
 
   web:
@@ -58,6 +59,13 @@ services:
     container_name: devforge-realtime
     extra_hosts:
       - host.docker.internal:host-gateway
+    restart: unless-stopped
+    networks:
+      - devforge
+    logging: *default-logging
+
+  agent:
+    container_name: devforge-agent
     restart: unless-stopped
     networks:
       - devforge
