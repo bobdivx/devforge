@@ -85,6 +85,16 @@ function canDiscoverModels(
     return true;
 }
 
+function persistedBaseUrl(form: NewProviderForm): { base_url?: string | null } {
+    if (! providerDefaults[form.provider].needsUrl) {
+        return {};
+    }
+
+    const url = form.base_url.trim();
+
+    return { base_url: url.length > 0 ? url : null };
+}
+
 export function AiProvidersSettings() {
     const { agentsEnabled } = useTeamContext();
     const query = useApiQuery(agentsEnabled ? 'ai-providers' : null, () => domainApi.aiProviders());
@@ -226,7 +236,7 @@ export function AiProvidersSettings() {
                 await domainApi.updateAiProvider(editingId, {
                     name: form.name,
                     model: form.model,
-                    ...(form.provider === 'ollama' ? { base_url: form.base_url || null } : {}),
+                    ...persistedBaseUrl(form),
                     is_default: form.is_default,
                     ...(form.api_key ? { api_key: form.api_key } : {}),
                 });
@@ -235,7 +245,7 @@ export function AiProvidersSettings() {
                     provider: form.provider,
                     name: form.name,
                     model: form.model,
-                    ...(form.provider === 'ollama' ? { base_url: form.base_url || null } : {}),
+                    ...persistedBaseUrl(form),
                     is_default: form.is_default,
                     ...(form.api_key ? { api_key: form.api_key } : {}),
                 } as Parameters<typeof domainApi.createAiProvider>[0]);
@@ -514,19 +524,32 @@ export function AiProvidersSettings() {
 
                         {providerInfo.needsUrl && (
                             <label class="grid gap-1 text-xs sm:col-span-2">
-                                <span class="font-medium">URL Ollama</span>
+                                <span class="font-medium">{form.provider === 'ollama' ? 'URL Ollama' : 'URL de base'}</span>
                                 <input
                                     class="input input-bordered input-sm"
                                     type="url"
                                     required
-                                    placeholder="http://host.docker.internal:11434"
+                                    placeholder={form.provider === 'ollama'
+                                        ? 'http://host.docker.internal:11434'
+                                        : (providerDefaults[form.provider].defaultUrl || 'https://api.openai.com/v1')}
                                     value={form.base_url}
                                     onInput={(e) => setForm({ ...form, base_url: (e.target as HTMLInputElement).value })}
                                 />
                                 <span class="text-[11px] text-base-content/50">
-                                    URL publique OK (ex. https://ollama.briseteia.me). En local Docker : IP hôte ou{' '}
-                                    <code class="text-[10px]">host.docker.internal</code>, pas{' '}
-                                    <code class="text-[10px]">localhost</code>.
+                                    {form.provider === 'ollama' ? (
+                                        <>
+                                            URL publique OK (ex. https://ollama.briseteia.me). En local Docker : IP hôte ou{' '}
+                                            <code class="text-[10px]">host.docker.internal</code>, pas{' '}
+                                            <code class="text-[10px]">localhost</code>.
+                                        </>
+                                    ) : (
+                                        <>
+                                            Compatible OpenAI (Mesh LLM, vLLM, LiteLLM). Ex. Mesh :{' '}
+                                            <code class="text-[10px]">http://10.1.0.88:9337/v1</code>
+                                            . Depuis Docker, pas de{' '}
+                                            <code class="text-[10px]">localhost</code>.
+                                        </>
+                                    )}
                                 </span>
                             </label>
                         )}
@@ -570,7 +593,7 @@ export function AiProvidersSettings() {
                                             ? (modelsLoading ? 'Chargement des modèles…' : 'Aucun modèle chargé')
                                             : (form.provider === 'gemini'
                                                 ? 'Saisissez d’abord la clé API'
-                                                : 'Saisissez d’abord l’URL Ollama')}
+                                                : 'Saisissez d’abord l’URL')}
                                     </option>
                                 )}
                                 {availableModels.map((model) => (
