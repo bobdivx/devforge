@@ -6,6 +6,7 @@
 #   bobdivx/devforge:latest
 #   bobdivx/devforge:web
 #   bobdivx/devforge:realtime
+#   bobdivx/devforge:agent
 #   bobdivx/devforge:helper   ← requis pour les déploiements (pull à la demande, pas un service compose)
 #
 # Avant le premier start, copier le proxy nginx :
@@ -107,6 +108,9 @@ services:
       realtime:
         condition: service_started
         required: true
+      agent:
+        condition: service_healthy
+        required: true
     deploy:
       resources:
         reservations:
@@ -129,6 +133,7 @@ services:
       - DEVFORGE_MCP_ENABLED=true
       - DEVFORGE_DATA_DIR=/media/Docker/AppData/devforge/data
       - HELPER_IMAGE=bobdivx/devforge
+      - AGENT_URL=http://agent:8090
       - PUSHER_APP_ID=devforge
       - PUSHER_APP_KEY=devforge
       - PUSHER_APP_SECRET=devforge
@@ -280,6 +285,42 @@ services:
     cap_add: []
     privileged: false
 
+  agent:
+    cpu_shares: 90
+    container_name: devforge-agent
+    deploy:
+      resources:
+        reservations:
+          devices: []
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    environment:
+      - AGENT_LISTEN=0.0.0.0:8090
+      - AGENT_PROVIDER=openai
+      - AGENT_BASE_URL=
+      - AGENT_API_KEY=
+      - AGENT_MODEL=gpt-4o-mini
+    image: bobdivx/devforge:agent
+    pull_policy: always
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/docker.png
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8090/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - devforge
+    ports: []
+    devices: []
+    cap_add: []
+    privileged: false
   redis:
     cpu_shares: 90
     command:
@@ -351,7 +392,7 @@ services:
         INTERVAL="$${DEVFORGE_KEEPER_INTERVAL:-15}"
         while true; do
           need_reload=0
-          for c in devforge-api devforge-web devforge-proxy devforge-db devforge-redis devforge-realtime; do
+          for c in devforge-api devforge-web devforge-proxy devforge-db devforge-redis devforge-realtime devforge-agent; do
             s=$$(docker inspect -f '{{.State.Status}}' "$$c" 2>/dev/null || true)
             if [ "$$s" = created ] || [ "$$s" = exited ]; then
               docker start "$$c" >/dev/null 2>&1 || true
@@ -407,12 +448,13 @@ x-casaos:
     3. Copier docker/devforge-proxy/nginx.conf vers le fichier monté
        (un dossier à la place du fichier fait échouer nginx).
        Ce fichier doit proxy /webhooks vers l'API (retour GitHub App).
-    4. Images : bobdivx/devforge:latest, :web et :realtime (Docker Hub).
+    4. Images : bobdivx/devforge:latest, :web, :realtime et :agent (Docker Hub).
     5. Adaptez les chemins AppData à votre NAS (/DATA/AppData ou /media/Docker/AppData).
     6. HTTP :8080 — SESSION_SECURE_COOKIE doit rester false.
     7. Mise à jour : docker pull bobdivx/devforge:latest
        && docker pull bobdivx/devforge:web
        && docker pull bobdivx/devforge:realtime
+       && docker pull bobdivx/devforge:agent
        puis recréer les conteneurs. Un redémarrage ne tire PAS la nouvelle image.
     8. Clé SSH localhost : sudo sh scripts/zimaos-bootstrap-localhost-ssh.sh
        (compte SSH = l'utilisateur NAS, pas root si PermitRootLogin est off).
