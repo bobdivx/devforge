@@ -1,5 +1,6 @@
 import { X } from 'lucide-preact';
 import type { ComponentChildren } from 'preact';
+import { createPortal } from 'preact/compat';
 import { useEffect } from 'preact/hooks';
 
 type ModalProps = {
@@ -42,15 +43,27 @@ export function Modal({
         return () => window.removeEventListener('keydown', onKeyDown);
     }, [open, onClose, dismissible]);
 
-    if (!open) {
+    useEffect(() => {
+        if (!open || typeof document === 'undefined') {
+            return;
+        }
+
+        const previous = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+            document.body.style.overflow = previous;
+        };
+    }, [open]);
+
+    if (!open || typeof document === 'undefined') {
         return null;
     }
 
-    return (
-        <div class="modal modal-open">
+    return createPortal(
+        <div class="modal modal-open z-[100]" role="dialog" aria-modal="true" aria-labelledby="devforge-modal-title">
             <div class={`modal-box ${sizeClass[size]}`}>
                 <div class="mb-3 flex items-start justify-between gap-3">
-                    <h2 class="text-xs sm:text-sm font-semibold">{title}</h2>
+                    <h2 id="devforge-modal-title" class="text-xs sm:text-sm font-semibold">{title}</h2>
                     {dismissible && (
                         <button class="btn btn-ghost btn-sm btn-square" type="button" aria-label="Fermer" onClick={onClose}>
                             <X class="size-4" aria-hidden />
@@ -65,6 +78,7 @@ export function Modal({
             ) : (
                 <div class="modal-backdrop" aria-hidden />
             )}
-        </div>
+        </div>,
+        document.body,
     );
 }

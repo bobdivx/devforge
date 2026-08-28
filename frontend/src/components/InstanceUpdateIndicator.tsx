@@ -35,7 +35,12 @@ export function InstanceUpdateIndicator({ enabled, onReload, checkHealth }: Inst
     const [modalOpen, setModalOpen] = useState(false);
     const [confirmError, setConfirmError] = useState<string | null>(null);
 
-    const locked = phase === 'progress' || phase === 'reviving' || phase === 'complete';
+    // Lock only once the backend reports in_progress (or revival/complete).
+    // `starting` alone must keep the confirm footer visible — otherwise a slow/failed
+    // SSH attempt leaves the yellow warning stuck with no buttons.
+    const locked = phase === 'reviving'
+        || phase === 'complete'
+        || (phase === 'progress' && status?.status === 'in_progress');
 
     useEffect(() => {
         if (locked) {

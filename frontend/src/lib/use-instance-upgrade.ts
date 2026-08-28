@@ -123,12 +123,13 @@ export function useInstanceUpgrade({
     const start = useCallback(async () => {
         setStarting(true);
         setError(null);
-        observedProgressRef.current = true;
         startedAtRef.current = Date.now();
         setElapsedSeconds(0);
 
         try {
             const response = await domainApi.startInstanceUpgrade();
+            // Lock progress UI only after the API accepts the upgrade.
+            observedProgressRef.current = true;
             applyStatus(response.data);
         } catch (caught) {
             if (statusRef.current?.status !== 'in_progress') {
@@ -170,7 +171,7 @@ export function useInstanceUpgrade({
         ? 'complete'
         : unreachable
             ? 'reviving'
-            : starting || status?.status === 'in_progress'
+            : status?.status === 'in_progress'
                 ? 'progress'
                 : status?.status === 'error'
                     ? 'error'
