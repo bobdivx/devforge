@@ -178,3 +178,30 @@ export async function switchTeam(teamId: number): Promise<BootstrapResponse> {
         body: JSON.stringify({ team_id: teamId }),
     });
 }
+
+/** Fortify POST /logout — session web Laravel, pas un nouveau flux d’auth. */
+export async function logout(): Promise<void> {
+    try {
+        await ensureCsrfCookie();
+
+        const headers = new Headers();
+        headers.set('Accept', 'application/json');
+        headers.set('X-Requested-With', 'XMLHttpRequest');
+
+        const csrfToken = readCookie('XSRF-TOKEN');
+        if (csrfToken) {
+            headers.set('X-XSRF-TOKEN', csrfToken);
+        }
+
+        await fetch('/logout', {
+            method: 'POST',
+            credentials: 'include',
+            headers,
+            redirect: 'manual',
+        });
+    } catch {
+        // On quitte l’interface même si le POST échoue (session déjà morte, réseau).
+    }
+
+    window.location.assign('/login');
+}

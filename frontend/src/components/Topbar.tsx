@@ -4,6 +4,7 @@ import type { Theme } from '../lib/theme';
 import { DeploymentsIndicator } from './DeploymentsIndicator';
 import { InstanceUpdateIndicator } from './InstanceUpdateIndicator';
 import { TeamSwitcher } from './TeamSwitcher';
+import { UserMenu } from './UserMenu';
 
 type TopbarProps = {
     bootstrap: BootstrapData;
@@ -14,13 +15,6 @@ type TopbarProps = {
 };
 
 export function Topbar({ bootstrap, theme, onOpenMenu, onToggleTheme, onSwitchTeam }: TopbarProps) {
-    const initials = bootstrap.user.name
-        .split(/\s+/)
-        .slice(0, 2)
-        .map((part) => part[0])
-        .join('')
-        .toUpperCase();
-
     return (
         <header class="devforge-topbar sticky top-0 z-20 flex h-16 shrink-0 items-center justify-between gap-2 sm:gap-3 px-3 sm:px-4 md:px-8">
             <div class="flex min-w-0 items-center gap-3">
@@ -49,19 +43,7 @@ export function Topbar({ bootstrap, theme, onOpenMenu, onToggleTheme, onSwitchTe
                 >
                     {theme === 'dark' ? <Sun class="size-4" aria-hidden /> : <Moon class="size-4" aria-hidden />}
                 </button>
-                <div class="flex items-center gap-2.5 ps-1">
-                    <div
-                        class="grid size-9 place-items-center rounded-full bg-primary text-[11px] font-bold text-primary-content"
-                        title={`${bootstrap.user.name} · ${bootstrap.user.email}`}
-                        aria-label={`Connecté en tant que ${bootstrap.user.name}`}
-                    >
-                        {initials || 'U'}
-                    </div>
-                    <div class="hidden min-w-0 lg:block">
-                        <p class="truncate text-xs sm:text-sm font-semibold leading-tight">{bootstrap.user.name}</p>
-                        <p class="truncate text-xs text-base-content/45">{bootstrap.current_team.name}</p>
-                    </div>
-                </div>
+                <UserMenu user={bootstrap.user} teamName={bootstrap.current_team.name} />
             </div>
         </header>
     );
