@@ -172,6 +172,14 @@ fn sanitize_error(raw: &str) -> String {
     value.chars().take(400).collect()
 }
 
+
+fn is_empty_completion(raw: &str) -> bool {
+    let lower = raw.to_lowercase();
+    (lower.contains("no message or tool call") && lower.contains("empty"))
+        || lower.contains("no content provided")
+        || lower.contains("response contained no message")
+}
+
 fn err(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<ErrorBody>) {
     (
         status,
@@ -198,6 +206,8 @@ fn llm_gateway_error(raw: &str, host: &str) -> (StatusCode, Json<ErrorBody>) {
         || lower.contains("dns")
     {
         " Check that the sidecar can reach this host (LAN IP or host.docker.internal, not a public HTTPS tunnel)."
+    } else if is_empty_completion(&sanitized) {
+        " Le modèle a renvoyé une réponse vide (petit modèle local + trop d'outils MCP). Réessayez avec Demeter (RTX 3090) ou un modèle plus gros."
     } else {
         ""
     };
@@ -375,7 +385,10 @@ async fn chat(
             .build();
         match tokio::time::timeout(
             LLM_TIMEOUT,
-            agent.prompt(prompt.as_str()).history(history).max_turns(40),
+            agent
+                .prompt(prompt.as_str())
+                .history(history_messages(&body.messages, &prompt))
+                .max_turns(40),
         )
         .await
         {
@@ -388,8 +401,37 @@ async fn chat(
                     ),
                 ));
             }
-            Ok(Err(e)) => return Err(llm_gateway_error(&e.to_string(), &host)),
             Ok(Ok(text)) => text,
+            Ok(Err(e)) => {
+                let raw = e.to_string();
+                if !is_empty_completion(&raw) {
+                    return Err(llm_gateway_error(&raw, &host));
+                }
+                tracing::warn!(
+                    "empty completion with MCP tools on {host}, retrying without tools"
+                );
+                let plain = client.agent(&model).preamble(&preamble).build();
+                match tokio::time::timeout(
+                    LLM_TIMEOUT,
+                    plain
+                        .prompt(prompt.as_str())
+                        .history(history_messages(&body.messages, &prompt)),
+                )
+                .await
+                {
+                    Err(_) => {
+                        return Err(err(
+                            StatusCode::BAD_GATEWAY,
+                            format!(
+                                "LLM timeout after {}s contacting {host}",
+                                LLM_TIMEOUT.as_secs()
+                            ),
+                        ));
+                    }
+                    Ok(Err(e2)) => return Err(llm_gateway_error(&e2.to_string(), &host)),
+                    Ok(Ok(text)) => text,
+                }
+            }
         }
     } else {
         let agent = client.agent(&model).preamble(&preamble).build();
@@ -410,4 +452,19 @@ async fn chat(
     };
 
     Ok(Json(ChatResponse { text, model }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_empty_completion;
+
+    #[test]
+    fn detects_rig_empty_tool_response() {
+        assert!(is_empty_completion(
+            "CompletionError: ResponseError: Response contained no message or tool call (empty)."
+        ));
+        assert!(is_empty_completion("No content provided"));
+        assert!(!is_empty_completion("LLM timeout after 60s contacting 10.1.0.58:11434"));
+        assert!(!is_empty_completion("model is required"));
+    }
 }
