@@ -1,13 +1,13 @@
 {
     "devforge": {
-        "version": "4.1.12"
+        "version": "4.1.13"
     },
     "coolify": {
         "v4": {
-            "version": "4.1.12"
+            "version": "4.1.13"
         },
         "nightly": {
-            "version": "4.1.12"
+            "version": "4.1.13"
         },
         "helper": {
             "version": "1.0.14"
