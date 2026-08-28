@@ -35,8 +35,8 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
                 return;
             }
 
-            $githubVersion = data_get($github, 'coolify.v4.version') ?? data_get($github, 'devforge.version');
-            $hubVersion = data_get($hub, 'coolify.v4.version') ?? data_get($hub, 'devforge.version');
+            $githubVersion = data_get($github, 'devforge.version') ?? data_get($github, 'coolify.v4.version');
+            $hubVersion = data_get($hub, 'devforge.version') ?? data_get($hub, 'coolify.v4.version');
             $latest_version = is_string($githubVersion) && $githubVersion !== '' ? $githubVersion : null;
 
             if (is_string($hubVersion) && $hubVersion !== '') {
@@ -61,7 +61,7 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
             $existingCoolifyVersion = null;
             if (File::exists(base_path('versions.json'))) {
                 $existingVersions = json_decode(File::get(base_path('versions.json')), true);
-                $existingCoolifyVersion = data_get($existingVersions, 'coolify.v4.version') ?? data_get($existingVersions, 'devforge.version');
+                $existingCoolifyVersion = data_get($existingVersions, 'devforge.version') ?? data_get($existingVersions, 'coolify.v4.version');
             }
 
             $bestVersion = $latest_version;
@@ -88,6 +88,7 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
 
             data_set($versions, 'coolify.v4.version', $bestVersion);
             data_set($versions, 'devforge.version', $bestVersion);
+            data_set($versions, 'coolify.nightly.version', $bestVersion);
             $latest_version = $bestVersion;
 
             File::put(base_path('versions.json'), json_encode($versions, JSON_PRETTY_PRINT));
@@ -134,7 +135,7 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
                 return null;
             }
 
-            $version = data_get($versions, 'coolify.v4.version') ?? data_get($versions, 'devforge.version');
+            $version = data_get($versions, 'devforge.version') ?? data_get($versions, 'coolify.v4.version');
             if (empty($version)) {
                 Log::warning('GitHub versions JSON missing version field');
 
@@ -214,6 +215,9 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
                 ],
                 'coolify' => [
                     'v4' => [
+                        'version' => $latestVersion,
+                    ],
+                    'nightly' => [
                         'version' => $latestVersion,
                     ],
                 ],
