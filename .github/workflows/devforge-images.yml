@@ -29,6 +29,10 @@ on:
       - .github/workflows/devforge-images.yml
   workflow_dispatch:
 
+concurrency:
+  group: devforge-images-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   packages: write
@@ -208,6 +212,8 @@ jobs:
   summary:
     runs-on: ubuntu-24.04
     needs: build
+    if: always()
+    continue-on-error: true
     steps:
       - name: Print image refs
         run: |
@@ -231,8 +237,8 @@ jobs:
   commit-version:
     runs-on: ubuntu-24.04
     needs: [prepare, build]
-    # Only commit if the build matrix succeeded fully
-    if: success()
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v5
         with:
