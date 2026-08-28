@@ -79,12 +79,12 @@ export function ProfileSettingsPanel({
                                 }
                             }}
                         >
-                            <div class="grid gap-2 sm:gap-3 md:grid-cols-2">
-                                <label class="grid gap-1.5 text-sm">
+                            <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                                <label class="flex min-w-0 w-full flex-col gap-1.5 text-sm">
                                     <span class="font-medium">Nom</span>
                                     <input class="input input-bordered input-sm w-full rounded-xl" name="name" required defaultValue={profile.name} />
                                 </label>
-                                <label class="grid gap-1.5 text-sm">
+                                <label class="flex min-w-0 w-full flex-col gap-1.5 text-sm">
                                     <span class="font-medium">E-mail</span>
                                     <input
                                         class="input input-bordered input-sm w-full rounded-xl"
@@ -98,10 +98,6 @@ export function ProfileSettingsPanel({
                             </div>
                             <div class="flex flex-col gap-2 sm:gap-3 sm:flex-row sm:items-center sm:justify-between">
                                 <div class="flex flex-wrap gap-2">
-                                    <StatusBadge
-                                        label={profile.email_verified ? 'E-mail vérifié' : 'E-mail non vérifié'}
-                                        tone={profile.email_verified ? 'success' : 'warning'}
-                                    />
                                     {isTwoFactorOn && (
                                         <StatusBadge label="2FA activée" tone="success" />
                                     )}
@@ -143,15 +139,15 @@ export function ProfileSettingsPanel({
                 >
                     <HiddenUsernameField username={username} />
                     <div class="grid gap-2 sm:gap-3 md:grid-cols-3">
-                        <label class="grid gap-1.5 text-sm">
+                        <label class="flex min-w-0 w-full flex-col gap-1.5 text-sm">
                             <span class="font-medium">Mot de passe actuel</span>
                             <input class="input input-bordered input-sm w-full rounded-xl" name="current_password" type="password" required autoComplete="current-password" />
                         </label>
-                        <label class="grid gap-1.5 text-sm">
+                        <label class="flex min-w-0 w-full flex-col gap-1.5 text-sm">
                             <span class="font-medium">Nouveau mot de passe</span>
                             <input class="input input-bordered input-sm w-full rounded-xl" name="password" type="password" required autoComplete="new-password" />
                         </label>
-                        <label class="grid gap-1.5 text-sm">
+                        <label class="flex min-w-0 w-full flex-col gap-1.5 text-sm">
                             <span class="font-medium">Confirmation</span>
                             <input class="input input-bordered input-sm w-full rounded-xl" name="password_confirmation" type="password" required autoComplete="new-password" />
                         </label>
