@@ -1,4 +1,4 @@
-import { CheckCircle, ChevronDown, Pencil, Plus, RefreshCw, Trash2, Wifi, XCircle, Zap } from 'lucide-preact';
+import { AlertTriangle, CheckCircle, ChevronDown, Pencil, Plus, RefreshCw, Trash2, Wifi, XCircle, Zap } from 'lucide-preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { ActionToolbar } from '../ui/ActionToolbar';
 import { HiddenUsernameField } from '../ui/HiddenUsernameField';
@@ -93,6 +93,33 @@ function persistedBaseUrl(form: NewProviderForm): { base_url?: string | null } {
     const url = form.base_url.trim();
 
     return { base_url: url.length > 0 ? url : null };
+}
+
+function isLocalOrPrivateHost(host: string): boolean {
+    const normalized = host.toLowerCase().replace(/^\[|\]$/g, '');
+    if (['localhost', '127.0.0.1', '::1', 'host.docker.internal'].includes(normalized)) {
+        return true;
+    }
+    if (normalized.endsWith('.local') || normalized.endsWith('.internal')) {
+        return true;
+    }
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(normalized)) {
+        const parts = normalized.split('.').map(Number);
+        return parts[0] === 10
+            || (parts[0] === 192 && parts[1] === 168)
+            || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
+            || parts[0] === 127;
+    }
+    return false;
+}
+
+function isPublicOllamaTunnel(url: string): boolean {
+    try {
+        const parsed = new URL(url.trim());
+        return parsed.protocol === 'https:' && ! isLocalOrPrivateHost(parsed.hostname);
+    } catch {
+        return false;
+    }
 }
 
 export function AiProvidersSettings() {
@@ -390,6 +417,12 @@ export function AiProvidersSettings() {
                                                         Modèle : {formatModelLabel(provider.model, provider.model_label)}
                                                         {provider.base_url ? ` · ${provider.base_url}` : ''}
                                                     </p>
+                                                    {provider.provider === 'ollama' && provider.base_url && isPublicOllamaTunnel(provider.base_url) && (
+                                                        <p class="mt-1 flex items-start gap-1 text-[11px] text-warning">
+                                                            <AlertTriangle class="mt-0.5 size-3 shrink-0" aria-hidden />
+                                                            Tunnel HTTPS public : le chat casse souvent (502). Préférez une IP LAN.
+                                                        </p>
+                                                    )}
                                                     {provider.has_api_key && (
                                                         <p class="mt-1 font-mono text-[11px] text-base-content/45">
                                                             API_KEY · •••••• (masquée)
@@ -535,10 +568,21 @@ export function AiProvidersSettings() {
                                     value={form.base_url}
                                     onInput={(e) => setForm({ ...form, base_url: (e.target as HTMLInputElement).value })}
                                 />
+                                {form.provider === 'ollama' && isPublicOllamaTunnel(form.base_url) && (
+                                    <div class="alert alert-warning mt-1 px-2.5 py-2 text-[11px]">
+                                        <AlertTriangle class="size-3.5 shrink-0" aria-hidden />
+                                        <span>
+                                            Cette URL HTTPS publique ressemble à un tunnel (Cloudflare).
+                                            Les tunnels cassent souvent <code class="text-[10px]">/v1/chat/completions</code> (502 / timeouts).
+                                            Préférez une IP LAN, ex. <code class="text-[10px]">http://10.1.0.58:11434</code>,
+                                            ou le DNS Docker <code class="text-[10px]">http://host.docker.internal:11434</code>.
+                                        </span>
+                                    </div>
+                                )}
                                 <span class="text-[11px] text-base-content/50">
                                     {form.provider === 'ollama' ? (
                                         <>
-                                            URL publique OK (ex. https://ollama.briseteia.me). En local Docker : IP hôte ou{' '}
+                                            Évitez les tunnels publics (*.briseteia.me en HTTPS). En Docker : IP LAN ou{' '}
                                             <code class="text-[10px]">host.docker.internal</code>, pas{' '}
                                             <code class="text-[10px]">localhost</code>.
                                         </>

@@ -1,4 +1,4 @@
-import { Brain, KeyRound, Layers3, Puzzle, ServerCog, Sparkles } from 'lucide-preact';
+import { Activity, Brain, KeyRound, Layers3, Puzzle, ServerCog, Sparkles } from 'lucide-preact';
 import type { ComponentChildren } from 'preact';
 import {
     AGENTS_SETTINGS_SECTIONS,
@@ -11,6 +11,7 @@ const ICONS: Record<AgentsSettingsSectionId, typeof KeyRound> = {
     instructions: Layers3,
     memory: Brain,
     mcp: Puzzle,
+    diagnostic: Activity,
     advanced: ServerCog,
 };
 

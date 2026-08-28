@@ -11,6 +11,7 @@ use App\Http\Controllers\DevForge\AgentFeatureDeliveryController;
 use App\Http\Controllers\DevForge\AgentRunController;
 use App\Http\Controllers\DevForge\AgentRunStreamController;
 use App\Http\Controllers\DevForge\AgentSessionController;
+use App\Http\Controllers\DevForge\AgentDiagnosticsController;
 use App\Http\Controllers\DevForge\AiProviderController;
 use App\Http\Controllers\DevForge\GraftAutomationController;
 use App\Http\Controllers\DevForge\OllamaController;
@@ -133,6 +134,7 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
         Route::put('/providers/{id}', [AiProviderController::class, 'update'])->name('providers.update');
         Route::delete('/providers/{id}', [AiProviderController::class, 'destroy'])->name('providers.destroy');
         Route::post('/providers/{id}/test', [AiProviderController::class, 'test'])->name('providers.test');
+        Route::post('/diagnostics', [AgentDiagnosticsController::class, 'run'])->name('diagnostics.run');
         Route::get('/ollama', [OllamaController::class, 'status'])->name('ollama.status');
         Route::get('/ollama/instances', [OllamaController::class, 'instances'])->name('ollama.instances');
         Route::post('/ollama/pull', [OllamaController::class, 'pull'])

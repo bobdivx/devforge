@@ -16,8 +16,11 @@ use rmcp::ServiceExt;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 const DUMMY_OPENAI_KEY: &str = "sk-local-devforge-agent";
+const LLM_TIMEOUT: Duration = Duration::from_secs(60);
+const MCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
 
 #[derive(Clone)]
 struct AppState {
@@ -141,12 +144,66 @@ fn openai_compat_base_url(provider: &str, url: &str) -> String {
     }
 }
 
+fn url_host(url: Option<&str>) -> String {
+    let Some(raw) = url.map(str::trim).filter(|value| !value.is_empty()) else {
+        return "unknown".to_string();
+    };
+    let rest = raw.split("://").nth(1).unwrap_or(raw);
+    let hostport = rest.split('/').next().unwrap_or(rest);
+    let hostport = hostport.split('@').next_back().unwrap_or(hostport);
+    if hostport.is_empty() {
+        "unknown".to_string()
+    } else {
+        hostport.to_string()
+    }
+}
+
+fn sanitize_error(raw: &str) -> String {
+    let mut value = raw.replace('\n', " ");
+    if let Some(idx) = value.find("Bearer ") {
+        value = format!("{}Bearer [redacted]", &value[..idx]);
+    }
+    for needle in ["sk-", "AIza", "api_key=", "api-key="] {
+        if let Some(idx) = value.find(needle) {
+            value = format!("{}[redacted]", &value[..idx]);
+            break;
+        }
+    }
+    value.chars().take(400).collect()
+}
+
 fn err(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<ErrorBody>) {
     (
         status,
         Json(ErrorBody {
             error: message.into(),
         }),
+    )
+}
+
+fn llm_gateway_error(raw: &str, host: &str) -> (StatusCode, Json<ErrorBody>) {
+    let sanitized = sanitize_error(raw);
+    let lower = sanitized.to_lowercase();
+    let hint = if lower.contains("502")
+        || lower.contains("bad gateway")
+        || lower.contains("cloudflare")
+        || lower.contains("error code: 502")
+    {
+        " Cloudflare/tunnels often break Ollama /v1/chat/completions — use a LAN IP (e.g. http://10.1.0.58:11434) or Docker DNS (host.docker.internal)."
+    } else if lower.contains("timed out")
+        || lower.contains("timeout")
+        || lower.contains("error sending request")
+        || lower.contains("connection")
+        || lower.contains("connect")
+        || lower.contains("dns")
+    {
+        " Check that the sidecar can reach this host (LAN IP or host.docker.internal, not a public HTTPS tunnel)."
+    } else {
+        ""
+    };
+    err(
+        StatusCode::BAD_GATEWAY,
+        format!("LLM error from {host}: {sanitized}.{hint}"),
     )
 }
 
@@ -224,6 +281,7 @@ async fn chat(
     let url = base_url
         .as_deref()
         .map(|value| openai_compat_base_url(&provider, value));
+    let host = url_host(url.as_deref());
 
     let mut builder = openai::Client::builder().api_key(&key);
     if let Some(ref url) = url {
@@ -254,40 +312,101 @@ async fn chat(
 
     let text = if let (Some(mcp_url), Some(mcp_token)) = (mcp_url, mcp_token) {
         tracing::info!("connecting MCP at {mcp_url}");
+        let mcp_host = url_host(Some(mcp_url));
         let config =
             StreamableHttpClientTransportConfig::with_uri(mcp_url.to_string()).auth_header(mcp_token);
         let transport = StreamableHttpClientTransport::from_config(config);
         let mut client_info = ClientInfo::default();
         client_info.client_info =
             Implementation::new("devforge-agent", env!("CARGO_PKG_VERSION"));
-        let mcp = client_info
-            .serve(transport)
-            .await
-            .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("mcp connect: {e}")))?;
-        let tools = mcp
-            .list_tools(Default::default())
-            .await
-            .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("mcp list_tools: {e}")))?
-            .tools;
+        let mcp = match tokio::time::timeout(MCP_CONNECT_TIMEOUT, client_info.serve(transport)).await
+        {
+            Err(_) => {
+                return Err(err(
+                    StatusCode::BAD_GATEWAY,
+                    format!(
+                        "MCP connect timeout after {}s to {mcp_host}",
+                        MCP_CONNECT_TIMEOUT.as_secs()
+                    ),
+                ));
+            }
+            Ok(Err(e)) => {
+                return Err(err(
+                    StatusCode::BAD_GATEWAY,
+                    format!(
+                        "mcp connect to {mcp_host}: {}",
+                        sanitize_error(&e.to_string())
+                    ),
+                ));
+            }
+            Ok(Ok(mcp)) => mcp,
+        };
+        let tools = match tokio::time::timeout(
+            MCP_CONNECT_TIMEOUT,
+            mcp.list_tools(Default::default()),
+        )
+        .await
+        {
+            Err(_) => {
+                return Err(err(
+                    StatusCode::BAD_GATEWAY,
+                    format!(
+                        "MCP list_tools timeout after {}s at {mcp_host}",
+                        MCP_CONNECT_TIMEOUT.as_secs()
+                    ),
+                ));
+            }
+            Ok(Err(e)) => {
+                return Err(err(
+                    StatusCode::BAD_GATEWAY,
+                    format!(
+                        "mcp list_tools at {mcp_host}: {}",
+                        sanitize_error(&e.to_string())
+                    ),
+                ));
+            }
+            Ok(Ok(list)) => list.tools,
+        };
         let agent = client
             .agent(&model)
             .preamble(&preamble)
             .default_max_turns(40)
             .rmcp_tools(tools, mcp.peer().to_owned())
             .build();
-        agent
-            .prompt(prompt.as_str())
-            .history(history)
-            .max_turns(40)
-            .await
-            .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("llm: {e}")))?
+        match tokio::time::timeout(
+            LLM_TIMEOUT,
+            agent.prompt(prompt.as_str()).history(history).max_turns(40),
+        )
+        .await
+        {
+            Err(_) => {
+                return Err(err(
+                    StatusCode::BAD_GATEWAY,
+                    format!(
+                        "LLM timeout after {}s contacting {host}",
+                        LLM_TIMEOUT.as_secs()
+                    ),
+                ));
+            }
+            Ok(Err(e)) => return Err(llm_gateway_error(&e.to_string(), &host)),
+            Ok(Ok(text)) => text,
+        }
     } else {
         let agent = client.agent(&model).preamble(&preamble).build();
-        agent
-            .prompt(prompt.as_str())
-            .history(history)
-            .await
-            .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("llm: {e}")))?
+        match tokio::time::timeout(LLM_TIMEOUT, agent.prompt(prompt.as_str()).history(history)).await
+        {
+            Err(_) => {
+                return Err(err(
+                    StatusCode::BAD_GATEWAY,
+                    format!(
+                        "LLM timeout after {}s contacting {host}",
+                        LLM_TIMEOUT.as_secs()
+                    ),
+                ));
+            }
+            Ok(Err(e)) => return Err(llm_gateway_error(&e.to_string(), &host)),
+            Ok(Ok(text)) => text,
+        }
     };
 
     Ok(Json(ChatResponse { text, model }))
