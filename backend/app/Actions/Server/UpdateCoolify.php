@@ -3,8 +3,10 @@
 namespace App\Actions\Server;
 
 use App\Models\Server;
+use App\Services\DevForge\InstanceUpgradeService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Sleep;
 use Lorisleiva\Actions\Concerns\AsAction;
 
@@ -38,7 +40,8 @@ class UpdateCoolify
 
             if ($response->successful()) {
                 $versions = $response->json();
-                $this->latestVersion = data_get($versions, 'coolify.v4.version');
+                $this->latestVersion = data_get($versions, 'coolify.v4.version')
+                    ?? data_get($versions, 'devforge.version');
             } else {
                 // Fallback to cache if CDN unavailable
                 $cacheVersion = get_latest_version_of_coolify();
@@ -119,11 +122,52 @@ class UpdateCoolify
         $latestHelperImageVersion = getHelperVersion();
         $upgradeScriptUrl = config('constants.coolify.upgrade_script_url');
 
-        remote_process([
-            "mkdir -p /data/coolify/source /data/devforge /tmp 2>/dev/null || true",
+        $commands = [
+            'mkdir -p /data/coolify/source /data/devforge /tmp 2>/dev/null || true',
             "curl -fsSL {$upgradeScriptUrl} -o /data/coolify/source/upgrade.sh 2>/dev/null || curl -fsSL {$upgradeScriptUrl} -o /data/devforge/upgrade.sh 2>/dev/null || curl -fsSL {$upgradeScriptUrl} -o /tmp/upgrade.sh",
-            "chmod +x /data/coolify/source/upgrade.sh 2>/dev/null || chmod +x /data/devforge/upgrade.sh 2>/dev/null || chmod +x /tmp/upgrade.sh 2>/dev/null || true",
+            'chmod +x /data/coolify/source/upgrade.sh 2>/dev/null || chmod +x /data/devforge/upgrade.sh 2>/dev/null || chmod +x /tmp/upgrade.sh 2>/dev/null || true',
             "bash /data/coolify/source/upgrade.sh $this->latestVersion $latestHelperImageVersion 2>/dev/null || bash /data/devforge/upgrade.sh $this->latestVersion $latestHelperImageVersion 2>/dev/null || bash /tmp/upgrade.sh $this->latestVersion $latestHelperImageVersion",
-        ], $this->server);
+        ];
+
+        $reachable = (bool) data_get($this->server->settings, 'is_reachable', false);
+        $canLocal = InstanceUpgradeService::canRunLocalDockerUpgrade();
+
+        // CasaOS / Zima: SSH to host.docker.internal is often broken — prefer docker.sock.
+        if ($this->server->isLocalhost() && $canLocal && ! $reachable) {
+            Log::info('Starting DevForge upgrade via local docker.sock (SSH unreachable)');
+            $this->updateViaLocalProcess($commands);
+
+            return;
+        }
+
+        try {
+            remote_process($commands, $this->server);
+        } catch (\Throwable $e) {
+            if ($this->server->isLocalhost() && $canLocal) {
+                Log::warning('SSH upgrade failed, falling back to local docker.sock', [
+                    'error' => $e->getMessage(),
+                ]);
+                $this->updateViaLocalProcess($commands);
+
+                return;
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
+     * @param  list<string>  $commands
+     */
+    private function updateViaLocalProcess(array $commands): void
+    {
+        $script = implode("\n", $commands);
+        $result = Process::timeout(600)->run(['bash', '-lc', $script]);
+
+        if ($result->failed()) {
+            $detail = trim($result->errorOutput() ?: $result->output() ?: 'erreur inconnue');
+
+            throw new \Exception('Mise à jour locale échouée : '.$detail);
+        }
     }
 }
