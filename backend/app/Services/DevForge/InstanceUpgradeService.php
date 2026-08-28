@@ -79,6 +79,17 @@ class InstanceUpgradeService
      */
     public function progress(): array
     {
+        foreach (self::statusFileCandidates() as $path) {
+            if (! is_readable($path)) {
+                continue;
+            }
+
+            $parsed = self::parseStatusFile(@file_get_contents($path) ?: null);
+            if ($parsed['status'] !== 'none') {
+                return $parsed;
+            }
+        }
+
         $server = Server::find(0);
         if (! $server) {
             return self::idleProgress();
@@ -95,6 +106,25 @@ class InstanceUpgradeService
         }
 
         return self::parseStatusFile(is_string($content) ? $content : null);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function statusFileCandidates(): array
+    {
+        return [
+            '/data/coolify/source/.upgrade-status',
+            '/data/devforge/.upgrade-status',
+            '/tmp/.upgrade-status',
+            '/DATA/AppData/devforge/.upgrade-status',
+            '/media/Docker/AppData/devforge/.upgrade-status',
+        ];
+    }
+
+    public static function canRunLocalDockerUpgrade(): bool
+    {
+        return is_readable('/var/run/docker.sock') || is_readable('/run/docker.sock');
     }
 
     /**
@@ -165,6 +195,25 @@ class InstanceUpgradeService
         if (! $current['available']) {
             throw ValidationException::withMessages([
                 'upgrade' => ['Aucune mise à jour n’est disponible.'],
+            ]);
+        }
+
+        $server = Server::find(0);
+        if (! $server) {
+            throw ValidationException::withMessages([
+                'upgrade' => ['Serveur localhost introuvable. Impossible de lancer la mise à jour.'],
+            ]);
+        }
+
+        $reachable = (bool) data_get($server->settings, 'is_reachable', false);
+        $canLocal = self::canRunLocalDockerUpgrade();
+
+        if (! $reachable && ! $canLocal) {
+            throw ValidationException::withMessages([
+                'upgrade' => [
+                    'Serveur localhost injoignable en SSH, et Docker n’est pas accessible depuis le conteneur. '
+                    .'Réparez le SSH (host.docker.internal:22) ou mettez à jour DevForge depuis CasaOS/ZimaOS.',
+                ],
             ]);
         }
 
