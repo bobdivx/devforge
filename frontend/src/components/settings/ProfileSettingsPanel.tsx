@@ -98,10 +98,6 @@ export function ProfileSettingsPanel({
                             </div>
                             <div class="flex flex-col gap-2 sm:gap-3 sm:flex-row sm:items-center sm:justify-between">
                                 <div class="flex flex-wrap gap-2">
-                                    <StatusBadge
-                                        label={profile.email_verified ? 'E-mail vérifié' : 'E-mail non vérifié'}
-                                        tone={profile.email_verified ? 'success' : 'warning'}
-                                    />
                                     {isTwoFactorOn && (
                                         <StatusBadge label="2FA activée" tone="success" />
                                     )}
