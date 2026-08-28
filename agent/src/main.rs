@@ -230,9 +230,12 @@ async fn chat(
         builder = builder.base_url(url);
     }
 
+    // rig 0.42 openai::Client defaults to the Responses API (/responses).
+    // Gemini OpenAI-compat, Ollama, and OpenRouter only implement Chat Completions.
     let client = builder
         .build()
-        .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("llm client: {e}")))?;
+        .map_err(|e| err(StatusCode::BAD_GATEWAY, format!("llm client: {e}")))?
+        .completions_api();
     let preamble = body.preamble.clone().unwrap_or_else(|| {
         "You are the DevForge agent runtime (Rig). Use tools when they help.".to_string()
     });
