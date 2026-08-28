@@ -6,7 +6,6 @@ use App\Models\Server;
 use App\Services\DevForge\InstanceUpgradeService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Sleep;
 use Lorisleiva\Actions\Concerns\AsAction;
 
@@ -133,27 +132,24 @@ class UpdateDevForge
         $canLocal = InstanceUpgradeService::canRunLocalDockerUpgrade();
 
         // CasaOS / Zima: SSH to host.docker.internal is often broken — prefer docker.sock.
-        if ($this->server->isLocalhost() && $canLocal && ! $reachable) {
-            Log::info('Starting DevForge upgrade via local docker.sock (SSH unreachable)');
-            $this->updateViaLocalProcess($commands);
-
-            return;
-        }
-
-        try {
-            remote_process($commands, $this->server);
-        } catch (\Throwable $e) {
-            if ($this->server->isLocalhost() && $canLocal) {
-                Log::warning('SSH upgrade failed, falling back to local docker.sock', [
-                    'error' => $e->getMessage(),
-                ]);
+        if ($this->server->isLocalhost() && $canLocal) {
+            try {
+                Log::info('Starting DevForge upgrade via local docker.sock');
                 $this->updateViaLocalProcess($commands);
 
                 return;
-            }
+            } catch (\Throwable $e) {
+                if (! $reachable) {
+                    throw $e;
+                }
 
-            throw $e;
+                Log::warning('Local docker.sock upgrade failed, falling back to SSH', [
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
+
+        remote_process($commands, $this->server);
     }
 
     /**
@@ -162,7 +158,7 @@ class UpdateDevForge
     private function updateViaLocalProcess(array $commands): void
     {
         $script = implode("\n", $commands);
-        $result = Process::timeout(600)->run(['bash', '-lc', $script]);
+        $result = InstanceUpgradeService::runLocalDockerCommand($script, timeout: 600);
 
         if ($result->failed()) {
             $detail = trim($result->errorOutput() ?: $result->output() ?: 'erreur inconnue');

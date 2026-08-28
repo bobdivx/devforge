@@ -1,0 +1,50 @@
+#!/bin/sh
+# Grant www-data access to a bind-mounted docker.sock (typically 660 root:docker).
+# Runs as root from entrypoint.d (directly or via sudo). Best-effort: never fail boot.
+# 1) add www-data to the socket GID group so sg/newgrp work
+# 2) setfacl u:www-data:rw so php-fpm workers already running as www-data can use the sock
+
+SOCK=""
+for candidate in /var/run/docker.sock /run/docker.sock; do
+    if [ -S "$candidate" ]; then
+        SOCK="$candidate"
+        break
+    fi
+done
+
+if [ -z "$SOCK" ]; then
+    exit 0
+fi
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "[devforge] docker-sock-grant skipped (not root)" >&2
+    exit 0
+fi
+
+GID="$(stat -c '%g' "$SOCK" 2>/dev/null || stat -f '%g' "$SOCK" 2>/dev/null || true)"
+if [ -z "$GID" ]; then
+    echo "[devforge] docker-sock-grant: could not read gid of $SOCK" >&2
+    exit 0
+fi
+
+GROUP_NAME="$(getent group "$GID" | cut -d: -f1 || true)"
+if [ -z "$GROUP_NAME" ]; then
+    GROUP_NAME="docker-host"
+    addgroup -g "$GID" "$GROUP_NAME" 2>/dev/null || addgroup -g "$GID" -S "$GROUP_NAME" 2>/dev/null || true
+    GROUP_NAME="$(getent group "$GID" | cut -d: -f1 || true)"
+    GROUP_NAME="${GROUP_NAME:-docker-host}"
+fi
+
+if ! id -nG www-data 2>/dev/null | tr " " "\n" | grep -qx "$GROUP_NAME"; then
+    addgroup www-data "$GROUP_NAME" 2>/dev/null || true
+fi
+
+ACL_OK="no"
+if command -v setfacl >/dev/null 2>&1; then
+    if setfacl -m u:www-data:rw "$SOCK" 2>/dev/null; then
+        ACL_OK="yes"
+    fi
+fi
+
+echo "[devforge] docker.sock $SOCK gid=$GID group=$GROUP_NAME acl=$ACL_OK"
+exit 0
