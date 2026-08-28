@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Actions\Server\UpdateCoolify;
+use App\Jobs\CheckForUpdatesJob;
 use App\Models\InstanceSettings;
 use App\Models\Server;
 use Livewire\Component;
@@ -29,14 +30,22 @@ class Upgrade extends Component
     public function checkUpdate()
     {
         try {
-            $this->refreshUpgradeState();
+            $this->refreshUpgradeState(forceRemote: true);
         } catch (\Throwable $e) {
             return handleError($e, $this);
         }
     }
 
-    protected function refreshUpgradeState(): void
+    protected function refreshUpgradeState(bool $forceRemote = false): void
     {
+        if ($forceRemote && ! isDev() && ! isCloud()) {
+            try {
+                CheckForUpdatesJob::dispatchSync();
+            } catch (\Throwable) {
+                // Keep last cached versions.json if GitHub/Hub are unreachable.
+            }
+        }
+
         $this->currentVersion = config('constants.coolify.version');
         $this->latestVersion = get_latest_version_of_coolify();
         $this->devMode = isDev();
@@ -56,7 +65,11 @@ class Upgrade extends Component
             $newVersionAvailable = false;
         }
 
-        $this->isUpgradeAvailable = $hasNewerVersion && $newVersionAvailable;
+        if ($settings && $hasNewerVersion && ! $newVersionAvailable) {
+            $settings->update(['new_version_available' => true]);
+        }
+
+        $this->isUpgradeAvailable = $hasNewerVersion;
     }
 
     public function upgrade()
@@ -74,7 +87,6 @@ class Upgrade extends Component
 
     public function getUpgradeStatus(): array
     {
-        // Only root team members can view upgrade status
         if (auth()->user()?->currentTeam()?->id !== 0) {
             return ['status' => 'none'];
         }
@@ -108,7 +120,6 @@ class Upgrade extends Component
 
         [$step, $message, $timestamp] = $parts;
 
-        // Check if status is stale (older than 10 minutes)
         try {
             $statusTime = new \DateTime($timestamp);
             $now = new \DateTime;

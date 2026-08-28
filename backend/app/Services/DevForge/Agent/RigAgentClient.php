@@ -46,9 +46,12 @@ class RigAgentClient
         }
 
         $resolvedModel = $this->nonEmptyString($llm['model'] ?? null) ?? $this->nonEmptyString($model);
-        if ($resolvedModel !== null) {
-            $payload['model'] = $resolvedModel;
+        if ($resolvedModel === null) {
+            throw new \RuntimeException(
+                'Aucun modèle LLM configuré. Choisis-en un (pas Auto) dans Connexions ou sur la fiche de l\'agent.',
+            );
         }
+        $payload['model'] = $resolvedModel;
 
         foreach (['provider', 'base_url', 'api_key'] as $key) {
             $value = $this->nonEmptyString($llm[$key] ?? null);
@@ -168,24 +171,66 @@ class RigAgentClient
             return null;
         }
 
-        $model = $agent?->preferredLlmModel();
-        if ($model === null || LlmModelResolver::isAuto($model)) {
-            $stored = $config->resolvedModel();
-            $model = LlmModelResolver::isAuto($stored)
-                ? LlmProviderRegistry::defaultModel($config->provider)
-                : $stored;
-        }
-
-        if (LlmModelResolver::isAuto($model)) {
-            $model = null;
-        }
-
         return [
             'provider' => (string) $config->provider,
             'base_url' => $this->resolveBaseUrl($config),
             'api_key' => $this->nonEmptyString($config->api_key),
-            'model' => $this->nonEmptyString($model),
+            'model' => $this->resolveConcreteModel($config, $agent),
         ];
+    }
+
+    private function resolveConcreteModel(AiProviderConfig $config, ?AiAgent $agent): ?string
+    {
+        $model = $agent?->preferredLlmModel();
+        if ($model !== null && ! LlmModelResolver::isAuto($model)) {
+            return $this->nonEmptyString($model);
+        }
+
+        $stored = $config->resolvedModel();
+        if (! LlmModelResolver::isAuto($stored)) {
+            return $this->nonEmptyString($stored);
+        }
+
+        $provider = (string) $config->provider;
+        $catalogIds = $this->catalogModelIds($config);
+
+        $picked = match ($provider) {
+            'ollama' => LlmModelResolver::pickBestOllamaModelForTools($catalogIds)
+                ?? LlmProviderRegistry::defaultModel('ollama'),
+            'gemini' => (LlmModelResolver::prioritizeGeminiModels($catalogIds)[0] ?? null)
+                ?? 'gemini-2.5-flash',
+            default => LlmProviderRegistry::defaultModel($provider),
+        };
+
+        if (LlmModelResolver::isAuto($picked)) {
+            $picked = $catalogIds[0] ?? null;
+        }
+
+        return $this->nonEmptyString($picked);
+    }
+
+    /** @return list<string> */
+    private function catalogModelIds(AiProviderConfig $config): array
+    {
+        try {
+            $rows = app(LlmModelCatalog::class)->listForProvider(
+                (string) $config->provider,
+                $this->nonEmptyString($config->api_key),
+                $this->resolveBaseUrl($config) ?? $this->nonEmptyString($config->base_url),
+            );
+        } catch (\Throwable) {
+            return [];
+        }
+
+        $ids = [];
+        foreach ($rows as $row) {
+            $id = $this->nonEmptyString($row['id'] ?? null);
+            if ($id !== null) {
+                $ids[] = $id;
+            }
+        }
+
+        return $ids;
     }
 
     private function resolveBaseUrl(AiProviderConfig $config): ?string

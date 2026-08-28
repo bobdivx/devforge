@@ -23,26 +23,40 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
                 return;
             }
             $settings = instanceSettings();
-            
-            // Try GitHub raw URL first
-            $versions = $this->fetchVersionsFromGitHub();
-            
-            // Fallback to Docker Hub if GitHub fetch failed
-            if ($versions === null) {
-                Log::warning('GitHub versions URL failed, falling back to Docker Hub');
-                $versions = $this->fetchVersionsFromDockerHub();
-            }
 
-            // If both sources failed, abort
+            $github = $this->fetchVersionsFromGitHub();
+            $hub = $this->fetchVersionsFromDockerHub();
+
+            $versions = $github ?? $hub;
+
             if ($versions === null) {
                 Log::error('Both GitHub and Docker Hub version checks failed');
+
                 return;
             }
 
-            $latest_version = data_get($versions, 'coolify.v4.version') ?? data_get($versions, 'devforge.version');
+            $githubVersion = data_get($github, 'coolify.v4.version') ?? data_get($github, 'devforge.version');
+            $hubVersion = data_get($hub, 'coolify.v4.version') ?? data_get($hub, 'devforge.version');
+            $latest_version = is_string($githubVersion) && $githubVersion !== '' ? $githubVersion : null;
+
+            if (is_string($hubVersion) && $hubVersion !== '') {
+                if ($latest_version === null || version_compare($hubVersion, $latest_version, '>')) {
+                    $latest_version = $hubVersion;
+                    Log::info('Using newer Docker Hub version over versions.json', [
+                        'store' => $githubVersion,
+                        'hub' => $hubVersion,
+                    ]);
+                }
+            }
+
+            if ($latest_version === null) {
+                Log::error('No usable version from GitHub or Docker Hub');
+
+                return;
+            }
+
             $current_version = config('constants.coolify.version');
 
-            // Read existing cached version
             $existingVersions = null;
             $existingCoolifyVersion = null;
             if (File::exists(base_path('versions.json'))) {
@@ -50,10 +64,8 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
                 $existingCoolifyVersion = data_get($existingVersions, 'coolify.v4.version') ?? data_get($existingVersions, 'devforge.version');
             }
 
-            // Determine the BEST version to use (CDN, cache, or current)
             $bestVersion = $latest_version;
 
-            // Check if cache has newer version than CDN
             if ($existingCoolifyVersion && version_compare($existingCoolifyVersion, $bestVersion, '>')) {
                 Log::warning('CDN served older DevForge version than cache', [
                     'cdn_version' => $latest_version,
@@ -63,7 +75,6 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
                 $bestVersion = $existingCoolifyVersion;
             }
 
-            // CRITICAL: Never allow bestVersion to be older than currently running version
             if (version_compare($bestVersion, $current_version, '<')) {
                 Log::warning('Version downgrade prevented in CheckForUpdatesJob', [
                     'cdn_version' => $latest_version,
@@ -75,19 +86,15 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
                 $bestVersion = $current_version;
             }
 
-            // Use data_set() for safe mutation (fixes #3)
             data_set($versions, 'coolify.v4.version', $bestVersion);
+            data_set($versions, 'devforge.version', $bestVersion);
             $latest_version = $bestVersion;
 
-            // ALWAYS write versions.json (for Sentinel, Helper, Traefik updates)
             File::put(base_path('versions.json'), json_encode($versions, JSON_PRETTY_PRINT));
 
-            // Invalidate cache to ensure fresh data is loaded
             invalidate_versions_cache();
 
-            // Only mark new version available if DevForge version actually increased
             if (version_compare($latest_version, $current_version, '>')) {
-                // New version available
                 $settings->update(['new_version_available' => true]);
             } else {
                 $settings->update(['new_version_available' => false]);
@@ -102,33 +109,35 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
 
     /**
      * Fetch versions from GitHub raw URL.
-     * 
+     *
      * @return array|null Versions array or null if failed
      */
     private function fetchVersionsFromGitHub(): ?array
     {
         try {
             $response = Http::retry(3, 1000)->get(config('constants.coolify.versions_url'));
-            
+
             if (! $response->successful()) {
                 Log::warning('GitHub versions URL returned non-2xx status', [
                     'url' => config('constants.coolify.versions_url'),
                     'status' => $response->status(),
                 ]);
+
                 return null;
             }
 
             $versions = $response->json();
-            
+
             if (empty($versions)) {
                 Log::warning('GitHub versions URL returned empty JSON');
+
                 return null;
             }
 
-            // Validate that we have at least a version field
             $version = data_get($versions, 'coolify.v4.version') ?? data_get($versions, 'devforge.version');
             if (empty($version)) {
                 Log::warning('GitHub versions JSON missing version field');
+
                 return null;
             }
 
@@ -138,13 +147,14 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
                 'url' => config('constants.coolify.versions_url'),
                 'exception' => $e->getMessage(),
             ]);
+
             return null;
         }
     }
 
     /**
      * Fetch latest version from Docker Hub public API.
-     * 
+     *
      * @return array|null Versions array with devforge.version and coolify.v4.version set
      */
     private function fetchVersionsFromDockerHub(): ?array
@@ -152,26 +162,27 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
         try {
             $image = config('constants.coolify.helper_image', 'bobdivx/devforge');
             $url = "https://hub.docker.com/v2/repositories/{$image}/tags?page_size=100";
-            
+
             $response = Http::retry(3, 1000)->get($url);
-            
+
             if (! $response->successful()) {
                 Log::error('Docker Hub API returned non-2xx status', [
                     'url' => $url,
                     'status' => $response->status(),
                 ]);
+
                 return null;
             }
 
             $data = $response->json();
             $tags = data_get($data, 'results', []);
-            
+
             if (empty($tags)) {
                 Log::error('Docker Hub returned no tags');
+
                 return null;
             }
 
-            // Filter to plain semver tags (e.g., 4.1.4, not api-4.1.4 or sha-*)
             $semverTags = [];
             foreach ($tags as $tag) {
                 $name = data_get($tag, 'name', '');
@@ -182,22 +193,21 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
 
             if (empty($semverTags)) {
                 Log::error('Docker Hub has no plain semver tags');
+
                 return null;
             }
 
-            // Sort and pick highest version
             usort($semverTags, function ($a, $b) {
-                return version_compare($b, $a); // Descending
+                return version_compare($b, $a);
             });
-            
+
             $latestVersion = $semverTags[0];
-            
+
             Log::info('Docker Hub fallback found version', [
                 'version' => $latestVersion,
                 'image' => $image,
             ]);
 
-            // Build minimal versions array
             return [
                 'devforge' => [
                     'version' => $latestVersion,
@@ -213,6 +223,7 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
                 'exception' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
+
             return null;
         }
     }
