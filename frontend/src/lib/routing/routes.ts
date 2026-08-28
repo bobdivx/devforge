@@ -17,6 +17,7 @@ import {
     CalendarClock,
     Cpu,
     Store,
+    Info,
     type LucideIcon,
 } from 'lucide-preact';
 
@@ -98,6 +99,8 @@ export type PageKey =
 
     | 'store'
 
+    | 'about'
+
     | 'not-found';
 
 
@@ -125,6 +128,8 @@ export const appRoutes: AppRoute[] = [
     { path: '/applications', label: 'Applications', description: 'Configuration et déploiements.', icon: Boxes, page: 'applications' },
 
     { path: '/store', label: 'Store', description: 'Publier et installer des applications en un clic.', icon: Store, page: 'store' },
+
+    { path: '/a-propos', label: 'À propos', description: 'Rig, bases techniques et partenaires de DevForge.', icon: Info, page: 'about' },
 
     { path: '/connexions', label: 'Connexions', description: 'GitHub, tokens Packages, clés API et secrets de build.', icon: Plug, page: 'connexions' },
 
@@ -208,6 +213,8 @@ export const staticRoutePaths = [
     '/onboarding',
 
     '/store',
+
+    '/a-propos',
 
     '/notifications/email',
 

@@ -15,6 +15,7 @@ import {
     Settings,
     Sparkles,
     Store,
+    Info,
     Wrench,
     type LucideIcon,
 } from 'lucide-preact';
@@ -188,6 +189,14 @@ export const sidebarNav: SidebarNavEntry[] = [
         path: '/store',
         icon: Store,
         pages: ['store'],
+    },
+    {
+        type: 'link',
+        id: 'about',
+        label: 'À propos',
+        path: '/a-propos',
+        icon: Info,
+        pages: ['about'],
     },
     {
         type: 'section',

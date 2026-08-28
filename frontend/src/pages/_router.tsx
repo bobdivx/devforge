@@ -2,6 +2,7 @@ import type { BootstrapData } from '../lib/bootstrap';
 import type { AppRoute } from '../lib/routes';
 import { extractApplicationUuid } from '../lib/routes';
 import { StorePage } from './store/_StorePage';
+import { AboutPage } from './about/_AboutPage';
 import { extractGithubAppUuid } from '../lib/settings-tabs';
 import { AgentDetailPage } from './agents/_AgentDetailPage';
 import { AgentsPage } from './agents/_AgentsPage';
@@ -53,6 +54,8 @@ export function DomainPage({ bootstrap, route, onSwitchTeam }: DomainPageProps) 
             );
         case 'store':
             return <StorePage path={route.path} />;
+        case 'about':
+            return <AboutPage />;
         case 'databases':
             return <CoreResourcesPage key="databases" type="databases" permissions={bootstrap.permissions} />;
         case 'services':
