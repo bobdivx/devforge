@@ -1,4 +1,4 @@
-import { Info, LogOut, User } from 'lucide-preact';
+import { LogOut, User } from 'lucide-preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { logout } from '../lib/api-client';
 import type { BootstrapUser } from '../lib/bootstrap';
@@ -107,15 +107,6 @@ export function UserMenu({ user, teamName }: UserMenuProps) {
                     >
                         <User class="size-4 shrink-0" aria-hidden />
                         Profil
-                    </a>
-                    <a
-                        class={itemClass}
-                        href={routeHref('/a-propos')}
-                        role="menuitem"
-                        onClick={(event) => goTo(event, '/a-propos')}
-                    >
-                        <Info class="size-4 shrink-0" aria-hidden />
-                        À propos
                     </a>
                     <div class="my-1 h-px bg-base-300/80" role="separator" />
                     <button

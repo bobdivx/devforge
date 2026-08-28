@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 describe('UserMenu', () => {
-    it('ouvre Profil, À propos et Déconnexion au clic sur l’avatar', () => {
+    it('ouvre Profil et Déconnexion au clic sur l’avatar', () => {
         render(<UserMenu user={bootstrapData.user} teamName={bootstrapData.current_team.name} />);
 
         expect(screen.queryByRole('menuitem', { name: 'Profil' })).not.toBeInTheDocument();
@@ -17,7 +17,7 @@ describe('UserMenu', () => {
         fireEvent.click(screen.getByRole('button', { name: /Menu du compte/ }));
 
         expect(screen.getByRole('menuitem', { name: 'Profil' })).toHaveAttribute('href', '/devforge/settings/');
-        expect(screen.getByRole('menuitem', { name: 'À propos' })).toHaveAttribute('href', '/devforge/a-propos/');
+        expect(screen.queryByRole('menuitem', { name: 'À propos' })).not.toBeInTheDocument();
         expect(screen.getByRole('menuitem', { name: 'Déconnexion' })).toBeInTheDocument();
     });
 
