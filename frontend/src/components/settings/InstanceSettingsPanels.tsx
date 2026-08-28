@@ -575,7 +575,7 @@ function EmailForm({
                         class="input input-bordered input-sm w-full rounded-xl"
                         value={form.smtp_from_name ?? ''}
                         disabled={!canEdit || saving}
-                        onInput={(event) => setForm((current) => ({ ...current, smtp_from_name: event.currentTarget.value || null }))}
+                        onInput={(event) => setForm((current) => ({ ...current, smtp_from_name: event.currentTarget.value }))}
                     />
                 </Field>
                 <Field label="Hôte SMTP">
@@ -794,12 +794,22 @@ function UpdatesForm({
             <ConfirmDialog
                 open={confirmOpen}
                 title="Mettre à jour DevForge ?"
-                message={`La version ${currentVersion} va être mise à jour vers ${latestVersion}. L’interface sera indisponible pendant le redémarrage.`}
+                message={(
+                    <>
+                        <p>
+                            La version {currentVersion} va être mise à jour vers {latestVersion}. L’interface sera indisponible pendant le redémarrage.
+                        </p>
+                        {error && <p class="text-error" role="alert">{error}</p>}
+                    </>
+                )}
                 confirmLabel="Mettre à jour maintenant"
                 cancelLabel="Annuler"
                 loading={upgrading}
                 onConfirm={() => void upgrade()}
-                onCancel={() => setConfirmOpen(false)}
+                onCancel={() => {
+                    setConfirmOpen(false);
+                    setError(null);
+                }}
             />
         </div>
     );
