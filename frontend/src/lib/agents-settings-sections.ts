@@ -4,6 +4,7 @@ export type AgentsSettingsSectionId =
     | 'instructions'
     | 'memory'
     | 'mcp'
+    | 'diagnostic'
     | 'advanced';
 
 export type AgentsSettingsSection = {
@@ -43,6 +44,12 @@ export const AGENTS_SETTINGS_SECTIONS: AgentsSettingsSection[] = [
         label: 'MCP',
         description: 'Serveurs MCP distants pour les agents',
         group: 'data',
+    },
+    {
+        id: 'diagnostic',
+        label: 'Diagnostic',
+        description: 'Santé Rig, MCP, Ollama, Gemini',
+        group: 'system',
     },
     {
         id: 'advanced',

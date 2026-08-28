@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { AiProvidersSettings } from '../../components/agents/AiProvidersSettings';
 import { AgentsAdvancedSettingsPanel } from '../../components/agents/AgentsAdvancedSettingsPanel';
+import { AgentsDiagnosticPanel } from '../../components/agents/AgentsDiagnosticPanel';
 import { AgentsMemoryOverviewPanel } from '../../components/agents/AgentsMemoryOverviewPanel';
 import { AgentsMcpSettingsPanel } from '../../components/agents/AgentsMcpSettingsPanel';
 import { AgentsSettingsShell } from '../../components/agents/AgentsSettingsShell';
@@ -22,9 +23,14 @@ export function AgentsSettingsPage({
     permissions: BootstrapPermissions;
 }) {
     const canManageAi = permissions.manage_team || permissions.instance_admin;
-    const [section, setSection] = useState<AgentsSettingsSectionId>(() => (
-        parseAgentsSettingsSection(typeof window !== 'undefined' ? window.location.hash : null)
-    ));
+    const [section, setSection] = useState<AgentsSettingsSectionId>(() => {
+        if (typeof window === 'undefined') {
+            return 'providers';
+        }
+        const url = new URL(window.location.href);
+        const hash = url.hash.replace(/^#/, '');
+        return parseAgentsSettingsSection(hash || url.searchParams.get('tab'));
+    });
 
     useEffect(() => {
         const onHash = () => setSection(parseAgentsSettingsSection(window.location.hash));
@@ -70,6 +76,7 @@ export function AgentsSettingsPage({
                     )}
                     {section === 'memory' && <AgentsMemoryOverviewPanel />}
                     {section === 'mcp' && <AgentsMcpSettingsPanel canEdit={canManageAi} />}
+                    {section === 'diagnostic' && <AgentsDiagnosticPanel />}
                     {section === 'advanced' && <AgentsAdvancedSettingsPanel canEdit={canManageAi} />}
                 </Card>
             </AgentsSettingsShell>

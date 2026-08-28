@@ -953,6 +953,21 @@ export type AiProviderConfig = {
     created_at: string;
 };
 
+export type AgentDiagnosticStatus = 'ok' | 'warn' | 'fail';
+export type AgentDiagnosticKind = 'rig' | 'mcp' | 'ollama' | 'gemini';
+export type AgentDiagnosticCheck = {
+    id: string;
+    kind: AgentDiagnosticKind;
+    label: string;
+    status: AgentDiagnosticStatus;
+    message: string;
+    detail?: string | null;
+    target?: string | null;
+    duration_ms: number;
+    http_status?: number | null;
+    models?: string[];
+};
+
 export type OllamaGpuInfo = {
     index: number;
     name: string;
@@ -4327,6 +4342,14 @@ export const domainApi = {
         method: 'POST',
         body: JSON.stringify(input),
     }),
+    runAgentDiagnostics: (check?: AgentDiagnosticKind) => mutate<ApiResponse<{ checks: AgentDiagnosticCheck[] }>>(
+        '/ai/diagnostics',
+        {
+            method: 'POST',
+            body: JSON.stringify(check ? { check } : {}),
+        },
+        90_000,
+    ),
 
     ollamaInstances: () => apiFetch<ApiResponse<OllamaInstance[]>>(`${API_BASE}/ai/ollama/instances`),
     ollamaStatus: (opts?: { baseUrl?: string | null; providerId?: number | null }) => {

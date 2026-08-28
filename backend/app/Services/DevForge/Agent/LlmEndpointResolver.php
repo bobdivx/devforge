@@ -98,6 +98,53 @@ class LlmEndpointResolver
         return str_contains(mb_strtolower($host), 'generativelanguage.googleapis.com');
     }
 
+    public static function urlHost(?string $baseUrl): ?string
+    {
+        $host = parse_url(trim((string) $baseUrl), PHP_URL_HOST);
+
+        return is_string($host) && $host !== '' ? $host : null;
+    }
+
+    public static function isLocalOrPrivateHost(string $host): bool
+    {
+        $host = strtolower(trim($host, '[]'));
+
+        if (in_array($host, ['localhost', '127.0.0.1', '::1', 'host.docker.internal'], true)) {
+            return true;
+        }
+
+        if (str_ends_with($host, '.local') || str_ends_with($host, '.internal')) {
+            return true;
+        }
+
+        if (filter_var($host, FILTER_VALIDATE_IP)) {
+            return ! filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+        }
+
+        return false;
+    }
+
+    public static function isPublicHttpsTunnel(?string $baseUrl): bool
+    {
+        $candidate = trim((string) $baseUrl);
+        if ($candidate === '') {
+            return false;
+        }
+
+        $parts = parse_url($candidate);
+        if ($parts === false) {
+            return false;
+        }
+
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        if ($scheme !== 'https' || $host === '') {
+            return false;
+        }
+
+        return ! self::isLocalOrPrivateHost($host);
+    }
+
     private static function resolveLocalhostForContainer(string $baseUrl): string
     {
         $parts = parse_url($baseUrl);
