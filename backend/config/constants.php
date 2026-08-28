@@ -2,7 +2,7 @@
 
 return [
     'coolify' => [
-        'version' => '4.1.10',
+        'version' => '4.1.11',
         'helper_version' => 'helper',
         'realtime_version' => 'realtime',
         'railpack_version' => '0.23.0',
