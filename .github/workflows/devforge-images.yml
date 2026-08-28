@@ -37,13 +37,17 @@ permissions:
   contents: write
   packages: write
 
+defaults:
+  run:
+    shell: bash
+
 env:
   DOCKERHUB_IMAGE: bobdivx/devforge
   GHCR_REGISTRY: ghcr.io
 
 jobs:
   prepare:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, devforge]
     outputs:
       current: ${{ steps.compute.outputs.current }}
       version: ${{ steps.compute.outputs.version }}
@@ -53,15 +57,12 @@ jobs:
       - name: Compute next version
         id: compute
         run: |
-          # Read current version from constants.php (coolify.version line only)
           CURRENT=$(awk -F"'" '/coolify.*=>.*\[/,/\]/ { if (/'\''version'\''/) { print $4; exit } }' backend/config/constants.php)
           if [ -z "$CURRENT" ]; then
             echo "Error: Could not extract coolify.version from constants.php"
             exit 1
           fi
           echo "Current version: $CURRENT"
-          
-          # Parse semver and increment patch
           if [[ "$CURRENT" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
             MAJOR="${BASH_REMATCH[1]}"
             MINOR="${BASH_REMATCH[2]}"
@@ -72,16 +73,16 @@ jobs:
             echo "Error: Invalid version format: $CURRENT"
             exit 1
           fi
-          
           echo "Next version: $NEW_VERSION"
           echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
           echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
   build:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, devforge]
     needs: prepare
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - name: api
@@ -106,8 +107,6 @@ jobs:
           CURRENT="${{ needs.prepare.outputs.current }}"
           NEW_VERSION="${{ needs.prepare.outputs.version }}"
           echo "Patching version: $CURRENT -> $NEW_VERSION"
-          
-          # Update backend/config/constants.php (coolify.version only)
           awk -v old="$CURRENT" -v new="$NEW_VERSION" '
             /coolify.*=>.*\[/,/\]/ {
               if (/'\''version'\'' =>/) {
@@ -117,10 +116,7 @@ jobs:
             { print }
           ' backend/config/constants.php > backend/config/constants.php.tmp
           mv backend/config/constants.php.tmp backend/config/constants.php
-          
-          # Update backend/versions.json (devforge.version and coolify.v4.version)
           sed -i "s/\"version\": \"${CURRENT}\"/\"version\": \"${NEW_VERSION}\"/g" backend/versions.json
-          
           echo "Patched files for build:"
           git diff backend/config/constants.php backend/versions.json
 
@@ -157,7 +153,6 @@ jobs:
           COMPONENT='${{ matrix.name }}'
           HUB="${{ env.DOCKERHUB_IMAGE }}"
           GHCR="${{ env.GHCR_REGISTRY }}/${OWNER_LC}/devforge-${COMPONENT}"
-
           {
             echo "sha=${SHORT_SHA}"
             echo "version=${VERSION}"
@@ -165,10 +160,6 @@ jobs:
             echo "ghcr=${GHCR}"
             echo "component=${COMPONENT}"
           } >> "$GITHUB_OUTPUT"
-
-          # Primary Hub tags stay component-scoped for web/realtime/helper.
-          # For api (the main NAS image), also publish plain :latest / :{version}
-          # so compose can use bobdivx/devforge:latest instead of :api.
           {
             echo "tags<<EOF"
             echo "${HUB}:${COMPONENT}"
@@ -185,7 +176,6 @@ jobs:
             echo "${GHCR}:${VERSION}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-
           echo "Docker Hub tags:"
           if [ "${COMPONENT}" = "api" ]; then
             echo "  ${HUB}:latest   ← tag principal (compose NAS)"
@@ -210,7 +200,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=devforge-${{ matrix.name }}
 
   summary:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, devforge]
     needs: build
     if: always()
     continue-on-error: true
@@ -235,7 +225,7 @@ jobs:
           echo "  ghcr.io/bobdivx/devforge-agent:latest"
 
   commit-version:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, devforge]
     needs: [prepare, build]
     if: ${{ !cancelled() && needs.build.result == 'success' }}
     continue-on-error: true
@@ -249,17 +239,12 @@ jobs:
         run: |
           CURRENT="${{ needs.prepare.outputs.current }}"
           NEW_VERSION="${{ needs.prepare.outputs.version }}"
-          
-          # Check if files already have the new version (idempotent)
           EXISTING=$(awk -F"'" '/coolify.*=>.*\[/,/\]/ { if (/'\''version'\''/) { print $4; exit } }' backend/config/constants.php)
           if [ "$EXISTING" = "$NEW_VERSION" ]; then
             echo "Version already at $NEW_VERSION, skipping commit"
             exit 0
           fi
-          
           echo "Updating GitHub main: $CURRENT -> $NEW_VERSION"
-          
-          # Update backend/config/constants.php (coolify.version only)
           awk -v old="$CURRENT" -v new="$NEW_VERSION" '
             /coolify.*=>.*\[/,/\]/ {
               if (/'\''version'\'' =>/) {
@@ -269,19 +254,14 @@ jobs:
             { print }
           ' backend/config/constants.php > backend/config/constants.php.tmp
           mv backend/config/constants.php.tmp backend/config/constants.php
-          
-          # Update backend/versions.json (devforge.version and coolify.v4.version)
           sed -i "s/\"version\": \"${CURRENT}\"/\"version\": \"${NEW_VERSION}\"/g" backend/versions.json
-          
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add backend/config/constants.php backend/versions.json
-          
-          # Commit only if there are changes
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
             git commit -m "chore: bump version to ${NEW_VERSION} [skip version bump]"
             git push origin HEAD:${{ github.ref_name }}
-            echo "✓ Version committed and pushed to GitHub"
+            echo "Version committed and pushed to GitHub"
           fi
