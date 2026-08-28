@@ -178,3 +178,26 @@ export async function switchTeam(teamId: number): Promise<BootstrapResponse> {
         body: JSON.stringify({ team_id: teamId }),
     });
 }
+
+/** Fortify `POST /logout` (même endpoint que la navbar Livewire). */
+export async function logout(): Promise<void> {
+    try {
+        await ensureCsrfCookie();
+
+        const headers = new Headers();
+        headers.set('Accept', 'application/json');
+
+        const csrfToken = readCookie('XSRF-TOKEN');
+        if (csrfToken) {
+            headers.set('X-XSRF-TOKEN', csrfToken);
+        }
+
+        await fetch('/logout', {
+            method: 'POST',
+            credentials: 'include',
+            headers,
+        });
+    } finally {
+        window.location.assign('/login');
+    }
+}
