@@ -1,4 +1,4 @@
-import { PanelLeftClose, PanelLeftOpen, Sparkles, X } from 'lucide-preact';
+import { Info, PanelLeftClose, PanelLeftOpen, Sparkles, X } from 'lucide-preact';
 import { useMemo } from 'preact/hooks';
 import type { BootstrapData } from '../lib/bootstrap';
 import { DEVFORGE_BRAND_NAME, DEVFORGE_LOGO_URL } from '../lib/brand';
@@ -158,6 +158,7 @@ export function Sidebar({
     const activeId = useMemo(() => resolveActiveNavId(entries, route), [entries, route]);
     const panelClass = collapsed ? 'w-[4.5rem]' : 'w-64';
     const collapsedLinks = useMemo(() => flattenSidebarNav(entries), [entries]);
+    const aboutActive = route.page === 'about' || route.path === '/a-propos';
 
     return (
         <aside
@@ -236,6 +237,17 @@ export function Sidebar({
                         {!collapsed && <span class="truncate">Assistant</span>}
                     </a>
                 )}
+                <a
+                    class={linkClass(aboutActive)}
+                    href={routeHref('/a-propos')}
+                    title="À propos"
+                    aria-label="À propos"
+                    aria-current={aboutActive ? 'page' : undefined}
+                    onClick={(event) => onNavigate(event, '/a-propos')}
+                >
+                    <Info class="size-3.5 sm:size-4 shrink-0" aria-hidden />
+                    {!collapsed && <span class="truncate">À propos</span>}
+                </a>
                 <button
                     class="hidden h-10 min-h-10 items-center gap-2 sm:gap-3 rounded-xl px-3 text-xs text-[var(--devforge-sidebar-muted)] hover:bg-[var(--devforge-sidebar-hover)] hover:text-[var(--devforge-sidebar-fg)] lg:flex"
                     type="button"
