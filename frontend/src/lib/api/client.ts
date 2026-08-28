@@ -179,28 +179,14 @@ export async function switchTeam(teamId: number): Promise<BootstrapResponse> {
     });
 }
 
-/** Fortify POST /logout — session web Laravel, pas un nouveau flux d’auth. */
+/** Fortify POST /logout (même contrat que le formulaire Livewire). */
 export async function logout(): Promise<void> {
+    await ensureCsrfCookie();
+
     try {
-        await ensureCsrfCookie();
-
-        const headers = new Headers();
-        headers.set('Accept', 'application/json');
-        headers.set('X-Requested-With', 'XMLHttpRequest');
-
-        const csrfToken = readCookie('XSRF-TOKEN');
-        if (csrfToken) {
-            headers.set('X-XSRF-TOKEN', csrfToken);
-        }
-
-        await fetch('/logout', {
-            method: 'POST',
-            credentials: 'include',
-            headers,
-            redirect: 'manual',
-        });
+        await apiFetch('/logout', { method: 'POST' });
     } catch {
-        // On quitte l’interface même si le POST échoue (session déjà morte, réseau).
+        // Fortify redirige souvent vers /login en HTML ; la session est déjà invalidée.
     }
 
     window.location.assign('/login');
