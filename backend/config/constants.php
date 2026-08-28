@@ -1,6 +1,7 @@
 <?php
 
-$devforgeConstants = [
+$config = [
+    'coolify' => [
         'version' => '4.1.13',
         'helper_version' => 'helper',
         'realtime_version' => 'realtime',
@@ -16,12 +17,7 @@ $devforgeConstants = [
         'versions_url' => env('VERSIONS_URL', 'https://raw.githubusercontent.com/bobdivx/devforge-store/main/versions.json'),
         'upgrade_script_url' => env('UPGRADE_SCRIPT_URL', 'https://raw.githubusercontent.com/bobdivx/devforge/main/scripts/upgrade.sh'),
         'releases_url' => env('RELEASES_URL', 'https://raw.githubusercontent.com/coollabsio/coolify-cdn/main/json/releases.json'),
-];
-
-return [
-    'devforge' => $devforgeConstants,
-    // BC alias for legacy config('constants.coolify.*')
-    'coolify' => $devforgeConstants,
+    ],
 
     'urls' => [
         'docs' => 'https://github.com/bobdivx/devforge',
@@ -152,3 +148,7 @@ return [
         'notification_delay_scaling' => 0.2,
     ],
 ];
+
+$config['devforge'] = $config['coolify'];
+
+return $config;

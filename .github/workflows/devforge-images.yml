@@ -58,10 +58,10 @@ jobs:
       - name: Compute next version
         id: compute
         run: |
-          # Read current version from constants.php (coolify.version line only)
-          CURRENT=$(awk -F"'" '/coolify.*=>.*\[/,/\]/ { if (/'\''version'\''/) { print $4; exit } }' backend/config/constants.php)
+          # First 'version' => 'x.y.z' in constants.php (coolify or devforge)
+          CURRENT=$(grep -m1 -E "'version' => '[0-9]+\.[0-9]+\.[0-9]+'" backend/config/constants.php | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
           if [ -z "$CURRENT" ]; then
-            echo "Error: Could not extract coolify.version from constants.php"
+            echo "Error: Could not extract version from constants.php"
             exit 1
           fi
           echo "Current version: $CURRENT"
@@ -113,16 +113,8 @@ jobs:
           NEW_VERSION="${{ needs.prepare.outputs.version }}"
           echo "Patching version: $CURRENT -> $NEW_VERSION"
           
-          # Update backend/config/constants.php (coolify.version only)
-          awk -v old="$CURRENT" -v new="$NEW_VERSION" '
-            /coolify.*=>.*\[/,/\]/ {
-              if (/'\''version'\'' =>/) {
-                sub(old, new)
-              }
-            }
-            { print }
-          ' backend/config/constants.php > backend/config/constants.php.tmp
-          mv backend/config/constants.php.tmp backend/config/constants.php
+          # Update backend/config/constants.php (first version assignment)
+          sed -i "s/'version' => '${CURRENT}'/'version' => '${NEW_VERSION}'/" backend/config/constants.php
           
           # Update backend/versions.json (all matching DevForge version fields)
           sed -i "s/\"version\": \"${CURRENT}\"/\"version\": \"${NEW_VERSION}\"/g" backend/versions.json
@@ -253,7 +245,7 @@ jobs:
           NEW_VERSION="${{ needs.prepare.outputs.version }}"
           
           # Check if files already have the new version (idempotent)
-          EXISTING=$(awk -F"'" '/coolify.*=>.*\[/,/\]/ { if (/'\''version'\''/) { print $4; exit } }' backend/config/constants.php)
+          EXISTING=$(grep -m1 -E "'version' => '[0-9]+\.[0-9]+\.[0-9]+'" backend/config/constants.php | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
           if [ "$EXISTING" = "$NEW_VERSION" ]; then
             echo "Version already at $NEW_VERSION, skipping commit"
             exit 0
@@ -261,16 +253,8 @@ jobs:
           
           echo "Updating GitHub main: $CURRENT -> $NEW_VERSION"
           
-          # Update backend/config/constants.php (coolify.version only)
-          awk -v old="$CURRENT" -v new="$NEW_VERSION" '
-            /coolify.*=>.*\[/,/\]/ {
-              if (/'\''version'\'' =>/) {
-                sub(old, new)
-              }
-            }
-            { print }
-          ' backend/config/constants.php > backend/config/constants.php.tmp
-          mv backend/config/constants.php.tmp backend/config/constants.php
+          # Update backend/config/constants.php (first version assignment)
+          sed -i "s/'version' => '${CURRENT}'/'version' => '${NEW_VERSION}'/" backend/config/constants.php
           
           # Update backend/versions.json (all matching DevForge version fields)
           sed -i "s/\"version\": \"${CURRENT}\"/\"version\": \"${NEW_VERSION}\"/g" backend/versions.json
