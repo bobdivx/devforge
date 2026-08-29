@@ -7,10 +7,12 @@ use App\Models\AiAgentKeyRequest;
 use App\Models\AiAgentRun;
 use App\Models\Application;
 use App\Services\DevForge\Application\ApplicationGitRepositoryParser;
+use App\Services\DevForge\Application\ApplicationRuntimeSettingsDetector;
 use App\Services\DevForge\Application\GithubPackagesBuildAuthInjector;
 use App\Services\DevForge\Application\NixpacksNodeVersionApplier;
 use App\Services\DevForge\Application\NixpacksNodeVersionResolver;
 use Illuminate\Support\Facades\Schema;
+use Throwable;
 
 /**
  * Séquence de réparation déterministe quand le LLM refuse d'émettre des tool_calls.
@@ -93,13 +95,139 @@ class AgentRepairHarness
         $probeHint = is_string($runContext['probe_error'] ?? null) ? (string) $runContext['probe_error'] : '';
         $lastProbe = is_string($runContext['last_probe_error'] ?? null) ? (string) $runContext['last_probe_error'] : '';
         $issueBlob = trim($logsBlob.' '.$goal.' '.$probeHint.' '.$lastProbe);
-        $issue = AgentChatRepairStrategy::detectIssue($issueBlob);
+
+        $application = $applicationUuid !== null
+            ? Application::query()->where('uuid', $applicationUuid)->first()
+            : null;
+        if ($application instanceof Application) {
+            $application->loadMissing(['settings', 'environment.project.team']);
+        }
+
+        $detectorFramework = $this->detectRuntimeFramework($application);
+        $issueContext = [
+            'detected_framework' => $application?->detected_framework,
+            'start_command' => $application?->start_command,
+            'ports_exposes' => $application?->ports_exposes,
+            'is_static' => (bool) ($application?->settings?->is_static ?? false),
+            'build_pack' => $application?->build_pack,
+            'detector_framework' => $detectorFramework,
+        ];
+        $issue = AgentChatRepairStrategy::detectIssue($issueBlob, $issueContext);
+
+        $ssrDetected = AgentDirectives::isAstroSsrFramework($detectorFramework)
+            || AgentDirectives::looksLikeAstroSsrSignals(
+                $application?->detected_framework,
+                $application?->start_command,
+                $application?->ports_exposes,
+            );
+        $staleStaticPack = $application instanceof Application && (
+            strtolower((string) $application->build_pack) === 'static'
+            || (bool) ($application->settings?->is_static ?? false)
+        );
+        $shouldRestoreAstroSsr = $ssrDetected && (
+            $issue === AgentChatRepairStrategy::ISSUE_ASTRO_STATIC_RUNTIME
+            || AgentDirectives::isMissingAstroServerEntryIssue($issueBlob)
+            || (AgentDirectives::looksLikeNginxStatusOrHealthcheckOnly($issueBlob) && $staleStaticPack)
+        );
+
+        if ($shouldRestoreAstroSsr) {
+            $settingsArgs = [
+                ...$appArgs,
+                ...AgentDirectives::astroSsrNixpacksRuntimeSettings(),
+                'redeploy' => true,
+                'reason' => 'Harness: Astro SSR détecté — nixpacks + entry.mjs, pas nginx static',
+            ];
+            $settingsResult = $toolkit->execute('update_application_runtime_settings', $settingsArgs);
+            $record('update_application_runtime_settings', $settingsArgs, $settingsResult);
+
+            $headline = 'Astro SSR : is_static=false, nixpacks, port 4321, start entry.mjs — redeploy lancé.';
+            $action = [
+                'kind' => 'runtime_settings',
+                'label' => 'astro_ssr_nixpacks',
+                'detail' => 'is_static=false build_pack=nixpacks ports=4321 start=entry.mjs',
+                'ok' => ! isset($settingsResult['error']),
+                'at' => now()->toISOString(),
+            ];
+            $run->mergeMetadata([
+                'correction_actions' => [
+                    ...((is_array($run->metadata['correction_actions'] ?? null)) ? $run->metadata['correction_actions'] : []),
+                    $action,
+                ],
+                'correction' => [
+                    'outcome' => isset($settingsResult['error']) ? 'partial' : 'fixed',
+                    'headline' => $headline,
+                    'diagnosis' => 'App Astro SSR (adapter Node / output server) — interdiction de basculer vers nginx static. Correction : nixpacks + node ./dist/server/entry.mjs.',
+                    'source_scope' => 'runtime_settings',
+                    'actions' => [$action],
+                    'steps' => ['is_static=false', 'build_pack=nixpacks', 'ports_exposes=4321', 'start_command=node ./dist/server/entry.mjs', 'health /status:4321', 'Redéployer'],
+                    'pills' => [
+                        ['id' => 'build', 'label' => 'Build', 'active' => true, 'href' => null, 'detail' => 'Astro SSR nixpacks'],
+                        ['id' => 'redeploy', 'label' => 'Redeploy', 'active' => true, 'href' => null, 'detail' => 'lancé'],
+                    ],
+                    'belongs_to_deployment_uuid' => is_string($runContext['deployment_uuid'] ?? null)
+                        ? $runContext['deployment_uuid']
+                        : null,
+                ],
+            ]);
+
+            return [
+                'text' => $headline,
+                'steps' => $steps,
+            ];
+        }
 
         if ($issue === AgentChatRepairStrategy::ISSUE_BASE_CONFIG) {
             $fixArgs = [...$appArgs, 'redeploy' => true, 'reason' => 'Harness: Read-only DevForge BASE_CONFIG_PATH'];
             $fixResult = $toolkit->execute('fix_coolify_base_config_path', $fixArgs);
             $record('fix_coolify_base_config_path', $fixArgs, $fixResult);
         } elseif ($issue === AgentChatRepairStrategy::ISSUE_ASTRO_STATIC_RUNTIME) {
+            $runtimeSettings = AgentChatRepairStrategy::astroRuntimeSettingsForDetection($detectorFramework, $issueContext);
+            if (($runtimeSettings['is_static'] ?? true) === false) {
+                $settingsArgs = [
+                    ...$appArgs,
+                    ...$runtimeSettings,
+                    'redeploy' => true,
+                    'reason' => 'Harness: Astro SSR détecté — nixpacks + entry.mjs, pas nginx static',
+                ];
+                $settingsResult = $toolkit->execute('update_application_runtime_settings', $settingsArgs);
+                $record('update_application_runtime_settings', $settingsArgs, $settingsResult);
+
+                $headline = 'Astro SSR : is_static=false, nixpacks, port 4321, start entry.mjs — redeploy lancé.';
+                $action = [
+                    'kind' => 'runtime_settings',
+                    'label' => 'astro_ssr_nixpacks',
+                    'detail' => 'is_static=false build_pack=nixpacks ports=4321',
+                    'ok' => ! isset($settingsResult['error']),
+                    'at' => now()->toISOString(),
+                ];
+                $run->mergeMetadata([
+                    'correction_actions' => [
+                        ...((is_array($run->metadata['correction_actions'] ?? null)) ? $run->metadata['correction_actions'] : []),
+                        $action,
+                    ],
+                    'correction' => [
+                        'outcome' => isset($settingsResult['error']) ? 'partial' : 'fixed',
+                        'headline' => $headline,
+                        'diagnosis' => 'App Astro SSR — le détecteur interdit le flip nginx static.',
+                        'source_scope' => 'runtime_settings',
+                        'actions' => [$action],
+                        'steps' => ['is_static=false', 'build_pack=nixpacks', 'ports_exposes=4321', 'start_command=node ./dist/server/entry.mjs', 'Redéployer'],
+                        'pills' => [
+                            ['id' => 'build', 'label' => 'Build', 'active' => true, 'href' => null, 'detail' => 'Astro SSR nixpacks'],
+                            ['id' => 'redeploy', 'label' => 'Redeploy', 'active' => true, 'href' => null, 'detail' => 'lancé'],
+                        ],
+                        'belongs_to_deployment_uuid' => is_string($runContext['deployment_uuid'] ?? null)
+                            ? $runContext['deployment_uuid']
+                            : null,
+                    ],
+                ]);
+
+                return [
+                    'text' => $headline,
+                    'steps' => $steps,
+                ];
+            }
+
             $settingsArgs = [
                 ...$appArgs,
                 ...AgentDirectives::astroStaticNginxRuntimeSettings(),
@@ -783,6 +911,35 @@ class AgentRepairHarness
         }
 
         return $payload;
+    }
+
+    private function detectRuntimeFramework(?Application $application): ?string
+    {
+        if (! $application instanceof Application) {
+            return null;
+        }
+
+        try {
+            $team = $application->team();
+            if ($team === null) {
+                return is_string($application->detected_framework) && $application->detected_framework !== ''
+                    ? $application->detected_framework
+                    : null;
+            }
+
+            $result = app(ApplicationRuntimeSettingsDetector::class)->detect($team, $application);
+            $framework = $result['suggestions']['framework'] ?? null;
+
+            if (is_string($framework) && $framework !== '') {
+                return $framework;
+            }
+        } catch (Throwable) {
+            // Source GitHub indisponible : retomber sur le framework déjà stocké.
+        }
+
+        return is_string($application->detected_framework) && $application->detected_framework !== ''
+            ? $application->detected_framework
+            : null;
     }
 
     /**
