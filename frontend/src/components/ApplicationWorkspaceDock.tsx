@@ -1,5 +1,5 @@
-import { Braces, MessageSquare, Rocket, FileText, Settings } from 'lucide-preact';
-import { applicationDockItems } from '../lib/application-dock';
+import { Braces, MessageSquare, Rocket, FileText, Settings, type LucideIcon } from 'lucide-preact';
+import { applicationDockItems, type ApplicationDockTabId } from '../lib/application-dock';
 import type { ApplicationTabId } from '../lib/application-tabs';
 import {
     applicationPath,
@@ -8,13 +8,13 @@ import {
     routeHref,
 } from '../lib/routes';
 
-const dockIcons = {
+const dockIcons: Record<ApplicationDockTabId, LucideIcon> = {
     agents: MessageSquare,
     deployments: Rocket,
     logs: FileText,
     variables: Braces,
     settings: Settings,
-} as const;
+};
 
 type ApplicationWorkspaceDockProps = {
     onNavigate: (event: MouseEvent, path: string) => void;

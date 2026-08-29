@@ -1,7 +1,12 @@
 import type { ApplicationTabId } from './application-tabs';
 
+export type ApplicationDockTabId = Extract<
+    ApplicationTabId,
+    'agents' | 'deployments' | 'logs' | 'variables' | 'settings'
+>;
+
 export type ApplicationDockItem = {
-    id: ApplicationTabId;
+    id: ApplicationDockTabId;
     label: string;
 };
 
