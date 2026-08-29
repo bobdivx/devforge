@@ -2,7 +2,7 @@
 
 $config = [
     'coolify' => [
-        'version' => '4.1.17',
+        'version' => '4.1.18',
         'helper_version' => 'helper',
         'realtime_version' => 'realtime',
         'railpack_version' => '0.23.0',
