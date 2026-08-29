@@ -1,8 +1,18 @@
 import { Info, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, X } from 'lucide-preact';
-import { useMemo } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { BootstrapData } from '../lib/bootstrap';
 import { DEVFORGE_BRAND_NAME, DEVFORGE_LOGO_URL } from '../lib/brand';
-import { AGENTS_CHAT_PATH } from '../lib/agent-routes';
+import {
+    buildSidebarSessions,
+    groupSessionsByApplication,
+    hasRunningSidebarSession,
+    newChatHref,
+    sessionHref,
+    formatRelativeSessionTime,
+    type SidebarAgentSession,
+} from '../lib/agent-sessions';
+import { pandaAppDotClass } from '../lib/pandaos-app-state';
+import { domainApi } from '../lib/domain-api';
 import {
     plusSidebarSection,
     primarySidebarNav,
@@ -11,7 +21,7 @@ import {
     type SidebarNavLink,
     type SidebarNavSection,
 } from '../lib/routing/sidebar-nav';
-import { routeHref, type AppRoute } from '../lib/routes';
+import { extractApplicationUuid, routeHref, type AppRoute } from '../lib/routes';
 
 type SidebarProps = {
     route: AppRoute;
@@ -40,26 +50,36 @@ function NavLink({
     active,
     collapsed,
     nested,
+    activityDot,
     onNavigate,
 }: {
     item: SidebarNavLink;
     active: boolean;
     collapsed: boolean;
     nested?: boolean;
+    activityDot?: boolean;
     onNavigate: (event: MouseEvent, path: string) => void;
 }) {
     const Icon = item.icon;
 
     return (
         <a
-            class={linkClass(active, nested)}
+            class={`${linkClass(active, nested)} relative`}
             href={routeHref(item.path)}
             title={collapsed ? item.label : undefined}
             aria-label={item.label}
             aria-current={active ? 'page' : undefined}
             onClick={(event) => onNavigate(event, item.path)}
         >
-            <Icon class="size-3.5 sm:size-4 shrink-0" aria-hidden />
+            <span class="relative shrink-0">
+                <Icon class="size-3.5 sm:size-4" aria-hidden />
+                {activityDot && (
+                    <span
+                        class="absolute -end-0.5 -top-0.5 size-1.5 rounded-full bg-success"
+                        aria-hidden
+                    />
+                )}
+            </span>
             {!collapsed && <span class="truncate">{item.label}</span>}
         </a>
     );
@@ -124,6 +144,92 @@ function PlusSection({
     );
 }
 
+function SessionRow({
+    session,
+    active,
+    onNavigate,
+}: {
+    session: SidebarAgentSession;
+    active: boolean;
+    onNavigate: (event: MouseEvent, path: string) => void;
+}) {
+    const href = sessionHref(session);
+
+    return (
+        <a
+            class={`flex min-w-0 items-start gap-2 rounded-lg px-2 py-1.5 text-[12px] transition-colors ${
+                active
+                    ? 'bg-[var(--devforge-sidebar-active-bg)] text-[var(--devforge-sidebar-active-fg)]'
+                    : 'text-[var(--devforge-sidebar-muted)] hover:bg-[var(--devforge-sidebar-hover)] hover:text-[var(--devforge-sidebar-fg)]'
+            }`}
+            href={routeHref(href)}
+            title={session.title}
+            onClick={(event) => onNavigate(event, href)}
+        >
+            <span
+                class={`mt-1.5 size-1.5 shrink-0 rounded-full ${pandaAppDotClass(session.status)}`}
+                aria-hidden
+            />
+            <span class="min-w-0 flex-1">
+                <span class="block truncate font-medium">{session.title}</span>
+                <span class="block truncate text-[10px] opacity-70">
+                    {formatRelativeSessionTime(session.lastActivityAt)}
+                </span>
+            </span>
+        </a>
+    );
+}
+
+function SessionsNavigator({
+    sessions,
+    activeSessionUuid,
+    onNavigate,
+}: {
+    sessions: SidebarAgentSession[];
+    activeSessionUuid: string | null;
+    onNavigate: (event: MouseEvent, path: string) => void;
+}) {
+    const grouped = useMemo(() => groupSessionsByApplication(sessions), [sessions]);
+
+    if (grouped.length === 0) {
+        return (
+            <p class="px-2 py-2 text-[11px] text-[var(--devforge-sidebar-muted)]">
+                Aucune conversation
+            </p>
+        );
+    }
+
+    return (
+        <div class="flex flex-col gap-3 px-0.5 pb-2">
+            {grouped.map((group) => (
+                <section key={group.applicationUuid ?? group.applicationName} class="min-w-0">
+                    <h3 class="truncate px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--devforge-sidebar-muted)]">
+                        {group.applicationName}
+                    </h3>
+                    {group.buckets.map((bucket) => (
+                        <div key={bucket.id} class="min-w-0">
+                            <p class="px-2 pt-1 text-[10px] font-medium text-[var(--devforge-sidebar-muted)]">
+                                {bucket.label}
+                            </p>
+                            <ul class="flex flex-col p-0">
+                                {bucket.sessions.map((session) => (
+                                    <li key={session.uuid}>
+                                        <SessionRow
+                                            session={session}
+                                            active={activeSessionUuid === session.uuid}
+                                            onNavigate={onNavigate}
+                                        />
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    ))}
+                </section>
+            ))}
+        </div>
+    );
+}
+
 export function Sidebar({
     route,
     bootstrap,
@@ -144,6 +250,68 @@ export function Sidebar({
     const activeId = useMemo(() => resolveActiveNavId(entries, route), [entries, route]);
     const panelClass = collapsed ? 'w-[4.5rem]' : 'w-60';
     const aboutActive = route.page === 'about' || route.path === '/a-propos';
+    const applicationUuid = route.page === 'application-detail' ? extractApplicationUuid(route.path) : null;
+    const newChatPath = newChatHref(applicationUuid);
+    const [sessions, setSessions] = useState<SidebarAgentSession[]>([]);
+    const activeSessionUuid = typeof window === 'undefined'
+        ? null
+        : new URLSearchParams(window.location.search).get('session');
+    const assistantBusy = hasRunningSidebarSession(sessions);
+
+    useEffect(() => {
+        if (!agentsEnabled) {
+            setSessions([]);
+            return;
+        }
+
+        let cancelled = false;
+
+        const load = async () => {
+            try {
+                const [agentsResponse, applicationsResponse] = await Promise.all([
+                    domainApi.agents(),
+                    domainApi.coreResources('applications').catch(() => ({ data: [] as Array<{ uuid: string; name: string }> })),
+                ]);
+
+                if (cancelled) {
+                    return;
+                }
+
+                const sessionsByAgent: Record<string, Awaited<ReturnType<typeof domainApi.agentSessions>>['data']> = {};
+                await Promise.all(agentsResponse.data.map(async (agent) => {
+                    try {
+                        const response = await domainApi.agentSessions(agent.uuid);
+                        sessionsByAgent[agent.uuid] = response.data;
+                    } catch {
+                        sessionsByAgent[agent.uuid] = [];
+                    }
+                }));
+
+                if (cancelled) {
+                    return;
+                }
+
+                setSessions(buildSidebarSessions(
+                    agentsResponse.data,
+                    sessionsByAgent,
+                    applicationsResponse.data.map((application) => ({
+                        uuid: application.uuid,
+                        name: application.name,
+                    })),
+                ));
+            } catch {
+                if (!cancelled) {
+                    setSessions([]);
+                }
+            }
+        };
+
+        void load();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [agentsEnabled, bootstrap.current_team.id]);
 
     return (
         <aside
@@ -189,10 +357,10 @@ export function Sidebar({
                 <div class={`px-2.5 pb-2 ${collapsed ? 'flex justify-center' : ''}`}>
                     <a
                         class={`btn btn-primary ${collapsed ? 'btn-square' : 'w-full'} h-10 min-h-10`}
-                        href={routeHref(AGENTS_CHAT_PATH)}
+                        href={routeHref(newChatPath)}
                         title="Nouveau chat"
                         aria-label="Nouveau chat"
-                        onClick={(event) => onNavigate(event, AGENTS_CHAT_PATH)}
+                        onClick={(event) => onNavigate(event, newChatPath)}
                     >
                         <Plus class="size-4" aria-hidden />
                         {!collapsed && <span>Nouveau chat</span>}
@@ -208,6 +376,7 @@ export function Sidebar({
                                 item={item}
                                 active={activeId === item.id}
                                 collapsed={collapsed}
+                                activityDot={item.id === 'assistant' && assistantBusy}
                                 onNavigate={onNavigate}
                             />
                         </li>
@@ -221,6 +390,15 @@ export function Sidebar({
                         />
                     )}
                 </ul>
+                {agentsEnabled && !collapsed && (
+                    <div class="mt-3 border-t border-[var(--devforge-sidebar-border)] pt-3">
+                        <SessionsNavigator
+                            sessions={sessions}
+                            activeSessionUuid={activeSessionUuid}
+                            onNavigate={onNavigate}
+                        />
+                    </div>
+                )}
             </nav>
 
             <div class="grid shrink-0 gap-1 border-t border-[var(--devforge-sidebar-border)] p-2.5 pb-safe lg:pb-2.5">
