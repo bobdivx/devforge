@@ -50,7 +50,7 @@ describe('OverviewPage', () => {
         expect(screen.getByRole('button', { name: /Rechercher une app, une commande/i })).toBeInTheDocument();
         expect(screen.getByText('Actif')).toBeInTheDocument();
         const appLink = screen.getAllByRole('link', { name: /popcorn-web/i })[0];
-        expect(appLink.getAttribute('href')).toBe('/devforge/applications/app-1/');
+        expect(appLink.getAttribute('href')).toBe('/devforge/applications/app-1/?tab=agents');
         expect(screen.getByRole('button', { name: 'Arrêter' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Redémarrer' })).toBeInTheDocument();
         expect(screen.getByRole('link', { name: /Ouvrir/i })).toBeInTheDocument();

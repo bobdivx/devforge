@@ -30,6 +30,8 @@ import { formatAgentProviderDisplay } from '../../lib/llm-models';
 import { scheduleLabel } from '../../lib/agent-triggers';
 import { useAgentRunTracker } from '../../lib/use-agent-run-tracker';
 import { isInFlightAgentRunStatus, shouldTrackAgentLatestRun } from '../../lib/agent-run-tracker';
+import { agentDetailSessionUuid } from '../../lib/agent-routes';
+import { pickApplicationChatAgent } from '../../lib/application-agent-chat';
 
 const typeLabels: Record<string, string> = {
     debug: 'Débogage',
@@ -273,7 +275,12 @@ type Props = {
 export function ApplicationAgentsPanel({ application, userName = 'Vous' }: Props) {
     const { agentsEnabled } = useTeamContext();
     const [createOpen, setCreateOpen] = useState(false);
-    const [selectedAgentUuid, setSelectedAgentUuid] = useState<string | null>(null);
+    const [selectedAgentUuid, setSelectedAgentUuid] = useState<string | null>(() => (
+        typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('agent')
+    ));
+    const [focusedSessionUuid, setFocusedSessionUuid] = useState<string | null>(() => (
+        typeof window === 'undefined' ? null : agentDetailSessionUuid(window.location.search)
+    ));
     const [activeSubTab, setActiveSubTab] = useState<'chat' | 'runs'>('chat');
     const [resetting, setResetting] = useState(false);
     const [deletingAll, setDeletingAll] = useState(false);
@@ -291,17 +298,62 @@ export function ApplicationAgentsPanel({ application, userName = 'Vous' }: Props
         [allAgents, application.uuid],
     );
 
-    // Initialiser l'agent sélectionné par défaut
+    // Initialiser l'agent sélectionné par défaut (URL agent=…, sinon agent chat de l’app)
     useEffect(() => {
-        if (selectedAgentUuid || allAgents.length === 0) {
+        if (allAgents.length === 0) {
             return;
         }
-        // Préférer un agent dédié ou deployment/worker/devforge
-        const first = dedicatedAgents[0] ?? teamAgents.find((a) => ['worker', 'deployment', 'devforge'].includes(a.type)) ?? allAgents[0];
-        if (first) {
-            setSelectedAgentUuid(first.uuid);
+
+        if (selectedAgentUuid && allAgents.some((agent) => agent.uuid === selectedAgentUuid)) {
+            return;
         }
-    }, [allAgents, dedicatedAgents, teamAgents, selectedAgentUuid]);
+
+        const fromUrl = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('agent');
+        if (fromUrl && allAgents.some((agent) => agent.uuid === fromUrl)) {
+            setSelectedAgentUuid(fromUrl);
+            return;
+        }
+
+        const preferred = pickApplicationChatAgent(allAgents, application.uuid)
+            ?? dedicatedAgents[0]
+            ?? teamAgents.find((a) => ['worker', 'deployment', 'devforge'].includes(a.type))
+            ?? allAgents[0];
+        if (preferred) {
+            setSelectedAgentUuid(preferred.uuid);
+        }
+    }, [allAgents, dedicatedAgents, teamAgents, selectedAgentUuid, application.uuid]);
+
+    useEffect(() => {
+        if (!selectedAgentUuid || typeof window === 'undefined') {
+            return;
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('new') !== '1') {
+            return;
+        }
+
+        let cancelled = false;
+
+        void domainApi.createAgentSession(selectedAgentUuid)
+            .then((created) => {
+                if (cancelled) {
+                    return;
+                }
+
+                setFocusedSessionUuid(created.data.uuid);
+                params.delete('new');
+                params.set('session', created.data.uuid);
+                params.set('agent', selectedAgentUuid);
+                params.set('tab', 'agents');
+                window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+            })
+            .catch(() => {});
+
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedAgentUuid]);
 
     const selectedAgent = useMemo(
         () => allAgents.find((a) => a.uuid === selectedAgentUuid) ?? null,
@@ -521,10 +573,12 @@ export function ApplicationAgentsPanel({ application, userName = 'Vous' }: Props
                                     </div>
                                 </div>
 
-                                <div class="h-[28rem] sm:h-[32rem]">
+                                <div class="h-[min(40rem,72dvh)] min-h-[22rem] sm:min-h-[28rem]">
                                     {activeSubTab === 'chat' ? (
                                         <AgentConversationView
                                             agent={selectedAgent}
+                                            initialSessionUuid={focusedSessionUuid}
+                                            applicationUuid={application.uuid}
                                             userName={userName}
                                             onAgentUpdated={() => void query.reload({ silent: true })}
                                         />
@@ -538,11 +592,11 @@ export function ApplicationAgentsPanel({ application, userName = 'Vous' }: Props
                             </div>
                         )}
 
-                        {/* Grille des cartes d'agents */}
-                        <div class="grid gap-2.5 sm:gap-3">
-                            <h4 class="text-xs font-semibold uppercase tracking-wider text-base-content/50">
+                        {/* Grille des cartes d'agents — secondaire au chat */}
+                        <details class="grid gap-2.5 sm:gap-3" open>
+                            <summary class="cursor-pointer text-xs font-semibold uppercase tracking-wider text-base-content/50">
                                 Vos Cartes d'Agents ({allAgents.length})
-                            </h4>
+                            </summary>
                             <div class="grid gap-2.5 sm:gap-3 md:grid-cols-2 xl:grid-cols-3">
                                 {allAgents.map((agent) => (
                                     <ApplicationAgentCardItem
@@ -559,7 +613,7 @@ export function ApplicationAgentsPanel({ application, userName = 'Vous' }: Props
                                     />
                                 ))}
                             </div>
-                        </div>
+                        </details>
                     </div>
                 )}
             </DataState>

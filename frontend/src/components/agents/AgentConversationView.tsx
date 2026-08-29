@@ -11,6 +11,7 @@ import { SessionHistoryList } from './SessionHistoryList';
 type Props = {
     agent: Agent;
     initialSessionUuid?: string | null;
+    applicationUuid?: string | null;
     onAgentUpdated: () => void;
     onRoutingChange?: (routing: AgentModelRouting | null) => void;
     userName?: string;
@@ -20,6 +21,7 @@ type Props = {
 export function AgentConversationView({
     agent,
     initialSessionUuid = null,
+    applicationUuid = null,
     onAgentUpdated,
     onRoutingChange,
     userName,
@@ -246,6 +248,7 @@ export function AgentConversationView({
         try {
             const response = await domainApi.sendAgentSessionMessage(agent.uuid, activeSession.uuid, trimmed || 'Voir les captures jointes.', {
                 chat_mode: chatMode,
+                ...(applicationUuid ? { application_uuid: applicationUuid } : {}),
                 ...(pendingAttachments.length > 0 ? { attachments: pendingAttachments } : {}),
             });
             setMessages((current) => [

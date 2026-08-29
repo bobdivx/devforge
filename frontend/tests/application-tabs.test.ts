@@ -51,13 +51,17 @@ describe('onglets applications / databases', () => {
         expect(parseApplicationTab('storage')).toBe('storage');
         expect(parseApplicationTab('limits')).toBe('limits');
         expect(parseApplicationTab('inconnu')).toBe('overview');
+        expect(parseApplicationTab(null)).toBe('agents');
+        expect(parseApplicationTab(undefined)).toBe('agents');
         expect(applicationPath('app-uuid', 'agents')).toBe('/applications/app-uuid?tab=agents');
         expect(applicationPath('app-uuid', 'logs')).toBe('/applications/app-uuid?tab=logs');
         expect(applicationPath('app-uuid', 'tasks')).toBe('/applications/app-uuid?tab=tasks');
         expect(applicationPath('app-uuid', 'previews')).toBe('/applications/app-uuid?tab=previews');
         expect(applicationPath('app-uuid', 'storage')).toBe('/applications/app-uuid?tab=storage');
         expect(applicationPath('app-uuid', 'limits')).toBe('/applications/app-uuid?tab=limits');
-        expect(applicationPath('app-uuid')).toBe('/applications/app-uuid');
+        expect(applicationPath('app-uuid')).toBe('/applications/app-uuid?tab=agents');
+        expect(applicationPath('app-uuid', 'overview')).toBe('/applications/app-uuid?tab=overview');
+        expect(applicationPath('app-uuid', 'agents')).toBe('/applications/app-uuid?tab=agents');
     });
 
     it('mappe les segments Coolify vers les onglets DevForge', () => {

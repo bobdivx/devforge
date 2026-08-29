@@ -2,6 +2,7 @@ import { ApiError } from './api-client';
 import type { AgentChatMessage, AgentChatStep, AgentModelRouting } from './domain-api';
 import { domainApi } from './domain-api';
 import { isTerminalAgentRunStatus } from './agent-run-tracker';
+import { emitSpotlightFromSteps } from './application-spotlight';
 
 const API_BASE = '/api/devforge/v1';
 
@@ -50,6 +51,10 @@ function parseSseChunk(buffer: string): { events: Array<{ event: string; data: s
     }
 
     return { events, rest };
+}
+
+function notifySpotlight(payload: StreamStatusPayload): void {
+    emitSpotlightFromSteps(payload.steps);
 }
 
 /**
@@ -124,6 +129,7 @@ async function waitViaSse(
                 if (payload.model_routing) {
                     onRouting?.(payload.model_routing);
                 }
+                notifySpotlight(payload);
                 onProgress?.(payload);
                 continue;
             }
@@ -164,7 +170,7 @@ async function waitViaPolling(
         if (run.data.metadata?.model_routing) {
             onRouting?.(run.data.metadata.model_routing);
         }
-        onProgress?.({
+        const payload: StreamStatusPayload = {
             status: run.data.status,
             iterations: run.data.iterations,
             tokens_used: run.data.tokens_used,
@@ -173,7 +179,9 @@ async function waitViaPolling(
             active_subagent_count: run.data.active_subagent_count ?? 0,
             steps: run.data.metadata?.steps,
             model_routing: run.data.metadata?.model_routing ?? null,
-        });
+        };
+        notifySpotlight(payload);
+        onProgress?.(payload);
 
         if (run.data.status === 'failed') {
             throw new ApiError(502, { message: run.data.summary ?? 'La réponse de l\'agent a échoué.' });

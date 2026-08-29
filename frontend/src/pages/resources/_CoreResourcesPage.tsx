@@ -114,7 +114,7 @@ function readServiceDeepLink(): { uuid: string | null; tab: ServiceDetailTabId }
 
 function readApplicationTabDeepLink(): ApplicationTabId {
     if (typeof window === 'undefined') {
-        return 'overview';
+        return 'agents';
     }
 
     return parseApplicationTab(new URLSearchParams(window.location.search).get('tab'));
@@ -415,7 +415,7 @@ export function CoreResourcesPage({ type, permissions, embedded = false, legacyB
         setSelectedUuid(null);
     }, [type, initialResourceUuid]);
 
-    const openApplication = (uuid: string, tab: ApplicationTabId = 'overview') => {
+    const openApplication = (uuid: string, tab: ApplicationTabId = 'agents') => {
         setSelectedUuid(uuid);
         setApplicationInitialTab(tab);
         navigateTo(applicationPath(uuid, tab));

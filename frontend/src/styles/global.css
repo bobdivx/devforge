@@ -727,18 +727,27 @@ input {
     pointer-events: none;
 }
 
+.devforge-workspace-dock__bar {
+    pointer-events: auto;
+    display: flex;
+    align-items: stretch;
+    width: 100%;
+    border-top: 1px solid #E5E7EB;
+    background: color-mix(in oklab, var(--color-base-100) 78%, transparent);
+    box-shadow: 0 -8px 28px color-mix(in oklab, var(--color-base-content) 8%, transparent);
+    backdrop-filter: blur(18px);
+}
+
 .devforge-workspace-dock__inner {
     position: relative;
     pointer-events: auto;
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 0;
-    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
     padding: 0.35rem 0.75rem max(0.35rem, env(safe-area-inset-bottom));
-    border-top: 1px solid #E5E7EB;
-    background: color-mix(in oklab, var(--color-base-100) 78%, transparent);
-    box-shadow: 0 -8px 28px color-mix(in oklab, var(--color-base-content) 8%, transparent);
-    backdrop-filter: blur(18px);
 }
 
 .devforge-workspace-dock__pill {
@@ -776,7 +785,34 @@ input {
     color: var(--color-primary);
 }
 
-[data-theme="dark"] .devforge-workspace-dock__inner {
+.devforge-workspace-dock__spotlight {
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    flex: 0 0 auto;
+    margin: 0.35rem 0.65rem 0.35rem 0;
+    padding: 0.35rem 0.55rem;
+    border: 0;
+    border-radius: 9999px;
+    background: transparent;
+    color: var(--color-base-content);
+    opacity: 0.45;
+    font-size: 0.6rem;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.devforge-workspace-dock__spotlight.is-on,
+.devforge-workspace-dock__spotlight[aria-pressed="true"] {
+    opacity: 1;
+    color: var(--color-primary);
+}
+
+[data-theme="dark"] .devforge-workspace-dock__bar {
     border-color: color-mix(in oklab, var(--color-base-content) 12%, transparent);
 }
 

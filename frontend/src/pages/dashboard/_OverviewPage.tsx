@@ -35,7 +35,7 @@ function AppStatusCard({
 }) {
     const state = pandaAppState(application.status);
     const actions = pandaAppActions(state);
-    const href = applicationPath(application.uuid);
+    const href = applicationPath(application.uuid, 'agents');
 
     return (
         <article class="devforge-card flex min-w-0 flex-col gap-4 rounded-2xl border border-[#E5E7EB] bg-base-100 p-4">
