@@ -359,6 +359,8 @@ class AgentDirectives
             return [];
         }
 
+        $text = preg_replace('/^\s*\{\}\s*/', '', $text) ?? $text;
+
         $known = array_fill_keys(array_map('strtolower', self::chatKnownToolNames()), true);
         $calls = [];
 
@@ -496,6 +498,8 @@ class AgentDirectives
             'list_github_branches',
             'list_github_apps',
             'list_github_repos',
+            'request_user_input',
+            'request_api_key',
             'list_github_workflow_runs',
             'get_github_workflow_run',
             'list_github_workflow_jobs',

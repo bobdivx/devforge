@@ -2566,11 +2566,53 @@ class AgentToolkit
             ? trim((string) $arguments['mission_uuid'])
             : (is_string($this->run->metadata['mission_uuid'] ?? null) ? $this->run->metadata['mission_uuid'] : null);
 
+        $resourceUuid = ($resourceUuid !== null && $resourceUuid !== '')
+            ? mb_substr($resourceUuid, 0, 64)
+            : null;
+        $canonical = AiAgentKeyRequest::canonicalKeyName($key);
+
+        $existing = AiAgentKeyRequest::pendingLogicalQuery(
+            (int) $this->team->id,
+            $canonical,
+            $resourceUuid,
+        )->first();
+
+        if ($existing instanceof AiAgentKeyRequest) {
+            AiAgentKeyRequest::pendingLogicalQuery((int) $this->team->id, $canonical, $resourceUuid)
+                ->where('id', '!=', $existing->id)
+                ->update(['status' => 'cancelled']);
+
+            if ($message !== '' && $existing->reason !== $message) {
+                $existing->update(['reason' => mb_substr($message, 0, 2000)]);
+            }
+
+            $request = $existing->fresh() ?? $existing;
+            $this->run->mergeMetadata([
+                'pending_user_input' => [
+                    'request_uuid' => $request->uuid,
+                    'key' => $canonical,
+                    'kind' => $kind,
+                    'mission_uuid' => $missionUuid,
+                    'reused' => true,
+                ],
+            ]);
+            $this->run->appendLog("Demande utilisateur déjà pending ({$kind}/{$canonical}) — réutilisation {$request->uuid}.");
+
+            return [
+                'status' => 'waiting_for_input',
+                'message' => "Demande « {$canonical} » déjà en attente (pas de doublon).",
+                'request_uuid' => $request->uuid,
+                'kind' => $kind,
+                'key' => $canonical,
+                'reused' => true,
+            ];
+        }
+
         $payload = [
             'team_id' => $this->team->id,
             'agent_id' => $this->agent->id,
             'run_id' => $this->run->id,
-            'key_name' => mb_substr($key, 0, 190),
+            'key_name' => mb_substr($canonical, 0, 190),
             'reason' => mb_substr($message, 0, 2000),
             'status' => 'pending',
         ];
@@ -2580,7 +2622,7 @@ class AgentToolkit
         }
         if (\Illuminate\Support\Facades\Schema::hasColumn('ai_agent_key_requests', 'resource_uuid')
             && $resourceUuid !== null && $resourceUuid !== '') {
-            $payload['resource_uuid'] = mb_substr($resourceUuid, 0, 64);
+            $payload['resource_uuid'] = $resourceUuid;
         }
         if (\Illuminate\Support\Facades\Schema::hasColumn('ai_agent_key_requests', 'mission_uuid')
             && $missionUuid !== null && $missionUuid !== '') {

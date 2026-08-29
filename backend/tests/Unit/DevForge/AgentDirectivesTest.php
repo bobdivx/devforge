@@ -278,3 +278,22 @@ it('detects bad gateway proxy port mismatches for agent harness', function () {
             'probe_error HTTP 502 bad gateway traefik loadbalancer.server.port=80 astro'
         )))->toBe(AgentChatRepairStrategy::ISSUE_PROXY_PORT);
 });
+
+
+it('extracts qwen text tool calls with empty-object prefix', function () {
+    $calls = AgentDirectives::extractProseToolCalls('{}{"name": "list_github_apps","arguments": {}}');
+
+    expect($calls)->toHaveCount(1)
+        ->and($calls[0]['name'])->toBe('list_github_apps')
+        ->and($calls[0]['arguments'])->toBe([]);
+});
+
+it('extracts request_user_input written as json', function () {
+    $calls = AgentDirectives::extractProseToolCalls(
+        '{"name":"request_user_input","arguments":{"key":"DATABASE_URL","message":"URL Turso manquante"}}'
+    );
+
+    expect($calls)->toHaveCount(1)
+        ->and($calls[0]['name'])->toBe('request_user_input')
+        ->and($calls[0]['arguments']['key'])->toBe('DATABASE_URL');
+});

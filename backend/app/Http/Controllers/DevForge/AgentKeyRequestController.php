@@ -93,6 +93,16 @@ class AgentKeyRequestController extends Controller
         }
         $keyRequest->update($payload);
 
+        $siblingQuery = AiAgentKeyRequest::pendingLogicalQuery(
+            (int) $team->id,
+            (string) $keyRequest->key_name,
+            is_string($keyRequest->resource_uuid) ? $keyRequest->resource_uuid : null,
+        )->where('id', '!=', $keyRequest->id);
+        $siblingCount = (clone $siblingQuery)->count();
+        if ($siblingCount > 0) {
+            $siblingQuery->update($payload);
+        }
+
         if (is_string($keyRequest->mission_uuid) && $keyRequest->mission_uuid !== '') {
             $this->missionBoard->update($team, $keyRequest->mission_uuid, [
                 'status' => 'open',
@@ -134,13 +144,19 @@ class AgentKeyRequestController extends Controller
             }
 
             try {
-                $this->envCatalog->upsert($application, [
-                    'key' => $keyRequest->key_name,
-                    'value' => $value,
-                    'is_buildtime' => true,
-                    'is_runtime' => true,
-                    'is_literal' => true,
-                ]);
+                $keys = array_values(array_unique([
+                    (string) $keyRequest->key_name,
+                    AiAgentKeyRequest::canonicalKeyName((string) $keyRequest->key_name),
+                ]));
+                foreach ($keys as $envKey) {
+                    $this->envCatalog->upsert($application, [
+                        'key' => $envKey,
+                        'value' => $value,
+                        'is_buildtime' => true,
+                        'is_runtime' => true,
+                        'is_literal' => true,
+                    ]);
+                }
             } catch (\Throwable $exception) {
                 return ['error' => mb_substr($exception->getMessage(), 0, 300)];
             }
