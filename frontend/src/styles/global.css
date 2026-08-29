@@ -8,17 +8,17 @@
     default: true;
     color-scheme: light;
     --color-base-100: #ffffff;
-    --color-base-200: #f3f5f2;
-    --color-base-300: #e3e8e4;
-    --color-base-content: #15231c;
-    --color-primary: #0f6b4c;
+    --color-base-200: #F7F8FA;
+    --color-base-300: #E5E7EB;
+    --color-base-content: #111827;
+    --color-primary: #2B54F0;
     --color-primary-content: #ffffff;
-    --color-secondary: #1e4d31;
+    --color-secondary: #1E3A8A;
     --color-secondary-content: #ffffff;
-    --color-accent: #1aa37a;
+    --color-accent: #2B54F0;
     --color-accent-content: #ffffff;
-    --color-neutral: #14201a;
-    --color-neutral-content: #e9f3ee;
+    --color-neutral: #111827;
+    --color-neutral-content: #F9FAFB;
     --color-info: #2563eb;
     --color-success: #16a34a;
     --color-warning: #ca8a04;
@@ -308,12 +308,13 @@ pre,
 }
 
 [data-theme="light"] {
-    --devforge-sidebar-bg: #10231c;
-    --devforge-sidebar-fg: #e9f3ee;
-    --devforge-sidebar-muted: #8aa396;
-    --devforge-sidebar-hover: rgba(255, 255, 255, 0.06);
-    --devforge-sidebar-active-bg: rgba(61, 220, 151, 0.16);
-    --devforge-sidebar-active-fg: #3ddc97;
+    --devforge-sidebar-bg: #FBFCFD;
+    --devforge-sidebar-fg: #111827;
+    --devforge-sidebar-muted: #6B7280;
+    --devforge-sidebar-hover: rgba(17, 24, 39, 0.05);
+    --devforge-sidebar-active-bg: rgba(43, 84, 240, 0.10);
+    --devforge-sidebar-active-fg: #2B54F0;
+    --devforge-sidebar-border: #E5E7EB;
 }
 
 [data-theme="dark"] {
@@ -323,12 +324,14 @@ pre,
     --devforge-sidebar-hover: rgba(255, 255, 255, 0.05);
     --devforge-sidebar-active-bg: color-mix(in oklab, var(--color-primary) 16%, transparent);
     --devforge-sidebar-active-fg: var(--color-primary);
+    --devforge-sidebar-border: rgba(255, 255, 255, 0.08);
 }
 
 .devforge-sidebar {
     min-height: 100dvh;
     background: var(--devforge-sidebar-bg);
     color: var(--devforge-sidebar-fg);
+    border-right: 1px solid var(--devforge-sidebar-border, transparent);
 }
 
 .devforge-topbar {
@@ -710,5 +713,75 @@ input {
         max-width: 100%;
         word-wrap: break-word;
         overflow-wrap: break-word;
+    }
+}
+
+
+/* PandaOS shell: command palette + application workspace dock */
+.devforge-workspace-dock {
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    z-index: 35;
+    padding: 0;
+    pointer-events: none;
+}
+
+.devforge-workspace-dock__inner {
+    position: relative;
+    pointer-events: auto;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0;
+    width: 100%;
+    padding: 0.35rem 0.75rem max(0.35rem, env(safe-area-inset-bottom));
+    border-top: 1px solid #E5E7EB;
+    background: color-mix(in oklab, var(--color-base-100) 78%, transparent);
+    box-shadow: 0 -8px 28px color-mix(in oklab, var(--color-base-content) 8%, transparent);
+    backdrop-filter: blur(18px);
+}
+
+.devforge-workspace-dock__pill {
+    position: absolute;
+    top: 0.35rem;
+    bottom: 0.35rem;
+    left: 0.35rem;
+    border-radius: 9999px;
+    background: color-mix(in oklab, var(--color-primary) 12%, var(--color-base-100));
+    transition: transform 220ms ease;
+}
+
+.devforge-workspace-dock__item {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    padding: 0.45rem 0.25rem;
+    border-radius: 9999px;
+    color: var(--color-base-content);
+    opacity: 0.55;
+    font-size: 0.65rem;
+    font-weight: 600;
+    line-height: 1;
+    transition: opacity 160ms ease, color 160ms ease;
+}
+
+.devforge-workspace-dock__item.is-active,
+.devforge-workspace-dock__item[aria-current="page"] {
+    opacity: 1;
+    color: var(--color-primary);
+}
+
+[data-theme="dark"] .devforge-workspace-dock__inner {
+    border-color: color-mix(in oklab, var(--color-base-content) 12%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .devforge-workspace-dock__pill {
+        transition: none;
     }
 }
