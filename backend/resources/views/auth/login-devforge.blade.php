@@ -6,7 +6,103 @@
         $passwordValue = app()->environment('local') ? 'password' : '';
     @endphp
 
-    <div class="devforge-auth-shell">
+    <div class="devforge-auth-shell devforge-auth-shell-split">
+        <aside class="devforge-auth-ecosystem" aria-labelledby="df-eco-title">
+            <div
+                class="devforge-auth-constellation"
+                role="img"
+                aria-label="DevForge au centre, relié à GitHub, MCP, clés d’équipe et agents IA"
+            >
+                <svg class="devforge-auth-eco-lines" viewBox="0 0 400 400" fill="none" aria-hidden="true">
+                    <defs>
+                        <linearGradient id="df-eco-stroke" x1="200" y1="200" x2="200" y2="64" gradientUnits="userSpaceOnUse">
+                            <stop stop-color="#fcd452" stop-opacity="0.55" />
+                            <stop offset="1" stop-color="#fcd452" stop-opacity="0.08" />
+                        </linearGradient>
+                    </defs>
+                    <circle cx="200" cy="200" r="118" stroke="#fcd452" stroke-opacity="0.08" />
+                    <circle cx="200" cy="200" r="168" stroke="#ffffff" stroke-opacity="0.05" stroke-dasharray="3 10" />
+                    <path d="M200 200 L200 64" stroke="url(#df-eco-stroke)" stroke-width="1.25" />
+                    <path d="M200 200 L336 128" stroke="#fcd452" stroke-opacity="0.28" stroke-width="1.25" />
+                    <path d="M200 200 L336 272" stroke="#fcd452" stroke-opacity="0.22" stroke-width="1.25" />
+                    <path d="M200 200 L200 336" stroke="#fcd452" stroke-opacity="0.26" stroke-width="1.25" />
+                    <path d="M200 200 L64 272" stroke="#ffffff" stroke-opacity="0.12" stroke-width="1.15" stroke-dasharray="4 6" />
+                </svg>
+
+                <div class="devforge-auth-eco-hub">
+                    <img src="/brand/logo.png" alt="" width="64" height="64" />
+                    <span>DevForge</span>
+                </div>
+
+                <div class="devforge-auth-eco-node" style="--x: 50%; --y: 16%; --delay: 0s;">
+                    <span class="devforge-auth-eco-icon" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
+                            <path d="M9 18c-4.51 2-5-2-7-2" />
+                        </svg>
+                    </span>
+                    <span class="devforge-auth-eco-label">GitHub</span>
+                </div>
+
+                <div class="devforge-auth-eco-node" style="--x: 84%; --y: 32%; --delay: 0.4s;">
+                    <span class="devforge-auth-eco-icon" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2v6" />
+                            <path d="m8 8 4-6 4 6" />
+                            <rect x="4" y="14" width="6" height="8" rx="1" />
+                            <rect x="14" y="14" width="6" height="8" rx="1" />
+                            <path d="M7 14v-2a5 5 0 0 1 10 0v2" />
+                        </svg>
+                    </span>
+                    <span class="devforge-auth-eco-label">MCP</span>
+                </div>
+
+                <div class="devforge-auth-eco-node" style="--x: 84%; --y: 68%; --delay: 0.8s;">
+                    <span class="devforge-auth-eco-icon" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="7.5" cy="15.5" r="5.5" />
+                            <path d="m21 2-9.6 9.6" />
+                            <path d="m15.5 7.5 3 3L22 7l-3-3" />
+                        </svg>
+                    </span>
+                    <span class="devforge-auth-eco-label">Clés d’équipe</span>
+                </div>
+
+                <div class="devforge-auth-eco-node" style="--x: 50%; --y: 84%; --delay: 1.1s;">
+                    <span class="devforge-auth-eco-icon" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 8V4H8" />
+                            <rect width="16" height="12" x="4" y="8" rx="2" />
+                            <path d="M2 14h2" />
+                            <path d="M20 14h2" />
+                            <path d="M15 13v2" />
+                            <path d="M9 13v2" />
+                        </svg>
+                    </span>
+                    <span class="devforge-auth-eco-label">Agents IA</span>
+                </div>
+
+                <div class="devforge-auth-eco-node is-soon" style="--x: 16%; --y: 68%; --delay: 1.5s;">
+                    <span class="devforge-auth-eco-icon" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                            <rect width="7" height="7" x="3" y="3" rx="1" />
+                            <rect width="7" height="7" x="14" y="3" rx="1" />
+                            <rect width="7" height="7" x="14" y="14" rx="1" />
+                            <rect width="7" height="7" x="3" y="14" rx="1" />
+                        </svg>
+                    </span>
+                    <span class="devforge-auth-eco-label">Slack <small>bientôt</small></span>
+                </div>
+            </div>
+
+            <p class="devforge-auth-eco-kicker">Écosystème d’apps connecté</p>
+            <h2 class="devforge-auth-eco-title" id="df-eco-title">Laissez l’IA travailler dans vos outils</h2>
+            <p class="devforge-auth-eco-lead">
+                GitHub, MCP et clés d’équipe, reliés à un seul hub DevForge —
+                plus besoin de copier-coller entre vos apps.
+            </p>
+        </aside>
+
         <div class="devforge-auth-panel">
             <header class="devforge-auth-brand">
                 <img
@@ -144,32 +240,21 @@
                 @endif
             </div>
 
-            <div class="devforge-auth-card">
-                <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-                    <h3 style="margin: 0; font-size: 1rem; font-weight: 600; color: #fff;">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: text-bottom; margin-inline-end: 0.5rem; color: var(--df-primary);" aria-hidden="true">
-                            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-                            <circle cx="12" cy="12" r="3" />
-                        </svg>
-                        Token API DevForge
-                    </h3>
-                    <p class="devforge-auth-muted" style="margin: 0; line-height: 1.5;">
-                        Les tokens API vous permettent d'accéder à DevForge depuis des outils externes, des scripts ou l'interface MCP.
-                    </p>
-                    <div class="devforge-auth-divider">
-                        <span>Comment générer un token</span>
-                    </div>
-                    <ol class="devforge-auth-muted" style="margin: 0; padding-inline-start: 1.25rem; line-height: 1.6; font-size: 0.875rem;">
-                        <li>Connectez-vous avec vos identifiants ci-dessus</li>
-                        <li>Accédez à <strong style="color: var(--df-content);">Sécurité → Tokens API</strong></li>
-                        <li>Créez un nouveau token avec les permissions appropriées</li>
-                        <li>Copiez le token généré (il ne sera affiché qu'une seule fois)</li>
-                    </ol>
-                    <p class="devforge-auth-muted" style="margin: 0.75rem 0 0; font-size: 0.8125rem;">
-                        <strong style="color: var(--df-primary);">Note :</strong> Les tokens ne peuvent être générés qu'après authentification pour des raisons de sécurité.
-                    </p>
-                </div>
-            </div>
+            <details class="devforge-auth-card devforge-auth-details devforge-auth-token-hint">
+                <summary>Token API DevForge</summary>
+                <p class="devforge-auth-muted" style="margin: 0.75rem 0 0; line-height: 1.5;">
+                    Les tokens API vous permettent d’accéder à DevForge depuis des outils externes, des scripts ou l’interface MCP.
+                </p>
+                <ol class="devforge-auth-muted" style="margin: 0.75rem 0 0; padding-inline-start: 1.25rem; line-height: 1.6; font-size: 0.875rem;">
+                    <li>Connectez-vous avec vos identifiants ci-dessus</li>
+                    <li>Accédez à <strong style="color: var(--df-content);">Sécurité → Tokens API</strong></li>
+                    <li>Créez un nouveau token avec les permissions appropriées</li>
+                    <li>Copiez le token généré (il ne sera affiché qu’une seule fois)</li>
+                </ol>
+                <p class="devforge-auth-muted" style="margin: 0.75rem 0 0; font-size: 0.8125rem;">
+                    <strong style="color: var(--df-primary);">Note :</strong> Les tokens ne peuvent être générés qu’après authentification pour des raisons de sécurité.
+                </p>
+            </details>
         </div>
     </div>
 
