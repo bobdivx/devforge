@@ -163,3 +163,135 @@ trait ApplicationWorkspaceChatContextSupport
             default => 'none',
         };
     }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function linkedDatabases(Application $application): array
+    {
+        try {
+            $variables = $application->environment_variables()
+                ->where('is_preview', false)
+                ->get(['key', 'comment']);
+        } catch (Throwable) {
+            return [];
+        }
+
+        $byUuid = [];
+        $prefix = LibsqlConnectionEnvSync::LINK_COMMENT_PREFIX;
+        foreach ($variables as $variable) {
+            $comment = (string) ($variable->comment ?? '');
+            if (! str_starts_with($comment, $prefix)) {
+                continue;
+            }
+            $uuid = substr($comment, strlen($prefix));
+            if ($uuid === '') {
+                continue;
+            }
+            $byUuid[$uuid]['uuid'] = $uuid;
+            $byUuid[$uuid]['env_keys'][] = $variable->key;
+        }
+
+        if ($byUuid === []) {
+            return [];
+        }
+
+        try {
+            $databases = $application->environment?->databases() ?? collect();
+            foreach ($databases as $database) {
+                $uuid = (string) ($database->uuid ?? '');
+                if (! isset($byUuid[$uuid])) {
+                    continue;
+                }
+                $engine = str((string) $database->type())->after('standalone-')->value();
+                $byUuid[$uuid]['name'] = (string) $database->name;
+                $byUuid[$uuid]['engine'] = $engine;
+                $byUuid[$uuid]['status'] = is_string($database->status ?? null) ? $database->status : null;
+            }
+        } catch (Throwable) {
+        }
+
+        return array_values($byUuid);
+    }
+
+    /**
+     * @param  mixed  $hints
+     */
+    private function formatEnvHints(mixed $hints): string
+    {
+        if (! is_array($hints) || $hints === []) {
+            return '  (aucune)';
+        }
+
+        $lines = [];
+        foreach ($hints as $hint) {
+            if (! is_array($hint)) {
+                continue;
+            }
+            $key = (string) ($hint['key'] ?? '');
+            if ($key === '') {
+                continue;
+            }
+            $scheme = (string) ($hint['scheme'] ?? 'none');
+            $length = (int) ($hint['length'] ?? 0);
+            $placeholder = ! empty($hint['is_placeholder']) ? 'placeholder' : 'set';
+            $lines[] = "  - {$key} (len={$length}, scheme={$scheme}, {$placeholder})";
+        }
+
+        return $lines === [] ? '  (aucune)' : implode("\n", $lines);
+    }
+
+    /**
+     * @param  mixed  $databases
+     */
+    private function formatLinkedDatabases(mixed $databases): string
+    {
+        if (! is_array($databases) || $databases === []) {
+            return '  (aucune)';
+        }
+
+        $lines = [];
+        foreach ($databases as $database) {
+            if (! is_array($database)) {
+                continue;
+            }
+            $name = (string) ($database['name'] ?? $database['uuid'] ?? 'db');
+            $engine = (string) ($database['engine'] ?? 'inconnu');
+            $status = (string) ($database['status'] ?? 'inconnu');
+            $keys = $database['env_keys'] ?? [];
+            $keyList = is_array($keys) ? implode(',', array_map('strval', $keys)) : '';
+            $lines[] = "  - {$name} engine={$engine} status={$status} env={$keyList}";
+        }
+
+        return $lines === [] ? '  (aucune)' : implode("\n", $lines);
+    }
+
+    /**
+     * @param  mixed  $deployment
+     */
+    private function formatLatestDeployment(mixed $deployment): string
+    {
+        if (! is_array($deployment) || $deployment === []) {
+            return '- Dernier déploiement : aucun';
+        }
+
+        $uuid = (string) ($deployment['uuid'] ?? 'inconnu');
+        $status = (string) ($deployment['status'] ?? 'inconnu');
+        $started = (string) ($deployment['at'] ?? $deployment['started_at'] ?? 'inconnu');
+        $rollback = ! empty($deployment['rollback']) ? ' rollback=oui' : '';
+        $block = "- Dernier déploiement : {$uuid} status={$status} at={$started}{$rollback}";
+
+        $logs = $deployment['failed_logs'] ?? [];
+        if (is_array($logs) && $logs !== []) {
+            $block .= "\n  Dernières lignes de log (échec, non hidden) :\n";
+            foreach ($logs as $line) {
+                if (! is_string($line) || $line === '') {
+                    continue;
+                }
+                $block .= '    '.$line."\n";
+            }
+        }
+
+        return rtrim($block);
+    }
+}
