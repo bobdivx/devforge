@@ -1,5 +1,5 @@
 import { Braces, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-preact';
-import { useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import { ActionToolbar } from '../ui/ActionToolbar';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { DataState } from '../ui/DataState';
@@ -242,6 +242,14 @@ export function SharedVariablesPanel({ path, embedded = false, canManage = false
     const tabItems = tabs.map(({ id, label }) => ({ id, label }));
     const formScope = (embedded && activeScope === 'overview' ? 'team' : activeScope) as Exclude<SharedVariableScopeTab, 'overview'>;
     const canCreate = canManage && activeScope !== 'overview';
+
+    useEffect(() => {
+        const onReload = () => {
+            void query.reload();
+        };
+        window.addEventListener('devforge-reload-shared-variables', onReload);
+        return () => window.removeEventListener('devforge-reload-shared-variables', onReload);
+    }, [query.reload]);
 
     const reload = async () => {
         setMutationError(null);
