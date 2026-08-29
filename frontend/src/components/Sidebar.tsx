@@ -1,12 +1,13 @@
-import { Info, PanelLeftClose, PanelLeftOpen, Sparkles, X } from 'lucide-preact';
+import { Info, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, X } from 'lucide-preact';
 import { useMemo } from 'preact/hooks';
 import type { BootstrapData } from '../lib/bootstrap';
 import { DEVFORGE_BRAND_NAME, DEVFORGE_LOGO_URL } from '../lib/brand';
+import { AGENTS_CHAT_PATH } from '../lib/agent-routes';
 import {
-    flattenSidebarNav,
+    plusSidebarSection,
+    primarySidebarNav,
     resolveActiveNavId,
     visibleSidebarNav,
-    type SidebarNavEntry,
     type SidebarNavLink,
     type SidebarNavSection,
 } from '../lib/routing/sidebar-nav';
@@ -64,48 +65,7 @@ function NavLink({
     );
 }
 
-function NavEntries({
-    entries,
-    activeId,
-    collapsed,
-    onNavigate,
-}: {
-    entries: SidebarNavEntry[];
-    activeId: string | null;
-    collapsed: boolean;
-    onNavigate: (event: MouseEvent, path: string) => void;
-}) {
-    return (
-        <ul class="flex flex-col gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 p-0">
-            {entries.map((entry) => {
-                if (entry.type === 'section') {
-                    return (
-                        <NavSection
-                            key={entry.id}
-                            section={entry}
-                            activeId={activeId}
-                            collapsed={collapsed}
-                            onNavigate={onNavigate}
-                        />
-                    );
-                }
-
-                return (
-                    <li key={entry.id}>
-                        <NavLink
-                            item={entry}
-                            active={activeId === entry.id}
-                            collapsed={collapsed}
-                            onNavigate={onNavigate}
-                        />
-                    </li>
-                );
-            })}
-        </ul>
-    );
-}
-
-function NavSection({
+function PlusSection({
     section,
     activeId,
     collapsed,
@@ -116,26 +76,50 @@ function NavSection({
     collapsed: boolean;
     onNavigate: (event: MouseEvent, path: string) => void;
 }) {
+    const childActive = section.items.some((item) => item.id === activeId);
+
+    if (collapsed) {
+        return (
+            <li>
+                <ul class="flex flex-col gap-0.5 p-0">
+                    {section.items.map((item) => (
+                        <li key={item.id}>
+                            <NavLink
+                                item={item}
+                                active={activeId === item.id}
+                                collapsed
+                                onNavigate={onNavigate}
+                            />
+                        </li>
+                    ))}
+                </ul>
+            </li>
+        );
+    }
+
     return (
         <li>
-            {!collapsed && (
-                <p class="mb-1.5 px-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--devforge-sidebar-muted)]">
-                    {section.label}
-                </p>
-            )}
-            <ul class="flex flex-col gap-0.5 p-0">
-                {section.items.map((item) => (
-                    <li key={item.id}>
-                        <NavLink
-                            item={item}
-                            active={activeId === item.id}
-                            collapsed={collapsed}
-                            nested={!collapsed}
-                            onNavigate={onNavigate}
-                        />
-                    </li>
-                ))}
-            </ul>
+            <details class="group" open={childActive || undefined}>
+                <summary
+                    class={`${linkClass(childActive)} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}
+                >
+                    <MoreHorizontal class="size-3.5 sm:size-4 shrink-0" aria-hidden />
+                    <span class="truncate">Plus</span>
+                </summary>
+                <ul class="mt-1 flex flex-col gap-0.5 p-0 ps-1">
+                    {section.items.map((item) => (
+                        <li key={item.id}>
+                            <NavLink
+                                item={item}
+                                active={activeId === item.id}
+                                collapsed={false}
+                                nested
+                                onNavigate={onNavigate}
+                            />
+                        </li>
+                    ))}
+                </ul>
+            </details>
         </li>
     );
 }
@@ -155,9 +139,10 @@ export function Sidebar({
         () => visibleSidebarNav(agentsEnabled, instanceAdmin),
         [agentsEnabled, instanceAdmin],
     );
+    const primary = useMemo(() => primarySidebarNav(entries), [entries]);
+    const plus = useMemo(() => plusSidebarSection(entries), [entries]);
     const activeId = useMemo(() => resolveActiveNavId(entries, route), [entries, route]);
-    const panelClass = collapsed ? 'w-[4.5rem]' : 'w-64';
-    const collapsedLinks = useMemo(() => flattenSidebarNav(entries), [entries]);
+    const panelClass = collapsed ? 'w-[4.5rem]' : 'w-60';
     const aboutActive = route.page === 'about' || route.path === '/a-propos';
 
     return (
@@ -200,43 +185,45 @@ export function Sidebar({
                 </button>
             </div>
 
+            {agentsEnabled && (
+                <div class={`px-2.5 pb-2 ${collapsed ? 'flex justify-center' : ''}`}>
+                    <a
+                        class={`btn btn-primary ${collapsed ? 'btn-square' : 'w-full'} h-10 min-h-10`}
+                        href={routeHref(AGENTS_CHAT_PATH)}
+                        title="Nouveau chat"
+                        aria-label="Nouveau chat"
+                        onClick={(event) => onNavigate(event, AGENTS_CHAT_PATH)}
+                    >
+                        <Plus class="size-4" aria-hidden />
+                        {!collapsed && <span>Nouveau chat</span>}
+                    </a>
+                </div>
+            )}
+
             <nav class="custom-scrollbar flex-1 overflow-y-auto overscroll-contain px-2.5 pb-2">
-                {collapsed ? (
-                    <ul class="flex flex-col gap-1 p-0">
-                        {collapsedLinks.map((item) => (
-                            <li key={item.id}>
-                                <NavLink
-                                    item={item}
-                                    active={activeId === item.id}
-                                    collapsed
-                                    onNavigate={onNavigate}
-                                />
-                            </li>
-                        ))}
-                    </ul>
-                ) : (
-                    <NavEntries
-                        entries={entries}
-                        activeId={activeId}
-                        collapsed={false}
-                        onNavigate={onNavigate}
-                    />
-                )}
+                <ul class="flex flex-col gap-0.5 p-0">
+                    {primary.map((item) => (
+                        <li key={item.id}>
+                            <NavLink
+                                item={item}
+                                active={activeId === item.id}
+                                collapsed={collapsed}
+                                onNavigate={onNavigate}
+                            />
+                        </li>
+                    ))}
+                    {plus && (
+                        <PlusSection
+                            section={plus}
+                            activeId={activeId}
+                            collapsed={collapsed}
+                            onNavigate={onNavigate}
+                        />
+                    )}
+                </ul>
             </nav>
 
-                <div class="grid shrink-0 gap-1 border-t border-white/10 p-2.5 pb-safe lg:pb-2.5">
-                {bootstrap.permissions.manage_team && (
-                    <a
-                        class={linkClass(activeId === 'onboarding')}
-                        href={routeHref('/onboarding')}
-                        title="Assistant de configuration"
-                        aria-label="Assistant de configuration"
-                        onClick={(event) => onNavigate(event, '/onboarding')}
-                    >
-                        <Sparkles class="size-3.5 sm:size-4 shrink-0" aria-hidden />
-                        {!collapsed && <span class="truncate">Assistant</span>}
-                    </a>
-                )}
+            <div class="grid shrink-0 gap-1 border-t border-[var(--devforge-sidebar-border)] p-2.5 pb-safe lg:pb-2.5">
                 <a
                     class={linkClass(aboutActive)}
                     href={routeHref('/a-propos')}

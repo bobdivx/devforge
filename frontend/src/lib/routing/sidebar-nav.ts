@@ -6,8 +6,8 @@ import {
     Container,
     Cpu,
     Database,
-    Gauge,
     HardDrive,
+    Home,
     MessageSquare,
     Plug,
     Rocket,
@@ -15,7 +15,6 @@ import {
     Settings,
     Sparkles,
     Store,
-    Wrench,
     type LucideIcon,
 } from 'lucide-preact';
 import type { AppRoute, PageKey } from './routes';
@@ -28,6 +27,7 @@ export type SidebarNavLink = {
     icon: LucideIcon;
     requiresAgents?: boolean;
     requiresInstanceAdmin?: boolean;
+    hideWhenAgents?: boolean;
 };
 
 export type SidebarNavSection = {
@@ -36,6 +36,7 @@ export type SidebarNavSection = {
     label: string;
     requiresAgents?: boolean;
     requiresInstanceAdmin?: boolean;
+    hideWhenAgents?: boolean;
     items: SidebarNavLink[];
 };
 
@@ -46,32 +47,72 @@ export type SidebarNavItem = {
 export type SidebarNavEntry = SidebarNavItem | SidebarNavSection;
 
 /**
- * Navigation principale organisée par les 3 jobs de DevForge :
- * 1. Déployer les apps
- * 2. Correction/amélioration automatique via agents
- * 3. Continuer à développer sur DevForge
+ * Navigation PandaOS : Accueil, Apps, Assistant, Connexions, Réglages + Plus.
  */
 export const sidebarNav: SidebarNavEntry[] = [
     {
         type: 'link',
         id: 'dashboard',
-        label: "Vue d'ensemble",
+        label: 'Accueil',
         path: '/',
-        icon: Gauge,
+        icon: Home,
         pages: ['dashboard'],
     },
     {
+        type: 'link',
+        id: 'applications',
+        label: 'Apps',
+        path: '/applications',
+        pages: ['applications', 'application-detail'],
+        icon: Boxes,
+    },
+    {
+        type: 'link',
+        id: 'assistant',
+        label: 'Assistant',
+        path: '/agents/chat',
+        pages: ['agents-chat', 'agent-detail'],
+        icon: MessageSquare,
+        requiresAgents: true,
+    },
+    {
+        type: 'link',
+        id: 'assistant-setup',
+        label: 'Assistant',
+        path: '/onboarding',
+        pages: ['onboarding'],
+        icon: Sparkles,
+        hideWhenAgents: true,
+    },
+    {
+        type: 'link',
+        id: 'connexions',
+        label: 'Connexions',
+        path: '/connexions',
+        icon: Plug,
+        pages: ['connexions', 'github', 'sources', 'services'],
+    },
+    {
+        type: 'link',
+        id: 'settings',
+        label: 'Réglages',
+        path: '/settings',
+        icon: Settings,
+        pages: [
+            'settings',
+            'sso',
+            'shared-variables',
+            'profile',
+            'destinations',
+            'tags',
+            'subscription',
+        ],
+    },
+    {
         type: 'section',
-        id: 'deploy',
-        label: 'Déployer',
+        id: 'plus',
+        label: 'Plus',
         items: [
-            {
-                id: 'applications',
-                label: 'Applications',
-                path: '/applications',
-                pages: ['applications', 'application-detail'],
-                icon: Boxes,
-            },
             {
                 id: 'deployments',
                 label: 'Déploiements',
@@ -86,49 +127,6 @@ export const sidebarNav: SidebarNavEntry[] = [
                 pages: ['databases'],
                 icon: Database,
             },
-            {
-                id: 'services',
-                label: 'Connexions',
-                path: '/services',
-                pages: ['connexions', 'services'],
-                icon: Wrench,
-            },
-        ],
-    },
-    {
-        type: 'section',
-        id: 'agents',
-        label: 'Équipe IA',
-        requiresAgents: true,
-        items: [
-            {
-                id: 'agents-manage',
-                label: 'Activité & membres',
-                path: '/agents',
-                pages: ['agents'],
-                icon: Bot,
-            },
-            {
-                id: 'agents-chat',
-                label: 'Chat',
-                path: '/agents/chat',
-                pages: ['agents-chat', 'agent-detail'],
-                icon: MessageSquare,
-            },
-            {
-                id: 'automation',
-                label: 'Automations',
-                path: '/automation',
-                pages: ['automation'],
-                icon: Sparkles,
-            },
-        ],
-    },
-    {
-        type: 'section',
-        id: 'operations',
-        label: 'Infrastructure',
-        items: [
             {
                 id: 'docker',
                 label: 'Docker',
@@ -171,64 +169,55 @@ export const sidebarNav: SidebarNavEntry[] = [
                 pages: ['scheduled-tasks'],
                 icon: CalendarClock,
             },
-        ],
-    },
-    {
-        type: 'link',
-        id: 'connexions',
-        label: 'Connexions',
-        path: '/connexions',
-        icon: Plug,
-        pages: ['connexions', 'github', 'sources'],
-    },
-    {
-        type: 'link',
-        id: 'store',
-        label: 'Store',
-        path: '/store',
-        icon: Store,
-        pages: ['store'],
-    },
-    {
-        type: 'section',
-        id: 'ai-settings',
-        label: 'Paramètres IA',
-        requiresAgents: true,
-        items: [
+            {
+                id: 'store',
+                label: 'Store',
+                path: '/store',
+                pages: ['store'],
+                icon: Store,
+            },
+            {
+                id: 'agents-manage',
+                label: 'Activité agents',
+                path: '/agents',
+                pages: ['agents'],
+                icon: Bot,
+                requiresAgents: true,
+            },
+            {
+                id: 'automation',
+                label: 'Automations',
+                path: '/automation',
+                pages: ['automation'],
+                icon: Sparkles,
+                requiresAgents: true,
+            },
             {
                 id: 'agents-settings',
                 label: 'Configuration AI',
                 path: '/agents/settings',
                 pages: ['agents-settings'],
                 icon: Settings,
+                requiresAgents: true,
             },
-        ],
-    },
-    {
-        type: 'link',
-        id: 'settings',
-        label: 'Paramètres',
-        path: '/settings',
-        icon: Settings,
-        pages: [
-            'settings',
-            'sso',
-            'shared-variables',
-            'profile',
-            'destinations',
-            'tags',
-            'subscription',
-            'onboarding',
         ],
     },
 ];
 
 function isNavEntryVisible(
-    entry: { requiresAgents?: boolean; requiresInstanceAdmin?: boolean },
+    entry: {
+        requiresAgents?: boolean;
+        requiresInstanceAdmin?: boolean;
+        hideWhenAgents?: boolean;
+    },
     agentsEnabled: boolean,
     instanceAdmin: boolean,
 ): boolean {
     if (entry.requiresAgents && !agentsEnabled) {
+        return false;
+    }
+
+    if (entry.hideWhenAgents && agentsEnabled) {
         return false;
     }
 
@@ -289,6 +278,16 @@ export function flattenSidebarNav(entries: SidebarNavEntry[]): SidebarNavLink[] 
     }
 
     return links;
+}
+
+export function primarySidebarNav(entries: SidebarNavEntry[]): SidebarNavLink[] {
+    return entries.filter((entry): entry is SidebarNavItem => entry.type === 'link');
+}
+
+export function plusSidebarSection(entries: SidebarNavEntry[]): SidebarNavSection | null {
+    const section = entries.find((entry) => entry.type === 'section' && entry.id === 'plus');
+
+    return section && section.type === 'section' ? section : null;
 }
 
 export function navPathMatches(itemPath: string, routePath: string): boolean {
