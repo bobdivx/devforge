@@ -124,3 +124,54 @@ it('routes processQueuedRun through Rig and never builds the PHP LLM provider', 
 
     Http::assertSent(fn ($request) => $request->url() === 'http://agent.test/v1/chat');
 });
+
+
+it('executes sidecar text tool json then returns the follow-up answer', function () {
+    config([
+        'devforge.agent_url' => 'http://agent.test',
+        'devforge.agent_mcp_url' => 'http://api:8080/mcp/devforge',
+    ]);
+
+    Http::fake([
+        'http://agent.test/v1/chat' => Http::sequence()
+            ->push(['text' => '{}{"name": "list_github_apps","arguments": {}}'])
+            ->push(['text' => 'Aucune GitHub App reliée.']),
+    ]);
+
+    $user = User::factory()->create();
+    $team = $user->teams()->first();
+    $config = AiProviderConfig::factory()->create([
+        'team_id' => $team->id,
+        'provider' => 'openai',
+        'api_key' => 'sk-test-ux',
+        'model' => 'gpt-4o-mini',
+        'is_default' => true,
+    ]);
+    $agent = AiAgent::factory()->create([
+        'team_id' => $team->id,
+        'provider_config_id' => $config->id,
+    ]);
+    $session = AiAgentSession::factory()->create([
+        'agent_id' => $agent->id,
+        'user_id' => $user->id,
+    ]);
+    $run = AiAgentRun::factory()->create([
+        'agent_id' => $agent->id,
+        'status' => 'running',
+    ]);
+
+    $reply = app(RigChatRuntime::class)->complete(
+        $agent,
+        $run,
+        'liste les apps github',
+        [
+            ['role' => 'system', 'content' => 'Tu es un agent.'],
+            ['role' => 'user', 'content' => 'liste les apps github'],
+        ],
+        $session,
+    );
+
+    expect($reply['text'])->toBe('Aucune GitHub App reliée.')
+        ->and($reply['iterations'])->toBe(2)
+        ->and($reply['text'])->not->toContain('list_github_apps');
+});
