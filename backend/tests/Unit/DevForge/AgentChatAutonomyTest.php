@@ -437,3 +437,27 @@ it('includes application scope in chat system prompt when provided', function ()
         ->and($prompt)->toContain('macompta')
         ->and($prompt)->toContain('application_uuid=app-uuid-macompta');
 });
+
+
+it('prefers workspace_brief over the short application scope block', function () {
+    $agent = AiAgent::factory()->deployment()->make([
+        'name' => 'Deploy Test',
+    ]);
+    $agent->setRelation('team', \App\Models\Team::factory()->make(['name' => 'Equipe Test']));
+
+    $prompt = app(AgentPromptBuilder::class)->chatSystemPrompt(
+        $agent,
+        'Corrige l’application',
+        [
+            'application_uuid' => 'app-uuid-macompta',
+            'application_name' => 'macompta',
+            'application_status' => 'running:unhealthy',
+            'workspace_brief' => "Champ d'application (scope obligatoire pour ce chat) :\nTu es dans le workspace de CETTE application.\n- Application : macompta (app-uuid-macompta)\n- Statut ressource : running:unhealthy\nPour les outils, utilise application_uuid=app-uuid-macompta",
+        ],
+    );
+
+    expect($prompt)->toContain('workspace de CETTE application')
+        ->and($prompt)->toContain('running:unhealthy')
+        ->and($prompt)->toContain('application_uuid=app-uuid-macompta')
+        ->and($prompt)->not->toContain('Build pack : inconnu');
+});
