@@ -55,7 +55,17 @@ class AgentChatRepairStrategy
         'run_application_tests',
     ];
 
-    public static function detectIssue(string $logsBlob): string
+    /**
+     * @param  array{
+     *     detected_framework?: string|null,
+     *     start_command?: string|null,
+     *     ports_exposes?: string|null,
+     *     is_static?: bool,
+     *     build_pack?: string|null,
+     *     detector_framework?: string|null
+     * }|null  $context
+     */
+    public static function detectIssue(string $logsBlob, ?array $context = null): string
     {
         $blob = mb_strtolower($logsBlob);
 
@@ -64,7 +74,11 @@ class AgentChatRepairStrategy
         }
 
         // Astro static lancé avec node ./dist/server/entry.mjs — avant healthcheck/nginx (sinon faux SSR).
-        if (AgentDirectives::isMissingAstroServerEntryIssue($logsBlob)) {
+        // Un 404 nginx /status ou un healthcheck fail sur une app SSR connue n'est PAS une preuve static.
+        if (
+            AgentDirectives::isMissingAstroServerEntryIssue($logsBlob)
+            && self::shouldClassifyAsAstroStaticRuntime($logsBlob, $context)
+        ) {
             return self::ISSUE_ASTRO_STATIC_RUNTIME;
         }
 
@@ -115,6 +129,64 @@ class AgentChatRepairStrategy
         }
 
         return self::ISSUE_GENERIC;
+    }
+
+    /**
+     * Ne classer ISSUE_ASTRO_STATIC_RUNTIME que si entry.mjs est vraiment absent
+     * ET que le détecteur (ou l'absence de signaux SSR) dit static.
+     *
+     * @param  array<string, mixed>|null  $context
+     */
+    public static function shouldClassifyAsAstroStaticRuntime(string $logsBlob, ?array $context): bool
+    {
+        $context = $context ?? [];
+
+        $detectorFramework = is_string($context['detector_framework'] ?? null)
+            ? (string) $context['detector_framework']
+            : null;
+        $storedFramework = is_string($context['detected_framework'] ?? null)
+            ? (string) $context['detected_framework']
+            : null;
+        $startCommand = is_string($context['start_command'] ?? null) ? (string) $context['start_command'] : null;
+        $portsExposes = is_string($context['ports_exposes'] ?? null) ? (string) $context['ports_exposes'] : null;
+
+        $knownSsr = AgentDirectives::isAstroSsrFramework($detectorFramework)
+            || AgentDirectives::looksLikeAstroSsrSignals($storedFramework, $startCommand, $portsExposes);
+
+        if ($knownSsr) {
+            return false;
+        }
+
+        if (AgentDirectives::looksLikeNginxStatusOrHealthcheckOnly($logsBlob)) {
+            return false;
+        }
+
+        if ($detectorFramework !== null && $detectorFramework !== '') {
+            return $detectorFramework === 'astro-static';
+        }
+
+        return AgentDirectives::isMissingAstroServerEntryIssue($logsBlob);
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $context
+     * @return array<string, mixed>
+     */
+    public static function astroRuntimeSettingsForDetection(?string $detectorFramework, ?array $context = null): array
+    {
+        $context = $context ?? [];
+        $stored = is_string($context['detected_framework'] ?? null) ? (string) $context['detected_framework'] : null;
+        $start = is_string($context['start_command'] ?? null) ? (string) $context['start_command'] : null;
+        $ports = is_string($context['ports_exposes'] ?? null) ? (string) $context['ports_exposes'] : null;
+
+        if (
+            AgentDirectives::isAstroSsrFramework($detectorFramework)
+            || AgentDirectives::looksLikeAstroSsrSignals($stored, $start, $ports)
+        ) {
+            return AgentDirectives::astroSsrNixpacksRuntimeSettings();
+        }
+
+        return AgentDirectives::astroStaticNginxRuntimeSettings();
     }
 
     /**
