@@ -134,6 +134,7 @@ it('applies Astro SSR listen port when still on Coolify default 3000', function 
 
 it('corrects wrongly-enabled static mode for Astro SSR', function () {
     $this->application->update([
+        'build_pack' => 'static',
         'ports_exposes' => '80',
         'publish_directory' => '/dist',
         'health_check_port' => '80',
@@ -173,7 +174,8 @@ it('corrects wrongly-enabled static mode for Astro SSR', function () {
         ->and((string) $this->application->ports_exposes)->toBe('4321')
         ->and($this->application->start_command)->toBe('node ./dist/server/entry.mjs')
         ->and((string) $this->application->health_check_port)->toBe('4321')
-        ->and($result['changes'])->toContain('is_static=false');
+        ->and($result['changes'])->toContain('is_static=false')
+        ->and($result['changes'])->toContain('build_pack=nixpacks');
 });
 
 it('enables nginx static and clears leftover Astro SSR start command', function () {
