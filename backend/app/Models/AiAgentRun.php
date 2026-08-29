@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\DevForge\Agent\AgentChatFleetMetadata;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -36,6 +37,13 @@ class AiAgentRun extends Model
             'tokens_used' => 'integer',
             'iterations' => 'integer',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::creating(function (AiAgentRun $run): void {
+            AgentChatFleetMetadata::enrichRun($run);
+        });
     }
 
     /** @return string[] */
