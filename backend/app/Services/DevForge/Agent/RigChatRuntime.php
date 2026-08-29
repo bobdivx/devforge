@@ -112,6 +112,7 @@ class RigChatRuntime
         $steps = [];
         $iterations = 0;
         $text = '';
+        $statusNudgeUsed = false;
 
         try {
             while ($iterations < self::MAX_TEXT_TOOL_TURNS) {
@@ -130,6 +131,15 @@ class RigChatRuntime
                 $text = trim($text);
                 $calls = AgentDirectives::extractProseToolCalls($text);
                 if ($calls === []) {
+                    if (! $statusNudgeUsed && AgentChatStatusDirectives::requiresChatTools($userContent)) {
+                        $statusNudgeUsed = true;
+                        $nudge = AgentChatStatusDirectives::chatToolNudgeMessage($userContent);
+                        $history[] = ['role' => 'assistant', 'content' => $text !== '' ? $text : '…'];
+                        $history[] = ['role' => 'user', 'content' => $nudge];
+                        $prompt = $nudge;
+                        $run->appendLog('Relance Rig : question statut/santé sans outil — consigne d\'action envoyée.');
+                        continue;
+                    }
                     break;
                 }
 

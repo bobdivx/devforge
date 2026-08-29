@@ -3,7 +3,8 @@
 namespace App\Providers;
 
 use App\Models\PersonalAccessToken;
-use Illuminate\Database\Eloquent\Model;
+use App\Services\DevForge\Agent\AgentPromptBuilder;
+use App\Services\DevForge\Agent\AgentPromptBuilderFleet;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -16,6 +17,8 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        $this->app->bind(AgentPromptBuilder::class, AgentPromptBuilderFleet::class);
+
         if (App::isLocal()) {
             $this->app->register(TelescopeServiceProvider::class);
         }
@@ -28,7 +31,6 @@ class AppServiceProvider extends ServiceProvider
         $this->configurePasswords();
         $this->configureSanctumModel();
         $this->configureGitHubHttp();
-
     }
 
     private function configureCommands(): void
