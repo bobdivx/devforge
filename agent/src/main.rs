@@ -173,6 +173,31 @@ fn sanitize_error(raw: &str) -> String {
 }
 
 
+fn parse_text_tool_call(text: &str) -> Option<(String, serde_json::Value)> {
+    let trimmed = text.trim();
+    let candidate = trimmed.strip_prefix("{}").map(str::trim).unwrap_or(trimmed);
+    if let Some(parsed) = decode_tool_object(candidate) {
+        return Some(parsed);
+    }
+    let start = candidate.find(r#"{"name""#)?;
+    let slice = &candidate[start..];
+    decode_tool_object(slice)
+}
+
+fn decode_tool_object(raw: &str) -> Option<(String, serde_json::Value)> {
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let name = value.get("name")?.as_str()?.trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+    let arguments = value
+        .get("arguments")
+        .cloned()
+        .or_else(|| value.get("parameters").cloned())
+        .unwrap_or_else(|| serde_json::json!({}));
+    Some((name, arguments))
+}
+
 fn is_empty_completion(raw: &str) -> bool {
     let lower = raw.to_lowercase();
     (lower.contains("no message or tool call") && lower.contains("empty"))
@@ -456,7 +481,16 @@ async fn chat(
 
 #[cfg(test)]
 mod tests {
-    use super::is_empty_completion;
+    use super::{is_empty_completion, parse_text_tool_call};
+
+    #[test]
+    fn parses_qwen_prefixed_text_tool_call() {
+        let parsed = parse_text_tool_call(r#"{}{"name": "list_github_apps","arguments": {}}"#)
+            .expect("tool call");
+        assert_eq!(parsed.0, "list_github_apps");
+        assert_eq!(parsed.1, serde_json::json!({}));
+        assert!(parse_text_tool_call("Voici les apps GitHub.").is_none());
+    }
 
     #[test]
     fn detects_rig_empty_tool_response() {
