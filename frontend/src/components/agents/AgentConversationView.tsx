@@ -77,7 +77,7 @@ export function AgentConversationView({
         setError(null);
 
         try {
-            const response = await domainApi.agentSessionMessages(agent.uuid, sessionUuid);
+            const response = await domainApi.agentSessionMessages(agent.uuid, sessionUuid, applicationUuid ? { application_uuid: applicationUuid } : undefined);
             setMessages(response.data);
             if (response.meta?.degraded) {
                 setError('Le chat est en mode dégradé : relancez le déploiement DevForge pour activer l\'historique.');
