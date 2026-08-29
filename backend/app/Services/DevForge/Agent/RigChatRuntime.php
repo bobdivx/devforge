@@ -131,9 +131,9 @@ class RigChatRuntime
                 $text = trim($text);
                 $calls = AgentDirectives::extractProseToolCalls($text);
                 if ($calls === []) {
-                    if (! $statusNudgeUsed && AgentDirectives::requiresChatTools($userContent)) {
+                    if (! $statusNudgeUsed && AgentChatStatusDirectives::requiresChatTools($userContent)) {
                         $statusNudgeUsed = true;
-                        $nudge = AgentDirectives::chatToolNudgeMessage($userContent);
+                        $nudge = AgentChatStatusDirectives::chatToolNudgeMessage($userContent);
                         $history[] = ['role' => 'assistant', 'content' => $text !== '' ? $text : '…'];
                         $history[] = ['role' => 'user', 'content' => $nudge];
                         $prompt = $nudge;
