@@ -96,7 +96,7 @@ export function AgentConversationView({
         setChatMode(session.chat_mode ?? 'build');
         syncSessionQuery(session.uuid);
         setDraft('');
-        setSessionsDrawerOpen(false);
+        setSessionsDrawerOpen(false); // Fermer le drawer après sélection
 
         try {
             await domainApi.activateAgentSession(agent.uuid, session.uuid);
@@ -374,6 +374,7 @@ export function AgentConversationView({
 
     return (
         <div class="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+            {/* Desktop sidebar - visible uniquement sur lg+ */}
             <aside class="hidden shrink-0 flex-col border-e border-base-300 bg-base-200/20 lg:flex lg:w-72 lg:max-w-[40%]">
                 <div class="flex shrink-0 items-center justify-end gap-1 px-3 pt-3">
                     <button
@@ -416,6 +417,7 @@ export function AgentConversationView({
                 )}
             </aside>
 
+            {/* Mobile drawer - overlay avec backdrop */}
             {sessionsDrawerOpen && (
                 <div class="fixed inset-0 z-50 lg:hidden">
                     <button
@@ -479,6 +481,7 @@ export function AgentConversationView({
             )}
 
             <div class="flex min-h-0 min-w-0 flex-1 flex-col bg-base-100">
+                {/* Mobile: bouton menu pour ouvrir le drawer */}
                 <div class="flex shrink-0 items-center justify-between border-b border-base-300 bg-base-100 px-3 py-2 lg:hidden">
                     <button
                         class="btn btn-ghost btn-sm gap-1.5 px-2.5"
