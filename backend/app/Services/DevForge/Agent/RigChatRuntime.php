@@ -6,9 +6,14 @@ use App\Models\AiAgent;
 use App\Models\AiAgentMessage;
 use App\Models\AiAgentRun;
 use App\Models\AiAgentSession;
+use App\Services\DevForge\Core\CoreResourceAction;
+use App\Services\DevForge\Core\CoreResourceCatalog;
+use App\Services\DevForge\DeploymentData;
 
 class RigChatRuntime
 {
+    private const MAX_TEXT_TOOL_TURNS = 8;
+
     public function __construct(
         private readonly RigAgentClient $rig,
         private readonly AgentContextCompactor $compactor,
@@ -104,24 +109,75 @@ class RigChatRuntime
         }
 
         $credentials = $this->rig->issueMcpCredentials($agent, $session);
+        $steps = [];
+        $iterations = 0;
+        $text = '';
 
         try {
-            $text = $this->rig->chat(
-                $prompt !== '' ? $prompt : 'Continue.',
-                $preamble,
-                $llm['model'] ?? null,
-                $llm,
-                [
-                    'messages' => $history,
-                    'mcp_url' => $credentials['url'],
-                    'mcp_token' => $credentials['token'],
-                ],
-            );
+            while ($iterations < self::MAX_TEXT_TOOL_TURNS) {
+                $iterations++;
+                $text = $this->rig->chat(
+                    $prompt !== '' ? $prompt : 'Continue.',
+                    $preamble,
+                    $llm['model'] ?? null,
+                    $llm,
+                    [
+                        'messages' => $history,
+                        'mcp_url' => $credentials['url'],
+                        'mcp_token' => $credentials['token'],
+                    ],
+                );
+                $text = trim($text);
+                $calls = AgentDirectives::extractProseToolCalls($text);
+                if ($calls === []) {
+                    break;
+                }
+
+                $run->appendLog('Tool calls extraits du texte sidecar ('.count($calls).').');
+                $toolkit = $this->makeToolkit($agent, $run);
+                $results = [];
+                $waitingForInput = false;
+
+                foreach ($calls as $call) {
+                    $name = (string) ($call['name'] ?? '');
+                    $arguments = is_array($call['arguments'] ?? null) ? $call['arguments'] : [];
+                    $result = $toolkit->execute($name, $arguments);
+                    $steps[] = [
+                        'tool' => $name,
+                        'arguments' => $arguments,
+                        'result' => $result,
+                    ];
+                    $results[] = [
+                        'name' => $name,
+                        'result' => $result,
+                    ];
+                    if (($result['status'] ?? '') === 'waiting_for_input') {
+                        $waitingForInput = true;
+                    }
+                }
+
+                if ($waitingForInput) {
+                    $text = (string) ($results[0]['result']['message'] ?? 'En attente de saisie utilisateur.');
+                    $run->update([
+                        'status' => 'waiting_for_input',
+                        'summary' => mb_substr($text, 0, 1000),
+                    ]);
+                    break;
+                }
+
+                $encoded = json_encode($results, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+                $history[] = ['role' => 'assistant', 'content' => $text];
+                $history[] = [
+                    'role' => 'user',
+                    'content' => "Résultat des outils (déjà exécutés, ne les réécris pas en JSON) :\n{$encoded}\nRéponds en français à l'utilisateur.",
+                ];
+                $prompt = 'Continue avec les résultats d’outils. Réponds en français, sans JSON d’outil.';
+            }
         } finally {
             $this->rig->revokeMcpCredentials($credentials['id'] ?? null);
         }
 
-        $text = trim($text);
+        $text = $this->hideRawToolJson(trim($text));
         if ($text === '') {
             $text = 'Je n\'ai pas pu générer de réponse.';
         }
@@ -132,14 +188,49 @@ class RigChatRuntime
         ]);
         $run->update([
             'summary' => mb_substr($text, 0, 1000),
-            'iterations' => 1,
+            'iterations' => $iterations,
         ]);
 
         return [
             'text' => $text,
             'tokens_used' => 0,
-            'iterations' => 1,
-            'steps' => [],
+            'iterations' => $iterations,
+            'steps' => $steps,
         ];
+    }
+
+    private function makeToolkit(AiAgent $agent, AiAgentRun $run): AgentToolkit
+    {
+        $agent->loadMissing(['team']);
+
+        return new AgentToolkit(
+            team: $agent->team,
+            run: $run,
+            catalog: app(CoreResourceCatalog::class),
+            resourceAction: app(CoreResourceAction::class),
+            deploymentData: app(DeploymentData::class),
+            agent: $agent,
+            assignedResourceUuid: $agent->resource_uuid,
+            runContext: is_array($run->metadata) ? $run->metadata : [],
+        );
+    }
+
+    private function hideRawToolJson(string $text): string
+    {
+        if ($text === '') {
+            return $text;
+        }
+
+        if (AgentDirectives::extractProseToolCalls($text) === []) {
+            return $text;
+        }
+
+        $stripped = trim((string) preg_replace('/^\\s*\\{\\}\\s*/', '', $text));
+        $decoded = json_decode($stripped, true);
+        if (is_array($decoded) && (isset($decoded['name']) || isset($decoded['method']) || isset($decoded['tool']))) {
+            return 'J’ai exécuté l’action demandée. Dis-moi si tu veux que je continue.';
+        }
+
+        return $text;
     }
 }
