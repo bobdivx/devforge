@@ -21,6 +21,7 @@ import { Sidebar } from './Sidebar';
 import { ToastRegion, type Toast } from './ToastRegion';
 import { Topbar } from './Topbar';
 import { AGENTS_CHAT_PATH } from '../lib/agent-routes';
+import { navigateTo } from '../lib/use-navigate';
 
 type AppProps = {
     initialPath: string;
@@ -121,9 +122,7 @@ export function App({ initialPath }: AppProps) {
         }
 
         event.preventDefault();
-        window.history.pushState({}, '', routeHref(targetPath));
-        setPathname(normalizeRoutePath(targetPath));
-        setLocationSearch(window.location.search);
+        navigateTo(targetPath);
         setSidebarOpen(false);
         document.querySelector<HTMLElement>('#devforge-content')?.focus();
     };
@@ -202,7 +201,7 @@ export function App({ initialPath }: AppProps) {
                                         class={`custom-scrollbar min-w-0 flex-1 outline-none ${
                                             immersiveChat
                                                 ? 'flex min-h-0 flex-col overflow-hidden p-0'
-                                                : `overflow-x-hidden overflow-y-auto px-4 py-5 md:px-8 md:py-7 ${applicationWorkspace ? 'pb-24' : ''}`
+                                                : `overflow-x-hidden overflow-y-auto px-4 py-5 md:px-8 md:py-7 ${applicationWorkspace ? 'pb-24 lg:pb-7' : ''}`
                                         }`}
                                         tabIndex={-1}
                                     >

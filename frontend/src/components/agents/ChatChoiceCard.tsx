@@ -1,5 +1,7 @@
 import { Check, X } from 'lucide-preact';
+import { useState } from 'preact/hooks';
 import type { ChatChoiceCard } from '../../lib/agent-choice-card';
+import { filterChoiceOptions } from '../../lib/agent-choice-card';
 
 type Props = {
     card: ChatChoiceCard;
@@ -10,6 +12,9 @@ type Props = {
 
 export function ChatChoiceCardView({ card, disabled = false, onSelect, onDismiss }: Props) {
     const selected = card.selected_id;
+    const [query, setQuery] = useState('');
+    const searchable = card.searchable === true || (card.catalog?.length ?? 0) > 0;
+    const shown = searchable ? filterChoiceOptions(card, query) : card.options;
 
     return (
         <section class="relative overflow-hidden rounded-2xl border border-base-300/80 bg-base-200/80 text-start shadow-sm">
@@ -28,9 +33,25 @@ export function ChatChoiceCardView({ card, disabled = false, onSelect, onDismiss
                 {card.body !== '' && (
                     <p class="text-xs leading-relaxed text-base-content/60">{card.body}</p>
                 )}
+                {searchable && !selected && (
+                    <input
+                        type="search"
+                        value={query}
+                        disabled={disabled}
+                        placeholder="Tape les premières lettres…"
+                        aria-label="Filtrer les applications"
+                        class="input input-sm input-bordered w-full bg-base-100"
+                        onInput={(event) => setQuery((event.currentTarget as HTMLInputElement).value)}
+                    />
+                )}
             </div>
             <ul class="grid gap-px border-t border-base-300/70 bg-base-300/40">
-                {card.options.map((option, index) => {
+                {shown.length === 0 && (
+                    <li class="bg-base-100/70 px-4 py-3 text-xs text-base-content/50">
+                        Aucune app ne correspond.
+                    </li>
+                )}
+                {shown.map((option, index) => {
                     const isSelected = selected === option.id;
                     const letter = option.id.length === 1 ? option.id : String.fromCharCode(65 + index);
 

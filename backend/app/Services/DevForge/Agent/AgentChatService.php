@@ -1111,20 +1111,47 @@ class AgentChatService
 
     /**
      * @param  array<string, mixed>  $context
-     * @return array<string, string>|null
+     * @return array<string, mixed>|null
      */
     private function initialChatMetadata(array $context, ?AiAgentSession $session = null): ?array
     {
-        $metadata = array_filter([
-            'application_uuid' => is_string($context['application_uuid'] ?? null) ? $context['application_uuid'] : null,
-            'application_name' => is_string($context['application_name'] ?? null) ? $context['application_name'] : null,
-            'git_repository' => is_string($context['git_repository'] ?? null) ? $context['git_repository'] : null,
-            'git_branch' => is_string($context['git_branch'] ?? null) ? $context['git_branch'] : null,
-            'build_pack' => is_string($context['build_pack'] ?? null) ? $context['build_pack'] : null,
-            'fqdn' => is_string($context['fqdn'] ?? null) ? $context['fqdn'] : null,
-            'chat_mode' => AgentChatMode::parse($context['chat_mode'] ?? $session?->chat_mode ?? 'build'),
-            'user_email' => is_string($context['user_email'] ?? null) ? $context['user_email'] : null,
-        ], fn (?string $value): bool => $value !== null && $value !== '');
+        $passThrough = [
+            'application_uuid',
+            'application_name',
+            'application_status',
+            'git_repository',
+            'git_branch',
+            'build_pack',
+            'fqdn',
+            'health_check_enabled',
+            'health_check_path',
+            'health_check_port',
+            'health_check_return_code',
+            'ports_exposes',
+            'start_command',
+            'build_command',
+            'detected_framework',
+            'has_custom_nginx',
+            'latest_deployment',
+            'env_var_hints',
+            'linked_databases',
+            'workspace_brief',
+            'user_email',
+        ];
+
+        $metadata = [];
+        foreach ($passThrough as $key) {
+            if (! array_key_exists($key, $context)) {
+                continue;
+            }
+            $value = $context[$key];
+            if ($value === null || $value === '') {
+                continue;
+            }
+            $metadata[$key] = $value;
+        }
+
+        $metadata['chat_mode'] = AgentChatMode::parse($context['chat_mode'] ?? $session?->chat_mode ?? 'build');
 
         return $metadata === [] ? null : $metadata;
     }

@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Services\DevForge\Agent\AgentChatService;
 use App\Services\DevForge\Agent\AgentSessionService;
 use App\Services\DevForge\Agent\AgentWelcomeComposer;
+use App\Services\DevForge\Agent\ApplicationWorkspaceChatContext;
 use App\Services\DevForge\Core\CurrentTeamContext;
 use App\Services\DevForge\CurrentTeamResources;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -35,16 +36,18 @@ class AgentMessageController extends Controller
         $agent = $this->findAgent($request, $uuid);
         $this->authorize('view', $agent);
 
+        $application = $this->optionalBoundApplication($request, $agent);
+
         if (! Schema::hasTable('ai_agent_messages')) {
             return response()->json([
-                'data' => [$this->welcomeMessage($agent, $this->currentUser($request))],
+                'data' => [$this->welcomeMessage($agent, $this->currentUser($request), application: $application)],
                 'meta' => ['count' => 1, 'degraded' => true],
             ]);
         }
 
         if (! Schema::hasTable('ai_agent_sessions')) {
             return response()->json([
-                'data' => [$this->welcomeMessage($agent, $this->currentUser($request))],
+                'data' => [$this->welcomeMessage($agent, $this->currentUser($request), application: $application)],
                 'meta' => ['count' => 1, 'degraded' => true],
             ]);
         }
@@ -63,14 +66,14 @@ class AgentMessageController extends Controller
             }
         } catch (\Throwable) {
             return response()->json([
-                'data' => [$this->welcomeMessage($agent, $this->currentUser($request))],
+                'data' => [$this->welcomeMessage($agent, $this->currentUser($request), application: $application)],
                 'meta' => ['count' => 1, 'degraded' => true],
             ]);
         }
 
         if (! $session instanceof AiAgentSession) {
             return response()->json([
-                'data' => [$this->welcomeMessage($agent, $this->currentUser($request))],
+                'data' => [$this->welcomeMessage($agent, $this->currentUser($request), application: $application)],
                 'meta' => ['count' => 1],
             ]);
         }
@@ -79,7 +82,7 @@ class AgentMessageController extends Controller
             ->map(fn (AiAgentMessage $message) => $this->present($message));
 
         if ($messages->isEmpty()) {
-            $messages = collect([$this->welcomeMessage($agent, $this->currentUser($request), $session)]);
+            $messages = collect([$this->welcomeMessage($agent, $this->currentUser($request), $session, $application)]);
         }
 
         return response()->json([
@@ -223,18 +226,43 @@ class AgentMessageController extends Controller
     }
 
     /**
-     * @return array<string, string>
+     * @return array<string, mixed>
      */
     private function resolveApplicationChatContext(Request $request, AiAgent $agent, ?string $applicationUuid): array
     {
-        if ($applicationUuid === null || trim($applicationUuid) === '') {
+        $application = $this->boundApplication($request, $agent, $applicationUuid);
+        if (! $application instanceof Application) {
             return [];
+        }
+
+        return $this->applicationChatContext($application);
+    }
+
+    private function optionalBoundApplication(Request $request, AiAgent $agent): ?Application
+    {
+        $uuid = $request->query('application_uuid') ?? $request->input('application_uuid');
+
+        return $this->boundApplication($request, $agent, is_string($uuid) ? $uuid : null, abortOnMissing: false);
+    }
+
+    private function boundApplication(
+        Request $request,
+        AiAgent $agent,
+        ?string $applicationUuid,
+        bool $abortOnMissing = true,
+    ): ?Application {
+        if ($applicationUuid === null || trim($applicationUuid) === '') {
+            return null;
         }
 
         try {
             $application = $this->currentTeamResources->application($this->currentUser($request), $applicationUuid);
         } catch (ModelNotFoundException) {
-            abort(404, 'Application introuvable.');
+            if ($abortOnMissing) {
+                abort(404, 'Application introuvable.');
+            }
+
+            return null;
         }
 
         if (
@@ -245,22 +273,15 @@ class AgentMessageController extends Controller
             abort(422, 'Cet agent est lié à une autre application.');
         }
 
-        return $this->applicationChatContext($application);
+        return $application;
     }
 
     /**
-     * @return array<string, string>
+     * @return array<string, mixed>
      */
     private function applicationChatContext(Application $application): array
     {
-        return array_filter([
-            'application_uuid' => $application->uuid,
-            'application_name' => (string) $application->name,
-            'git_repository' => is_string($application->git_repository) ? $application->git_repository : null,
-            'git_branch' => is_string($application->git_branch) ? $application->git_branch : null,
-            'build_pack' => is_string($application->build_pack) ? $application->build_pack : null,
-            'fqdn' => is_string($application->fqdn) ? $application->fqdn : null,
-        ], fn (?string $value): bool => $value !== null && $value !== '');
+        return app(ApplicationWorkspaceChatContext::class)->build($application);
     }
 
     /** @return array<string, mixed> */
@@ -278,8 +299,12 @@ class AgentMessageController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function welcomeMessage(AiAgent $agent, User $user, ?AiAgentSession $session = null): array
-    {
-        return $this->welcomeComposer->compose($agent, $user, $session);
+    private function welcomeMessage(
+        AiAgent $agent,
+        User $user,
+        ?AiAgentSession $session = null,
+        ?Application $application = null,
+    ): array {
+        return $this->welcomeComposer->compose($agent, $user, $session, $application);
     }
 }

@@ -821,3 +821,10 @@ input {
         transition: none;
     }
 }
+
+
+@media (min-width: 1024px) {
+    .devforge-workspace-dock {
+        display: none;
+    }
+}

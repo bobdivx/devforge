@@ -2,7 +2,7 @@ import { Menu, MessageSquarePlus, RefreshCw, X } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
 import type { Agent, AgentChatAttachment, AgentChatMessage, AgentChatSession, AgentChatStep, AgentModelRouting } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
-import { ApiError } from '../../lib/api-client';
+import { ApiError, apiFetch } from '../../lib/api-client';
 import { agentDetailSessionUuid, shouldOpenAgentSettings, syncAgentDetailQuery } from '../../lib/agent-routes';
 import { waitForChatReply } from '../../lib/agent-chat-stream';
 import { AgentChatPanel } from './AgentChatPanel';
@@ -77,7 +77,14 @@ export function AgentConversationView({
         setError(null);
 
         try {
-            const response = await domainApi.agentSessionMessages(agent.uuid, sessionUuid);
+            const params = new URLSearchParams();
+            if (applicationUuid) {
+                params.set('application_uuid', applicationUuid);
+            }
+            const query = params.toString();
+            const response = await apiFetch<{ data: AgentChatMessage[]; meta?: Record<string, number | string | boolean> }>(
+                `/api/devforge/v1/agents/${encodeURIComponent(agent.uuid)}/sessions/${encodeURIComponent(sessionUuid)}/messages${query ? `?${query}` : ''}`,
+            );
             setMessages(response.data);
             if (response.meta?.degraded) {
                 setError('Le chat est en mode dégradé : relancez le déploiement DevForge pour activer l\'historique.');

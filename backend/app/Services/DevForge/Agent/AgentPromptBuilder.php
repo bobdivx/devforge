@@ -482,9 +482,19 @@ class AgentPromptBuilder
      */
     private function chatApplicationContextBlock(array $context): string
     {
+        $brief = trim((string) ($context['workspace_brief'] ?? ''));
+        if ($brief !== '') {
+            return $brief;
+        }
+
         $applicationUuid = trim((string) ($context['application_uuid'] ?? ''));
         if ($applicationUuid === '') {
             return '';
+        }
+
+        try {
+            return app(ApplicationWorkspaceChatContext::class)->formatPromptBlock($context);
+        } catch (\Throwable) {
         }
 
         $applicationName = (string) ($context['application_name'] ?? 'Application');
@@ -492,11 +502,15 @@ class AgentPromptBuilder
         $gitBranch = (string) ($context['git_branch'] ?? 'inconnu');
         $buildPack = (string) ($context['build_pack'] ?? 'inconnu');
         $fqdn = (string) ($context['fqdn'] ?? 'aucun');
+        $status = (string) ($context['application_status'] ?? '');
+
+        $statusLine = $status !== '' ? "\n        - Statut ressource : {$status}" : '';
 
         return trim(<<<CONTEXT
 
         Champ d'application (scope obligatoire pour ce chat) :
-        - Application : {$applicationName} ({$applicationUuid})
+        Tu es dans le workspace de CETTE application. Tu as déjà son statut, ses variables d'environnement (clés et formes, jamais les secrets), ses logs de déploiement et ses paramètres runtime. Si l'utilisateur dit « corrige » (ou équivalent), diagnostique à partir de CE contexte : ne redemande pas le status.
+        - Application : {$applicationName} ({$applicationUuid}){$statusLine}
         - Dépôt : {$gitRepository}
         - Branche : {$gitBranch}
         - Build pack : {$buildPack}

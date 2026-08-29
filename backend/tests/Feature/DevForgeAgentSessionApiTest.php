@@ -161,6 +161,9 @@ it('stores application context on queued chat messages', function () {
         ->and($run->metadata['application_uuid'])->toBe($application->uuid)
         ->and($run->metadata['application_name'])->toBe('Domain app')
         ->and($run->metadata['git_repository'])->toBe('acme/demo-app')
+        ->and($run->metadata['workspace_brief'] ?? null)->toBeString()
+        ->and($run->metadata['workspace_brief'])->toContain('Champ d'application')
+        ->and($run->metadata['workspace_brief'])->toContain($application->uuid)
         ->and($session->fresh()->title)->toBe('App · Domain app');
 });
 
@@ -309,4 +312,106 @@ it('rejects deleting another user session', function () {
         ->withSession(['currentTeam' => $team])
         ->deleteJson("/api/devforge/v1/agents/{$agent->uuid}/sessions/{$otherSession->uuid}")
         ->assertNotFound();
+});
+
+
+function sessionApiMakeApplication(\App\Models\Team $team, array $overrides = []): \App\Models\Application
+{
+    $server = \App\Models\Server::factory()->create(['team_id' => $team->id]);
+    $destination = $server->standaloneDockers()->firstOrFail();
+    $project = \App\Models\Project::factory()->create(['team_id' => $team->id]);
+    $environment = \App\Models\Environment::factory()->create(['project_id' => $project->id]);
+
+    $application = \App\Models\Application::factory()->create(array_merge([
+        'environment_id' => $environment->id,
+        'destination_id' => $destination->id,
+        'destination_type' => \App\Models\StandaloneDocker::class,
+        'git_repository' => 'acme/demo-app',
+        'git_branch' => 'main',
+        'build_pack' => 'nixpacks',
+    ], collect($overrides)->except(['status', 'updated_at'])->all()));
+
+    $force = [];
+    if (array_key_exists('status', $overrides)) {
+        $force['status'] = $overrides['status'];
+    }
+    if (array_key_exists('updated_at', $overrides)) {
+        $force['updated_at'] = $overrides['updated_at'];
+    }
+    if ($force !== []) {
+        $application->forceFill($force)->save();
+    }
+
+    return $application->fresh();
+}
+
+it('returns a scoped welcome without pick_app when application_uuid is present', function () {
+    $user = User::factory()->create(['name' => 'Mathieu JESER']);
+    $team = $user->teams()->firstOrFail();
+    $agent = AiAgent::factory()->create(['team_id' => $team->id, 'resource_uuid' => null]);
+    $session = AiAgentSession::factory()->create([
+        'agent_id' => $agent->id,
+        'user_id' => $user->id,
+    ]);
+    $application = sessionApiMakeApplication($team, [
+        'name' => 'macompta',
+        'status' => 'running:unhealthy',
+    ]);
+
+    $this->actingAs($user)
+        ->withSession(['currentTeam' => $team])
+        ->getJson("/api/devforge/v1/agents/{$agent->uuid}/sessions/{$session->uuid}/messages?application_uuid={$application->uuid}")
+        ->assertSuccessful()
+        ->assertJsonPath('data.0.uuid', 'welcome')
+        ->assertJsonPath('data.0.metadata.application_uuid', $application->uuid)
+        ->assertJsonMissingPath('data.0.metadata.choice_card')
+        ->assertJsonFragment(['content' => "Salut Mathieu. On est sur macompta (running:unhealthy) — je vois déjà son statut, ses logs et ses variables. Dis-moi ce que tu veux corriger."]);
+});
+
+it('ranks pick_app options by unhealthy status before alphabetical names', function () {
+    $user = User::factory()->create(['name' => 'Mathieu JESER']);
+    $team = $user->teams()->firstOrFail();
+    $agent = AiAgent::factory()->create(['team_id' => $team->id, 'resource_uuid' => null]);
+    $session = AiAgentSession::factory()->create([
+        'agent_id' => $agent->id,
+        'user_id' => $user->id,
+    ]);
+
+    \App\Models\GithubApp::create([
+        'name' => 'Team GitHub',
+        'api_url' => 'https://api.github.com',
+        'html_url' => 'https://github.com',
+        'team_id' => $team->id,
+        'installation_id' => 4242,
+        'app_id' => 1,
+    ]);
+
+    sessionApiMakeApplication($team, [
+        'name' => 'TeslaReports',
+        'status' => 'running:healthy',
+        'updated_at' => now()->subDay(),
+    ]);
+    sessionApiMakeApplication($team, [
+        'name' => 'aline-farm',
+        'status' => 'running:healthy',
+        'updated_at' => now()->subHours(2),
+    ]);
+    $broken = sessionApiMakeApplication($team, [
+        'name' => 'macompta',
+        'status' => 'running:unhealthy',
+        'updated_at' => now()->subMinutes(5),
+    ]);
+
+    $response = $this->actingAs($user)
+        ->withSession(['currentTeam' => $team])
+        ->getJson("/api/devforge/v1/agents/{$agent->uuid}/sessions/{$session->uuid}/messages")
+        ->assertSuccessful();
+
+    $card = $response->json('data.0.metadata.choice_card');
+    expect($card)->toBeArray()
+        ->and($card['id'])->toBe('pick_app')
+        ->and($card['searchable'])->toBeTrue()
+        ->and($card['options'][0]['label'])->toBe('macompta')
+        ->and(collect($card['catalog'])->pluck('label')->all())->toContain('TeslaReports')
+        ->and(collect($card['catalog'])->pluck('label')->all())->toContain($broken->name);
 });
