@@ -103,6 +103,10 @@ export function parseApplicationTab(value: string | null | undefined): Applicati
         return value as ApplicationTabId;
     }
 
+    if (value === null || value === undefined || value === '') {
+        return 'agents';
+    }
+
     return 'overview';
 }
 
@@ -114,8 +118,8 @@ export function applicationTabFromLegacySegment(segment: string | undefined): Ap
     return legacyApplicationSegmentToTab[segment] ?? 'overview';
 }
 
-export function applicationPath(uuid: string, tab: ApplicationTabId = 'overview'): string {
+export function applicationPath(uuid: string, tab: ApplicationTabId = 'agents'): string {
     const base = `/applications/${uuid}`;
 
-    return tab === 'overview' ? base : `${base}?tab=${tab}`;
+    return `${base}?tab=${tab}`;
 }
