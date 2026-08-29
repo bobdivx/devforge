@@ -152,3 +152,76 @@ class AgentPromptBuilder
             RULES,
             default => '',
         };
+
+        $roleRules = match (\\App\\Services\\DevForge\\Agent\\Tool\\AgentSubagentCapabilities::resolveRole($context)) {
+            \\App\\Services\\DevForge\\Agent\\Tool\\AgentSubagentCapabilities::ROLE_ORCHESTRATOR => <<<'RULES'
+
+            Rôle : ORCHESTRATEUR.
+            - Décompose en leafs via spawn_task (async) + yield_wait.
+            - Pipeline deploy recommandé : leaf_profile=diagnose → fix → redeploy (1× max).
+            - Après chaque handoff [Subagent Completion] : REVIEW obligatoire avant l’étape suivante.
+            - Ne réponds à l’utilisateur / chat overview qu’après review des leafs.
+            RULES,
+            \\App\\Services\\DevForge\\Agent\\Tool\\AgentSubagentCapabilities::ROLE_LEAF => <<<'RULES'
+
+            Rôle : LEAF — pas d’orchestration.
+            RULES,
+            default => <<<'RULES'
+
+            Sous-tâches : préférer spawn_task (async) puis yield_wait plutôt que tout faire en une passe.
+            Pour une équipe multi-rôles parallèle : spawn_task(goal=…, auto_roles=true) ou roles=[researcher,analyst,…].
+            Pour un débat / synthèse collaborative (veille, design) : spawn_task(goal=…, orchestration=collab, speaker_selection=auto).
+            INTERDIT orchestration=collab sur échec deploy / fix-CI (rester pipeline diagnose→fix→redeploy).
+            RULES,
+        };
+
+        $dynamicRoleBlock = '';
+        $rolePrompt = trim((string) ($context['role_system_prompt'] ?? ''));
+        $roleSlug = trim((string) ($context['role_slug'] ?? ''));
+        if ($rolePrompt !== '' || $roleSlug !== '') {
+            $label = $roleSlug !== '' ? $roleSlug : 'spécialisé';
+            $dynamicRoleBlock = trim(<<<ROLE
+
+            Rôle dynamique ({$label}) :
+            {$rolePrompt}
+            ROLE);
+        }
+
+        $languageRules = AgentDirectives::outputLanguageRules();
+        $autonomyRules = AgentDirectives::autonomyRules();
+        $memoryBlock = $this->memoryPromptBlock($agent, $context);
+        $skillsBlock = $this->skillsPromptBlock($agent, $context);
+        $layeredBlock = $this->layeredInstructionsBlock($agent, $context);
+        $standingBlock = $this->standingOrdersBlock($agent, $context);
+        if (! empty($context['standing_order_hint']) && is_string($context['standing_order_hint'])) {
+            $standingBlock = trim($standingBlock."\\n\\nSTANDING ORDER DEPLOY (fallback) :\\n".$context['standing_order_hint']);
+        }
+
+        return trim(<<<PROMPT
+        {$languageRules}
+
+        {$basePrompt}
+
+        Tu es un agent IA autonome intégré dans DevForge.
+        Tu as des outils natifs (tool_calls) pour agir sur la plateforme et GitHub.
+        Ne refuse JAMAIS une tâche en prétextant un produit inconnu (DevForge, etc.) — tu es déjà dans DevForge.
+        Équipe : {$agent->team->name}
+        Type : {$agent->type}
+
+        {$layeredBlock}
+
+        {$standingBlock}
+
+        {$skillsBlock}
+
+        {$memoryBlock}
+
+        {$eventRules}
+
+        {$roleRules}
+
+        {$dynamicRoleBlock}
+
+        {$autonomyRules}
+        PROMPT);
+    }
