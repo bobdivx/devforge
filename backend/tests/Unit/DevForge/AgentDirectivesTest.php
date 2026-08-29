@@ -175,6 +175,47 @@ it('detects missing Astro SSR entry as static nginx runtime', function () {
         ->and(AgentDirectives::astroStaticNginxRuntimeSettings()['ports_exposes'])->toBe('80');
 });
 
+it('keeps Astro SSR on nixpacks and does not treat nginx /status 404 as static', function () {
+    $ssr = AgentDirectives::astroSsrNixpacksRuntimeSettings();
+
+    expect($ssr['is_static'])->toBeFalse()
+        ->and($ssr['build_pack'])->toBe('nixpacks')
+        ->and($ssr['ports_exposes'])->toBe('4321')
+        ->and($ssr['start_command'])->toBe('node ./dist/server/entry.mjs')
+        ->and($ssr['health_check_path'])->toBe('/status')
+        ->and($ssr['health_check_port'])->toBe('4321')
+        ->and($ssr['detected_framework'])->toBe('astro-ssr')
+        ->and(AgentDirectives::isAstroSsrFramework('astro-ssr'))->toBeTrue()
+        ->and(AgentDirectives::looksLikeAstroSsrSignals(null, 'node ./dist/server/entry.mjs', '4321'))->toBeTrue()
+        ->and(AgentDirectives::looksLikeNginxStatusOrHealthcheckOnly(
+            'GET /status HTTP/1.1" 404 nginx. New container is unhealthy.'
+        ))->toBeTrue()
+        ->and(AgentDirectives::looksLikeNginxStatusOrHealthcheckOnly(
+            "Error: Cannot find module '/app/dist/server/entry.mjs'"
+        ))->toBeFalse();
+});
+
+it('does not classify nginx /status or missing entry as static when detector says astro-ssr', function () {
+    $nginxStatus = 'probe GET /status 404 nginx. healthcheck failed.';
+    $missingEntry = "Error: Cannot find module '/app/dist/server/entry.mjs'\nNew container is unhealthy.";
+
+    expect(AgentChatRepairStrategy::detectIssue($nginxStatus, [
+        'detected_framework' => 'astro-ssr',
+        'start_command' => 'node ./dist/server/entry.mjs',
+        'ports_exposes' => '4321',
+        'detector_framework' => 'astro-ssr',
+    ]))->not->toBe(AgentChatRepairStrategy::ISSUE_ASTRO_STATIC_RUNTIME)
+        ->and(AgentChatRepairStrategy::detectIssue($missingEntry, [
+            'detector_framework' => 'astro-ssr',
+            'detected_framework' => 'astro-ssr',
+        ]))->not->toBe(AgentChatRepairStrategy::ISSUE_ASTRO_STATIC_RUNTIME)
+        ->and(AgentChatRepairStrategy::detectIssue($missingEntry, [
+            'detector_framework' => 'astro-static',
+        ]))->toBe(AgentChatRepairStrategy::ISSUE_ASTRO_STATIC_RUNTIME)
+        ->and(AgentChatRepairStrategy::astroRuntimeSettingsForDetection('astro-ssr')['is_static'])->toBeFalse()
+        ->and(AgentChatRepairStrategy::astroRuntimeSettingsForDetection('astro-static')['is_static'])->toBeTrue();
+});
+
 it('detects missing static publish_directory / nginx welcome failures', function () {
     expect(AgentDirectives::isMissingStaticPublishDirectoryIssue('Welcome to nginx!'))->toBeTrue()
         ->and(AgentDirectives::isMissingStaticPublishDirectoryIssue('Page nginx par défaut détectée'))->toBeTrue()
