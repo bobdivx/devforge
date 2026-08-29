@@ -100,6 +100,13 @@ class ApplicationDeploySettingsReconciler
             $changes[] = 'is_static=false';
         }
 
+        // Stale DB build_pack=static then serving nginx:alpine /dist even when the repo is Astro SSR.
+        $currentBuildPack = strtolower((string) ($application->build_pack ?? ''));
+        if (! $suggestedStatic && in_array($framework, $ssrFrameworks, true) && $currentBuildPack === 'static') {
+            $payload['build_pack'] = 'nixpacks';
+            $changes[] = 'build_pack=nixpacks';
+        }
+
         if ($publishUnset && $suggestedPublish !== '/') {
             $payload['publish_directory'] = $suggestedPublish;
             $changes[] = "publish_directory={$suggestedPublish}";
@@ -108,8 +115,8 @@ class ApplicationDeploySettingsReconciler
         if ($suggestedStatic && (isset($payload['is_static']) || isset($payload['publish_directory']))) {
             $ports = is_string($suggestions['ports_exposes'] ?? null) ? (string) $suggestions['ports_exposes'] : '80';
             if (! filled($application->ports_exposes) || (string) $application->ports_exposes === '3000') {
-                $payload['ports_exposes'] = $ports;
-                $changes[] = "ports_exposes={$ports}";
+            $payload['ports_exposes'] = $ports;
+            $changes[] = "ports_exposes={$ports}";
             }
         }
 
