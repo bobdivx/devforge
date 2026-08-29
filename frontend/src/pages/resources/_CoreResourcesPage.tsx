@@ -119,3 +119,73 @@ function readApplicationTabDeepLink(): ApplicationTabId {
 
     return parseApplicationTab(new URLSearchParams(window.location.search).get('tab'));
 }
+
+type CoreResourcesPageProps = {
+    type: CoreResourceType;
+    permissions: BootstrapPermissions;
+    embedded?: boolean;
+    legacyBaseUrl?: string;
+    initialResourceUuid?: string | null;
+};
+
+const labels: Record<CoreResourceType, string> = {
+    servers: 'Serveurs',
+    applications: 'Applications',
+    databases: 'Bases de données',
+    services: 'Services',
+};
+
+const descriptions: Record<CoreResourceType, string> = {
+    servers: 'Hôtes SSH, proxy et destinations de déploiement.',
+    applications: 'Santé, déploiements et accès rapide à vos apps.',
+    databases: 'Instances, connexions et sauvegardes.',
+    services: 'Stacks et services gérés.',
+};
+
+const actionLabels: Record<CoreAction, string> = {
+    start: 'Démarrer',
+    stop: 'Arrêter',
+    restart: 'Redémarrer',
+    deploy: 'Déployer',
+};
+
+const actionIcons = {
+    start: Play,
+    stop: Square,
+    restart: RotateCw,
+    deploy: Rocket,
+};
+
+function databaseCardTitle(resource: CoreResource): string {
+    const applications = resource.connected_applications ?? [];
+
+    if (/^libsql-database-[a-z0-9]+$/i.test(resource.name) && applications.length > 0) {
+        return applications.length === 1
+            ? `Base de ${applications[0].application_name}`
+            : applications.map((application) => application.application_name).join(', ');
+    }
+
+    if (applications.length === 0) {
+        return 'Sans application';
+    }
+
+    return applications.map((application) => application.application_name).join(', ');
+}
+
+function databaseCardSubtitle(resource: CoreResource): string {
+    const engineLabel = resource.engine_label ?? resource.engine ?? 'Base de données';
+    const status = parseResourceStatus(resource.status).shortLabel;
+
+    return `${engineLabel} · ${status}`;
+}
+
+function resourceSearchHaystack(resource: CoreResource, resourceType: CoreResourceType): string {
+    const values = [resource.name, resource.uuid];
+
+    if (resourceType === 'databases') {
+        values.push(resource.engine ?? '', resource.engine_label ?? '');
+        values.push(...(resource.connected_applications ?? []).map((application) => application.application_name));
+    }
+
+    return values.join(' ').toLowerCase();
+}
