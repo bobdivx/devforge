@@ -1,11 +1,10 @@
 import { Braces, MessageSquare, Rocket, FileText, Settings } from 'lucide-preact';
-import { useEffect, useState } from 'preact/hooks';
 import { applicationDockItems } from '../lib/application-dock';
 import type { ApplicationTabId } from '../lib/application-tabs';
 import {
     applicationPath,
     extractApplicationUuid,
-    readApplicationTabFromLocation,
+    parseApplicationTab,
     routeHref,
 } from '../lib/routes';
 
@@ -19,24 +18,13 @@ const dockIcons = {
 
 type ApplicationWorkspaceDockProps = {
     onNavigate: (event: MouseEvent, path: string) => void;
+    locationSearch?: string;
 };
 
-export function ApplicationWorkspaceDock({ onNavigate }: ApplicationWorkspaceDockProps) {
-    const [uuid, setUuid] = useState(() => (
-        typeof window === 'undefined' ? null : extractApplicationUuid(window.location.pathname)
-    ));
-    const [activeTab, setActiveTab] = useState<ApplicationTabId>(() => readApplicationTabFromLocation());
-
-    useEffect(() => {
-        const sync = () => {
-            setUuid(extractApplicationUuid(window.location.pathname));
-            setActiveTab(readApplicationTabFromLocation());
-        };
-
-        window.addEventListener('popstate', sync);
-
-        return () => window.removeEventListener('popstate', sync);
-    }, []);
+export function ApplicationWorkspaceDock({ onNavigate, locationSearch }: ApplicationWorkspaceDockProps) {
+    const uuid = typeof window === 'undefined' ? null : extractApplicationUuid(window.location.pathname);
+    const search = locationSearch ?? (typeof window === 'undefined' ? '' : window.location.search);
+    const activeTab: ApplicationTabId = parseApplicationTab(new URLSearchParams(search).get('tab'));
 
     if (!uuid) {
         return null;
