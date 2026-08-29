@@ -648,6 +648,83 @@ class AgentDirectives
         ];
     }
 
+    /**
+     * Réglages Nixpacks pour Astro SSR (@astrojs/node, output server/hybrid).
+     *
+     * @return array<string, mixed>
+     */
+    public static function astroSsrNixpacksRuntimeSettings(): array
+    {
+        return [
+            'is_static' => false,
+            'build_pack' => 'nixpacks',
+            'start_command' => 'node ./dist/server/entry.mjs',
+            'publish_directory' => '/dist',
+            'ports_exposes' => '4321',
+            'health_check_path' => '/status',
+            'health_check_port' => '4321',
+            'detected_framework' => 'astro-ssr',
+        ];
+    }
+
+    public static function isAstroSsrFramework(?string $framework): bool
+    {
+        $value = mb_strtolower(trim((string) $framework));
+
+        return $value === 'astro-ssr' || str_contains($value, 'astro-ssr');
+    }
+
+    public static function looksLikeAstroSsrSignals(
+        ?string $framework,
+        ?string $startCommand = null,
+        ?string $portsExposes = null,
+    ): bool {
+        if (self::isAstroSsrFramework($framework)) {
+            return true;
+        }
+
+        $start = (string) $startCommand;
+        if (preg_match('/dist\/server\/entry\.(mjs|js)\b/', $start) === 1) {
+            return true;
+        }
+
+        $frameworkLower = mb_strtolower((string) $framework);
+        $ports = trim((string) $portsExposes);
+
+        return $ports === '4321' && (str_contains($frameworkLower, 'astro') || str_contains($frameworkLower, 'ssr'));
+    }
+
+    /**
+     * 404 nginx sur /status ou healthcheck fail — pas une preuve que entry.mjs est absent.
+     */
+    public static function looksLikeNginxStatusOrHealthcheckOnly(?string $text): bool
+    {
+        if ($text === null || trim($text) === '') {
+            return false;
+        }
+
+        if (self::isMissingAstroServerEntryIssue($text)) {
+            return false;
+        }
+
+        $blob = mb_strtolower($text);
+        $nginxStatus = (bool) preg_match(
+            '/\/status[^\n]{0,120}(404|not found)|nginx[^\n]{0,120}\/status|(?:get|curl)[^\n]{0,60}\/status[^\n]{0,60}(404|fail)/iu',
+            $text,
+        );
+        $healthFail = (
+            str_contains($blob, 'healthcheck')
+            || str_contains($blob, 'health check')
+            || str_contains($blob, 'unhealthy')
+        ) && (
+            str_contains($blob, 'fail')
+            || str_contains($blob, 'unhealthy')
+            || str_contains($blob, '404')
+        );
+
+        return $nginxStatus || $healthFail;
+    }
+
     public static function isMissingStaticPublishDirectoryIssue(?string $text): bool
     {
         if ($text === null || trim($text) === '') {
