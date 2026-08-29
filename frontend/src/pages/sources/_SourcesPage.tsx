@@ -96,6 +96,30 @@ export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
     }
 
     const listedApps = apps.data?.data ?? [];
+    const groupedAgentRequests = useMemo(() => {
+        const rows = agentRequests.data?.data ?? [];
+        const seen = new Map<string, (typeof rows)[number]>();
+        const aliases = new Set([
+            'DATABASE_URL',
+            'DATABASE_URL_MACOMPTA',
+            'DATABASE_URL_VALIDATED',
+            'DATABASE_URL_CORRECT',
+            'CORRECT_DB_URL',
+            'NEW_DB_REMOTE_URL',
+            'ASTRO_DB_REMOTE_URL',
+            'TURSO_DATABASE_URL',
+        ]);
+        for (const req of rows) {
+            const raw = (req.key_name ?? '').trim().toUpperCase();
+            const logical = aliases.has(raw) ? 'DATABASE_URL' : raw;
+            const key = `${logical}|${req.resource_uuid ?? ''}`;
+            if (!seen.has(key)) {
+                seen.set(key, req);
+            }
+        }
+        return Array.from(seen.values());
+    }, [agentRequests.data]);
+
     const installedApps = listedApps.filter(isGithubAppInstalled);
     const pendingApps = listedApps.filter((app) => !isGithubAppInstalled(app));
 
@@ -150,13 +174,13 @@ export function ConnexionsPage({ permissions }: ConnexionsPageProps) {
                 </Card>
             )}
 
-            {agentRequests.data?.data && agentRequests.data.data.length > 0 && (
+            {groupedAgentRequests.length > 0 && (
                 <Card title="Demandes d'agents" eyebrow="Action Requise" class="border-warning bg-warning/5">
                     <p class="mb-4 text-xs text-base-content/70">
                         Certains agents IA sont en pause car ils ont besoin de variables ou clés API pour continuer leur travail.
                     </p>
                     <div class="grid gap-2.5 sm:gap-3 md:gap-4">
-                        {agentRequests.data.data.map((req) => (
+                        {groupedAgentRequests.map((req) => (
                             <div key={req.uuid} class="flex flex-col gap-2 rounded-lg border border-base-300 bg-base-100 p-4">
                                 <div class="flex items-center gap-2 flex-wrap">
                                     <Bot class="size-3.5 sm:size-4 text-primary" aria-hidden />
