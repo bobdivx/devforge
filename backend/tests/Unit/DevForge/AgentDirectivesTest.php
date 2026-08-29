@@ -128,7 +128,7 @@ it('nudges failure agents that stop after diagnosis only', function () {
 });
 
 it('detects host permission diagnoses and provides an ops nudge', function () {
-    $text = 'Permission denied lors de l\'ecriture dans data/applications — ownership host.';
+    $text = 'Permission denied lors de l\'écriture dans data/applications — ownership host.';
 
     expect(AgentDirectives::isHostPermissionDiagnosis($text))->toBeTrue()
         ->and(AgentDirectives::isHostPermissionDiagnosis('npm ERR! missing script'))->toBeFalse()
@@ -142,4 +142,158 @@ it('detects host permission diagnoses and provides an ops nudge', function () {
         ->and(AgentDirectives::deploymentFailureHostPermissionNudgeMessage())->toContain('fix_application_host_permissions')
         ->and(AgentDirectives::deploymentFailureHostPermissionNudgeMessage())->toContain('DUMMY_')
         ->and(AgentDirectives::deploymentFailureHostPermissionNudgeMessage())->not->toContain('send_notification sans fix');
+});
+
+it('detects Coolify BASE_CONFIG_PATH / read-only failures without hardcoded host paths', function () {
+    expect(AgentDirectives::isCoolifyBaseConfigPathIssue(
+        "mkdir coolify/applications/x: Read-only file system"
+    ))->toBeTrue()
+        ->and(AgentDirectives::isCoolifyBaseConfigPathIssue(
+            "mkdir: cannot create directory '/data': Read-only file system"
+        ))->toBeFalse()
+        ->and(AgentDirectives::isCoolifyBaseConfigPathIssue('tee: Permission denied'))->toBeFalse()
+        ->and(AgentDirectives::failureExcerptHasCoolifyBaseConfigPathIssue([
+            ['message' => 'sudo mkdir -p /media/Docker/AppData/coolify/data/applications/x'],
+            ['message' => 'Read-only file system'],
+        ]))->toBeTrue()
+        ->and(AgentDirectives::failureExcerptHasCoolifyBaseConfigPathIssue([
+            ['message' => 'sudo mkdir -p /var/custom/coolify/applications/x'],
+            ['message' => "mkdir: cannot create directory '/var': Read-only file system"],
+        ]))->toBeTrue();
+});
+
+it('detects missing Astro SSR entry as static nginx runtime', function () {
+    $log = "Error: Cannot find module '/app/dist/server/entry.mjs'\ncode: 'MODULE_NOT_FOUND'";
+
+    expect(AgentDirectives::isMissingAstroServerEntryIssue($log))->toBeTrue()
+        ->and(AgentDirectives::failureExcerptHasMissingAstroServerEntryIssue([
+            ['message' => $log],
+        ]))->toBeTrue()
+        ->and(AgentDirectives::isMissingAstroServerEntryIssue('npm ERR! missing script: start'))->toBeFalse()
+        ->and(AgentDirectives::astroStaticNginxRuntimeSettings()['is_static'])->toBeTrue()
+        ->and(AgentDirectives::astroStaticNginxRuntimeSettings()['publish_directory'])->toBe('/dist')
+        ->and(AgentDirectives::astroStaticNginxRuntimeSettings()['ports_exposes'])->toBe('80');
+});
+
+it('detects missing static publish_directory / nginx welcome failures', function () {
+    expect(AgentDirectives::isMissingStaticPublishDirectoryIssue('Welcome to nginx!'))->toBeTrue()
+        ->and(AgentDirectives::isMissingStaticPublishDirectoryIssue('Page nginx par défaut détectée'))->toBeTrue()
+        ->and(AgentDirectives::isMissingStaticPublishDirectoryIssue('npm ERR! missing script'))->toBeFalse()
+        ->and(AgentDirectives::inferStaticPublishDirectory([
+            ['message' => '[build] directory: /app/dist/'],
+        ]))->toBe('/dist')
+        ->and(AgentDirectives::inferStaticPublishDirectory([
+            ['message' => '[build] directory: /app/build/'],
+        ]))->toBe('/build')
+        ->and(AgentDirectives::inferStaticPublishDirectory([
+            ['message' => 'astro build complete'],
+        ]))->toBe('/dist')
+        ->and(AgentDirectives::inferStaticPublishDirectory([
+            ['message' => 'npm ERR! missing script'],
+        ]))->toBeNull()
+        ->and(AgentDirectives::pickStaticPublishDirectoryFromSourceEntries([
+            ['name' => 'src', 'type' => 'directory'],
+            ['name' => 'dist', 'type' => 'directory'],
+            ['name' => 'package.json', 'type' => 'file'],
+        ]))->toBe('/dist')
+        ->and(AgentDirectives::pickStaticPublishDirectoryFromSourceEntries([
+            ['name' => 'src', 'type' => 'directory'],
+        ]))->toBeNull()
+        ->and(AgentChatRepairStrategy::detectIssue(mb_strtolower(
+            'Page nginx par défaut détectée (publish_directory probablement incorrect, ex. /dist manquant).'
+        )))->toBe(AgentChatRepairStrategy::ISSUE_NGINX_PUBLISH);
+});
+
+it('detects ApplicationReadiness platform crashes and invalid chown groups', function () {
+    expect(AgentDirectives::isReadinessPlatformCrash('Class "App\\Models\\ApplicationReadiness" not found'))->toBeTrue()
+        ->and(AgentDirectives::failureExcerptHasReadinessPlatformCrash([
+            ['message' => 'Deployment failed: Class "App\\Models\\ApplicationReadiness" not found'],
+        ]))->toBeTrue()
+        ->and(AgentDirectives::isInvalidChownGroupIssue("chown: invalid group: 'bobdivx:bobdivx'"))->toBeTrue()
+        ->and(AgentDirectives::isInvalidChownGroupIssue('Permission denied'))->toBeFalse();
+});
+
+it('detects npm private registry E401 failures', function () {
+    $log = 'npm error code E401\nnpm error 401 Unauthorized - GET https://npm.pkg.github.com/download/@Briseteia/ma-prusa-design-system/0.0.47 — unauthenticated: User cannot be authenticated';
+
+    expect(AgentDirectives::isNpmPrivateRegistryAuthIssue($log))->toBeTrue()
+        ->and(AgentChatRepairStrategy::detectIssue(mb_strtolower($log)))->toBe(AgentChatRepairStrategy::ISSUE_NPM_AUTH)
+        ->and(AgentDirectives::isNpmPrivateRegistryAuthIssue('npm ERR! missing script: build'))->toBeFalse();
+});
+
+it('mentions github app packages injection in deployment failure prompts', function () {
+    $agent = new AiAgent([
+        'type' => 'deployment',
+        'name' => 'Deploy Test',
+        'team_id' => 1,
+    ]);
+    $agent->setRelation('team', Team::factory()->make(['name' => 'Equipe Test']));
+
+    $system = app(AgentPromptBuilder::class)->autonomousSystemPrompt($agent, [
+        'event' => 'deployment_failed',
+    ]);
+
+    expect($system)->toContain('GitHub')
+        ->and($system)->toContain('NODE_AUTH_TOKEN');
+});
+
+it('builds readiness failure prompts with structured outcome instructions', function () {
+    $agent = new AiAgent([
+        'type' => 'deployment',
+        'name' => 'Deploy Test',
+        'team_id' => 1,
+    ]);
+    $agent->setRelation('team', Team::factory()->make(['name' => 'Equipe Test']));
+
+    $system = app(AgentPromptBuilder::class)->autonomousSystemPrompt($agent, [
+        'event' => 'application_readiness_failed',
+    ]);
+    $message = app(AgentPromptBuilder::class)->autonomousInitialMessage($agent, [
+        'event' => 'application_readiness_failed',
+        'application_name' => 'macompta',
+        'application_uuid' => 'app-uuid',
+        'deployment_uuid' => 'deploy-uuid',
+        'fqdn' => 'https://macompta.example.com',
+        'probe_url' => 'https://macompta.example.com',
+        'probe_status' => 502,
+        'probe_error' => 'HTTP 502',
+        'readiness_round' => 1,
+        'readiness_max_rounds' => 5,
+    ], 'event');
+
+    expect($system)->toContain('outcome')
+        ->and($system)->toContain('needs_user')
+        ->and($system)->toContain('publish_directory')
+        ->and($message)->toContain('ALERTE READINESS')
+        ->and($message)->toContain('http_request')
+        ->and($message)->toContain('publish_directory');
+});
+
+it('detects bad gateway proxy port mismatches for agent harness', function () {
+    expect(AgentDirectives::isBadGatewayProxyPortIssue(
+        'HTTP 502 Bad Gateway — Host Error. Server listening on http://localhost:4321'
+    ))->toBeTrue()
+        ->and(AgentDirectives::isBadGatewayProxyPortIssue('HTTP 404 not found'))->toBeFalse()
+        ->and(AgentChatRepairStrategy::detectIssue(mb_strtolower(
+            'probe_error HTTP 502 bad gateway traefik loadbalancer.server.port=80 astro'
+        )))->toBe(AgentChatRepairStrategy::ISSUE_PROXY_PORT);
+});
+
+
+it('extracts qwen text tool calls with empty-object prefix', function () {
+    $calls = AgentDirectives::extractProseToolCalls('{}{"name": "list_github_apps","arguments": {}}');
+
+    expect($calls)->toHaveCount(1)
+        ->and($calls[0]['name'])->toBe('list_github_apps')
+        ->and($calls[0]['arguments'])->toBe([]);
+});
+
+it('extracts request_user_input written as json', function () {
+    $calls = AgentDirectives::extractProseToolCalls(
+        '{"name":"request_user_input","arguments":{"key":"DATABASE_URL","message":"URL Turso manquante"}}'
+    );
+
+    expect($calls)->toHaveCount(1)
+        ->and($calls[0]['name'])->toBe('request_user_input')
+        ->and($calls[0]['arguments']['key'])->toBe('DATABASE_URL');
 });
