@@ -13,7 +13,7 @@ describe('ApplicationWorkspaceDock', () => {
         window.history.replaceState({}, '', '/devforge/applications/app-1/?tab=logs');
         render(<ApplicationWorkspaceDock onNavigate={() => undefined} />);
 
-        expect(screen.getByRole('navigation', { name: 'Espace de travail application' })).toBeInTheDocument();
+        expect(screen.getByRole('navigation', { name: 'Espace de travail application' })).toHaveClass('lg:hidden');
         expect(screen.getByRole('link', { name: 'Chat' })).toHaveAttribute('href', '/devforge/applications/app-1/?tab=agents');
         expect(screen.getByRole('link', { name: 'Déploiements' })).toHaveAttribute('href', '/devforge/applications/app-1/?tab=deployments');
         expect(screen.getByRole('link', { name: 'Logs' })).toHaveAttribute('href', '/devforge/applications/app-1/?tab=logs');
