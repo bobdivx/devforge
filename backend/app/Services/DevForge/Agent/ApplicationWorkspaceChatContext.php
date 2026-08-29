@@ -165,3 +165,145 @@ RULES;
         Pour les outils (read_application_source, write_application_source, upsert_application_env_var, control_resource, get_deployment_logs, get_resource_status, etc.), utilise application_uuid={$uuid} sans redemander l'UUID.
         CONTEXT);
     }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function rankTeamApplications(int $teamId, int $limit): array
+    {
+        try {
+            $apps = Application::query()
+                ->whereRelation('environment.project', 'team_id', $teamId)
+                ->orderByDesc('updated_at')
+                ->limit(80)
+                ->get(['id', 'uuid', 'name', 'status', 'fqdn', 'updated_at']);
+        } catch (Throwable) {
+            return [];
+        }
+
+        if ($apps->isEmpty()) {
+            return [];
+        }
+
+        $ids = $apps->pluck('id')->map(fn (mixed $id): string => (string) $id)->all();
+        $latestByApp = [];
+        try {
+            $deployments = ApplicationDeploymentQueue::query()
+                ->whereIn('application_id', $ids)
+                ->orderByDesc('id')
+                ->get([
+                    'id',
+                    'application_id',
+                    'status',
+                    'created_at',
+                    'updated_at',
+                    'finished_at',
+                    'rollback',
+                ]);
+            foreach ($deployments as $deployment) {
+                $key = (string) $deployment->application_id;
+                if (! isset($latestByApp[$key])) {
+                    $latestByApp[$key] = $deployment;
+                }
+            }
+        } catch (Throwable) {
+        }
+
+        $rows = [];
+        foreach ($apps as $application) {
+            $status = $this->resourceStatus($application);
+            $deployment = $latestByApp[(string) $application->id] ?? null;
+            $deployStatus = $deployment !== null ? (string) $deployment->status : null;
+            $deployAt = null;
+            $rollback = false;
+            if ($deployment !== null) {
+                $deployAt = $deployment->finished_at?->toIso8601String()
+                    ?? $deployment->updated_at?->toIso8601String()
+                    ?? $deployment->created_at?->toIso8601String();
+                $rollback = (bool) ($deployment->rollback ?? false);
+            }
+
+            $statusLower = strtolower($status);
+            $severity = 3;
+            $failedDeploy = $deployStatus !== null && strtolower($deployStatus) === 'failed';
+            if (
+                str_contains($statusLower, 'unhealthy')
+                || str_contains($statusLower, 'failed')
+                || str_contains($statusLower, 'error')
+                || $failedDeploy
+            ) {
+                $severity = 0;
+            } elseif (str_contains($statusLower, 'exited') || str_contains($statusLower, 'restarting')) {
+                $severity = 1;
+            }
+
+            $rows[] = [
+                'name' => (string) $application->name,
+                'uuid' => (string) $application->uuid,
+                'status' => $status,
+                'fqdn' => is_string($application->fqdn) ? $application->fqdn : null,
+                'last_deploy_status' => $deployStatus,
+                'last_deploy_at' => $deployAt,
+                'last_deploy_rollback' => $rollback,
+                '_severity' => $severity,
+                '_updated' => $application->updated_at?->getTimestamp() ?? 0,
+            ];
+        }
+
+        usort($rows, function (array $a, array $b): int {
+            if ($a['_severity'] !== $b['_severity']) {
+                return $a['_severity'] <=> $b['_severity'];
+            }
+
+            return ($b['_updated'] <=> $a['_updated']);
+        });
+
+        $capped = array_slice($rows, 0, $limit);
+        foreach ($capped as &$row) {
+            unset($row['_severity'], $row['_updated']);
+        }
+        unset($row);
+
+        return array_values($capped);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $fleet
+     */
+    public function formatFleetPromptBlock(array $fleet): string
+    {
+        $rules = self::statusReadingRules();
+        if ($fleet === []) {
+            return trim("Flotte équipe : aucune application.\n\n{$rules}");
+        }
+
+        $lines = [];
+        foreach ($fleet as $app) {
+            if (! is_array($app)) {
+                continue;
+            }
+            $name = (string) ($app['name'] ?? 'app');
+            $uuid = (string) ($app['uuid'] ?? '');
+            $status = (string) ($app['status'] ?? 'inconnu');
+            $fqdn = (string) ($app['fqdn'] ?? 'aucun');
+            $deployStatus = $app['last_deploy_status'] ?? null;
+            $deployAt = $app['last_deploy_at'] ?? null;
+            $deployLabel = is_string($deployStatus) && $deployStatus !== ''
+                ? $deployStatus
+                : 'aucun';
+            $atLabel = is_string($deployAt) && $deployAt !== '' ? $deployAt : 'n/a';
+            $rollback = ! empty($app['last_deploy_rollback']) ? ' rollback=oui' : '';
+            $lines[] = "- {$name} ({$uuid}) statut={$status} fqdn={$fqdn} dernier_déploiement={$deployLabel} at={$atLabel}{$rollback}";
+        }
+
+        $list = implode("\n", $lines);
+
+        return trim(<<<CONTEXT
+Flotte équipe (contexte live injecté par le backend, pas par l'utilisateur) :
+Les apps unhealthy et celles dont le dernier déploiement a échoué sont listées en premier (max 20).
+
+{$rules}
+
+{$list}
+CONTEXT);
+    }
