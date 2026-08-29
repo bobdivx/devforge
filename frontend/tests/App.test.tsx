@@ -71,7 +71,7 @@ describe('shell DevForge', () => {
         expect(await screen.findByText('Serveur principal')).toBeInTheDocument();
         expect(window.location.pathname).toBe('/devforge/settings/servers');
         expect(screen.getByRole('link', { name: 'Serveurs' })).toHaveAttribute('aria-current', 'page');
-        expect(screen.getByRole('link', { name: 'Paramètres' })).not.toHaveAttribute('aria-current');
+        expect(screen.getByRole('link', { name: 'Réglages' })).not.toHaveAttribute('aria-current');
         expect(screen.getByRole('combobox', { name: 'Section' })).toHaveValue('servers');
         expect(screen.getByRole('button', { name: 'Serveurs' })).toHaveAttribute('aria-current', 'page');
         expect(screen.queryByRole('link', { name: 'Coolify' })).not.toBeInTheDocument();
