@@ -39,7 +39,11 @@ function formatDate(value: string | null): string {
     }
 }
 
-export function DevForgeMcpTokenCard() {
+type DevForgeMcpTokenCardProps = {
+    embedded?: boolean;
+};
+
+export function DevForgeMcpTokenCard({ embedded = false }: DevForgeMcpTokenCardProps) {
     const query = useApiQuery('security-api-tokens', () => domainApi.apiTokens());
     const tokens = query.data?.data ?? [];
     const meta = query.data?.meta;
@@ -114,103 +118,109 @@ export function DevForgeMcpTokenCard() {
 
     const isApiDisabled = meta?.is_api_enabled === false;
 
-    return (
-        <>
-            <Card title="Token DevForge" eyebrow="MCP & API">
-                <div class="grid gap-2.5 sm:gap-3 md:gap-4">
-                    <p class="text-xs text-base-content/55">
-                        Jetons d'authentification pour l'API REST et le serveur MCP DevForge (Cursor, agents).
-                        Endpoint : <code class="font-mono text-[11px]">{endpoint}</code>
+    const body = (
+        <div class="grid gap-2.5 sm:gap-3 md:gap-4">
+            <p class="text-xs text-base-content/55">
+                Jetons d'authentification pour l'API REST et le serveur MCP DevForge (Cursor, agents).
+                Endpoint : <code class="font-mono text-[11px]">{endpoint}</code>
+            </p>
+
+            {isApiDisabled && (
+                <div class="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
+                    <p class="text-sm text-warning">
+                        L'API est désactivée sur cette instance. Activez-la dans{' '}
+                        <button
+                            class="link link-warning font-medium"
+                            type="button"
+                            onClick={() => navigateTo('/settings/advanced')}
+                        >
+                            Paramètres → Avancé
+                        </button>
+                        .
                     </p>
+                </div>
+            )}
 
-                    {isApiDisabled && (
-                        <div class="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
-                            <p class="text-sm text-warning">
-                                L'API est désactivée sur cette instance. Activez-la dans{' '}
-                                <button
-                                    class="link link-warning font-medium"
-                                    type="button"
-                                    onClick={() => navigateTo('/settings/advanced')}
-                                >
-                                    Paramètres → Avancé
-                                </button>
-                                .
-                            </p>
-                        </div>
-                    )}
+            {error && (
+                <p class="rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-sm text-error">{error}</p>
+            )}
 
-                    {error && (
-                        <p class="rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-sm text-error">{error}</p>
-                    )}
-
-                    {plainTextToken && (
-                        <div class="rounded-lg border border-success/40 bg-success/10 p-4">
-                            <p class="text-xs sm:text-sm font-semibold text-success">Jeton créé avec succès</p>
-                            <p class="mt-1 text-xs text-base-content/65">
-                                Copiez ce jeton maintenant. Il ne sera plus affiché après fermeture.
-                            </p>
-                            <code class="mt-3 block break-all rounded-lg bg-base-100 px-3 py-2 font-mono text-xs">
-                                {plainTextToken}
-                            </code>
-                            <button class="btn btn-outline btn-sm mt-3" type="button" onClick={() => void copyToken()}>
-                                <Copy class="size-3.5" aria-hidden />
-                                {copied ? 'Copié' : 'Copier'}
-                            </button>
-                        </div>
-                    )}
-
-                    {tokens.length > 0 && (
-                        <div class="grid gap-2">
-                            <h4 class="text-xs sm:text-sm font-semibold">Jetons actifs ({tokens.length})</h4>
-                            <div class="grid gap-2">
-                                {tokens.slice(0, 5).map((token: ApiToken) => (
-                                    <div key={token.id} class="flex items-center justify-between gap-2 sm:gap-3 rounded-lg border border-base-300 bg-base-100 p-3">
-                                        <div class="min-w-0 flex-1">
-                                            <div class="font-medium text-sm truncate">{token.name}</div>
-                                            <div class="text-xs text-base-content/55">
-                                                <span class="font-mono">{token.abilities.join(', ')}</span>
-                                                {' · '}
-                                                Expire {formatDate(token.expires_at)}
-                                            </div>
-                                        </div>
-                                        <button
-                                            class="btn btn-ghost btn-xs text-error"
-                                            type="button"
-                                            onClick={() => setPendingDelete(token)}
-                                            title="Révoquer"
-                                        >
-                                            <Trash2 class="size-3.5" aria-hidden />
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                            {tokens.length > 5 && (
-                                <button
-                                    class="link link-sm text-base-content/65 text-left"
-                                    type="button"
-                                    onClick={() => navigateTo('/settings/security')}
-                                >
-                                    Voir tous les jetons ({tokens.length}) →
-                                </button>
-                            )}
-                        </div>
-                    )}
-
-                    {tokens.length === 0 && !isApiDisabled && (
-                        <p class="text-xs text-base-content/55">Aucun jeton créé.</p>
-                    )}
-
-                    <button
-                        class="btn btn-primary btn-sm w-fit"
-                        type="button"
-                        disabled={isApiDisabled}
-                        onClick={() => setShowForm(true)}
-                    >
-                        <Plus class="size-3.5" aria-hidden />
-                        Créer un jeton MCP
+            {plainTextToken && (
+                <div class="rounded-lg border border-success/40 bg-success/10 p-4">
+                    <p class="text-xs sm:text-sm font-semibold text-success">Jeton créé avec succès</p>
+                    <p class="mt-1 text-xs text-base-content/65">
+                        Copiez ce jeton maintenant. Il ne sera plus affiché après fermeture.
+                    </p>
+                    <code class="mt-3 block break-all rounded-lg bg-base-100 px-3 py-2 font-mono text-xs">
+                        {plainTextToken}
+                    </code>
+                    <button class="btn btn-outline btn-sm mt-3" type="button" onClick={() => void copyToken()}>
+                        <Copy class="size-3.5" aria-hidden />
+                        {copied ? 'Copié' : 'Copier'}
                     </button>
                 </div>
-            </Card>
+            )}
+
+            {tokens.length > 0 && (
+                <div class="grid gap-2">
+                    <h4 class="text-xs sm:text-sm font-semibold">Jetons actifs ({tokens.length})</h4>
+                    <div class="grid gap-2">
+                        {tokens.slice(0, 5).map((token: ApiToken) => (
+                            <div key={token.id} class="flex items-center justify-between gap-2 sm:gap-3 rounded-lg border border-base-300 bg-base-100 p-3">
+                                <div class="min-w-0 flex-1">
+                                    <div class="font-medium text-sm truncate">{token.name}</div>
+                                    <div class="text-xs text-base-content/55">
+                                        <span class="font-mono">{token.abilities.join(', ')}</span>
+                                        {' · '}
+                                        Expire {formatDate(token.expires_at)}
+                                    </div>
+                                </div>
+                                <button
+                                    class="btn btn-ghost btn-xs text-error"
+                                    type="button"
+                                    onClick={() => setPendingDelete(token)}
+                                    title="Révoquer"
+                                >
+                                    <Trash2 class="size-3.5" aria-hidden />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                    {tokens.length > 5 && (
+                        <button
+                            class="link link-sm text-base-content/65 text-left"
+                            type="button"
+                            onClick={() => navigateTo('/settings/security')}
+                        >
+                            Voir tous les jetons ({tokens.length}) →
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {tokens.length === 0 && !isApiDisabled && (
+                <p class="text-xs text-base-content/55">Aucun jeton créé.</p>
+            )}
+
+            <button
+                class="btn btn-primary btn-sm w-fit"
+                type="button"
+                disabled={isApiDisabled}
+                onClick={() => setShowForm(true)}
+            >
+                <Plus class="size-3.5" aria-hidden />
+                Créer un jeton MCP
+            </button>
+        </div>
+    );
+
+    return (
+        <>
+            {embedded ? body : (
+                <Card title="Token DevForge" eyebrow="MCP & API">
+                    {body}
+                </Card>
+            )}
 
             <Modal title="Nouveau jeton DevForge" open={showForm} onClose={() => setShowForm(false)}>
                 <div class="p-6 grid gap-2.5 sm:gap-3 md:gap-4">
