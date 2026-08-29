@@ -14,7 +14,9 @@ import {
 } from '../lib/appearance';
 import { TeamContext } from '../lib/team-context';
 import { DomainPage } from '../pages/_router';
+import { ApplicationWorkspaceDock } from './ApplicationWorkspaceDock';
 import { AuthGuard } from './AuthGuard';
+import { CommandPalette } from './CommandPalette';
 import { Sidebar } from './Sidebar';
 import { ToastRegion, type Toast } from './ToastRegion';
 import { Topbar } from './Topbar';
@@ -26,6 +28,9 @@ type AppProps = {
 
 export function App({ initialPath }: AppProps) {
     const [pathname, setPathname] = useState(() => normalizeRoutePath(initialPath));
+    const [locationSearch, setLocationSearch] = useState(() => (
+        typeof window === 'undefined' ? '' : window.location.search
+    ));
     const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<unknown>(null);
@@ -37,6 +42,7 @@ export function App({ initialPath }: AppProps) {
     const [teamRevision, setTeamRevision] = useState(0);
     const route = useMemo(() => findRoute(pathname), [pathname]);
     const immersiveChat = route.page === 'agent-detail';
+    const applicationWorkspace = route.page === 'application-detail';
     const showChatFab = Boolean(
         bootstrap?.features?.agents_enabled
         && route.page !== 'agent-detail'
@@ -76,10 +82,12 @@ export function App({ initialPath }: AppProps) {
             if (canonical) {
                 window.history.replaceState({}, '', routeHref(canonical));
                 setPathname(normalizeRoutePath(canonical));
+                setLocationSearch(window.location.search);
                 return;
             }
 
             setPathname(current);
+            setLocationSearch(window.location.search);
         };
 
         syncPathname();
@@ -115,6 +123,7 @@ export function App({ initialPath }: AppProps) {
         event.preventDefault();
         window.history.pushState({}, '', routeHref(targetPath));
         setPathname(normalizeRoutePath(targetPath));
+        setLocationSearch(window.location.search);
         setSidebarOpen(false);
         document.querySelector<HTMLElement>('#devforge-content')?.focus();
     };
@@ -193,7 +202,7 @@ export function App({ initialPath }: AppProps) {
                                         class={`custom-scrollbar min-w-0 flex-1 outline-none ${
                                             immersiveChat
                                                 ? 'flex min-h-0 flex-col overflow-hidden p-0'
-                                                : 'overflow-x-hidden overflow-y-auto px-4 py-5 md:px-8 md:py-7'
+                                                : `overflow-x-hidden overflow-y-auto px-4 py-5 md:px-8 md:py-7 ${applicationWorkspace ? 'pb-24' : ''}`
                                         }`}
                                         tabIndex={-1}
                                     >
@@ -212,6 +221,12 @@ export function App({ initialPath }: AppProps) {
                                     </main>
                                 </div>
                             </div>
+
+                            <CommandPalette />
+
+                            {applicationWorkspace && (
+                                <ApplicationWorkspaceDock onNavigate={navigate} locationSearch={locationSearch} />
+                            )}
 
                             <ToastRegion
                                 toasts={toasts}

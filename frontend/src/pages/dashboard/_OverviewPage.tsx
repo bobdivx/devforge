@@ -1,293 +1,240 @@
-import { Activity, Bot, Boxes, Database, RefreshCw, Server } from 'lucide-preact';
-import { PageHeader } from '../../components/PageHeader';
-import { Card } from '../../components/ui/Card';
-import { DataState } from '../../components/ui/DataState';
-import { DonutChart } from '../../components/ui/DonutChart';
-import { ProgressBar } from '../../components/ui/ProgressBar';
-import { ResourceStatusIcon } from '../../components/ui/ResourceStatusIcon';
-import { SkeletonCard } from '../../components/ui/Skeleton';
-import { StatCard } from '../../components/ui/StatCard';
-import { DeploymentStatusIcon } from '../../components/ui/DeploymentStatusIcon';
-import { Table } from '../../components/ui/Table';
+import { ExternalLink, Play, RefreshCw, RotateCw, Search, Square } from 'lucide-preact';
+import { useState } from 'preact/hooks';
 import { AgentAvatar } from '../../components/agents/AgentAvatar';
-import { parseResourceStatus } from '../../lib/resource-status';
-import { domainApi, type ResourceStatus } from '../../lib/domain-api';
+import { DataState } from '../../components/ui/DataState';
+import { SkeletonCard } from '../../components/ui/Skeleton';
+import { openCommandPalette } from '../../lib/command-palette';
+import { domainApi, type CoreAction, type ResourceStatus } from '../../lib/domain-api';
 import { dayGreeting, formatDashboardDate } from '../../lib/greeting';
-import { routeHref, applicationPath } from '../../lib/routes';
+import {
+    pandaActionLabels,
+    pandaAppActions,
+    pandaAppDotClass,
+    pandaAppState,
+    pandaAppStateLabel,
+} from '../../lib/pandaos-app-state';
+import { agentDetailPath } from '../../lib/agent-routes';
+import { applicationPath, routeHref } from '../../lib/routes';
 import { useApiQuery } from '../../lib/use-api-query';
 import { useNavigate } from '../../lib/use-navigate';
-
-function summarizeResources(resources: ResourceStatus[]) {
-    const parsed = resources.map((resource) => parseResourceStatus(resource.status));
-    const running = parsed.filter(({ tone }) => tone === 'success').length;
-    const degraded = parsed.filter(({ tone }) => tone === 'warning').length;
-    const stopped = parsed.filter(({ tone }) => tone === 'error').length;
-
-    return { total: resources.length, running, degraded, stopped };
-}
-
-function ApplicationQuickCard({
-    application,
-    onNavigate,
-}: {
-    application: ResourceStatus;
-    onNavigate: (event: MouseEvent, path: string) => void;
-}) {
-    return (
-        <a
-            class="flex min-w-0 items-center justify-between gap-2 sm:gap-3 rounded-2xl bg-base-200/80 px-2.5 sm:px-3 md:px-3 sm:px-4 py-2.5 sm:py-3.5 transition hover:bg-base-200"
-            href={routeHref(applicationPath(application.uuid))}
-            onClick={(event) => onNavigate(event, applicationPath(application.uuid))}
-        >
-            <div class="min-w-0">
-                <p class="truncate text-xs sm:text-sm font-semibold">{application.name}</p>
-                <p class="truncate text-xs text-base-content/45">Application</p>
-            </div>
-            <ResourceStatusIcon status={application.status} />
-        </a>
-    );
-}
 
 type OverviewPageProps = {
     userName?: string;
 };
+
+function AppStatusCard({
+    application,
+    acting,
+    onNavigate,
+    onAction,
+}: {
+    application: ResourceStatus;
+    acting: CoreAction | null;
+    onNavigate: (event: MouseEvent, path: string) => void;
+    onAction: (application: ResourceStatus, action: CoreAction) => void;
+}) {
+    const state = pandaAppState(application.status);
+    const actions = pandaAppActions(state);
+    const href = applicationPath(application.uuid);
+
+    return (
+        <article class="devforge-card flex min-w-0 flex-col gap-4 rounded-2xl border border-[#E5E7EB] bg-base-100 p-4">
+            <a
+                class="flex min-w-0 items-start justify-between gap-3"
+                href={routeHref(href)}
+                onClick={(event) => onNavigate(event, href)}
+            >
+                <div class="min-w-0">
+                    <p class="truncate text-sm font-semibold">{application.name}</p>
+                    <p class="mt-1 flex items-center gap-1.5 text-xs text-base-content/50">
+                        <span class={`size-2 rounded-full ${pandaAppDotClass(state)}`} aria-hidden />
+                        {pandaAppStateLabel(state)}
+                    </p>
+                </div>
+            </a>
+            <div class="mt-auto flex flex-wrap gap-1.5">
+                {actions.map((action) => {
+                    const Icon = action === 'start' ? Play : action === 'stop' ? Square : RotateCw;
+
+                    return (
+                        <button
+                            key={action}
+                            class="btn btn-ghost btn-xs border border-[#E5E7EB]"
+                            type="button"
+                            disabled={acting !== null}
+                            onClick={() => onAction(application, action)}
+                        >
+                            <Icon class="size-3.5" aria-hidden />
+                            {acting === action ? '…' : pandaActionLabels[action]}
+                        </button>
+                    );
+                })}
+                {state === 'running' && (
+                    <a
+                        class="btn btn-primary btn-xs"
+                        href={routeHref(href)}
+                        onClick={(event) => onNavigate(event, href)}
+                    >
+                        <ExternalLink class="size-3.5" aria-hidden />
+                        Ouvrir
+                    </a>
+                )}
+            </div>
+        </article>
+    );
+}
 
 export function OverviewPage({ userName = '' }: OverviewPageProps) {
     const onNavigate = useNavigate();
     const query = useApiQuery('overview', () => domainApi.overview());
     const overview = query.data?.data;
     const applications = overview?.resource_statuses.applications ?? [];
-    const databases = overview?.resource_statuses.databases ?? [];
-    const services = overview?.resource_statuses.services ?? [];
-    const servers = overview?.resource_statuses.servers ?? [];
-    const health = overview?.health;
-    const appHealth = summarizeResources(applications);
-    const agentsEnabled = overview?.agents_summary !== null && overview?.agents_summary !== undefined;
-    const hasFailedDeploys = (overview?.recent_deployments ?? []).some((d) => d.status === 'failed');
-    const healthTone = !health
-        ? 'default'
-        : health.score >= 80
-            ? 'success'
-            : health.score >= 50
-                ? 'warning'
-                : 'error';
+    const sessions = overview?.agent_activity ?? [];
+    const [actingUuid, setActingUuid] = useState<string | null>(null);
+    const [actingAction, setActingAction] = useState<CoreAction | null>(null);
+    const [actionError, setActionError] = useState<string | null>(null);
+    const greeting = dayGreeting(userName || 'toi');
+
+    const runAction = async (application: ResourceStatus, action: CoreAction) => {
+        setActingUuid(application.uuid);
+        setActingAction(action);
+        setActionError(null);
+
+        try {
+            await domainApi.coreAction('applications', application.uuid, action);
+            await query.reload();
+        } catch {
+            setActionError(`Impossible d’${pandaActionLabels[action].toLowerCase()} « ${application.name} ».`);
+        } finally {
+            setActingUuid(null);
+            setActingAction(null);
+        }
+    };
 
     return (
-        <div class="grid min-w-0 gap-6">
-            <PageHeader
-                eyebrow="Santé"
-                title={userName ? dayGreeting(userName) : 'Vue d’ensemble'}
-                description={formatDashboardDate()}
-                actions={(
-                    <button class="btn btn-ghost btn-sm border border-base-300/80" type="button" onClick={() => void query.reload()}>
-                        <RefreshCw class="size-3.5" aria-hidden />
-                        Actualiser
-                    </button>
-                )}
-            />
+        <div class="mx-auto grid min-w-0 max-w-5xl gap-8">
+            <header class="grid min-w-0 gap-2 pt-4 text-center sm:pt-8">
+                <p class="text-xs font-medium uppercase tracking-[0.18em] text-base-content/40">
+                    {formatDashboardDate()}
+                </p>
+                <h1 class="text-3xl font-semibold tracking-tight sm:text-4xl">{greeting}</h1>
+            </header>
+
+            <button
+                class="mx-auto flex w-full max-w-xl items-center gap-3 rounded-2xl border border-[#E5E7EB] bg-base-100 px-4 py-3 text-left shadow-sm transition hover:border-primary/40"
+                type="button"
+                onClick={() => openCommandPalette()}
+            >
+                <Search class="size-4 text-base-content/40" aria-hidden />
+                <span class="flex-1 text-sm text-base-content/45">Rechercher une app, une commande…</span>
+                <kbd class="hidden rounded-md border border-[#E5E7EB] px-1.5 py-0.5 text-[10px] text-base-content/45 sm:inline">
+                    ⌘K
+                </kbd>
+            </button>
 
             {query.loading && (
-                <div class="grid min-w-0 gap-2 sm:gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    {Array.from({ length: 4 }).map((_, index) => <SkeletonCard key={index} />)}
+                <div class="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {Array.from({ length: 3 }).map((_, index) => <SkeletonCard key={index} />)}
                 </div>
             )}
 
             <DataState loading={false} error={query.error} onRetry={() => void query.reload()}>
-                {overview && health && (
-                    <div class="grid min-w-0 gap-6">
-                        <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                            <StatCard
-                                label="Santé plateforme"
-                                value={`${health.score}%`}
-                                hint={`${health.running} / ${health.total_resources} ressources en ligne`}
-                                tone={healthTone}
-                                icon={Activity}
-                            />
-                            <StatCard
-                                label="Applications"
-                                value={appHealth.total}
-                                hint={`${appHealth.running} en ligne`}
-                                href="/applications"
-                                icon={Boxes}
-                                onNavigate={onNavigate}
-                            />
-                            <StatCard
-                                label="Bases & services"
-                                value={databases.length + services.length}
-                                hint={`${databases.length} bases · ${services.length} services`}
-                                href="/databases"
-                                icon={Database}
-                                onNavigate={onNavigate}
-                            />
-                            {agentsEnabled && overview.agents_summary ? (
-                                <StatCard
-                                    label="Agents IA"
-                                    value={overview.agents_summary.active}
-                                    hint={`${overview.agents_summary.running} en cours`}
-                                    tone="success"
-                                    href="/agents"
-                                    icon={Bot}
-                                    onNavigate={onNavigate}
-                                />
-                            ) : (
-                                <StatCard
-                                    label="Serveurs"
-                                    value={servers.length}
-                                    hint="Infrastructure"
-                                    href="/settings/servers"
-                                    icon={Server}
-                                    onNavigate={onNavigate}
-                                />
-                            )}
-                        </div>
-
-                        <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 xl:grid-cols-3">
-                            <Card title="Disponibilité" eyebrow="Pipeline" class="min-w-0 xl:col-span-2">
-                                <div class="flex min-w-0 flex-col gap-6 lg:flex-row lg:items-center">
-                                    <DonutChart
-                                        size={148}
-                                        centerLabel={`${health.score}%`}
-                                        segments={[
-                                            { label: 'OK', value: health.running, color: 'var(--color-success)' },
-                                            { label: 'Dégradé', value: health.degraded, color: 'var(--color-warning)' },
-                                            { label: 'Arrêté', value: health.stopped, color: 'var(--color-error)' },
-                                        ]}
-                                    />
-                                    <div class="grid min-w-0 flex-1 gap-2.5 sm:gap-3 md:gap-4">
-                                        <div class="grid gap-2 sm:gap-3 sm:grid-cols-3">
-                                            <p class="text-sm"><span class="font-semibold tabular-nums">{health.running}</span> <span class="text-base-content/50">en ligne</span></p>
-                                            <p class="text-sm"><span class="font-semibold tabular-nums">{health.degraded}</span> <span class="text-base-content/50">dégradées</span></p>
-                                            <p class="text-sm"><span class="font-semibold tabular-nums">{health.stopped}</span> <span class="text-base-content/50">arrêtées</span></p>
-                                        </div>
-                                        <ProgressBar
-                                            value={health.score}
-                                            label="Disponibilité globale"
-                                            tone={health.score >= 80 ? 'success' : health.score >= 50 ? 'warning' : 'error'}
-                                        />
-                                        <ul class="grid gap-2 text-xs sm:grid-cols-2">
-                                            <li class="flex justify-between rounded-xl bg-base-200/70 px-3 py-2">
-                                                <span class="text-base-content/55">Applications</span>
-                                                <span class="tabular-nums font-medium">{appHealth.running}/{appHealth.total}</span>
-                                            </li>
-                                            <li class="flex justify-between rounded-xl bg-base-200/70 px-3 py-2">
-                                                <span class="text-base-content/55">Bases</span>
-                                                <span class="tabular-nums font-medium">{summarizeResources(databases).running}/{databases.length}</span>
-                                            </li>
-                                            <li class="flex justify-between rounded-xl bg-base-200/70 px-3 py-2">
-                                                <span class="text-base-content/55">Services</span>
-                                                <span class="tabular-nums font-medium">{summarizeResources(services).running}/{services.length}</span>
-                                            </li>
-                                            <li class="flex justify-between rounded-xl bg-base-200/70 px-3 py-2">
-                                                <span class="text-base-content/55">Serveurs</span>
-                                                <span class="tabular-nums font-medium">{summarizeResources(servers).running}/{servers.length}</span>
-                                            </li>
-                                        </ul>
-                                    </div>
+                {overview && (
+                    <div class="grid min-w-0 gap-8">
+                        {sessions.length > 0 && (
+                            <section class="grid min-w-0 gap-3">
+                                <div class="flex items-end justify-between gap-3">
+                                    <h2 class="text-sm font-semibold tracking-tight">Sessions récentes</h2>
+                                    <a
+                                        class="text-xs text-primary"
+                                        href={routeHref('/agents')}
+                                        onClick={(event) => onNavigate(event, '/agents')}
+                                    >
+                                        Voir tout
+                                    </a>
                                 </div>
-                            </Card>
+                                <ul class="grid min-w-0 gap-2">
+                                    {sessions.slice(0, 5).map((activity) => {
+                                        const path = activity.agent?.uuid
+                                            ? agentDetailPath(activity.agent.uuid)
+                                            : '/agents';
 
-                            <Card title="Applications" eyebrow="État" class="min-w-0">
-                                {applications.length === 0 ? (
-                                    <div class="grid gap-2 sm:gap-3 py-6 text-center">
-                                        <p class="text-sm text-base-content/55">Aucune application dans cette équipe.</p>
-                                        <a class="btn btn-primary btn-sm mx-auto" href={routeHref('/applications')} onClick={(event) => onNavigate(event, '/applications')}>
-                                            <Boxes class="size-3.5" aria-hidden />
-                                            Voir les applications
-                                        </a>
-                                    </div>
-                                ) : (
-                                    <div class="grid min-w-0 gap-2">
-                                        {applications.slice(0, 6).map((application) => (
-                                            <ApplicationQuickCard application={application} onNavigate={onNavigate} key={application.uuid} />
-                                        ))}
-                                    </div>
-                                )}
-                            </Card>
-                        </div>
-
-                        <div class="grid min-w-0 gap-2.5 sm:gap-3 md:gap-2.5 sm:gap-3 md:gap-4 xl:grid-cols-2">
-                            <Card title="Déploiements récents" eyebrow="Activité" class="min-w-0">
-                                {overview.recent_deployments.length === 0 ? (
-                                    <p class="py-3 sm:py-4 text-center text-xs text-base-content/50">Aucun déploiement récent.</p>
-                                ) : (
-                                    <div class="min-w-0 overflow-x-auto">
-                                        <Table headers={['Application', 'Statut', 'Date']} caption="Déploiements récents">
-                                            {overview.recent_deployments.map((deployment) => (
-                                                <tr key={deployment.uuid}>
-                                                    <td class="max-w-[10rem] truncate font-medium sm:max-w-none">
-                                                        <a class="hover:text-primary" href={routeHref('/deployments')} onClick={(event) => onNavigate(event, '/deployments')}>
-                                                            {deployment.application?.name ?? '—'}
-                                                        </a>
-                                                    </td>
-                                                    <td class="whitespace-nowrap">
-                                                        <DeploymentStatusIcon status={deployment.status} showLabel />
-                                                    </td>
-                                                    <td class="whitespace-nowrap text-xs text-base-content/55">
-                                                        {deployment.created_at ? new Date(deployment.created_at).toLocaleString('fr-FR') : '—'}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </Table>
-                                    </div>
-                                )}
-                            </Card>
-
-                            {agentsEnabled && overview.agents_summary && (
-                                <Card
-                                    title="Agents IA"
-                                    eyebrow={`${overview.agents_summary.active} actifs · ${overview.agents_summary.running} en cours`}
-                                    class="min-w-0"
-                                >
-                                    {overview.agent_activity.length === 0 ? (
-                                        <div class="grid gap-2 sm:gap-3 py-6 text-center">
-                                            <p class="text-sm text-base-content/55">Aucune activité récente.</p>
-                                            <a class="btn btn-ghost btn-sm mx-auto border border-base-300/80" href={routeHref('/agents')} onClick={(event) => onNavigate(event, '/agents')}>
-                                                <Bot class="size-3.5" aria-hidden />
-                                                Ouvrir les agents
-                                            </a>
-                                        </div>
-                                    ) : (
-                                        <>
-                                            <ul class="min-w-0 divide-y divide-base-300/70">
-                                                {overview.agent_activity.map((activity) => (
-                                                    <li class="flex min-w-0 items-start gap-2 sm:gap-3 py-3 sm:items-center" key={activity.uuid}>
-                                                        {activity.agent && (
-                                                            <AgentAvatar
-                                                                type={activity.agent.type}
-                                                                color={activity.agent.avatar_color}
-                                                                shape={activity.agent.avatar_shape}
-                                                                name={activity.agent.name}
-                                                                size="sm"
-                                                                status={activity.status === 'failed' ? 'error' : activity.status === 'completed' ? 'idle' : 'running'}
-                                                                animate={activity.status !== 'completed' && activity.status !== 'failed'}
-                                                            />
-                                                        )}
-                                                        <div class="min-w-0 flex-1 overflow-hidden">
-                                                            <p class="truncate text-xs sm:text-sm font-medium">{activity.agent?.name ?? 'Agent'}</p>
-                                                            <p class="line-clamp-2 break-words text-xs text-base-content/55 sm:line-clamp-1">
-                                                                {activity.summary || 'Exécution sans résumé'}
-                                                            </p>
-                                                        </div>
-                                                        <div class="shrink-0">
-                                                            <ResourceStatusIcon
-                                                                status={activity.status === 'completed' ? 'running:healthy' : activity.status === 'failed' ? 'exited' : 'starting:unknown'}
-                                                                showLabel
-                                                            />
-                                                        </div>
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                            <div class="card-toolbar mt-3">
-                                                <a class="btn btn-ghost btn-sm border border-base-300/80" href={routeHref('/agents')} onClick={(event) => onNavigate(event, '/agents')}>
-                                                    <Bot class="size-3.5" aria-hidden />
-                                                    Voir les agents
+                                        return (
+                                            <li key={activity.uuid}>
+                                                <a
+                                                    class="flex min-w-0 items-center gap-3 rounded-2xl border border-[#E5E7EB] bg-base-100 px-3 py-2.5 transition hover:border-primary/30"
+                                                    href={routeHref(path)}
+                                                    onClick={(event) => onNavigate(event, path)}
+                                                >
+                                                    {activity.agent && (
+                                                        <AgentAvatar
+                                                            type={activity.agent.type}
+                                                            color={activity.agent.avatar_color}
+                                                            shape={activity.agent.avatar_shape}
+                                                            name={activity.agent.name}
+                                                            size="sm"
+                                                            status={activity.status === 'failed' ? 'error' : activity.status === 'completed' ? 'idle' : 'running'}
+                                                            animate={activity.status !== 'completed' && activity.status !== 'failed'}
+                                                        />
+                                                    )}
+                                                    <div class="min-w-0 flex-1">
+                                                        <p class="truncate text-sm font-medium">{activity.agent?.name ?? 'Agent'}</p>
+                                                        <p class="line-clamp-2 break-words text-xs text-base-content/55">
+                                                            {activity.summary || 'Exécution sans résumé'}
+                                                        </p>
+                                                    </div>
                                                 </a>
-                                            </div>
-                                        </>
-                                    )}
-                                </Card>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            </section>
+                        )}
+
+                        <section class="grid min-w-0 gap-3">
+                            <div class="flex items-end justify-between gap-3">
+                                <h2 class="text-sm font-semibold tracking-tight">Applications</h2>
+                                <button
+                                    class="btn btn-ghost btn-xs border border-[#E5E7EB]"
+                                    type="button"
+                                    onClick={() => void query.reload()}
+                                >
+                                    <RefreshCw class="size-3.5" aria-hidden />
+                                    Actualiser
+                                </button>
+                            </div>
+
+                            {actionError && (
+                                <p class="rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-xs text-error" role="alert">
+                                    {actionError}
+                                </p>
                             )}
-                        </div>
+
+                            {applications.length === 0 ? (
+                                <div class="grid gap-3 rounded-2xl border border-dashed border-[#E5E7EB] bg-base-100 px-6 py-10 text-center">
+                                    <p class="text-sm text-base-content/55">Aucune application dans cette équipe.</p>
+                                    <a
+                                        class="btn btn-primary btn-sm mx-auto"
+                                        href={routeHref('/applications')}
+                                        onClick={(event) => onNavigate(event, '/applications')}
+                                    >
+                                        Voir les applications
+                                    </a>
+                                </div>
+                            ) : (
+                                <div class="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                                    {applications.map((application) => (
+                                        <AppStatusCard
+                                            key={application.uuid}
+                                            application={application}
+                                            acting={actingUuid === application.uuid ? actingAction : null}
+                                            onNavigate={onNavigate}
+                                            onAction={(app, action) => void runAction(app, action)}
+                                        />
+                                    ))}
+                                </div>
+                            )}
+                        </section>
                     </div>
                 )}
             </DataState>

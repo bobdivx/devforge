@@ -1,6 +1,7 @@
-import { Menu, Moon, Sun } from 'lucide-preact';
+import { Menu, Moon, Search, Sun } from 'lucide-preact';
 import type { BootstrapData } from '../lib/bootstrap';
 import type { Theme } from '../lib/theme';
+import { openCommandPalette } from '../lib/command-palette';
 import { DeploymentsIndicator } from './DeploymentsIndicator';
 import { InstanceUpdateIndicator } from './InstanceUpdateIndicator';
 import { TeamSwitcher } from './TeamSwitcher';
@@ -33,6 +34,24 @@ export function Topbar({ bootstrap, theme, onOpenMenu, onToggleTheme, onSwitchTe
             </div>
 
             <div class="flex items-center gap-2">
+                <button
+                    class="btn btn-ghost btn-sm hidden items-center gap-2 border border-base-300/70 sm:inline-flex"
+                    type="button"
+                    aria-label="Ouvrir la palette de commandes"
+                    onClick={() => openCommandPalette()}
+                >
+                    <Search class="size-3.5" aria-hidden />
+                    <span class="text-xs text-base-content/55">Rechercher</span>
+                    <kbd class="rounded border border-base-300 px-1 text-[10px] text-base-content/40">⌘K</kbd>
+                </button>
+                <button
+                    class="btn btn-ghost btn-circle btn-sm sm:hidden"
+                    type="button"
+                    aria-label="Ouvrir la palette de commandes"
+                    onClick={() => openCommandPalette()}
+                >
+                    <Search class="size-4" aria-hidden />
+                </button>
                 <InstanceUpdateIndicator enabled={bootstrap.permissions.instance_admin} />
                 <DeploymentsIndicator />
                 <button

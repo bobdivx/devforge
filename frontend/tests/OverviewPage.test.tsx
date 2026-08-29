@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 describe('OverviewPage', () => {
-    it('met en avant les applications et masque projets ou membres', async () => {
+    it('affiche l’accueil PandaOS : recherche, carte app et actions', async () => {
         vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
             const url = String(input);
             if (url === '/api/devforge/v1/overview') {
@@ -46,18 +46,21 @@ describe('OverviewPage', () => {
 
         render(<OverviewPage />);
 
-        expect(await screen.findByText('Santé plateforme')).toBeInTheDocument();
-        expect(screen.getByText('popcorn-web')).toBeInTheDocument();
-        const quickLink = screen.getByRole('link', { name: /popcorn-web/i });
-        expect(quickLink.getAttribute('href')).toBe('/devforge/applications/app-1/');
+        expect(await screen.findByText('popcorn-web')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /Rechercher une app, une commande/i })).toBeInTheDocument();
+        expect(screen.getByText('Actif')).toBeInTheDocument();
+        const appLink = screen.getAllByRole('link', { name: /popcorn-web/i })[0];
+        expect(appLink.getAttribute('href')).toBe('/devforge/applications/app-1/');
+        expect(screen.getByRole('button', { name: 'Arrêter' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Redémarrer' })).toBeInTheDocument();
+        expect(screen.getByRole('link', { name: /Ouvrir/i })).toBeInTheDocument();
         expect(screen.getByRole('heading', { name: 'Applications' })).toBeInTheDocument();
-        expect(screen.getByRole('heading', { name: 'Agents IA' })).toBeInTheDocument();
+        expect(screen.queryByText('Santé plateforme')).not.toBeInTheDocument();
         expect(screen.queryByText('Projets')).not.toBeInTheDocument();
         expect(screen.queryByText('Membres')).not.toBeInTheDocument();
-        expect(screen.queryByText('Projets récents')).not.toBeInTheDocument();
     });
 
-    it('tronque les résumés d\'activité agent dans la carte', async () => {
+    it('tronque les résumés d\'activité agent dans les sessions récentes', async () => {
         const longSummary = 'The error message indicates that the Docker build process failed with an exit code of 1. '.repeat(6);
 
         vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
@@ -87,6 +90,7 @@ describe('OverviewPage', () => {
         const { container } = render(<OverviewPage />);
 
         expect(await screen.findByText('Build')).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: 'Sessions récentes' })).toBeInTheDocument();
         const summary = container.querySelector('.line-clamp-2');
         expect(summary).toHaveClass('break-words');
         expect(summary?.textContent).toContain('Docker build process failed');
