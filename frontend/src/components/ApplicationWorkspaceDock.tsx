@@ -68,7 +68,7 @@ export function ApplicationWorkspaceDock({ onNavigate, locationSearch }: Applica
 
     return (
         <nav
-            class="devforge-workspace-dock"
+            class="devforge-workspace-dock lg:hidden"
             aria-label="Espace de travail application"
         >
             <div class="devforge-workspace-dock__bar">
