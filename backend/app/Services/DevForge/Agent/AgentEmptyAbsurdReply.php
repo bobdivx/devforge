@@ -64,8 +64,6 @@ class AgentEmptyAbsurdReply
         }
 
         foreach ($words as $word) {
-            $token = trim($word, ". ,!?;:'\"`()[]{}");
-            // keep punctuation set aligned with source file
             $token = trim($word, ".,!?;:'\"`()[]{}");
             if ($token === '' || preg_match('/^[A-Za-z]{1,24}$/', $token) !== 1) {
                 return false;
