@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { AiProviderConfig, LlmModelOption } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
+import { SmallModelToolsWarning } from './SmallModelToolsWarning';
 
 type Props = {
     providers: AiProviderConfig[];
@@ -113,6 +114,7 @@ export function AgentProviderModelFields({
                 {!selected && (
                     <span class="text-[11px] text-base-content/50">Choisissez d’abord un provider pour lister les modèles.</span>
                 )}
+                <SmallModelToolsWarning model={preferredModel} />
             </label>
 
             {showFallback && onFallbackChange && (

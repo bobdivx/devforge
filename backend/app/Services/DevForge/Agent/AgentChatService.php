@@ -2,6 +2,7 @@
 
 namespace App\Services\DevForge\Agent;
 
+use App\Enums\TaskModelTier;
 use App\Jobs\Agent\RunAgentChatJob;
 use App\Models\AiAgent;
 use App\Models\AiAgentMessage;
@@ -571,6 +572,8 @@ class AgentChatService
 
         $proseToolNudgeUsed = false;
 
+        $absurdRetryUsed = false;
+
         $toolsUsedThisTurn = false;
 
         /** @var list<string> $toolsUsedThisRun */
@@ -642,6 +645,47 @@ class AgentChatService
 
             if (! $response->hasToolCalls()) {
 
+                $assistantText = (string) ($response->text ?? '');
+                if (AgentEmptyAbsurdReply::isEmptyOrAbsurd($assistantText, false, $userContent)) {
+                    app(AgentChatEmptyReplyFallback::class)->log($run, $assistantText);
+                    $summary = '';
+                    $assistantText = '';
+
+                    if (! $absurdRetryUsed) {
+                        $absurdRetryUsed = true;
+                        $retryProvider = app(AgentChatEmptyReplyFallback::class)->retryPhpProvider($agent, $tier);
+                        if ($retryProvider !== null) {
+                            $provider = $retryProvider;
+                            $run->appendLog('Fallback : nouvel essai avec un modèle Ollama plus grand.');
+                            continue;
+                        }
+
+                        if ($tier !== TaskModelTier::Heavy) {
+                            $tier = TaskModelTier::Heavy;
+                            $reason = $this->taskModelRouter->reason($userContent, 'chat', $agent->type, [], $tier);
+                            $routing = $this->taskModelRouter->routingPayload($tier, $reason);
+                            $run->mergeMetadata(['model_routing' => $routing]);
+                            $run->appendLog('Fallback : nouvel essai avec tier plus fort ('.$routing['display'].').');
+                            $provider = $this->providerFactory->makeForAgent(
+                                $agent,
+                                function (\Throwable $exception, string $primaryLabel, string $fallbackLabel) use ($run): void {
+                                    $run->appendLog("Provider {$primaryLabel} indisponible, bascule vers {$fallbackLabel}.");
+                                },
+                                config('devforge.agents_smart_routing', true) ? $tier : null,
+                                function (array $report) use ($run): void {
+                                    $run->appendLog('Diagnostic '.(string) ($report['provider'] ?? 'llm').' : '.(string) ($report['summary'] ?? ''));
+                                    foreach (array_slice($report['lines'] ?? [], 0, 6) as $line) {
+                                        if (is_string($line) && $line !== '') {
+                                            $run->appendLog($line);
+                                        }
+                                    }
+                                },
+                            );
+                            continue;
+                        }
+                    }
+                }
+
                 // Intention réparation + aucune correction (même si diagnostic logs lu) → harness.
                 if (
                     AgentDirectives::isChatRepairIntent($userContent)
@@ -671,7 +715,7 @@ class AgentChatService
 
                     $toolNudgeUsed = true;
 
-                    $messages[] = ['role' => 'assistant', 'content' => $response->text ?: 'En attente d\'action.'];
+                    $messages[] = ['role' => 'assistant', 'content' => AgentEmptyAbsurdReply::historyContent((string) ($response->text ?? '')) ?: 'En attente d\'action.'];
 
                     $messages[] = ['role' => 'user', 'content' => AgentDirectives::chatToolNudgeMessage($userContent)];
 
@@ -745,7 +789,7 @@ class AgentChatService
 
                 if ($decision['continue'] === true) {
                     $continueNudges++;
-                    $messages[] = ['role' => 'assistant', 'content' => $response->text ?: '…'];
+                    $messages[] = ['role' => 'assistant', 'content' => AgentEmptyAbsurdReply::historyContent((string) ($response->text ?? ''))];
                     $messages[] = ['role' => 'user', 'content' => $decision['nudge'] ?? AgentDirectives::chatToolNudgeMessage($userContent)];
                     $run->appendLog('Until-done : '.$decision['reason']." (nudge {$continueNudges}/{$maxContinueNudges}).");
 
@@ -974,11 +1018,14 @@ class AgentChatService
 
         $iterations = $budget->getUsed();
 
-        if ($summary === '') {
-            $summary = 'Je n\'ai pas pu générer de réponse.';
+        if ($summary === '' || AgentEmptyAbsurdReply::isEmptyOrAbsurd($summary, $steps !== [], $userContent)) {
+            $summary = '';
         }
 
         $summary = $untilDone->stripDoneMarker($this->sanitizeAssistantReply($summary, $steps));
+        if (AgentEmptyAbsurdReply::isEmptyOrAbsurd($summary, $steps !== [], $userContent)) {
+            $summary = '';
+        }
 
         if (
             AgentDirectives::isChatRepairIntent($userContent)
@@ -1002,6 +1049,10 @@ class AgentChatService
                 'steps' => [...$steps, ...$harness['steps']],
                 ...isset($harness['pending_approval']) ? ['pending_approval' => $harness['pending_approval']] : [],
             ];
+        }
+
+        if ($summary === '' || AgentEmptyAbsurdReply::isEmptyOrAbsurd($summary, $steps !== [], $userContent)) {
+            $summary = AgentEmptyAbsurdReply::userFacingFailureMessage();
         }
 
         $longTaskId = null;
@@ -1055,6 +1106,10 @@ class AgentChatService
 
         if ($steps === [] && AgentDirectives::mentionsToolWithoutCalling($cleaned)) {
             return 'Les actions n’ont pas été exécutées (description d’outil au lieu d’un appel réel). Réessayez avec une consigne plus directe, par exemple « corrige le déploiement maintenant ».';
+        }
+
+        if (AgentEmptyAbsurdReply::isEmptyOrAbsurd($cleaned, $steps !== [])) {
+            return $steps !== [] ? 'Actions exécutées. Voir le détail ci-dessus.' : '';
         }
 
         return $cleaned !== '' ? $cleaned : $text;

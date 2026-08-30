@@ -2,6 +2,7 @@
 
 namespace App\Services\DevForge\Agent\Providers;
 
+use App\Services\DevForge\Agent\AgentEmptyAbsurdReply;
 use App\Services\DevForge\Agent\Contracts\LlmProvider;
 use App\Services\DevForge\Agent\Contracts\LlmResponse;
 use App\Services\DevForge\Agent\OllamaMessageNormalizer;
@@ -32,28 +33,67 @@ class ResilientLlmProvider implements LlmProvider
         }
 
         try {
-            return $this->primary->chat($messages, $tools);
+            $response = $this->primary->chat($messages, $tools);
         } catch (\Throwable $exception) {
             if (! $this->shouldFallback($exception)) {
                 throw $exception;
             }
 
-            $this->useFallback = true;
+            return $this->switchToFallback($exception, $messages, $tools);
+        }
 
-            if ($this->onFallback) {
-                ($this->onFallback)($exception, $this->primaryLabel, $this->fallbackLabel);
-            }
-
-            return $this->fallback->chat(
-                $this->prepareFallbackMessages($messages),
+        if ($this->isEmptyOrAbsurdResponse($response, $messages)) {
+            return $this->switchToFallback(
+                new \RuntimeException('Empty or absurd LLM completion from '.$this->primaryLabel),
+                $messages,
                 $tools,
             );
         }
+
+        return $response;
     }
 
     public function testConnection(): bool
     {
         return $this->primary->testConnection() || $this->fallback->testConnection();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $messages
+     * @param  array<int, mixed>  $tools
+     */
+    private function switchToFallback(\Throwable $exception, array $messages, array $tools): LlmResponse
+    {
+        $this->useFallback = true;
+
+        if ($this->onFallback) {
+            ($this->onFallback)($exception, $this->primaryLabel, $this->fallbackLabel);
+        }
+
+        return $this->fallback->chat(
+            $this->prepareFallbackMessages($messages),
+            $tools,
+        );
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $messages
+     */
+    private function isEmptyOrAbsurdResponse(LlmResponse $response, array $messages): bool
+    {
+        $userMessage = '';
+        for ($i = count($messages) - 1; $i >= 0; $i--) {
+            if (($messages[$i]['role'] ?? '') === 'user') {
+                $userMessage = (string) ($messages[$i]['content'] ?? '');
+                break;
+            }
+        }
+
+        return AgentEmptyAbsurdReply::isEmptyOrAbsurd(
+            (string) ($response->text ?? ''),
+            $response->hasToolCalls(),
+            $userMessage,
+        );
     }
 
     private function shouldFallback(\Throwable $exception): bool
