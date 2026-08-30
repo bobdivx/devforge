@@ -113,6 +113,7 @@ class RigChatRuntime
         $iterations = 0;
         $text = '';
         $statusNudgeUsed = false;
+        $strongerRetryUsed = false;
 
         try {
             while ($iterations < self::MAX_TEXT_TOOL_TURNS) {
@@ -131,10 +132,43 @@ class RigChatRuntime
                 $text = trim($text);
                 $calls = AgentDirectives::extractProseToolCalls($text);
                 if ($calls === []) {
+                    $isAbsurd = AgentEmptyAbsurdReply::isEmptyOrAbsurd($text, false, $userContent);
+                    if ($isAbsurd) {
+                        app(AgentChatEmptyReplyFallback::class)->log($run, $text);
+                        $text = '';
+
+                        if (! $strongerRetryUsed) {
+                            $strongerRetryUsed = true;
+                            $stronger = app(AgentChatEmptyReplyFallback::class)->strongerLlmPayload($llm);
+                            if (is_array($stronger)) {
+                                $llm = $stronger;
+                                $run->appendLog('Fallback : nouvel essai avec modèle plus grand ('.$stronger['model'].').');
+                                $prompt = $userContent !== '' ? $userContent : $prompt;
+                                continue;
+                            }
+                        }
+
+                        if (AgentDirectives::isChatRepairIntent($userContent)) {
+                            $run->appendLog('Fallback : intention réparation — harness forcé (réponse vide/absurde).');
+                            $toolkit = $this->makeToolkit($agent, $run);
+                            $runContext = is_array($run->metadata) ? $run->metadata : [];
+                            $harness = app(AgentRepairHarness::class)->execute(
+                                $toolkit,
+                                $agent,
+                                $run,
+                                $runContext,
+                                $userContent,
+                            );
+                            $text = (string) ($harness['text'] ?? '');
+                            $steps = [...$steps, ...($harness['steps'] ?? [])];
+                            break;
+                        }
+                    }
+
                     if (! $statusNudgeUsed && AgentChatStatusDirectives::requiresChatTools($userContent)) {
                         $statusNudgeUsed = true;
                         $nudge = AgentChatStatusDirectives::chatToolNudgeMessage($userContent);
-                        $history[] = ['role' => 'assistant', 'content' => $text !== '' ? $text : '…'];
+                        $history[] = ['role' => 'assistant', 'content' => AgentEmptyAbsurdReply::historyContent($text)];
                         $history[] = ['role' => 'user', 'content' => $nudge];
                         $prompt = $nudge;
                         $run->appendLog('Relance Rig : question statut/santé sans outil — consigne d\'action envoyée.');
@@ -188,8 +222,10 @@ class RigChatRuntime
         }
 
         $text = $this->hideRawToolJson(trim($text));
-        if ($text === '') {
-            $text = 'Je n\'ai pas pu générer de réponse.';
+        if ($text === '' || AgentEmptyAbsurdReply::isEmptyOrAbsurd($text, $steps !== [], $userContent)) {
+            $text = AgentEmptyAbsurdReply::userFacingFailureMessage(
+                isset($llm['model']) && is_string($llm['model']) ? $llm['model'] : null,
+            );
         }
 
         $run->mergeMetadata([
