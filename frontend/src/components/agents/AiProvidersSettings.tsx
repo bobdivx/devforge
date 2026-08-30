@@ -5,6 +5,7 @@ import { HiddenUsernameField } from '../ui/HiddenUsernameField';
 import type { AiProviderConfig, LlmModelOption, LlmProvider } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
 import { AUTO_MODEL_VALUE, CUSTOM_MODEL_VALUE, formatModelLabel, isAutoModel, modelSelectValue } from '../../lib/llm-models';
+import { SmallModelToolsWarning } from './SmallModelToolsWarning';
 import { useApiQuery } from '../../lib/use-api-query';
 import { useTeamContext } from '../../lib/team-context';
 
@@ -423,6 +424,7 @@ export function AiProvidersSettings() {
                                                             Tunnel HTTPS public : le chat casse souvent (502). Préférez une IP LAN.
                                                         </p>
                                                     )}
+                                                    <SmallModelToolsWarning model={provider.model} />
                                                     {provider.has_api_key && (
                                                         <p class="mt-1 font-mono text-[11px] text-base-content/45">
                                                             API_KEY · •••••• (masquée)
@@ -664,6 +666,7 @@ export function AiProvidersSettings() {
                                     onInput={(e) => setForm({ ...form, model: (e.target as HTMLInputElement).value })}
                                 />
                             )}
+                            <SmallModelToolsWarning model={form.model} />
                         </label>
 
                         <label class="flex items-center gap-2 text-xs sm:col-span-2">
