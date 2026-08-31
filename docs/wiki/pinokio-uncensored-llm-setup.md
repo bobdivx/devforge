@@ -136,3 +136,10 @@ Dans DevForge, pour configurer l'agent afin qu'il utilise votre serveur local :
 ### Erreur : `unknown value for --flash-attn: --cache-type-k`
 - **Cause** : Les versions récentes de llama-server attendent `--flash-attn on` et non `--flash-attn` seul.
 - **Solution** : C'est géré automatiquement dans `serve.cjs` avec `args.push("--flash-attn", "on")`.
+
+### Erreur : `LLM timeout after 60s contacting 10.1.0.88:10086`
+- **Cause** : L'ingestion d'un gros prompt d'agent (~20 000 tokens) a pris plus de 60 secondes car le `batch-size` était réglé trop bas (512).
+- **Solution** : 
+  1. Utilisez `batchSize: 2048` dans `serve.cjs` (l'ingestion des 20k tokens passe de 65s à ~10s sur RTX 3090).
+  2. Le timeout côté DevForge a été augmenté à **300 secondes (5 minutes)** par défaut (configurable via `DEVFORGE_AGENT_TIMEOUT=300` et `LLM_TIMEOUT_SECS=300`).
+
