@@ -573,7 +573,7 @@ export function ApplicationAgentsPanel({ application, userName = 'Vous' }: Props
                                     </div>
                                 </div>
 
-                                <div class="h-[min(40rem,72dvh)] min-h-[22rem] sm:min-h-[28rem]">
+                                <div class="flex h-[min(46rem,78dvh)] min-h-[24rem] sm:min-h-[30rem] flex-col min-h-0">
                                     {activeSubTab === 'chat' ? (
                                         <AgentConversationView
                                             agent={selectedAgent}

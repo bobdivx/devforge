@@ -116,3 +116,46 @@ it('chats via anthropic provider and maps tool use', function () {
         ->and($response->toolCalls[0]['id'])->toBe('toolu_1')
         ->and($response->tokensUsed)->toBe(15);
 });
+
+it('tests connection with /v1 fallback for local openai endpoints', function () {
+    Http::fake([
+        '10.1.0.88:10086/models' => Http::response('Not Found', 404),
+        '10.1.0.88:10086/v1/models' => Http::response(['data' => [['id' => 'qwen3']]]),
+    ]);
+
+    $provider = new OpenAiCompatibleProvider(
+        apiKey: '',
+        model: 'qwen3',
+        baseUrl: 'http://10.1.0.88:10086',
+    );
+
+    expect($provider->testConnection())->toBeTrue();
+});
+
+it('chats via local openai provider falling back to /v1/chat/completions', function () {
+    Http::fake([
+        '10.1.0.88:10086/chat/completions' => Http::response('Not Found', 404),
+        '10.1.0.88:10086/v1/chat/completions' => Http::response([
+            'choices' => [[
+                'message' => [
+                    'content' => 'réponse qwen3',
+                ],
+                'finish_reason' => 'stop',
+            ]],
+            'usage' => ['total_tokens' => 12],
+        ]),
+    ]);
+
+    $provider = new OpenAiCompatibleProvider(
+        apiKey: '',
+        model: 'qwen3',
+        baseUrl: 'http://10.1.0.88:10086',
+    );
+
+    $response = $provider->chat([
+        ['role' => 'user', 'content' => 'bonjour'],
+    ]);
+
+    expect($response->text)->toBe('réponse qwen3')
+        ->and($response->tokensUsed)->toBe(12);
+});

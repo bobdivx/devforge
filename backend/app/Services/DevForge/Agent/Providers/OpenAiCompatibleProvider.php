@@ -54,15 +54,23 @@ class OpenAiCompatibleProvider implements LlmProvider
 
     public function testConnection(): bool
     {
-        try {
-            $response = Http::withHeaders($this->headers())
-                ->timeout(15)
-                ->get(rtrim($this->baseUrl, '/').'/models');
+        $urls = $this->candidateUrls('/models');
 
-            return $response->successful();
-        } catch (ConnectionException) {
-            return false;
+        foreach ($urls as $url) {
+            try {
+                $response = Http::withHeaders($this->headers())
+                    ->timeout(15)
+                    ->get($url);
+
+                if ($response->successful()) {
+                    return true;
+                }
+            } catch (ConnectionException) {
+                // Try next candidate URL.
+            }
         }
+
+        return false;
     }
 
     /**
@@ -70,6 +78,7 @@ class OpenAiCompatibleProvider implements LlmProvider
      */
     private function sendWithRetries(array $payload): Response
     {
+        $chatUrls = $this->candidateUrls('/chat/completions');
         $lastResponse = null;
 
         for ($attempt = 0; $attempt <= self::MAX_RETRIES; $attempt++) {
@@ -77,17 +86,24 @@ class OpenAiCompatibleProvider implements LlmProvider
                 Sleep::sleep(2 ** $attempt);
             }
 
-            $response = Http::withHeaders($this->headers())
-                ->timeout(120)
-                ->post(rtrim($this->baseUrl, '/').'/chat/completions', $payload);
+            foreach ($chatUrls as $url) {
+                $response = Http::withHeaders($this->headers())
+                    ->timeout(120)
+                    ->post($url, $payload);
 
-            if ($response->successful()) {
-                return $response;
+                if ($response->successful()) {
+                    return $response;
+                }
+
+                $lastResponse = $response;
+
+                // Si le chemin retourne 404, on passe à l'URL candidate suivante sans attendre.
+                if ($response->status() !== 404) {
+                    break;
+                }
             }
 
-            $lastResponse = $response;
-
-            if (! in_array($response->status(), self::RETRYABLE_STATUS_CODES, true)) {
+            if ($lastResponse && ! in_array($lastResponse->status(), self::RETRYABLE_STATUS_CODES, true)) {
                 break;
             }
         }
@@ -102,11 +118,36 @@ class OpenAiCompatibleProvider implements LlmProvider
         throw new \RuntimeException("{$this->label} [{$this->model}] [{$status}]: {$detail}");
     }
 
+    /**
+     * @return array<int, string>
+     */
+    private function candidateUrls(string $path): array
+    {
+        $clean = rtrim($this->baseUrl, '/');
+        $urls = [];
+
+        if (str_ends_with($clean, '/v1')) {
+            $urls[] = $clean.$path;
+            $parent = preg_replace('#/v1$#', '', $clean) ?? $clean;
+            $urls[] = $parent.$path;
+        } else {
+            $urls[] = $clean.$path;
+            $urls[] = $clean.'/v1'.$path;
+        }
+
+        return array_values(array_unique($urls));
+    }
+
     /** @return array<string, string> */
     private function headers(): array
     {
+        $key = trim($this->apiKey);
+        if ($key === '') {
+            $key = 'sk-local-devforge';
+        }
+
         return array_merge([
-            'Authorization' => 'Bearer '.$this->apiKey,
+            'Authorization' => 'Bearer '.$key,
             'Accept' => 'application/json',
             'Content-Type' => 'application/json',
         ], $this->extraHeaders);

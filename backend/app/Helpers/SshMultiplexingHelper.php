@@ -275,8 +275,25 @@ class SshMultiplexingHelper
             .'-o ControlPersist='.config('constants.ssh.mux_persist_time').' ';
     }
 
+    public static function ensureMuxDirectoryExists(): void
+    {
+        $disk = Storage::disk('ssh-mux');
+        if (! $disk->exists('')) {
+            $disk->makeDirectory('');
+        }
+        $dir = storage_path('app/ssh/mux');
+        if (! is_dir($dir)) {
+            @mkdir($dir, 0700, true);
+        }
+        if (file_exists('/var/www/html/storage/app/ssh') && ! file_exists('/var/www/html/storage/app/ssh/mux')) {
+            @mkdir('/var/www/html/storage/app/ssh/mux', 0700, true);
+        }
+    }
+
     private static function muxSocket(Server $server): string
     {
+        self::ensureMuxDirectoryExists();
+
         return '/var/www/html/storage/app/ssh/mux/mux_'.$server->uuid;
     }
 

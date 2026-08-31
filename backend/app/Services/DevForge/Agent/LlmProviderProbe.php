@@ -192,30 +192,74 @@ class LlmProviderProbe
     private function diagnoseOpenAiCompatible(AiProviderConfig $config, ?array $preferredModels): array
     {
         $provider = (string) $config->provider;
+        $baseUrl = LlmEndpointResolver::openAiCompatibleBaseUrl($provider, $config->base_url);
+        $apiKey = (string) $config->api_key;
 
         try {
             $available = collect($this->modelCatalog->listForProvider(
                 $provider,
-                apiKey: (string) $config->api_key,
-                baseUrl: LlmEndpointResolver::openAiCompatibleBaseUrl($provider, $config->base_url),
+                apiKey: $apiKey,
+                baseUrl: $baseUrl,
             ))->pluck('id')->map(fn ($id): string => (string) $id)->values()->all();
         } catch (\Throwable $exception) {
-            return $this->failureReport($provider, 'Liste des modèles impossible : '.$exception->getMessage());
+            $available = [];
         }
 
         $candidates = $this->candidates($preferredModels, $available, $available);
-        $recommended = $candidates !== [] ? $candidates : $available;
+        $explicitModel = ! LlmModelResolver::isAuto($config->model) ? trim((string) $config->model) : null;
+        if ($explicitModel !== null && ! in_array($explicitModel, $candidates, true)) {
+            array_unshift($candidates, $explicitModel);
+        }
+
+        $probed = [];
+        $working = [];
+
+        // Si aucun modèle n'est listé automatiquement mais qu'un modèle est fourni ou préféré, on probe le chat.
+        if ($available === [] && $candidates !== []) {
+            foreach (array_slice($candidates, 0, 2) as $modelId) {
+                $probe = $this->probeOpenAiChat($apiKey, $baseUrl, $modelId);
+                $probed[] = $probe;
+                if ($probe['ok']) {
+                    $working[] = $modelId;
+                }
+            }
+        }
+
+        if ($working !== []) {
+            $available = array_values(array_unique([...$available, ...$working]));
+        }
+
+        $recommended = $working !== [] ? $working : ($candidates !== [] ? $candidates : $available);
+        $isOk = $available !== [] || $working !== [];
+
+        $lines = [];
+        if ($available !== []) {
+            $lines[] = 'Modèles listés : '.implode(', ', array_slice($available, 0, 12)).(count($available) > 12 ? '…' : '');
+        } else {
+            $lines[] = "Aucun modèle listé automatiquement. Si vous utilisez Local AI Studio / LM Studio, assurez-vous d'utiliser l'URL '/v1' ou de spécifier un modèle manuellement.";
+        }
+
+        foreach ($probed as $row) {
+            if ($row['ok']) {
+                $lines[] = "Probe OK : {$row['id']}";
+            } else {
+                $lines[] = "Probe KO : {$row['id']} — ".mb_substr((string) $row['error'], 0, 180);
+            }
+        }
+
+        $summary = count($available).' modèle(s) listé(s) pour '.$provider.'.';
+        if ($working !== [] && count($available) === count($working)) {
+            $summary = count($working).' modèle(s) vérifié(s) pour '.$provider.' ('.implode(', ', $working).').';
+        }
 
         return [
-            'ok' => $available !== [],
+            'ok' => $isOk,
             'provider' => $provider,
             'models_available' => $available,
-            'models_probed' => [],
+            'models_probed' => $probed,
             'recommended' => array_values(array_unique($recommended)),
-            'summary' => count($available).' modèle(s) listé(s) pour '.$provider.'.',
-            'lines' => [
-                'Modèles listés : '.implode(', ', array_slice($available, 0, 12)).(count($available) > 12 ? '…' : ''),
-            ],
+            'summary' => $summary,
+            'lines' => $lines,
         ];
     }
 
@@ -322,6 +366,55 @@ class LlmProviderProbe
             'ok' => false,
             'error' => "HTTP {$response->status()} ".mb_substr((string) $response->body(), 0, 220),
         ];
+    }
+
+    /**
+     * @return array{id: string, ok: bool, error: string|null}
+     */
+    private function probeOpenAiChat(string $apiKey, string $baseUrl, string $modelId): array
+    {
+        $key = trim($apiKey);
+        if ($key === '') {
+            $key = 'sk-local-devforge';
+        }
+
+        $headers = [
+            'Authorization' => 'Bearer '.$key,
+            'Accept' => 'application/json',
+            'Content-Type' => 'application/json',
+        ];
+
+        $clean = rtrim($baseUrl, '/');
+        $chatUrls = str_ends_with($clean, '/v1')
+            ? ["{$clean}/chat/completions", preg_replace('#/v1$#', '', $clean).'/chat/completions']
+            : ["{$clean}/chat/completions", "{$clean}/v1/chat/completions"];
+
+        $lastError = null;
+
+        foreach (array_values(array_unique($chatUrls)) as $url) {
+            try {
+                $response = Http::withHeaders($headers)
+                    ->connectTimeout(4)
+                    ->timeout(20)
+                    ->post($url, [
+                        'model' => $modelId,
+                        'messages' => [
+                            ['role' => 'user', 'content' => 'Reply with OK'],
+                        ],
+                        'max_tokens' => 8,
+                    ]);
+
+                if ($response->successful()) {
+                    return ['id' => $modelId, 'ok' => true, 'error' => null];
+                }
+
+                $lastError = "HTTP {$response->status()} ".mb_substr((string) $response->body(), 0, 220);
+            } catch (ConnectionException $exception) {
+                $lastError = $exception->getMessage();
+            }
+        }
+
+        return ['id' => $modelId, 'ok' => false, 'error' => $lastError ?? 'Chat endpoint injoignable'];
     }
 
     /**

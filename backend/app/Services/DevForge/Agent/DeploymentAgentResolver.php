@@ -64,7 +64,12 @@ class DeploymentAgentResolver
         $allAgents = AiAgent::query()
             ->where('team_id', $team->id)
             ->whereIn('type', self::BUILD_TYPES)
-            ->get();
+            ->get()
+            ->map(function (AiAgent $agent): AiAgent {
+                $agent->prepareForEventDispatch();
+
+                return $agent->fresh() ?? $agent;
+            });
 
         $activeAgents = $allAgents->where('is_active', true);
         $withProvider = $activeAgents->filter(fn (AiAgent $agent): bool => $agent->hasLlmProvider());

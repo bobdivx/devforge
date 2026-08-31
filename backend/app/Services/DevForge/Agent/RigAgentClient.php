@@ -79,7 +79,7 @@ class RigAgentClient
             }
         }
 
-        $response = Http::timeout(120)->post($this->baseUrl().'/v1/chat', $payload);
+        $response = Http::timeout(180)->post($this->baseUrl().'/v1/chat', $payload);
 
         if ($response->failed()) {
             throw new \RuntimeException(

@@ -18,9 +18,14 @@ class LlmModelCatalog
                 $baseUrl,
             ),
             'ollama' => $this->listOllamaModels($baseUrl ?? throw new \InvalidArgumentException('URL Ollama requise.')),
-            'openai', 'openrouter' => $this->listOpenAiCompatibleModels(
-                $provider,
-                $apiKey ?? throw new \InvalidArgumentException("Clé API {$provider} requise."),
+            'openai' => $this->listOpenAiCompatibleModels(
+                'openai',
+                $apiKey ?? ($baseUrl ? null : throw new \InvalidArgumentException('Clé API openai requise.')),
+                $baseUrl,
+            ),
+            'openrouter' => $this->listOpenAiCompatibleModels(
+                'openrouter',
+                $apiKey ?? throw new \InvalidArgumentException('Clé API openrouter requise.'),
                 $baseUrl,
             ),
             'anthropic' => $this->listAnthropicModels(
@@ -98,11 +103,16 @@ class LlmModelCatalog
     /**
      * @return array<int, array{id: string, label: string, description: string|null}>
      */
-    private function listOpenAiCompatibleModels(string $provider, string $apiKey, ?string $baseUrl = null): array
+    private function listOpenAiCompatibleModels(string $provider, ?string $apiKey = null, ?string $baseUrl = null): array
     {
         $resolvedBaseUrl = LlmEndpointResolver::openAiCompatibleBaseUrl($provider, $baseUrl);
+        $key = trim((string) ($apiKey ?? ''));
+        if ($key === '') {
+            $key = 'sk-local-devforge';
+        }
+
         $headers = [
-            'Authorization' => 'Bearer '.$apiKey,
+            'Authorization' => 'Bearer '.$key,
             'Accept' => 'application/json',
         ];
 
@@ -111,26 +121,99 @@ class LlmModelCatalog
             $headers['X-Title'] = 'DevForge';
         }
 
-        $response = Http::withHeaders($headers)
-            ->connectTimeout(5)
-            ->timeout(20)
-            ->get("{$resolvedBaseUrl}/models");
+        $candidateUrls = $this->resolveOpenAiModelUrls($resolvedBaseUrl);
+        $lastException = null;
 
-        if ($response->failed()) {
-            throw new \RuntimeException("Impossible de récupérer les modèles {$provider} [{$response->status()}].");
+        foreach ($candidateUrls as $candidateUrl) {
+            try {
+                $response = Http::withHeaders($headers)
+                    ->connectTimeout(5)
+                    ->timeout(20)
+                    ->get($candidateUrl);
+
+                if ($response->successful()) {
+                    $models = $this->parseOpenAiCompatibleModelResponse($response->json());
+                    if ($models !== []) {
+                        return $models;
+                    }
+                }
+            } catch (\Throwable $exception) {
+                $lastException = $exception;
+            }
         }
 
-        return collect($response->json('data', []))
-            ->map(function (array $model): array {
-                $id = (string) ($model['id'] ?? '');
+        if ($lastException instanceof \Throwable && empty($models ?? [])) {
+            throw new \RuntimeException("Impossible de récupérer les modèles {$provider} : {$lastException->getMessage()}");
+        }
 
-                return [
-                    'id' => $id,
-                    'label' => $id,
-                    'description' => isset($model['owned_by'])
+        return $models ?? [];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function resolveOpenAiModelUrls(string $baseUrl): array
+    {
+        $clean = rtrim($baseUrl, '/');
+        $urls = [];
+
+        if (str_ends_with($clean, '/v1')) {
+            $urls[] = "{$clean}/models";
+            $parent = preg_replace('#/v1$#', '', $clean) ?? $clean;
+            $urls[] = "{$parent}/models";
+        } else {
+            $urls[] = "{$clean}/models";
+            $urls[] = "{$clean}/v1/models";
+        }
+
+        return array_values(array_unique($urls));
+    }
+
+    /**
+     * @return array<int, array{id: string, label: string, description: string|null}>
+     */
+    private function parseOpenAiCompatibleModelResponse(mixed $json): array
+    {
+        if (! is_array($json)) {
+            return [];
+        }
+
+        $rawItems = [];
+        if (isset($json['data']) && is_array($json['data'])) {
+            $rawItems = $json['data'];
+        } elseif (isset($json['models']) && is_array($json['models'])) {
+            $rawItems = $json['models'];
+        } elseif (array_is_list($json)) {
+            $rawItems = $json;
+        }
+
+        return collect($rawItems)
+            ->map(function (mixed $model): array {
+                if (is_string($model)) {
+                    $id = trim($model);
+
+                    return [
+                        'id' => $id,
+                        'label' => $id,
+                        'description' => null,
+                    ];
+                }
+
+                if (is_array($model)) {
+                    $id = (string) ($model['id'] ?? $model['name'] ?? $model['model'] ?? '');
+                    $label = (string) ($model['name'] ?? $model['label'] ?? $model['id'] ?? $id);
+                    $description = isset($model['owned_by'])
                         ? (string) $model['owned_by']
-                        : (isset($model['name']) ? (string) $model['name'] : null),
-                ];
+                        : (isset($model['description']) ? (string) $model['description'] : null);
+
+                    return [
+                        'id' => $id,
+                        'label' => $label !== '' ? $label : $id,
+                        'description' => $description,
+                    ];
+                }
+
+                return ['id' => '', 'label' => '', 'description' => null];
             })
             ->filter(fn (array $model): bool => $model['id'] !== '')
             ->sortBy('label', SORT_NATURAL | SORT_FLAG_CASE)

@@ -65,7 +65,9 @@ class AiProviderController extends Controller
 
         $provider = $validated['provider'];
 
-        if (LlmProviderRegistry::requiresApiKey($provider) && empty($apiKey)) {
+        if ($provider === 'openai' && ! empty($baseUrl)) {
+            // Local / custom OpenAI endpoint : API key is optional.
+        } elseif (LlmProviderRegistry::requiresApiKey($provider) && empty($apiKey)) {
             abort(422, "Une clé API est requise pour lister les modèles {$provider}.");
         }
 
@@ -238,7 +240,9 @@ class AiProviderController extends Controller
     {
         $provider = (string) ($config['provider'] ?? '');
 
-        if (LlmProviderRegistry::requiresApiKey($provider) && empty($config['api_key'])) {
+        if ($provider === 'openai' && ! empty($config['base_url'])) {
+            // Local / custom OpenAI endpoint : API key is optional.
+        } elseif (LlmProviderRegistry::requiresApiKey($provider) && empty($config['api_key'])) {
             abort(422, "Une clé API est requise pour {$provider}.");
         }
 

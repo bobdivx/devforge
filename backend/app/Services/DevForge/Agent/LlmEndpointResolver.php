@@ -44,7 +44,7 @@ class LlmEndpointResolver
             return rtrim($fallback, '/');
         }
 
-        return rtrim($candidate, '/');
+        return rtrim(self::resolveLocalhostForContainer($candidate), '/');
     }
 
     public static function anthropicBaseUrl(?string $baseUrl): string

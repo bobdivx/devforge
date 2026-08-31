@@ -65,3 +65,31 @@ it('reports ollama as down when tags endpoint is unreachable', function () {
     expect($report['ok'])->toBeFalse()
         ->and($report['summary'])->toContain('Ollama');
 });
+
+it('probes openai compatible model via chat when /models returns 404', function () {
+    Cache::flush();
+
+    Http::fake([
+        '10.1.0.88:10086/models' => Http::response('Not Found', 404),
+        '10.1.0.88:10086/v1/models' => Http::response('Not Found', 404),
+        '10.1.0.88:10086/chat/completions' => Http::response('Not Found', 404),
+        '10.1.0.88:10086/v1/chat/completions' => Http::response([
+            'choices' => [['message' => ['content' => 'OK']]],
+        ]),
+    ]);
+
+    $team = Team::factory()->create();
+    $config = AiProviderConfig::factory()->create([
+        'team_id' => $team->id,
+        'provider' => 'openai',
+        'model' => 'qwen3',
+        'base_url' => 'http://10.1.0.88:10086',
+    ]);
+
+    $report = app(LlmProviderProbe::class)->diagnose($config, useCache: false);
+
+    expect($report['ok'])->toBeTrue()
+        ->and($report['models_available'])->toContain('qwen3')
+        ->and($report['recommended'])->toContain('qwen3')
+        ->and($report['summary'])->toContain('qwen3');
+});

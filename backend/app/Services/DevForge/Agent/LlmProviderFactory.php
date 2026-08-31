@@ -375,6 +375,25 @@ class LlmProviderFactory
             }
         }
 
+        // Pour un endpoint OpenAI personnalisé (ex: Local AI Studio, LM Studio, vLLM),
+        // on tente de choisir le premier modèle disponible sur le serveur local.
+        $baseUrl = $config->base_url ? trim($config->base_url) : null;
+        if ($baseUrl !== null && $baseUrl !== '' && ! str_contains($baseUrl, 'api.openai.com')) {
+            try {
+                $models = $this->modelCatalog->listForProvider(
+                    $config->provider,
+                    apiKey: (string) $config->api_key,
+                    baseUrl: LlmEndpointResolver::openAiCompatibleBaseUrl($config->provider, $baseUrl),
+                );
+
+                if (! empty($models) && isset($models[0]['id'])) {
+                    return (string) $models[0]['id'];
+                }
+            } catch (\Throwable) {
+                // Fallback ci-dessous.
+            }
+        }
+
         return LlmProviderRegistry::defaultModel($config->provider);
     }
 

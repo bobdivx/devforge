@@ -71,6 +71,13 @@ function canDiscoverModels(
 ): boolean {
     const info = providerDefaults[form.provider];
 
+    if (form.provider === 'openai') {
+        const isCustomUrl = form.base_url.trim().length > 0 && form.base_url.trim() !== 'https://api.openai.com/v1';
+        if (isCustomUrl) {
+            return true;
+        }
+    }
+
     if (info.needsKey) {
         if (form.api_key.trim().length >= 8) {
             return true;
@@ -541,18 +548,22 @@ export function AiProvidersSettings() {
                                 <input
                                     class="input input-bordered input-sm"
                                     type="password"
-                                    required={! isEditing}
+                                    required={! isEditing && ! (form.provider === 'openai' && form.base_url.trim().length > 0 && form.base_url.trim() !== 'https://api.openai.com/v1')}
                                     autoComplete="new-password"
                                     placeholder={isEditing && editingProvider?.has_api_key
                                         ? 'Laisser vide pour conserver la clé actuelle'
-                                        : 'sk-… / AIza…'}
+                                        : (form.provider === 'openai' && form.base_url.trim().length > 0 && form.base_url.trim() !== 'https://api.openai.com/v1'
+                                            ? 'Optionnelle pour serveur local (Local AI Studio, LM Studio)'
+                                            : 'sk-… / AIza…')}
                                     value={form.api_key}
                                     onInput={(e) => setForm({ ...form, api_key: (e.target as HTMLInputElement).value })}
                                 />
                                 <span class="text-[11px] text-base-content/50">
                                     {isEditing && editingProvider?.has_api_key
                                         ? 'La clé enregistrée reste active tant que vous ne saisissez pas une nouvelle valeur.'
-                                        : 'Les modèles disponibles seront chargés automatiquement depuis l\'API du provider.'}
+                                        : (form.provider === 'openai' && form.base_url.trim().length > 0 && form.base_url.trim() !== 'https://api.openai.com/v1'
+                                            ? 'Optionnelle pour les serveurs locaux ou privés (Local AI Studio, LM Studio, vLLM).'
+                                            : 'Les modèles disponibles seront chargés automatiquement depuis l\'API du provider.')}
                                 </span>
                             </label>
                         )}
@@ -590,10 +601,12 @@ export function AiProvidersSettings() {
                                         </>
                                     ) : (
                                         <>
-                                            Compatible OpenAI (Mesh LLM, vLLM, LiteLLM). Ex. Mesh :{' '}
-                                            <code class="text-[10px]">http://10.1.0.88:9337/v1</code>
-                                            . Depuis Docker, pas de{' '}
-                                            <code class="text-[10px]">localhost</code>.
+                                            Compatible OpenAI (Local AI Studio, LM Studio, vLLM, LiteLLM). Ex. Local :{' '}
+                                            <code class="text-[10px]">http://10.1.0.88:10086/v1</code>
+                                            {' '}ou{' '}
+                                            <code class="text-[10px]">https://qwen.briseteia.me/v1</code>
+                                            . Depuis Docker : IP LAN ou{' '}
+                                            <code class="text-[10px]">host.docker.internal</code>.
                                         </>
                                     )}
                                 </span>

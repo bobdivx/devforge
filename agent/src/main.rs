@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const DUMMY_OPENAI_KEY: &str = "sk-local-devforge-agent";
-const LLM_TIMEOUT: Duration = Duration::from_secs(60);
+const LLM_TIMEOUT: Duration = Duration::from_secs(180);
 const MCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
 
 #[derive(Clone)]

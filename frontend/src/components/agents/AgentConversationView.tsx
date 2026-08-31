@@ -380,7 +380,7 @@ export function AgentConversationView({
     };
 
     return (
-        <div class="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+        <div class="flex h-full min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
             {/* Desktop sidebar - visible uniquement sur lg+ */}
             <aside class="hidden shrink-0 flex-col border-e border-base-300 bg-base-200/20 lg:flex lg:w-72 lg:max-w-[40%]">
                 <div class="flex shrink-0 items-center justify-end gap-1 px-3 pt-3">
@@ -487,7 +487,7 @@ export function AgentConversationView({
                 </div>
             )}
 
-            <div class="flex min-h-0 min-w-0 flex-1 flex-col bg-base-100">
+            <div class="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-base-100">
                 {/* Mobile: bouton menu pour ouvrir le drawer */}
                 <div class="flex shrink-0 items-center justify-between border-b border-base-300 bg-base-100 px-3 py-2 lg:hidden">
                     <button
