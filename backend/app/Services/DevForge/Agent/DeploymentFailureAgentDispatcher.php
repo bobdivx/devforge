@@ -174,7 +174,7 @@ class DeploymentFailureAgentDispatcher
     private function extractFailureLogExcerpt(
         Application $application,
         ApplicationDeploymentQueue $deploymentQueue,
-        int $maxLines = 40,
+        int $maxLines = 20,
     ): array {
         $lines = $this->rawDeploymentLogLines($deploymentQueue);
 
@@ -222,7 +222,7 @@ class DeploymentFailureAgentDispatcher
                 'message' => mb_substr(
                     $this->secretRedactor->redact((string) ($line['message'] ?? ''), $application),
                     0,
-                    2000,
+                    400,
                 ),
                 'timestamp' => isset($line['timestamp']) ? (string) $line['timestamp'] : null,
             ])
