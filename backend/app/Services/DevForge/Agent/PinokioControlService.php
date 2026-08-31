@@ -35,18 +35,14 @@ class PinokioControlService
             ->orderByDesc('is_default')
             ->orderBy('name')
             ->get()
-            ->filter(function (AiProviderConfig $provider): bool {
-                $url = (string) ($provider->base_url ?? '');
-
-                return str_contains($url, ':10086') || str_contains($url, ':42031') || str_contains(strtolower($provider->name), 'pinokio') || str_contains(strtolower($provider->name), 'local');
-            })
+            ->filter(fn (AiProviderConfig $provider): bool => $this->looksLikePinokioProvider($provider))
             ->map(function (AiProviderConfig $provider): array {
                 $baseUrl = (string) ($provider->base_url ?? '');
                 $resolved = $this->normalizeBaseUrl($baseUrl);
 
                 return [
                     'id' => $provider->id,
-                    'name' => $provider->name,
+                    'name' => $this->displayName($provider),
                     'base_url' => $provider->base_url,
                     'resolved_base_url' => $resolved,
                     'is_default' => (bool) $provider->is_default,
@@ -56,6 +52,54 @@ class PinokioControlService
             })
             ->values()
             ->all();
+    }
+
+    /**
+     * Détecte un studio Pinokio / Demeter (RTX 3090) même si le provider est typé openai.
+     */
+    public function looksLikePinokioProvider(AiProviderConfig $provider): bool
+    {
+        $url = strtolower((string) ($provider->base_url ?? ''));
+        $name = strtolower((string) $provider->name);
+
+        if ($url !== '' && (
+            str_contains($url, ':10086')
+            || str_contains($url, ':42031')
+            || str_contains($url, '10.1.0.88')
+        )) {
+            return true;
+        }
+
+        foreach (['pinokio', 'demeter', 'local studio', 'uncensored'] as $needle) {
+            if (str_contains($name, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function displayName(AiProviderConfig $provider): string
+    {
+        $name = trim((string) $provider->name);
+        $url = strtolower((string) ($provider->base_url ?? ''));
+        $nameLower = strtolower($name);
+
+        if (str_contains($nameLower, 'demeter')) {
+            return $name !== '' ? $name : 'Demeter';
+        }
+
+        if (str_contains($url, '10.1.0.88') || str_contains($url, ':10086')) {
+            if ($name === '' || in_array($nameLower, ['qwen3', 'openai', 'auto', 'local'], true)) {
+                return 'Demeter (RTX 3090)';
+            }
+
+            if (! str_contains($nameLower, 'demeter') && ! str_contains($nameLower, '3090')) {
+                return "{$name} · Demeter";
+            }
+        }
+
+        return $name !== '' ? $name : 'Pinokio';
     }
 
     /**
@@ -109,10 +153,11 @@ class PinokioControlService
                     $parsed = $v1Models->json();
                     $dataList = is_array($parsed['data'] ?? null) ? $parsed['data'] : [];
                     $modelsData = array_map(fn ($m) => [
-                        'filename' => (string) ($m['id'] ?? 'model.gguf'),
-                        'name' => (string) ($m['id'] ?? 'model.gguf'),
+                        'filename' => (string) ($m['id'] ?? 'model'),
+                        'name' => (string) ($m['id'] ?? 'model'),
                         'size' => '',
                         'sizeBytes' => 0,
+                        'from_v1' => true,
                     ], $dataList);
                     if ($activeModel === null && count($modelsData) > 0) {
                         $activeModel = $modelsData[0]['filename'];
@@ -126,12 +171,17 @@ class PinokioControlService
                     if (! is_array($item)) {
                         continue;
                     }
-                    $filename = (string) ($item['filename'] ?? $item['name'] ?? '');
-                    if ($filename === '' || ! str_ends_with(strtolower($filename), '.gguf')) {
+                    $filename = (string) ($item['filename'] ?? $item['name'] ?? $item['id'] ?? '');
+                    if ($filename === '') {
                         continue;
                     }
                     if (str_contains(strtolower($filename), 'mmproj')) {
                         continue; // Masquer les projecteurs de vision de la liste des modèles
+                    }
+                    // /api/llm/models renvoie des .gguf ; /v1/models peut exposer des ids sans extension (ex. qwen3).
+                    $fromV1 = (bool) ($item['from_v1'] ?? false);
+                    if (! $fromV1 && ! str_ends_with(strtolower($filename), '.gguf')) {
+                        continue;
                     }
                     $models[] = [
                         'filename' => $filename,

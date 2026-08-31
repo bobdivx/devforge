@@ -1,40 +1,118 @@
-import { CheckCircle2, Cpu, Loader2, Power, RefreshCw, Sparkles, Wifi, WifiOff, Zap } from 'lucide-preact';
+import { CheckCircle2, Cpu, Loader2, Power, RefreshCw, Save, Server, Sparkles, Wifi, WifiOff, Zap } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
-import type { PinokioModelInfo, PinokioStatus } from '../../lib/domain-api';
+import type { PinokioInstance, PinokioModelInfo, PinokioStatus } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
+import { useApiQuery } from '../../lib/use-api-query';
+import { useTeamContext } from '../../lib/team-context';
+import { ApiError } from '../../lib/api-client';
+
+const DEFAULT_DEMETER_URL = 'http://10.1.0.88:10086';
+const DEFAULT_DEMETER_NAME = 'Demeter';
+
+function normalizeStudioUrl(raw: string): string {
+    const trimmed = raw.trim().replace(/\/+$/, '');
+    if (!trimmed) {
+        return '';
+    }
+    if (!/^https?:\/\//i.test(trimmed)) {
+        return `http://${trimmed}`;
+    }
+    return trimmed.replace(/\/v1$/i, '');
+}
 
 interface Props {
     defaultBaseUrl?: string;
+    canManage?: boolean;
     onModelSelected?: (model: string) => void;
 }
 
-export function PinokioStudioManager({ defaultBaseUrl = 'http://10.1.0.88:10086', onModelSelected }: Props) {
-    const [baseUrl] = useState(defaultBaseUrl);
+export function PinokioStudioManager({
+    defaultBaseUrl = DEFAULT_DEMETER_URL,
+    canManage = false,
+    onModelSelected,
+}: Props) {
+    const { agentsEnabled } = useTeamContext();
+    const instancesQuery = useApiQuery(
+        agentsEnabled ? 'pinokio-instances' : null,
+        () => domainApi.pinokioInstances(),
+    );
+    const instances = (instancesQuery.data?.data ?? []) as PinokioInstance[];
+
+    const [selectedId, setSelectedId] = useState<number | null>(null);
+    const [nameDraft, setNameDraft] = useState(DEFAULT_DEMETER_NAME);
+    const [urlDraft, setUrlDraft] = useState(defaultBaseUrl);
     const [status, setStatus] = useState<PinokioStatus | null>(null);
     const [loading, setLoading] = useState(false);
+    const [saving, setSaving] = useState(false);
     const [actionLoading, setActionLoading] = useState<string | null>(null);
     const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
     const [selectedContextSize, setSelectedContextSize] = useState<number>(65536);
 
-    const fetchStatus = async () => {
-        setLoading(true);
-        try {
-            const res = await domainApi.pinokioStatus({ baseUrl });
-            setStatus(res.data);
-            if (res.data.context_size) {
-                setSelectedContextSize(res.data.context_size);
-            }
-        } catch (err: any) {
+    useEffect(() => {
+        if (instances.length === 0) {
+            setSelectedId(null);
+            return;
+        }
+        if (selectedId != null && instances.some((i) => i.id === selectedId)) {
+            return;
+        }
+        const preferred = instances.find((i) => i.is_default) ?? instances[0];
+        setSelectedId(preferred.id);
+    }, [instances, selectedId]);
+
+    const selected = instances.find((i) => i.id === selectedId) ?? null;
+
+    useEffect(() => {
+        if (selected) {
+            setNameDraft(selected.name || DEFAULT_DEMETER_NAME);
+            setUrlDraft(selected.resolved_base_url || selected.base_url || defaultBaseUrl);
+            return;
+        }
+        if (instances.length === 0) {
+            setNameDraft(DEFAULT_DEMETER_NAME);
+            setUrlDraft(defaultBaseUrl);
+        }
+    }, [selected?.id, selected?.base_url, selected?.resolved_base_url, selected?.name, instances.length, defaultBaseUrl]);
+
+    const probeUrl = normalizeStudioUrl(urlDraft) || null;
+
+    const fetchStatus = async (overrideUrl?: string | null) => {
+        const target = normalizeStudioUrl(overrideUrl ?? urlDraft);
+        if (!target) {
             setStatus({
                 reachable: false,
-                base_url: baseUrl,
+                base_url: null,
                 active_model: null,
                 running: false,
                 context_size: null,
                 backend_mode: null,
                 gpu: null,
                 models: [],
-                error: err?.message || 'Serveur injoignable',
+                error: 'Indiquez l’URL du studio Pinokio (ex. http://10.1.0.88:10086).',
+            });
+            return;
+        }
+        setLoading(true);
+        try {
+            const res = await domainApi.pinokioStatus({
+                baseUrl: target,
+                providerId: selectedId,
+            });
+            setStatus(res.data);
+            if (res.data.context_size) {
+                setSelectedContextSize(res.data.context_size);
+            }
+        } catch (err: unknown) {
+            setStatus({
+                reachable: false,
+                base_url: target,
+                active_model: null,
+                running: false,
+                context_size: null,
+                backend_mode: null,
+                gpu: null,
+                models: [],
+                error: err instanceof ApiError ? err.message : 'Serveur injoignable',
             });
         } finally {
             setLoading(false);
@@ -43,44 +121,106 @@ export function PinokioStudioManager({ defaultBaseUrl = 'http://10.1.0.88:10086'
 
     useEffect(() => {
         void fetchStatus();
-    }, [baseUrl]);
+    }, [probeUrl, selectedId]);
+
+    const handleSaveConnection = async () => {
+        if (!canManage) {
+            return;
+        }
+        const url = normalizeStudioUrl(urlDraft);
+        const name = nameDraft.trim() || DEFAULT_DEMETER_NAME;
+        if (!url) {
+            setMessage({ text: 'URL requise.', type: 'error' });
+            return;
+        }
+        setSaving(true);
+        setMessage(null);
+        try {
+            if (selectedId != null) {
+                await domainApi.updateAiProvider(selectedId, {
+                    name,
+                    base_url: url,
+                    model: selected?.model ?? 'auto',
+                });
+                setMessage({ text: `Connexion « ${name} » mise à jour.`, type: 'success' });
+            } else {
+                const created = await domainApi.createAiProvider({
+                    provider: 'openai',
+                    name,
+                    base_url: url,
+                    model: 'auto',
+                    is_default: false,
+                });
+                setSelectedId(created.data.id);
+                setMessage({ text: `Studio « ${name} » enregistré (provider OpenAI local).`, type: 'success' });
+            }
+            await instancesQuery.reload({ silent: true });
+            await fetchStatus(url);
+        } catch (err: unknown) {
+            setMessage({
+                text: err instanceof ApiError ? err.message : 'Enregistrement impossible.',
+                type: 'error',
+            });
+        } finally {
+            setSaving(false);
+        }
+    };
 
     const handleStartModel = async (model: PinokioModelInfo) => {
+        if (!probeUrl) {
+            return;
+        }
         setActionLoading(model.filename);
         setMessage(null);
         try {
             const res = await domainApi.pinokioStartModel({
                 model: model.filename,
-                base_url: baseUrl,
+                base_url: probeUrl,
+                provider_id: selectedId,
                 context_size: selectedContextSize,
                 gpu_layers: -1,
                 flash_attn: true,
                 batch_size: 2048,
             });
             setMessage({ text: res.data.message || `Modèle ${model.name} chargé en VRAM !`, type: 'success' });
-            if (onModelSelected) {
-                onModelSelected(model.filename);
-            }
+            onModelSelected?.(model.filename);
             await fetchStatus();
-        } catch (err: any) {
-            setMessage({ text: err?.message || 'Erreur lors du chargement du modèle.', type: 'error' });
+        } catch (err: unknown) {
+            setMessage({
+                text: err instanceof ApiError ? err.message : 'Erreur lors du chargement du modèle.',
+                type: 'error',
+            });
         } finally {
             setActionLoading(null);
         }
     };
 
     const handleStopModel = async () => {
+        if (!probeUrl) {
+            return;
+        }
         setActionLoading('stop');
         setMessage(null);
         try {
-            const res = await domainApi.pinokioStopModel({ base_url: baseUrl });
+            const res = await domainApi.pinokioStopModel({
+                base_url: probeUrl,
+                provider_id: selectedId,
+            });
             setMessage({ text: res.data.message || 'Modèle déchargé. VRAM libérée !', type: 'success' });
             await fetchStatus();
-        } catch (err: any) {
-            setMessage({ text: err?.message || 'Erreur lors de la mise en veille.', type: 'error' });
+        } catch (err: unknown) {
+            setMessage({
+                text: err instanceof ApiError ? err.message : 'Erreur lors de la mise en veille.',
+                type: 'error',
+            });
         } finally {
             setActionLoading(null);
         }
+    };
+
+    const refreshAll = async () => {
+        await instancesQuery.reload({ silent: true });
+        await fetchStatus();
     };
 
     const vramUsed = status?.gpu?.vram_used_gb ?? 0;
@@ -88,16 +228,17 @@ export function PinokioStudioManager({ defaultBaseUrl = 'http://10.1.0.88:10086'
     const vramPercent = vramTotal > 0 ? Math.min(100, Math.round((vramUsed / vramTotal) * 100)) : 0;
 
     return (
-        <div class="space-y-4 rounded-xl border border-base-300 bg-base-100 p-4 shadow-sm">
-            {/* Header & Connection */}
-            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-base-300/80 pb-3">
+        <div class="grid gap-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
                 <div class="flex items-center gap-2">
                     <div class="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
                         <Cpu class="size-5" />
                     </div>
                     <div>
-                        <h3 class="text-sm font-bold text-base-content">Local AI Studio (Pinokio)</h3>
-                        <p class="text-xs text-base-content/60">Gestion et monitoring du serveur GPU local</p>
+                        <h3 class="text-sm font-bold text-base-content">Demeter / Pinokio</h3>
+                        <p class="text-xs text-base-content/60">
+                            Studio GGUF local (RTX 3090) — URL LAN, charge VRAM, swap de modèles.
+                        </p>
                     </div>
                 </div>
 
@@ -106,7 +247,7 @@ export function PinokioStudioManager({ defaultBaseUrl = 'http://10.1.0.88:10086'
                         {status?.reachable ? (
                             <>
                                 <Wifi class="size-3.5 text-success" />
-                                <span class="font-medium text-success">En ligne ({status.base_url})</span>
+                                <span class="font-medium text-success">En ligne</span>
                             </>
                         ) : (
                             <>
@@ -118,26 +259,130 @@ export function PinokioStudioManager({ defaultBaseUrl = 'http://10.1.0.88:10086'
                     <button
                         type="button"
                         class="btn btn-ghost btn-xs gap-1"
-                        onClick={fetchStatus}
-                        disabled={loading}
+                        onClick={() => void refreshAll()}
+                        disabled={loading || instancesQuery.loading}
                     >
-                        <RefreshCw class={`size-3.5 ${loading ? 'animate-spin' : ''}`} />
-                        Actualiser
+                        <RefreshCw class={`size-3.5 ${loading || instancesQuery.loading ? 'animate-spin' : ''}`} />
+                        Tester
                     </button>
                 </div>
             </div>
 
-            {/* Notification message */}
+            {instances.length > 0 && (
+                <div class="flex flex-wrap gap-2">
+                    {instances.map((instance) => {
+                        const active = instance.id === selectedId;
+                        return (
+                            <button
+                                key={instance.id}
+                                type="button"
+                                class={`btn btn-sm gap-1.5 ${active ? 'btn-primary' : 'btn-ghost border border-base-300'}`}
+                                onClick={() => setSelectedId(instance.id)}
+                            >
+                                <Server class="size-3.5" aria-hidden />
+                                <span class="truncate max-w-[12rem]">{instance.name}</span>
+                                {instance.is_default && <span class="badge badge-xs">défaut</span>}
+                                <span
+                                    class={`size-1.5 rounded-full ${instance.reachable ? 'bg-success' : 'bg-warning'}`}
+                                    title={instance.reachable ? 'Joignable' : 'Injoignable'}
+                                />
+                            </button>
+                        );
+                    })}
+                    {canManage && (
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-ghost border border-dashed border-base-300"
+                            onClick={() => {
+                                setSelectedId(null);
+                                setNameDraft(DEFAULT_DEMETER_NAME);
+                                setUrlDraft(defaultBaseUrl);
+                                setStatus(null);
+                            }}
+                        >
+                            + Nouvelle instance
+                        </button>
+                    )}
+                </div>
+            )}
+
+            <section class="grid gap-3 rounded-xl border border-base-300 bg-base-100 p-3 sm:p-4">
+                <h4 class="text-xs font-semibold uppercase tracking-wide text-base-content/55">
+                    Connexion
+                </h4>
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <label class="grid gap-1 text-[11px]">
+                        <span class="font-medium text-base-content/70">Nom</span>
+                        <input
+                            class="input input-bordered input-sm"
+                            type="text"
+                            value={nameDraft}
+                            disabled={!canManage || saving}
+                            placeholder="Demeter"
+                            onInput={(e) => setNameDraft((e.target as HTMLInputElement).value)}
+                        />
+                    </label>
+                    <label class="grid gap-1 text-[11px] sm:col-span-2">
+                        <span class="font-medium text-base-content/70">URL Pinokio (LAN)</span>
+                        <input
+                            class="input input-bordered input-sm font-mono"
+                            type="url"
+                            value={urlDraft}
+                            disabled={saving}
+                            placeholder={DEFAULT_DEMETER_URL}
+                            onInput={(e) => setUrlDraft((e.target as HTMLInputElement).value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    void fetchStatus();
+                                }
+                            }}
+                        />
+                        <span class="text-[10px] text-base-content/45">
+                            Ex. <code class="text-[10px]">{DEFAULT_DEMETER_URL}</code>
+                            {' '}— pas le tunnel Cloudflare. Clé API optionnelle (endpoint OpenAI-compatible local).
+                        </span>
+                    </label>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        class="btn btn-ghost btn-sm gap-1"
+                        disabled={loading || !urlDraft.trim()}
+                        onClick={() => void fetchStatus()}
+                    >
+                        {loading ? <span class="loading loading-spinner loading-xs" /> : <RefreshCw class="size-3.5" />}
+                        Tester la connexion
+                    </button>
+                    {canManage && (
+                        <button
+                            type="button"
+                            class="btn btn-primary btn-sm gap-1"
+                            disabled={saving || !urlDraft.trim()}
+                            onClick={() => void handleSaveConnection()}
+                        >
+                            {saving ? <span class="loading loading-spinner loading-xs" /> : <Save class="size-3.5" />}
+                            {selectedId != null ? 'Enregistrer' : 'Enregistrer comme provider'}
+                        </button>
+                    )}
+                </div>
+            </section>
+
             {message && (
                 <div class={`alert alert-${message.type === 'success' ? 'success' : 'error'} py-2 text-xs`}>
                     <span>{message.text}</span>
                 </div>
             )}
 
-            {/* Hardware & VRAM Telemetry */}
+            {!status?.reachable && (
+                <p class="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+                    {status?.error
+                        ?? 'Hors ligne — vérifiez que Pinokio tourne sur le PC GPU, puis corrigez l’URL ci-dessus et cliquez sur Tester.'}
+                </p>
+            )}
+
             {status?.reachable && (
                 <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    {/* GPU VRAM Card */}
                     <div class="rounded-lg border border-base-300 bg-base-200/40 p-3">
                         <div class="flex items-center justify-between text-xs text-base-content/70">
                             <span class="font-medium">Mémoire VRAM ({status.gpu?.name || 'GPU'})</span>
@@ -155,7 +400,6 @@ export function PinokioStudioManager({ defaultBaseUrl = 'http://10.1.0.88:10086'
                         </div>
                     </div>
 
-                    {/* Active Model Card */}
                     <div class="rounded-lg border border-base-300 bg-base-200/40 p-3 sm:col-span-2">
                         <div class="flex items-center justify-between">
                             <span class="text-xs font-medium text-base-content/70">Modèle chargé en VRAM</span>
@@ -167,7 +411,7 @@ export function PinokioStudioManager({ defaultBaseUrl = 'http://10.1.0.88:10086'
                                     disabled={actionLoading === 'stop'}
                                 >
                                     {actionLoading === 'stop' ? <Loader2 class="size-3 animate-spin" /> : <Power class="size-3" />}
-                                    Mettre en veille (Libérer VRAM)
+                                    Mettre en veille
                                 </button>
                             )}
                         </div>
@@ -183,7 +427,6 @@ export function PinokioStudioManager({ defaultBaseUrl = 'http://10.1.0.88:10086'
                                         <Sparkles class="size-3" />
                                         Flash Attention
                                     </span>
-                                    <span class="badge badge-ghost badge-sm font-semibold text-success">100% GPU</span>
                                 </>
                             ) : (
                                 <span class="text-xs text-base-content/50 italic">Aucun modèle en mémoire (GPU en veille)</span>
@@ -193,11 +436,10 @@ export function PinokioStudioManager({ defaultBaseUrl = 'http://10.1.0.88:10086'
                 </div>
             )}
 
-            {/* Model Management & Fast Swap */}
             {status?.reachable && (
-                <div class="space-y-2 pt-1">
+                <div class="space-y-2">
                     <div class="flex items-center justify-between">
-                        <h4 class="text-xs font-bold uppercase tracking-wider text-base-content/60">Modèles GGUF Disponibles</h4>
+                        <h4 class="text-xs font-bold uppercase tracking-wider text-base-content/60">Modèles disponibles</h4>
                         <div class="flex items-center gap-2">
                             <span class="text-xs text-base-content/60">Contexte :</span>
                             <select
@@ -231,7 +473,6 @@ export function PinokioStudioManager({ defaultBaseUrl = 'http://10.1.0.88:10086'
                                             {model.size && <span>• {model.size}</span>}
                                         </div>
                                     </div>
-
                                     <div>
                                         {model.is_active ? (
                                             <button type="button" class="btn btn-outline btn-success btn-xs" disabled>
@@ -262,7 +503,7 @@ export function PinokioStudioManager({ defaultBaseUrl = 'http://10.1.0.88:10086'
                             ))
                         ) : (
                             <div class="p-4 text-center text-xs text-base-content/50">
-                                Aucun fichier .gguf détecté dans le dossier app/llm-models de Pinokio.
+                                Aucun modèle détecté (GGUF ou /v1/models).
                             </div>
                         )}
                     </div>

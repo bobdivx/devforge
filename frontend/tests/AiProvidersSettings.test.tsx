@@ -72,6 +72,8 @@ describe('AiProvidersSettings', () => {
         renderWithAgentsEnabled();
 
         expect(await screen.findByText('Gemini Flash')).toBeInTheDocument();
+        expect(screen.getByRole('link', { name: 'Modèles locaux' })).toHaveAttribute('href', '#models');
+        expect(screen.getByRole('link', { name: 'section dédiée' })).toHaveAttribute('href', '#pinokio');
 
         fireEvent.click(screen.getByTitle('Modifier'));
 

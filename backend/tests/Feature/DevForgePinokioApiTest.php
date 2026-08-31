@@ -72,6 +72,29 @@ it('swaps model via post to pinokio start', function () {
         ->assertJsonPath('data.ok', true);
 });
 
+it('lists demeter pinokio instances for the team', function () {
+    $this->mock(PinokioControlService::class, function ($mock) {
+        $mock->shouldReceive('listInstances')
+            ->once()
+            ->andReturn([[
+                'id' => 12,
+                'name' => 'Demeter (RTX 3090)',
+                'base_url' => 'http://10.1.0.88:10086',
+                'resolved_base_url' => 'http://10.1.0.88:10086',
+                'is_default' => true,
+                'model' => 'qwen3',
+                'reachable' => true,
+            ]]);
+    });
+
+    $this->actingAs($this->user)
+        ->withSession($this->session)
+        ->getJson(route('ai.pinokio.instances'))
+        ->assertOk()
+        ->assertJsonPath('data.0.name', 'Demeter (RTX 3090)')
+        ->assertJsonPath('data.0.reachable', true);
+});
+
 it('stops model via post to pinokio stop', function () {
     $this->mock(PinokioControlService::class, function ($mock) {
         $mock->shouldReceive('stopModel')

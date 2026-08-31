@@ -172,7 +172,7 @@ export function OllamaControlPanel({ canManage = false }: { canManage?: boolean 
             <div class="grid gap-2.5 sm:gap-3 md:gap-4">
                 <div class="flex flex-wrap items-center justify-between gap-2">
                     <p class="text-[11px] text-base-content/55">
-                        Une instance = un provider Ollama (URL). Ex. PC 3090 et NAS A2000 = 2 providers.
+                        Une instance = un provider Ollama (URL). Demeter / Pinokio a sa propre section dans le menu.
                     </p>
                     <ActionToolbar>
                         <button class="btn btn-ghost btn-xs gap-1" type="button" disabled={busy} onClick={() => void refreshAll()}>

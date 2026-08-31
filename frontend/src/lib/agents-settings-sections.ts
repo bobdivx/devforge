@@ -1,6 +1,7 @@
 export type AgentsSettingsSectionId =
     | 'providers'
     | 'models'
+    | 'pinokio'
     | 'instructions'
     | 'memory'
     | 'mcp'
@@ -24,7 +25,13 @@ export const AGENTS_SETTINGS_SECTIONS: AgentsSettingsSection[] = [
     {
         id: 'models',
         label: 'Modèles locaux',
-        description: 'Ollama, GPU, pull de modèles',
+        description: 'Ollama, pull, GPU NAS',
+        group: 'core',
+    },
+    {
+        id: 'pinokio',
+        label: 'Demeter / Pinokio',
+        description: 'URL studio, VRAM, GGUF',
         group: 'core',
     },
     {

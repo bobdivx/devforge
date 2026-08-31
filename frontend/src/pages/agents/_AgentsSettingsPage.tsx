@@ -8,6 +8,7 @@ import { AgentsSettingsShell } from '../../components/agents/AgentsSettingsShell
 import { LayeredInstructionsPanel } from '../../components/agents/LayeredInstructionsPanel';
 import { TeamSkillsPanel } from '../../components/agents/TeamSkillsPanel';
 import { PageHeader } from '../../components/PageHeader';
+import { PinokioStudioManager } from '../../components/agents/PinokioStudioManager';
 import { OllamaControlPanel } from '../../components/settings/OllamaControlPanel';
 import { Card } from '../../components/ui/Card';
 import {
@@ -58,6 +59,7 @@ export function AgentsSettingsPage({
                 <Card title={meta?.label ?? 'Paramètres'} eyebrow={meta?.description}>
                     {section === 'providers' && <AiProvidersSettings />}
                     {section === 'models' && <OllamaControlPanel canManage={canManageAi} />}
+                    {section === 'pinokio' && <PinokioStudioManager canManage={canManageAi} />}
                     {section === 'instructions' && (
                         <div class="grid gap-6">
                             <div>

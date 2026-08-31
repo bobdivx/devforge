@@ -1,7 +1,12 @@
 <?php
 
+use App\Models\AiProviderConfig;
+use App\Models\Team;
 use App\Services\DevForge\Agent\PinokioControlService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+
+uses(RefreshDatabase::class);
 
 it('returns status and lists models from Pinokio server', function () {
     Http::fake([
@@ -82,4 +87,76 @@ it('stops the active model to free GPU VRAM', function () {
 
     expect($result['ok'])->toBeTrue()
         ->and($result['message'])->toContain('VRAM GPU libérée');
+});
+
+it('lists openai providers on Demeter / Pinokio ports as local studio instances', function () {
+    Http::fake([
+        'http://10.1.0.88:10086/v1/models' => Http::response(['data' => [['id' => 'qwen3']]]),
+        'http://10.1.0.88:10086/api/health' => Http::response(['ok' => true]),
+    ]);
+
+    $team = Team::factory()->create();
+    $demeter = AiProviderConfig::factory()->create([
+        'team_id' => $team->id,
+        'provider' => 'openai',
+        'name' => 'qwen3',
+        'base_url' => 'http://10.1.0.88:10086',
+        'model' => 'auto',
+        'is_default' => true,
+    ]);
+    AiProviderConfig::factory()->create([
+        'team_id' => $team->id,
+        'provider' => 'openai',
+        'name' => 'Cloud OpenAI',
+        'base_url' => 'https://api.openai.com/v1',
+        'model' => 'gpt-4o',
+    ]);
+    AiProviderConfig::factory()->create([
+        'team_id' => $team->id,
+        'provider' => 'openai',
+        'name' => 'Demeter Home',
+        'base_url' => 'http://192.168.1.50:8080',
+        'model' => 'qwen3',
+    ]);
+
+    $service = new PinokioControlService;
+    $instances = $service->listInstances($team);
+
+    expect($instances)->toHaveCount(2)
+        ->and(collect($instances)->pluck('id')->all())->toContain($demeter->id)
+        ->and(collect($instances)->firstWhere('id', $demeter->id)['name'])->toBe('Demeter (RTX 3090)')
+        ->and(collect($instances)->pluck('name')->all())->toContain('Demeter Home');
+});
+
+it('includes OpenAI-compatible model ids without .gguf from /v1/models', function () {
+    Http::fake([
+        'http://10.1.0.88:10086/api/health' => Http::response([
+            'backend' => [
+                'running' => true,
+                'ready' => true,
+                'settings' => [
+                    'model' => 'qwen3',
+                    'contextSize' => 65536,
+                ],
+            ],
+        ]),
+        'http://10.1.0.88:10086/api/telemetry' => Http::response([
+            'gpu_name' => 'NVIDIA GeForce RTX 3090',
+            'vram_used_gb' => 20.0,
+            'vram_total_gb' => 24.0,
+        ]),
+        'http://10.1.0.88:10086/api/llm/models' => Http::response('Not Found', 404),
+        'http://10.1.0.88:10086/v1/models' => Http::response([
+            'data' => [
+                ['id' => 'qwen3'],
+                ['id' => 'qwen2.5-coder'],
+            ],
+        ]),
+    ]);
+
+    $service = new PinokioControlService;
+    $status = $service->status('http://10.1.0.88:10086');
+
+    expect($status['reachable'])->toBeTrue()
+        ->and(collect($status['models'])->pluck('filename')->all())->toContain('qwen3', 'qwen2.5-coder');
 });

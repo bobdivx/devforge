@@ -5,7 +5,6 @@ import { HiddenUsernameField } from '../ui/HiddenUsernameField';
 import type { AiProviderConfig, LlmModelOption, LlmProvider } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
 import { AUTO_MODEL_VALUE, CUSTOM_MODEL_VALUE, formatModelLabel, isAutoModel, modelSelectValue } from '../../lib/llm-models';
-import { PinokioStudioManager } from './PinokioStudioManager';
 import { SmallModelToolsWarning } from './SmallModelToolsWarning';
 import { useApiQuery } from '../../lib/use-api-query';
 import { useTeamContext } from '../../lib/team-context';
@@ -704,11 +703,12 @@ export function AiProvidersSettings() {
                 </form>
             )}
 
-            <PinokioStudioManager
-                onModelSelected={() => {
-                    void query.reload();
-                }}
-            />
+            <p class="rounded-md border border-dashed border-base-300 px-3 py-2 text-[11px] text-base-content/55">
+                Ollama → <a class="link link-primary" href="#models">Modèles locaux</a>
+                {' · '}
+                Demeter / Pinokio → <a class="link link-primary" href="#pinokio">section dédiée</a>
+                {' '}(URL LAN, VRAM, GGUF).
+            </p>
         </div>
     );
 }
