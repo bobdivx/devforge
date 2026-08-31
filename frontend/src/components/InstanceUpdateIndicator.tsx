@@ -92,6 +92,10 @@ export function InstanceUpdateIndicator({ enabled, onReload, checkHealth }: Inst
         setConfirmError(null);
     };
 
+    if (!enabled) {
+        return null;
+    }
+
     return (
         <>
             {showBadge && (
@@ -126,15 +130,15 @@ export function InstanceUpdateIndicator({ enabled, onReload, checkHealth }: Inst
                 dismissible={!locked}
                 onClose={handleClose}
                 footer={locked && phase !== 'complete' ? undefined : (
-                    <>
+                    <div class="flex flex-col-reverse sm:flex-row gap-2 w-full sm:w-auto sm:justify-end">
                         {phase === 'complete' && (
-                            <Button onClick={reloadNow}>Recharger maintenant</Button>
+                            <Button class="w-full sm:w-auto" onClick={reloadNow}>Recharger maintenant</Button>
                         )}
                         {phase === 'error' && (
                             <>
-                                <Button variant="ghost" onClick={handleClose}>Fermer</Button>
+                                <Button class="w-full sm:w-auto" variant="ghost" onClick={handleClose}>Fermer</Button>
                                 {canLaunch && (
-                                    <Button disabled={starting} onClick={() => void handleConfirm()}>
+                                    <Button class="w-full sm:w-auto" disabled={starting} onClick={() => void handleConfirm()}>
                                         {starting ? 'En cours…' : 'Réessayer'}
                                     </Button>
                                 )}
@@ -142,13 +146,13 @@ export function InstanceUpdateIndicator({ enabled, onReload, checkHealth }: Inst
                         )}
                         {phase === 'idle' && (
                             <>
-                                <Button variant="ghost" onClick={handleClose}>Plus tard</Button>
-                                <Button disabled={starting} onClick={() => void handleConfirm()}>
+                                <Button class="w-full sm:w-auto" variant="ghost" onClick={handleClose}>Plus tard</Button>
+                                <Button class="w-full sm:w-auto" disabled={starting} onClick={() => void handleConfirm()}>
                                     {starting ? 'En cours…' : 'Mettre à jour maintenant'}
                                 </Button>
                             </>
                         )}
-                    </>
+                    </div>
                 )}
             >
                 {status && (
