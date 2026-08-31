@@ -217,8 +217,10 @@ class InstanceUpgradeService
             ]);
         }
 
+        $latest = $this->latestVersion();
+
         try {
-            UpdateDevForge::run(manual_update: true);
+            UpdateDevForge::run(manual_update: true, targetVersion: $latest !== '0.0.0' ? $latest : null);
         } catch (\Throwable $e) {
             throw ValidationException::withMessages([
                 'upgrade' => [$e->getMessage()],

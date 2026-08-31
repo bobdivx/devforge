@@ -20,7 +20,7 @@ class UpdateDevForge
 
     public ?string $currentVersion = null;
 
-    public function handle($manual_update = false)
+    public function handle($manual_update = false, ?string $targetVersion = null)
     {
         if (isDev()) {
             Sleep::for(10)->seconds();
@@ -33,60 +33,36 @@ class UpdateDevForge
             return;
         }
 
-        // Fetch fresh version from CDN instead of using cache
-        try {
-            $response = Http::retry(3, 1000)->timeout(10)
-                ->get(config('constants.devforge.versions_url'));
+        $this->currentVersion = (string) config('constants.devforge.version');
 
-            if ($response->successful()) {
-                $versions = $response->json();
-                $this->latestVersion = data_get($versions, 'devforge.version')
-                    ?? data_get($versions, 'coolify.v4.version');
-            } else {
-                // Fallback to cache if CDN unavailable
-                $cacheVersion = get_latest_version_of_coolify();
+        if (is_string($targetVersion) && trim($targetVersion) !== '') {
+            $this->latestVersion = trim($targetVersion);
+        } else {
+            $cacheVersion = (string) get_latest_version_of_coolify();
+            $cdnVersion = null;
 
-                // Validate cache version against current running version
-                if ($cacheVersion && version_compare($cacheVersion, config('constants.devforge.version'), '<')) {
-                    Log::error('Failed to fetch fresh version from CDN and cache is corrupted/outdated', [
-                        'cached_version' => $cacheVersion,
-                        'current_version' => config('constants.devforge.version'),
-                    ]);
-                    throw new \Exception(
-                        'Cannot determine latest version: CDN unavailable and cache version '.
-                        "({$cacheVersion}) is older than running version (".config('constants.devforge.version').')'
-                    );
+            try {
+                $response = Http::retry(2, 500)->timeout(5)
+                    ->get(config('constants.devforge.versions_url'));
+
+                if ($response->successful()) {
+                    $versions = $response->json();
+                    $cdnVersion = data_get($versions, 'devforge.version')
+                        ?? data_get($versions, 'coolify.v4.version');
                 }
-
-                $this->latestVersion = $cacheVersion;
-                Log::warning('Failed to fetch fresh version from CDN (unsuccessful response), using validated cache', [
-                    'version' => $cacheVersion,
-                ]);
-            }
-        } catch (\Throwable $e) {
-            $cacheVersion = get_latest_version_of_coolify();
-
-            // Validate cache version against current running version
-            if ($cacheVersion && version_compare($cacheVersion, config('constants.devforge.version'), '<')) {
-                Log::error('Failed to fetch fresh version from CDN and cache is corrupted/outdated', [
-                    'error' => $e->getMessage(),
-                    'cached_version' => $cacheVersion,
-                    'current_version' => config('constants.devforge.version'),
-                ]);
-                throw new \Exception(
-                    'Cannot determine latest version: CDN unavailable and cache version '.
-                    "({$cacheVersion}) is older than running version (".config('constants.devforge.version').')'
-                );
+            } catch (\Throwable) {
+                // Ignore CDN failure, use cache
             }
 
-            $this->latestVersion = $cacheVersion;
-            Log::warning('Failed to fetch fresh version from CDN, using validated cache', [
-                'error' => $e->getMessage(),
-                'version' => $cacheVersion,
-            ]);
+            $bestVersion = $cacheVersion;
+            if (is_string($cdnVersion) && $cdnVersion !== '') {
+                if ($bestVersion === '' || version_compare($cdnVersion, $bestVersion, '>')) {
+                    $bestVersion = $cdnVersion;
+                }
+            }
+
+            $this->latestVersion = $bestVersion !== '' ? $bestVersion : $this->currentVersion;
         }
-
-        $this->currentVersion = config('constants.devforge.version');
         if (! $manual_update) {
             if (! $settings->is_auto_update_enabled) {
                 return;
