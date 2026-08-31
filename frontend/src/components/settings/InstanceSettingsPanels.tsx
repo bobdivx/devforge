@@ -704,9 +704,12 @@ function UpdatesForm({
         try {
             const response = await domainApi.checkUpdatesSettings();
             await onSaved();
-            setMessage(response.data.updates.new_version_available
-                ? 'Nouvelle version disponible.'
-                : 'Aucune nouvelle version.');
+            const updates = response.data.updates;
+            if (updates.new_version_available) {
+                setMessage(`Nouvelle version disponible : ${updates.latest_version ?? ''} (actuelle : ${updates.current_version ?? ''})`);
+            } else {
+                setMessage(`Votre instance est à jour (version ${updates.current_version ?? form.current_version ?? ''}).`);
+            }
         } catch (caught) {
             setError(caught instanceof Error ? caught.message : 'Échec de la vérification.');
         } finally {
@@ -766,8 +769,16 @@ function UpdatesForm({
                     onChange={(val) => setForm((current) => ({ ...current, update_check_frequency: val || null }))}
                 />
             </div>
-            {error && <p class="text-sm text-error">{error}</p>}
-            {message && <p class="text-sm text-base-content/60" role="status">{message}</p>}
+            {message && (
+                <div class={`alert ${form.new_version_available ? 'alert-warning' : 'alert-success'} py-2 text-xs font-medium`}>
+                    <span>{message}</span>
+                </div>
+            )}
+            {error && (
+                <div class="alert alert-error py-2 text-xs font-medium">
+                    <span>{error}</span>
+                </div>
+            )}
             {canEdit && (
                 <div class="flex flex-wrap gap-2">
                     <button class="btn btn-primary btn-sm rounded-xl" type="button" disabled={saving || checking || upgrading} onClick={() => void save()}>
@@ -786,7 +797,7 @@ function UpdatesForm({
                             onClick={() => setConfirmOpen(true)}
                         >
                             <ArrowUpCircle class="size-3.5" aria-hidden />
-                            {upgrading ? 'Mise à jour…' : 'Mettre à jour maintenant'}
+                            {upgrading ? 'Mise à jour…' : `Mettre à jour vers ${latestVersion}`}
                         </button>
                     )}
                 </div>
@@ -823,12 +834,14 @@ export function InstanceSettingsPanels({ section, permissions }: InstanceSetting
     return (
         <div class="grid gap-2.5 sm:gap-3 md:gap-4">
             <Card title={titles[section]} eyebrow={canEdit ? 'Administrateur' : 'Lecture seule'}>
-                <div class="card-toolbar mb-3">
-                    <button class="btn btn-ghost btn-sm" type="button" onClick={() => void settings.reload()}>
-                        <RefreshCw class="size-3.5" aria-hidden />
-                        Actualiser
-                    </button>
-                </div>
+                {section !== 'updates' && (
+                    <div class="card-toolbar mb-3">
+                        <button class="btn btn-ghost btn-sm" type="button" onClick={() => void settings.reload()}>
+                            <RefreshCw class="size-3.5" aria-hidden />
+                            Actualiser
+                        </button>
+                    </div>
+                )}
                 <DataState loading={settings.loading} error={settings.error} onRetry={() => void settings.reload()}>
                     {data && section === 'instance' && (
                         <InstanceForm data={data.instance} canEdit={canEdit} onSaved={settings.reload} />

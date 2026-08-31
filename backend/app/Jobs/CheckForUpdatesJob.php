@@ -19,7 +19,7 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
     public function handle(): void
     {
         try {
-            if (isDev() || isCloud()) {
+            if (isCloud()) {
                 return;
             }
             $settings = instanceSettings();
@@ -186,18 +186,19 @@ class CheckForUpdatesJob implements ShouldBeEncrypted, ShouldQueue
 
             $semverTags = [];
             foreach ($tags as $tag) {
-                $name = data_get($tag, 'name', '');
-                if (preg_match('/^[0-9]+\.[0-9]+\.[0-9]+$/', $name)) {
-                    $semverTags[] = $name;
+                $name = (string) data_get($tag, 'name', '');
+                if (preg_match('/^(?:agent-|helper-|proxy-|web-|realtime-|api-|v)?([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)$/i', $name, $match)) {
+                    $semverTags[] = $match[1];
                 }
             }
 
             if (empty($semverTags)) {
-                Log::error('Docker Hub has no plain semver tags');
+                Log::error('Docker Hub has no matching semver tags');
 
                 return null;
             }
 
+            $semverTags = array_values(array_unique($semverTags));
             usort($semverTags, function ($a, $b) {
                 return version_compare($b, $a);
             });
