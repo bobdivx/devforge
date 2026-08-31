@@ -79,7 +79,8 @@ class RigAgentClient
             }
         }
 
-        $response = Http::timeout(180)->post($this->baseUrl().'/v1/chat', $payload);
+        $timeout = (int) config('devforge.agent_timeout', 300);
+        $response = Http::timeout($timeout)->post($this->baseUrl().'/v1/chat', $payload);
 
         if ($response->failed()) {
             throw new \RuntimeException(

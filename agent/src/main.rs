@@ -19,8 +19,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const DUMMY_OPENAI_KEY: &str = "sk-local-devforge-agent";
-const LLM_TIMEOUT: Duration = Duration::from_secs(180);
 const MCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
+
+fn llm_timeout() -> Duration {
+    let secs = std::env::var("LLM_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(300);
+    Duration::from_secs(secs)
+}
 
 #[derive(Clone)]
 struct AppState {
@@ -408,8 +415,9 @@ async fn chat(
             .default_max_turns(40)
             .rmcp_tools(tools, mcp.peer().to_owned())
             .build();
+        let timeout_duration = llm_timeout();
         match tokio::time::timeout(
-            LLM_TIMEOUT,
+            timeout_duration,
             agent
                 .prompt(prompt.as_str())
                 .history(history_messages(&body.messages, &prompt))
@@ -422,7 +430,7 @@ async fn chat(
                     StatusCode::BAD_GATEWAY,
                     format!(
                         "LLM timeout after {}s contacting {host}",
-                        LLM_TIMEOUT.as_secs()
+                        timeout_duration.as_secs()
                     ),
                 ));
             }
@@ -437,7 +445,7 @@ async fn chat(
                 );
                 let plain = client.agent(&model).preamble(&preamble).build();
                 match tokio::time::timeout(
-                    LLM_TIMEOUT,
+                    timeout_duration,
                     plain
                         .prompt(prompt.as_str())
                         .history(history_messages(&body.messages, &prompt)),
@@ -449,7 +457,7 @@ async fn chat(
                             StatusCode::BAD_GATEWAY,
                             format!(
                                 "LLM timeout after {}s contacting {host}",
-                                LLM_TIMEOUT.as_secs()
+                                timeout_duration.as_secs()
                             ),
                         ));
                     }
@@ -459,15 +467,16 @@ async fn chat(
             }
         }
     } else {
+        let timeout_duration = llm_timeout();
         let agent = client.agent(&model).preamble(&preamble).build();
-        match tokio::time::timeout(LLM_TIMEOUT, agent.prompt(prompt.as_str()).history(history)).await
+        match tokio::time::timeout(timeout_duration, agent.prompt(prompt.as_str()).history(history)).await
         {
             Err(_) => {
                 return Err(err(
                     StatusCode::BAD_GATEWAY,
                     format!(
                         "LLM timeout after {}s contacting {host}",
-                        LLM_TIMEOUT.as_secs()
+                        timeout_duration.as_secs()
                     ),
                 ));
             }
