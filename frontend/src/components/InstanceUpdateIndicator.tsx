@@ -50,21 +50,21 @@ export function InstanceUpdateIndicator({ enabled, onReload, checkHealth }: Inst
     }, [locked]);
 
     useEffect(() => {
-        const handleOpen = () => setModalOpen(true);
+        const handleOpen = () => {
+            setConfirmError(null);
+            setModalOpen(true);
+        };
         window.addEventListener(INSTANCE_UPGRADE_OPEN_EVENT, handleOpen);
         return () => window.removeEventListener(INSTANCE_UPGRADE_OPEN_EVENT, handleOpen);
     }, []);
 
-    if (!shouldShowInstanceUpgrade(status) || !status) {
-        return null;
-    }
-
-    const canLaunch = status.available && (status.status === 'none' || status.status === 'error') && !starting && !locked;
+    const showBadge = Boolean(shouldShowInstanceUpgrade(status) && status);
+    const canLaunch = Boolean(status?.available && (status.status === 'none' || status.status === 'error') && !starting && !locked);
     const badgeLabel = phase === 'reviving' || phase === 'complete'
         ? 'Redémarrage…'
         : starting || phase === 'progress'
             ? 'Mise à jour…'
-            : instanceUpgradeLabel(status);
+            : status ? instanceUpgradeLabel(status) : 'Mise à jour';
 
     const modalTitle = phase === 'complete'
         ? 'Mise à jour terminée'
@@ -94,28 +94,30 @@ export function InstanceUpdateIndicator({ enabled, onReload, checkHealth }: Inst
 
     return (
         <>
-            <button
-                type="button"
-                class={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-                    status.status === 'error' && phase !== 'progress'
-                        ? 'border-error/30 bg-error/10 text-error hover:bg-error/15'
-                        : 'border-warning/30 bg-warning/10 text-warning hover:bg-warning/15'
-                }`}
-                aria-label={badgeLabel}
-                aria-live="polite"
-                disabled={!canLaunch && !locked && phase !== 'error'}
-                onClick={() => {
-                    setConfirmError(null);
-                    setModalOpen(true);
-                }}
-            >
-                {locked && phase !== 'complete' ? (
-                    <Loader2 class="size-3.5 animate-spin" aria-hidden />
-                ) : (
-                    <ArrowUpCircle class="size-3.5" aria-hidden />
-                )}
-                <span class="max-w-[12rem] truncate">{badgeLabel}</span>
-            </button>
+            {showBadge && (
+                <button
+                    type="button"
+                    class={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                        status?.status === 'error' && phase !== 'progress'
+                            ? 'border-error/30 bg-error/10 text-error hover:bg-error/15'
+                            : 'border-warning/30 bg-warning/10 text-warning hover:bg-warning/15'
+                    }`}
+                    aria-label={badgeLabel}
+                    aria-live="polite"
+                    disabled={!canLaunch && !locked && phase !== 'error'}
+                    onClick={() => {
+                        setConfirmError(null);
+                        setModalOpen(true);
+                    }}
+                >
+                    {locked && phase !== 'complete' ? (
+                        <Loader2 class="size-3.5 animate-spin" aria-hidden />
+                    ) : (
+                        <ArrowUpCircle class="size-3.5" aria-hidden />
+                    )}
+                    <span class="max-w-[12rem] truncate">{badgeLabel}</span>
+                </button>
+            )}
 
             <Modal
                 open={modalOpen}
@@ -149,13 +151,15 @@ export function InstanceUpdateIndicator({ enabled, onReload, checkHealth }: Inst
                     </>
                 )}
             >
-                <p class="text-sm text-base-content/60">
-                    {status.current_version}
-                    {' '}
-                    <span aria-hidden>→</span>
-                    {' '}
-                    {status.latest_version}
-                </p>
+                {status && (
+                    <p class="text-sm text-base-content/60">
+                        {status.current_version}
+                        {' '}
+                        <span aria-hidden>→</span>
+                        {' '}
+                        {status.latest_version}
+                    </p>
+                )}
 
                 {phase === 'idle' && (
                     <div class="alert alert-warning text-sm" role="alert">
