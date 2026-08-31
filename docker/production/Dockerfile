@@ -14,6 +14,7 @@ ARG NGINX_VERSION=1.31.3-r1
 # Add user/group
 ARG USER_ID=9999
 ARG GROUP_ID=9999
+ARG DOCKER_CLI_IMAGE=docker:27.5.1-cli
 
 # =================================================================
 # Stage 1: Composer dependencies
@@ -70,6 +71,8 @@ RUN npm run build \
 # =================================================================
 FROM minio/mc:${MINIO_VERSION} AS minio-client
 
+FROM ${DOCKER_CLI_IMAGE} AS docker-cli
+
 # =================================================================
 # Final Stage: Production image
 # =================================================================
@@ -117,7 +120,10 @@ RUN --mount=type=cache,target=/var/cache/apk \
     git-lfs \
     jq \
     lsof \
-    vim
+    vim \
+    sudo \
+    acl \
+    shadow
 
 # Configure shell aliases
 RUN echo "alias ll='ls -al'" >> /etc/profile && \
@@ -185,6 +191,19 @@ RUN mkdir -p /etc/nginx/conf.d && \
 # Install MinIO client
 COPY --from=minio-client /usr/bin/mc /usr/bin/mc
 RUN chmod +x /usr/bin/mc
+
+# Docker CLI + compose plugin: instance self-update runs upgrade.sh against the mounted docker.sock.
+RUN mkdir -p /usr/local/libexec/docker/cli-plugins /usr/libexec/docker/cli-plugins
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
+RUN chmod +x /usr/local/bin/docker /usr/local/libexec/docker/cli-plugins/docker-compose \
+    && ln -sf /usr/local/libexec/docker/cli-plugins/docker-compose /usr/libexec/docker/cli-plugins/docker-compose
+
+COPY --chmod=755 docker/production/bin/devforge-docker-sock-grant /usr/local/bin/devforge-docker-sock-grant
+COPY --chmod=440 docker/production/etc/sudoers.d/devforge-docker-sock /etc/sudoers.d/devforge-docker-sock
+RUN chown root:root /usr/local/bin/devforge-docker-sock-grant /etc/sudoers.d/devforge-docker-sock \
+    && chmod 755 /usr/local/bin/devforge-docker-sock-grant \
+    && chmod 440 /etc/sudoers.d/devforge-docker-sock
 
 # Switch to non-root user
 USER www-data

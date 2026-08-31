@@ -6,7 +6,9 @@ use App\Actions\Server\UpdateDevForge;
 use App\Models\InstanceSettings;
 use App\Models\Server;
 use DateTimeInterface;
+use Illuminate\Process\ProcessResult;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Validation\ValidationException;
 
 class InstanceUpgradeService
@@ -122,9 +124,128 @@ class InstanceUpgradeService
         ];
     }
 
+    /**
+     * @return list<string>
+     */
+    public static function dockerSocketCandidates(): array
+    {
+        return [
+            '/var/run/docker.sock',
+            '/run/docker.sock',
+        ];
+    }
+
+    public static function detectDockerSocket(): ?string
+    {
+        foreach (self::dockerSocketCandidates() as $path) {
+            if (is_socket($path) || file_exists($path)) {
+                return $path;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Socket is usable when it exists AND (PHP can read it OR `docker info` talks to the engine).
+     * Do not rely on is_readable() alone: 660 root:docker is unreadable for www-data until
+     * the entrypoint grants the sock GID / ACL.
+     */
+    public static function evaluateLocalDockerUpgrade(bool $socketExists, bool $socketReadable, bool $dockerCliWorks): bool
+    {
+        return $socketExists && ($socketReadable || $dockerCliWorks);
+    }
+
     public static function canRunLocalDockerUpgrade(): bool
     {
-        return is_readable('/var/run/docker.sock') || is_readable('/run/docker.sock');
+        $socket = self::detectDockerSocket();
+
+        return self::evaluateLocalDockerUpgrade(
+            socketExists: $socket !== null,
+            socketReadable: $socket !== null && is_readable($socket),
+            dockerCliWorks: self::dockerCliWorks(),
+        );
+    }
+
+    public static function dockerCliWorks(): bool
+    {
+        if (self::detectDockerSocket() === null) {
+            return false;
+        }
+
+        try {
+            $result = Process::timeout(8)->run(['docker', 'info', '-f', '{{.ServerVersion}}']);
+            if ($result->successful()) {
+                return true;
+            }
+
+            $group = self::dockerSocketGroupName();
+            $sg = self::sgBinary();
+            if ($group !== null && $sg !== null) {
+                $retry = Process::timeout(8)->run([$sg, $group, '-c', 'docker info -f "{{.ServerVersion}}"']);
+
+                return $retry->successful();
+            }
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return false;
+    }
+
+    public static function dockerSocketGroupName(): ?string
+    {
+        $socket = self::detectDockerSocket();
+        if ($socket === null || ! function_exists('posix_getgrgid')) {
+            return null;
+        }
+
+        $gid = @filegroup($socket);
+        if (! is_int($gid)) {
+            return null;
+        }
+
+        $info = posix_getgrgid($gid);
+
+        return is_array($info) && ! empty($info['name']) ? (string) $info['name'] : null;
+    }
+
+    public static function sgBinary(): ?string
+    {
+        foreach (['/usr/bin/sg', '/bin/sg'] as $path) {
+            if (is_executable($path)) {
+                return $path;
+            }
+        }
+
+        return null;
+    }
+
+    public static function runLocalDockerCommand(string $script, int $timeout = 600): ProcessResult
+    {
+        $attempts = [
+            ['bash', '-lc', $script],
+        ];
+
+        $group = self::dockerSocketGroupName();
+        $sg = self::sgBinary();
+        if ($group !== null && $sg !== null) {
+            $attempts[] = [$sg, $group, '-c', $script];
+        }
+
+        $last = Process::timeout($timeout)->run($attempts[0]);
+        if ($last->successful()) {
+            return $last;
+        }
+
+        foreach (array_slice($attempts, 1) as $command) {
+            $last = Process::timeout($timeout)->run($command);
+            if ($last->successful()) {
+                return $last;
+            }
+        }
+
+        return $last;
     }
 
     /**

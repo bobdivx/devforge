@@ -89,3 +89,47 @@ it('ignores empty, invalid or stale upgrade status files', function (?string $co
     'incomplete' => ['1|starting'],
     'stale' => ['2|Pulling|2026-08-17 19:40:00'],
 ]);
+
+it('requires a docker socket to run a local instance upgrade', function () {
+    expect(InstanceUpgradeService::evaluateLocalDockerUpgrade(
+        socketExists: false,
+        socketReadable: false,
+        dockerCliWorks: false,
+    ))->toBeFalse()
+        ->and(InstanceUpgradeService::evaluateLocalDockerUpgrade(
+            socketExists: false,
+            socketReadable: true,
+            dockerCliWorks: true,
+        ))->toBeFalse();
+});
+
+it('treats an unreadable docker socket as usable when docker info works', function () {
+    expect(InstanceUpgradeService::evaluateLocalDockerUpgrade(
+        socketExists: true,
+        socketReadable: false,
+        dockerCliWorks: true,
+    ))->toBeTrue();
+});
+
+it('treats a readable docker socket as usable without the docker CLI', function () {
+    expect(InstanceUpgradeService::evaluateLocalDockerUpgrade(
+        socketExists: true,
+        socketReadable: true,
+        dockerCliWorks: false,
+    ))->toBeTrue();
+});
+
+it('rejects a present docker socket that is neither readable nor reachable via docker CLI', function () {
+    expect(InstanceUpgradeService::evaluateLocalDockerUpgrade(
+        socketExists: true,
+        socketReadable: false,
+        dockerCliWorks: false,
+    ))->toBeFalse();
+});
+
+it('probes the standard docker.sock locations', function () {
+    expect(InstanceUpgradeService::dockerSocketCandidates())->toBe([
+        '/var/run/docker.sock',
+        '/run/docker.sock',
+    ]);
+});
