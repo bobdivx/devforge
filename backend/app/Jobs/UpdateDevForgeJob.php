@@ -42,7 +42,8 @@ class UpdateDevForgeJob implements ShouldBeEncrypted, ShouldQueue
             }
 
             Log::info('Starting DevForge update process...');
-            UpdateDevForge::run(false);
+            $latest = get_latest_version_of_devforge();
+            UpdateDevForge::run(manual_update: false, targetVersion: $latest !== '0.0.0' ? $latest : null);
 
             $settings->update(['new_version_available' => false]);
             Log::info('DevForge update completed successfully.');
