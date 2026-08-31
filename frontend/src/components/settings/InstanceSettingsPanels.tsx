@@ -12,7 +12,7 @@ import {
     type InstanceSettings,
     type OauthProviderSettings,
 } from '../../lib/domain-api';
-import { notifyInstanceUpgradeChanged } from '../../lib/instance-upgrade';
+import { notifyInstanceUpgradeChanged, openInstanceUpgradeModal } from '../../lib/instance-upgrade';
 import { normalizeAppsWildcardDomain, previewDefaultApplicationUrl } from '../../lib/onboarding-steps';
 import { useApiQuery } from '../../lib/use-api-query';
 
@@ -794,7 +794,7 @@ function UpdatesForm({
                             class="btn btn-warning btn-sm rounded-xl"
                             type="button"
                             disabled={saving || checking || upgrading}
-                            onClick={() => setConfirmOpen(true)}
+                            onClick={() => openInstanceUpgradeModal()}
                         >
                             <ArrowUpCircle class="size-3.5" aria-hidden />
                             {upgrading ? 'Mise à jour…' : `Mettre à jour vers ${latestVersion}`}

@@ -2,8 +2,15 @@ import type { InstanceUpgradeStatus } from './domain-api';
 
 export const INSTANCE_UPGRADE_MAX_STEP = 6;
 export const INSTANCE_UPGRADE_CHANGED_EVENT = 'devforge:instance-upgrade-changed';
+export const INSTANCE_UPGRADE_OPEN_EVENT = 'devforge:open-instance-upgrade';
 export const INSTANCE_HEALTH_URL = '/api/health';
 export const INSTANCE_UPGRADE_SUCCESS_COUNTDOWN = 3;
+
+export function openInstanceUpgradeModal(): void {
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(INSTANCE_UPGRADE_OPEN_EVENT));
+    }
+}
 
 export const INSTANCE_UPGRADE_UI_STEPS = [
     { id: 1, label: 'Préparation' },

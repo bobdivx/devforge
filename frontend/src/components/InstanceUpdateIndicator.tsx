@@ -3,6 +3,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { ApiError } from '../lib/api-client';
 import {
     formatInstanceUpgradeElapsed,
+    INSTANCE_UPGRADE_OPEN_EVENT,
     instanceUpgradeLabel,
     instanceUpgradeProgressPercent,
     shouldShowInstanceUpgrade,
@@ -47,6 +48,12 @@ export function InstanceUpdateIndicator({ enabled, onReload, checkHealth }: Inst
             setModalOpen(true);
         }
     }, [locked]);
+
+    useEffect(() => {
+        const handleOpen = () => setModalOpen(true);
+        window.addEventListener(INSTANCE_UPGRADE_OPEN_EVENT, handleOpen);
+        return () => window.removeEventListener(INSTANCE_UPGRADE_OPEN_EVENT, handleOpen);
+    }, []);
 
     if (!shouldShowInstanceUpgrade(status) || !status) {
         return null;
