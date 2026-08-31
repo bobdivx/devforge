@@ -111,20 +111,18 @@ done
 log_section "Step 3/6: Pulling Docker images"
 write_status "3" "Téléchargement des images DevForge (${LATEST_IMAGE})"
 
-log "Pulling API image: ${API_IMAGE}..."
-docker pull "${API_IMAGE}" || docker pull "${DEVFORGE_IMAGE}:latest" || true
-
-log "Pulling Web SPA image: ${WEB_IMAGE}..."
-docker pull "${WEB_IMAGE}" || true
-
-log "Pulling Realtime image: ${REALTIME_IMAGE}..."
-docker pull "${REALTIME_IMAGE}" || true
-
-log "Pulling Helper image: ${HELPER_IMAGE}..."
-docker pull "${HELPER_IMAGE}" || true
-
-log "Pulling Proxy image: ${PROXY_IMAGE}..."
-docker pull "${PROXY_IMAGE}" || true
+log "Pulling DevForge images for version ${LATEST_IMAGE}..."
+docker pull "${DEVFORGE_IMAGE}:${LATEST_IMAGE}" 2>>"$LOGFILE" || true
+docker pull "${DEVFORGE_IMAGE}:api-${LATEST_IMAGE}" 2>>"$LOGFILE" || true
+docker pull "${DEVFORGE_IMAGE}:web-${LATEST_IMAGE}" 2>>"$LOGFILE" || true
+docker pull "${DEVFORGE_IMAGE}:realtime-${LATEST_IMAGE}" 2>>"$LOGFILE" || true
+docker pull "${DEVFORGE_IMAGE}:agent-${LATEST_IMAGE}" 2>>"$LOGFILE" || true
+docker pull "${DEVFORGE_IMAGE}:proxy-${LATEST_IMAGE}" 2>>"$LOGFILE" || true
+docker pull "${DEVFORGE_IMAGE}:latest" 2>>"$LOGFILE" || true
+docker pull "${DEVFORGE_IMAGE}:web" 2>>"$LOGFILE" || true
+docker pull "${DEVFORGE_IMAGE}:realtime" 2>>"$LOGFILE" || true
+docker pull "${DEVFORGE_IMAGE}:helper" 2>>"$LOGFILE" || true
+docker pull "${DEVFORGE_IMAGE}:agent" 2>>"$LOGFILE" || true
 
 log_section "Step 4/6: Restarting containers (detached)"
 write_status "4" "Redémarrage des conteneurs DevForge"
@@ -152,16 +150,23 @@ nohup bash -c "
     log 'Starting container reload...'
     write_status '5' 'Démarrage des nouveaux conteneurs et migrations'
 
-    # If compose file exists, use docker compose
+    # If compose file exists, update version strings and use docker compose
     if [ -n \"\$COMPOSE_FILE\" ] && [ -f \"\$COMPOSE_FILE\" ]; then
         log \"Using compose file: \$COMPOSE_FILE\"
         COMPOSE_DIR=\"\$(dirname \"\$COMPOSE_FILE\")\"
         cd \"\$COMPOSE_DIR\"
+
+        # Update version tags in compose file if fixed tags are used
+        sed -i -E \"s|(image:\s*bobdivx/devforge:(api-)?)4\.[0-9]+\.[0-9]+|\1\${LATEST_IMAGE}|g\" \"\$COMPOSE_FILE\" 2>/dev/null || true
+        sed -i -E \"s|(image:\s*bobdivx/devforge:web-)4\.[0-9]+\.[0-9]+|\1\${LATEST_IMAGE}|g\" \"\$COMPOSE_FILE\" 2>/dev/null || true
+        sed -i -E \"s|(image:\s*bobdivx/devforge:realtime-)4\.[0-9]+\.[0-9]+|\1\${LATEST_IMAGE}|g\" \"\$COMPOSE_FILE\" 2>/dev/null || true
+        sed -i -E \"s|(image:\s*bobdivx/devforge:agent-)4\.[0-9]+\.[0-9]+|\1\${LATEST_IMAGE}|g\" \"\$COMPOSE_FILE\" 2>/dev/null || true
+
         LATEST_IMAGE=\"\${LATEST_IMAGE}\" docker compose pull --ignore-pull-failures 2>>\"\$LOGFILE\" || true
-        LATEST_IMAGE=\"\${LATEST_IMAGE}\" docker compose up -d --remove-orphans 2>>\"\$LOGFILE\" || true
+        LATEST_IMAGE=\"\${LATEST_IMAGE}\" docker compose up -d --remove-orphans --force-recreate 2>>\"\$LOGFILE\" || true
     else
         # Direct container recreation / restart
-        for c in devforge-realtime devforge-web devforge-api devforge-proxy; do
+        for c in devforge-realtime devforge-web devforge-api devforge-proxy devforge-agent; do
             if docker ps -a --format '{{.Names}}' | grep -qx \"\$c\"; then
                 log \"Restarting container: \$c\"
                 docker restart \"\$c\" >>\"\$LOGFILE\" 2>&1 || true
