@@ -9,7 +9,7 @@ type ModalProps = {
     onClose: () => void;
     children: ComponentChildren;
     footer?: ComponentChildren;
-    size?: 'md' | 'lg' | 'xl';
+    size?: 'md' | 'lg' | 'xl' | '2xl';
     dismissible?: boolean;
 };
 
@@ -17,6 +17,7 @@ const sizeClass = {
     md: 'max-w-lg',
     lg: 'max-w-2xl',
     xl: 'max-w-3xl',
+    '2xl': 'max-w-4xl',
 };
 
 export function Modal({

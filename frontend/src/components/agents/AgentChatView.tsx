@@ -1,4 +1,4 @@
-import { ArrowLeft, PanelRightOpen, Settings2, Users } from 'lucide-preact';
+import { ArrowLeft, Settings2, Users } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
 import { AgentAvatar } from './AgentAvatar';
 import { AgentSettingsPanel } from './AgentSettingsPanel';
@@ -18,6 +18,7 @@ import {
 } from '../../lib/agent-routes';
 import { formatAgentProviderDisplay } from '../../lib/llm-models';
 import { AgentModelRoutingBadge } from './AgentModelRoutingBadge';
+import { Modal } from '../ui/Modal';
 import { routeHref } from '../../lib/routes';
 
 type Props = {
@@ -198,27 +199,19 @@ export function AgentChatView({ agent, onBack, onAgentUpdated, userName }: Props
                         onRoutingChange={setActiveRouting}
                     />
                 )}
-
-                {settingsOpen && (
-                    <aside class="hidden w-80 shrink-0 overflow-y-auto border-s border-base-300 bg-base-200/30 lg:block">
-                        <AgentSettingsPanel agent={agent} onUpdated={onAgentUpdated} onClose={() => toggleSettings(false)} />
-                    </aside>
-                )}
             </div>
 
             {settingsOpen && (
-                <div class="fixed inset-0 z-50 lg:hidden">
-                    <button class="absolute inset-0 bg-black/50" type="button" aria-label="Fermer" onClick={() => toggleSettings(false)} />
-                    <aside class="absolute inset-y-0 end-0 w-full max-w-sm overflow-y-auto border-s border-base-300 bg-base-100 shadow-xl">
-                        <div class="flex items-center justify-between border-b border-base-300 px-4 py-3">
-                            <span class="text-sm font-semibold">Configuration</span>
-                            <button class="btn btn-ghost btn-sm btn-square" type="button" onClick={() => toggleSettings(false)}>
-                                <PanelRightOpen class="size-4" aria-hidden />
-                            </button>
-                        </div>
+                <Modal
+                    open={settingsOpen}
+                    title={`Paramètres & Plugins — ${agent.name}`}
+                    size="2xl"
+                    onClose={() => toggleSettings(false)}
+                >
+                    <div class="max-h-[78vh] overflow-y-auto pr-1">
                         <AgentSettingsPanel agent={agent} onUpdated={onAgentUpdated} onClose={() => toggleSettings(false)} />
-                    </aside>
-                </div>
+                    </div>
+                </Modal>
             )}
         </div>
     );
