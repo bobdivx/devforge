@@ -36,6 +36,10 @@ export function isToolProseDump(content: string): boolean {
         return false;
     }
 
+    if (/<(?:function|tool_call)[>=]/i.test(text) || /<\/(?:function|tool_call)>/i.test(text)) {
+        return true;
+    }
+
     if (/"method"\s*:\s*"(?:spawn_task|control_resource|fix_application_host_permissions)"/i.test(text)) {
         return true;
     }
@@ -49,9 +53,11 @@ export function isToolProseDump(content: string): boolean {
         || /commande requise|voici la commande requise/i.test(text);
 }
 
-/** Retire les blocs JSON / consignes d’outil destinés à l’UI, pas à l’utilisateur. */
+/** Retire les blocs JSON / XML / consignes d’outil destinés à l’UI, pas à l’utilisateur. */
 export function sanitizeAssistantContent(content: string, steps: AgentChatStep[] = []): string {
     let text = content
+        .replace(/<function(?:=|\s+name=)["']?[^"'>]+["']?>[\s\S]*?<\/function>/gi, '')
+        .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
         .replace(/```(?:json)?\s*\{[\s\S]*?\}\s*```/gi, '')
         .replace(/^\s*\{[^{}]*"method"\s*:\s*"[^"]+"[^{}]*\}\s*$/gim, '')
         .replace(/\n{3,}/g, '\n\n')
@@ -70,7 +76,7 @@ export function sanitizeAssistantContent(content: string, steps: AgentChatStep[]
 
 export function stepsCompletion(steps: AgentChatStep[]): { done: number; total: number } {
     const total = steps.length;
-    const done = steps.filter((step) => step.status === 'done' || step.status === undefined).length;
+    const done = steps.filter((step) => step.status === 'done' || step.status === 'completed' || step.status === 'success' || step.status === undefined).length;
 
     return { done, total };
 }

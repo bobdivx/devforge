@@ -187,9 +187,13 @@ class RigChatRuntime
                     $arguments = is_array($call['arguments'] ?? null) ? $call['arguments'] : [];
                     $result = $toolkit->execute($name, $arguments);
                     $steps[] = [
-                        'tool' => $name,
-                        'arguments' => $arguments,
-                        'result' => $result,
+                        'type' => 'tool',
+                        'name' => $name,
+                        'args_summary' => $this->summarizeToolArgs($arguments),
+                        'result_summary' => $this->summarizeToolResult($result),
+                        'status' => isset($result['error'])
+                            ? 'error'
+                            : (($result['status'] ?? null) === 'ask' || ! empty($result['pending_approval']) ? 'awaiting_approval' : 'done'),
                     ];
                     $results[] = [
                         'name' => $name,
@@ -213,9 +217,9 @@ class RigChatRuntime
                 $history[] = ['role' => 'assistant', 'content' => $text];
                 $history[] = [
                     'role' => 'user',
-                    'content' => "Résultat des outils (déjà exécutés, ne les réécris pas en JSON) :\n{$encoded}\nRéponds en français à l'utilisateur.",
+                    'content' => "Résultat des outils (déjà exécutés, ne les réécris pas en JSON ou XML) :\n{$encoded}\nRéponds en français à l'utilisateur.",
                 ];
-                $prompt = 'Continue avec les résultats d’outils. Réponds en français, sans JSON d’outil.';
+                $prompt = 'Continue avec les résultats d’outils. Réponds en français, sans bloc d’outil XML ou JSON.';
             }
         } finally {
             $this->rig->revokeMcpCredentials($credentials['id'] ?? null);
@@ -261,22 +265,57 @@ class RigChatRuntime
         );
     }
 
+    private function summarizeToolArgs(array $arguments): string
+    {
+        if ($arguments === []) {
+            return '';
+        }
+
+        $json = json_encode($arguments, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        return mb_substr((string) $json, 0, 160);
+    }
+
+    private function summarizeToolResult(array $result): string
+    {
+        if (isset($result['error'])) {
+            return mb_substr((string) $result['error'], 0, 200);
+        }
+
+        if (isset($result['message'])) {
+            return mb_substr((string) $result['message'], 0, 200);
+        }
+
+        $json = json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        return mb_substr((string) $json, 0, 200);
+    }
+
     private function hideRawToolJson(string $text): string
     {
         if ($text === '') {
             return $text;
         }
 
+        // Nettoyer les balises XML <function=...>...</function> et <tool_call>...</tool_call>
+        $cleaned = preg_replace('/<function(?:=|\s+name=)["\']?[^"\'>]+["\']?>[\s\S]*?<\/function>/i', '', $text) ?? $text;
+        $cleaned = preg_replace('/<tool_call>[\s\S]*?<\/tool_call>/i', '', $cleaned) ?? $cleaned;
+        $cleaned = trim($cleaned);
+
+        if ($cleaned !== '') {
+            return $cleaned;
+        }
+
         if (AgentDirectives::extractProseToolCalls($text) === []) {
             return $text;
         }
 
-        $stripped = trim((string) preg_replace('/^\\s*\\{\\}\\s*/', '', $text));
+        $stripped = trim((string) preg_replace('/^\s*\{\}\s*/', '', $text));
         $decoded = json_decode($stripped, true);
         if (is_array($decoded) && (isset($decoded['name']) || isset($decoded['method']) || isset($decoded['tool']))) {
             return 'J’ai exécuté l’action demandée. Dis-moi si tu veux que je continue.';
         }
 
-        return $text;
+        return 'J’ai exécuté les actions demandées. Dis-moi si tu veux que je continue.';
     }
 }

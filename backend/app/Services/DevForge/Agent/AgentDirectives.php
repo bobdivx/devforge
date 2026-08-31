@@ -349,7 +349,77 @@ class AgentDirectives
     }
 
     /**
-     * Récupère des appels d'outils écrits en prose/JSON (modèles qui n'émettent pas de tool_calls API).
+     * Parse XML-style tool calls emitted by Qwen/DeepSeek/Hermes/Llama models:
+     * <function=get_deployment_logs><parameter=application_uuid>value</parameter></function>
+     * <tool_call><function=...></tool_call>
+     *
+     * @return list<array{name: string, arguments: array<string, mixed>}>
+     */
+    public static function extractXmlToolCalls(?string $text): array
+    {
+        if ($text === null || trim($text) === '') {
+            return [];
+        }
+
+        $known = array_fill_keys(array_map('strtolower', self::chatKnownToolNames()), true);
+        $calls = [];
+
+        // Pattern 1: <function=name> ... </function> or <function name="name"> ... </function>
+        if (preg_match_all('/<function(?:=|\s+name=)["\']?([a-zA-Z0-9_\-]+)["\']?>([\s\S]*?)<\/function>/i', $text, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $match) {
+                $funcName = trim($match[1]);
+                $body = $match[2];
+                $arguments = [];
+
+                // Match <parameter=key>value</parameter> or <parameter name="key">value</parameter>
+                if (preg_match_all('/<parameter(?:=|\s+name=)["\']?([a-zA-Z0-9_\-]+)["\']?>([\s\S]*?)<\/parameter>/i', $body, $paramMatches, PREG_SET_ORDER)) {
+                    foreach ($paramMatches as $pm) {
+                        $paramKey = trim($pm[1]);
+                        $paramVal = trim($pm[2]);
+                        $decodedVal = json_decode($paramVal, true);
+                        $arguments[$paramKey] = (json_last_error() === JSON_ERROR_NONE && ! is_numeric($paramVal)) ? $decodedVal : $paramVal;
+                    }
+                } elseif (preg_match('/^\s*(\{[\s\S]*\})\s*$/', trim($body), $jsonMatch)) {
+                    $decoded = json_decode($jsonMatch[1], true);
+                    if (is_array($decoded)) {
+                        $arguments = $decoded;
+                    }
+                }
+
+                if (isset($known[strtolower($funcName)]) || ! empty($funcName)) {
+                    $calls[] = [
+                        'name' => $funcName,
+                        'arguments' => $arguments,
+                    ];
+                }
+            }
+        }
+
+        // Pattern 2: <tool_call> { JSON } </tool_call>
+        if (preg_match_all('/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/i', $text, $tcMatches)) {
+            foreach ($tcMatches[1] as $jsonStr) {
+                $decoded = json_decode(trim($jsonStr), true);
+                if (is_array($decoded)) {
+                    $name = $decoded['name'] ?? $decoded['tool'] ?? $decoded['function'] ?? null;
+                    $args = $decoded['arguments'] ?? $decoded['parameters'] ?? [];
+                    if (is_string($args)) {
+                        $args = json_decode($args, true) ?? [];
+                    }
+                    if (is_string($name) && $name !== '') {
+                        $calls[] = [
+                            'name' => $name,
+                            'arguments' => is_array($args) ? $args : [],
+                        ];
+                    }
+                }
+            }
+        }
+
+        return $calls;
+    }
+
+    /**
+     * Récupère des appels d'outils écrits en prose/JSON/XML (modèles qui n'émettent pas de tool_calls API).
      *
      * @return list<array{name: string, arguments: array<string, mixed>}>
      */
@@ -357,6 +427,12 @@ class AgentDirectives
     {
         if ($text === null || trim($text) === '') {
             return [];
+        }
+
+        // 1. Extraire les tool calls XML (format natif Qwen3, DeepSeek, etc.)
+        $xmlCalls = self::extractXmlToolCalls($text);
+        if ($xmlCalls !== []) {
+            return $xmlCalls;
         }
 
         $text = preg_replace('/^\s*\{\}\s*/', '', $text) ?? $text;

@@ -230,6 +230,17 @@ class OpenAiCompatibleProvider implements LlmProvider
             ];
         }
 
+        if ($toolCalls === []) {
+            $proseCalls = AgentDirectives::extractProseToolCalls($text);
+            foreach ($proseCalls as $index => $proseCall) {
+                $toolCalls[] = [
+                    'id' => 'call_prose_'.($index + 1),
+                    'name' => (string) ($proseCall['name'] ?? ''),
+                    'arguments' => is_array($proseCall['arguments'] ?? null) ? $proseCall['arguments'] : [],
+                ];
+            }
+        }
+
         $finishReason = (string) ($choice['finish_reason'] ?? 'stop');
         $tokensUsed = (int) ($data['usage']['total_tokens'] ?? 0);
 

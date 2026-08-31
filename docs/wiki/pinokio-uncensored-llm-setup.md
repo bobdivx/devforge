@@ -68,12 +68,13 @@ $path = "D:\pinokio\api\uncensored-local-studio\app\scripts\server\serve.cjs"
 $content = (Get-Content -Path $path -Raw)
 $content = $content -replace "(?s)// Auto-load LLM model on server startup.*", ""
 
-# 2. Remplacer les verrous de contexte et d'écoute réseau
+# 2. Remplacer les verrous de contexte et d'écoute réseau + activer Jinja pour les tool calls
 $content = $content `
   -replace '"--host", "127\.0\.0\.1"', '"--host", "0.0.0.0"' `
   -replace 'Math\.min\(32768, contextSize\)', 'Math.min(65536, contextSize)' `
   -replace '16384 : 32768;', '16384 : 65536;' `
-  -replace '\[32768, 24576,', '[65536, 32768, 24576,'
+  -replace '\[32768, 24576,', '[65536, 32768, 24576,' `
+  -replace '"--parallel", "1",', '"--parallel", "1", "--jinja",'
 
 # 3. Injecter l'auto-load au démarrage avec 65536 tokens et Flash Attention
 $autoLoadCode = @'
