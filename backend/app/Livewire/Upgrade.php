@@ -2,7 +2,7 @@
 
 namespace App\Livewire;
 
-use App\Actions\Server\UpdateCoolify;
+use App\Actions\Server\UpdateDevForge;
 use App\Jobs\CheckForUpdatesJob;
 use App\Models\InstanceSettings;
 use App\Models\Server;
@@ -79,7 +79,7 @@ class Upgrade extends Component
                 return;
             }
             $this->updateInProgress = true;
-            UpdateCoolify::run(manual_update: true);
+            UpdateDevForge::run(manual_update: true);
         } catch (\Throwable $e) {
             return handleError($e, $this);
         }

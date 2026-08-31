@@ -22,6 +22,7 @@ use App\Jobs\RegenerateSslCertJob;
 use App\Jobs\ScheduledJobManager;
 use App\Jobs\ServerManagerJob;
 use App\Jobs\UpdateCoolifyJob;
+use App\Jobs\UpdateDevForgeJob;
 use App\Models\InstanceSettings;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
@@ -187,7 +188,7 @@ class Kernel extends ConsoleKernel
 
         if ($this->settings->is_auto_update_enabled) {
             $autoUpdateFrequency = $this->settings->auto_update_frequency;
-            $this->scheduleInstance->job(new UpdateCoolifyJob)
+            $this->scheduleInstance->job(new UpdateDevForgeJob)
                 ->cron($autoUpdateFrequency)
                 ->timezone($this->instanceTimezone)
                 ->onOneServer();

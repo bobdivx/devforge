@@ -1,6 +1,6 @@
 <?php
 
-use App\Actions\Server\UpdateCoolify;
+use App\Actions\Server\UpdateDevForge;
 use App\Models\InstanceSettings;
 use App\Models\Team;
 use App\Models\User;
@@ -61,8 +61,8 @@ it('forbids instance upgrade status for non instance admins', function () {
 });
 
 it('starts a manual instance upgrade when a newer version is available', function () {
-    $this->mock(UpdateCoolify::class, function ($mock): void {
-        $mock->shouldReceive('handle')->once()->with(true);
+    $this->mock(UpdateDevForge::class, function ($mock): void {
+        $mock->shouldReceive('handle')->once()->with(true, '4.0.0-beta.999');
     });
 
     $this->actingAs($this->user)

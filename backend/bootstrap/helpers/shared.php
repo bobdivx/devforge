@@ -436,16 +436,21 @@ function get_latest_sentinel_version(): string
         return '0.0.0';
     }
 }
-function get_latest_version_of_coolify(): string
+function get_latest_version_of_devforge(): string
 {
     try {
         $versions = get_versions_data();
 
-        return data_get($versions, 'coolify.v4.version', '0.0.0');
+        return data_get($versions, 'devforge.version')
+            ?? data_get($versions, 'coolify.v4.version', '0.0.0');
     } catch (Throwable $e) {
-
         return '0.0.0';
     }
+}
+
+function get_latest_version_of_coolify(): string
+{
+    return get_latest_version_of_devforge();
 }
 
 function generate_random_name(?string $cuid = null): string
