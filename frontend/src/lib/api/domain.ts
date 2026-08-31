@@ -1027,6 +1027,40 @@ export type OllamaInstance = {
     reachable: boolean;
 };
 
+export type PinokioModelInfo = {
+    filename: string;
+    name: string;
+    size: string;
+    size_bytes: number;
+    is_active: boolean;
+};
+
+export type PinokioStatus = {
+    reachable: boolean;
+    base_url: string | null;
+    active_model: string | null;
+    running: boolean;
+    context_size: number | null;
+    backend_mode: string | null;
+    gpu: {
+        name: string;
+        vram_used_gb: number;
+        vram_total_gb: number;
+    } | null;
+    models: PinokioModelInfo[];
+    error: string | null;
+};
+
+export type PinokioInstance = {
+    id: number;
+    name: string;
+    base_url: string | null;
+    resolved_base_url: string | null;
+    is_default: boolean;
+    model: string | null;
+    reachable: boolean;
+};
+
 export type AgentModelRouting = {
     tier: 'light' | 'standard' | 'heavy';
     tier_label: string;
@@ -4384,6 +4418,35 @@ export const domainApi = {
     }>>('/ai/ollama/assign-agent', {
         method: 'POST',
         body: JSON.stringify(input),
+    }),
+
+    pinokioInstances: () => apiFetch<ApiResponse<PinokioInstance[]>>(`${API_BASE}/ai/pinokio/instances`),
+    pinokioStatus: (opts?: { baseUrl?: string | null; providerId?: number | null }) => {
+        const params = new URLSearchParams();
+        if (opts?.baseUrl) {
+            params.set('base_url', opts.baseUrl);
+        }
+        if (opts?.providerId != null) {
+            params.set('provider_id', String(opts.providerId));
+        }
+        const query = params.toString() ? `?${params.toString()}` : '';
+        return apiFetch<ApiResponse<PinokioStatus>>(`${API_BASE}/ai/pinokio${query}`);
+    },
+    pinokioStartModel: (input: {
+        model: string;
+        base_url?: string | null;
+        provider_id?: number | null;
+        context_size?: number;
+        gpu_layers?: number;
+        flash_attn?: boolean;
+        batch_size?: number;
+    }) => mutate<ApiResponse<{ ok: boolean; message: string }>>('/ai/pinokio/start', {
+        method: 'POST',
+        body: JSON.stringify(input),
+    }),
+    pinokioStopModel: (input?: { base_url?: string | null; provider_id?: number | null }) => mutate<ApiResponse<{ ok: boolean; message: string }>>('/ai/pinokio/stop', {
+        method: 'POST',
+        body: JSON.stringify(input ?? {}),
     }),
 
     dockerContainers: (serverUuid?: string) => {

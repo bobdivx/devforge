@@ -76,7 +76,7 @@ export function sanitizeAssistantContent(content: string, steps: AgentChatStep[]
 
 export function stepsCompletion(steps: AgentChatStep[]): { done: number; total: number } {
     const total = steps.length;
-    const done = steps.filter((step) => step.status === 'done' || step.status === 'completed' || step.status === 'success' || step.status === undefined).length;
+    const done = steps.filter((step) => step.status === 'done' || step.status === undefined).length;
 
     return { done, total };
 }

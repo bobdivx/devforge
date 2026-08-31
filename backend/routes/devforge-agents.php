@@ -15,6 +15,7 @@ use App\Http\Controllers\DevForge\AgentDiagnosticsController;
 use App\Http\Controllers\DevForge\AiProviderController;
 use App\Http\Controllers\DevForge\GraftAutomationController;
 use App\Http\Controllers\DevForge\OllamaController;
+use App\Http\Controllers\DevForge\PinokioController;
 use App\Http\Middleware\EnsureDevForgeAgentsEnabled;
 use Illuminate\Support\Facades\Route;
 
@@ -151,6 +152,14 @@ Route::middleware(EnsureDevForgeAgentsEnabled::class)->group(function () {
             ->name('ollama.provider-model');
         Route::post('/ollama/assign-agent', [OllamaController::class, 'assignToAgent'])
             ->name('ollama.assign-agent');
+        Route::get('/pinokio', [PinokioController::class, 'status'])->name('pinokio.status');
+        Route::get('/pinokio/instances', [PinokioController::class, 'instances'])->name('pinokio.instances');
+        Route::post('/pinokio/start', [PinokioController::class, 'start'])
+            ->middleware('throttle:20,1')
+            ->name('pinokio.start');
+        Route::post('/pinokio/stop', [PinokioController::class, 'stop'])
+            ->middleware('throttle:20,1')
+            ->name('pinokio.stop');
         Route::get('/instructions', [AgentInstructionsController::class, 'show'])->name('instructions.show');
         Route::put('/instructions', [AgentInstructionsController::class, 'update'])->name('instructions.update');
         Route::get('/missions', [AgentMissionController::class, 'index'])->name('missions.index');

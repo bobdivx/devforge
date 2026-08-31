@@ -124,7 +124,24 @@ Dans DevForge, pour configurer l'agent afin qu'il utilise votre serveur local :
 
 ---
 
-## 5. Résolution des Problèmes Fréquents (Troubleshooting)
+## 5. Contrôle & Monitoring Direct depuis DevForge (Nouveau !)
+
+DevForge intègre désormais un **panneau de gestion en temps réel** pour votre instance Pinokio :
+
+1. **Monitoring GPU & VRAM** :
+   - Jauge en direct de la mémoire VRAM occupée sur votre RTX 3090 (ex: `23.1 / 24.0 Go`).
+   - Statut du serveur et mode backend (`CUDA GPU`).
+2. **Permutation de modèles GGUF en 1 clic** :
+   - Liste de tous les fichiers `.gguf` présents dans `app/llm-models/`.
+   - Bouton **« Charger sur GPU »** : déclenche le swap à distance avec 64k tokens, Flash Attention et GPU offloading complet.
+3. **Mise en veille GPU** :
+   - Bouton **« Mettre en veille (Libérer VRAM) »** pour décharger le modèle et libérer les 24 Go de VRAM quand vous ne travaillez pas avec les agents.
+4. **Accès** :
+   - Rendez-vous dans **Settings** $\rightarrow$ **AI / LLM Providers** pour visualiser et contrôler Pinokio directement !
+
+---
+
+## 6. Résolution des Problèmes Fréquents (Troubleshooting)
 
 ### Erreur : `request (XXXX tokens) exceeds the available context size`
 - **Cause** : Le contexte alloué au démarrage de llama-server était inférieur à la taille de la requête.
@@ -143,4 +160,5 @@ Dans DevForge, pour configurer l'agent afin qu'il utilise votre serveur local :
 - **Solution** : 
   1. Utilisez `batchSize: 2048` dans `serve.cjs` (l'ingestion des 20k tokens passe de 65s à ~10s sur RTX 3090).
   2. Le timeout côté DevForge a été augmenté à **300 secondes (5 minutes)** par défaut (configurable via `DEVFORGE_AGENT_TIMEOUT=300` et `LLM_TIMEOUT_SECS=300`).
+
 

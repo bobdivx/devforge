@@ -5,6 +5,7 @@ import { HiddenUsernameField } from '../ui/HiddenUsernameField';
 import type { AiProviderConfig, LlmModelOption, LlmProvider } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
 import { AUTO_MODEL_VALUE, CUSTOM_MODEL_VALUE, formatModelLabel, isAutoModel, modelSelectValue } from '../../lib/llm-models';
+import { PinokioStudioManager } from './PinokioStudioManager';
 import { SmallModelToolsWarning } from './SmallModelToolsWarning';
 import { useApiQuery } from '../../lib/use-api-query';
 import { useTeamContext } from '../../lib/team-context';
@@ -702,6 +703,12 @@ export function AiProvidersSettings() {
                     </div>
                 </form>
             )}
+
+            <PinokioStudioManager
+                onModelSelected={() => {
+                    void query.reload();
+                }}
+            />
         </div>
     );
 }
