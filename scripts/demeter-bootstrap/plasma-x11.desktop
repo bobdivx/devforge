@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=XSession
-Exec=/usr/lib/plasma-dbus-run-session-if-needed /usr/bin/startplasma-x11
-TryExec=/usr/bin/startplasma-x11
-DesktopNames=KDE
-Name=Plasma (X11)
-Comment=Plasma by KDE
-X-KDE-PluginInfo-Version=6.7.4

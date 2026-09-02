@@ -1,5 +1,0 @@
-{
-  "title": "LiteLLM Cursor Proxy",
-  "description": "Proxy LiteLLM (port 4000) pour Cursor Agent via tunnel HTTPS → llama-server :10086",
-  "version": "1.0.0"
-}
