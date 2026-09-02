@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ajoute la cle publique Cursor/Windows dans authorized_keys sur Demeter.
+# Ajoute une cle publique SSH dans authorized_keys sur Demeter (Linux).
 # Usage sur Demeter (Remote SSH) :
 #   bash install-ssh-key-on-demeter.sh "ssh-ed25519 AAAA... comment"
 # Ou depuis le repo devforge :
@@ -27,4 +27,4 @@ else
 fi
 
 # Permettre auth par cle (Arch sshd par defaut : PubkeyAuthentication yes)
-echo "Test depuis Windows : ssh demeter hostname"
+echo "Test : ssh bobdivx@10.1.0.88 hostname"

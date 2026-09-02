@@ -46,8 +46,7 @@ if [[ -n "$BACKUP_LITELLM_CONFIG" && -f "$BACKUP_LITELLM_CONFIG" ]]; then
   cp -f "$BACKUP_LITELLM_CONFIG" "$LITELLM_CONFIG"
 fi
 
-# Installer app LiteLLM Pinokio si le script d'install existe (version Linux a ajouter)
-INSTALL_PS1="$REPO_ROOT/scripts/pinokio-litellm-install.ps1"
+# Installer app LiteLLM Pinokio (Linux — copie depuis devforge, pas PowerShell)
 if [[ -f "$REPO_ROOT/scripts/pinokio-litellm-cursor-proxy/pinokio.json" ]]; then
   TARGET="$PINOKIO_HOME/api/litellm-cursor-proxy"
   mkdir -p "$TARGET"
@@ -95,8 +94,12 @@ fi
 echo ""
 echo "Termine (partie script)."
 echo "Homarr : configurer tuiles (voir homarr-tiles.md)"
-echo "Actions Pinokio UI :"
-echo "  1. Uncensored Local Studio — Install, Start, telecharger GGUF, charger 49152"
+echo "Apps Pinokio + modeles : voir PINOKIO-STACK.md"
+echo "  bash scripts/demeter-bootstrap/clone-pinokio-apps.sh"
+echo "Actions Pinokio UI (sur Demeter Linux) :"
+echo "  1. Uncensored Local Studio — Install, Start, retélécharger GGUF Qwen3-Coder, contexte 49152"
 echo "  2. LiteLLM Cursor Proxy — Install, Start"
-echo "  3. Cloudflare tunnel vers port $LITELLM_PORT"
-echo "  4. Test: curl http://127.0.0.1:$LITELLM_PORT/health/liveliness"
+echo "  3. Wan 2 (pinokiofactory/wan) — Install, Start"
+echo "  4. ACE-Step 1.5 + Studio — Install, Start"
+echo "  5. Cloudflare tunnel vers port $LITELLM_PORT"
+echo "  6. Test: curl http://127.0.0.1:$LITELLM_PORT/health/liveliness"

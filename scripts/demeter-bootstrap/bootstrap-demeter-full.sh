@@ -43,10 +43,10 @@ if [[ ! -f "$LITELLM_CONFIG" ]]; then
 fi
 
 bash "$SCRIPT_DIR/bootstrap-linux.sh"
+bash "$SCRIPT_DIR/clone-pinokio-apps.sh"
 
 LITELLM_APP="$PINOKIO_HOME/api/litellm-cursor-proxy"
 if [[ -d "$LITELLM_APP" ]]; then
-  sed -i "s|D:/pinokio/litellm-config.yaml|${LITELLM_CONFIG}|g" "$LITELLM_APP/start.js" 2>/dev/null || true
   echo ">> Install LiteLLM venv"
   cd "$LITELLM_APP"
   python3 -m venv env
@@ -57,12 +57,6 @@ if [[ -d "$LITELLM_APP" ]]; then
 fi
 
 UNCENSORED_DIR="$PINOKIO_HOME/api/uncensored-local-studio"
-if [[ ! -d "$UNCENSORED_DIR" ]]; then
-  echo ">> Clone Uncensored Local Studio (pinokio)"
-  mkdir -p "$PINOKIO_HOME/api"
-  git clone https://github.com/cocktailpeanut/uncensored-local-studio.pinokio "$UNCENSORED_DIR"
-fi
-
 if [[ -d "$UNCENSORED_DIR/app" ]]; then
   echo ">> Uncensored setup.sh (peut prendre plusieurs minutes)"
   cd "$UNCENSORED_DIR/app"
@@ -99,9 +93,11 @@ curl -sf -o /dev/null -w "LiteLLM :4000 -> %{http_code}\n" "http://127.0.0.1:${L
 curl -sf -o /dev/null -w "llama :10086 -> %{http_code}\n" "http://127.0.0.1:10086/v1/models" || echo "llama-server FAIL (normal sans GGUF charge)"
 
 echo ""
-echo "Termine."
+echo "Termine (infra Linux)."
 echo "  Homarr     : http://10.1.0.88:7575"
 echo "  LiteLLM    : http://10.1.0.88:${LITELLM_PORT}"
 echo "  llama API  : http://10.1.0.88:10086/v1"
-echo "  Pinokio UI : lancer 'pinokio' — telecharger GGUF + contexte 49152"
-echo "  Tunnel     : cloudflared vers :${LITELLM_PORT} (voir litellm-config master_key)"
+echo ""
+echo "Suite obligatoire (Pinokio UI sur Demeter) :"
+echo "  → PINOKIO-STACK.md (Wan, ACE-Step, retéléchargement GGUF, contexte 49152)"
+echo "  pinokio   # Install + Start chaque app"

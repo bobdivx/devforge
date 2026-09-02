@@ -1,114 +1,67 @@
-# Demeter bootstrap — Pinokio + Homarr + agents (sans DevForge)
+# Demeter bootstrap — Pinokio + Homarr (CachyOS / Linux)
 
-Stack cible sur le nouvel OS Linux :
+Machine GPU **Demeter** (`10.1.0.88`, RTX 3090) — **Linux uniquement** (`~/pinokio`, pas `D:\pinokio`).
 
 ```
-Homarr :7575          ← portail unique (tu choisis Homarr)
-  → Pinokio           ← launcher LLM, LiteLLM, ComfyUI, ACE
-  → ComfyUI           ← Wan 2 (UI metier)
-  → ACE-Step          ← musique (UI metier)
+Homarr :7575          ← portail
+  → Pinokio           ← Uncensored LLM, LiteLLM, Wan 2, ACE-Step
 ```
 
-DevForge (NAS) = reconfigurer plus tard si besoin.
+DevForge (NAS) = reconfigurer apres Demeter OK.
 
-## Ce que tu fais (minimum)
-
-### 1. Avant formatage
-
-- [ ] `litellm-config.yaml` (cle API Cursor)
-- [ ] Export tunnel Cloudflare
-- [ ] Clone devforge accessible (GitHub ou NAS)
-- [ ] Sauvegarde `api/` optionnelle (configs Pinokio)
-
-### 2. Sur le nouvel OS
-
-1. NVIDIA : `nvidia-smi`
-2. IP fixe `10.1.0.88` si possible
-3. OpenSSH + Docker
-4. `git clone` devforge (ex. `~/Documents/devforge`) ou `git pull` si deja clone
-5. **SSH cle** (optionnel mais recommande) : voir section SSH ci-dessous
-6. Cursor Remote SSH → Demeter
-
-### 3. Fichier local
-
-```bash
-cp scripts/demeter-bootstrap/demeter.local.env.example ~/demeter.local.env
-nano ~/demeter.local.env
-```
-
-### 4. Prompt agent Cursor
-
-Voir `AGENT-PROMPT.md` (inclut Homarr).
-
-### 5. Bootstrap complet (une commande sur Demeter)
+## Sur Demeter (terminal ou Cursor Remote SSH)
 
 ```bash
 cd ~/Documents/devforge
 git pull
+
+cp scripts/demeter-bootstrap/demeter.local.env.example ~/demeter.local.env
+nano ~/demeter.local.env   # chemins Linux, tunnel Cloudflare si besoin
+
 bash scripts/demeter-bootstrap/bootstrap-demeter-full.sh
 ```
+
+Checklist apps + modeles a retélécharger : **`PINOKIO-STACK.md`**
 
 ## Homarr
 
 ```bash
-cd devforge/scripts/demeter-bootstrap
+cd ~/Documents/devforge/scripts/demeter-bootstrap
 cp homarr.env.example homarr.env
-openssl rand -hex 32   # coller dans SECRET_ENCRYPTION_KEY
+openssl rand -hex 32   # SECRET_ENCRYPTION_KEY dans homarr.env
 docker compose -f docker-compose.homarr.yml --env-file homarr.env up -d
 ```
 
-UI : **http://10.1.0.88:7575**
+UI : **http://10.1.0.88:7575** — tuiles : `homarr-tiles.md`
 
-Tuiles suggerees : `homarr-tiles.md`
-
-## SSH sans mot de passe (PC Windows → Demeter)
-
-Sur le **PC Windows** (une fois) :
-
-```powershell
-ssh-keygen -t ed25519 -f $env:USERPROFILE\.ssh\id_ed25519_demeter -N '""' -C "cursor-devforge-demeter"
-```
-
-Ajouter dans `%USERPROFILE%\.ssh\config` :
-
-```
-Host demeter
-    HostName 10.1.0.88
-    User bobdivx
-    IdentityFile ~/.ssh/id_ed25519_demeter
-    IdentitiesOnly yes
-```
-
-**Sur Demeter** (Remote SSH, une fois — mot de passe encore requis en local) :
+## Pinokio (CachyOS)
 
 ```bash
-cd ~/Documents/devforge
-bash scripts/demeter-bootstrap/install-ssh-key-on-demeter.sh "CONTENU_DE_id_ed25519_demeter.pub"
+paru -S --noconfirm pinokio-bin    # ou AppImage depuis pinokio.co
+bash scripts/demeter-bootstrap/clone-pinokio-apps.sh
+pinokio   # UI → Install + Start sur chaque app
 ```
 
-Ou depuis Windows quand le mot de passe SSH repond :
+## SSH cle (optionnel — acces sans mot de passe)
 
-```powershell
-$env:DEMETER_SSH_PASSWORD='...'
-.\scripts\demeter-bootstrap\install-ssh-key-windows.ps1
+Sur **Demeter** :
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -C "demeter-local"
+bash scripts/demeter-bootstrap/install-ssh-key-on-demeter.sh "$(cat ~/.ssh/id_ed25519.pub)"
 ```
 
-Test : `ssh demeter hostname`
-
-## Ce que l agent fait
-
-| Etape | Action |
-|-------|--------|
-| Homarr | Docker compose + autostart |
-| Pinokio | Install, apps LLM + LiteLLM |
-| GGUF | Retelecharger, contexte 49152 |
-| ComfyUI / ACE | Install via Pinokio ou natif + tuiles Homarr |
-| Tunnel | Cloudflare → LiteLLM :4000 |
-| Tests | health, /v1/models, agent.briseteia.me/cursor |
+Pour autoriser un **autre poste** (ex. PC Cursor) : coller sa cle publique avec le meme script.
 
 ## Fichiers
 
-- `bootstrap-linux.sh`
-- `docker-compose.homarr.yml`
-- `homarr-tiles.md`
-- `AGENT-PROMPT.md`
+| Fichier | Role |
+|---------|------|
+| `bootstrap-demeter-full.sh` | Bootstrap tout-en-un Linux |
+| `bootstrap-linux.sh` | Homarr + LiteLLM app |
+| `clone-pinokio-apps.sh` | Clone wan, ace-step, uncensored, litellm |
+| `PINOKIO-STACK.md` | Apps + GGUF / modeles obligatoires |
+| `homarr-tiles.md` | Tuiles Homarr |
+| `AGENT-PROMPT.md` | Prompt agent Cursor sur Demeter |
+
+Scripts `*.ps1` / `*.bat` dans `scripts/` = ancienne machine **Windows** — ne pas utiliser sur Demeter.
