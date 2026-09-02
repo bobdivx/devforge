@@ -5,7 +5,7 @@ module.exports = {
       method: "shell.run",
       params: {
         venv: "env",
-        message: "litellm --config \"D:/pinokio/litellm-config.yaml\" --host 0.0.0.0 --port 4000",
+        message: "litellm --config \"${LITELLM_CONFIG_PATH:-$HOME/pinokio/litellm-config.yaml}\" --host 0.0.0.0 --port ${LITELLM_PORT:-4000}",
         on: [{
           event: "/Application startup complete|Uvicorn running on/i",
           done: true,
@@ -26,7 +26,7 @@ module.exports = {
       params: {
         url: "http://127.0.0.1:4000",
         port: 4000,
-        config: "D:/pinokio/litellm-config.yaml",
+        config: "${LITELLM_CONFIG_PATH:-$HOME/pinokio/litellm-config.yaml}",
       },
     },
     {

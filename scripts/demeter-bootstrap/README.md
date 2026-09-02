@@ -39,6 +39,14 @@ nano ~/demeter.local.env
 
 Voir `AGENT-PROMPT.md` (inclut Homarr).
 
+### 5. Bootstrap complet (une commande sur Demeter)
+
+```bash
+cd ~/Documents/devforge
+git pull
+bash scripts/demeter-bootstrap/bootstrap-demeter-full.sh
+```
+
 ## Homarr
 
 ```bash
