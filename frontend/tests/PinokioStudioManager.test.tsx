@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 describe('PinokioStudioManager', () => {
-    it('affiche un champ URL et permet de tester / enregistrer Demeter', async () => {
+    it('affiche les champs studio et LLM et permet d’enregistrer Demeter', async () => {
         const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
             const url = String(input);
             const method = init?.method ?? 'GET';
@@ -33,7 +33,9 @@ describe('PinokioStudioManager', () => {
                 return jsonResponse({
                     data: {
                         reachable: false,
-                        base_url: 'http://10.1.0.88:10086',
+                        base_url: 'http://10.1.0.88:42065',
+                        studio_url: 'http://10.1.0.88:42065',
+                        llm_url: 'http://10.1.0.88:10086/v1',
                         active_model: null,
                         running: false,
                         context_size: null,
@@ -52,7 +54,8 @@ describe('PinokioStudioManager', () => {
                         provider: 'openai',
                         name: 'Demeter',
                         model: 'auto',
-                        base_url: 'http://10.1.0.88:10086',
+                        base_url: 'http://10.1.0.88:10086/v1',
+                        studio_base_url: 'http://10.1.0.88:42065',
                         has_api_key: false,
                         is_default: false,
                         created_at: '2026-01-01T00:00:00.000Z',
@@ -70,18 +73,22 @@ describe('PinokioStudioManager', () => {
         );
 
         expect(await screen.findByText('Demeter / Pinokio')).toBeInTheDocument();
-        const urlInput = await screen.findByPlaceholderText('http://10.1.0.88:10086');
-        expect(urlInput).toHaveValue('http://10.1.0.88:10086');
+        expect(await screen.findByPlaceholderText('http://10.1.0.88:42065')).toHaveValue('http://10.1.0.88:42065');
+        expect(screen.getByPlaceholderText('http://10.1.0.88:10086/v1')).toHaveValue('http://10.1.0.88:10086/v1');
         expect(screen.getByRole('button', { name: /Enregistrer comme provider/i })).toBeInTheDocument();
         expect(screen.getByText(/Hors ligne/i)).toBeInTheDocument();
 
-        fireEvent.input(urlInput, { target: { value: 'http://10.1.0.88:10086' } });
         fireEvent.click(screen.getByRole('button', { name: /Enregistrer comme provider/i }));
 
         await waitFor(() => {
-            expect(fetchMock.mock.calls.some(([req, init]) => (
-                String(req) === '/api/devforge/v1/ai/providers' && init?.method === 'POST'
-            ))).toBe(true);
+            expect(fetchMock.mock.calls.some(([req, init]) => {
+                if (String(req) !== '/api/devforge/v1/ai/providers' || init?.method !== 'POST') {
+                    return false;
+                }
+                const body = JSON.parse(String(init.body));
+                return body.base_url === 'http://10.1.0.88:10086/v1'
+                    && body.studio_base_url === 'http://10.1.0.88:42065';
+            })).toBe(true);
         });
     });
 
@@ -94,8 +101,10 @@ describe('PinokioStudioManager', () => {
                     data: [{
                         id: 12,
                         name: 'Demeter (RTX 3090)',
-                        base_url: 'http://10.1.0.88:10086',
-                        resolved_base_url: 'http://10.1.0.88:10086',
+                        base_url: 'http://10.1.0.88:10086/v1',
+                        studio_base_url: 'http://10.1.0.88:42065',
+                        resolved_base_url: 'http://10.1.0.88:42065',
+                        llm_base_url: 'http://10.1.0.88:10086',
                         is_default: true,
                         model: 'qwen3',
                         reachable: true,
@@ -107,10 +116,12 @@ describe('PinokioStudioManager', () => {
                 return jsonResponse({
                     data: {
                         reachable: true,
-                        base_url: 'http://10.1.0.88:10086',
+                        base_url: 'http://10.1.0.88:42065',
+                        studio_url: 'http://10.1.0.88:42065',
+                        llm_url: 'http://10.1.0.88:10086',
                         active_model: 'qwen3',
                         running: true,
-                        context_size: 65536,
+                        context_size: 49152,
                         backend_mode: 'CUDA GPU',
                         gpu: { name: 'NVIDIA GeForce RTX 3090', vram_used_gb: 20, vram_total_gb: 24 },
                         models: [{
@@ -138,6 +149,7 @@ describe('PinokioStudioManager', () => {
         await waitFor(() => {
             expect(screen.getByText('En ligne')).toBeInTheDocument();
             expect(screen.getByText('Actif en VRAM')).toBeInTheDocument();
+            expect(screen.getByText(/49 152 tokens/)).toBeInTheDocument();
         });
     });
 });

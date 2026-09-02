@@ -5,6 +5,7 @@ namespace App\Http\Controllers\DevForge;
 use App\Http\Controllers\Controller;
 use App\Models\AiProviderConfig;
 use App\Models\Team;
+use App\Models\User;
 use App\Services\DevForge\Agent\PinokioControlService;
 use App\Services\DevForge\Core\CurrentTeamContext;
 use Illuminate\Http\JsonResponse;
@@ -25,7 +26,7 @@ class PinokioController extends Controller
         return response()->json([
             'data' => $this->pinokio->listInstances($team),
             'meta' => [
-                'hint' => 'Serveurs Pinokio Uncensored Local Studio détectés sur votre réseau local.',
+                'hint' => 'Studio Pinokio (port ~420xx) pour le contrôle ; port 10086 pour l’inférence agents (/v1).',
             ],
         ]);
     }
@@ -35,19 +36,9 @@ class PinokioController extends Controller
         $this->authorize('viewAny', AiProviderConfig::class);
         $team = $this->currentTeam($request);
 
-        $baseUrl = (string) ($request->query('base_url') ?? '');
-        if ($baseUrl === '') {
-            $providerId = $request->query('provider_id');
-            if (is_numeric($providerId)) {
-                $baseUrl = $this->providerBaseUrl($team, (int) $providerId) ?? '';
-            }
-        }
+        [$baseUrl, $studioUrl] = $this->resolveUrls($request, $team);
 
-        if ($baseUrl === '') {
-            $baseUrl = 'http://10.1.0.88:10086';
-        }
-
-        $status = $this->pinokio->status($baseUrl);
+        $status = $this->pinokio->status($baseUrl, $studioUrl);
 
         return response()->json(['data' => $status]);
     }
@@ -60,6 +51,7 @@ class PinokioController extends Controller
         $validated = $request->validate([
             'model' => ['required', 'string', 'max:255'],
             'base_url' => ['nullable', 'string', 'url'],
+            'studio_url' => ['nullable', 'string', 'url'],
             'provider_id' => ['nullable', 'integer'],
             'context_size' => ['nullable', 'integer', 'min:512', 'max:131072'],
             'gpu_layers' => ['nullable', 'integer'],
@@ -67,14 +59,9 @@ class PinokioController extends Controller
             'batch_size' => ['nullable', 'integer', 'min:128', 'max:4096'],
         ]);
 
-        $baseUrl = $validated['base_url'] ?? null;
-        if ($baseUrl === null && ! empty($validated['provider_id'])) {
-            $baseUrl = $this->providerBaseUrl($team, (int) $validated['provider_id']);
-        }
+        [$baseUrl, $studioUrl] = $this->resolveUrls($request, $team, $validated);
 
-        if ($baseUrl === null) {
-            $baseUrl = 'http://10.1.0.88:10086';
-        }
+        $validated['studio_url'] = $studioUrl;
 
         $result = $this->pinokio->startModel($baseUrl, $validated['model'], $validated);
 
@@ -85,14 +72,18 @@ class PinokioController extends Controller
             ], 422);
         }
 
-        // Mettre à jour la configuration du provider dans DevForge si un provider_id a été fourni
         if (! empty($validated['provider_id'])) {
             $provider = AiProviderConfig::query()
                 ->where('team_id', $team->id)
                 ->find((int) $validated['provider_id']);
 
             if ($provider instanceof AiProviderConfig) {
-                $provider->update(['model' => $validated['model']]);
+                $llmProviderUrl = $this->pinokio->normalizeLlmProviderUrl($baseUrl);
+                $provider->update(array_filter([
+                    'model' => $validated['model'],
+                    'base_url' => $llmProviderUrl,
+                    'studio_base_url' => $studioUrl,
+                ]));
             }
         }
 
@@ -106,19 +97,13 @@ class PinokioController extends Controller
 
         $validated = $request->validate([
             'base_url' => ['nullable', 'string', 'url'],
+            'studio_url' => ['nullable', 'string', 'url'],
             'provider_id' => ['nullable', 'integer'],
         ]);
 
-        $baseUrl = $validated['base_url'] ?? null;
-        if ($baseUrl === null && ! empty($validated['provider_id'])) {
-            $baseUrl = $this->providerBaseUrl($team, (int) $validated['provider_id']);
-        }
+        [$baseUrl, $studioUrl] = $this->resolveUrls($request, $team, $validated);
 
-        if ($baseUrl === null) {
-            $baseUrl = 'http://10.1.0.88:10086';
-        }
-
-        $result = $this->pinokio->stopModel($baseUrl);
+        $result = $this->pinokio->stopModel($baseUrl, $studioUrl);
 
         if (! $result['ok']) {
             return response()->json([
@@ -132,19 +117,44 @@ class PinokioController extends Controller
 
     private function currentTeam(Request $request): Team
     {
-        return $this->currentTeamContext->get($request->user());
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+
+        return $this->currentTeamContext->resolve($user);
     }
 
-    private function providerBaseUrl(Team $team, int $providerId): ?string
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array{0: string, 1: string|null}
+     */
+    private function resolveUrls(Request $request, Team $team, array $validated = []): array
     {
-        $provider = AiProviderConfig::query()
-            ->where('team_id', $team->id)
-            ->find($providerId);
+        $baseUrl = (string) ($validated['base_url'] ?? $request->query('base_url') ?? '');
+        $studioUrl = (string) ($validated['studio_url'] ?? $request->query('studio_url') ?? '');
 
-        if ($provider === null || ! is_string($provider->base_url) || trim($provider->base_url) === '') {
-            return null;
+        $providerId = $validated['provider_id'] ?? $request->query('provider_id');
+        if (is_numeric($providerId)) {
+            $provider = AiProviderConfig::query()
+                ->where('team_id', $team->id)
+                ->find((int) $providerId);
+
+            if ($provider instanceof AiProviderConfig) {
+                if ($baseUrl === '' && is_string($provider->base_url)) {
+                    $baseUrl = $provider->base_url;
+                }
+                if ($studioUrl === '' && is_string($provider->studio_base_url)) {
+                    $studioUrl = $provider->studio_base_url;
+                }
+            }
         }
 
-        return $provider->base_url;
+        if ($baseUrl === '') {
+            $baseUrl = 'http://10.1.0.88:10086';
+        }
+
+        return [
+            $baseUrl,
+            $studioUrl !== '' ? $studioUrl : null,
+        ];
     }
 }

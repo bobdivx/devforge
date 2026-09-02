@@ -1,0 +1,18 @@
+# Exemple pour Demeter — copier vers D:\pinokio\litellm-config.yaml
+# LiteLLM >= 1.97.0 requis pour la route /cursor (mode Agent Cursor).
+
+model_list:
+  - model_name: demeter-qwen3-coder
+    litellm_params:
+      model: openai/qwen3-coder-30b-a3b-instruct-q4_k_m.gguf
+      api_base: http://127.0.0.1:10086/v1
+      api_key: sk-local
+      timeout: 600
+      stream: true
+
+general_settings:
+  master_key: sk-demeter-cursor-2026
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false

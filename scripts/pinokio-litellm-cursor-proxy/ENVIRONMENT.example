@@ -1,0 +1,10 @@
+# Copié vers ENVIRONMENT par pinokio-litellm-install.ps1
+# Démarre LiteLLM automatiquement quand Pinokio démarre (après reboot si Pinokio est en auto-start Windows).
+
+PINOKIO_SCRIPT_AUTOLAUNCH=start.js
+PINOKIO_SCRIPT_AUTOLAUNCH_ENABLED=true
+
+# Config LiteLLM (fichier YAML existant sur Demeter)
+LITELLM_CONFIG_PATH=D:\pinokio\litellm-config.yaml
+LITELLM_PORT=4000
+LITELLM_HOST=0.0.0.0

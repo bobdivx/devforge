@@ -948,6 +948,7 @@ export type AiProviderConfig = {
     model: string;
     model_label?: string;
     base_url: string | null;
+    studio_base_url?: string | null;
     has_api_key: boolean;
     is_default: boolean;
     created_at: string;
@@ -1038,6 +1039,8 @@ export type PinokioModelInfo = {
 export type PinokioStatus = {
     reachable: boolean;
     base_url: string | null;
+    studio_url: string | null;
+    llm_url: string | null;
     active_model: string | null;
     running: boolean;
     context_size: number | null;
@@ -1055,7 +1058,9 @@ export type PinokioInstance = {
     id: number;
     name: string;
     base_url: string | null;
+    studio_base_url: string | null;
     resolved_base_url: string | null;
+    llm_base_url: string | null;
     is_default: boolean;
     model: string | null;
     reachable: boolean;
@@ -4421,10 +4426,13 @@ export const domainApi = {
     }),
 
     pinokioInstances: () => apiFetch<ApiResponse<PinokioInstance[]>>(`${API_BASE}/ai/pinokio/instances`),
-    pinokioStatus: (opts?: { baseUrl?: string | null; providerId?: number | null }) => {
+    pinokioStatus: (opts?: { baseUrl?: string | null; studioUrl?: string | null; providerId?: number | null }) => {
         const params = new URLSearchParams();
         if (opts?.baseUrl) {
             params.set('base_url', opts.baseUrl);
+        }
+        if (opts?.studioUrl) {
+            params.set('studio_url', opts.studioUrl);
         }
         if (opts?.providerId != null) {
             params.set('provider_id', String(opts.providerId));
@@ -4435,6 +4443,7 @@ export const domainApi = {
     pinokioStartModel: (input: {
         model: string;
         base_url?: string | null;
+        studio_url?: string | null;
         provider_id?: number | null;
         context_size?: number;
         gpu_layers?: number;
@@ -4444,7 +4453,7 @@ export const domainApi = {
         method: 'POST',
         body: JSON.stringify(input),
     }),
-    pinokioStopModel: (input?: { base_url?: string | null; provider_id?: number | null }) => mutate<ApiResponse<{ ok: boolean; message: string }>>('/ai/pinokio/stop', {
+    pinokioStopModel: (input?: { base_url?: string | null; studio_url?: string | null; provider_id?: number | null }) => mutate<ApiResponse<{ ok: boolean; message: string }>>('/ai/pinokio/stop', {
         method: 'POST',
         body: JSON.stringify(input ?? {}),
     }),

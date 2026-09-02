@@ -6,8 +6,10 @@ import { useApiQuery } from '../../lib/use-api-query';
 import { useTeamContext } from '../../lib/team-context';
 import { ApiError } from '../../lib/api-client';
 
-const DEFAULT_DEMETER_URL = 'http://10.1.0.88:10086';
+const DEFAULT_LLM_URL = 'http://10.1.0.88:10086/v1';
+const DEFAULT_STUDIO_URL = 'http://10.1.0.88:42065';
 const DEFAULT_DEMETER_NAME = 'Demeter';
+const DEFAULT_CONTEXT_SIZE = 49152;
 
 function normalizeStudioUrl(raw: string): string {
     const trimmed = raw.trim().replace(/\/+$/, '');
@@ -20,14 +22,33 @@ function normalizeStudioUrl(raw: string): string {
     return trimmed.replace(/\/v1$/i, '');
 }
 
+function normalizeLlmUrl(raw: string): string {
+    const base = normalizeStudioUrl(raw);
+    if (!base) {
+        return '';
+    }
+    return base.endsWith('/v1') ? base : `${base}/v1`;
+}
+
+function isStudioPortUrl(url: string): boolean {
+    const match = url.match(/:(420\d{2})\b/);
+    if (!match) {
+        return false;
+    }
+    const port = Number(match[1]);
+    return port >= 42000 && port <= 42120;
+}
+
 interface Props {
     defaultBaseUrl?: string;
+    defaultStudioUrl?: string;
     canManage?: boolean;
     onModelSelected?: (model: string) => void;
 }
 
 export function PinokioStudioManager({
-    defaultBaseUrl = DEFAULT_DEMETER_URL,
+    defaultBaseUrl = DEFAULT_LLM_URL,
+    defaultStudioUrl = DEFAULT_STUDIO_URL,
     canManage = false,
     onModelSelected,
 }: Props) {
@@ -40,13 +61,14 @@ export function PinokioStudioManager({
 
     const [selectedId, setSelectedId] = useState<number | null>(null);
     const [nameDraft, setNameDraft] = useState(DEFAULT_DEMETER_NAME);
-    const [urlDraft, setUrlDraft] = useState(defaultBaseUrl);
+    const [studioUrlDraft, setStudioUrlDraft] = useState(defaultStudioUrl);
+    const [llmUrlDraft, setLlmUrlDraft] = useState(defaultBaseUrl);
     const [status, setStatus] = useState<PinokioStatus | null>(null);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [actionLoading, setActionLoading] = useState<string | null>(null);
     const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-    const [selectedContextSize, setSelectedContextSize] = useState<number>(65536);
+    const [selectedContextSize, setSelectedContextSize] = useState<number>(DEFAULT_CONTEXT_SIZE);
 
     useEffect(() => {
         if (instances.length === 0) {
@@ -65,37 +87,57 @@ export function PinokioStudioManager({
     useEffect(() => {
         if (selected) {
             setNameDraft(selected.name || DEFAULT_DEMETER_NAME);
-            setUrlDraft(selected.resolved_base_url || selected.base_url || defaultBaseUrl);
+            const llm = selected.base_url || (selected.llm_base_url ? `${selected.llm_base_url}/v1` : defaultBaseUrl);
+            setLlmUrlDraft(normalizeLlmUrl(llm));
+            const studio = selected.studio_base_url
+                ?? (selected.resolved_base_url && isStudioPortUrl(selected.resolved_base_url) ? selected.resolved_base_url : defaultStudioUrl);
+            setStudioUrlDraft(normalizeStudioUrl(studio));
             return;
         }
         if (instances.length === 0) {
             setNameDraft(DEFAULT_DEMETER_NAME);
-            setUrlDraft(defaultBaseUrl);
+            setLlmUrlDraft(defaultBaseUrl);
+            setStudioUrlDraft(defaultStudioUrl);
         }
-    }, [selected?.id, selected?.base_url, selected?.resolved_base_url, selected?.name, instances.length, defaultBaseUrl]);
+    }, [
+        selected?.id,
+        selected?.base_url,
+        selected?.studio_base_url,
+        selected?.llm_base_url,
+        selected?.resolved_base_url,
+        selected?.name,
+        instances.length,
+        defaultBaseUrl,
+        defaultStudioUrl,
+    ]);
 
-    const probeUrl = normalizeStudioUrl(urlDraft) || null;
+    const probeStudioUrl = normalizeStudioUrl(studioUrlDraft) || null;
+    const probeLlmUrl = normalizeLlmUrl(llmUrlDraft) || null;
 
-    const fetchStatus = async (overrideUrl?: string | null) => {
-        const target = normalizeStudioUrl(overrideUrl ?? urlDraft);
-        if (!target) {
+    const fetchStatus = async (overrideStudio?: string | null, overrideLlm?: string | null) => {
+        const studio = normalizeStudioUrl(overrideStudio ?? studioUrlDraft);
+        const llm = normalizeLlmUrl(overrideLlm ?? llmUrlDraft);
+        if (!studio && !llm) {
             setStatus({
                 reachable: false,
                 base_url: null,
+                studio_url: null,
+                llm_url: null,
                 active_model: null,
                 running: false,
                 context_size: null,
                 backend_mode: null,
                 gpu: null,
                 models: [],
-                error: 'Indiquez l’URL du studio Pinokio (ex. http://10.1.0.88:10086).',
+                error: 'Indiquez l’URL studio (port ~420xx) et/ou l’URL LLM (port 10086).',
             });
             return;
         }
         setLoading(true);
         try {
             const res = await domainApi.pinokioStatus({
-                baseUrl: target,
+                baseUrl: llm || undefined,
+                studioUrl: studio || undefined,
                 providerId: selectedId,
             });
             setStatus(res.data);
@@ -105,7 +147,9 @@ export function PinokioStudioManager({
         } catch (err: unknown) {
             setStatus({
                 reachable: false,
-                base_url: target,
+                base_url: studio || llm,
+                studio_url: studio || null,
+                llm_url: llm || null,
                 active_model: null,
                 running: false,
                 context_size: null,
@@ -121,16 +165,17 @@ export function PinokioStudioManager({
 
     useEffect(() => {
         void fetchStatus();
-    }, [probeUrl, selectedId]);
+    }, [probeStudioUrl, probeLlmUrl, selectedId]);
 
     const handleSaveConnection = async () => {
         if (!canManage) {
             return;
         }
-        const url = normalizeStudioUrl(urlDraft);
+        const studio = normalizeStudioUrl(studioUrlDraft);
+        const llm = normalizeLlmUrl(llmUrlDraft);
         const name = nameDraft.trim() || DEFAULT_DEMETER_NAME;
-        if (!url) {
-            setMessage({ text: 'URL requise.', type: 'error' });
+        if (!studio || !llm) {
+            setMessage({ text: 'URLs studio et LLM requises.', type: 'error' });
             return;
         }
         setSaving(true);
@@ -139,7 +184,8 @@ export function PinokioStudioManager({
             if (selectedId != null) {
                 await domainApi.updateAiProvider(selectedId, {
                     name,
-                    base_url: url,
+                    base_url: llm,
+                    studio_base_url: studio,
                     model: selected?.model ?? 'auto',
                 });
                 setMessage({ text: `Connexion « ${name} » mise à jour.`, type: 'success' });
@@ -147,7 +193,8 @@ export function PinokioStudioManager({
                 const created = await domainApi.createAiProvider({
                     provider: 'openai',
                     name,
-                    base_url: url,
+                    base_url: llm,
+                    studio_base_url: studio,
                     model: 'auto',
                     is_default: false,
                 });
@@ -155,7 +202,7 @@ export function PinokioStudioManager({
                 setMessage({ text: `Studio « ${name} » enregistré (provider OpenAI local).`, type: 'success' });
             }
             await instancesQuery.reload({ silent: true });
-            await fetchStatus(url);
+            await fetchStatus(studio, llm);
         } catch (err: unknown) {
             setMessage({
                 text: err instanceof ApiError ? err.message : 'Enregistrement impossible.',
@@ -167,7 +214,8 @@ export function PinokioStudioManager({
     };
 
     const handleStartModel = async (model: PinokioModelInfo) => {
-        if (!probeUrl) {
+        if (!probeStudioUrl) {
+            setMessage({ text: 'URL studio requise pour charger un modèle.', type: 'error' });
             return;
         }
         setActionLoading(model.filename);
@@ -175,12 +223,13 @@ export function PinokioStudioManager({
         try {
             const res = await domainApi.pinokioStartModel({
                 model: model.filename,
-                base_url: probeUrl,
+                base_url: probeLlmUrl ?? undefined,
+                studio_url: probeStudioUrl,
                 provider_id: selectedId,
                 context_size: selectedContextSize,
                 gpu_layers: -1,
                 flash_attn: true,
-                batch_size: 2048,
+                batch_size: 512,
             });
             setMessage({ text: res.data.message || `Modèle ${model.name} chargé en VRAM !`, type: 'success' });
             onModelSelected?.(model.filename);
@@ -196,14 +245,16 @@ export function PinokioStudioManager({
     };
 
     const handleStopModel = async () => {
-        if (!probeUrl) {
+        if (!probeStudioUrl) {
+            setMessage({ text: 'URL studio requise pour décharger le modèle.', type: 'error' });
             return;
         }
         setActionLoading('stop');
         setMessage(null);
         try {
             const res = await domainApi.pinokioStopModel({
-                base_url: probeUrl,
+                base_url: probeLlmUrl ?? undefined,
+                studio_url: probeStudioUrl,
                 provider_id: selectedId,
             });
             setMessage({ text: res.data.message || 'Modèle déchargé. VRAM libérée !', type: 'success' });
@@ -237,7 +288,7 @@ export function PinokioStudioManager({
                     <div>
                         <h3 class="text-sm font-bold text-base-content">Demeter / Pinokio</h3>
                         <p class="text-xs text-base-content/60">
-                            Studio GGUF local (RTX 3090) — URL LAN, charge VRAM, swap de modèles.
+                            Studio (port ~420xx) pour le contrôle VRAM · port 10086 pour les agents DevForge.
                         </p>
                     </div>
                 </div>
@@ -296,7 +347,8 @@ export function PinokioStudioManager({
                             onClick={() => {
                                 setSelectedId(null);
                                 setNameDraft(DEFAULT_DEMETER_NAME);
-                                setUrlDraft(defaultBaseUrl);
+                                setStudioUrlDraft(defaultStudioUrl);
+                                setLlmUrlDraft(defaultBaseUrl);
                                 setStatus(null);
                             }}
                         >
@@ -311,7 +363,7 @@ export function PinokioStudioManager({
                     Connexion
                 </h4>
                 <div class="grid gap-3 sm:grid-cols-2">
-                    <label class="grid gap-1 text-[11px]">
+                    <label class="grid gap-1 text-[11px] sm:col-span-2">
                         <span class="font-medium text-base-content/70">Nom</span>
                         <input
                             class="input input-bordered input-sm"
@@ -322,25 +374,32 @@ export function PinokioStudioManager({
                             onInput={(e) => setNameDraft((e.target as HTMLInputElement).value)}
                         />
                     </label>
-                    <label class="grid gap-1 text-[11px] sm:col-span-2">
-                        <span class="font-medium text-base-content/70">URL Pinokio (LAN)</span>
+                    <label class="grid gap-1 text-[11px]">
+                        <span class="font-medium text-base-content/70">URL Studio Pinokio</span>
                         <input
                             class="input input-bordered input-sm font-mono"
                             type="url"
-                            value={urlDraft}
+                            value={studioUrlDraft}
                             disabled={saving}
-                            placeholder={DEFAULT_DEMETER_URL}
-                            onInput={(e) => setUrlDraft((e.target as HTMLInputElement).value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    void fetchStatus();
-                                }
-                            }}
+                            placeholder={DEFAULT_STUDIO_URL}
+                            onInput={(e) => setStudioUrlDraft((e.target as HTMLInputElement).value)}
                         />
                         <span class="text-[10px] text-base-content/45">
-                            Ex. <code class="text-[10px]">{DEFAULT_DEMETER_URL}</code>
-                            {' '}— pas le tunnel Cloudflare. Clé API optionnelle (endpoint OpenAI-compatible local).
+                            Port frontend serve.cjs (~42065) — contrôle modèle, télémétrie GPU.
+                        </span>
+                    </label>
+                    <label class="grid gap-1 text-[11px]">
+                        <span class="font-medium text-base-content/70">URL LLM (agents)</span>
+                        <input
+                            class="input input-bordered input-sm font-mono"
+                            type="url"
+                            value={llmUrlDraft}
+                            disabled={saving}
+                            placeholder={DEFAULT_LLM_URL}
+                            onInput={(e) => setLlmUrlDraft((e.target as HTMLInputElement).value)}
+                        />
+                        <span class="text-[10px] text-base-content/45">
+                            Port 10086 — inférence OpenAI-compatible (<code class="text-[10px]">/v1</code>).
                         </span>
                     </label>
                 </div>
@@ -348,7 +407,7 @@ export function PinokioStudioManager({
                     <button
                         type="button"
                         class="btn btn-ghost btn-sm gap-1"
-                        disabled={loading || !urlDraft.trim()}
+                        disabled={loading || (!studioUrlDraft.trim() && !llmUrlDraft.trim())}
                         onClick={() => void fetchStatus()}
                     >
                         {loading ? <span class="loading loading-spinner loading-xs" /> : <RefreshCw class="size-3.5" />}
@@ -358,7 +417,7 @@ export function PinokioStudioManager({
                         <button
                             type="button"
                             class="btn btn-primary btn-sm gap-1"
-                            disabled={saving || !urlDraft.trim()}
+                            disabled={saving || !studioUrlDraft.trim() || !llmUrlDraft.trim()}
                             onClick={() => void handleSaveConnection()}
                         >
                             {saving ? <span class="loading loading-spinner loading-xs" /> : <Save class="size-3.5" />}
@@ -377,7 +436,7 @@ export function PinokioStudioManager({
             {!status?.reachable && (
                 <p class="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
                     {status?.error
-                        ?? 'Hors ligne — vérifiez que Pinokio tourne sur le PC GPU, puis corrigez l’URL ci-dessus et cliquez sur Tester.'}
+                        ?? 'Hors ligne — vérifiez que Pinokio tourne sur Demeter, mettez à jour le port studio si besoin, puis cliquez sur Tester.'}
                 </p>
             )}
 
@@ -421,7 +480,7 @@ export function PinokioStudioManager({
                                     <span class="badge badge-primary font-mono text-xs">{status.active_model}</span>
                                     <span class="badge badge-outline badge-sm gap-1">
                                         <Zap class="size-3 text-warning" />
-                                        {status.context_size ?? 65536} tokens
+                                        {status.context_size ?? DEFAULT_CONTEXT_SIZE} tokens
                                     </span>
                                     <span class="badge badge-success badge-sm gap-1">
                                         <Sparkles class="size-3" />
@@ -448,8 +507,8 @@ export function PinokioStudioManager({
                                 onChange={(e) => setSelectedContextSize(Number((e.target as HTMLSelectElement).value))}
                             >
                                 <option value={32768}>32 768 tokens (32k)</option>
-                                <option value={65536}>65 536 tokens (64k - Recommandé)</option>
-                                <option value={131072}>131 072 tokens (128k - Max)</option>
+                                <option value={49152}>49 152 tokens (48k — recommandé agents)</option>
+                                <option value={65536}>65 536 tokens (64k)</option>
                             </select>
                         </div>
                     </div>

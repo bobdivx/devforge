@@ -1,0 +1,21 @@
+# Homarr dashboard — Demeter
+# Usage:
+#   cp homarr.env.example homarr.env
+#   openssl rand -hex 32   # si pas de cle
+#   docker compose -f docker-compose.homarr.yml --env-file homarr.env up -d
+#
+# UI: http://10.1.0.88:7575
+
+services:
+  homarr:
+    container_name: homarr-demeter
+    image: ghcr.io/homarr-labs/homarr:latest
+    restart: unless-stopped
+    ports:
+      - "${HOMARR_PORT:-7575}:7575"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./homarr-appdata:/appdata
+    environment:
+      - SECRET_ENCRYPTION_KEY=${SECRET_ENCRYPTION_KEY}
+      - LOG_LEVEL=info

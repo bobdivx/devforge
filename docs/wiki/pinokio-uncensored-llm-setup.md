@@ -23,7 +23,8 @@ Ce guide détaille la mise en place, l'optimisation maximale GPU (RTX 3090 24 Go
 |        ▼                                                          |
 |   Node.js Server (scripts/server/serve.cjs)                       |
 |        │                                                          |
-|        ├─ Auto-load Qwen3 au démarrage                            |
+|        ├─ Pas de chargement auto (VRAM vide au démarrage)         |
+|        │   → charger le modèle via DevForge (#pinokio)            |
 |        │                                                          |
 |        ▼                                                          |
 |   llama-server.exe (CUDA 12 Backend)                              |
@@ -58,17 +59,67 @@ Le modèle **Qwen3-Coder-30B-A3B-Instruct** utilise une architecture **MoE (Mixt
 
 ---
 
-## 3. Mise à jour Automatique en 1 Clic (PowerShell)
+## 3. Supprimer le lancement manuel de llama-server (cause fréquente)
 
-Pour appliquer toutes ces optimisations et activer le **chargement automatique du modèle au démarrage** de Pinokio, ouvrez PowerShell sur la machine hôte (`D:`) et collez la commande suivante :
+Si vous aviez configuré un démarrage direct du type :
+
+```text
+D:\pinokio\api\uncensored-local-studio\app\app\llm-backend\win\cuda\llama-server.exe
+  --model D:\pinokio\...\qwen3-coder-30b-a3b-instruct-q4_k_m.gguf
+  --host 0.0.0.0 --port 10086 --ctx-size 8192 --n-gpu-layers 35
+```
+
+**c’est cette commande** qui recharge l’ancien modèle à chaque boot — pas seulement `serve.cjs`.
+
+Sur Demeter (PowerShell) :
 
 ```powershell
-# 1. Nettoyer toute ancienne tentative auto-load
+cd C:\Users\auber\Documents\GitHub\devforge
+.\scripts\pinokio-demeter-reset-llm.ps1
+```
+
+Le script :
+- tue `llama-server` sur le port `10086`
+- supprime l’auto-load dans `serve.cjs`
+- cherche et nettoie les fichiers Pinokio qui lancent `llama-server.exe --model ...`
+
+Ensuite **ne relancez plus** `llama-server.exe` à la main. Utilisez **Start** dans Pinokio (→ `serve.cjs` uniquement).
+
+---
+
+## 4. Désactiver l’auto-load injecté dans serve.cjs
+
+L’ancienne config chargeait automatiquement le **premier fichier « qwen »** trouvé (souvent `qwen3-coder-30b-a3b-instruct-q4_k_m.gguf`). Après avoir téléchargé un **nouveau** GGUF, désactivez cet auto-load pour éviter de remonter l’ancien modèle au démarrage de Pinokio.
+
+Sur la machine GPU (Demeter), en PowerShell :
+
+```powershell
+cd C:\chemin\vers\devforge   # ou copiez le script depuis le dépôt
+.\scripts\pinokio-serve-disable-autoload.ps1
+```
+
+Chemin par défaut de `serve.cjs` : `D:\pinokio\api\uncensored-local-studio\app\scripts\server\serve.cjs`
+
+Puis **redémarrez** Pinokio Uncensored Local Studio. Le serveur écoute sur `:10086` **sans modèle en VRAM** — chargez le bon fichier dans **DevForge → Paramètres AI → Demeter / Pinokio → Charger sur GPU**.
+
+### Auto-load optionnel (un seul modèle précis)
+
+Si vous voulez quand même un démarrage automatique, **nommez explicitement** le fichier GGUF (pas de recherche « qwen ») :
+
+```powershell
+.\scripts\pinokio-serve-configure-autoload.ps1 -ModelFilename "VOTRE-MODELE.gguf"
+```
+
+---
+
+## 5. Optimisations réseau / contexte (serve.cjs)
+
+Pour appliquer host `0.0.0.0`, contexte 64k et Jinja (tool calls), sur la machine hôte :
+
+```powershell
 $path = "D:\pinokio\api\uncensored-local-studio\app\scripts\server\serve.cjs"
 $content = (Get-Content -Path $path -Raw)
-$content = $content -replace "(?s)// Auto-load LLM model on server startup.*", ""
 
-# 2. Remplacer les verrous de contexte et d'écoute réseau + activer Jinja pour les tool calls
 $content = $content `
   -replace '"--host", "127\.0\.0\.1"', '"--host", "0.0.0.0"' `
   -replace 'Math\.min\(32768, contextSize\)', 'Math.min(65536, contextSize)' `
@@ -76,55 +127,26 @@ $content = $content `
   -replace '\[32768, 24576,', '[65536, 32768, 24576,' `
   -replace '"--parallel", "1",', '"--parallel", "1", "--jinja",'
 
-# 3. Injecter l'auto-load au démarrage avec 65536 tokens et Flash Attention
-$autoLoadCode = @'
-
-// Auto-load LLM model on server startup
-setTimeout(async () => {
-  try {
-    const models = typeof getLlmModels === "function" ? getLlmModels() : [];
-    const target = models.find(m => !m.isProjector && m.filename.toLowerCase().includes("qwen")) || models.find(m => !m.isProjector);
-    if (target) {
-      console.log("  [llm] Auto-loading model " + target.filename + " with 65536 context...");
-      await startLlm({
-        model: target.filename,
-        contextSize: 65536,
-        gpuLayers: -1,
-        flashAttn: true,
-        cacheTypeK: "q8_0",
-        cacheTypeV: "q8_0",
-        batchSize: 2048,
-        ubatchSize: 512
-      });
-      console.log("  [llm] Model " + target.filename + " is READY in VRAM (65k context)!");
-    }
-  } catch (e) {
-    console.warn("  [llm] Auto-start failed:", e.message);
-  }
-}, 2000);
-'@
-
-Set-Content -Path $path -Value ($content.TrimEnd() + "`r`n" + $autoLoadCode) -Encoding UTF8
-Write-Host "✅ Configuration serve.cjs mise à jour avec succès !" -ForegroundColor Green
+Set-Content -Path $path -Value $content.TrimEnd() -Encoding UTF8
+Write-Host "✅ Optimisations serve.cjs appliquées (sans auto-load)." -ForegroundColor Green
 ```
 
 ---
 
-## 4. Configuration dans l'interface DevForge
+## 6. Configuration dans l'interface DevForge
 
 Dans DevForge, pour configurer l'agent afin qu'il utilise votre serveur local :
 
-1. Allez dans **Settings** $\rightarrow$ **AI / LLM Providers**.
-2. Ajoutez ou éditez un provider :
-   - **Provider Type** : `OpenAI-compatible` (ou `Local`)
+1. Allez dans **Paramètres AI → Demeter / Pinokio** (`#pinokio`).
+2. Vérifiez l’URL : `http://10.1.0.88:10086`
+3. **Tester** puis **Charger sur GPU** le GGUF téléchargé.
+4. Pour les agents, le provider OpenAI local peut rester dans **Providers & clés** :
    - **Base URL** : `http://10.1.0.88:10086/v1`
-   - **API Key** : `sk-local-devforge` (ou n'importe quelle valeur non vide)
-   - **Model Name** : `qwen3-coder-30b-a3b-instruct-q4_k_m.gguf`
-   - **Context Limit** : `65536`
+   - **Model Name** : nom exact du GGUF chargé (ou `auto`)
 
 ---
 
-## 5. Contrôle & Monitoring Direct depuis DevForge (Nouveau !)
+## 7. Contrôle & Monitoring Direct depuis DevForge
 
 DevForge intègre désormais un **panneau de gestion en temps réel** pour votre instance Pinokio :
 
@@ -137,11 +159,16 @@ DevForge intègre désormais un **panneau de gestion en temps réel** pour votre
 3. **Mise en veille GPU** :
    - Bouton **« Mettre en veille (Libérer VRAM) »** pour décharger le modèle et libérer les 24 Go de VRAM quand vous ne travaillez pas avec les agents.
 4. **Accès** :
-   - Rendez-vous dans **Settings** $\rightarrow$ **AI / LLM Providers** pour visualiser et contrôler Pinokio directement !
+   - **Paramètres AI → Demeter / Pinokio** (`#pinokio`)
 
 ---
 
-## 6. Résolution des Problèmes Fréquents (Troubleshooting)
+## 8. Résolution des Problèmes Fréquents (Troubleshooting)
+
+### L’ancien qwen3-coder revient toujours au démarrage
+
+- **Cause** : tâche planifiée, raccourci, ou script `.bat` qui lance `llama-server.exe --model ...qwen3-coder...` avant Pinokio.
+- **Solution** : `pinokio-demeter-reset-llm.ps1`, puis vérifier le Planificateur de tâches Windows et les raccourcis Démarrage pour `llama-server`.
 
 ### Erreur : `request (XXXX tokens) exceeds the available context size`
 - **Cause** : Le contexte alloué au démarrage de llama-server était inférieur à la taille de la requête.
@@ -149,7 +176,7 @@ DevForge intègre désormais un **panneau de gestion en temps réel** pour votre
 
 ### Erreur : `LLM error from 10.1.0.88:10086: CompletionError: JsonError`
 - **Cause** : Le modèle n'était pas encore chargé en mémoire VRAM au moment où la requête est arrivée, ou le port était inaccessible.
-- **Solution** : Avec le script d'auto-load ci-dessus, attendez 10 à 15 secondes après le clic sur **Start** dans Pinokio pour que le modèle soit chargé en VRAM.
+- **Solution** : Désactivez l’auto-load (`pinokio-serve-disable-autoload.ps1`), redémarrez Pinokio, chargez le modèle via DevForge (#pinokio), attendez « Actif en VRAM ».
 
 ### Erreur : `unknown value for --flash-attn: --cache-type-k`
 - **Cause** : Les versions récentes de llama-server attendent `--flash-attn on` et non `--flash-attn` seul.
@@ -160,5 +187,80 @@ DevForge intègre désormais un **panneau de gestion en temps réel** pour votre
 - **Solution** : 
   1. Utilisez `batchSize: 2048` dans `serve.cjs` (l'ingestion des 20k tokens passe de 65s à ~10s sur RTX 3090).
   2. Le timeout côté DevForge a été augmenté à **300 secondes (5 minutes)** par défaut (configurable via `DEVFORGE_AGENT_TIMEOUT=300` et `LLM_TIMEOUT_SECS=300`).
+
+---
+
+## 9. LiteLLM pour Cursor Agent (démarrage via Pinokio)
+
+LiteLLM n’est **pas** inclus dans Uncensored Local Studio. C’est un proxy séparé (port **4000**) entre le tunnel Cloudflare et `llama-server` (:10086).
+
+### Pourquoi Pinokio ?
+
+Sans Pinokio, tu lances manuellement :
+
+```powershell
+litellm --config D:\pinokio\litellm-config.yaml --port 4000
+```
+
+→ **Après chaque reboot**, il faut relancer cette commande.
+
+Avec l’app Pinokio **LiteLLM Cursor Proxy**, LiteLLM redémarre **automatiquement** quand Pinokio démarre (`PINOKIO_SCRIPT_AUTOLAUNCH`).
+
+### Installation (une fois, sur Demeter)
+
+```powershell
+cd C:\Users\auber\Documents\GitHub\devforge
+.\scripts\pinokio-litellm-install.ps1
+```
+
+Puis dans **Pinokio** :
+
+1. Ouvrir l’app **LiteLLM Cursor Proxy** (`D:\pinokio\api\litellm-cursor-proxy`)
+2. **Install** (installe LiteLLM ≥ 1.97 dans un venv isolé)
+3. **Start**
+
+Vérification :
+
+```powershell
+curl.exe http://127.0.0.1:4000/health/liveliness
+```
+
+### Auto-start après reboot Windows
+
+| Composant | Comment |
+|-----------|---------|
+| **Pinokio** | Paramètres Pinokio → **Launch at startup** (démarrage Windows) |
+| **LiteLLM** | `PINOKIO_SCRIPT_AUTOLAUNCH=start.js` (écrit par le script d’install) |
+| **llama-server** | App **Uncensored Local Studio** dans Pinokio (Start ou autolaunch séparé) |
+| **Tunnel Cloudflare** | Service Windows / tâche planifiée séparée (`agent.briseteia.me`) |
+
+### Config Cursor (inchangée)
+
+| Réglage | Valeur |
+|---------|--------|
+| Base URL | `https://agent.briseteia.me/cursor` (un seul `/`) |
+| Modèle | `demeter-qwen3-coder` (nom dans `litellm-config.yaml`) |
+| API Key | `master_key` du YAML (`D:\pinokio\litellm-config.yaml`) |
+
+Fichiers dans le depôt : `scripts/pinokio-litellm-cursor-proxy/` et `scripts/pinokio-litellm-install.ps1`.
+
+### Sauvegarde avant migration OS (CatchyOS, etc.)
+
+Script : `scripts/pinokio-backup-demeter.ps1` (ou `.bat`).
+
+```powershell
+cd C:\Users\auber\Documents\scripts
+powershell -ExecutionPolicy Bypass -File .\pinokio-backup-demeter.ps1
+```
+
+Sauvegarde legere (configs + apps, sans GGUF) : quelques GB max.
+
+Avec les modeles GGUF (~17 GB+) :
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\pinokio-backup-demeter.ps1 -IncludeModels
+```
+
+Contenu typique : `api\` (apps Pinokio, `serve.cjs` patche, ENVIRONMENT), `litellm-config.yaml`. Exclut par defaut `node_modules`, `venv`, `llm-models`.
 
 

@@ -18,6 +18,7 @@ class AiProviderConfig extends Model
         'name',
         'api_key',
         'base_url',
+        'studio_base_url',
         'model',
         'is_default',
     ];

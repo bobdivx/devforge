@@ -13,6 +13,7 @@ use App\Services\DevForge\Agent\LlmModelResolver;
 use App\Services\DevForge\Agent\LlmProviderFactory;
 use App\Services\DevForge\Agent\LlmProviderProbe;
 use App\Services\DevForge\Agent\LlmProviderRegistry;
+use App\Services\DevForge\Agent\PinokioControlService;
 use App\Services\DevForge\Core\CurrentTeamContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -101,6 +102,7 @@ class AiProviderController extends Controller
             'name' => ['required', 'string', 'max:100'],
             'api_key' => ['nullable', 'string'],
             'base_url' => ['nullable', 'string', 'url'],
+            'studio_base_url' => ['nullable', 'string', 'url'],
             'model' => ['nullable', 'string', 'max:100'],
             'is_default' => ['nullable', 'boolean'],
         ]);
@@ -110,6 +112,7 @@ class AiProviderController extends Controller
         $this->validateProviderConfig($validated);
 
         $validated = array_merge($validated, LlmEndpointResolver::sanitizeProviderConfig($validated));
+        $validated = $this->normalizePinokioProviderUrls($validated);
 
         if (! empty($validated['is_default'])) {
             AiProviderConfig::where('team_id', $team->id)->update(['is_default' => false]);
@@ -133,6 +136,7 @@ class AiProviderController extends Controller
             'name' => ['sometimes', 'string', 'max:100'],
             'api_key' => ['sometimes', 'nullable', 'string'],
             'base_url' => ['sometimes', 'nullable', 'string', 'url'],
+            'studio_base_url' => ['sometimes', 'nullable', 'string', 'url'],
             'model' => ['sometimes', 'nullable', 'string', 'max:100'],
             'is_default' => ['sometimes', 'boolean'],
         ]);
@@ -148,9 +152,11 @@ class AiProviderController extends Controller
         }
 
         if (array_key_exists('base_url', $validated) || array_key_exists('provider', $validated)) {
-            $merged = array_merge($config->only(['provider', 'base_url']), $validated);
+            $merged = array_merge($config->only(['provider', 'base_url', 'studio_base_url']), $validated);
             $validated = array_merge($validated, LlmEndpointResolver::sanitizeProviderConfig($merged));
         }
+
+        $validated = $this->normalizePinokioProviderUrls(array_merge($config->only(['provider', 'base_url', 'studio_base_url']), $validated));
 
         $config->update($validated);
 
@@ -272,9 +278,45 @@ class AiProviderController extends Controller
             'model' => $config->model,
             'model_label' => LlmModelResolver::displayLabel($config),
             'base_url' => $config->base_url,
+            'studio_base_url' => $config->studio_base_url,
             'has_api_key' => ! empty($config->api_key),
             'is_default' => $config->is_default,
             'created_at' => $config->created_at->toISOString(),
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function normalizePinokioProviderUrls(array $validated): array
+    {
+        if (($validated['provider'] ?? '') !== 'openai') {
+            return $validated;
+        }
+
+        $pinokio = app(PinokioControlService::class);
+        $baseUrl = (string) ($validated['base_url'] ?? '');
+
+        if ($baseUrl !== '' && $pinokio->looksLikePinokioProvider(new AiProviderConfig([
+            'provider' => 'openai',
+            'name' => (string) ($validated['name'] ?? 'Demeter'),
+            'base_url' => $baseUrl,
+            'studio_base_url' => $validated['studio_base_url'] ?? null,
+        ]))) {
+            $llmProviderUrl = $pinokio->normalizeLlmProviderUrl($baseUrl);
+            if ($llmProviderUrl !== null) {
+                $validated['base_url'] = $llmProviderUrl;
+            }
+        }
+
+        if (isset($validated['studio_base_url']) && is_string($validated['studio_base_url'])) {
+            $validated['studio_base_url'] = rtrim(trim($validated['studio_base_url']), '/');
+            if ($validated['studio_base_url'] === '') {
+                $validated['studio_base_url'] = null;
+            }
+        }
+
+        return $validated;
     }
 }
