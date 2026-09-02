@@ -13,13 +13,15 @@ Toutes les apps doivent utiliser ces ports pour Homarr, DevForge et le LAN.
 | **ACE-Step 1.5** | `8001` | http://10.1.0.88:8001 | `--server-name 0.0.0.0 --port` / `start.js` |
 | **Cloudflare tunnel** | — | https://agent.briseteia.me/v1 | → LiteLLM `:4000` (Cursor : Override OpenAI Base URL) |
 
-## Appliquer les ports Pinokio
+## Appliquer les ports et le bind réseau (0.0.0.0)
 
 ```bash
-bash scripts/demeter-bootstrap/fix-demeter-pinokio-ports.sh
+bash scripts/demeter-bootstrap/patch-pinokio-network.sh
 ```
 
-Puis dans Pinokio : **Stop** puis **Start** chaque app (ou redémarrer Pinokio).
+Équivalent : `fix-demeter-pinokio-ports.sh` + `patch-serve-network.sh`
+
+Puis dans Pinokio : **Stop** puis **Start** chaque app.
 
 ## Vérifier
 

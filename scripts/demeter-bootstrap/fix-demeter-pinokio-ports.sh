@@ -39,6 +39,8 @@ module.exports = {
         env: {
           FRONTEND_PORT: "${UNCENSORED_UI_PORT}",
           LLM_PORT: "${LLM_PORT}",
+          LLM_HOST: "0.0.0.0",
+          HOST: "0.0.0.0",
           PORT: "${UNCENSORED_UI_PORT}"
         },
         path: "app",
@@ -79,7 +81,8 @@ module.exports = async (kernel) => {
           venv: "venv",
           env: {
             SERVER_NAME: "0.0.0.0",
-            SERVER_PORT: port
+            SERVER_PORT: port,
+            GRADIO_SERVER_NAME: "0.0.0.0"
           },
           path: "app",
           message: [
@@ -122,6 +125,7 @@ module.exports = {
       params: {
         env: {
           SERVER_NAME: "0.0.0.0",
+          GRADIO_SERVER_NAME: "0.0.0.0",
           PORT: "${ACE_STEP_PORT}"
         },
         path: "app",

@@ -25,6 +25,7 @@ bash scripts/demeter-bootstrap/bootstrap-demeter-full.sh
 
 # Après migration disque IA / stack stabilisée
 bash scripts/demeter-bootstrap/bootstrap-demeter-final.sh
+bash scripts/demeter-bootstrap/patch-pinokio-network.sh
 bash scripts/demeter-bootstrap/setup-demeter-boot.sh   # systemd user + linger
 ```
 
@@ -66,8 +67,10 @@ Ou provider **LiteLLM** : `https://agent.briseteia.me/v1` + modèle `demeter-qwe
 | `load-demeter-llm-gpu.sh` | Charge le GGUF via API studio |
 | `llm-start-gpu.json` | Paramètres GPU (49152 ctx, flash attn) |
 | `litellm-config.demeter.yaml` | Config LiteLLM sans Postgres |
-| `patch-serve-llm-host.sh` | `--host 0.0.0.0` dans serve.cjs |
-| `patch-ace-step-host.sh` | `--server-name 0.0.0.0` dans ace-step Pinokio |
+| `patch-pinokio-network.sh` | **Tout-en-un** : ports + bind `0.0.0.0` (LAN/NPM) |
+| `patch-serve-network.sh` | `serve.cjs` Uncensored (UI + llama) en `0.0.0.0` |
+| `patch-serve-llm-host.sh` | Alias → `patch-serve-network.sh` |
+| `patch-ace-step-host.sh` | Alias → `patch-pinokio-network.sh` |
 | `patch-serve-context.sh` | Contexte max 49152 |
 | `install-llama-cuda.sh` | Backend CUDA llama (Vulkan fallback) |
 | `migrate-to-ia-disk.sh` | Migration vers `/mnt/ia` |

@@ -28,8 +28,11 @@ check "llama API" "http://${HOST}:10086/v1/models"
 check "Wan" "http://${HOST}:8188"
 check "ACE-Step" "http://${HOST}:8001"
 
-echo "--- listening ---"
+echo "--- listening (attendu: 0.0.0.0 ou * sur chaque port actif) ---"
 ss -tlnp 2>/dev/null | grep -E ':7575|:42000|:1420|:4000|:10086|:8188|:8001' || true
+
+echo "--- bind 127.0.0.1 only (problème LAN si service up) ---"
+ss -tlnp 2>/dev/null | grep -E '127\.0\.0\.1:(1420|4000|8001|8188|10086)' || echo "  (aucun — OK)"
 
 if [[ "$FAIL" -gt 0 ]]; then
   echo "WARN: $FAIL service(s) down (normal si app non demarree dans Pinokio)"

@@ -33,7 +33,7 @@ module.exports = {
       method: "process.wait",
       params: {
         title: "LiteLLM Cursor Proxy",
-        description: "Actif — Cursor → https://agent.briseteia.me/cursor",
+        description: "Actif — Cursor → https://agent.briseteia.me/v1",
       },
     },
   ],
