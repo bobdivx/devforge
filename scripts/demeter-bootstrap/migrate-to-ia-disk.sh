@@ -19,7 +19,7 @@ if [[ ! -d "$IA_ROOT" ]] || ! mountpoint -q "$IA_ROOT" 2>/dev/null; then
 fi
 
 echo ">> Arret services IA"
-pkill -f "bootstrap-phase3.sh" 2>/dev/null || true
+pkill -f "bootstrap-demeter-final.sh" 2>/dev/null || true
 pkill -f "litellm --config" 2>/dev/null || true
 pkill -f "scripts/server/serve.cjs" 2>/dev/null || true
 sleep 2

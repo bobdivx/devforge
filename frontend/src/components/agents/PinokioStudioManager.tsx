@@ -2,12 +2,20 @@ import { CheckCircle2, Cpu, Loader2, Power, RefreshCw, Save, Server, Sparkles, W
 import { useEffect, useState } from 'preact/hooks';
 import type { PinokioInstance, PinokioModelInfo, PinokioStatus } from '../../lib/domain-api';
 import { domainApi } from '../../lib/domain-api';
+import {
+    buildLlmUrl,
+    buildStudioUrl,
+    DEFAULT_LLM_PORT,
+    DEFAULT_LLM_URL,
+    DEFAULT_PINOKIO_HOST,
+    DEFAULT_STUDIO_PORT,
+    DEFAULT_STUDIO_URL,
+    parsePinokioEndpoints,
+} from '../../lib/pinokio-urls';
 import { useApiQuery } from '../../lib/use-api-query';
 import { useTeamContext } from '../../lib/team-context';
 import { ApiError } from '../../lib/api-client';
 
-const DEFAULT_LLM_URL = 'http://10.1.0.88:10086/v1';
-const DEFAULT_STUDIO_URL = 'http://10.1.0.88:42065';
 const DEFAULT_DEMETER_NAME = 'Demeter';
 const DEFAULT_CONTEXT_SIZE = 49152;
 
@@ -59,10 +67,13 @@ export function PinokioStudioManager({
     );
     const instances = (instancesQuery.data?.data ?? []) as PinokioInstance[];
 
+    const initialEndpoints = parsePinokioEndpoints(defaultStudioUrl, defaultBaseUrl);
+
     const [selectedId, setSelectedId] = useState<number | null>(null);
     const [nameDraft, setNameDraft] = useState(DEFAULT_DEMETER_NAME);
-    const [studioUrlDraft, setStudioUrlDraft] = useState(defaultStudioUrl);
-    const [llmUrlDraft, setLlmUrlDraft] = useState(defaultBaseUrl);
+    const [hostDraft, setHostDraft] = useState(initialEndpoints.host);
+    const [studioPortDraft, setStudioPortDraft] = useState(initialEndpoints.studioPort);
+    const [llmPortDraft, setLlmPortDraft] = useState(initialEndpoints.llmPort);
     const [status, setStatus] = useState<PinokioStatus | null>(null);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -88,16 +99,20 @@ export function PinokioStudioManager({
         if (selected) {
             setNameDraft(selected.name || DEFAULT_DEMETER_NAME);
             const llm = selected.base_url || (selected.llm_base_url ? `${selected.llm_base_url}/v1` : defaultBaseUrl);
-            setLlmUrlDraft(normalizeLlmUrl(llm));
             const studio = selected.studio_base_url
                 ?? (selected.resolved_base_url && isStudioPortUrl(selected.resolved_base_url) ? selected.resolved_base_url : defaultStudioUrl);
-            setStudioUrlDraft(normalizeStudioUrl(studio));
+            const endpoints = parsePinokioEndpoints(normalizeStudioUrl(studio), normalizeLlmUrl(llm));
+            setHostDraft(endpoints.host);
+            setStudioPortDraft(endpoints.studioPort);
+            setLlmPortDraft(endpoints.llmPort);
             return;
         }
         if (instances.length === 0) {
             setNameDraft(DEFAULT_DEMETER_NAME);
-            setLlmUrlDraft(defaultBaseUrl);
-            setStudioUrlDraft(defaultStudioUrl);
+            const endpoints = parsePinokioEndpoints(defaultStudioUrl, defaultBaseUrl);
+            setHostDraft(endpoints.host);
+            setStudioPortDraft(endpoints.studioPort);
+            setLlmPortDraft(endpoints.llmPort);
         }
     }, [
         selected?.id,
@@ -111,8 +126,10 @@ export function PinokioStudioManager({
         defaultStudioUrl,
     ]);
 
-    const probeStudioUrl = normalizeStudioUrl(studioUrlDraft) || null;
-    const probeLlmUrl = normalizeLlmUrl(llmUrlDraft) || null;
+    const studioUrlDraft = buildStudioUrl(hostDraft, studioPortDraft);
+    const llmUrlDraft = buildLlmUrl(hostDraft, llmPortDraft);
+    const probeStudioUrl = studioUrlDraft || null;
+    const probeLlmUrl = llmUrlDraft || null;
 
     const fetchStatus = async (overrideStudio?: string | null, overrideLlm?: string | null) => {
         const studio = normalizeStudioUrl(overrideStudio ?? studioUrlDraft);
@@ -286,9 +303,9 @@ export function PinokioStudioManager({
                         <Cpu class="size-5" />
                     </div>
                     <div>
-                        <h3 class="text-sm font-bold text-base-content">Demeter / Pinokio</h3>
+                        <h3 class="text-sm font-bold text-base-content">Local AI Studio (Pinokio)</h3>
                         <p class="text-xs text-base-content/60">
-                            Studio (port ~420xx) pour le contrôle VRAM · port 10086 pour les agents DevForge.
+                            Gestion et monitoring du serveur GPU local (Demeter).
                         </p>
                     </div>
                 </div>
@@ -314,10 +331,98 @@ export function PinokioStudioManager({
                         disabled={loading || instancesQuery.loading}
                     >
                         <RefreshCw class={`size-3.5 ${loading || instancesQuery.loading ? 'animate-spin' : ''}`} />
-                        Tester
+                        Actualiser
                     </button>
                 </div>
             </div>
+
+            <section class="grid gap-3 rounded-xl border border-base-300 bg-base-100 p-3 sm:p-4">
+                <h4 class="text-xs font-semibold uppercase tracking-wide text-base-content/55">
+                    Connexion Demeter
+                </h4>
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <label class="grid gap-1 text-[11px] sm:col-span-2">
+                        <span class="font-medium text-base-content/70">Nom</span>
+                        <input
+                            class="input input-bordered input-sm"
+                            type="text"
+                            value={nameDraft}
+                            disabled={!canManage || saving}
+                            placeholder="Demeter"
+                            onInput={(e) => setNameDraft((e.target as HTMLInputElement).value)}
+                        />
+                    </label>
+                    <label class="grid gap-1 text-[11px] sm:col-span-2 lg:col-span-1">
+                        <span class="font-medium text-base-content/70">Adresse IP / hôte</span>
+                        <input
+                            class="input input-bordered input-sm font-mono"
+                            type="text"
+                            value={hostDraft}
+                            disabled={saving}
+                            placeholder={DEFAULT_PINOKIO_HOST}
+                            onInput={(e) => setHostDraft((e.target as HTMLInputElement).value)}
+                        />
+                        <span class="text-[10px] text-base-content/45">
+                            IP LAN de la machine GPU (ex. Demeter).
+                        </span>
+                    </label>
+                    <label class="grid gap-1 text-[11px]">
+                        <span class="font-medium text-base-content/70">Port Studio Pinokio</span>
+                        <input
+                            class="input input-bordered input-sm font-mono"
+                            type="number"
+                            min={1}
+                            max={65535}
+                            value={studioPortDraft}
+                            disabled={saving}
+                            onInput={(e) => setStudioPortDraft(Number((e.target as HTMLInputElement).value) || DEFAULT_STUDIO_PORT)}
+                        />
+                        <span class="text-[10px] text-base-content/45">
+                            UI Pinokio / serve.cjs (défaut {DEFAULT_STUDIO_PORT}).
+                        </span>
+                    </label>
+                    <label class="grid gap-1 text-[11px]">
+                        <span class="font-medium text-base-content/70">Port LLM</span>
+                        <input
+                            class="input input-bordered input-sm font-mono"
+                            type="number"
+                            min={1}
+                            max={65535}
+                            value={llmPortDraft}
+                            disabled={saving}
+                            onInput={(e) => setLlmPortDraft(Number((e.target as HTMLInputElement).value) || DEFAULT_LLM_PORT)}
+                        />
+                        <span class="text-[10px] text-base-content/45">
+                            llama-server OpenAI-compatible (défaut {DEFAULT_LLM_PORT}).
+                        </span>
+                    </label>
+                </div>
+                <p class="rounded-md bg-base-200/60 px-2.5 py-1.5 font-mono text-[10px] text-base-content/60">
+                    Studio : {studioUrlDraft || '—'} · LLM : {llmUrlDraft || '—'}
+                </p>
+                <div class="flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        class="btn btn-ghost btn-sm gap-1"
+                        disabled={loading || hostDraft.trim() === ''}
+                        onClick={() => void fetchStatus()}
+                    >
+                        {loading ? <span class="loading loading-spinner loading-xs" /> : <RefreshCw class="size-3.5" />}
+                        Tester la connexion
+                    </button>
+                    {canManage && (
+                        <button
+                            type="button"
+                            class="btn btn-primary btn-sm gap-1"
+                            disabled={saving || hostDraft.trim() === ''}
+                            onClick={() => void handleSaveConnection()}
+                        >
+                            {saving ? <span class="loading loading-spinner loading-xs" /> : <Save class="size-3.5" />}
+                            {selectedId != null ? 'Enregistrer' : 'Enregistrer comme provider'}
+                        </button>
+                    )}
+                </div>
+            </section>
 
             {instances.length > 0 && (
                 <div class="flex flex-wrap gap-2">
@@ -347,8 +452,10 @@ export function PinokioStudioManager({
                             onClick={() => {
                                 setSelectedId(null);
                                 setNameDraft(DEFAULT_DEMETER_NAME);
-                                setStudioUrlDraft(defaultStudioUrl);
-                                setLlmUrlDraft(defaultBaseUrl);
+                                const endpoints = parsePinokioEndpoints(defaultStudioUrl, defaultBaseUrl);
+                                setHostDraft(endpoints.host);
+                                setStudioPortDraft(endpoints.studioPort);
+                                setLlmPortDraft(endpoints.llmPort);
                                 setStatus(null);
                             }}
                         >
@@ -357,75 +464,6 @@ export function PinokioStudioManager({
                     )}
                 </div>
             )}
-
-            <section class="grid gap-3 rounded-xl border border-base-300 bg-base-100 p-3 sm:p-4">
-                <h4 class="text-xs font-semibold uppercase tracking-wide text-base-content/55">
-                    Connexion
-                </h4>
-                <div class="grid gap-3 sm:grid-cols-2">
-                    <label class="grid gap-1 text-[11px] sm:col-span-2">
-                        <span class="font-medium text-base-content/70">Nom</span>
-                        <input
-                            class="input input-bordered input-sm"
-                            type="text"
-                            value={nameDraft}
-                            disabled={!canManage || saving}
-                            placeholder="Demeter"
-                            onInput={(e) => setNameDraft((e.target as HTMLInputElement).value)}
-                        />
-                    </label>
-                    <label class="grid gap-1 text-[11px]">
-                        <span class="font-medium text-base-content/70">URL Studio Pinokio</span>
-                        <input
-                            class="input input-bordered input-sm font-mono"
-                            type="url"
-                            value={studioUrlDraft}
-                            disabled={saving}
-                            placeholder={DEFAULT_STUDIO_URL}
-                            onInput={(e) => setStudioUrlDraft((e.target as HTMLInputElement).value)}
-                        />
-                        <span class="text-[10px] text-base-content/45">
-                            Port frontend serve.cjs (~42065) — contrôle modèle, télémétrie GPU.
-                        </span>
-                    </label>
-                    <label class="grid gap-1 text-[11px]">
-                        <span class="font-medium text-base-content/70">URL LLM (agents)</span>
-                        <input
-                            class="input input-bordered input-sm font-mono"
-                            type="url"
-                            value={llmUrlDraft}
-                            disabled={saving}
-                            placeholder={DEFAULT_LLM_URL}
-                            onInput={(e) => setLlmUrlDraft((e.target as HTMLInputElement).value)}
-                        />
-                        <span class="text-[10px] text-base-content/45">
-                            Port 10086 — inférence OpenAI-compatible (<code class="text-[10px]">/v1</code>).
-                        </span>
-                    </label>
-                </div>
-                <div class="flex flex-wrap gap-2">
-                    <button
-                        type="button"
-                        class="btn btn-ghost btn-sm gap-1"
-                        disabled={loading || (!studioUrlDraft.trim() && !llmUrlDraft.trim())}
-                        onClick={() => void fetchStatus()}
-                    >
-                        {loading ? <span class="loading loading-spinner loading-xs" /> : <RefreshCw class="size-3.5" />}
-                        Tester la connexion
-                    </button>
-                    {canManage && (
-                        <button
-                            type="button"
-                            class="btn btn-primary btn-sm gap-1"
-                            disabled={saving || !studioUrlDraft.trim() || !llmUrlDraft.trim()}
-                            onClick={() => void handleSaveConnection()}
-                        >
-                            {saving ? <span class="loading loading-spinner loading-xs" /> : <Save class="size-3.5" />}
-                            {selectedId != null ? 'Enregistrer' : 'Enregistrer comme provider'}
-                        </button>
-                    )}
-                </div>
-            </section>
 
             {message && (
                 <div class={`alert alert-${message.type === 'success' ? 'success' : 'error'} py-2 text-xs`}>

@@ -71,12 +71,15 @@ D:\pinokio\api\uncensored-local-studio\app\app\llm-backend\win\cuda\llama-server
 
 **c’est cette commande** qui recharge l’ancien modèle à chaque boot — pas seulement `serve.cjs`.
 
-Sur Demeter (PowerShell) :
+Sur Demeter (Linux) :
 
-```powershell
-cd C:\Users\auber\Documents\GitHub\devforge
-.\scripts\pinokio-demeter-reset-llm.ps1
+```bash
+cd ~/Documents/devforge
+bash scripts/demeter-bootstrap/stabilize-demeter.sh
+bash scripts/demeter-bootstrap/patch-serve-llm-host.sh
 ```
+
+Scripts Windows legacy (ancienne install) : `scripts/demeter-bootstrap/legacy-windows/pinokio-demeter-reset-llm.ps1`
 
 Le script :
 - tue `llama-server` sur le port `10086`
@@ -91,12 +94,14 @@ Ensuite **ne relancez plus** `llama-server.exe` à la main. Utilisez **Start** d
 
 L’ancienne config chargeait automatiquement le **premier fichier « qwen »** trouvé (souvent `qwen3-coder-30b-a3b-instruct-q4_k_m.gguf`). Après avoir téléchargé un **nouveau** GGUF, désactivez cet auto-load pour éviter de remonter l’ancien modèle au démarrage de Pinokio.
 
-Sur la machine GPU (Demeter), en PowerShell :
+Sur la machine GPU (Demeter), en bash :
 
-```powershell
-cd C:\chemin\vers\devforge   # ou copiez le script depuis le dépôt
-.\scripts\pinokio-serve-disable-autoload.ps1
+```bash
+cd ~/Documents/devforge
+bash scripts/demeter-bootstrap/setup-demeter-boot.sh
 ```
+
+Script Windows legacy : `scripts/demeter-bootstrap/legacy-windows/pinokio-serve-disable-autoload.ps1`
 
 Chemin par défaut de `serve.cjs` : `D:\pinokio\api\uncensored-local-studio\app\scripts\server\serve.cjs`
 
@@ -238,15 +243,16 @@ curl.exe http://127.0.0.1:4000/health/liveliness
 
 | Réglage | Valeur |
 |---------|--------|
-| Base URL | `https://agent.briseteia.me/cursor` (un seul `/`) |
-| Modèle | `demeter-qwen3-coder` (nom dans `litellm-config.yaml`) |
-| API Key | `master_key` du YAML (`D:\pinokio\litellm-config.yaml`) |
+| Base URL | `https://agent.briseteia.me/v1` |
+| Modèle | `demeter-qwen3-coder` |
+| API Key | `master_key` du YAML (`/mnt/ia/pinokio/litellm-config.yaml`) |
 
-Fichiers dans le depôt : `scripts/pinokio-litellm-cursor-proxy/` et `scripts/pinokio-litellm-install.ps1`.
+Fichiers : `scripts/pinokio-litellm-cursor-proxy/`, `scripts/demeter-bootstrap/litellm-config.demeter.yaml`
+Installation Windows legacy : `scripts/demeter-bootstrap/legacy-windows/pinokio-litellm-install.ps1`
 
 ### Sauvegarde avant migration OS (CatchyOS, etc.)
 
-Script : `scripts/pinokio-backup-demeter.ps1` (ou `.bat`).
+Script : `scripts/demeter-bootstrap/legacy-windows/pinokio-backup-demeter.ps1` (Windows legacy)
 
 ```powershell
 cd C:\Users\auber\Documents\scripts

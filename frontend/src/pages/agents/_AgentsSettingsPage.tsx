@@ -57,7 +57,7 @@ export function AgentsSettingsPage({
 
             <AgentsSettingsShell active={section} onChange={selectSection}>
                 <Card title={meta?.label ?? 'Paramètres'} eyebrow={meta?.description}>
-                    {section === 'providers' && <AiProvidersSettings />}
+                    {section === 'providers' && <AiProvidersSettings canManage={canManageAi} />}
                     {section === 'models' && <OllamaControlPanel canManage={canManageAi} />}
                     {section === 'pinokio' && <PinokioStudioManager canManage={canManageAi} />}
                     {section === 'instructions' && (

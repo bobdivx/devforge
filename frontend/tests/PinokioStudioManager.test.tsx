@@ -33,8 +33,8 @@ describe('PinokioStudioManager', () => {
                 return jsonResponse({
                     data: {
                         reachable: false,
-                        base_url: 'http://10.1.0.88:42065',
-                        studio_url: 'http://10.1.0.88:42065',
+                        base_url: 'http://10.1.0.88:42000',
+                        studio_url: 'http://10.1.0.88:42000',
                         llm_url: 'http://10.1.0.88:10086/v1',
                         active_model: null,
                         running: false,
@@ -55,7 +55,7 @@ describe('PinokioStudioManager', () => {
                         name: 'Demeter',
                         model: 'auto',
                         base_url: 'http://10.1.0.88:10086/v1',
-                        studio_base_url: 'http://10.1.0.88:42065',
+                        studio_base_url: 'http://10.1.0.88:42000',
                         has_api_key: false,
                         is_default: false,
                         created_at: '2026-01-01T00:00:00.000Z',
@@ -72,9 +72,9 @@ describe('PinokioStudioManager', () => {
             </TeamContext.Provider>,
         );
 
-        expect(await screen.findByText('Demeter / Pinokio')).toBeInTheDocument();
-        expect(await screen.findByPlaceholderText('http://10.1.0.88:42065')).toHaveValue('http://10.1.0.88:42065');
-        expect(screen.getByPlaceholderText('http://10.1.0.88:10086/v1')).toHaveValue('http://10.1.0.88:10086/v1');
+        expect(await screen.findByText('Local AI Studio (Pinokio)')).toBeInTheDocument();
+        expect(await screen.findByPlaceholderText('10.1.0.88')).toHaveValue('10.1.0.88');
+        expect(screen.getByText(/Studio : http:\/\/10\.1\.0\.88:42000/)).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Enregistrer comme provider/i })).toBeInTheDocument();
         expect(screen.getByText(/Hors ligne/i)).toBeInTheDocument();
 
@@ -87,7 +87,7 @@ describe('PinokioStudioManager', () => {
                 }
                 const body = JSON.parse(String(init.body));
                 return body.base_url === 'http://10.1.0.88:10086/v1'
-                    && body.studio_base_url === 'http://10.1.0.88:42065';
+                    && body.studio_base_url === 'http://10.1.0.88:42000';
             })).toBe(true);
         });
     });
@@ -102,8 +102,8 @@ describe('PinokioStudioManager', () => {
                         id: 12,
                         name: 'Demeter (RTX 3090)',
                         base_url: 'http://10.1.0.88:10086/v1',
-                        studio_base_url: 'http://10.1.0.88:42065',
-                        resolved_base_url: 'http://10.1.0.88:42065',
+                        studio_base_url: 'http://10.1.0.88:42000',
+                        resolved_base_url: 'http://10.1.0.88:42000',
                         llm_base_url: 'http://10.1.0.88:10086',
                         is_default: true,
                         model: 'qwen3',
@@ -116,8 +116,8 @@ describe('PinokioStudioManager', () => {
                 return jsonResponse({
                     data: {
                         reachable: true,
-                        base_url: 'http://10.1.0.88:42065',
-                        studio_url: 'http://10.1.0.88:42065',
+                        base_url: 'http://10.1.0.88:42000',
+                        studio_url: 'http://10.1.0.88:42000',
                         llm_url: 'http://10.1.0.88:10086',
                         active_model: 'qwen3',
                         running: true,

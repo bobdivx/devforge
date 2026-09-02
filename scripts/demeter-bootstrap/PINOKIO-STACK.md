@@ -9,8 +9,7 @@ Checklist apres migration OS. Les GGUF / checkpoints **ne sont pas** dans la sau
 | 1 | **Uncensored Local Studio** | `cocktailpeanut/uncensored-local-studio.pinokio` | `uncensored-local-studio` | LLM local `:10086` — agents DevForge |
 | 2 | **LiteLLM Cursor Proxy** | scripts devforge `pinokio-litellm-cursor-proxy` | `litellm-cursor-proxy` | Proxy `:4000` — Cursor Agent |
 | 3 | **Wan 2** (video) | `pinokiofactory/wan` | `wan` | Wan2GP — generation video |
-| 4 | **ACE-Step 1.5** | `cocktailpeanut/ace-step.pinokio` | `ace-step.pinokio` | Musique locale |
-| 5 | **ACE-Step Studio** (optionnel) | `timoncool/ACE-Step-Studio-pinokio` | `ace-step-studio-pinokio` | UI studio musique / clips |
+| 4 | **ACE-Step 1.5** | `cocktailpeanut/ace-step.pinokio` | `ace-step.pinokio` | Musique locale (une seule entrée Pinokio) |
 
 Dans Pinokio : **Install → Start → Launch at startup** pour chaque app (apres clone).
 
@@ -50,7 +49,7 @@ Voir `docs/wiki/pinokio-uncensored-llm-setup.md` (chemins Linux : `~/pinokio`).
 - `api_base` : `http://127.0.0.1:10086/v1`
 - Modele alias : `demeter-qwen3-coder`
 
-Cursor : `https://agent.briseteia.me/cursor` + `master_key`.
+Cursor (Override OpenAI Base URL) : `https://agent.briseteia.me/v1` + clé `master_key` + modèle `demeter-qwen3-coder`.
 
 ## Modeles Wan 2 (video)
 
@@ -60,9 +59,7 @@ Cursor : `https://agent.briseteia.me/cursor` + `master_key`.
 
 ## Modeles ACE-Step (musique)
 
-- **ACE-Step 1.5** : modeles Hugging Face au premier run (`ace-step.pinokio`)
-- API optionnelle : `http://127.0.0.1:8001` (acestep-api)
-- **ACE-Step Studio** : pull modeles au premier Install (PyTorch 2.7 + ACE-Step 1.5 XL)
+- **ACE-Step 1.5** (`ace-step.pinokio`) : modèles Hugging Face au premier Install/Start
 
 ## VRAM RTX 3090 (24 GB)
 
@@ -78,11 +75,11 @@ Workflow : **Stop** LLM dans Pinokio → Start Wan ou ACE-Step → Stop avant re
 curl -s http://127.0.0.1:7575          # Homarr
 curl -s http://127.0.0.1:4000/health/liveliness   # LiteLLM
 curl -s http://127.0.0.1:10086/v1/models          # llama-server (apres GGUF charge)
-curl -s https://agent.briseteia.me/cursor/health/liveliness  # tunnel Cursor
+curl -s https://agent.briseteia.me/v1/models -H "Authorization: Bearer sk-demeter-cursor-2026"
 ```
 
 ## DevForge NAS (apres Demeter OK)
 
-- URL studio Pinokio : port dynamique (~`42065`)
+- URL studio Pinokio : `http://10.1.0.88:42000`
 - URL LLM agents : `http://10.1.0.88:10086/v1`
-- Parametres → AI → Demeter / Pinokio → `studio_base_url` + charger modele 49152
+- Paramètres AI → **Local AI Studio (Pinokio)** : IP + ports, ou LiteLLM `https://agent.briseteia.me/v1`

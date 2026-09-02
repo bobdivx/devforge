@@ -38,8 +38,12 @@ if [[ ! -f "$HOME/demeter.local.env" ]]; then
 fi
 
 if [[ ! -f "$LITELLM_CONFIG" ]]; then
-  cp -f "$REPO_ROOT/scripts/pinokio-litellm-cursor-proxy/litellm-config.yaml.example" "$LITELLM_CONFIG"
-  echo ">> litellm-config.yaml cree depuis example — verifier master_key"
+  if [[ -f "$SCRIPT_DIR/litellm-config.demeter.yaml" ]]; then
+    cp -f "$SCRIPT_DIR/litellm-config.demeter.yaml" "$LITELLM_CONFIG"
+  else
+    cp -f "$REPO_ROOT/scripts/pinokio-litellm-cursor-proxy/litellm-config.yaml.example" "$LITELLM_CONFIG"
+  fi
+  echo ">> litellm-config.yaml cree — verifier master_key"
 fi
 
 bash "$SCRIPT_DIR/bootstrap-linux.sh"

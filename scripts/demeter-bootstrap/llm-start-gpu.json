@@ -1,0 +1,11 @@
+{
+  "model": "qwen3-coder-30b-a3b-instruct-q4_k_m.gguf",
+  "preferredBackend": "cuda",
+  "contextSize": 49152,
+  "gpuLayers": -1,
+  "flashAttn": true,
+  "cacheTypeK": "q8_0",
+  "cacheTypeV": "q8_0",
+  "batchSize": 2048,
+  "ubatchSize": 512
+}

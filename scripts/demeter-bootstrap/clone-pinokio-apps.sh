@@ -40,8 +40,7 @@ fi
 
 clone_if_missing "wan" "https://github.com/pinokiofactory/wan"
 clone_if_missing "ace-step.pinokio" "https://github.com/cocktailpeanut/ace-step.pinokio"
-clone_if_missing "ace-step-studio-pinokio" \
-  "https://github.com/timoncool/ACE-Step-Studio-pinokio"
+# ACE-Step Studio (timoncool) = doublon UI — garder uniquement ace-step.pinokio (ACE-Step 1.5)
 
 echo ""
 echo "Termine. Ouvrir Pinokio → Install + Start pour chaque app."

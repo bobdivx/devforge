@@ -6,6 +6,7 @@ import type { AiProviderConfig, LlmModelOption, LlmProvider } from '../../lib/do
 import { domainApi } from '../../lib/domain-api';
 import { AUTO_MODEL_VALUE, CUSTOM_MODEL_VALUE, formatModelLabel, isAutoModel, modelSelectValue } from '../../lib/llm-models';
 import { SmallModelToolsWarning } from './SmallModelToolsWarning';
+import { PinokioStudioManager } from './PinokioStudioManager';
 import { useApiQuery } from '../../lib/use-api-query';
 import { useTeamContext } from '../../lib/team-context';
 
@@ -130,7 +131,7 @@ function isPublicOllamaTunnel(url: string): boolean {
     }
 }
 
-export function AiProvidersSettings() {
+export function AiProvidersSettings({ canManage = false }: { canManage?: boolean }) {
     const { agentsEnabled } = useTeamContext();
     const query = useApiQuery(agentsEnabled ? 'ai-providers' : null, () => domainApi.aiProviders());
     const [showForm, setShowForm] = useState(false);
@@ -703,12 +704,9 @@ export function AiProvidersSettings() {
                 </form>
             )}
 
-            <p class="rounded-md border border-dashed border-base-300 px-3 py-2 text-[11px] text-base-content/55">
-                Ollama → <a class="link link-primary" href="#models">Modèles locaux</a>
-                {' · '}
-                Demeter / Pinokio → <a class="link link-primary" href="#pinokio">section dédiée</a>
-                {' '}(URL LAN, VRAM, GGUF).
-            </p>
+            <div class="mt-4 border-t border-base-300 pt-4">
+                <PinokioStudioManager canManage={canManage} />
+            </div>
         </div>
     );
 }

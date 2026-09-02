@@ -66,14 +66,36 @@ describe('AiProvidersSettings', () => {
                 });
             }
 
+            if (url === '/api/devforge/v1/ai/pinokio/instances') {
+                return jsonResponse({ data: [] });
+            }
+
+            if (url.startsWith('/api/devforge/v1/ai/pinokio?')) {
+                return jsonResponse({
+                    data: {
+                        reachable: false,
+                        base_url: null,
+                        studio_url: null,
+                        llm_url: null,
+                        active_model: null,
+                        running: false,
+                        context_size: null,
+                        backend_mode: null,
+                        gpu: null,
+                        models: [],
+                        error: 'Hors ligne',
+                    },
+                });
+            }
+
             throw new Error(`Requête inattendue : ${method} ${url}`);
         });
 
         renderWithAgentsEnabled();
 
         expect(await screen.findByText('Gemini Flash')).toBeInTheDocument();
-        expect(screen.getByRole('link', { name: 'Modèles locaux' })).toHaveAttribute('href', '#models');
-        expect(screen.getByRole('link', { name: 'section dédiée' })).toHaveAttribute('href', '#pinokio');
+        expect(screen.getByText('Local AI Studio (Pinokio)')).toBeInTheDocument();
+        expect(screen.getByPlaceholderText('10.1.0.88')).toBeInTheDocument();
 
         fireEvent.click(screen.getByTitle('Modifier'));
 

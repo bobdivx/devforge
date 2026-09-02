@@ -22,7 +22,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$sourceApp = Join-Path $PSScriptRoot "pinokio-litellm-cursor-proxy"
+$sourceApp = Join-Path $PSScriptRoot "../../pinokio-litellm-cursor-proxy"
 $targetApp = Join-Path $PinokioHome "api\$AppName"
 
 if (-not (Test-Path -LiteralPath $sourceApp)) {
@@ -96,6 +96,6 @@ Write-Host "- llama-server :10086: Uncensored Local Studio dans Pinokio" -Foregr
 Write-Host "- Tunnel Cloudflare agent.briseteia.me: service Windows separe" -ForegroundColor White
 Write-Host ""
 Write-Host "Cursor :" -ForegroundColor Cyan
-Write-Host "  Base URL : https://agent.briseteia.me/cursor" -ForegroundColor White
+Write-Host "  Base URL : https://agent.briseteia.me/v1" -ForegroundColor White
 Write-Host "  Modele   : demeter-qwen3-coder" -ForegroundColor White
 Write-Host "  API Key  : master_key dans $ConfigPath" -ForegroundColor White

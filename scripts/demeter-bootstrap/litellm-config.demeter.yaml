@@ -1,5 +1,5 @@
-# Exemple LiteLLM Demeter — copier vers /mnt/ia/pinokio/litellm-config.yaml
-# Cursor : Override OpenAI Base URL = https://agent.briseteia.me/v1 (pas /cursor)
+# Demeter LiteLLM — sans Postgres (mode local / Cursor)
+# Copier vers /mnt/ia/pinokio/litellm-config.yaml
 
 model_list:
   - model_name: demeter-qwen3-coder
