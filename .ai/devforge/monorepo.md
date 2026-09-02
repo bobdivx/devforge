@@ -11,8 +11,11 @@
 ├── docker-compose*.yml
 ├── scripts/
 ├── package.json          # workspaces npm (frontend) + scripts Vite Laravel
-├── README.md, LICENSE, SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md
-├── CLAUDE.md, AGENTS.md  # entrypoints AI
+├── README.md, LICENSE
+├── SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, CLAUDE.md, AGENTS.md  # stubs → docs/
+├── docs/                 # docs projet (GRAFT, CLAUDE, SECURITY, …)
+│   ├── CLAUDE.md, AGENTS.md, …
+│   └── GRAFT_*.md
 └── …
 ```
 
@@ -21,7 +24,8 @@
 - `backend/`, `frontend/`, `docs/`, `docker/`, `scripts/`, `.github/`
 - `package.json` / `package-lock.json` (workspaces)
 - `docker-compose*.yml`
-- Docs GitHub / AI : `README.md`, `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `CLAUDE.md`, `AGENTS.md`
+- Docs GitHub / AI : stubs à la racine → contenu dans `docs/` (`SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `CLAUDE.md`, `AGENTS.md`)
+- Stack Demeter (Pinokio / GPU) : repo dédié [bobdivx/demeter-lab](https://github.com/bobdivx/demeter-lab) — voir `scripts/DEMETER.md`
 
 ### Ne pas remettre à la racine
 

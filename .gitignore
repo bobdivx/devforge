@@ -22,6 +22,8 @@ backend/.env.backup
 backend/.env.secrets
 scripts/devforge-deploy.env
 devforge-rollout-*.tar.gz
+tmp-*.sql
+body.txt
 .phpunit.result.cache
 Homestead.json
 Homestead.yaml

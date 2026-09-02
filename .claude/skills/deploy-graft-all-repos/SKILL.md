@@ -136,7 +136,7 @@ npx graft build --dir .graft
 
 ---
 
-Voir [devforge/GRAFT_INTEGRATION.md](https://github.com/bobdivx/devforge/blob/main/GRAFT_INTEGRATION.md) pour documentation complète.
+Voir [devforge/docs/GRAFT_INTEGRATION.md](https://github.com/bobdivx/devforge/blob/main/docs/GRAFT_INTEGRATION.md) pour documentation complète.
 
 Auto-déployé par DevForge Agent Automation
 ```
@@ -195,7 +195,7 @@ After merge:
 ---
 
 Auto-deployed by DevForge Agent Automation  
-See [GRAFT_INTEGRATION.md](https://github.com/bobdivx/devforge/blob/main/GRAFT_INTEGRATION.md) for details
+See [GRAFT_INTEGRATION.md](https://github.com/bobdivx/devforge/blob/main/docs/GRAFT_INTEGRATION.md) for details
 ```
 
 ### 3. Progress Tracking
