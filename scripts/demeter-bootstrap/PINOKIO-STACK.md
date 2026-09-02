@@ -4,7 +4,7 @@ Checklist apres migration OS. Les GGUF / checkpoints **ne sont pas** dans la sau
 
 ## Apps Pinokio (ordre recommande)
 
-| Priorite | App | Repo launcher | Dossier `~/pinokio/api/` | Role |
+| Priorite | App | Repo launcher | Dossier `~/pinokio/api/` (→ `/mnt/ia/pinokio/api/`) | Role |
 |----------|-----|---------------|--------------------------|------|
 | 1 | **Uncensored Local Studio** | `cocktailpeanut/uncensored-local-studio.pinokio` | `uncensored-local-studio` | LLM local `:10086` — agents DevForge |
 | 2 | **LiteLLM Cursor Proxy** | scripts devforge `pinokio-litellm-cursor-proxy` | `litellm-cursor-proxy` | Proxy `:4000` — Cursor Agent |

@@ -1,6 +1,18 @@
 # Demeter bootstrap — Pinokio + Homarr (CachyOS / Linux)
 
-Machine GPU **Demeter** (`10.1.0.88`, RTX 3090) — **Linux uniquement** (`~/pinokio`, pas `D:\pinokio`).
+Machine GPU **Demeter** (`10.1.0.88`, RTX 3090) — **Linux uniquement**.
+
+**Disque IA** : label `IA`, monté sur `/mnt/ia` (~900 Go). Tout le lourd (Pinokio, GGUF, Homarr data) vit là :
+
+```
+/mnt/ia/pinokio/     ← apps Pinokio + modeles
+/mnt/ia/homarr/      ← données Homarr
+/mnt/ia/logs/        ← litellm, serve.cjs
+```
+
+`~/pinokio` = symlink vers `/mnt/ia/pinokio` (compat scripts).
+
+Migration : `bash scripts/demeter-bootstrap/migrate-to-ia-disk.sh`
 
 ```
 Homarr :7575          ← portail
