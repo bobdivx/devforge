@@ -120,10 +120,13 @@ module.exports = {
     {
       method: "shell.run",
       params: {
-        env: { },
+        env: {
+          SERVER_NAME: "0.0.0.0",
+          PORT: "${ACE_STEP_PORT}"
+        },
         path: "app",
         message: [
-          "uv run acestep --port ${ACE_STEP_PORT}{{platform === 'darwin' ? ' --init_service true --init_llm true --backend pt --lm_model_path acestep-5Hz-lm-1.7B' : ''}}"
+          "uv run acestep --server-name 0.0.0.0 --port ${ACE_STEP_PORT}{{platform === 'darwin' ? ' --init_service true --init_llm true --backend pt --lm_model_path acestep-5Hz-lm-1.7B' : ''}}"
         ],
         on: [{
           event: "/(http:\/\/[0-9.:]+)/",

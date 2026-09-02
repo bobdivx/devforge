@@ -10,7 +10,7 @@ Toutes les apps doivent utiliser ces ports pour Homarr, DevForge et le LAN.
 | **llama-server** (API OpenAI) | `10086` | http://10.1.0.88:10086/v1 | `LLM_PORT` / `serve.cjs` |
 | **LiteLLM** (Cursor proxy) | `4000` | http://10.1.0.88:4000 | `LITELLM_PORT` / `start.js` |
 | **Wan 2** (Wan2GP) | `8188` | http://10.1.0.88:8188 | `SERVER_PORT` / `wan/start.js` |
-| **ACE-Step 1.5** | `8001` | http://10.1.0.88:8001 | `--port` / `ace-step/start.js` |
+| **ACE-Step 1.5** | `8001` | http://10.1.0.88:8001 | `--server-name 0.0.0.0 --port` / `start.js` |
 | **Cloudflare tunnel** | — | https://agent.briseteia.me/v1 | → LiteLLM `:4000` (Cursor : Override OpenAI Base URL) |
 
 ## Appliquer les ports Pinokio
