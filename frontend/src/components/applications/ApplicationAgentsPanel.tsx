@@ -289,39 +289,44 @@ export function ApplicationAgentsPanel({ application, userName = 'Vous' }: Props
     const query = useApiQuery(agentsEnabled ? 'application-agents' : null, () => domainApi.agents());
     const allAgents = query.data?.data ?? [];
 
-    const dedicatedAgents = useMemo(
-        () => allAgents.filter((a) => a.resource_uuid === application.uuid),
+    /** Agents utilisables sur cette app : équipe (sans verrou) + dédiés à cette app. */
+    const usableAgents = useMemo(
+        () => allAgents.filter((a) => !a.resource_uuid || a.resource_uuid === application.uuid),
         [allAgents, application.uuid],
     );
+    const dedicatedAgents = useMemo(
+        () => usableAgents.filter((a) => a.resource_uuid === application.uuid),
+        [usableAgents, application.uuid],
+    );
     const teamAgents = useMemo(
-        () => allAgents.filter((a) => a.resource_uuid !== application.uuid),
-        [allAgents, application.uuid],
+        () => usableAgents.filter((a) => !a.resource_uuid),
+        [usableAgents],
     );
 
     // Initialiser l'agent sélectionné par défaut (URL agent=…, sinon agent chat de l’app)
     useEffect(() => {
-        if (allAgents.length === 0) {
+        if (usableAgents.length === 0) {
             return;
         }
 
-        if (selectedAgentUuid && allAgents.some((agent) => agent.uuid === selectedAgentUuid)) {
+        if (selectedAgentUuid && usableAgents.some((agent) => agent.uuid === selectedAgentUuid)) {
             return;
         }
 
         const fromUrl = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('agent');
-        if (fromUrl && allAgents.some((agent) => agent.uuid === fromUrl)) {
+        if (fromUrl && usableAgents.some((agent) => agent.uuid === fromUrl)) {
             setSelectedAgentUuid(fromUrl);
             return;
         }
 
-        const preferred = pickApplicationChatAgent(allAgents, application.uuid)
+        const preferred = pickApplicationChatAgent(usableAgents, application.uuid)
             ?? dedicatedAgents[0]
             ?? teamAgents.find((a) => ['worker', 'deployment', 'devforge'].includes(a.type))
-            ?? allAgents[0];
+            ?? usableAgents[0];
         if (preferred) {
             setSelectedAgentUuid(preferred.uuid);
         }
-    }, [allAgents, dedicatedAgents, teamAgents, selectedAgentUuid, application.uuid]);
+    }, [usableAgents, dedicatedAgents, teamAgents, selectedAgentUuid, application.uuid]);
 
     useEffect(() => {
         if (!selectedAgentUuid || typeof window === 'undefined') {
@@ -356,8 +361,8 @@ export function ApplicationAgentsPanel({ application, userName = 'Vous' }: Props
     }, [selectedAgentUuid]);
 
     const selectedAgent = useMemo(
-        () => allAgents.find((a) => a.uuid === selectedAgentUuid) ?? null,
-        [allAgents, selectedAgentUuid],
+        () => usableAgents.find((a) => a.uuid === selectedAgentUuid) ?? null,
+        [usableAgents, selectedAgentUuid],
     );
 
     const handleDeleteAgent = async (agent: Agent) => {
@@ -425,27 +430,29 @@ export function ApplicationAgentsPanel({ application, userName = 'Vous' }: Props
     return (
         <section class="grid min-w-0 gap-3 sm:gap-4">
             {/* Header Toolbar */}
-            <div class="flex flex-wrap items-center justify-between gap-2 sm:gap-3 rounded-xl border border-base-300/80 bg-base-100 p-3 sm:p-4">
-                <div class="min-w-0">
-                    <h3 class="flex items-center gap-2 text-xs sm:text-sm font-semibold">
-                        <Bot class="size-4 text-primary" aria-hidden />
+            <div class="flex flex-col gap-3 rounded-xl border border-base-300/80 bg-base-100 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:p-4">
+                <div class="min-w-0 flex-1">
+                    <h3 class="flex flex-wrap items-center gap-2 text-xs sm:text-sm font-semibold">
+                        <Bot class="size-4 shrink-0 text-primary" aria-hidden />
                         <span>Agents IA</span>
                         <span class="badge badge-ghost badge-sm tabular-nums">
-                            {allAgents.length} {allAgents.length > 1 ? 'agents' : 'agent'}
+                            {usableAgents.length} {usableAgents.length > 1 ? 'agents' : 'agent'}
                         </span>
                     </h3>
-                    <p class="text-xs text-base-content/55">
-                        Vos bots autonomes et assistants IA pour analyser, corriger et déployer cette application.
+                    <p class="mt-1 hidden text-xs text-base-content/55 sm:block sm:max-w-xl">
+                        Un agent par type de travail (déploiement, veille…). Les sous-agents naissent pour une tâche ;
+                        le contexte application est injecté au chat.
                     </p>
                 </div>
-                <div class="flex flex-wrap items-center gap-1 sm:gap-1.5">
+                <div class="flex w-full shrink-0 flex-wrap items-center gap-1.5 sm:w-auto sm:justify-end">
                     <button
                         class="btn btn-primary btn-sm gap-1.5"
                         type="button"
                         onClick={() => setCreateOpen(true)}
                     >
                         <Plus class="size-3.5" aria-hidden />
-                        <span>Nouveau Bot</span>
+                        <span class="sm:hidden">Nouveau</span>
+                        <span class="hidden sm:inline">Nouveau Bot</span>
                     </button>
                     <button
                         class="btn btn-ghost btn-sm border border-base-300/80 gap-1.5"
@@ -461,7 +468,7 @@ export function ApplicationAgentsPanel({ application, userName = 'Vous' }: Props
                         )}
                         <span class="hidden sm:inline">Réinitialiser l'équipe</span>
                     </button>
-                    {allAgents.length > 0 && (
+                    {usableAgents.length > 0 && (
                         <button
                             class="btn btn-ghost btn-sm border border-base-300/80 text-error/80 hover:text-error gap-1.5"
                             type="button"
@@ -492,7 +499,7 @@ export function ApplicationAgentsPanel({ application, userName = 'Vous' }: Props
             {query.error && <p class="text-xs text-error">{query.error}</p>}
 
             <DataState loading={query.loading} error={query.error} onRetry={() => void query.reload()}>
-                {allAgents.length === 0 ? (
+                {usableAgents.length === 0 ? (
                     <div class="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-base-300 bg-base-100/50 p-8 sm:p-12 text-center">
                         <div class="grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
                             <Sparkles class="size-6" aria-hidden />
@@ -595,10 +602,10 @@ export function ApplicationAgentsPanel({ application, userName = 'Vous' }: Props
                         {/* Grille des cartes d'agents — secondaire au chat */}
                         <details class="grid gap-2.5 sm:gap-3" open>
                             <summary class="cursor-pointer text-xs font-semibold uppercase tracking-wider text-base-content/50">
-                                Vos Cartes d'Agents ({allAgents.length})
+                                Vos Cartes d'Agents ({usableAgents.length})
                             </summary>
                             <div class="grid gap-2.5 sm:gap-3 md:grid-cols-2 xl:grid-cols-3">
-                                {allAgents.map((agent) => (
+                                {usableAgents.map((agent) => (
                                     <ApplicationAgentCardItem
                                         key={agent.uuid}
                                         agent={agent}
@@ -621,7 +628,6 @@ export function ApplicationAgentsPanel({ application, userName = 'Vous' }: Props
             <CreateAgentModal
                 open={createOpen}
                 userName={userName}
-                resourceUuid={application.uuid}
                 onClose={() => setCreateOpen(false)}
                 onCreated={(agent) => {
                     setCreateOpen(false);

@@ -133,6 +133,13 @@ class DefaultAgentProvisioner
                 Log::info("[DefaultAgentProvisioner] Relanceur #{$existing->id} : provider fixé vers config #{$providerConfig->id} ({$providerConfig->provider}).");
             }
 
+            // Agents d'équipe = 1 par type, pas liés à une app (contexte passé au chat)
+            if (filled($existing->resource_uuid) && $existing->parent_agent_id === null) {
+                $existing->update(['resource_uuid' => null]);
+                $updated = true;
+                Log::info("[DefaultAgentProvisioner] Relanceur #{$existing->id} : resource_uuid effacé (rôle équipe).");
+            }
+
             return $updated ? 1 : 0;
         }
 
@@ -195,6 +202,12 @@ class DefaultAgentProvisioner
             ->first();
 
         if ($existing) {
+            if (filled($existing->resource_uuid) && $existing->parent_agent_id === null) {
+                $existing->update(['resource_uuid' => null]);
+
+                return 1;
+            }
+
             return 0;
         }
 

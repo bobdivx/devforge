@@ -9,13 +9,12 @@ use App\Models\AiAgentSession;
 use App\Models\Application;
 use App\Models\Team;
 use App\Models\User;
+use App\Services\DevForge\Agent\AgentApplicationContext;
 use App\Services\DevForge\Agent\AgentChatService;
 use App\Services\DevForge\Agent\AgentSessionService;
 use App\Services\DevForge\Agent\AgentWelcomeComposer;
 use App\Services\DevForge\Agent\ApplicationWorkspaceChatContext;
 use App\Services\DevForge\Core\CurrentTeamContext;
-use App\Services\DevForge\CurrentTeamResources;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -24,7 +23,7 @@ class AgentSessionController extends Controller
 {
     public function __construct(
         private readonly CurrentTeamContext $currentTeamContext,
-        private readonly CurrentTeamResources $currentTeamResources,
+        private readonly AgentApplicationContext $agentApplicationContext,
         private readonly AgentSessionService $sessionService,
         private readonly AgentChatService $chatService,
         private readonly AgentWelcomeComposer $welcomeComposer,
@@ -337,29 +336,12 @@ class AgentSessionController extends Controller
         ?string $applicationUuid,
         bool $abortOnMissing = true,
     ): ?Application {
-        if ($applicationUuid === null || trim($applicationUuid) === '') {
-            return null;
-        }
-
-        try {
-            $application = $this->currentTeamResources->application($this->currentUser($request), $applicationUuid);
-        } catch (ModelNotFoundException) {
-            if ($abortOnMissing) {
-                abort(404, 'Application introuvable.');
-            }
-
-            return null;
-        }
-
-        if (
-            is_string($agent->resource_uuid)
-            && $agent->resource_uuid !== ''
-            && $agent->resource_uuid !== $application->uuid
-        ) {
-            abort(422, 'Cet agent est lié à une autre application.');
-        }
-
-        return $application;
+        return $this->agentApplicationContext->resolve(
+            $this->currentUser($request),
+            $agent,
+            $applicationUuid,
+            $abortOnMissing,
+        );
     }
 
     /**
