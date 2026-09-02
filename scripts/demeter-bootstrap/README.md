@@ -26,7 +26,8 @@ DevForge (NAS) = reconfigurer plus tard si besoin.
 2. IP fixe `10.1.0.88` si possible
 3. OpenSSH + Docker
 4. `git clone` devforge (ex. `~/Documents/devforge`) ou `git pull` si deja clone
-5. Cursor Remote SSH → Demeter
+5. **SSH cle** (optionnel mais recommande) : voir section SSH ci-dessous
+6. Cursor Remote SSH → Demeter
 
 ### 3. Fichier local
 
@@ -59,6 +60,40 @@ docker compose -f docker-compose.homarr.yml --env-file homarr.env up -d
 UI : **http://10.1.0.88:7575**
 
 Tuiles suggerees : `homarr-tiles.md`
+
+## SSH sans mot de passe (PC Windows → Demeter)
+
+Sur le **PC Windows** (une fois) :
+
+```powershell
+ssh-keygen -t ed25519 -f $env:USERPROFILE\.ssh\id_ed25519_demeter -N '""' -C "cursor-devforge-demeter"
+```
+
+Ajouter dans `%USERPROFILE%\.ssh\config` :
+
+```
+Host demeter
+    HostName 10.1.0.88
+    User bobdivx
+    IdentityFile ~/.ssh/id_ed25519_demeter
+    IdentitiesOnly yes
+```
+
+**Sur Demeter** (Remote SSH, une fois — mot de passe encore requis en local) :
+
+```bash
+cd ~/Documents/devforge
+bash scripts/demeter-bootstrap/install-ssh-key-on-demeter.sh "CONTENU_DE_id_ed25519_demeter.pub"
+```
+
+Ou depuis Windows quand le mot de passe SSH repond :
+
+```powershell
+$env:DEMETER_SSH_PASSWORD='...'
+.\scripts\demeter-bootstrap\install-ssh-key-windows.ps1
+```
+
+Test : `ssh demeter hostname`
 
 ## Ce que l agent fait
 
