@@ -193,14 +193,17 @@ class CleanupNames extends Command
             $dbConfig = config('database.connections.'.config('database.default'));
             $command = sprintf(
                 'pg_dump -h %s -p %s -U %s -d %s > %s',
-                $dbConfig['host'],
-                $dbConfig['port'],
-                $dbConfig['username'],
-                $dbConfig['database'],
-                $backupFile
+                escapeshellarg($dbConfig['host']),
+                escapeshellarg($dbConfig['port']),
+                escapeshellarg($dbConfig['username']),
+                escapeshellarg($dbConfig['database']),
+                escapeshellarg($backupFile)
             );
 
+            // Use putenv to avoid exposing password in process list
+            putenv("PGPASSWORD=" . ($dbConfig['password'] ?? ''));
             exec($command, $output, $returnCode);
+            putenv('PGPASSWORD'); // Clear it immediately
         } catch (\Exception $e) {
             // Log failure but continue - backup is optional safeguard
             Log::warning('Name cleanup backup failed', ['error' => $e->getMessage()]);

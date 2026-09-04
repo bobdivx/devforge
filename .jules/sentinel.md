@@ -1,0 +1,4 @@
+## 2024-05-24 - [Fix pg_dump Command Injection Risk]
+**Vulnerability:** In `backend/app/Console/Commands/CleanupNames.php`, the `createBackup` method invoked `pg_dump` via `exec()` using unescaped string interpolation for host, port, username, database, and backup path.
+**Learning:** Shell commands using `exec()`, `system()`, or `shell_exec()` must always escape variables derived from configurations or user input to prevent command injection. Additionally, database passwords should not be passed directly in the shell command string, as they leak to the process list (e.g. `ps aux`).
+**Prevention:** Use `escapeshellarg()` on all dynamic variables in shell commands. Use `putenv("PGPASSWORD=...")` immediately before calling `exec()` and `putenv("PGPASSWORD")` immediately after to pass secrets securely via the environment without exposing them in the process table.
