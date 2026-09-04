@@ -118,7 +118,12 @@ class ResilientLlmProvider implements LlmProvider
             || str_contains($message, 'quota')
             || str_contains($message, 'rate limit')
             || str_contains($message, 'unavailable')
-            || str_contains($message, 'indisponible');
+            || str_contains($message, 'indisponible')
+            || (str_contains($message, 'no message or tool call') && str_contains($message, 'empty'))
+            || str_contains($message, 'response contained no message')
+            || str_contains($message, 'no content provided')
+            || str_contains($message, 'empty or absurd')
+            || str_contains($message, 'réponse vide');
     }
 
     /**
