@@ -113,36 +113,59 @@ class RigChatRuntime
         $iterations = 0;
         $text = '';
         $statusNudgeUsed = false;
-        $strongerRetryUsed = false;
+        $attemptedLlmKeys = [];
+        $crossProviderAttempts = 0;
+        $maxCrossProviderAttempts = 3;
 
         try {
             while ($iterations < self::MAX_TEXT_TOOL_TURNS) {
                 $iterations++;
-                $text = $this->rig->chat(
-                    $prompt !== '' ? $prompt : 'Continue.',
-                    $preamble,
-                    $llm['model'] ?? null,
-                    $llm,
-                    [
-                        'messages' => $history,
-                        'mcp_url' => $credentials['url'],
-                        'mcp_token' => $credentials['token'],
-                    ],
-                );
+                try {
+                    $text = $this->rig->chat(
+                        $prompt !== '' ? $prompt : 'Continue.',
+                        $preamble,
+                        $llm['model'] ?? null,
+                        $llm,
+                        [
+                            'messages' => $history,
+                            'mcp_url' => $credentials['url'],
+                            'mcp_token' => $credentials['token'],
+                        ],
+                    );
+                } catch (\Throwable $exception) {
+                    if (! AgentChatEmptyReplyFallback::isEmptyCompletionFailure($exception->getMessage())) {
+                        throw $exception;
+                    }
+
+                    app(AgentChatEmptyReplyFallback::class)->log(
+                        $run,
+                        $exception->getMessage(),
+                        'empty_completion_error',
+                    );
+                    $text = '';
+                }
+
                 $text = trim($text);
                 $calls = AgentDirectives::extractProseToolCalls($text);
                 if ($calls === []) {
                     $isAbsurd = AgentEmptyAbsurdReply::isEmptyOrAbsurd($text, false, $userContent);
                     if ($isAbsurd) {
-                        app(AgentChatEmptyReplyFallback::class)->log($run, $text);
+                        if ($text !== '') {
+                            app(AgentChatEmptyReplyFallback::class)->log($run, $text);
+                        }
                         $text = '';
 
-                        if (! $strongerRetryUsed) {
-                            $strongerRetryUsed = true;
-                            $stronger = app(AgentChatEmptyReplyFallback::class)->strongerLlmPayload($llm);
-                            if (is_array($stronger)) {
-                                $llm = $stronger;
-                                $run->appendLog('Fallback : nouvel essai avec modèle plus grand ('.$stronger['model'].').');
+                        if ($crossProviderAttempts < $maxCrossProviderAttempts) {
+                            $next = app(AgentChatEmptyReplyFallback::class)->nextCrossProviderLlmPayload(
+                                $agent,
+                                $llm,
+                                $attemptedLlmKeys,
+                            );
+                            if (is_array($next)) {
+                                $crossProviderAttempts++;
+                                $llm = $next;
+                                $label = ($next['provider'] ?? '?').'/'.($next['model'] ?? '?');
+                                $run->appendLog('Fallback cross-provider : nouvel essai avec '.$label.'.');
                                 $prompt = $userContent !== '' ? $userContent : $prompt;
                                 continue;
                             }
@@ -229,6 +252,8 @@ class RigChatRuntime
         if ($text === '' || AgentEmptyAbsurdReply::isEmptyOrAbsurd($text, $steps !== [], $userContent)) {
             $text = AgentEmptyAbsurdReply::userFacingFailureMessage(
                 isset($llm['model']) && is_string($llm['model']) ? $llm['model'] : null,
+                isset($llm['provider']) && is_string($llm['provider']) ? $llm['provider'] : null,
+                isset($llm['base_url']) && is_string($llm['base_url']) ? $llm['base_url'] : null,
             );
         }
 
