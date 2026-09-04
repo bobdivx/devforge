@@ -51,6 +51,30 @@ it('builds a french user-facing failure that never contains unfavored', function
         ->and($message)->not->toContain('unfavored');
 });
 
+it('does not blame petit modele local when the failing provider is gemini cloud', function () {
+    $message = AgentEmptyAbsurdReply::userFacingFailureMessage(
+        'gemini-2.5-flash',
+        'gemini',
+        'https://generativelanguage.googleapis.com/v1beta/openai',
+    );
+
+    expect($message)->toContain('cloud')
+        ->and($message)->toContain('gemini-2.5-flash')
+        ->and($message)->not->toContain('petit modèle local')
+        ->and($message)->not->toContain('trop d\'outils MCP')
+        ->and(AgentEmptyAbsurdReply::isCloudProvider('gemini'))->toBeTrue()
+        ->and(AgentEmptyAbsurdReply::isCloudProvider(null, null, 'generativelanguage.googleapis.com'))->toBeTrue()
+        ->and(AgentEmptyAbsurdReply::isCloudProvider('ollama', 'qwen2.5:3b'))->toBeFalse();
+});
+
+it('detects rig empty completion errors from gemini', function () {
+    $raw = 'Rig agent chat 502: {"error":"LLM error from generativelanguage.googleapis.com: CompletionError: ResponseError: Response contained no message or tool call (empty)."}';
+
+    expect(AgentEmptyAbsurdReply::isEmptyCompletionFailure($raw))->toBeTrue()
+        ->and(AgentChatEmptyReplyFallback::isEmptyCompletionFailure($raw))->toBeTrue()
+        ->and(AgentEmptyAbsurdReply::isEmptyCompletionFailure('LLM timeout after 60s'))->toBeFalse();
+});
+
 it('picks a stronger installed ollama model than qwen2.5:3b', function () {
     $fallback = new AgentChatEmptyReplyFallback;
 
