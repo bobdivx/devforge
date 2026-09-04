@@ -58,27 +58,15 @@ class ResilientLlmProvider implements LlmProvider
         return $this->primary->testConnection() || $this->fallback->testConnection();
     }
 
-    /**
-     * @param  array<int, array<string, mixed>>  $messages
-     * @param  array<int, mixed>  $tools
-     */
     private function switchToFallback(\Throwable $exception, array $messages, array $tools): LlmResponse
     {
         $this->useFallback = true;
-
         if ($this->onFallback) {
             ($this->onFallback)($exception, $this->primaryLabel, $this->fallbackLabel);
         }
-
-        return $this->fallback->chat(
-            $this->prepareFallbackMessages($messages),
-            $tools,
-        );
+        return $this->fallback->chat($this->prepareFallbackMessages($messages), $tools);
     }
 
-    /**
-     * @param  array<int, array<string, mixed>>  $messages
-     */
     private function isEmptyOrAbsurdResponse(LlmResponse $response, array $messages): bool
     {
         $userMessage = '';
@@ -88,18 +76,12 @@ class ResilientLlmProvider implements LlmProvider
                 break;
             }
         }
-
-        return AgentEmptyAbsurdReply::isEmptyOrAbsurd(
-            (string) ($response->text ?? ''),
-            $response->hasToolCalls(),
-            $userMessage,
-        );
+        return AgentEmptyAbsurdReply::isEmptyOrAbsurd((string) ($response->text ?? ''), $response->hasToolCalls(), $userMessage);
     }
 
     private function shouldFallback(\Throwable $exception): bool
     {
         $message = mb_strtolower($exception->getMessage());
-
         return str_contains($message, '[502]')
             || str_contains($message, '[503]')
             || str_contains($message, '[504]')
@@ -118,19 +100,19 @@ class ResilientLlmProvider implements LlmProvider
             || str_contains($message, 'quota')
             || str_contains($message, 'rate limit')
             || str_contains($message, 'unavailable')
-            || str_contains($message, 'indisponible');
+            || str_contains($message, 'indisponible')
+            || (str_contains($message, 'no message or tool call') && str_contains($message, 'empty'))
+            || str_contains($message, 'response contained no message')
+            || str_contains($message, 'no content provided')
+            || str_contains($message, 'empty or absurd')
+            || str_contains($message, 'réponse vide');
     }
 
-    /**
-     * @param  array<int, array<string, mixed>>  $messages
-     * @return array<int, array<string, mixed>>
-     */
     private function prepareFallbackMessages(array $messages): array
     {
         if ($this->fallback instanceof OllamaProvider) {
             return OllamaMessageNormalizer::compressForOllamaFallback($messages);
         }
-
         return $messages;
     }
 }

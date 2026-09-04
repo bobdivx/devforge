@@ -2,7 +2,7 @@
 
 $config = [
     'coolify' => [
-        'version' => '4.1.35',
+        'version' => '4.1.36',
         'helper_version' => 'helper',
         'realtime_version' => 'realtime',
         'railpack_version' => '0.23.0',
@@ -69,17 +69,17 @@ $config = [
         'mux_persist_time' => env('SSH_MUX_PERSIST_TIME', 3600),
         'mux_health_check_enabled' => env('SSH_MUX_HEALTH_CHECK_ENABLED', true),
         'mux_health_check_timeout' => env('SSH_MUX_HEALTH_CHECK_TIMEOUT', 5),
-        'mux_max_age' => env('SSH_MUX_MAX_AGE', 1800), // 30 minutes
-        'mux_lock_ttl' => env('SSH_MUX_LOCK_TTL', 30), // lock auto-release, seconds
-        'mux_lock_timeout' => env('SSH_MUX_LOCK_TIMEOUT', 10), // max wait for lock, seconds
-        'mux_orphan_min_age' => env('SSH_MUX_ORPHAN_MIN_AGE', 600), // min process age before reaping orphans, seconds
-        'mux_orphan_reap_enabled' => env('SSH_MUX_ORPHAN_REAP_ENABLED', false), // false = dry-run, only log orphans
+        'mux_max_age' => env('SSH_MUX_MAX_AGE', 1800),
+        'mux_lock_ttl' => env('SSH_MUX_LOCK_TTL', 30),
+        'mux_lock_timeout' => env('SSH_MUX_LOCK_TIMEOUT', 10),
+        'mux_orphan_min_age' => env('SSH_MUX_ORPHAN_MIN_AGE', 600),
+        'mux_orphan_reap_enabled' => env('SSH_MUX_ORPHAN_REAP_ENABLED', false),
         'connection_timeout' => 10,
         'server_interval' => 20,
         'command_timeout' => 3600,
         'max_retries' => env('SSH_MAX_RETRIES', 3),
-        'retry_base_delay' => env('SSH_RETRY_BASE_DELAY', 2), // seconds
-        'retry_max_delay' => env('SSH_RETRY_MAX_DELAY', 30), // seconds
+        'retry_base_delay' => env('SSH_RETRY_BASE_DELAY', 2),
+        'retry_max_delay' => env('SSH_RETRY_MAX_DELAY', 30),
         'retry_multiplier' => env('SSH_RETRY_MULTIPLIER', 2),
     ],
 
@@ -99,19 +99,10 @@ $config = [
     ],
 
     'sentinel' => [
-        // How often (seconds) PushServerUpdateJob is force-dispatched even when
-        // the container state hash is unchanged. Keeps exited-detection and
-        // storage checks from going stale without writing every resource row on
-        // every push.
         'push_force_interval_seconds' => env('SENTINEL_PUSH_FORCE_INTERVAL_SECONDS', 300),
-
     ],
 
     'proxy' => [
-        // How often (seconds) PushServerUpdateJob periodically re-connects the
-        // proxy to Docker networks as a safety net. Real network-layout changes
-        // already connect the proxy on-demand; this only covers gaps (Swarm
-        // networks added via UI, proxy crash recovery).
         'connect_networks_interval_seconds' => env('PROXY_CONNECT_NETWORKS_INTERVAL_SECONDS', 3600),
     ],
 
@@ -126,25 +117,8 @@ $config = [
     ],
 
     'server_checks' => [
-        // Notification delay configuration for parallel server checks
-        // Used for Traefik version checks and other future server check jobs
-        // These settings control how long to wait before sending notifications
-        // after dispatching parallel check jobs for all servers
-
-        // Minimum delay in seconds (120s = 2 minutes)
-        // Accounts for job processing time, retries, and network latency
         'notification_delay_min' => 120,
-
-        // Maximum delay in seconds (300s = 5 minutes)
-        // Prevents excessive waiting for very large server counts
         'notification_delay_max' => 300,
-
-        // Scaling factor: seconds to add per server (0.2)
-        // Formula: delay = min(max, max(min, serverCount * scaling))
-        // Examples:
-        //   - 100 servers: 120s (uses minimum)
-        //   - 1000 servers: 200s
-        //   - 2000 servers: 300s (hits maximum)
         'notification_delay_scaling' => 0.2,
     ],
 ];
