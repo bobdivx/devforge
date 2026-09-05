@@ -128,13 +128,15 @@ class Emails extends Command
                 }
                 break;
             case 'application-deployment-success':
-                $application = Application::all()->first();
+                // Bolt: Optimize fetching the first record directly from DB instead of fetching all records into memory
+                $application = Application::first();
                 $this->mail = (new DeploymentSuccess($application, 'test'))->toMail();
                 $this->sendEmail();
                 break;
             case 'application-deployment-failed':
-                $application = Application::all()->first();
-                $preview = ApplicationPreview::all()->first();
+                // Bolt: Optimize fetching the first record directly from DB instead of fetching all records into memory
+                $application = Application::first();
+                $preview = ApplicationPreview::first();
                 if (! $preview) {
                     $preview = ApplicationPreview::create([
                         'application_id' => $application->id,
@@ -149,13 +151,15 @@ class Emails extends Command
                 $this->sendEmail();
                 break;
             case 'application-status-changed':
-                $application = Application::all()->first();
+                // Bolt: Optimize fetching the first record directly from DB instead of fetching all records into memory
+                $application = Application::first();
                 $this->mail = (new StatusChanged($application))->toMail();
                 $this->sendEmail();
                 break;
             case 'backup-failed':
-                $backup = ScheduledDatabaseBackup::all()->first();
-                $db = StandalonePostgresql::all()->first();
+                // Bolt: Optimize fetching the first record directly from DB instead of fetching all records into memory
+                $backup = ScheduledDatabaseBackup::first();
+                $db = StandalonePostgresql::first();
                 if (! $backup) {
                     $backup = ScheduledDatabaseBackup::create([
                         'enabled' => true,
@@ -171,8 +175,9 @@ class Emails extends Command
                 $this->sendEmail();
                 break;
             case 'backup-success':
-                $backup = ScheduledDatabaseBackup::all()->first();
-                $db = StandalonePostgresql::all()->first();
+                // Bolt: Optimize fetching the first record directly from DB instead of fetching all records into memory
+                $backup = ScheduledDatabaseBackup::first();
+                $db = StandalonePostgresql::first();
                 if (! $backup) {
                     $backup = ScheduledDatabaseBackup::create([
                         'enabled' => true,
