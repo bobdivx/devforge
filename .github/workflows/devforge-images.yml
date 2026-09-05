@@ -283,42 +283,8 @@ jobs:
           if [ -n "$STORE_FILE" ]; then
             STORE_SHA=$(echo "$STORE_FILE" | jq -r .sha)
             if [ -n "$STORE_SHA" ] && [ "$STORE_SHA" != "null" ]; then
-              JSON_CONTENT=$(cat <<EOF
-{
-    "devforge": {
-        "version": "${NEW_VERSION}"
-    },
-    "coolify": {
-        "v4": {
-            "version": "${NEW_VERSION}"
-        },
-        "nightly": {
-            "version": "${NEW_VERSION}"
-        },
-        "helper": {
-            "version": "${NEW_VERSION}"
-        },
-        "realtime": {
-            "version": "${NEW_VERSION}"
-        },
-        "sentinel": {
-            "version": "0.0.21"
-        }
-    },
-    "traefik": {
-        "v3.6": "3.6.11",
-        "v3.5": "3.5.6",
-        "v3.4": "3.4.5",
-        "v3.3": "3.3.7",
-        "v3.2": "3.2.5",
-        "v3.1": "3.1.7",
-        "v3.0": "3.0.4",
-        "v2.11": "2.11.40"
-    }
-}
-EOF
-)
-              B64=$(echo "$JSON_CONTENT" | base64 -w 0 2>/dev/null || echo "$JSON_CONTENT" | base64)
+              JSON_CONTENT=$(jq -n --arg v "$NEW_VERSION" '{devforge:{version:$v},coolify:{v4:{version:$v},nightly:{version:$v},helper:{version:$v},realtime:{version:$v},sentinel:{version:"0.0.21"}},traefik:{"v3.6":"3.6.11","v3.5":"3.5.6","v3.4":"3.4.5","v3.3":"3.3.7","v3.2":"3.2.5","v3.1":"3.1.7","v3.0":"3.0.4","v2.11":"2.11.40"}}')
+              B64=$(printf '%s' "$JSON_CONTENT" | base64 -w 0 2>/dev/null || printf '%s' "$JSON_CONTENT" | base64)
               gh api -X PUT repos/bobdivx/devforge-store/contents/versions.json \
                 -f message="chore: sync versions.json to ${NEW_VERSION}" \
                 -f content="$B64" \
