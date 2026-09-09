@@ -38,31 +38,37 @@ class StartSsoStack
         $settings->sso_forward_auth_address = SsoProtection::DEFAULT_FORWARD_AUTH_ADDRESS;
         $settings->save();
 
-        try {
-            $this->writeAndUp($server, $settings);
-        } catch (\Throwable $e) {
-            Log::warning('SSO stack failed to become healthy; resetting Pocket ID data and retrying.', [
-                'error' => $e->getMessage(),
-            ]);
-            instant_remote_process(SsoProtection::resetPocketIdDatabaseCommands(), $server);
-            $this->writeAndUp($server, $settings);
-        }
+        $this->writeAndUp($server, $settings);
+        $this->provisionClients($server);
+        $server->setupSsoProxyConfiguration();
 
+        return 'OK';
+    }
+
+    public function provisionClients(Server $server): void
+    {
         try {
+            $settings = instanceSettings();
+            $previousAppsId = $settings->sso_apps_client_id;
+            $previousAppsSecret = $settings->sso_apps_client_secret;
             $settings = app(ProvisionPocketIdClients::class)->handle($settings->fresh());
-            if (filled($settings->sso_apps_client_id) && filled($settings->sso_apps_client_secret)) {
+            $appsCredentialsChanged = $settings->sso_apps_client_id !== $previousAppsId
+                || $settings->sso_apps_client_secret !== $previousAppsSecret;
+
+            if (
+                filled($settings->sso_apps_client_id)
+                && filled($settings->sso_apps_client_secret)
+                && $appsCredentialsChanged
+            ) {
                 $this->writeAndUp($server, $settings);
             }
+
             app(SyncApplicationOidcEnvironment::class)->sync();
         } catch (\Throwable $e) {
             Log::warning('SSO stack started but OIDC clients were not provisioned yet.', [
                 'error' => $e->getMessage(),
             ]);
         }
-
-        $server->setupSsoProxyConfiguration();
-
-        return 'OK';
     }
 
     private function writeAndUp(Server $server, InstanceSettings $settings): void

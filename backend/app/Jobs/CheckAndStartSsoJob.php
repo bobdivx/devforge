@@ -38,17 +38,16 @@ class CheckAndStartSsoJob implements ShouldBeEncrypted, ShouldQueue
             ->filter()
             ->values();
 
-        $settings = instanceSettings();
-        $alreadyReady = $status->count() === 2
-            && $status->every(fn (mixed $value): bool => $value === 'running')
-            && SsoProtection::pocketIdLoginEnabled()
-            && filled($settings->sso_apps_client_id);
-
-        if ($alreadyReady) {
-            return;
-        }
+        $containersRunning = $status->count() === 2
+            && $status->every(fn (mixed $value): bool => $value === 'running');
 
         try {
+            if ($containersRunning) {
+                app(StartSsoStack::class)->provisionClients($this->server);
+
+                return;
+            }
+
             StartSsoStack::run($this->server);
         } catch (\Throwable $e) {
             Log::warning('Could not start the managed SSO stack.', [
