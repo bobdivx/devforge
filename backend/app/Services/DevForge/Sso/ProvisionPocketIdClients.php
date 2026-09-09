@@ -100,28 +100,32 @@ class ProvisionPocketIdClients
     private function ensureClient(PendingRequest $http, string $name, array $callbackUrls, array $logoutUrls, ?string $knownId = null, ?string $knownSecret = null): ?array
     {
         try {
-            $existing = filled($knownId) ? $knownId : $this->findClientId($http, $name);
+            $payload = [
+                'name' => $name,
+                'callbackURLs' => $callbackUrls,
+                'logoutCallbackURLs' => $logoutUrls,
+                'isPublic' => false,
+                'pkceEnabled' => false,
+            ];
+            $existing = $this->resolveClientId($http, $name, $knownId);
             if ($existing === null) {
-                $created = $http->post('/api/oidc/clients', [
-                    'name' => $name,
-                    'callbackURLs' => $callbackUrls,
-                    'logoutCallbackURLs' => $logoutUrls,
-                    'isPublic' => false,
-                    'pkceEnabled' => false,
-                ]);
-                $created->throw();
-                $existing = (string) $created->json('id');
+                $existing = $this->createClient($http, $payload);
+                $knownSecret = null;
             } else {
-                $http->put('/api/oidc/clients/'.$existing, [
-                    'name' => $name,
-                    'callbackURLs' => $callbackUrls,
-                    'logoutCallbackURLs' => $logoutUrls,
-                    'isPublic' => false,
-                    'pkceEnabled' => false,
-                ])->throw();
+                $updated = $http->put('/api/oidc/clients/'.$existing, $payload);
+                if ($updated->notFound()) {
+                    $existing = $this->createClient($http, $payload);
+                    $knownSecret = null;
+                } else {
+                    $updated->throw();
+                }
             }
 
-            if (filled($existing) && filled($knownSecret)) {
+            if ($existing === '') {
+                return null;
+            }
+
+            if (filled($knownSecret) && $existing === $knownId) {
                 return ['id' => (string) $existing, 'secret' => (string) $knownSecret];
             }
 
@@ -132,7 +136,7 @@ class ProvisionPocketIdClients
             $secretResponse->throw();
             $secret = (string) ($secretResponse->json('secret') ?? $secretResponse->json('clientSecret') ?? '');
 
-            if ($existing === '' || $secret === '') {
+            if ($secret === '') {
                 return null;
             }
 
@@ -145,6 +149,31 @@ class ProvisionPocketIdClients
 
             return null;
         }
+    }
+
+    /**
+     * @param  array{name: string, callbackURLs: list<string>, logoutCallbackURLs: list<string>, isPublic: bool, pkceEnabled: bool}  $payload
+     */
+    private function createClient(PendingRequest $http, array $payload): string
+    {
+        $created = $http->post('/api/oidc/clients', $payload);
+        $created->throw();
+
+        return (string) $created->json('id');
+    }
+
+    private function resolveClientId(PendingRequest $http, string $name, ?string $knownId): ?string
+    {
+        if (filled($knownId) && $this->clientExists($http, $knownId)) {
+            return $knownId;
+        }
+
+        return $this->findClientId($http, $name);
+    }
+
+    private function clientExists(PendingRequest $http, string $id): bool
+    {
+        return $http->get('/api/oidc/clients/'.$id)->successful();
     }
 
     private function findClientId(PendingRequest $http, string $name): ?string
