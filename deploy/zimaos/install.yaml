@@ -1,0 +1,41 @@
+# ZimaOS / CasaOS — définition d’install Custom App (même contenu runtime)
+# Alias pratique : certains UIs demandent un « yaml de déploiement » séparé.
+# Tu peux coller ce fichier tel quel dans « Installer une app personnalisée ».
+
+name: devforge
+
+services:
+  devforge:
+    image: bobdivx/devforge:2.0.0
+    container_name: devforge
+    restart: unless-stopped
+    network_mode: bridge
+    ports:
+      - "8000:8000"
+    volumes:
+      - /DATA/AppData/devforge:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DATABASE_URL=sqlite:/data/devforge.db?mode=rwc
+      - DEVFORGE_DATA_DIR=/data
+      - DEVFORGE_STATIC_DIR=/app/web
+      - DEVFORGE_VERSION=2.0.0
+      - DEVFORGE_UPDATE_MODE=docker
+      - DEVFORGE_UPDATE_IMAGE=bobdivx/devforge
+      - DEVFORGE_SELF_CONTAINER=devforge
+      - DEVFORGE_EXECUTOR=local
+      - DEVFORGE_ALLOW_REGISTER=0
+      - DEVFORGE_ALLOW_INSECURE_WEBHOOK=0
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/api/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 25s
+    labels:
+      icon: https://raw.githubusercontent.com/bobdivx/devforge/main/deploy/zimaos/icon.svg
+      description: DevForge v2 — PaaS self-host avec agents IA
+      webui: http://{{inthost}}:8000
+      port.8000: Web UI + API
