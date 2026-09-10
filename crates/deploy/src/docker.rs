@@ -67,6 +67,69 @@ pub fn nixpacks_build(image: &str) -> String {
     format!("nixpacks build . --name {}", shell_escape(image))
 }
 
+/// Fallback when nixpacks CLI is absent: Node multi-stage Dockerfile (build + start).
+pub fn node_inline_dockerfile(port: u16) -> String {
+    format!(
+        r#"FROM node:22-bookworm-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json* npm-shrinkwrap.json* yarn.lock* pnpm-lock.yaml* ./
+RUN if [ -f package-lock.json ]; then npm ci; \
+  elif [ -f yarn.lock ]; then corepack enable && yarn install --frozen-lockfile; \
+  elif [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install --frozen-lockfile; \
+  else npm install; fi
+COPY . .
+RUN npm run build
+
+FROM node:22-bookworm-slim
+WORKDIR /app
+ENV NODE_ENV=production HOST=0.0.0.0 PORT={port}
+COPY --from=build /app /app
+EXPOSE {port}
+CMD ["npm", "run", "start"]
+"#,
+        port = port
+    )
+}
+
+pub fn docker_build_from_content(image: &str, dockerfile: &str) -> String {
+    if cfg!(windows) {
+        let escaped = dockerfile.replace('\'', "''");
+        format!(
+            "Set-Content -LiteralPath .devforge.Dockerfile -Value @'\n{escaped}\n'@; docker build -f .devforge.Dockerfile -t {} .",
+            shell_escape(image)
+        )
+    } else {
+        format!(
+            "docker build -t {} -f - . <<'DFEOF'\n{}\nDFEOF",
+            shell_escape(image),
+            dockerfile
+        )
+    }
+}
+
+/// Static site: npm build then nginx (publish_directory relative to workdir, default dist).
+pub fn static_inline_dockerfile(publish_directory: &str) -> String {
+    let pub_dir = publish_directory.trim().trim_start_matches('/');
+    let pub_dir = if pub_dir.is_empty() { "dist" } else { pub_dir };
+    format!(
+        r#"FROM node:22-bookworm-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json* npm-shrinkwrap.json* yarn.lock* pnpm-lock.yaml* ./
+RUN if [ -f package-lock.json ]; then npm ci; \
+  elif [ -f yarn.lock ]; then corepack enable && yarn install --frozen-lockfile; \
+  elif [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install --frozen-lockfile; \
+  else npm install; fi
+COPY . .
+RUN npm run build
+
+FROM nginx:alpine
+COPY --from=build /app/{pub_dir} /usr/share/nginx/html
+EXPOSE 80
+"#,
+        pub_dir = pub_dir
+    )
+}
+
 pub fn docker_stop(name: &str) -> String {
     if cfg!(windows) {
         format!(

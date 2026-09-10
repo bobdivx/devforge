@@ -388,8 +388,14 @@ struct NodeHit {
 }
 
 fn dep_has(pkg: &Value, name: &str) -> bool {
-    pkg.pointer(&format!("/dependencies/{name}")).is_some()
-        || pkg.pointer(&format!("/devDependencies/{name}")).is_some()
+    // Use object key lookup — JSON Pointer breaks on scoped packages (`@astrojs/node`).
+    pkg.get("dependencies")
+        .and_then(|d| d.get(name))
+        .is_some()
+        || pkg
+            .get("devDependencies")
+            .and_then(|d| d.get(name))
+            .is_some()
 }
 
 fn detect_node(pkg: &Value, evidence: &mut Vec<String>) -> NodeHit {
@@ -638,6 +644,19 @@ mod tests {
         assert!(d.is_static);
         assert_eq!(d.build_pack, "static");
         assert_eq!(d.publish_directory.as_deref(), Some("/dist"));
+    }
+
+    #[test]
+    fn detects_astro_ssr_scoped_adapter() {
+        let mut tree = FileTree::new();
+        tree.insert(
+            "package.json".into(),
+            Some(r#"{"dependencies":{"astro":"^7.0.0","@astrojs/node":"^11.0.0"}}"#.into()),
+        );
+        let d = detect(&tree);
+        assert!(!d.is_static, "scoped @astrojs/node must not be treated as static");
+        assert_eq!(d.build_pack, "nixpacks");
+        assert_eq!(d.port, 4321);
     }
 
     #[test]

@@ -9,7 +9,7 @@ name: devforge
 
 services:
   devforge:
-    image: bobdivx/devforge:2.0.2
+    image: bobdivx/devforge:2.0.3
     container_name: devforge
     restart: unless-stopped
     ports:
@@ -71,7 +71,7 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "2.0.2"
+  version: "2.0.3"
   update_at: "2026-09-11"
   website: https://github.com/bobdivx/devforge
   repo: https://github.com/bobdivx/devforge

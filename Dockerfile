@@ -15,10 +15,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libs
 COPY . .
 RUN cargo build -p devforge-server --release
 
+FROM docker:27-cli AS dockercli
+
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl git libssl3 openssh-client \
   && rm -rf /var/lib/apt/lists/*
+COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=dockercli /usr/local/libexec/docker/cli-plugins /usr/local/libexec/docker/cli-plugins
 COPY --from=builder /src/target/release/devforge-server /usr/local/bin/devforge-server
 COPY --from=web /web/dist /app/web
 ENV HOST=0.0.0.0 \

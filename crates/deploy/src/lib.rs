@@ -607,21 +607,23 @@ impl DeployFacade {
                 }
             }
             "static" => {
-                // Build static via nixpacks-like dockerfile inline is heavy; require Dockerfile or use nginx alpine copy
-                let cmd = format!(
-                    "docker build -t {image} -f - . <<'DFEOF'\nFROM nginx:alpine\nCOPY {} /usr/share/nginx/html\nDFEOF",
-                    req.publish_directory
-                        .as_deref()
-                        .unwrap_or("dist")
-                        .trim_start_matches('/')
-                );
-                // Heredoc fails on Windows cmd — use dockerfile path or nixpacks
-                let fallback = if cfg!(windows) {
-                    docker::docker_build(".", &image, "Dockerfile")
+                let pub_dir = req
+                    .publish_directory
+                    .as_deref()
+                    .unwrap_or("dist")
+                    .trim_start_matches('/');
+                let df = docker::static_inline_dockerfile(pub_dir);
+                let cmd = if cfg!(windows) {
+                    // Windows: prefer project Dockerfile if present; else inline via PS.
+                    if std::path::Path::new(&format!("{build_dir}/Dockerfile")).exists() {
+                        docker::docker_build(".", &image, "Dockerfile")
+                    } else {
+                        docker::docker_build_from_content(&image, &df)
+                    }
                 } else {
-                    cmd
+                    docker::docker_build_from_content(&image, &df)
                 };
-                match self.executor.exec(server, &build_dir, &fallback, 900).await {
+                match self.executor.exec(server, &build_dir, &cmd, 900).await {
                     Ok(r) => {
                         logs.push_str(&format!(
                             "[static-build] exit={} {}\n",
@@ -650,7 +652,18 @@ impl DeployFacade {
                 }
             }
             "dockerfile" => {
-                let cmd = docker::docker_build(".", &image, "Dockerfile");
+                let has_df = std::path::Path::new(&format!("{build_dir}/Dockerfile")).is_file();
+                let cmd = if has_df {
+                    docker::docker_build(".", &image, "Dockerfile")
+                } else {
+                    logs.push_str(
+                        "[dockerfile] pas de Dockerfile — fallback Node inline\n",
+                    );
+                    docker::docker_build_from_content(
+                        &image,
+                        &docker::node_inline_dockerfile(port),
+                    )
+                };
                 match self.executor.exec(server, &build_dir, &cmd, 900).await {
                     Ok(r) => {
                         logs.push_str(&format!(
@@ -698,11 +711,22 @@ impl DeployFacade {
                     }
                     Ok(r) => {
                         logs.push_str(&format!(
-                            "[nixpacks] exit={} {}\n[fallback] docker build Dockerfile\n",
+                            "[nixpacks] exit={} {}\n",
                             r.exit_code,
                             trim_out(&r.output)
                         ));
-                        let cmd = docker::docker_build(".", &image, "Dockerfile");
+                        let has_df =
+                            std::path::Path::new(&format!("{build_dir}/Dockerfile")).is_file();
+                        let cmd = if has_df {
+                            logs.push_str("[fallback] docker build Dockerfile\n");
+                            docker::docker_build(".", &image, "Dockerfile")
+                        } else {
+                            logs.push_str("[fallback] docker build Node inline Dockerfile\n");
+                            docker::docker_build_from_content(
+                                &image,
+                                &docker::node_inline_dockerfile(port),
+                            )
+                        };
                         match self.executor.exec(server, &build_dir, &cmd, 900).await {
                             Ok(r2) => {
                                 logs.push_str(&format!(
@@ -733,7 +757,45 @@ impl DeployFacade {
                     }
                     Err(e) => {
                         logs.push_str(&format!("[nixpacks] error: {e}\n"));
-                        false
+                        let has_df =
+                            std::path::Path::new(&format!("{build_dir}/Dockerfile")).is_file();
+                        let cmd = if has_df {
+                            logs.push_str("[fallback] docker build Dockerfile\n");
+                            docker::docker_build(".", &image, "Dockerfile")
+                        } else {
+                            logs.push_str("[fallback] docker build Node inline Dockerfile\n");
+                            docker::docker_build_from_content(
+                                &image,
+                                &docker::node_inline_dockerfile(port),
+                            )
+                        };
+                        match self.executor.exec(server, &build_dir, &cmd, 900).await {
+                            Ok(r2) => {
+                                logs.push_str(&format!(
+                                    "[docker-build] exit={} {}\n",
+                                    r2.exit_code,
+                                    trim_out(&r2.output)
+                                ));
+                                if r2.ok {
+                                    self.docker_restart_container(
+                                        server,
+                                        &build_dir,
+                                        &name,
+                                        &image,
+                                        port,
+                                        port,
+                                        &mut logs,
+                                    )
+                                    .await
+                                } else {
+                                    false
+                                }
+                            }
+                            Err(e2) => {
+                                logs.push_str(&format!("[docker-build] error: {e2}\n"));
+                                false
+                            }
+                        }
                     }
                 }
             }
