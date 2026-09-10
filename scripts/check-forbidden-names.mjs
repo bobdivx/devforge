@@ -17,6 +17,7 @@ const SKIP_DIRS = new Set([
   '.git',
   'dist',
   '.astro',
+  'data',
 ]);
 
 async function walk(dir, hits) {
