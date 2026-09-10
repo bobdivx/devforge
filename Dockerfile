@@ -3,7 +3,7 @@
 FROM node:22-bookworm AS web
 WORKDIR /web
 COPY apps/web/package.json apps/web/package-lock.json ./
-RUN npm ci
+RUN npm install --include=optional
 COPY apps/web/ ./
 ENV PUBLIC_SERVER_URL=/api/v1
 RUN npm run build

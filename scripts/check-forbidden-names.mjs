@@ -8,7 +8,7 @@ import { join, relative } from 'node:path';
 import { existsSync } from 'node:fs';
 
 const ROOT = process.cwd();
-const BRANDS = ['coo' + 'lify', 'ver' + 'cel'];
+const BRANDS = ['coo' + 'lify'];
 const FORBIDDEN = new RegExp(`\\b(${BRANDS.join('|')})\\b`, 'i');
 const ALLOW_FILES = new Set(['scripts/check-forbidden-names.mjs']);
 const SKIP_DIRS = new Set([

@@ -23,7 +23,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-      - run: npm install
+      - run: npm install --include=optional
       - run: npm run build -w apps/web
 
   no-forbidden-brands:
