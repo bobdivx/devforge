@@ -6,7 +6,7 @@ name: devforge
 
 services:
   devforge:
-    image: bobdivx/devforge:2.0.0
+    image: bobdivx/devforge:2.0.1
     container_name: devforge
     restart: unless-stopped
     network_mode: bridge
@@ -21,7 +21,7 @@ services:
       - DATABASE_URL=sqlite:/data/devforge.db?mode=rwc
       - DEVFORGE_DATA_DIR=/data
       - DEVFORGE_STATIC_DIR=/app/web
-      - DEVFORGE_VERSION=2.0.0
+      - DEVFORGE_VERSION=2.0.1
       - DEVFORGE_UPDATE_MODE=docker
       - DEVFORGE_UPDATE_IMAGE=bobdivx/devforge
       - DEVFORGE_SELF_CONTAINER=devforge

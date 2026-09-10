@@ -11,13 +11,18 @@ mod security;
 mod state;
 mod update_routes;
 
-use axum::Router;
+use axum::{routing::get, Json, Router};
+use serde_json::{json, Value};
 use state::AppState;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+async fn api_root() -> Json<Value> {
+    Json(json!({"name":"DevForge Server","docs":"/api/v1/health"}))
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -52,20 +57,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
-    // Front Astro build (optionnel) : DEVFORGE_STATIC_DIR=/app/web
+    // Front Astro : DEVFORGE_STATIC_DIR=/app/web (ne pas enregistrer "/" API sinon le SPA est masqué)
+    let mut serving_web = false;
     if let Ok(dir) = std::env::var("DEVFORGE_STATIC_DIR") {
         let root = PathBuf::from(&dir);
         if root.is_dir() {
             let index = root.join("index.html");
             tracing::info!(path = %dir, "serving static web assets");
+            serving_web = true;
             if index.is_file() {
-                app = app.fallback_service(ServeDir::new(&root).not_found_service(ServeFile::new(index)));
+                app = app.fallback_service(
+                    ServeDir::new(&root).not_found_service(ServeFile::new(index)),
+                );
             } else {
                 app = app.fallback_service(ServeDir::new(&root));
             }
         } else {
             tracing::warn!(path = %dir, "DEVFORGE_STATIC_DIR introuvable — API seule");
         }
+    }
+    if !serving_web {
+        app = app.route("/", get(api_root));
     }
 
     let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());

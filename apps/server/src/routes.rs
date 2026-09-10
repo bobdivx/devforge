@@ -18,7 +18,6 @@ use devforge_shared::ProjectTestContext;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/", get(root))
         .route("/api/v1/health", get(health))
         .route("/api/v1/projects", get(list_projects).post(create_project))
         .route(
@@ -48,10 +47,6 @@ pub fn router() -> Router<AppState> {
             "/api/v1/projects/{uuid}/env/{key}",
             get(get_env).delete(delete_env),
         )
-}
-
-async fn root() -> Json<Value> {
-    Json(json!({"name":"DevForge Server","docs":"/api/v1/health"}))
 }
 
 async fn health(State(state): State<AppState>) -> Json<Value> {
