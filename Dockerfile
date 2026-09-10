@@ -17,7 +17,7 @@ RUN cargo build -p devforge-server --release
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl libssl3 \
+  && apt-get install -y --no-install-recommends ca-certificates curl git libssl3 openssh-client \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /src/target/release/devforge-server /usr/local/bin/devforge-server
 COPY --from=web /web/dist /app/web
@@ -26,11 +26,11 @@ ENV HOST=0.0.0.0 \
     DATABASE_URL=sqlite:/data/devforge.db?mode=rwc \
     DEVFORGE_DATA_DIR=/data \
     DEVFORGE_STATIC_DIR=/app/web \
-    DEVFORGE_UPDATE_MODE=compose \
-    DEVFORGE_UPDATE_COMPOSE_FILE=/opt/devforge/docker-compose.yml \
+    DEVFORGE_UPDATE_MODE=docker \
     DEVFORGE_SELF_CONTAINER=devforge \
-    DEVFORGE_UPDATE_IMAGE=ghcr.io/bobdivx/devforge \
-    DEVFORGE_EXECUTOR=local
+    DEVFORGE_UPDATE_IMAGE=bobdivx/devforge \
+    DEVFORGE_EXECUTOR=local \
+    DEVFORGE_SSH_KEY=/data/ssh/id_ed25519
 VOLUME ["/data"]
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --retries=10 \

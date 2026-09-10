@@ -1,15 +1,15 @@
 # DevForge v2 — ZimaOS / CasaOS Custom App
 # Import : App Store → Installer une app personnalisée → coller ce fichier
-# ou copier dans Apps/DevForge/ d’un store v2.
 #
-# Données persistantes : /DATA/AppData/devforge
-# UI : http://<nas>:8000
+# Tout le runtime (DB, static UI, executor local) vient de l’image.
+# Config métier (GitHub, domaine, SSH distant) → UI DevForge (wizard / Settings).
+# Ne remplis PAS le panneau Variables ZimaOS avec des secrets app.
 
 name: devforge
 
 services:
   devforge:
-    image: bobdivx/devforge:2.0.1
+    image: bobdivx/devforge:2.0.2
     container_name: devforge
     restart: unless-stopped
     ports:
@@ -23,23 +23,6 @@ services:
       - type: bind
         source: /var/run/docker.sock
         target: /var/run/docker.sock
-    environment:
-      HOST: "0.0.0.0"
-      PORT: "8000"
-      DATABASE_URL: sqlite:/data/devforge.db?mode=rwc
-      DEVFORGE_DATA_DIR: /data
-      DEVFORGE_STATIC_DIR: /app/web
-      DEVFORGE_VERSION: "2.0.1"
-      DEVFORGE_UPDATE_MODE: docker
-      DEVFORGE_UPDATE_IMAGE: bobdivx/devforge
-      DEVFORGE_SELF_CONTAINER: devforge
-      DEVFORGE_EXECUTOR: local
-      # Prod : définir un secret webhook + origines CORS
-      DEVFORGE_ALLOW_REGISTER: "0"
-      DEVFORGE_ALLOW_INSECURE_WEBHOOK: "0"
-      DEVFORGE_GITHUB_WEBHOOK_SECRET: ""
-      DEVFORGE_CORS_ORIGINS: ""
-      DEVFORGE_GITHUB_TOKEN: ""
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/api/v1/health || exit 1"]
       interval: 10s
@@ -50,29 +33,12 @@ services:
       volumes:
         - container: /data
           description:
-            en_US: App data (SQLite, deploys)
-            fr_FR: Données app (SQLite, déploiements)
+            en_US: App data (SQLite, SSH keys, deploys)
+            fr_FR: Données app (SQLite, clés SSH, déploiements)
         - container: /var/run/docker.sock
           description:
-            en_US: Docker socket (local deploys)
-            fr_FR: Socket Docker (déploiements locaux)
-      envs:
-        - container: DEVFORGE_ALLOW_REGISTER
-          description:
-            en_US: "1 = open registration after first admin"
-            fr_FR: "1 = inscription ouverte après le 1er admin"
-        - container: DEVFORGE_GITHUB_WEBHOOK_SECRET
-          description:
-            en_US: GitHub webhook HMAC secret
-            fr_FR: Secret HMAC webhook GitHub
-        - container: DEVFORGE_CORS_ORIGINS
-          description:
-            en_US: "CSV of allowed origins, e.g. https://devforge.example.com"
-            fr_FR: "Origines CORS autorisées (CSV)"
-        - container: DEVFORGE_GITHUB_TOKEN
-          description:
-            en_US: Optional GitHub token at boot
-            fr_FR: Token GitHub optionnel au démarrage
+            en_US: Docker socket (local deploys — no SSH needed)
+            fr_FR: Socket Docker (déploiements locaux — pas de SSH)
       ports:
         - container: "8000"
           description:
@@ -94,24 +60,22 @@ x-casaos:
     fr_FR: Déploie des apps avec des agents IA
   description:
     en_US: |
-      DevForge v2 is a self-hosted PaaS (Rust + Astro): projects, Docker deploys,
-      GitHub, LLM agents, MCP. Persist data under /DATA/AppData/devforge.
-      First account becomes instance admin.
+      Self-hosted PaaS. Open http://NAS:8000, create admin, finish onboarding in the UI.
+      Docker socket = local deploys. Remote SSH is optional (Settings).
     fr_FR: |
-      DevForge v2 est un PaaS self-host (Rust + Astro) : projets, déploiements Docker,
-      GitHub, agents LLM, MCP. Données dans /DATA/AppData/devforge.
-      Le premier compte devient admin d’instance.
+      PaaS self-host. Ouvre http://NAS:8000, crée l’admin, termine le wizard dans l’UI.
+      Socket Docker = déploiements locaux. SSH distant optionnel (Settings).
   author: bobdivx
   developer: DevForge
   category: Developer
   architectures:
     - amd64
     - arm64
-  version: "2.0.1"
-  update_at: "2026-09-10"
+  version: "2.0.2"
+  update_at: "2026-09-11"
   website: https://github.com/bobdivx/devforge
   repo: https://github.com/bobdivx/devforge
   tips:
     before_install:
-      en_US: Requires Docker socket access. Open port 8000. Create the first admin on first visit.
-      fr_FR: Accès socket Docker requis. Port 8000. Crée l’admin à la première visite.
+      en_US: Leave Variables empty — configure GitHub/domain/SSH in the DevForge UI after install.
+      fr_FR: Laisse Variables vide — configure GitHub/domaine/SSH dans l’UI DevForge après install.

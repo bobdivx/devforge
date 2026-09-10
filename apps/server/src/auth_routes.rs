@@ -54,6 +54,8 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/me", get(me))
         .route("/api/v1/onboarding", get(onboarding_status).post(save_onboarding))
         .route("/api/v1/onboarding/complete", post(complete_onboarding))
+        .route("/api/v1/settings/ssh", get(ssh_status).post(save_ssh))
+        .route("/api/v1/settings/ssh/generate-key", post(generate_ssh_key))
         .route("/api/v1/admin/overview", get(admin_overview))
         .route("/api/v1/admin/workspaces/{uuid}", patch(admin_update_workspace))
 }
@@ -587,7 +589,7 @@ async fn save_onboarding(
     // Reload settings after github configure (token already persisted there)
     s = load_settings(&state).await?;
 
-    if !s.ssh_host.is_empty() && std::env::var("DEVFORGE_SSH_HOST").is_err() {
+    if !s.ssh_host.is_empty() {
         std::env::set_var("DEVFORGE_SSH_HOST", &s.ssh_host);
         std::env::set_var("DEVFORGE_SSH_USER", &s.ssh_user);
     }
@@ -656,6 +658,178 @@ async fn complete_onboarding(
     Ok(Json(json!({
         "ok": true,
         "redirect": "/app"
+    })))
+}
+
+fn ssh_key_paths() -> (std::path::PathBuf, std::path::PathBuf) {
+    let data = std::env::var("DEVFORGE_DATA_DIR").unwrap_or_else(|_| "/data".into());
+    let private = std::env::var("DEVFORGE_SSH_KEY")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from(format!("{data}/ssh/id_ed25519")));
+    let public = {
+        let mut p = private.clone();
+        let name = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("id_ed25519");
+        p.set_file_name(format!("{name}.pub"));
+        p
+    };
+    (private, public)
+}
+
+async fn require_admin_from_headers(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(), (axum::http::StatusCode, Json<Value>)> {
+    let token = bearer_from(headers).ok_or_else(unauthorized)?;
+    let user = session_user(state, &token).await?.ok_or_else(unauthorized)?;
+    if user.role != ROLE_INSTANCE_ADMIN {
+        return Err((
+            axum::http::StatusCode::FORBIDDEN,
+            Json(json!({"error": "Réservé à l’admin instance"})),
+        ));
+    }
+    Ok(())
+}
+
+async fn ssh_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_admin_from_headers(&state, &headers).await?;
+    let s = load_settings(&state).await?;
+    let (private, public) = ssh_key_paths();
+    let key_exists = private.is_file();
+    let public_key = if public.is_file() {
+        tokio::fs::read_to_string(&public).await.ok()
+    } else {
+        None
+    };
+    let executor = std::env::var("DEVFORGE_EXECUTOR").unwrap_or_else(|_| "local".into());
+    Ok(Json(json!({
+        "ok": true,
+        "executor": executor,
+        "local_docker": executor == "local",
+        "ssh_host": s.ssh_host,
+        "ssh_user": s.ssh_user,
+        "key_path": private.to_string_lossy(),
+        "key_exists": key_exists,
+        "public_key": public_key,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct SshSaveBody {
+    pub ssh_host: Option<String>,
+    pub ssh_user: Option<String>,
+}
+
+async fn save_ssh(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<SshSaveBody>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_admin_from_headers(&state, &headers).await?;
+    let mut s = load_settings(&state).await?;
+    if let Some(v) = body.ssh_host {
+        s.ssh_host = v.trim().to_string();
+    }
+    if let Some(v) = body.ssh_user {
+        let u = v.trim().to_string();
+        if !u.is_empty() {
+            s.ssh_user = u;
+        }
+    }
+    let now = now_str();
+    sqlx::query(
+        "UPDATE instance_settings SET ssh_host = ?, ssh_user = ?, updated_at = ? WHERE id = 1",
+    )
+    .bind(&s.ssh_host)
+    .bind(&s.ssh_user)
+    .bind(&now)
+    .execute(&state.pool)
+    .await
+    .map_err(internal)?;
+
+    if s.ssh_host.is_empty() {
+        std::env::remove_var("DEVFORGE_SSH_HOST");
+    } else {
+        std::env::set_var("DEVFORGE_SSH_HOST", &s.ssh_host);
+        std::env::set_var("DEVFORGE_SSH_USER", &s.ssh_user);
+    }
+    let (private, _) = ssh_key_paths();
+    if private.is_file() {
+        std::env::set_var("DEVFORGE_SSH_KEY", private.to_string_lossy().to_string());
+    }
+
+    Ok(Json(json!({
+        "ok": true,
+        "ssh_host": s.ssh_host,
+        "ssh_user": s.ssh_user,
+    })))
+}
+
+async fn generate_ssh_key(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_admin_from_headers(&state, &headers).await?;
+    let (private, public) = ssh_key_paths();
+    if let Some(parent) = private.parent() {
+        tokio::fs::create_dir_all(parent).await.map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("mkdir ssh: {e}")})),
+            )
+        })?;
+    }
+    if private.is_file() {
+        let pub_key = tokio::fs::read_to_string(&public).await.unwrap_or_default();
+        return Ok(Json(json!({
+            "ok": true,
+            "created": false,
+            "key_path": private.to_string_lossy(),
+            "public_key": pub_key,
+            "hint": "Clé déjà présente — copie la publique dans authorized_keys du serveur distant.",
+        })));
+    }
+
+    let out = tokio::process::Command::new("ssh-keygen")
+        .args([
+            "-t",
+            "ed25519",
+            "-N",
+            "",
+            "-C",
+            "devforge",
+            "-f",
+            private.to_str().unwrap_or("/data/ssh/id_ed25519"),
+        ])
+        .output()
+        .await
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("ssh-keygen: {e}")})),
+            )
+        })?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err((
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("ssh-keygen failed: {err}")})),
+        ));
+    }
+
+    std::env::set_var("DEVFORGE_SSH_KEY", private.to_string_lossy().to_string());
+    let pub_key = tokio::fs::read_to_string(&public).await.unwrap_or_default();
+    Ok(Json(json!({
+        "ok": true,
+        "created": true,
+        "key_path": private.to_string_lossy(),
+        "public_key": pub_key,
+        "hint": "Ajoute cette clé publique dans ~/.ssh/authorized_keys sur le host distant.",
     })))
 }
 

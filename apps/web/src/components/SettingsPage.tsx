@@ -38,9 +38,16 @@ type GhUser = {
   avatar_url?: string | null;
 };
 
-type SettingsSection = 'general' | 'domaine' | 'github' | 'llm' | 'backup';
+type SettingsSection = 'general' | 'domaine' | 'github' | 'serveur' | 'llm' | 'backup';
 
-const SECTION_KEYS: SettingsSection[] = ['general', 'domaine', 'github', 'llm', 'backup'];
+const SECTION_KEYS: SettingsSection[] = [
+  'general',
+  'domaine',
+  'github',
+  'serveur',
+  'llm',
+  'backup',
+];
 
 function readSection(): SettingsSection {
   if (typeof window === 'undefined') return 'general';
@@ -53,6 +60,7 @@ const SECTION_TITLES: Record<SettingsSection, string> = {
   general: 'Général',
   domaine: 'Domaine',
   github: 'GitHub',
+  serveur: 'Serveur',
   llm: 'Agents / LLM',
   backup: 'Sauvegardes',
 };
@@ -72,6 +80,12 @@ export function SettingsPage() {
   const [wildcard, setWildcard] = useState('');
   const [instanceName, setInstanceName] = useState('');
   const [domainBusy, setDomainBusy] = useState(false);
+  const [sshHost, setSshHost] = useState('');
+  const [sshUser, setSshUser] = useState('root');
+  const [sshLocal, setSshLocal] = useState(true);
+  const [sshKeyExists, setSshKeyExists] = useState(false);
+  const [sshPublicKey, setSshPublicKey] = useState('');
+  const [sshBusy, setSshBusy] = useState(false);
   const toast = useToast();
 
   async function loadGh() {
@@ -88,6 +102,19 @@ export function SettingsPage() {
     }
   }
 
+  async function loadSsh() {
+    try {
+      const s = await api.sshStatus();
+      setSshHost(s.ssh_host || '');
+      setSshUser(s.ssh_user || 'root');
+      setSshLocal(s.local_docker);
+      setSshKeyExists(s.key_exists);
+      setSshPublicKey(s.public_key || '');
+    } catch {
+      /* ignore */
+    }
+  }
+
   useEffect(() => {
     Promise.all([
       api
@@ -100,6 +127,7 @@ export function SettingsPage() {
         setInstanceName(b.settings?.instance_name || '');
       }),
       loadGh(),
+      loadSsh(),
     ]).finally(() => setLoading(false));
   }, []);
 
@@ -389,6 +417,142 @@ export function SettingsPage() {
                 </div>
               </form>
             ) : null}
+          </Card>
+        </FadeIn>
+      )}
+
+      {section === 'serveur' && (
+        <FadeIn>
+          <Card>
+            <CardHeader
+              title="Déploiements"
+              action={
+                sshLocal ? (
+                  <Badge tone="ok">Docker local</Badge>
+                ) : (
+                  <Badge tone="accent">SSH distant</Badge>
+                )
+              }
+            />
+            <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
+              Sur ce NAS, les apps se déploient via le socket Docker — aucun SSH requis. Configure
+              un host seulement pour un serveur distant.
+            </p>
+            {!isAdmin ? (
+              <Alert tone="warn">Réservé à l’admin instance.</Alert>
+            ) : (
+              <div class="space-y-4">
+                <form
+                  class="flex flex-wrap items-end gap-2"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    setSshBusy(true);
+                    try {
+                      await api.saveSsh({
+                        ssh_host: sshHost.trim(),
+                        ssh_user: sshUser.trim() || 'root',
+                      });
+                      toast.push({ title: 'Serveur enregistré', tone: 'ok' });
+                      await loadSsh();
+                    } catch (err) {
+                      toast.push({
+                        title: 'Échec',
+                        detail: String((err as Error).message || err),
+                        tone: 'danger',
+                      });
+                    } finally {
+                      setSshBusy(false);
+                    }
+                  }}
+                >
+                  <div class="min-w-[160px] flex-1">
+                    <Input
+                      label="Host (optionnel)"
+                      placeholder="vide = Docker local"
+                      value={sshHost}
+                      onInput={(e) => setSshHost((e.target as HTMLInputElement).value)}
+                    />
+                  </div>
+                  <div class="w-36">
+                    <Input
+                      label="User"
+                      value={sshUser}
+                      onInput={(e) => setSshUser((e.target as HTMLInputElement).value)}
+                    />
+                  </div>
+                  <Button type="submit" size="sm" disabled={sshBusy}>
+                    Enregistrer
+                  </Button>
+                </form>
+
+                <div class="rounded-xl border border-[var(--color-line)] p-3">
+                  <div class="mb-2 flex items-center justify-between gap-2">
+                    <p class="text-sm font-medium">Clé SSH</p>
+                    <Badge tone={sshKeyExists ? 'ok' : 'muted'}>
+                      {sshKeyExists ? 'présente' : 'absente'}
+                    </Badge>
+                  </div>
+                  <p class="mb-3 text-xs text-[var(--color-ink-faint)]">
+                    Générée dans <code>/data/ssh/</code> — pas dans Variables ZimaOS. Ne colle jamais
+                    la clé privée dans un champ env.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={sshBusy}
+                    onClick={async () => {
+                      setSshBusy(true);
+                      try {
+                        const r = await api.generateSshKey();
+                        setSshKeyExists(true);
+                        setSshPublicKey(r.public_key || '');
+                        toast.push({
+                          title: r.created ? 'Clé créée' : 'Clé déjà là',
+                          detail: r.hint,
+                          tone: 'ok',
+                        });
+                      } catch (err) {
+                        toast.push({
+                          title: 'Génération KO',
+                          detail: String((err as Error).message || err),
+                          tone: 'danger',
+                        });
+                      } finally {
+                        setSshBusy(false);
+                      }
+                    }}
+                  >
+                    {sshKeyExists ? 'Afficher la clé' : 'Générer une clé'}
+                  </Button>
+                  {sshPublicKey && (
+                    <div class="mt-3 space-y-2">
+                      <p class="text-xs text-[var(--color-ink-muted)]">
+                        À coller dans <code>~/.ssh/authorized_keys</code> sur le host distant :
+                      </p>
+                      <textarea
+                        readonly
+                        class="h-24 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] p-2 font-mono text-xs"
+                        value={sshPublicKey}
+                      />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(sshPublicKey);
+                            toast.push({ title: 'Clé publique copiée', tone: 'ok' });
+                          } catch {
+                            toast.push({ title: 'Copie impossible', tone: 'warn' });
+                          }
+                        }}
+                      >
+                        Copier
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </Card>
         </FadeIn>
       )}

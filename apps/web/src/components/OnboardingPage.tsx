@@ -16,14 +16,13 @@ import {
   ToastProvider,
 } from './ui';
 
-type StepId = 'welcome' | 'instance' | 'domain' | 'github' | 'server' | 'finish';
+type StepId = 'welcome' | 'instance' | 'domain' | 'github' | 'finish';
 
 const STEPS: { id: StepId; label: string }[] = [
   { id: 'welcome', label: 'Accueil' },
   { id: 'instance', label: 'Instance' },
   { id: 'domain', label: 'Domaine' },
   { id: 'github', label: 'GitHub' },
-  { id: 'server', label: 'Serveur' },
   { id: 'finish', label: 'Terminé' },
 ];
 
@@ -48,8 +47,6 @@ function OnboardingWizard() {
   const [instanceUrl, setInstanceUrl] = useState('http://localhost:8000');
   const [domain, setDomain] = useState('');
   const [githubToken, setGithubToken] = useState('');
-  const [sshHost, setSshHost] = useState('');
-  const [sshUser, setSshUser] = useState('root');
 
   const idx = STEPS.findIndex((s) => s.id === step);
   const progress = Math.round(((idx + 1) / STEPS.length) * 100);
@@ -60,8 +57,6 @@ function OnboardingWizard() {
       setInstanceName(b.settings.instance_name || 'DevForge');
       setInstanceUrl(b.settings.instance_url || 'http://localhost:8000');
       setDomain(b.settings.wildcard_domain || '');
-      setSshHost(b.settings.ssh_host || '');
-      setSshUser(b.settings.ssh_user || 'root');
     });
   }, []);
 
@@ -102,12 +97,6 @@ function OnboardingWizard() {
         if (githubToken.trim()) {
           await savePartial({ github_token: githubToken });
         }
-      }
-      if (step === 'server') {
-        await savePartial({
-          ssh_host: sshHost,
-          ssh_user: sshUser,
-        });
       }
       const nextStep = STEPS[idx + 1];
       if (nextStep) setStep(nextStep.id);
@@ -160,7 +149,8 @@ function OnboardingWizard() {
                 Salut{boot?.user ? `, ${boot.user.name}` : ''}
               </h1>
               <p class="text-sm leading-relaxed text-[var(--color-ink-muted)]">
-                On configure DevForge en quelques étapes : instance, domaine, GitHub et serveur.
+                Instance, domaine apps, GitHub. Les déploiements locaux passent par Docker (déjà
+                monté) — pas de SSH à configurer ici.
               </p>
               <Button onClick={next} class="w-full">
                 C’est parti
@@ -252,38 +242,6 @@ function OnboardingWizard() {
             </div>
           )}
 
-          {step === 'server' && (
-            <div class="space-y-4">
-              <h2 class="text-xl font-semibold tracking-tight">Serveur SSH</h2>
-              <p class="text-sm text-[var(--color-ink-muted)]">
-                Host pour Docker / deploys. Laisse vide pour configurer plus tard.
-              </p>
-              <Input
-                label="Host"
-                placeholder="1.2.3.4"
-                value={sshHost}
-                onInput={(e) => setSshHost((e.target as HTMLInputElement).value)}
-              />
-              <Input
-                label="User"
-                value={sshUser}
-                onInput={(e) => setSshUser((e.target as HTMLInputElement).value)}
-              />
-              <div class="flex gap-2">
-                <Button variant="ghost" onClick={() => setStep('github')}>
-                  Retour
-                </Button>
-                <Button variant="outline" onClick={skip}>
-                  Plus tard
-                </Button>
-                <Button class="flex-1" disabled={busy} onClick={next}>
-                  {busy ? <Spinner /> : null}
-                  Continuer
-                </Button>
-              </div>
-            </div>
-          )}
-
           {step === 'finish' && (
             <div class="space-y-4">
               <h2 class="text-xl font-semibold tracking-tight">Tout est en place</h2>
@@ -299,11 +257,14 @@ function OnboardingWizard() {
                   GitHub
                 </li>
                 <li class="flex items-center gap-2">
-                  <PulseDot tone={sshHost ? 'ok' : 'muted'} /> Serveur · {sshHost || 'plus tard'}
+                  <PulseDot tone="ok" /> Déplois locaux · Docker socket
                 </li>
               </ul>
+              <p class="text-xs text-[var(--color-ink-faint)]">
+                Serveur SSH distant : Settings → Serveur (optionnel).
+              </p>
               <div class="flex gap-2">
-                <Button variant="ghost" onClick={() => setStep('server')}>
+                <Button variant="ghost" onClick={() => setStep('github')}>
                   Retour
                 </Button>
                 <Button class="flex-1" disabled={busy} onClick={finish}>

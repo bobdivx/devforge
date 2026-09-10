@@ -161,6 +161,30 @@ export const api = {
       method: 'POST',
       body: '{}',
     }),
+  sshStatus: () =>
+    request<{
+      ok: boolean;
+      executor: string;
+      local_docker: boolean;
+      ssh_host: string;
+      ssh_user: string;
+      key_path: string;
+      key_exists: boolean;
+      public_key?: string | null;
+    }>('/settings/ssh'),
+  saveSsh: (body: { ssh_host?: string; ssh_user?: string }) =>
+    request<{ ok: boolean; ssh_host: string; ssh_user: string }>('/settings/ssh', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  generateSshKey: () =>
+    request<{
+      ok: boolean;
+      created: boolean;
+      key_path: string;
+      public_key: string;
+      hint?: string;
+    }>('/settings/ssh/generate-key', { method: 'POST', body: '{}' }),
   adminOverview: () =>
     request<{
       ok: boolean;

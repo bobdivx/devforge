@@ -47,6 +47,7 @@ export const SETTINGS_NAV: NavItem[] = [
   { href: '/app/settings', label: 'Général', key: 'general' },
   { href: '/app/settings?tab=domaine', label: 'Domaine', key: 'domaine' },
   { href: '/app/settings?tab=github', label: 'GitHub', key: 'github' },
+  { href: '/app/settings?tab=serveur', label: 'Serveur', key: 'serveur' },
   { href: '/app/settings?tab=llm', label: 'Agents / LLM', key: 'llm' },
   { href: '/app/settings?tab=backup', label: 'Sauvegardes', key: 'backup' },
   { href: '/app/update', label: 'Mise à jour', key: 'update' },

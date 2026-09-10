@@ -5,14 +5,14 @@
 #   deploy/zimaos/install.yaml
 #
 # Usage :
-#   export DEVFORGE_VERSION=2.0.1
+#   export DEVFORGE_VERSION=2.0.2
 #   docker compose up -d
 #
-# Image : bobdivx/devforge:2.0.1 (Docker Hub) / ghcr.io/bobdivx/devforge:2.0.1
+# Image : bobdivx/devforge:2.0.2 (Docker Hub) / ghcr.io/bobdivx/devforge:2.0.2
 
 services:
   devforge:
-    image: bobdivx/devforge:${DEVFORGE_VERSION:-2.0.1}
+    image: bobdivx/devforge:${DEVFORGE_VERSION:-2.0.2}
     container_name: devforge
     restart: unless-stopped
     ports:
@@ -26,7 +26,7 @@ services:
       PORT: "8000"
       DATABASE_URL: sqlite:/data/devforge.db?mode=rwc
       DEVFORGE_DATA_DIR: /data
-      DEVFORGE_VERSION: ${DEVFORGE_VERSION:-2.0.1}
+      DEVFORGE_VERSION: ${DEVFORGE_VERSION:-2.0.2}
       DEVFORGE_UPDATE_MODE: compose
       DEVFORGE_UPDATE_COMPOSE_FILE: /opt/devforge/docker-compose.yml
       DEVFORGE_UPDATE_COMPOSE_SERVICE: devforge
