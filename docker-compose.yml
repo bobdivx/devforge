@@ -1,78 +1,42 @@
-# DevForge — définitions de base
-# Prod : docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env up -d
-# Dev  : docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-
-x-logging: &default-logging
-  driver: json-file
-  options:
-    max-size: "20m"
-    max-file: "3"
+# DevForge v2 — déploiement self-update (compose).
+# Usage :
+#   export DEVFORGE_VERSION=2.0.0
+#   docker compose up -d
+#
+# Image : ghcr.io/bobdivx/devforge:2.0.0  et  bobdivx/devforge:2.0.0 (Docker Hub)
+# Self-update depuis l’UI : pull + force-recreate avec le tag DEVFORGE_VERSION.
 
 services:
-  proxy:
-    image: nginx:1.27-alpine
-    container_name: devforge-proxy
-    restart: unless-stopped
-    networks:
-      - devforge
-    logging: *default-logging
-
-  api:
-    container_name: devforge-api
-    restart: unless-stopped
-    working_dir: /var/www/html
-    extra_hosts:
-      - host.docker.internal:host-gateway
-    networks:
-      - devforge
-    depends_on:
-      - postgres
-      - redis
-      - realtime
-      - agent
-    logging: *default-logging
-
-  web:
-    container_name: devforge-web
-    restart: unless-stopped
-    networks:
-      - devforge
-    logging: *default-logging
-
-  postgres:
-    image: postgres:15-alpine
-    container_name: devforge-db
-    restart: unless-stopped
-    networks:
-      - devforge
-    logging: *default-logging
-
-  redis:
-    image: redis:7-alpine
-    container_name: devforge-redis
-    restart: unless-stopped
-    networks:
-      - devforge
-    logging: *default-logging
-
-  realtime:
-    container_name: devforge-realtime
-    extra_hosts:
-      - host.docker.internal:host-gateway
-    restart: unless-stopped
-    networks:
-      - devforge
-    logging: *default-logging
-
-  agent:
-    container_name: devforge-agent
-    restart: unless-stopped
-    networks:
-      - devforge
-    logging: *default-logging
-
-networks:
   devforge:
-    name: devforge
-    driver: bridge
-    external: false
+    image: ghcr.io/bobdivx/devforge:${DEVFORGE_VERSION:-latest}
+    container_name: devforge
+    restart: unless-stopped
+    ports:
+      - "${DEVFORGE_HTTP_PORT:-8000}:8000"
+    volumes:
+      - ${DEVFORGE_DATA_DIR:-./data}:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker-compose.yml:/opt/devforge/docker-compose.yml:ro
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8000"
+      DATABASE_URL: sqlite:/data/devforge.db?mode=rwc
+      DEVFORGE_DATA_DIR: /data
+      DEVFORGE_VERSION: ${DEVFORGE_VERSION:-latest}
+      DEVFORGE_UPDATE_MODE: compose
+      DEVFORGE_UPDATE_COMPOSE_FILE: /opt/devforge/docker-compose.yml
+      DEVFORGE_UPDATE_COMPOSE_SERVICE: devforge
+      DEVFORGE_SELF_CONTAINER: devforge
+      DEVFORGE_UPDATE_IMAGE: ghcr.io/bobdivx/devforge
+      DEVFORGE_UPDATE_REPO: ${DEVFORGE_UPDATE_REPO:-bobdivx/devforge}
+      DEVFORGE_EXECUTOR: local
+      DEVFORGE_STATIC_DIR: /app/web
+      DEVFORGE_CORS_ORIGINS: ${DEVFORGE_CORS_ORIGINS:-}
+      DEVFORGE_GITHUB_WEBHOOK_SECRET: ${DEVFORGE_GITHUB_WEBHOOK_SECRET:-}
+      DEVFORGE_ALLOW_REGISTER: ${DEVFORGE_ALLOW_REGISTER:-0}
+      DEVFORGE_GITHUB_TOKEN: ${DEVFORGE_GITHUB_TOKEN:-}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/api/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12

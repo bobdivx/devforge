@@ -1,0 +1,1266 @@
+//! Self-update DevForge : check GitHub releases + apply (compose / docker / binary).
+//! Pas de simulation : sans runtime applicable, `start` échoue clairement.
+
+use chrono::Utc;
+use devforge_deploy::RemoteExecutor;
+use devforge_github::GitHubFacade;
+use devforge_shared::{DevForgeError, Result};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
+use tokio::sync::RwLock;
+use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateMode {
+    /// `docker compose pull` + `up --force-recreate` (recommandé en prod).
+    Compose,
+    /// Pull image + recreate du conteneur nommé (via inspect / run).
+    Docker,
+    /// Télécharge l’asset de release et remplace le binaire courant.
+    Binary,
+}
+
+impl UpdateMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Compose => "compose",
+            Self::Docker => "docker",
+            Self::Binary => "binary",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateConfig {
+    pub current_version: String,
+    pub repo_owner: String,
+    pub repo_name: String,
+    pub mode: UpdateMode,
+    pub container_name: String,
+    pub image: String,
+    pub compose_file: String,
+    pub compose_service: String,
+    pub server_id: String,
+    pub channel: String,
+}
+
+impl UpdateConfig {
+    pub fn from_env() -> Self {
+        let current = std::env::var("DEVFORGE_VERSION")
+            .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
+        let repo = std::env::var("DEVFORGE_UPDATE_REPO")
+            .unwrap_or_else(|_| "bobdivx/devforge".into());
+        let (owner, name) = match repo.split_once('/') {
+            Some((o, n)) => (o.to_string(), n.to_string()),
+            None => ("bobdivx".into(), repo),
+        };
+        let mode = match std::env::var("DEVFORGE_UPDATE_MODE")
+            .unwrap_or_else(|_| "auto".into())
+            .to_lowercase()
+            .as_str()
+        {
+            "compose" => UpdateMode::Compose,
+            "docker" => UpdateMode::Docker,
+            "binary" => UpdateMode::Binary,
+            "stub" => {
+                tracing::warn!(
+                    "DEVFORGE_UPDATE_MODE=stub est retiré — bascule auto (compose/docker/binary)"
+                );
+                detect_auto_mode()
+            }
+            _ => detect_auto_mode(),
+        };
+        Self {
+            current_version: current.trim_start_matches('v').to_string(),
+            repo_owner: owner,
+            repo_name: name,
+            mode,
+            container_name: std::env::var("DEVFORGE_SELF_CONTAINER")
+                .unwrap_or_else(|_| "devforge".into()),
+            image: std::env::var("DEVFORGE_UPDATE_IMAGE")
+                .unwrap_or_else(|_| "ghcr.io/bobdivx/devforge".into()),
+            compose_file: std::env::var("DEVFORGE_UPDATE_COMPOSE_FILE")
+                .unwrap_or_else(|_| "docker-compose.yml".into()),
+            compose_service: std::env::var("DEVFORGE_UPDATE_COMPOSE_SERVICE")
+                .unwrap_or_else(|_| "devforge".into()),
+            server_id: std::env::var("DEVFORGE_DEFAULT_SERVER_ID")
+                .unwrap_or_else(|_| "default".into()),
+            channel: std::env::var("DEVFORGE_UPDATE_CHANNEL")
+                .unwrap_or_else(|_| "stable".into()),
+        }
+    }
+}
+
+fn detect_auto_mode() -> UpdateMode {
+    if std::env::var("DEVFORGE_UPDATE_COMPOSE_FILE").is_ok() {
+        return UpdateMode::Compose;
+    }
+    if running_in_container() || std::env::var("DEVFORGE_SELF_CONTAINER").is_ok() {
+        return UpdateMode::Docker;
+    }
+    UpdateMode::Binary
+}
+
+fn running_in_container() -> bool {
+    Path::new("/.dockerenv").exists()
+        || std::fs::read_to_string("/proc/1/cgroup")
+            .map(|s| s.contains("docker") || s.contains("containerd") || s.contains("kubepods"))
+            .unwrap_or(false)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StepStatus {
+    Pending,
+    Running,
+    Done,
+    Failed,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateStep {
+    pub id: String,
+    pub label: String,
+    pub status: StepStatus,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateJob {
+    pub id: String,
+    pub target_version: String,
+    pub status: String,
+    pub steps: Vec<UpdateStep>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub message: String,
+    pub wait_path: String,
+}
+
+impl UpdateJob {
+    fn new(target_version: &str) -> Self {
+        let steps = vec![
+            UpdateStep {
+                id: "check".into(),
+                label: "Vérification".into(),
+                status: StepStatus::Pending,
+                detail: String::new(),
+            },
+            UpdateStep {
+                id: "prepare".into(),
+                label: "Préparation".into(),
+                status: StepStatus::Pending,
+                detail: String::new(),
+            },
+            UpdateStep {
+                id: "pull".into(),
+                label: "Téléchargement".into(),
+                status: StepStatus::Pending,
+                detail: String::new(),
+            },
+            UpdateStep {
+                id: "apply".into(),
+                label: "Application".into(),
+                status: StepStatus::Pending,
+                detail: String::new(),
+            },
+            UpdateStep {
+                id: "restart".into(),
+                label: "Redémarrage".into(),
+                status: StepStatus::Pending,
+                detail: String::new(),
+            },
+        ];
+        Self {
+            id: Uuid::new_v4().to_string(),
+            target_version: target_version.trim_start_matches('v').to_string(),
+            status: "running".into(),
+            steps,
+            started_at: Utc::now().to_rfc3339(),
+            finished_at: None,
+            message: "Mise à jour en cours…".into(),
+            wait_path: "/app/update/wait".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionCheck {
+    pub current: String,
+    pub latest: Option<String>,
+    pub latest_name: Option<String>,
+    pub latest_url: Option<String>,
+    pub update_available: bool,
+    /// True si une MAJ peut être appliquée dans le mode courant (pas une simulation).
+    pub can_apply: bool,
+    pub channel: String,
+    pub mode: String,
+    pub repo: String,
+    pub message: String,
+}
+
+pub struct UpdateFacade {
+    config: UpdateConfig,
+    github: Arc<GitHubFacade>,
+    executor: Arc<dyn RemoteExecutor>,
+    job: Arc<RwLock<Option<UpdateJob>>>,
+    http: reqwest::Client,
+}
+
+impl UpdateFacade {
+    pub fn new(
+        github: Arc<GitHubFacade>,
+        executor: Arc<dyn RemoteExecutor>,
+        config: UpdateConfig,
+    ) -> Self {
+        Self {
+            config,
+            github,
+            executor,
+            job: Arc::new(RwLock::new(None)),
+            http: reqwest::Client::new(),
+        }
+    }
+
+    pub fn from_env(github: Arc<GitHubFacade>, executor: Arc<dyn RemoteExecutor>) -> Self {
+        Self::new(github, executor, UpdateConfig::from_env())
+    }
+
+    pub fn config(&self) -> &UpdateConfig {
+        &self.config
+    }
+
+    pub fn current_version(&self) -> &str {
+        &self.config.current_version
+    }
+
+    pub async fn current_job(&self) -> Option<UpdateJob> {
+        self.job.read().await.clone()
+    }
+
+    pub async fn check(&self) -> Result<VersionCheck> {
+        let repo = format!("{}/{}", self.config.repo_owner, self.config.repo_name);
+        match self.fetch_latest().await {
+            Ok((tag, name, url)) => {
+                let latest = tag.trim_start_matches('v').to_string();
+                let available = version_gt(&latest, &self.config.current_version);
+                let can_apply = available && self.mode_ready_hint().is_none();
+                let message = if available {
+                    if let Some(hint) = self.mode_ready_hint() {
+                        format!("Nouvelle version {latest} disponible — {hint}")
+                    } else {
+                        format!("Nouvelle version {latest} disponible.")
+                    }
+                } else {
+                    "DevForge est à jour.".into()
+                };
+                Ok(VersionCheck {
+                    current: self.config.current_version.clone(),
+                    latest: Some(latest),
+                    latest_name: Some(name),
+                    latest_url: Some(url),
+                    update_available: available,
+                    can_apply,
+                    channel: self.config.channel.clone(),
+                    mode: self.config.mode.as_str().into(),
+                    repo,
+                    message,
+                })
+            }
+            Err(e) => Ok(VersionCheck {
+                current: self.config.current_version.clone(),
+                latest: None,
+                latest_name: None,
+                latest_url: None,
+                update_available: false,
+                can_apply: false,
+                channel: self.config.channel.clone(),
+                mode: self.config.mode.as_str().into(),
+                repo,
+                message: format!("Impossible de vérifier les releases : {e}"),
+            }),
+        }
+    }
+
+    /// Prérequis manquants pour le mode courant (None = OK).
+    fn mode_ready_hint(&self) -> Option<&'static str> {
+        match self.config.mode {
+            UpdateMode::Compose | UpdateMode::Docker => None,
+            UpdateMode::Binary => None,
+        }
+    }
+
+    async fn fetch_latest(&self) -> Result<(String, String, String)> {
+        let owner = &self.config.repo_owner;
+        let name = &self.config.repo_name;
+        if let Ok(releases) = self.github.list_releases(owner, name).await {
+            if let Some(r) = releases
+                .into_iter()
+                .find(|r| !r.draft && (self.config.channel != "stable" || !r.prerelease))
+            {
+                return Ok((r.tag, r.name, r.html_url));
+            }
+        }
+        let url = format!("https://api.github.com/repos/{owner}/{name}/releases/latest");
+        let res = self
+            .http
+            .get(&url)
+            .header("User-Agent", "DevForge-Update")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("GitHub releases: {e}")))?;
+        if !res.status().is_success() {
+            let status = res.status();
+            let body = res.text().await.unwrap_or_default();
+            return Err(DevForgeError::Message(format!(
+                "GitHub {status}: {}",
+                body.chars().take(200).collect::<String>()
+            )));
+        }
+        let v: Value = res
+            .json()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("JSON releases: {e}")))?;
+        let tag = v
+            .get("tag_name")
+            .and_then(|t| t.as_str())
+            .ok_or_else(|| DevForgeError::Message("release sans tag".into()))?
+            .to_string();
+        let name = v
+            .get("name")
+            .and_then(|t| t.as_str())
+            .unwrap_or(&tag)
+            .to_string();
+        let html = v
+            .get("html_url")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .to_string();
+        Ok((tag, name, html))
+    }
+
+    pub async fn start(&self, target: Option<String>) -> Result<UpdateJob> {
+        {
+            let guard = self.job.read().await;
+            if let Some(j) = guard.as_ref() {
+                if j.status == "running" || j.status == "restarting" {
+                    return Err(DevForgeError::Message(
+                        "Une mise à jour est déjà en cours.".into(),
+                    ));
+                }
+            }
+        }
+
+        let check = self.check().await?;
+        let target = match target
+            .filter(|s| !s.trim().is_empty())
+            .or(check.latest.clone())
+        {
+            Some(t) => t.trim_start_matches('v').to_string(),
+            None => {
+                return Err(DevForgeError::Message(
+                    "Aucune version cible (releases introuvables).".into(),
+                ));
+            }
+        };
+
+        if !version_gt(&target, &self.config.current_version) {
+            return Err(DevForgeError::Message(format!(
+                "Déjà à jour ({}).",
+                self.config.current_version
+            )));
+        }
+
+        let job = UpdateJob::new(&target);
+        let job_id = job.id.clone();
+        *self.job.write().await = Some(job.clone());
+
+        let this = Self {
+            config: self.config.clone(),
+            github: self.github.clone(),
+            executor: self.executor.clone(),
+            job: self.job.clone(),
+            http: self.http.clone(),
+        };
+        tokio::spawn(async move {
+            if let Err(e) = this.run_pipeline(&job_id, &target).await {
+                tracing::error!(error = %e, "update pipeline failed");
+                let _ = this.fail_job(&job_id, &e.to_string()).await;
+            }
+        });
+
+        self.current_job()
+            .await
+            .ok_or_else(|| DevForgeError::Message("job perdu".into()))
+    }
+
+    async fn run_pipeline(&self, job_id: &str, target: &str) -> Result<()> {
+        self.set_step(
+            job_id,
+            "check",
+            StepStatus::Running,
+            "Comparaison des versions…",
+        )
+        .await?;
+        self.set_step(
+            job_id,
+            "check",
+            StepStatus::Done,
+            &format!("{} → {}", self.config.current_version, target),
+        )
+        .await?;
+
+        self.set_step(
+            job_id,
+            "prepare",
+            StepStatus::Running,
+            &format!("Mode {}…", self.config.mode.as_str()),
+        )
+        .await?;
+
+        match self.config.mode {
+            UpdateMode::Compose | UpdateMode::Docker => {
+                self.run_container_pipeline(job_id, target).await?;
+            }
+            UpdateMode::Binary => {
+                self.run_binary_pipeline(job_id, target).await?;
+            }
+        }
+
+        self.set_step(
+            job_id,
+            "restart",
+            StepStatus::Running,
+            "Le service va redémarrer…",
+        )
+        .await?;
+
+        {
+            let mut guard = self.job.write().await;
+            if let Some(j) = guard.as_mut() {
+                if j.id == job_id {
+                    j.status = "restarting".into();
+                    j.message = "Redémarrage de DevForge…".into();
+                    j.wait_path = format!("/app/update/wait?job={}&to={}", j.id, j.target_version);
+                }
+            }
+        }
+
+        // Laisser le temps au front de poller / redirect avant kill.
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        match self.config.mode {
+            UpdateMode::Compose | UpdateMode::Docker => {
+                // Apply a déjà recréé le conteneur ; process peut mourir ici.
+            }
+            UpdateMode::Binary => {
+                self.restart_replaced_binary().await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn run_container_pipeline(&self, job_id: &str, target: &str) -> Result<()> {
+        let probe = self
+            .executor
+            .exec(
+                &self.config.server_id,
+                ".",
+                "docker version --format '{{.Server.Version}}'",
+                30,
+            )
+            .await?;
+        if !probe.ok {
+            return Err(DevForgeError::Message(format!(
+                "Docker indisponible : {}",
+                probe.output
+            )));
+        }
+        self.set_step(
+            job_id,
+            "prepare",
+            StepStatus::Done,
+            &format!("Docker {}", probe.output.trim()),
+        )
+        .await?;
+
+        self.set_step(job_id, "pull", StepStatus::Running, "Pull image…")
+            .await?;
+
+        let pull_cmd = if self.config.mode == UpdateMode::Compose {
+            compose_cmd(
+                &self.config.compose_file,
+                target,
+                &format!("pull {}", shell_escape(&self.config.compose_service)),
+            )
+        } else {
+            format!(
+                "docker pull {}:{}",
+                shell_escape(&self.config.image),
+                shell_escape(target)
+            )
+        };
+        let pull = self
+            .executor
+            .exec(&self.config.server_id, ".", &pull_cmd, 600)
+            .await?;
+        if !pull.ok {
+            return Err(DevForgeError::Message(format!(
+                "Pull échoué : {}",
+                truncate(&pull.output, 400)
+            )));
+        }
+        self.set_step(job_id, "pull", StepStatus::Done, &truncate(&pull.output, 180))
+            .await?;
+
+        self.set_step(job_id, "apply", StepStatus::Running, "Recréation…")
+            .await?;
+
+        if self.config.mode == UpdateMode::Compose {
+            let apply_cmd = compose_cmd(
+                &self.config.compose_file,
+                target,
+                &format!(
+                    "up -d --no-deps --force-recreate {}",
+                    shell_escape(&self.config.compose_service)
+                ),
+            );
+            let apply = self
+                .executor
+                .exec(&self.config.server_id, ".", &apply_cmd, 300)
+                .await?;
+            if !apply.ok {
+                return Err(DevForgeError::Message(format!(
+                    "Apply échoué : {}",
+                    truncate(&apply.output, 400)
+                )));
+            }
+            self.set_step(
+                job_id,
+                "apply",
+                StepStatus::Done,
+                &truncate(&apply.output, 180),
+            )
+            .await?;
+        } else {
+            let detail = self.recreate_docker_container(target).await?;
+            self.set_step(job_id, "apply", StepStatus::Done, &detail)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Recreate nommé via inspect JSON (portable Windows/Linux).
+    async fn recreate_docker_container(&self, target: &str) -> Result<String> {
+        let name = &self.config.container_name;
+        let image_ref = format!("{}:{}", self.config.image, target);
+
+        let inspect = self
+            .executor
+            .exec(
+                &self.config.server_id,
+                ".",
+                &format!("docker inspect {}", shell_escape(name)),
+                30,
+            )
+            .await?;
+        if !inspect.ok {
+            return Err(DevForgeError::Message(format!(
+                "Conteneur {} introuvable : {}",
+                name,
+                truncate(&inspect.output, 200)
+            )));
+        }
+        let v: Value = {
+            let raw = inspect.output.trim();
+            let start = raw.find('[').or_else(|| raw.find('{')).unwrap_or(0);
+            serde_json::from_str(&raw[start..]).map_err(|e| {
+                DevForgeError::Message(format!("inspect JSON: {e}"))
+            })?
+        };
+        let obj = v
+            .as_array()
+            .and_then(|a| a.first())
+            .cloned()
+            .unwrap_or(v);
+
+        let mut run = vec![
+            "docker".into(),
+            "run".into(),
+            "-d".into(),
+            "--name".into(),
+            name.clone(),
+        ];
+
+        let restart = obj
+            .pointer("/HostConfig/RestartPolicy/Name")
+            .and_then(|x| x.as_str())
+            .unwrap_or("unless-stopped");
+        if restart != "no" && !restart.is_empty() {
+            run.push("--restart".into());
+            run.push(restart.into());
+        }
+
+        if let Some(binds) = obj.pointer("/HostConfig/Binds").and_then(|x| x.as_array()) {
+            for b in binds {
+                if let Some(s) = b.as_str() {
+                    run.push("-v".into());
+                    run.push(s.to_string());
+                }
+            }
+        }
+
+        if let Some(ports) = obj
+            .pointer("/HostConfig/PortBindings")
+            .and_then(|x| x.as_object())
+        {
+            for (container_port, hosts) in ports {
+                let port_key = container_port.replace("/tcp", "").replace("/udp", "");
+                if let Some(arr) = hosts.as_array() {
+                    for h in arr {
+                        let host_ip = h.get("HostIp").and_then(|x| x.as_str()).unwrap_or("");
+                        let host_port = h.get("HostPort").and_then(|x| x.as_str()).unwrap_or("");
+                        if host_port.is_empty() {
+                            continue;
+                        }
+                        let mapping = if host_ip.is_empty() || host_ip == "0.0.0.0" {
+                            format!("{host_port}:{port_key}")
+                        } else {
+                            format!("{host_ip}:{host_port}:{port_key}")
+                        };
+                        run.push("-p".into());
+                        run.push(mapping);
+                    }
+                }
+            }
+        }
+
+        if let Some(env) = obj.pointer("/Config/Env").and_then(|x| x.as_array()) {
+            for e in env {
+                if let Some(s) = e.as_str() {
+                    // La nouvelle image doit porter DEVFORGE_VERSION = target.
+                    if s.starts_with("DEVFORGE_VERSION=") {
+                        run.push("-e".into());
+                        run.push(format!("DEVFORGE_VERSION={target}"));
+                    } else {
+                        run.push("-e".into());
+                        run.push(s.to_string());
+                    }
+                }
+            }
+        } else {
+            run.push("-e".into());
+            run.push(format!("DEVFORGE_VERSION={target}"));
+        }
+
+        if let Some(nets) = obj
+            .pointer("/NetworkSettings/Networks")
+            .and_then(|x| x.as_object())
+        {
+            if let Some(net_name) = nets.keys().next() {
+                run.push("--network".into());
+                run.push(net_name.clone());
+            }
+        }
+
+        run.push(image_ref.clone());
+
+        let old = format!("{name}-old");
+        let rename = self
+            .executor
+            .exec(
+                &self.config.server_id,
+                ".",
+                &format!(
+                    "docker rename {} {}",
+                    shell_escape(name),
+                    shell_escape(&old)
+                ),
+                30,
+            )
+            .await?;
+        if !rename.ok {
+            return Err(DevForgeError::Message(format!(
+                "rename échoué : {}",
+                truncate(&rename.output, 200)
+            )));
+        }
+
+        let run_cmd = shell_join(&run);
+        let created = self
+            .executor
+            .exec(&self.config.server_id, ".", &run_cmd, 120)
+            .await?;
+        if !created.ok {
+            let _ = self
+                .executor
+                .exec(
+                    &self.config.server_id,
+                    ".",
+                    &format!(
+                        "docker rename {} {}",
+                        shell_escape(&old),
+                        shell_escape(name)
+                    ),
+                    30,
+                )
+                .await;
+            return Err(DevForgeError::Message(format!(
+                "docker run échoué : {}",
+                truncate(&created.output, 400)
+            )));
+        }
+
+        let _ = self
+            .executor
+            .exec(
+                &self.config.server_id,
+                ".",
+                &format!("docker rm -f {}", shell_escape(&old)),
+                60,
+            )
+            .await;
+
+        Ok(format!("Recréé {name} ← {image_ref}"))
+    }
+
+    async fn run_binary_pipeline(&self, job_id: &str, target: &str) -> Result<()> {
+        let triple = host_target_triple();
+        self.set_step(
+            job_id,
+            "prepare",
+            StepStatus::Done,
+            &format!("Binaire {triple}"),
+        )
+        .await?;
+
+        self.set_step(
+            job_id,
+            "pull",
+            StepStatus::Running,
+            "Recherche de l’asset GitHub…",
+        )
+        .await?;
+
+        let asset = self
+            .resolve_release_asset(target, &triple)
+            .await
+            .map_err(|e| {
+                DevForgeError::Message(format!(
+                    "{e} — publie une release avec `devforge-server-{triple}.zip` (ou .exe/.bin)."
+                ))
+            })?;
+
+        let current = std::env::current_exe().map_err(|e| {
+            DevForgeError::Message(format!("Impossible de résoudre le binaire courant : {e}"))
+        })?;
+        let download_path = download_path_for(&current, &asset.name);
+
+        self.set_step(
+            job_id,
+            "pull",
+            StepStatus::Running,
+            &format!("Téléchargement {}…", asset.name),
+        )
+        .await?;
+
+        self.download_asset(&asset, &download_path).await?;
+        self.set_step(
+            job_id,
+            "pull",
+            StepStatus::Done,
+            &format!("{} ({} octets)", asset.name, asset.size),
+        )
+        .await?;
+
+        self.set_step(
+            job_id,
+            "apply",
+            StepStatus::Running,
+            "Remplacement du binaire…",
+        )
+        .await?;
+        let installed = self
+            .install_downloaded_binary(&download_path, &current, &asset.name)
+            .await?;
+        self.set_step(
+            job_id,
+            "apply",
+            StepStatus::Done,
+            &format!("Installé → {}", installed.display()),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn resolve_release_asset(&self, tag: &str, triple: &str) -> Result<ReleaseAsset> {
+        let owner = &self.config.repo_owner;
+        let name = &self.config.repo_name;
+        let tag_variants = [format!("v{tag}"), tag.to_string()];
+        let mut last_err = DevForgeError::Message("release introuvable".into());
+
+        for tag_name in &tag_variants {
+            let url = format!(
+                "https://api.github.com/repos/{owner}/{name}/releases/tags/{tag_name}"
+            );
+            let mut req = self
+                .http
+                .get(&url)
+                .header("User-Agent", "DevForge-Update")
+                .header("Accept", "application/vnd.github+json");
+            if let Ok(token) = std::env::var("DEVFORGE_GITHUB_TOKEN") {
+                if !token.trim().is_empty() {
+                    req = req.bearer_auth(token.trim());
+                }
+            }
+            let res = req.send().await.map_err(|e| {
+                DevForgeError::Message(format!("GitHub release {tag_name}: {e}"))
+            })?;
+            if !res.status().is_success() {
+                last_err = DevForgeError::Message(format!(
+                    "GitHub release {tag_name}: {}",
+                    res.status()
+                ));
+                continue;
+            }
+            let v: Value = res
+                .json()
+                .await
+                .map_err(|e| DevForgeError::Message(format!("JSON release: {e}")))?;
+            let assets = v
+                .get("assets")
+                .and_then(|a| a.as_array())
+                .cloned()
+                .unwrap_or_default();
+            if let Some(asset) = pick_asset(&assets, triple) {
+                return Ok(asset);
+            }
+            last_err = DevForgeError::Message(format!(
+                "Aucun asset compatible ({triple}) sur la release {tag_name}"
+            ));
+        }
+        Err(last_err)
+    }
+
+    async fn download_asset(&self, asset: &ReleaseAsset, dest: &Path) -> Result<()> {
+        if let Some(parent) = dest.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                DevForgeError::Message(format!("mkdir download: {e}"))
+            })?;
+        }
+        let mut req = self
+            .http
+            .get(&asset.url)
+            .header("User-Agent", "DevForge-Update")
+            .header("Accept", "application/octet-stream");
+        if let Ok(token) = std::env::var("DEVFORGE_GITHUB_TOKEN") {
+            if !token.trim().is_empty() {
+                req = req.bearer_auth(token.trim());
+            }
+        }
+        let res = req
+            .send()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("download: {e}")))?;
+        if !res.status().is_success() {
+            return Err(DevForgeError::Message(format!(
+                "download HTTP {}",
+                res.status()
+            )));
+        }
+        let bytes = res
+            .bytes()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("download body: {e}")))?;
+        let mut file = tokio::fs::File::create(dest)
+            .await
+            .map_err(|e| DevForgeError::Message(format!("create {}: {e}", dest.display())))?;
+        file.write_all(&bytes)
+            .await
+            .map_err(|e| DevForgeError::Message(format!("write download: {e}")))?;
+        file.flush()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("flush download: {e}")))?;
+        Ok(())
+    }
+
+    async fn install_downloaded_binary(
+        &self,
+        download: &Path,
+        current: &Path,
+        asset_name: &str,
+    ) -> Result<PathBuf> {
+        let staged = if asset_name.ends_with(".zip") {
+            let dir = download
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(format!("devforge-update-{}", Uuid::new_v4()));
+            tokio::fs::create_dir_all(&dir).await.map_err(|e| {
+                DevForgeError::Message(format!("mkdir extract: {e}"))
+            })?;
+            extract_zip_find_binary(download, &dir).await?
+        } else {
+            download.to_path_buf()
+        };
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = tokio::fs::metadata(&staged)
+                .await
+                .map_err(|e| DevForgeError::Message(format!("stat binary: {e}")))?
+                .permissions();
+            perms.set_mode(0o755);
+            tokio::fs::set_permissions(&staged, perms)
+                .await
+                .map_err(|e| DevForgeError::Message(format!("chmod: {e}")))?;
+        }
+
+        let backup = current.with_extension("old");
+        let _ = tokio::fs::remove_file(&backup).await;
+        tokio::fs::rename(current, &backup).await.map_err(|e| {
+            DevForgeError::Message(format!(
+                "Impossible de sauvegarder {} → {} : {e}",
+                current.display(),
+                backup.display()
+            ))
+        })?;
+        if let Err(e) = tokio::fs::rename(&staged, current).await {
+            let _ = tokio::fs::rename(&backup, current).await;
+            return Err(DevForgeError::Message(format!(
+                "Impossible d’installer le nouveau binaire : {e}"
+            )));
+        }
+        let _ = tokio::fs::remove_file(download).await;
+        Ok(current.to_path_buf())
+    }
+
+    async fn restart_replaced_binary(&self) -> Result<()> {
+        let current = std::env::current_exe().map_err(|e| {
+            DevForgeError::Message(format!("current_exe: {e}"))
+        })?;
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        let mut cmd = tokio::process::Command::new(&current);
+        cmd.args(&args).envs(std::env::vars()).kill_on_drop(false);
+        #[cfg(windows)]
+        {
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+            const DETACHED_PROCESS: u32 = 0x00000008;
+            cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+        }
+        cmd.spawn()
+            .map_err(|e| DevForgeError::Message(format!("relance binaire: {e}")))?;
+        // Quitte le process courant ; la page wait poll /health.
+        tokio::spawn(async {
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            std::process::exit(0);
+        });
+        Ok(())
+    }
+
+    async fn set_step(
+        &self,
+        job_id: &str,
+        step_id: &str,
+        status: StepStatus,
+        detail: &str,
+    ) -> Result<()> {
+        let mut guard = self.job.write().await;
+        let job = guard
+            .as_mut()
+            .filter(|j| j.id == job_id)
+            .ok_or_else(|| DevForgeError::Message("job introuvable".into()))?;
+        if let Some(step) = job.steps.iter_mut().find(|s| s.id == step_id) {
+            step.status = status;
+            step.detail = detail.to_string();
+        }
+        Ok(())
+    }
+
+    async fn fail_job(&self, job_id: &str, message: &str) -> Result<()> {
+        let mut guard = self.job.write().await;
+        if let Some(j) = guard.as_mut() {
+            if j.id == job_id {
+                j.status = "failed".into();
+                j.message = message.to_string();
+                j.finished_at = Some(Utc::now().to_rfc3339());
+                for step in j.steps.iter_mut() {
+                    if step.status == StepStatus::Running {
+                        step.status = StepStatus::Failed;
+                        step.detail = message.to_string();
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn job_json(job: &UpdateJob) -> Value {
+        json!(job)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ReleaseAsset {
+    name: String,
+    url: String,
+    size: u64,
+}
+
+fn pick_asset(assets: &[Value], triple: &str) -> Option<ReleaseAsset> {
+    let mut scored: Vec<(i32, ReleaseAsset)> = Vec::new();
+    for a in assets {
+        let name = a.get("name")?.as_str()?.to_string();
+        let url = a
+            .get("browser_download_url")?
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        if url.is_empty() {
+            continue;
+        }
+        let size = a.get("size").and_then(|s| s.as_u64()).unwrap_or(0);
+        let lower = name.to_lowercase();
+        let mut score = 0;
+        if lower.contains(triple) {
+            score += 100;
+        }
+        if lower.contains("devforge-server") || lower.contains("devforge_server") {
+            score += 20;
+        }
+        if cfg!(windows) && (lower.ends_with(".exe") || lower.contains("windows")) {
+            score += 10;
+        }
+        if cfg!(target_os = "linux") && lower.contains("linux") {
+            score += 10;
+        }
+        if cfg!(target_os = "macos") && (lower.contains("darwin") || lower.contains("macos")) {
+            score += 10;
+        }
+        if cfg!(target_arch = "x86_64")
+            && (lower.contains("x86_64") || lower.contains("amd64") || lower.contains("x64"))
+        {
+            score += 5;
+        }
+        if cfg!(target_arch = "aarch64")
+            && (lower.contains("aarch64") || lower.contains("arm64"))
+        {
+            score += 5;
+        }
+        if score > 0 {
+            scored.push((score, ReleaseAsset { name, url, size }));
+        }
+    }
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.into_iter().next().map(|(_, a)| a)
+}
+
+fn host_target_triple() -> String {
+    if let Ok(t) = std::env::var("DEVFORGE_UPDATE_TARGET") {
+        return t;
+    }
+    if cfg!(all(target_arch = "x86_64", target_os = "windows")) {
+        "x86_64-pc-windows-msvc".into()
+    } else if cfg!(all(target_arch = "aarch64", target_os = "windows")) {
+        "aarch64-pc-windows-msvc".into()
+    } else if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
+        "x86_64-unknown-linux-gnu".into()
+    } else if cfg!(all(target_arch = "aarch64", target_os = "linux")) {
+        "aarch64-unknown-linux-gnu".into()
+    } else if cfg!(all(target_arch = "x86_64", target_os = "macos")) {
+        "x86_64-apple-darwin".into()
+    } else if cfg!(all(target_arch = "aarch64", target_os = "macos")) {
+        "aarch64-apple-darwin".into()
+    } else {
+        format!(
+            "{}-{}-unknown",
+            std::env::consts::ARCH,
+            std::env::consts::OS
+        )
+    }
+}
+
+fn compose_cmd(compose_file: &str, version: &str, subcommand: &str) -> String {
+    let file = shell_escape(compose_file);
+    if cfg!(windows) {
+        format!(
+            "$env:DEVFORGE_VERSION='{}'; docker compose -f {} {}",
+            version.replace('\'', "''"),
+            file,
+            subcommand
+        )
+    } else {
+        format!(
+            "DEVFORGE_VERSION={} docker compose -f {} {}",
+            shell_escape(version),
+            file,
+            subcommand
+        )
+    }
+}
+
+fn shell_join(parts: &[String]) -> String {
+    parts
+        .iter()
+        .map(|p| {
+            if p.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '=' | '@'))
+            {
+                p.clone()
+            } else if cfg!(windows) {
+                format!("'{}'", p.replace('\'', "''"))
+            } else {
+                shell_escape(p)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn download_path_for(current: &Path, asset_name: &str) -> PathBuf {
+    let dir = current
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    dir.join(format!(".devforge-update-{asset_name}"))
+}
+
+async fn extract_zip_find_binary(zip_path: &Path, dest_dir: &Path) -> Result<PathBuf> {
+    let status = if cfg!(windows) {
+        let zip = zip_path.to_string_lossy().replace('\'', "''");
+        let dest = dest_dir.to_string_lossy().replace('\'', "''");
+        tokio::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!(
+                    "Expand-Archive -LiteralPath '{zip}' -DestinationPath '{dest}' -Force"
+                ),
+            ])
+            .status()
+            .await
+    } else {
+        tokio::process::Command::new("unzip")
+            .arg("-o")
+            .arg(zip_path.as_os_str())
+            .arg("-d")
+            .arg(dest_dir.as_os_str())
+            .status()
+            .await
+    }
+    .map_err(|e| DevForgeError::Message(format!("extract zip: {e}")))?;
+    if !status.success() {
+        return Err(DevForgeError::Message(
+            "Échec extraction ZIP (unzip / Expand-Archive).".into(),
+        ));
+    }
+
+    let mut stack = vec![dest_dir.to_path_buf()];
+    let mut candidates = Vec::new();
+    while let Some(dir) = stack.pop() {
+        let mut rd = tokio::fs::read_dir(&dir)
+            .await
+            .map_err(|e| DevForgeError::Message(format!("read extract: {e}")))?;
+        while let Some(entry) = rd
+            .next_entry()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("read extract entry: {e}")))?
+        {
+            let path = entry.path();
+            let ft = entry
+                .file_type()
+                .await
+                .map_err(|e| DevForgeError::Message(format!("file_type: {e}")))?;
+            if ft.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if name == "devforge-server"
+                || name == "devforge-server.exe"
+                || name == "devforge"
+                || name == "devforge.exe"
+            {
+                return Ok(path);
+            }
+            if !name.contains("readme") && !name.ends_with(".md") && !name.ends_with(".txt") {
+                candidates.push(path);
+            }
+        }
+    }
+    candidates
+        .into_iter()
+        .next()
+        .ok_or_else(|| DevForgeError::Message("ZIP sans binaire exécutable".into()))
+}
+
+/// True if `a` is strictly greater than `b` (semver loosely: major.minor.patch).
+pub fn version_gt(a: &str, b: &str) -> bool {
+    parse_ver(a) > parse_ver(b)
+}
+
+fn parse_ver(s: &str) -> (u64, u64, u64) {
+    let s = s.trim().trim_start_matches('v');
+    let mut parts = s.split(|c| c == '.' || c == '-');
+    let major = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let patch = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    (major, minor, patch)
+}
+
+fn shell_escape(s: &str) -> String {
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '@'))
+    {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    let t = s.trim();
+    if t.chars().count() <= max {
+        t.to_string()
+    } else {
+        format!("{}…", t.chars().take(max).collect::<String>())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_compare() {
+        assert!(version_gt("2.1.0", "2.0.0"));
+        assert!(version_gt("v2.0.1", "2.0.0"));
+        assert!(!version_gt("2.0.0", "2.0.0"));
+        assert!(!version_gt("1.9.9", "2.0.0"));
+    }
+
+    #[test]
+    fn pick_windows_asset() {
+        let assets = vec![
+            json!({"name": "README.md", "browser_download_url": "http://x/r", "size": 1}),
+            json!({
+                "name": "devforge-server-x86_64-pc-windows-msvc.zip",
+                "browser_download_url": "http://x/bin",
+                "size": 10
+            }),
+        ];
+        let a = pick_asset(&assets, "x86_64-pc-windows-msvc").expect("asset");
+        assert!(a.name.contains("windows"));
+    }
+}

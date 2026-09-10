@@ -1,0 +1,15 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+---
+<script is:inline>
+  const params = new URLSearchParams(window.location.search);
+  const project = params.get('project');
+  if (project) {
+    window.location.replace(`/app/projects/view?uuid=${encodeURIComponent(project)}&tab=agents`);
+  } else {
+    window.location.replace('/app/projects');
+  }
+</script>
+<BaseLayout title="Agents · DevForge">
+  <p class="p-8 text-sm text-[var(--color-ink-muted)]">Redirection…</p>
+</BaseLayout>

@@ -1,0 +1,7 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { ProjectDetailPage } from '../../../components/ProjectDetailPage';
+---
+<BaseLayout title="Project · DevForge">
+  <ProjectDetailPage client:only="preact" />
+</BaseLayout>

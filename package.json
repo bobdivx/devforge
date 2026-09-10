@@ -1,37 +1,22 @@
 {
-    "name": "devforge",
-    "private": true,
-    "type": "module",
-    "workspaces": [
-        "frontend"
-    ],
-    "scripts": {
-        "dev": "node scripts/dev-laravel-vite.mjs",
-        "dev:laravel": "node scripts/dev-laravel-vite.mjs",
-        "dev:frontend": "npm run dev --workspace frontend",
-        "dev:devforge": "npm run dev --workspace frontend",
-        "build": "npm run build:laravel && npm run build:frontend",
-        "build:laravel": "node scripts/build-laravel-vite.mjs && node scripts/normalize-vite-manifest.mjs",
-        "build:frontend": "npm run build --workspace frontend",
-        "build:devforge": "npm run build --workspace frontend",
-        "test:frontend": "npm run test --workspace frontend",
-        "test:devforge": "npm run test --workspace frontend",
-        "test:vite-manifest": "node scripts/normalize-vite-manifest.test.mjs"
-    },
-    "devDependencies": {
-        "@nanonets/graft": "^0.12.0",
-        "@tailwindcss/postcss": "4.1.18",
-        "laravel-vite-plugin": "2.0.1",
-        "postcss": "8.5.15",
-        "tailwind-scrollbar": "4.0.2",
-        "tailwindcss": "4.1.18",
-        "vite": "7.3.6"
-    },
-    "dependencies": {
-        "@tailwindcss/forms": "0.5.10",
-        "@tailwindcss/typography": "0.5.16",
-        "@xterm/addon-fit": "0.10.0",
-        "@xterm/xterm": "5.5.0",
-        "playwright": "^1.58.2"
-    }
+  "name": "devforge",
+  "private": true,
+  "version": "2.0.0",
+  "description": "DevForge monorepo — PaaS with AI agents (Rust + Astro)",
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev -w apps/web",
+    "build:web": "npm run build -w apps/web",
+    "check:forbidden": "node scripts/check-forbidden-names.mjs",
+    "sanitize:lock": "node scripts/sanitize-lockfile.mjs",
+    "postinstall": "node scripts/sanitize-lockfile.mjs",
+    "ci:web": "npm run build -w apps/web",
+    "dev:server": "cargo run -p devforge-server",
+    "test:rust": "cargo test --workspace"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }

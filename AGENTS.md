@@ -1,5 +1,9 @@
-# AGENTS.md
+# AGENTS
 
-Guidance agents / Cursor.
+DevForge v2 greenfield.
 
-→ Voir **[docs/AGENTS.md](docs/AGENTS.md)**.
+- Front : Astro + Preact only (`apps/web`)
+- Server : Rust Axum (`apps/server`)
+- Modules : `crates/*` (incl. `mcp`, `env`)
+- Archive : `bobdivx/devforge-alpha` — extraction only
+- Never introduce legacy platform brand names in source

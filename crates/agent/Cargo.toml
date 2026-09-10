@@ -1,0 +1,21 @@
+[package]
+name = "devforge-agent"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+devforge-shared = { workspace = true }
+devforge-deploy = { workspace = true }
+devforge-github = { workspace = true }
+devforge-mcp = { workspace = true }
+devforge-env = { workspace = true }
+devforge-llm = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+regex = "1"
+
+[dev-dependencies]
+tokio = { workspace = true }

@@ -1,0 +1,50 @@
+# Modules backend (crates)
+
+Facades derrière traits ; runtime réel activé via env (sinon stubs).
+
+| Crate | Rôle | État |
+|-------|------|------|
+| `shared` | Erreurs, Tool trait, DTOs | OK |
+| `agent` | Runner + registry tools | OK stub LLM |
+| `deploy` | tests + Docker lifecycle via `RemoteExecutor` | **SSH / local** (stub = tests only) |
+| `env` | Variables d’env projet (secrets masqués) | OK + SQLite |
+| `ports` | Mapping ports container ↔ public | Memory store |
+| `domain` | FQDN + **certbot ACME** via executor | Memory + apply |
+| `proxy` | Routes + **labels Traefik** via `docker update` | Memory + apply |
+| `wireguard` | Réseaux/peers + **`wg-quick`** | Memory + apply |
+| `auth` | Users, sessions, onboarding | **Argon2 + SQLite** |
+| `storage` | Buckets S3-compatibles | **UX Settings** (+ memory fallback) |
+| `backup` | Jobs backup → storage + **backup instance** | S3 via UX |
+| `detect` | Détection framework (Laravel, Next, Astro, Compose…) | **OK** |
+| `llm` | Providers LLM (OpenAI-compat + stub) | **OK** |
+| `update` | Self-update versions + compose/docker/binary | **OK** |
+| `database` | Provision DB app (Postgres etc.) | **Non implémenté** (erreur explicite) |
+| `mcp` | Serveur MCP + client HTTP + catalogue (Turso, Slack…) + lien DB→projet | **OK** |
+
+## Base de données DevForge (métadonnées)
+
+**Défaut : SQLite local** (`DATABASE_URL=sqlite:devforge.db?mode=rwc`).
+
+- Simple en solo / CI / laptop.
+- **Turso** (libSQL) : option plus tard pour multi-instance / edge — même schéma SQL, driver `libsql`. Pas obligatoire maintenant.
+
+## Activation runtime
+
+```bash
+export DEVFORGE_EXECUTOR=auto   # ssh si DEVFORGE_SSH_HOST, sinon local
+export DEVFORGE_SSH_HOST=…
+export DEVFORGE_GITHUB_TOKEN=…
+# Backups S3 instance : Settings → Sauvegardes (UX), pas d’env.
+```
+
+Pas de fallback stub silencieux : sans config, GitHub = `off` (erreur API), executor = `local`.
+
+`GET /api/v1/health` → `backends.{executor,github,storage,database,llm,update}` + `version`.
+
+## Routes HTTP
+
+- Storage : `/api/v1/storage/buckets` + `…/{bucket}/objects`
+- Backups projets : `/api/v1/projects/{uuid}/backups` + `…/restore-preview`
+- Backups instance : `/api/v1/settings/backup-s3` + `/api/v1/instance/backups` (+ restore)
+- Update : `/api/v1/update/check|status|start` (+ UI `/app/update`, wait `/app/update/wait`)
+- (+ ports, domains, proxy, lifecycle, wireguard, github)

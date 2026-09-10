@@ -1,0 +1,51 @@
+import type { ComponentChildren } from 'preact';
+import { cn } from '../../lib/cn';
+
+type Props = {
+  class?: string;
+  children: ComponentChildren;
+  padding?: 'none' | 'sm' | 'md' | 'lg';
+};
+
+const pads = {
+  none: '',
+  sm: 'p-4',
+  md: 'p-5',
+  lg: 'p-6',
+};
+
+export function Card({ class: className, children, padding = 'md' }: Props) {
+  return (
+    <div
+      class={cn(
+        'rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]',
+        pads[padding],
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function CardHeader({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description?: string;
+  action?: ComponentChildren;
+}) {
+  return (
+    <div class="mb-4 flex items-start justify-between gap-3">
+      <div>
+        <h2 class="text-sm font-medium tracking-tight text-[var(--color-ink)]">{title}</h2>
+        {description && (
+          <p class="mt-1 text-sm text-[var(--color-ink-muted)]">{description}</p>
+        )}
+      </div>
+      {action}
+    </div>
+  );
+}

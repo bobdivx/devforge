@@ -1,0 +1,30 @@
+import { Container, Section } from '../ui';
+
+const STEPS = [
+  { n: '01', title: 'Connecte le repo', body: 'Branche ton projet et c’est parti.' },
+  { n: '02', title: 'Deploy', body: 'Build, start, logs — en un clic.' },
+  { n: '03', title: 'Agent', body: 'Tes agents agissent dans le projet.' },
+];
+
+export function WorkflowStrip() {
+  return (
+    <Section id="workflow" class="pt-0">
+      <Container>
+        <div class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-bg-elevated)] p-8 md:p-10">
+          <h2 class="text-2xl font-semibold tracking-tight">Workflow</h2>
+          <div class="mt-10 grid gap-10 md:grid-cols-3">
+            {STEPS.map((s) => (
+              <div key={s.n}>
+                <div class="text-xs font-medium tracking-[0.18em] text-[var(--color-accent)]">
+                  {s.n}
+                </div>
+                <div class="mt-3 text-lg font-medium tracking-tight">{s.title}</div>
+                <p class="mt-2 text-sm leading-relaxed text-[var(--color-ink-muted)]">{s.body}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Container>
+    </Section>
+  );
+}

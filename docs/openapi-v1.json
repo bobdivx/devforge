@@ -1,0 +1,30 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "DevForge Server",
+    "version": "2.0.0",
+    "description": "HTTP surface of apps/server (/api/v1)"
+  },
+  "servers": [{ "url": "http://127.0.0.1:8000/api/v1" }],
+  "paths": {
+    "/health": {
+      "get": { "summary": "Health", "responses": { "200": { "description": "OK" } } }
+    },
+    "/projects": {
+      "get": { "summary": "List projects", "responses": { "200": { "description": "OK" } } },
+      "post": { "summary": "Create project", "responses": { "201": { "description": "Created" } } }
+    },
+    "/agent/chat": {
+      "post": {
+        "summary": "Agent chat (JSON or SSE if stream=true)",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/agent/tools/run_application_tests": {
+      "post": {
+        "summary": "Run project tests via declared workdir + test_command",
+        "responses": { "200": { "description": "OK" } }
+      }
+    }
+  }
+}

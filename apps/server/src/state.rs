@@ -1,0 +1,699 @@
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use devforge_agent::{build_core_registry, AgentRunner, ProjectStore, ToolRegistry};
+use devforge_database::DatabaseFacade;
+use devforge_deploy::{executor_from_env, DeployFacade};
+use devforge_domain::DomainFacade;
+use devforge_env::{EnvFacade, EnvStore, EnvVar, MemoryEnvStore};
+use devforge_github::{client_from_env, client_from_token, GitHubClient, GitHubFacade, HttpGitHubClient};
+use devforge_mcp::McpFacade;
+use devforge_ports::PortsFacade;
+use devforge_proxy::ProxyFacade;
+use devforge_shared::{ProjectTestContext, Result as DfResult};
+use devforge_wireguard::{MemoryWireguardStore, WireguardFacade};
+use devforge_storage::StorageFacade;
+use devforge_backup::{BackupFacade, InstanceBackupService, MemoryBackupStore};
+use devforge_update::UpdateFacade;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use sqlx::{sqlite::SqlitePoolOptions, FromRow, SqlitePool};
+use std::sync::Arc;
+use uuid::Uuid;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub pool: SqlitePool,
+    /// Filesystem path of the SQLite DB (for instance backup/restore).
+    pub db_path: std::path::PathBuf,
+    pub registry: Arc<ToolRegistry>,
+    pub agent: Arc<AgentRunner>,
+    pub databases: Arc<DatabaseFacade>,
+    pub mcp: Arc<McpFacade>,
+    pub env: Arc<EnvFacade>,
+    pub deploy: Arc<DeployFacade>,
+    pub github: Arc<GitHubFacade>,
+    pub ports: Arc<PortsFacade>,
+    pub domains: Arc<DomainFacade>,
+    pub proxy: Arc<ProxyFacade>,
+    pub wireguard: Arc<WireguardFacade>,
+    pub storage: Arc<StorageFacade>,
+    pub backup: Arc<BackupFacade>,
+    pub updater: Arc<UpdateFacade>,
+    /// Active backends: executor / github / storage / llm.
+    pub backends: Arc<BackendModes>,
+}
+
+#[derive(Debug)]
+pub struct BackendModes {
+    pub executor: &'static str,
+    pub github: std::sync::RwLock<String>,
+    pub storage: std::sync::RwLock<String>,
+    pub database: &'static str,
+    pub llm: std::sync::RwLock<String>,
+}
+
+impl BackendModes {
+    pub fn github_mode(&self) -> String {
+        self.github
+            .read()
+            .map(|m| m.clone())
+            .unwrap_or_else(|_| "stub".into())
+    }
+
+    pub fn set_github_mode(&self, mode: impl Into<String>) {
+        if let Ok(mut g) = self.github.write() {
+            *g = mode.into();
+        }
+    }
+
+    pub fn storage_mode(&self) -> String {
+        self.storage
+            .read()
+            .map(|m| m.clone())
+            .unwrap_or_else(|_| "memory".into())
+    }
+
+    pub fn set_storage_mode(&self, mode: impl Into<String>) {
+        if let Ok(mut g) = self.storage.write() {
+            *g = mode.into();
+        }
+    }
+
+    pub fn llm_mode(&self) -> String {
+        self.llm
+            .read()
+            .map(|m| m.clone())
+            .unwrap_or_else(|_| "stub".into())
+    }
+
+    pub fn set_llm_mode(&self, mode: impl Into<String>) {
+        if let Ok(mut g) = self.llm.write() {
+            *g = mode.into();
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Project {
+    pub id: i64,
+    pub uuid: String,
+    pub name: String,
+    pub slug: String,
+    pub status: String,
+    pub git_repository: Option<String>,
+    pub git_branch: Option<String>,
+    pub server_id: Option<String>,
+    pub workdir: Option<String>,
+    pub test_command: Option<String>,
+    pub production_url: Option<String>,
+    pub workspace_uuid: String,
+    pub build_pack: String,
+    pub port: i64,
+    pub is_static: i64,
+    pub publish_directory: Option<String>,
+    pub base_directory: String,
+    pub docker_compose_location: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Deployment {
+    pub id: i64,
+    pub uuid: String,
+    pub project_id: i64,
+    pub status: String,
+    pub git_sha: Option<String>,
+    pub git_message: Option<String>,
+    pub logs: Option<String>,
+    pub finished_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+struct SqliteProjectStore {
+    pool: SqlitePool,
+}
+
+#[async_trait]
+impl ProjectStore for SqliteProjectStore {
+    async fn list_projects(&self) -> DfResult<Vec<Value>> {
+        let rows = sqlx::query_as::<_, Project>("SELECT * FROM projects ORDER BY name ASC")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        Ok(rows
+            .into_iter()
+            .map(|p| {
+                json!({
+                    "uuid": p.uuid,
+                    "name": p.name,
+                    "status": p.status,
+                    "git_repository": p.git_repository,
+                    "git_branch": p.git_branch,
+                    "production_url": p.production_url,
+                })
+            })
+            .collect())
+    }
+
+    async fn get_project(&self, uuid: &str) -> DfResult<Option<Value>> {
+        let row = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ?")
+            .bind(uuid)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        let Some(p) = row else {
+            return Ok(None);
+        };
+        let deps: Vec<(String, String, Option<String>, Option<String>, String)> = sqlx::query_as(
+            r#"SELECT d.uuid, d.status, d.git_sha, d.git_message, d.created_at
+               FROM deployments d
+               WHERE d.project_id = ?
+               ORDER BY d.id DESC LIMIT 5"#,
+        )
+        .bind(p.id)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+        let deployments: Vec<Value> = deps
+            .into_iter()
+            .map(|(uuid, status, sha, msg, created)| {
+                json!({
+                    "uuid": uuid,
+                    "status": status,
+                    "git_sha": sha,
+                    "git_message": msg,
+                    "created_at": created,
+                })
+            })
+            .collect();
+        Ok(Some(json!({
+            "uuid": p.uuid,
+            "name": p.name,
+            "slug": p.slug,
+            "status": p.status,
+            "git_repository": p.git_repository,
+            "git_branch": p.git_branch,
+            "production_url": p.production_url,
+            "build_pack": p.build_pack,
+            "port": p.port,
+            "workdir": p.workdir,
+            "test_command": p.test_command,
+            "recent_deployments": deployments,
+        })))
+    }
+
+    async fn resolve_project(&self, uuid: &str) -> DfResult<Option<ProjectTestContext>> {
+        let row = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ?")
+            .bind(uuid)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        Ok(row.map(|p| ProjectTestContext {
+            project_uuid: p.uuid,
+            server_id: p.server_id.unwrap_or_default(),
+            workdir: p.workdir.unwrap_or_default(),
+            test_command: p.test_command.unwrap_or_default(),
+            timeout: None,
+        }))
+    }
+
+    async fn deployment_logs(&self, uuid: &str) -> DfResult<Value> {
+        let row = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = ?")
+            .bind(uuid)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        match row {
+            Some(d) => Ok(json!({
+                "ok": true,
+                "deployment_uuid": d.uuid,
+                "status": d.status,
+                "logs": d.logs.unwrap_or_default()
+            })),
+            None => Ok(json!({"ok": false, "error": format!("Déploiement introuvable: {uuid}")})),
+        }
+    }
+}
+
+/// SQLite-backed env store for project variables.
+pub struct SqliteEnvStore {
+    pool: SqlitePool,
+}
+
+#[async_trait]
+impl EnvStore for SqliteEnvStore {
+    async fn list(&self, project_uuid: &str) -> DfResult<Vec<EnvVar>> {
+        let rows: Vec<(String, String, i64)> = sqlx::query_as(
+            "SELECT key, value, secret FROM project_env_vars WHERE project_uuid = ? ORDER BY key",
+        )
+        .bind(project_uuid)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        Ok(rows
+            .into_iter()
+            .map(|(key, value, secret)| EnvVar {
+                key,
+                value,
+                secret: secret != 0,
+            })
+            .collect())
+    }
+
+    async fn get(&self, project_uuid: &str, key: &str) -> DfResult<Option<EnvVar>> {
+        let row: Option<(String, String, i64)> = sqlx::query_as(
+            "SELECT key, value, secret FROM project_env_vars WHERE project_uuid = ? AND key = ?",
+        )
+        .bind(project_uuid)
+        .bind(key)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        Ok(row.map(|(key, value, secret)| EnvVar {
+            key,
+            value,
+            secret: secret != 0,
+        }))
+    }
+
+    async fn upsert(&self, project_uuid: &str, var: EnvVar) -> DfResult<EnvVar> {
+        let key = var.key.trim().to_string();
+        if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(devforge_shared::DevForgeError::Message(
+                "clé env invalide (A-Z, 0-9, _)".into(),
+            ));
+        }
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            r#"INSERT INTO project_env_vars (project_uuid, key, value, secret, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(project_uuid, key) DO UPDATE SET
+                 value = excluded.value,
+                 secret = excluded.secret,
+                 updated_at = excluded.updated_at"#,
+        )
+        .bind(project_uuid)
+        .bind(&key)
+        .bind(&var.value)
+        .bind(if var.secret { 1 } else { 0 })
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        Ok(EnvVar {
+            key,
+            value: var.value,
+            secret: var.secret,
+        })
+    }
+
+    async fn delete(&self, project_uuid: &str, key: &str) -> DfResult<bool> {
+        let res = sqlx::query("DELETE FROM project_env_vars WHERE project_uuid = ? AND key = ?")
+            .bind(project_uuid)
+            .bind(key)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        Ok(res.rows_affected() > 0)
+    }
+}
+
+impl AppState {
+    pub async fn new(database_url: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let db_path = devforge_backup::sqlite_path_from_url(database_url);
+        if let Err(e) = InstanceBackupService::apply_pending_restore(&db_path) {
+            tracing::warn!(error = %e, "échec application pending restore");
+        }
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(5)
+            .connect(database_url)
+            .await?;
+
+        crate::db::migrate(&pool).await?;
+
+        let (executor, executor_mode) = executor_from_env();
+        let (gh_client, github_mode) = resolve_github_client(&pool).await;
+        let storage = Arc::new(StorageFacade::memory());
+        let s3_cfg = crate::backup_routes::load_s3_config(&pool).await;
+        storage.apply_config_unchecked(s3_cfg).await;
+        let storage_mode = storage.mode().await;
+        let backup = Arc::new(BackupFacade::new(
+            Arc::new(MemoryBackupStore::new()),
+            storage.clone(),
+        ));
+        let (_, llm_mode) = resolve_llm_provider(&pool).await;
+
+        let backends = Arc::new(BackendModes {
+            executor: executor_mode,
+            github: std::sync::RwLock::new(github_mode.to_string()),
+            storage: std::sync::RwLock::new(storage_mode.clone()),
+            database: "sqlite-local",
+            llm: std::sync::RwLock::new(llm_mode.clone()),
+        });
+        tracing::info!(
+            executor = executor_mode,
+            github = %github_mode,
+            storage = %storage_mode,
+            llm = %llm_mode,
+            "backends runtime"
+        );
+
+        let deploy = Arc::new(DeployFacade::new(executor.clone()));
+        let github = Arc::new(GitHubFacade::new(gh_client, github_mode));
+        let mcp = Arc::new(McpFacade::with_http_client());
+        let _mem = MemoryEnvStore::new();
+        let env = Arc::new(EnvFacade::new(Arc::new(SqliteEnvStore {
+            pool: pool.clone(),
+        })));
+        let ports = Arc::new(PortsFacade::new(Arc::new(crate::infra_sqlite::SqlitePortStore {
+            pool: pool.clone(),
+        })));
+        let apply_server = std::env::var("DEVFORGE_DEFAULT_SERVER_ID")
+            .unwrap_or_else(|_| "default".into());
+
+        let mut domains = DomainFacade::new(Arc::new(crate::infra_sqlite::SqliteDomainStore {
+            pool: pool.clone(),
+        }));
+        let mut proxy = ProxyFacade::new(Arc::new(crate::infra_sqlite::SqliteProxyStore {
+            pool: pool.clone(),
+        }));
+        let mut wireguard = WireguardFacade::new(Arc::new(MemoryWireguardStore::new()));
+        if executor_mode != "stub" {
+            domains = domains.with_executor(executor.clone(), apply_server.clone());
+            proxy = proxy.with_executor(executor.clone(), apply_server.clone());
+            wireguard = wireguard.with_executor(executor.clone(), apply_server);
+        }
+        let domains = Arc::new(domains);
+        let proxy = Arc::new(proxy);
+        let wireguard = Arc::new(wireguard);
+        let store: Arc<dyn ProjectStore> = Arc::new(SqliteProjectStore {
+            pool: pool.clone(),
+        });
+        let registry = Arc::new(build_core_registry(
+            deploy.clone(),
+            github.clone(),
+            store,
+            mcp.clone(),
+            env.clone(),
+        ));
+        let agent = Arc::new(AgentRunner::new(registry.clone()));
+        // Prefer DB/Settings LLM over plain env when configured.
+        {
+            let (llm, mode) = resolve_llm_provider(&pool).await;
+            agent.set_llm(llm, mode.clone()).await;
+            backends.set_llm_mode(mode);
+        }
+        let updater = Arc::new(UpdateFacade::from_env(
+            github.clone(),
+            deploy.executor(),
+        ));
+
+        let state = Self {
+            pool,
+            db_path,
+            registry,
+            agent,
+            databases: Arc::new(DatabaseFacade::new()),
+            mcp,
+            env,
+            deploy,
+            github,
+            ports,
+            domains,
+            proxy,
+            wireguard,
+            storage,
+            backup,
+            updater,
+            backends,
+        };
+
+        if let Err(e) = crate::mcp_routes::load_mcp_from_db(&state).await {
+            tracing::warn!(error = %e, "chargement MCP depuis SQLite");
+        }
+
+        Ok(state)
+    }
+
+    /// Persist + hot-reload GitHub HTTP client (PAT). Empty token → off.
+    pub async fn configure_github(
+        &self,
+        token: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let t = token.trim().to_string();
+        let now = now_str();
+        sqlx::query("UPDATE instance_settings SET github_token = ?, updated_at = ? WHERE id = 1")
+            .bind(&t)
+            .bind(&now)
+            .execute(&self.pool)
+            .await?;
+
+        if t.is_empty() {
+            let (client, mode) = client_from_token("");
+            self.github.set_client(client, mode);
+            self.backends.set_github_mode(mode);
+            return Ok(());
+        }
+
+        let probe = HttpGitHubClient::new(&t);
+        let user = probe.current_user().await?;
+        if user.login.is_empty() {
+            return Err("token GitHub invalide (login vide)".into());
+        }
+        let (client, mode) = client_from_token(&t);
+        self.github.set_client(client, mode);
+        self.backends.set_github_mode(mode);
+        if std::env::var("DEVFORGE_GITHUB_TOKEN").is_err() {
+            std::env::set_var("DEVFORGE_GITHUB_TOKEN", &t);
+        }
+        Ok(())
+    }
+
+    /// Persist + hot-reload LLM provider. Empty key → stub (unless ollama).
+    pub async fn configure_llm(
+        &self,
+        provider: &str,
+        api_key: &str,
+        model: &str,
+        base_url: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let provider = provider.trim().to_lowercase();
+        let provider = if provider.is_empty() {
+            "auto".to_string()
+        } else {
+            provider
+        };
+        let api_key = api_key.trim().to_string();
+        let model = {
+            let m = model.trim();
+            if m.is_empty() {
+                "gpt-4o-mini".to_string()
+            } else {
+                m.to_string()
+            }
+        };
+        let base_url = base_url.trim().to_string();
+        let now = now_str();
+        sqlx::query(
+            "UPDATE instance_settings SET llm_provider = ?, llm_api_key = ?, llm_model = ?, llm_base_url = ?, updated_at = ? WHERE id = 1",
+        )
+        .bind(&provider)
+        .bind(&api_key)
+        .bind(&model)
+        .bind(&base_url)
+        .bind(&now)
+        .execute(&self.pool)
+        .await?;
+
+        if provider == "stub" {
+            let (llm, mode) = devforge_llm::provider_from_config("stub", "", "gpt-4o-mini", None);
+            self.agent.set_llm(llm, mode.clone()).await;
+            self.backends.set_llm_mode(mode);
+            return Ok(());
+        }
+
+        // Recharge toute la chaîne (priorité) plutôt qu’un seul provider.
+        self.reload_llm_chain().await
+    }
+
+    /// Recharge la chaîne LLM depuis `llm_providers` (priority ASC, enabled).
+    pub async fn reload_llm_chain(
+        &self,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (llm, mode) = resolve_llm_provider(&self.pool).await;
+        self.agent.set_llm(llm, mode.clone()).await;
+        self.backends.set_llm_mode(mode);
+        Ok(())
+    }
+}
+
+fn normalize_chat_base(provider: &str, base_url: &str) -> String {
+    let clean = base_url.trim().trim_end_matches('/').to_string();
+    if provider == "ollama" {
+        if clean.is_empty() {
+            return "http://127.0.0.1:11434/v1".into();
+        }
+        if clean.ends_with("/v1") {
+            return clean;
+        }
+        return format!("{clean}/v1");
+    }
+    if clean.is_empty() {
+        return devforge_llm::OpenAiCompatibleProvider::default_base_url(provider)
+            .unwrap_or("")
+            .to_string();
+    }
+    clean
+}
+
+async fn resolve_llm_provider(pool: &SqlitePool) -> (Arc<dyn devforge_llm::LlmProvider>, String) {
+    // 1) Chaîne multi-providers (priorité) — probe chat avant activation
+    let rows: Vec<(String, String, String, String, String, String)> = sqlx::query_as(
+        r#"SELECT id, name, provider, api_key, base_url, model
+           FROM llm_providers
+           WHERE enabled = 1
+           ORDER BY priority ASC, name ASC"#,
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    if !rows.is_empty() {
+        let mut chain = Vec::new();
+        let mut labels = Vec::new();
+        let now = chrono::Utc::now().to_rfc3339();
+        for (id, name, provider, key, base, model) in &rows {
+            let probe = devforge_llm::probe(&devforge_llm::ProbeRequest {
+                provider: provider.clone(),
+                base_url: base.clone(),
+                api_key: key.clone(),
+                model: model.clone(),
+            })
+            .await;
+
+            let _ = sqlx::query(
+                r#"UPDATE llm_providers
+                   SET healthy = ?, last_probe_at = ?, last_probe_error = ?, resolved_model = ?
+                   WHERE id = ?"#,
+            )
+            .bind(if probe.ok { 1i64 } else { 0i64 })
+            .bind(&now)
+            .bind(probe.error.as_deref().unwrap_or(""))
+            .bind(&probe.resolved_model)
+            .bind(id)
+            .execute(pool)
+            .await;
+
+            if !probe.ok {
+                tracing::warn!(
+                    provider = %name,
+                    error = %probe.error.as_deref().unwrap_or("?"),
+                    "LLM health KO — exclu de la chaîne"
+                );
+                continue;
+            }
+
+            let chat_base = normalize_chat_base(provider, base);
+            let (p, mode) = devforge_llm::provider_from_config(
+                provider,
+                key,
+                &probe.resolved_model,
+                if chat_base.is_empty() {
+                    None
+                } else {
+                    Some(chat_base.as_str())
+                },
+            );
+            if mode == "stub" {
+                continue;
+            }
+            tracing::info!(
+                provider = %name,
+                model = %probe.resolved_model,
+                latency_ms = probe.latency_ms,
+                "LLM health OK — dans la chaîne"
+            );
+            labels.push(name.clone());
+            chain.push(devforge_llm::ChainEntry {
+                label: name.clone(),
+                provider: p,
+            });
+        }
+        if chain.len() == 1 {
+            let label = labels[0].clone();
+            return (chain.remove(0).provider, label);
+        }
+        if chain.len() > 1 {
+            let mode = format!("chain:{}", labels.join(">"));
+            let resilient = Arc::new(devforge_llm::ResilientLlmProvider::new(chain));
+            return (resilient, mode);
+        }
+        tracing::warn!("aucun LLM healthy — fallback stub");
+    }
+
+    // 2) Legacy instance_settings
+    let row: Option<(String, String, String, String)> = sqlx::query_as(
+        "SELECT llm_provider, llm_api_key, llm_model, llm_base_url FROM instance_settings WHERE id = 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+
+    if let Some((provider, key, model, base)) = row {
+        let has_db = !key.trim().is_empty()
+            || provider == "ollama"
+            || provider == "stub"
+            || (provider != "auto" && !provider.is_empty());
+        if has_db && (provider != "auto" || !key.trim().is_empty()) {
+            return devforge_llm::provider_from_config(
+                &provider,
+                &key,
+                &model,
+                if base.trim().is_empty() {
+                    None
+                } else {
+                    Some(base.as_str())
+                },
+            );
+        }
+        if !key.trim().is_empty() {
+            return devforge_llm::provider_from_config("openai", &key, &model, None);
+        }
+    }
+
+    let (p, m) = devforge_llm::provider_from_env();
+    (p, m.to_string())
+}
+
+async fn resolve_github_client(
+    pool: &SqlitePool,
+) -> (Arc<dyn devforge_github::GitHubClient>, &'static str) {
+    if let Some(c) = HttpGitHubClient::from_env() {
+        return (Arc::new(c), "http");
+    }
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT github_token FROM instance_settings WHERE id = 1")
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    if let Some((token,)) = row {
+        if !token.trim().is_empty() {
+            return client_from_token(&token);
+        }
+    }
+    client_from_env()
+}
+
+pub fn now_str() -> String {
+    let n: DateTime<Utc> = Utc::now();
+    n.to_rfc3339()
+}
+
+pub fn new_uuid() -> String {
+    Uuid::new_v4().to_string()
+}

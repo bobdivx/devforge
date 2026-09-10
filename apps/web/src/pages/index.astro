@@ -1,0 +1,20 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { SiteHeader } from '../components/marketing/SiteHeader';
+import { SiteFooter } from '../components/marketing/SiteFooter';
+import { Hero } from '../components/marketing/Hero';
+import { FeatureBento } from '../components/marketing/FeatureBento';
+import { MetricsStrip } from '../components/marketing/MetricsStrip';
+import { WorkflowStrip } from '../components/marketing/WorkflowStrip';
+---
+
+<BaseLayout title="DevForge — Deploy with clarity">
+  <div class="min-h-screen">
+    <SiteHeader client:load />
+    <Hero client:load />
+    <FeatureBento client:load />
+    <MetricsStrip client:load />
+    <WorkflowStrip client:load />
+    <SiteFooter client:load />
+  </div>
+</BaseLayout>

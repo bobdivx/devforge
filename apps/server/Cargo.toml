@@ -1,0 +1,41 @@
+[package]
+name = "devforge-server"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "devforge-server"
+path = "src/main.rs"
+
+[dependencies]
+devforge-shared = { workspace = true }
+devforge-agent = { workspace = true }
+devforge-deploy = { workspace = true }
+devforge-github = { workspace = true }
+devforge-database = { workspace = true }
+devforge-mcp = { workspace = true }
+devforge-env = { workspace = true }
+devforge-ports = { workspace = true }
+devforge-domain = { workspace = true }
+devforge-proxy = { workspace = true }
+devforge-wireguard = { workspace = true }
+devforge-storage = { workspace = true }
+devforge-backup = { workspace = true }
+devforge-auth = { workspace = true }
+devforge-detect = { workspace = true }
+devforge-llm = { workspace = true }
+devforge-update = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+async-trait = { workspace = true }
+dotenvy = "0.15"
+futures-util = "0.3"
+sha2 = "0.10"

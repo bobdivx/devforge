@@ -1,0 +1,59 @@
+[workspace]
+resolver = "2"
+members = [
+    "apps/server",
+    "crates/shared",
+    "crates/agent",
+    "crates/deploy",
+    "crates/github",
+    "crates/database",
+    "crates/mcp",
+    "crates/env",
+    "crates/ports",
+    "crates/domain",
+    "crates/proxy",
+    "crates/wireguard",
+    "crates/storage",
+    "crates/backup",
+    "crates/auth",
+    "crates/detect",
+    "crates/llm",
+    "crates/update",
+]
+
+[workspace.package]
+version = "2.0.0"
+edition = "2021"
+license = "proprietary"
+authors = ["DevForge"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "sync", "process", "fs"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
+tracing = "0.1"
+axum = { version = "0.8", features = ["macros"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono", "uuid"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+devforge-shared = { path = "crates/shared" }
+devforge-agent = { path = "crates/agent" }
+devforge-deploy = { path = "crates/deploy" }
+devforge-github = { path = "crates/github" }
+devforge-database = { path = "crates/database" }
+devforge-mcp = { path = "crates/mcp" }
+devforge-env = { path = "crates/env" }
+devforge-ports = { path = "crates/ports" }
+devforge-domain = { path = "crates/domain" }
+devforge-proxy = { path = "crates/proxy" }
+devforge-wireguard = { path = "crates/wireguard" }
+devforge-storage = { path = "crates/storage" }
+devforge-backup = { path = "crates/backup" }
+devforge-auth = { path = "crates/auth" }
+devforge-detect = { path = "crates/detect" }
+devforge-llm = { path = "crates/llm" }
+devforge-update = { path = "crates/update" }
