@@ -222,7 +222,7 @@ Pour tester le nouveau comportement, simuler l'incident popcorn-web :
 
 ### Vérification CI
 
-Le check `no-forbidden-brands` (scripts/check-forbidden-names.mjs) continue de bloquer le mot interdit "coolify" :
+Le check `no-forbidden-brands` (scripts/check-forbidden-names.mjs) continue de bloquer le mot interdit (legacy platform) :
 
 ```bash
 npm run check:forbidden
