@@ -63,15 +63,23 @@ pub fn docker_compose_up(compose_file: &str) -> String {
     )
 }
 
+/// Host CLI nixpacks (legacy). Prefer [`crate::builders::nixpacks_docker_build`].
 pub fn nixpacks_build(image: &str) -> String {
     format!("nixpacks build . --name {}", shell_escape(image))
 }
 
-/// Fallback when nixpacks CLI is absent: Node multi-stage Dockerfile (build + start).
+/// Fallback when nixpacks is unavailable: Node multi-stage Dockerfile (build + start).
+/// Skips Puppeteer/Chromium browser download during `npm ci` (apps that need Chrome
+/// at runtime should ship their own Dockerfile or nixpacks.toml).
 pub fn node_inline_dockerfile(port: u16) -> String {
     format!(
         r#"FROM node:22-bookworm-slim AS build
 WORKDIR /app
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+ENV PUPPETEER_SKIP_DOWNLOAD=1 \
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1
 COPY package.json package-lock.json* npm-shrinkwrap.json* yarn.lock* pnpm-lock.yaml* ./
 RUN if [ -f package-lock.json ]; then npm ci; \
   elif [ -f yarn.lock ]; then corepack enable && yarn install --frozen-lockfile; \
@@ -82,7 +90,12 @@ RUN npm run build
 
 FROM node:22-bookworm-slim
 WORKDIR /app
-ENV NODE_ENV=production HOST=0.0.0.0 PORT={port}
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+ENV NODE_ENV=production HOST=0.0.0.0 PORT={port} \
+    PUPPETEER_SKIP_DOWNLOAD=1 \
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1
 COPY --from=build /app /app
 EXPOSE {port}
 CMD ["npm", "run", "start"]
@@ -114,6 +127,11 @@ pub fn static_inline_dockerfile(publish_directory: &str) -> String {
     format!(
         r#"FROM node:22-bookworm-slim AS build
 WORKDIR /app
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+ENV PUPPETEER_SKIP_DOWNLOAD=1 \
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1
 COPY package.json package-lock.json* npm-shrinkwrap.json* yarn.lock* pnpm-lock.yaml* ./
 RUN if [ -f package-lock.json ]; then npm ci; \
   elif [ -f yarn.lock ]; then corepack enable && yarn install --frozen-lockfile; \

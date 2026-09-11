@@ -23,8 +23,14 @@ APIs :
 `POST /api/v1/projects/{uuid}/deployments` lance un vrai pipeline :
 
 1. `git clone` / fetch + checkout (token instance injecté si privé)
-2. Build selon `build_pack` (`nixpacks` → fallback Dockerfile, `dockerfile`, `dockercompose`, `static`)
+2. Build selon `build_pack` :
+   - **`nixpacks`** (défaut) — builder Docker `ghcr.io/railwayapp/nixpacks` (pas de CLI host). Override : `DEVFORGE_NIXPACKS_IMAGE`. Sur ZimaOS / conteneur DevForge : `--volumes-from` pour partager `/data`. Fallback : Dockerfile projet, sinon Node inline.
+   - **`dockerfile`** / **`dockercompose`** / **`static`**
 3. `docker run` avec port projet + `.env` exporté
+
+Build-time env transmis à nixpacks (filtre) : `PUPPETEER_*`, `NODE_*`, `NPM_*`, `YARN_*`, `PNPM_*`, `CI`, `NODE_OPTIONS`. `PUPPETEER_SKIP_DOWNLOAD=1` est injecté par défaut pour éviter l’échec Chrome pendant `npm ci`.
+
+**Browser automation (Puppeteer / Playwright)** : ce n’est pas un plugin DevForge. Si l’app a besoin de Chrome au runtime, fournis un `Dockerfile` (ou `nixpacks.toml` avec les paquets apt/nix) dans le repo. Le skip download ne fait que débloquer l’install.
 
 Logs dans le déploiement. Workdir Windows local : `DEVFORGE_DATA_DIR` (défaut `data/applications/{uuid}`).
 

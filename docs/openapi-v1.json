@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "DevForge Server",
-    "version": "2.0.3",
+    "version": "2.0.4",
     "description": "HTTP surface of apps/server (/api/v1)"
   },
   "servers": [{ "url": "http://127.0.0.1:8000/api/v1" }],

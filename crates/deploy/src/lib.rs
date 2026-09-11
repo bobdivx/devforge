@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+pub mod builders;
 pub mod docker;
 pub mod ssh;
 
@@ -692,12 +693,27 @@ impl DeployFacade {
                     }
                 }
             }
-            // nixpacks (default)
+            // nixpacks (default) — Docker-first builder image, no host CLI
             _ => {
-                let nix = docker::nixpacks_build(&image);
-                match self.executor.exec(server, &build_dir, &nix, 900).await {
+                let build_envs = builders::collect_build_envs(req.env_file.as_deref());
+                let nix = builders::nixpacks_docker_build(&image, &build_envs);
+                logs.push_str(&format!(
+                    "[nixpacks-docker] image={} envs={}\n",
+                    std::env::var("DEVFORGE_NIXPACKS_IMAGE").unwrap_or_else(|_| {
+                        builders::DEFAULT_NIXPACKS_IMAGE.to_string()
+                    }),
+                    build_envs
+                        .iter()
+                        .map(|(k, _)| k.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ));
+                match self.executor.exec(server, &build_dir, &nix, 1800).await {
                     Ok(r) if r.ok => {
-                        logs.push_str(&format!("[nixpacks] {}\n", trim_out(&r.output)));
+                        logs.push_str(&format!(
+                            "[nixpacks-docker] {}\n",
+                            trim_out(&r.output)
+                        ));
                         self.docker_restart_container(
                             server,
                             &build_dir,
@@ -711,22 +727,13 @@ impl DeployFacade {
                     }
                     Ok(r) => {
                         logs.push_str(&format!(
-                            "[nixpacks] exit={} {}\n",
+                            "[nixpacks-docker] exit={} {}\n",
                             r.exit_code,
                             trim_out(&r.output)
                         ));
-                        let has_df =
-                            std::path::Path::new(&format!("{build_dir}/Dockerfile")).is_file();
-                        let cmd = if has_df {
-                            logs.push_str("[fallback] docker build Dockerfile\n");
-                            docker::docker_build(".", &image, "Dockerfile")
-                        } else {
-                            logs.push_str("[fallback] docker build Node inline Dockerfile\n");
-                            docker::docker_build_from_content(
-                                &image,
-                                &docker::node_inline_dockerfile(port),
-                            )
-                        };
+                        let (cmd, label) =
+                            builders::fallback_image_build_cmd(&build_dir, &image, port);
+                        logs.push_str(&format!("[fallback] {label}\n"));
                         match self.executor.exec(server, &build_dir, &cmd, 900).await {
                             Ok(r2) => {
                                 logs.push_str(&format!(
@@ -756,19 +763,10 @@ impl DeployFacade {
                         }
                     }
                     Err(e) => {
-                        logs.push_str(&format!("[nixpacks] error: {e}\n"));
-                        let has_df =
-                            std::path::Path::new(&format!("{build_dir}/Dockerfile")).is_file();
-                        let cmd = if has_df {
-                            logs.push_str("[fallback] docker build Dockerfile\n");
-                            docker::docker_build(".", &image, "Dockerfile")
-                        } else {
-                            logs.push_str("[fallback] docker build Node inline Dockerfile\n");
-                            docker::docker_build_from_content(
-                                &image,
-                                &docker::node_inline_dockerfile(port),
-                            )
-                        };
+                        logs.push_str(&format!("[nixpacks-docker] error: {e}\n"));
+                        let (cmd, label) =
+                            builders::fallback_image_build_cmd(&build_dir, &image, port);
+                        logs.push_str(&format!("[fallback] {label}\n"));
                         match self.executor.exec(server, &build_dir, &cmd, 900).await {
                             Ok(r2) => {
                                 logs.push_str(&format!(
@@ -804,7 +802,9 @@ impl DeployFacade {
         let build_ok = if build_ok {
             true
         } else {
-            logs.push_str("[fallback] Docker build KO — tentative runtime Node local\n");
+            logs.push_str(
+                "[fallback] Docker build KO — tentative runtime Node local (dernier recours)\n",
+            );
             self.try_local_node_runtime(server, &build_dir, port, &mut logs)
                 .await
         };
@@ -873,9 +873,9 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         }
 
         let install = if cfg!(windows) {
-            "if (Test-Path package-lock.json) { npm ci } else { npm install }"
+            "$env:PUPPETEER_SKIP_DOWNLOAD='1'; $env:PUPPETEER_SKIP_CHROMIUM_DOWNLOAD='1'; if (Test-Path package-lock.json) { npm ci } else { npm install }"
         } else {
-            "if [ -f package-lock.json ]; then npm ci; else npm install; fi"
+            "export PUPPETEER_SKIP_DOWNLOAD=1 PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1; if [ -f package-lock.json ]; then npm ci; else npm install; fi"
         };
         match self.executor.exec(server, build_dir, install, 900).await {
             Ok(r) => {
