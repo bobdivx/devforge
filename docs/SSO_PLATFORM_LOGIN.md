@@ -64,10 +64,12 @@ Pas de création automatique sauf si explicitement autorisé. Cela évite l'ouve
 
 **Options si l'admin se verrouille** :
 
-1. **Variable d'environnement override** (à implémenter si nécessaire) :
+1. **Variable d'environnement override** (implémenté) :
    ```bash
    DEVFORGE_FORCE_LOCAL_LOGIN=1
    ```
+   Force l'affichage du formulaire email/password même si `hide_local_login` est activé.
+   Redémarrer le serveur après avoir défini cette variable.
    
 2. **Accès base de données direct** :
    ```sql

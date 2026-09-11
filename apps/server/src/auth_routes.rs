@@ -279,6 +279,21 @@ async fn bootstrap(
             .map(|u| u.role == ROLE_INSTANCE_ADMIN)
             .unwrap_or(false);
 
+    // Break-glass: DEVFORGE_FORCE_LOCAL_LOGIN=1 force le login local même si hide_local_login est activé
+    let force_local_login = matches!(
+        std::env::var("DEVFORGE_FORCE_LOCAL_LOGIN")
+            .unwrap_or_default()
+            .to_lowercase()
+            .as_str(),
+        "1" | "true" | "yes"
+    );
+
+    let hide_local_login = if force_local_login {
+        false
+    } else {
+        sso_settings.hide_local_login()
+    };
+
     Ok(Json(json!({
         "ok": true,
         "needs_setup": count == 0,
@@ -302,7 +317,7 @@ async fn bootstrap(
         "sso": {
             "enabled": sso_settings.enable_platform_login(),
             "oidc_configured": sso_settings.oidc_configured(),
-            "hide_local_login": sso_settings.hide_local_login(),
+            "hide_local_login": hide_local_login,
             "provider": sso_settings.provider(),
             "issuer_url": sso_settings.issuer(),
         }

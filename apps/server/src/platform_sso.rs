@@ -163,12 +163,11 @@ fn generate_state_token() -> String {
     // Utilise UUID pour générer des valeurs aléatoires sécurisées
     let uuid1 = uuid::Uuid::new_v4();
     let uuid2 = uuid::Uuid::new_v4();
-    base64::encode(format!("{}{}", uuid1.as_simple(), uuid2.as_simple()))
+    format!("{}{}", uuid1.as_simple(), uuid2.as_simple())
 }
 
 fn generate_nonce() -> String {
-    let uuid1 = uuid::Uuid::new_v4();
-    base64::encode(uuid1.as_bytes())
+    uuid::Uuid::new_v4().to_string()
 }
 
 async fn platform_redirect_uri(state: &AppState) -> Result<String, (StatusCode, Json<Value>)> {
