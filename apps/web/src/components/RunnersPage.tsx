@@ -81,6 +81,10 @@ export function RunnersPage() {
   const [logs, setLogs] = useState<RunnerLogs | null>(null);
   const [jobs, setJobs] = useState<RunnerJob[]>([]);
   const [wizard, setWizard] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
+  const [ghConnected, setGhConnected] = useState<boolean | null>(null);
+  const [ghLogin, setGhLogin] = useState<string | null>(null);
+  const [repos, setRepos] = useState<Array<{ full_name: string; owner: string; name: string }>>([]);
   const [form, setForm] = useState<CreateRunnerBody>({
     owner: '',
     repo: '',
@@ -88,7 +92,6 @@ export function RunnersPage() {
     image: IMAGE_PRESETS[0],
     labels: 'self-hosted,devforge',
     network_mode: 'bridge',
-    auth_mode: 'registration',
     pull_image: true,
     replace_existing: true,
     volumes: [],
@@ -97,6 +100,45 @@ export function RunnersPage() {
   const [volumeDraft, setVolumeDraft] = useState('');
   const [envKey, setEnvKey] = useState('');
   const [envVal, setEnvVal] = useState('');
+
+  function openWizard() {
+    setAdvanced(false);
+    setWizard(true);
+    void (async () => {
+      try {
+        const st = await api.githubStatus();
+        setGhConnected(!!st.connected);
+        setGhLogin(st.user?.login ?? null);
+        if (st.connected) {
+          const r = await api.githubRepos();
+          setRepos(
+            (r.data ?? []).map((x) => ({
+              full_name: x.full_name,
+              owner: x.owner,
+              name: x.name,
+            })),
+          );
+        } else {
+          setRepos([]);
+        }
+      } catch {
+        setGhConnected(false);
+        setRepos([]);
+      }
+    })();
+  }
+
+  function pickRepo(full: string) {
+    const [owner, ...rest] = full.split('/');
+    const repo = rest.join('/');
+    if (!owner || !repo) return;
+    setForm((f) => ({
+      ...f,
+      owner,
+      repo,
+      runner_name: f.runner_name || `${repo}-runner`,
+    }));
+  }
 
   async function load() {
     try {
@@ -192,7 +234,18 @@ export function RunnersPage() {
     e.preventDefault();
     setBusy(true);
     try {
-      await api.runnersCreate(form);
+      await api.runnersCreate({
+        owner: form.owner,
+        repo: form.repo,
+        runner_name: form.runner_name,
+        image: form.image,
+        labels: form.labels,
+        network_mode: form.network_mode,
+        pull_image: form.pull_image,
+        replace_existing: form.replace_existing,
+        volumes: form.volumes,
+        extra_env: form.extra_env,
+      });
       toast.push({ title: 'Création démarrée', tone: 'info' });
       setWizard(false);
       await load();
@@ -256,7 +309,7 @@ export function RunnersPage() {
           <Button size="sm" variant="outline" disabled={busy} onClick={() => void syncNow()}>
             Sync
           </Button>
-          <Button size="sm" onClick={() => setWizard(true)}>
+          <Button size="sm" onClick={() => openWizard()}>
             Nouveau runner
           </Button>
         </div>
@@ -354,10 +407,6 @@ export function RunnersPage() {
                 <dt class="text-[var(--color-ink-muted)]">Network</dt>
                 <dd>{detail.network_mode}</dd>
               </div>
-              <div class="flex justify-between gap-4">
-                <dt class="text-[var(--color-ink-muted)]">Auth</dt>
-                <dd>{detail.auth_mode}</dd>
-              </div>
               {detail.volumes?.length > 0 && (
                 <div>
                   <dt class="mb-1 text-[var(--color-ink-muted)]">Volumes</dt>
@@ -416,202 +465,250 @@ export function RunnersPage() {
         open={wizard}
         onClose={() => setWizard(false)}
         title="Nouveau runner"
-        description="Conteneur Docker self-hosted (création async)"
+        description="Le token GitHub Settings est utilisé automatiquement"
         size="lg"
       >
-        <form class="space-y-3" onSubmit={createRunner}>
-          <div class="grid gap-3 sm:grid-cols-2">
-            <Input
-              label="Owner"
-              required
-              value={form.owner}
-              onInput={(e) => setForm((f) => ({ ...f, owner: (e.target as HTMLInputElement).value }))}
-            />
-            <Input
-              label="Repo"
-              required
-              value={form.repo}
-              onInput={(e) => setForm((f) => ({ ...f, repo: (e.target as HTMLInputElement).value }))}
-            />
-          </div>
+        <form class="space-y-4" onSubmit={createRunner}>
+          {ghConnected === false && (
+            <Alert tone="warn">
+              GitHub n’est pas connecté.{' '}
+              <a href="/app/settings?tab=github" class="underline">
+                Settings → GitHub
+              </a>
+            </Alert>
+          )}
+          {ghConnected && ghLogin && (
+            <p class="text-xs text-[var(--color-ink-faint)]">
+              Connecté en tant que <span class="font-medium text-[var(--color-ink-muted)]">{ghLogin}</span>
+            </p>
+          )}
+
+          {repos.length > 0 ? (
+            <label class="block text-sm">
+              <span class="mb-1 block text-[var(--color-ink-muted)]">Dépôt</span>
+              <select
+                class="w-full rounded-lg border border-[var(--color-line)] bg-transparent px-3 py-2"
+                value={form.owner && form.repo ? `${form.owner}/${form.repo}` : ''}
+                onChange={(e) => pickRepo((e.target as HTMLSelectElement).value)}
+                required
+              >
+                <option value="" disabled>
+                  Choisir un repo…
+                </option>
+                {repos.map((r) => (
+                  <option key={r.full_name} value={r.full_name}>
+                    {r.full_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <div class="grid gap-3 sm:grid-cols-2">
+              <Input
+                label="Owner"
+                required
+                value={form.owner}
+                onInput={(e) => setForm((f) => ({ ...f, owner: (e.target as HTMLInputElement).value }))}
+              />
+              <Input
+                label="Repo"
+                required
+                value={form.repo}
+                onInput={(e) => setForm((f) => ({ ...f, repo: (e.target as HTMLInputElement).value }))}
+              />
+            </div>
+          )}
+
           <Input
             label="Nom du runner"
             required
+            placeholder="mon-runner"
             value={form.runner_name}
             onInput={(e) =>
               setForm((f) => ({ ...f, runner_name: (e.target as HTMLInputElement).value }))
             }
           />
+
           <div>
+            <div class="mb-1.5 text-sm text-[var(--color-ink-muted)]">Image Docker</div>
+            <div class="mb-2 flex flex-wrap gap-1.5">
+              {IMAGE_PRESETS.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  class={`rounded-md border px-2 py-1 font-mono text-[11px] transition ${
+                    form.image === p
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                      : 'border-[var(--color-line)] text-[var(--color-ink-muted)] hover:bg-white/5'
+                  }`}
+                  onClick={() => setForm((f) => ({ ...f, image: p }))}
+                >
+                  {p.split('/').pop()}
+                </button>
+              ))}
+            </div>
             <Input
-              label="Image Docker"
-              list="runner-images"
+              label="Image personnalisée"
+              placeholder="ghcr.io/mon-org/mon-runner:tag"
               value={form.image || ''}
               onInput={(e) => setForm((f) => ({ ...f, image: (e.target as HTMLInputElement).value }))}
             />
-            <datalist id="runner-images">
-              {IMAGE_PRESETS.map((p) => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
-          </div>
-          <Input
-            label="Labels"
-            value={form.labels || ''}
-            onInput={(e) => setForm((f) => ({ ...f, labels: (e.target as HTMLInputElement).value }))}
-          />
-          <div class="grid gap-3 sm:grid-cols-2">
-            <label class="block text-sm">
-              <span class="mb-1 block text-[var(--color-ink-muted)]">Network</span>
-              <select
-                class="w-full rounded-lg border border-[var(--color-line)] bg-transparent px-3 py-2"
-                value={form.network_mode || 'bridge'}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    network_mode: (e.target as HTMLSelectElement).value,
-                  }))
-                }
-              >
-                <option value="bridge">bridge</option>
-                <option value="host">host</option>
-                <option value="none">none</option>
-              </select>
-            </label>
-            <label class="block text-sm">
-              <span class="mb-1 block text-[var(--color-ink-muted)]">Auth</span>
-              <select
-                class="w-full rounded-lg border border-[var(--color-line)] bg-transparent px-3 py-2"
-                value={form.auth_mode || 'registration'}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    auth_mode: (e.target as HTMLSelectElement).value,
-                  }))
-                }
-              >
-                <option value="registration">registration token</option>
-                <option value="pat">PAT instance</option>
-              </select>
-            </label>
-          </div>
-          <label class="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={!!form.pull_image}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, pull_image: (e.target as HTMLInputElement).checked }))
-              }
-            />
-            Pull image avant démarrage
-          </label>
-
-          <div>
-            <div class="mb-1 text-sm text-[var(--color-ink-muted)]">Volumes (host:container[:ro|rw])</div>
-            <div class="flex gap-2">
-              <Input
-                value={volumeDraft}
-                placeholder="/data/cache:/cache:rw"
-                onInput={(e) => setVolumeDraft((e.target as HTMLInputElement).value)}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const v = volumeDraft.trim();
-                  if (!v) return;
-                  setForm((f) => ({ ...f, volumes: [...(f.volumes || []), v] }));
-                  setVolumeDraft('');
-                }}
-              >
-                Ajouter
-              </Button>
-            </div>
-            {(form.volumes || []).length > 0 && (
-              <ul class="mt-2 space-y-1 font-mono text-xs text-[var(--color-ink-faint)]">
-                {(form.volumes || []).map((v) => (
-                  <li key={v} class="flex justify-between gap-2">
-                    <span>{v}</span>
-                    <button
-                      type="button"
-                      class="text-[var(--color-danger)]"
-                      onClick={() =>
-                        setForm((f) => ({
-                          ...f,
-                          volumes: (f.volumes || []).filter((x) => x !== v),
-                        }))
-                      }
-                    >
-                      ×
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <p class="mt-1 text-xs text-[var(--color-ink-faint)]">
+              Colle n’importe quelle image (GHCR, Docker Hub, registry privé…).
+            </p>
           </div>
 
-          <div>
-            <div class="mb-1 text-sm text-[var(--color-ink-muted)]">Extra env</div>
-            <div class="flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="text-sm text-[var(--color-accent)] hover:underline"
+            onClick={() => setAdvanced((v) => !v)}
+          >
+            {advanced ? 'Masquer les options' : 'Options avancées'}
+          </button>
+
+          {advanced && (
+            <div class="space-y-3 rounded-lg border border-[var(--color-line)] p-3">
               <Input
-                placeholder="KEY"
-                value={envKey}
-                onInput={(e) => setEnvKey((e.target as HTMLInputElement).value)}
+                label="Labels"
+                value={form.labels || ''}
+                onInput={(e) => setForm((f) => ({ ...f, labels: (e.target as HTMLInputElement).value }))}
               />
-              <Input
-                placeholder="value"
-                value={envVal}
-                onInput={(e) => setEnvVal((e.target as HTMLInputElement).value)}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const key = envKey.trim().toUpperCase();
-                  if (!key) return;
-                  setForm((f) => ({
-                    ...f,
-                    extra_env: [...(f.extra_env || []), { key, value: envVal }],
-                  }));
-                  setEnvKey('');
-                  setEnvVal('');
-                }}
-              >
-                Ajouter
-              </Button>
+              <label class="block text-sm">
+                <span class="mb-1 block text-[var(--color-ink-muted)]">Network</span>
+                <select
+                  class="w-full rounded-lg border border-[var(--color-line)] bg-transparent px-3 py-2"
+                  value={form.network_mode || 'bridge'}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      network_mode: (e.target as HTMLSelectElement).value,
+                    }))
+                  }
+                >
+                  <option value="bridge">bridge</option>
+                  <option value="host">host</option>
+                  <option value="none">none</option>
+                </select>
+              </label>
+              <label class="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={!!form.pull_image}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, pull_image: (e.target as HTMLInputElement).checked }))
+                  }
+                />
+                Pull image avant démarrage
+              </label>
+
+              <div>
+                <div class="mb-1 text-sm text-[var(--color-ink-muted)]">Volumes</div>
+                <div class="flex gap-2">
+                  <Input
+                    value={volumeDraft}
+                    placeholder="/data/cache:/cache:rw"
+                    onInput={(e) => setVolumeDraft((e.target as HTMLInputElement).value)}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const v = volumeDraft.trim();
+                      if (!v) return;
+                      setForm((f) => ({ ...f, volumes: [...(f.volumes || []), v] }));
+                      setVolumeDraft('');
+                    }}
+                  >
+                    +
+                  </Button>
+                </div>
+                {(form.volumes || []).length > 0 && (
+                  <ul class="mt-2 space-y-1 font-mono text-xs text-[var(--color-ink-faint)]">
+                    {(form.volumes || []).map((v) => (
+                      <li key={v} class="flex justify-between gap-2">
+                        <span>{v}</span>
+                        <button
+                          type="button"
+                          class="text-[var(--color-danger)]"
+                          onClick={() =>
+                            setForm((f) => ({
+                              ...f,
+                              volumes: (f.volumes || []).filter((x) => x !== v),
+                            }))
+                          }
+                        >
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div>
+                <div class="mb-1 text-sm text-[var(--color-ink-muted)]">Variables d’environnement</div>
+                <div class="flex flex-wrap gap-2">
+                  <Input
+                    placeholder="KEY"
+                    value={envKey}
+                    onInput={(e) => setEnvKey((e.target as HTMLInputElement).value)}
+                  />
+                  <Input
+                    placeholder="value"
+                    value={envVal}
+                    onInput={(e) => setEnvVal((e.target as HTMLInputElement).value)}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const key = envKey.trim().toUpperCase();
+                      if (!key) return;
+                      setForm((f) => ({
+                        ...f,
+                        extra_env: [...(f.extra_env || []), { key, value: envVal }],
+                      }));
+                      setEnvKey('');
+                      setEnvVal('');
+                    }}
+                  >
+                    +
+                  </Button>
+                </div>
+                {(form.extra_env || []).length > 0 && (
+                  <ul class="mt-2 space-y-1 font-mono text-xs text-[var(--color-ink-faint)]">
+                    {(form.extra_env || []).map((e) => (
+                      <li key={e.key} class="flex justify-between gap-2">
+                        <span>
+                          {e.key}={e.value}
+                        </span>
+                        <button
+                          type="button"
+                          class="text-[var(--color-danger)]"
+                          onClick={() =>
+                            setForm((f) => ({
+                              ...f,
+                              extra_env: (f.extra_env || []).filter((x) => x.key !== e.key),
+                            }))
+                          }
+                        >
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
-            {(form.extra_env || []).length > 0 && (
-              <ul class="mt-2 space-y-1 font-mono text-xs text-[var(--color-ink-faint)]">
-                {(form.extra_env || []).map((e) => (
-                  <li key={e.key} class="flex justify-between gap-2">
-                    <span>
-                      {e.key}={e.value}
-                    </span>
-                    <button
-                      type="button"
-                      class="text-[var(--color-danger)]"
-                      onClick={() =>
-                        setForm((f) => ({
-                          ...f,
-                          extra_env: (f.extra_env || []).filter((x) => x.key !== e.key),
-                        }))
-                      }
-                    >
-                      ×
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          )}
 
           <div class="flex justify-end gap-2 pt-2">
             <Button type="button" variant="ghost" onClick={() => setWizard(false)}>
               Annuler
             </Button>
-            <Button type="submit" disabled={busy}>
+            <Button type="submit" disabled={busy || ghConnected === false}>
               Créer
             </Button>
           </div>

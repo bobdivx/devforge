@@ -127,6 +127,7 @@ impl ProxyFacade {
     }
 
     /// Comme [`sync`], avec ForwardAuth SSO optionnel (adresse oauth2-proxy / TinyAuth).
+    /// Applique **tous** les hosts (primary + alias) via recreate conteneur (labels Docker immuables).
     pub async fn sync_with(
         &self,
         project_uuid: &str,
@@ -134,6 +135,7 @@ impl ProxyFacade {
     ) -> Result<Value> {
         let routes = self.store.list(project_uuid).await?;
         let mut labels = serde_json::Map::new();
+        labels.insert("traefik.enable".into(), json!("true"));
         for route in &routes {
             let piece = docker::traefik_labels(
                 project_uuid,
@@ -144,6 +146,9 @@ impl ProxyFacade {
             );
             if let Some(obj) = piece.as_object() {
                 for (k, v) in obj {
+                    if k == "traefik.enable" {
+                        continue;
+                    }
                     labels.insert(k.clone(), v.clone());
                 }
             }
@@ -151,19 +156,31 @@ impl ProxyFacade {
         let labels_val = Value::Object(labels.clone());
         let container = format!("df-{}", project_uuid.chars().take(12).collect::<String>());
 
+        if routes.is_empty() {
+            return Ok(json!({
+                "ok": true,
+                "project_uuid": project_uuid,
+                "synced": 0,
+                "container": container,
+                "labels": labels_val,
+                "note": "aucune route proxy — rien à appliquer"
+            }));
+        }
+
         if let Some(exec) = &self.executor {
-            let cmd = docker::docker_update_labels(&container, &labels_val);
+            let cmd = docker::docker_recreate_with_labels(&container, &labels_val);
             let res = exec
-                .exec(&self.apply_server_id, "", &cmd, 60)
+                .exec(&self.apply_server_id, "", &cmd, 120)
                 .await?;
             return Ok(json!({
                 "ok": res.ok,
                 "project_uuid": project_uuid,
                 "synced": routes.len(),
+                "hosts": routes.iter().map(|r| &r.host).collect::<Vec<_>>(),
                 "container": container,
                 "labels": labels_val,
                 "sso": forward_auth_address.is_some(),
-                "command": cmd,
+                "command": "docker recreate with labels",
                 "output": res.output,
             }));
         }
@@ -172,6 +189,7 @@ impl ProxyFacade {
             "ok": true,
             "project_uuid": project_uuid,
             "synced": routes.len(),
+            "hosts": routes.iter().map(|r| &r.host).collect::<Vec<_>>(),
             "labels": labels_val,
             "sso": forward_auth_address.is_some(),
             "note": "executor non branché — labels générés seulement"

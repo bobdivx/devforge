@@ -1,6 +1,7 @@
 use crate::{
     map_http_err, parse_json_array, require_ok, GitBranch, GitCommit, GitHubClient, GitRelease,
-    GitRepo, GitTag, GitUser, PullRequest, RegistrationToken, RepoRunner, WorkflowJob, WorkflowRun,
+    GitRepo, GitTag, GitUser, PullRequest, RegistrationToken, RepoFile, RepoRunner, WorkflowJob,
+    WorkflowRun,
 };
 use async_trait::async_trait;
 use devforge_shared::Result;
@@ -70,6 +71,21 @@ impl HttpGitHubClient {
         let body = res.text().await.map_err(map_http_err)?;
         require_ok(status, &body)?;
         parse_json_array(&body)
+    }
+
+    async fn put_json(&self, path: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
+        let url = format!("{}{path}", self.base);
+        let res = self
+            .http
+            .put(&url)
+            .json(body)
+            .send()
+            .await
+            .map_err(map_http_err)?;
+        let status = res.status();
+        let text = res.text().await.map_err(map_http_err)?;
+        require_ok(status, &text)?;
+        parse_json_array(&text)
     }
 }
 
@@ -427,25 +443,90 @@ impl GitHubClient for HttpGitHubClient {
         path: &str,
         r#ref: Option<&str>,
     ) -> Result<Option<String>> {
+        Ok(self.get_file(owner, repo, path, r#ref).await?.map(|f| f.content))
+    }
+
+    async fn get_file(
+        &self,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        r#ref: Option<&str>,
+    ) -> Result<Option<RepoFile>> {
         let path = path.trim().trim_start_matches('/');
         let mut url = format!("/repos/{owner}/{repo}/contents/{path}");
         if let Some(r) = r#ref {
             url.push_str(&format!("?ref={r}"));
         }
-        let data = self.get(&url).await?;
+        let data = match self.get(&url).await {
+            Ok(d) => d,
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("404") {
+                    return Ok(None);
+                }
+                return Err(e);
+            }
+        };
         if data.get("type").and_then(|t| t.as_str()) != Some("file") {
             return Ok(None);
         }
+        let sha = data
+            .get("sha")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string();
         let encoding = data.get("encoding").and_then(|e| e.as_str()).unwrap_or("");
-        let content = data.get("content").and_then(|c| c.as_str()).unwrap_or("");
-        if encoding == "base64" {
-            let cleaned: String = content.chars().filter(|c| !c.is_whitespace()).collect();
-            Ok(String::from_utf8(decode_base64_simple(&cleaned)).ok())
-        } else if content.is_empty() {
-            Ok(None)
+        let content_raw = data.get("content").and_then(|c| c.as_str()).unwrap_or("");
+        let content = if encoding == "base64" {
+            let cleaned: String = content_raw.chars().filter(|c| !c.is_whitespace()).collect();
+            String::from_utf8(decode_base64_simple(&cleaned)).unwrap_or_default()
         } else {
-            Ok(Some(content.to_string()))
+            content_raw.to_string()
+        };
+        Ok(Some(RepoFile {
+            path: path.to_string(),
+            content,
+            sha,
+        }))
+    }
+
+    async fn write_file(
+        &self,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        content: &str,
+        message: &str,
+        branch: Option<&str>,
+        sha: Option<&str>,
+    ) -> Result<RepoFile> {
+        let path = path.trim().trim_start_matches('/');
+        let encoded = encode_base64_simple(content.as_bytes());
+        let mut body = serde_json::json!({
+            "message": message,
+            "content": encoded,
+        });
+        if let Some(b) = branch {
+            body["branch"] = serde_json::Value::String(b.to_string());
         }
+        if let Some(s) = sha {
+            body["sha"] = serde_json::Value::String(s.to_string());
+        }
+        let data = self
+            .put_json(&format!("/repos/{owner}/{repo}/contents/{path}"), &body)
+            .await?;
+        let new_sha = data
+            .pointer("/content/sha")
+            .and_then(|s| s.as_str())
+            .or_else(|| data.get("sha").and_then(|s| s.as_str()))
+            .unwrap_or("")
+            .to_string();
+        Ok(RepoFile {
+            path: path.to_string(),
+            content: content.to_string(),
+            sha: new_sha,
+        })
     }
 
     async fn create_registration_token(
@@ -583,6 +664,40 @@ fn decode_base64_simple(input: &str) -> Vec<u8> {
             bits -= 8;
             out.push(((buf >> bits) & 0xff) as u8);
         }
+    }
+    out
+}
+
+fn encode_base64_simple(input: &[u8]) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    let mut i = 0;
+    while i < input.len() {
+        let b0 = input[i] as u32;
+        let b1 = if i + 1 < input.len() {
+            input[i + 1] as u32
+        } else {
+            0
+        };
+        let b2 = if i + 2 < input.len() {
+            input[i + 2] as u32
+        } else {
+            0
+        };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((triple >> 18) & 0x3f) as usize] as char);
+        out.push(TABLE[((triple >> 12) & 0x3f) as usize] as char);
+        if i + 1 < input.len() {
+            out.push(TABLE[((triple >> 6) & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if i + 2 < input.len() {
+            out.push(TABLE[(triple & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        i += 3;
     }
     out
 }

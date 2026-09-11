@@ -110,6 +110,13 @@ pub struct WorkflowJob {
     pub html_url: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoFile {
+    pub path: String,
+    pub content: String,
+    pub sha: String,
+}
+
 #[async_trait]
 pub trait GitHubClient: Send + Sync {
     async fn current_user(&self) -> Result<GitUser>;
@@ -167,6 +174,27 @@ pub trait GitHubClient: Send + Sync {
         path: &str,
         r#ref: Option<&str>,
     ) -> Result<Option<String>>;
+
+    /// Read file with sha (for updates via Contents API).
+    async fn get_file(
+        &self,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        r#ref: Option<&str>,
+    ) -> Result<Option<RepoFile>>;
+
+    /// Create or update a text file (Contents API). `sha` required when updating.
+    async fn write_file(
+        &self,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        content: &str,
+        message: &str,
+        branch: Option<&str>,
+        sha: Option<&str>,
+    ) -> Result<RepoFile>;
 
     async fn create_registration_token(
         &self,
@@ -282,6 +310,33 @@ impl GitHubClient for StubGitHubClient {
         _path: &str,
         _ref: Option<&str>,
     ) -> Result<Option<String>> {
+        Err(DevForgeError::Message(
+            "GitHub non configuré — connecte un token dans Settings".into(),
+        ))
+    }
+
+    async fn get_file(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _path: &str,
+        _ref: Option<&str>,
+    ) -> Result<Option<RepoFile>> {
+        Err(DevForgeError::Message(
+            "GitHub non configuré — connecte un token dans Settings".into(),
+        ))
+    }
+
+    async fn write_file(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _path: &str,
+        _content: &str,
+        _message: &str,
+        _branch: Option<&str>,
+        _sha: Option<&str>,
+    ) -> Result<RepoFile> {
         Err(DevForgeError::Message(
             "GitHub non configuré — connecte un token dans Settings".into(),
         ))
@@ -455,6 +510,31 @@ impl GitHubFacade {
         r#ref: Option<&str>,
     ) -> Result<Option<String>> {
         self.client().read_file(owner, repo, path, r#ref).await
+    }
+
+    pub async fn get_file(
+        &self,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        r#ref: Option<&str>,
+    ) -> Result<Option<RepoFile>> {
+        self.client().get_file(owner, repo, path, r#ref).await
+    }
+
+    pub async fn write_file(
+        &self,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        content: &str,
+        message: &str,
+        branch: Option<&str>,
+        sha: Option<&str>,
+    ) -> Result<RepoFile> {
+        self.client()
+            .write_file(owner, repo, path, content, message, branch, sha)
+            .await
     }
 
     pub async fn create_registration_token(

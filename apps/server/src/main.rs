@@ -1,4 +1,5 @@
 mod db;
+mod actions_routes;
 mod auth_routes;
 mod backup_routes;
 mod detect_svc;
@@ -10,6 +11,7 @@ mod routes;
 mod runner_routes;
 mod runner_store;
 mod security;
+mod pocket_id;
 mod sso;
 mod sso_routes;
 mod state;
@@ -68,6 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(llm_routes::router())
         .merge(mcp_routes::router())
         .merge(runner_routes::router())
+        .merge(actions_routes::router())
         .merge(update_routes::router())
         .layer(middleware::from_fn_with_state(
             state.clone(),

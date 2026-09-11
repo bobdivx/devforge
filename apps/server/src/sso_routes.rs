@@ -1,4 +1,4 @@
-//! Settings SSO instance (Pocket ID / OIDC externe + ForwardAuth).
+//! Settings SSO instance (OIDC générique / Pocket ID + ForwardAuth).
 
 use axum::{
     extract::State,
@@ -10,7 +10,8 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::sso::{self, SsoSettings};
+use crate::pocket_id;
+use crate::sso::{self, SsoSettings, PROVIDER_POCKET_ID};
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -32,7 +33,10 @@ async fn require_admin(
 }
 
 fn view(cfg: &SsoSettings) -> Value {
+    let issuer = cfg.issuer();
     json!({
+        "provider": cfg.provider(),
+        "issuer_url": issuer,
         "protect_apps_by_default": cfg.protect_by_default(),
         "forward_auth_address": cfg.sso_forward_auth_address,
         "hide_local_login": cfg.hide_local_login(),
@@ -40,10 +44,22 @@ fn view(cfg: &SsoSettings) -> Value {
         "oauth2_proxy_url": cfg.sso_oauth2_proxy_url,
         "apps_client_id": cfg.sso_apps_client_id,
         "apps_client_secret_set": !cfg.sso_apps_client_secret.trim().is_empty(),
+        "pocket_id_api_token_set": !cfg.sso_pocket_id_api_token.trim().is_empty(),
         "forward_auth_configured": cfg.forward_auth_configured() || cfg.effective_forward_auth_address().is_some(),
         "oidc_configured": cfg.oidc_configured(),
         "middleware_name": sso::MIDDLEWARE_NAME,
     })
+}
+
+async fn load_instance_urls(pool: &sqlx::SqlitePool) -> (String, String) {
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT COALESCE(wildcard_domain,''), COALESCE(instance_url,'') FROM instance_settings WHERE id = 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+    row.unwrap_or_default()
 }
 
 async fn get_sso(
@@ -57,6 +73,10 @@ async fn get_sso(
 
 #[derive(Deserialize)]
 pub struct PutSsoBody {
+    /// `generic` | `pocket_id`
+    pub provider: Option<String>,
+    /// Alias préféré de l'issuer OIDC (sinon `pocket_id_url`).
+    pub issuer_url: Option<String>,
     pub protect_apps_by_default: Option<bool>,
     pub forward_auth_address: Option<String>,
     pub hide_local_login: Option<bool>,
@@ -65,6 +85,12 @@ pub struct PutSsoBody {
     pub apps_client_id: Option<String>,
     /// Omit or empty to keep existing secret.
     pub apps_client_secret: Option<String>,
+    /// Omit or empty to keep existing API token.
+    pub pocket_id_api_token: Option<String>,
+    /// Uniquement pour `provider=pocket_id` : crée/maj le client via l'API Pocket ID.
+    pub provision: Option<bool>,
+    /// Force la génération d'un nouveau client secret côté Pocket ID.
+    pub rotate_secret: Option<bool>,
 }
 
 async fn put_sso(
@@ -74,6 +100,12 @@ async fn put_sso(
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     require_admin(&state, &headers).await?;
     let current = sso::load_sso_settings(&state.pool).await;
+
+    let provider = body
+        .provider
+        .as_deref()
+        .map(sso::normalize_provider)
+        .unwrap_or_else(|| current.provider().to_string());
 
     let protect = body
         .protect_apps_by_default
@@ -87,22 +119,101 @@ async fn put_sso(
         .forward_auth_address
         .map(|s| s.trim().to_string())
         .unwrap_or(current.sso_forward_auth_address);
-    let pocket = body
-        .pocket_id_url
+    let issuer = body
+        .issuer_url
+        .or(body.pocket_id_url)
         .map(|s| s.trim().trim_end_matches('/').to_string())
         .unwrap_or(current.sso_pocket_id_url);
     let proxy_url = body
         .oauth2_proxy_url
         .map(|s| s.trim().trim_end_matches('/').to_string())
         .unwrap_or(current.sso_oauth2_proxy_url);
-    let client_id = body
+    let mut client_id = body
         .apps_client_id
         .map(|s| s.trim().to_string())
-        .unwrap_or(current.sso_apps_client_id);
-    let client_secret = match body.apps_client_secret {
+        .unwrap_or(current.sso_apps_client_id.clone());
+    let mut client_secret = match body.apps_client_secret {
         Some(s) if !s.trim().is_empty() => s.trim().to_string(),
-        _ => current.sso_apps_client_secret,
+        _ => current.sso_apps_client_secret.clone(),
     };
+    let api_token = match body.pocket_id_api_token {
+        Some(s) if !s.trim().is_empty() => s.trim().to_string(),
+        _ => current.sso_pocket_id_api_token.clone(),
+    };
+
+    let is_pocket = provider == PROVIDER_POCKET_ID;
+    let token_available = !api_token.trim().is_empty();
+    let should_provision = is_pocket
+        && body
+            .provision
+            .unwrap_or(token_available && !issuer.trim().is_empty());
+    let rotate_secret = body.rotate_secret.unwrap_or(false);
+
+    let mut provision_meta = json!(null);
+    if should_provision {
+        if issuer.trim().is_empty() {
+            return Err((
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({"error": "URL issuer Pocket ID requise pour le provisionnement"})),
+            ));
+        }
+        if !token_available {
+            return Err((
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Token API Pocket ID requis pour le provisionnement"})),
+            ));
+        }
+
+        let (wildcard, instance_url) = load_instance_urls(&state.pool).await;
+        let callbacks = pocket_id::default_callback_urls(&wildcard, &instance_url);
+        let launch = {
+            let u = instance_url.trim();
+            if u.is_empty() {
+                None
+            } else {
+                Some(u.trim_end_matches('/').to_string())
+            }
+        };
+        let target_id = if client_id.trim().is_empty() {
+            pocket_id::DEFAULT_CLIENT_ID.to_string()
+        } else {
+            client_id.trim().to_string()
+        };
+        let need_secret = rotate_secret || client_secret.trim().is_empty();
+
+        match pocket_id::provision_oidc_client(
+            &issuer,
+            &api_token,
+            &target_id,
+            &callbacks,
+            launch.as_deref(),
+            need_secret,
+        )
+        .await
+        {
+            Ok(r) => {
+                client_id = r.client_id;
+                if let Some(secret) = r.client_secret {
+                    client_secret = secret;
+                }
+                provision_meta = json!({
+                    "ok": true,
+                    "created_client": r.created_client,
+                    "created_secret": r.created_secret,
+                    "callback_urls": callbacks,
+                });
+            }
+            Err(e) => {
+                return Err((
+                    axum::http::StatusCode::BAD_GATEWAY,
+                    Json(json!({
+                        "error": e.message,
+                        "pocket_id_status": e.status,
+                    })),
+                ));
+            }
+        }
+    }
 
     let now = Utc::now().to_rfc3339();
     sqlx::query(
@@ -114,16 +225,20 @@ async fn put_sso(
             sso_oauth2_proxy_url = ?,
             sso_apps_client_id = ?,
             sso_apps_client_secret = ?,
+            sso_pocket_id_api_token = ?,
+            sso_oidc_provider = ?,
             updated_at = ?
          WHERE id = 1"#,
     )
     .bind(protect)
     .bind(&forward)
     .bind(hide)
-    .bind(&pocket)
+    .bind(&issuer)
     .bind(&proxy_url)
     .bind(&client_id)
     .bind(&client_secret)
+    .bind(&api_token)
+    .bind(&provider)
     .bind(&now)
     .execute(&state.pool)
     .await
@@ -135,5 +250,9 @@ async fn put_sso(
     })?;
 
     let cfg = sso::load_sso_settings(&state.pool).await;
-    Ok(Json(json!({ "ok": true, "config": view(&cfg) })))
+    Ok(Json(json!({
+        "ok": true,
+        "config": view(&cfg),
+        "provision": provision_meta,
+    })))
 }

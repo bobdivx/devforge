@@ -23,6 +23,9 @@ pub struct CatalogPreset {
     /// e.g. "database" — enables resource linking UI
     pub resource_kind: Option<String>,
     pub popular: bool,
+    /// Guide affiché dans le modal de config (étapes jeton, scopes, pièges).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup_notes: Option<String>,
 }
 
 fn field(
@@ -53,8 +56,10 @@ pub fn catalog() -> Vec<CatalogPreset> {
                 "Bases libSQL edge. Liste tes DBs et relie-les à un projet (env DATABASE_URL)."
                     .into(),
             category: "database".into(),
-            docs_url: Some("https://docs.turso.tech/mcp".into()),
-            default_url: Some("https://mcp.turso.tech/mcp".into()),
+            docs_url: Some("https://docs.turso.tech/integrations/mcp".into()),
+            // Hosted MCP Turso (OAuth). L’ancien host mcp.turso.tech ne résout plus.
+            // Le token Platform sert surtout à lier des DBs via l’API Turso (resources).
+            default_url: Some("https://mcp.turso.ai/mcp".into()),
             fields: vec![
                 field(
                     "api_token",
@@ -62,7 +67,9 @@ pub fn catalog() -> Vec<CatalogPreset> {
                     true,
                     true,
                     Some("eyJ…"),
-                    Some("Turso → Account → API Tokens"),
+                    Some(
+                        "Turso → Account → API Tokens. Sert à lister/lier les DBs. Les tools MCP hébergés exigent OAuth (pas le token Platform).",
+                    ),
                 ),
                 field(
                     "org",
@@ -75,12 +82,13 @@ pub fn catalog() -> Vec<CatalogPreset> {
             ],
             resource_kind: Some("database".into()),
             popular: true,
+        setup_notes: None,
         },
         CatalogPreset {
             id: "cloudflare".into(),
             name: "Cloudflare".into(),
             description:
-                "Workers, DNS, R2, D1, Pages — MCP officiel Cloudflare (API token)."
+                "DNS, Tunnel, Workers, R2 — MCP officiel. Pour publier les apps DevForge : jeton à droits minimaux (Tunnel + DNS)."
                     .into(),
             category: "infrastructure".into(),
             docs_url: Some(
@@ -94,16 +102,20 @@ pub fn catalog() -> Vec<CatalogPreset> {
                     "API Token",
                     true,
                     true,
-                    Some("…"),
-                    Some("dash.cloudflare.com → My Profile → API Tokens"),
+                    Some("cfat_…"),
+                    Some(
+                        "Profil → API Tokens → Create Token (Custom). Pas un jeton « compte entier ». Copie-le une seule fois.",
+                    ),
                 ),
                 field(
                     "account_id",
-                    "Account ID (optionnel)",
+                    "Account ID",
                     false,
                     false,
                     Some("32 hex chars"),
-                    Some("Utile si plusieurs comptes ; sinon auto-détecté"),
+                    Some(
+                        "Dashboard Cloudflare → barre latérale droite / overview du compte. Affiché aussi après création du jeton.",
+                    ),
                 ),
                 field(
                     "url",
@@ -111,27 +123,45 @@ pub fn catalog() -> Vec<CatalogPreset> {
                     false,
                     false,
                     Some("https://mcp.cloudflare.com/mcp"),
-                    Some("Par défaut : MCP API Cloudflare"),
+                    Some("Laisser la valeur par défaut sauf MCP self-host."),
                 ),
             ],
             resource_kind: None,
             popular: true,
+            setup_notes: Some(
+                "Créer le jeton (droits minimaux)\n\
+• Cloudflare → My Profile → API Tokens → Create Token → Custom token\n\
+• Account → Cloudflare Tunnel → Edit\n\
+• Account → Account Settings → Read (optionnel)\n\
+• Zone → DNS → Edit\n\
+• Zone → Zone → Read\n\
+• Zone Resources : seulement tes zones apps (ex. jeser.app), pas « All zones »\n\
+• Client IP Filtering : laisser vide (sinon le NAS / MCP hébergé sera bloqué)\n\
+• Ne colle jamais le jeton dans un chat / ticket / commit\n\
+\n\
+Dans ce formulaire\n\
+• API Token = Bearer cfat_… (secret)\n\
+• Account ID = id du compte (pas secret)\n\
+• Les clés S3/R2 affichées à la création du jeton ne sont PAS nécessaires ici"
+                    .into(),
+            ),
         },
         CatalogPreset {
             id: "vercel".into(),
             name: "Vercel".into(),
-            description: "Déploiements, projets et domaines Vercel.".into(),
+            description: "Déploiements, projets et domaines — MCP officiel Vercel (OAuth)."
+                .into(),
             category: "infrastructure".into(),
-            docs_url: Some("https://vercel.com/docs".into()),
-            default_url: None,
+            docs_url: Some("https://vercel.com/docs/agent-resources/vercel-mcp".into()),
+            default_url: Some("https://mcp.vercel.com".into()),
             fields: vec![
                 field(
                     "api_token",
-                    "Access Token",
+                    "Access Token (optionnel)",
                     true,
-                    true,
+                    false,
                     Some("…"),
-                    Some("Vercel → Settings → Tokens"),
+                    Some("Le MCP hébergé utilise surtout OAuth ; un token API peut ne pas suffire pour tools/list."),
                 ),
                 field(
                     "team_id",
@@ -143,23 +173,24 @@ pub fn catalog() -> Vec<CatalogPreset> {
                 ),
                 field(
                     "url",
-                    "URL MCP (optionnel)",
+                    "URL MCP",
                     false,
                     false,
-                    Some("http://127.0.0.1:3600/mcp"),
-                    None,
+                    Some("https://mcp.vercel.com"),
+                    Some("Pas de suffixe /mcp — endpoint officiel Vercel"),
                 ),
             ],
             resource_kind: None,
             popular: true,
+        setup_notes: None,
         },
         CatalogPreset {
             id: "supabase".into(),
             name: "Supabase".into(),
-            description: "Postgres, Auth et Storage Supabase.".into(),
+            description: "Postgres, Auth et Storage — MCP officiel Supabase.".into(),
             category: "database".into(),
-            docs_url: Some("https://supabase.com/docs".into()),
-            default_url: None,
+            docs_url: Some("https://supabase.com/docs/guides/getting-started/mcp".into()),
+            default_url: Some("https://mcp.supabase.com/mcp".into()),
             fields: vec![
                 field(
                     "access_token",
@@ -167,7 +198,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
                     true,
                     true,
                     Some("sbp_…"),
-                    Some("Supabase → Account → Access Tokens"),
+                    Some("Supabase → Account → Access Tokens. OAuth possible via le dashboard MCP."),
                 ),
                 field(
                     "project_ref",
@@ -179,23 +210,24 @@ pub fn catalog() -> Vec<CatalogPreset> {
                 ),
                 field(
                     "url",
-                    "URL MCP (optionnel)",
+                    "URL MCP",
                     false,
                     false,
-                    Some("http://127.0.0.1:3700/mcp"),
-                    None,
+                    Some("https://mcp.supabase.com/mcp"),
+                    Some("Endpoint hébergé Supabase"),
                 ),
             ],
             resource_kind: Some("database".into()),
             popular: true,
+        setup_notes: None,
         },
         CatalogPreset {
             id: "neon".into(),
             name: "Neon".into(),
-            description: "Postgres serverless Neon.".into(),
+            description: "Postgres serverless — MCP officiel Neon (OAuth / API key).".into(),
             category: "database".into(),
-            docs_url: Some("https://neon.tech/docs".into()),
-            default_url: None,
+            docs_url: Some("https://neon.tech/docs/ai/neon-mcp-server".into()),
+            default_url: Some("https://mcp.neon.tech/mcp".into()),
             fields: vec![
                 field(
                     "api_key",
@@ -203,19 +235,20 @@ pub fn catalog() -> Vec<CatalogPreset> {
                     true,
                     true,
                     Some("napi_…"),
-                    Some("Neon Console → Account → API Keys"),
+                    Some("Neon Console → Account → API Keys (Bearer). OAuth aussi supporté."),
                 ),
                 field(
                     "url",
-                    "URL MCP (optionnel)",
+                    "URL MCP",
                     false,
                     false,
-                    Some("http://127.0.0.1:3800/mcp"),
-                    None,
+                    Some("https://mcp.neon.tech/mcp"),
+                    Some("Streamable HTTP ; fallback SSE : https://mcp.neon.tech/sse"),
                 ),
             ],
             resource_kind: Some("database".into()),
             popular: true,
+        setup_notes: None,
         },
         CatalogPreset {
             id: "upstash".into(),
@@ -252,6 +285,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
             ],
             resource_kind: None,
             popular: false,
+        setup_notes: None,
         },
         CatalogPreset {
             id: "slack".into(),
@@ -280,49 +314,66 @@ pub fn catalog() -> Vec<CatalogPreset> {
             ],
             resource_kind: None,
             popular: true,
+        setup_notes: None,
         },
         CatalogPreset {
             id: "linear".into(),
             name: "Linear".into(),
-            description: "Issues et projets Linear pour les agents.".into(),
+            description: "Issues et projets — MCP officiel Linear (OAuth / API key).".into(),
             category: "productivity".into(),
-            docs_url: Some("https://linear.app/docs".into()),
-            default_url: None,
+            docs_url: Some("https://linear.app/docs/mcp".into()),
+            default_url: Some("https://mcp.linear.app/mcp".into()),
             fields: vec![
-                field("api_key", "API Key", true, true, Some("lin_api_…"), None),
+                field(
+                    "api_key",
+                    "API Key",
+                    true,
+                    true,
+                    Some("lin_api_…"),
+                    Some("Linear → Settings → API. Le MCP hébergé peut exiger OAuth."),
+                ),
                 field(
                     "url",
-                    "URL MCP (optionnel)",
+                    "URL MCP",
                     false,
                     false,
-                    Some("http://127.0.0.1:3200/mcp"),
-                    None,
+                    Some("https://mcp.linear.app/mcp"),
+                    Some("Endpoint hébergé Linear"),
                 ),
             ],
             resource_kind: None,
             popular: true,
+        setup_notes: None,
         },
         CatalogPreset {
             id: "sentry".into(),
             name: "Sentry".into(),
-            description: "Erreurs et releases Sentry.".into(),
+            description: "Erreurs et releases — MCP officiel Sentry (OAuth).".into(),
             category: "observability".into(),
-            docs_url: Some("https://docs.sentry.io".into()),
-            default_url: None,
+            docs_url: Some("https://docs.sentry.io/product/sentry-mcp/".into()),
+            default_url: Some("https://mcp.sentry.dev/mcp".into()),
             fields: vec![
-                field("auth_token", "Auth Token", true, true, Some("sntrys_…"), None),
+                field(
+                    "auth_token",
+                    "Auth Token (optionnel)",
+                    true,
+                    false,
+                    Some("sntrys_…"),
+                    Some("Le MCP hébergé utilise surtout OAuth."),
+                ),
                 field("org", "Organization slug", false, true, Some("mon-org"), None),
                 field(
                     "url",
-                    "URL MCP (optionnel)",
+                    "URL MCP",
                     false,
                     false,
-                    Some("http://127.0.0.1:3300/mcp"),
-                    None,
+                    Some("https://mcp.sentry.dev/mcp"),
+                    Some("Endpoint hébergé Sentry"),
                 ),
             ],
             resource_kind: None,
             popular: true,
+        setup_notes: None,
         },
         CatalogPreset {
             id: "resend".into(),
@@ -351,14 +402,15 @@ pub fn catalog() -> Vec<CatalogPreset> {
             ],
             resource_kind: None,
             popular: false,
+        setup_notes: None,
         },
         CatalogPreset {
             id: "posthog".into(),
             name: "PostHog".into(),
-            description: "Product analytics et feature flags.".into(),
+            description: "Product analytics — MCP officiel PostHog.".into(),
             category: "observability".into(),
-            docs_url: Some("https://posthog.com/docs".into()),
-            default_url: None,
+            docs_url: Some("https://posthog.com/docs/model-context-protocol".into()),
+            default_url: Some("https://mcp.posthog.com/mcp".into()),
             fields: vec![
                 field(
                     "api_key",
@@ -366,7 +418,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
                     true,
                     true,
                     Some("phx_…"),
-                    None,
+                    Some("PostHog → Settings → Personal API Keys"),
                 ),
                 field(
                     "host",
@@ -378,15 +430,16 @@ pub fn catalog() -> Vec<CatalogPreset> {
                 ),
                 field(
                     "url",
-                    "URL MCP (optionnel)",
+                    "URL MCP",
                     false,
                     false,
-                    Some("http://127.0.0.1:4100/mcp"),
-                    None,
+                    Some("https://mcp.posthog.com/mcp"),
+                    Some("Endpoint hébergé PostHog"),
                 ),
             ],
             resource_kind: None,
             popular: false,
+        setup_notes: None,
         },
         CatalogPreset {
             id: "discord".into(),
@@ -415,6 +468,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
             ],
             resource_kind: None,
             popular: false,
+        setup_notes: None,
         },
         CatalogPreset {
             id: "railway".into(),
@@ -443,90 +497,94 @@ pub fn catalog() -> Vec<CatalogPreset> {
             ],
             resource_kind: None,
             popular: false,
+        setup_notes: None,
         },
         CatalogPreset {
             id: "notion".into(),
             name: "Notion".into(),
-            description: "Pages et bases Notion.".into(),
+            description: "Pages et bases — MCP officiel Notion (OAuth).".into(),
             category: "productivity".into(),
-            docs_url: Some("https://developers.notion.com".into()),
-            default_url: None,
+            docs_url: Some("https://developers.notion.com/docs/mcp".into()),
+            default_url: Some("https://mcp.notion.com/mcp".into()),
             fields: vec![
                 field(
                     "integration_token",
-                    "Integration Token",
+                    "Integration Token (optionnel)",
                     true,
-                    true,
+                    false,
                     Some("ntn_…"),
-                    None,
+                    Some("Le MCP hébergé utilise surtout OAuth."),
                 ),
                 field(
                     "url",
-                    "URL MCP (optionnel)",
+                    "URL MCP",
                     false,
                     false,
-                    Some("http://127.0.0.1:3400/mcp"),
-                    None,
+                    Some("https://mcp.notion.com/mcp"),
+                    Some("Endpoint hébergé Notion"),
                 ),
             ],
             resource_kind: None,
             popular: false,
+        setup_notes: None,
         },
         CatalogPreset {
             id: "stripe".into(),
             name: "Stripe".into(),
-            description: "Paiements, clients et webhooks Stripe.".into(),
+            description: "Paiements — MCP officiel Stripe (OAuth / secret key).".into(),
             category: "payments".into(),
-            docs_url: Some("https://docs.stripe.com".into()),
-            default_url: None,
+            docs_url: Some("https://docs.stripe.com/mcp".into()),
+            default_url: Some("https://mcp.stripe.com".into()),
             fields: vec![
                 field(
                     "secret_key",
-                    "Secret Key",
+                    "Secret Key (optionnel)",
                     true,
-                    true,
+                    false,
                     Some("sk_live_… / sk_test_…"),
-                    None,
+                    Some("Voir docs.stripe.com/mcp — OAuth recommandé pour le MCP hébergé."),
                 ),
                 field(
                     "url",
-                    "URL MCP (optionnel)",
+                    "URL MCP",
                     false,
                     false,
-                    Some("http://127.0.0.1:3500/mcp"),
-                    None,
+                    Some("https://mcp.stripe.com"),
+                    Some("Pas de suffixe /mcp"),
                 ),
             ],
             resource_kind: None,
             popular: true,
+        setup_notes: None,
         },
         CatalogPreset {
             id: "github".into(),
             name: "GitHub MCP".into(),
-            description: "Tools GitHub dédiés (en plus de la connexion PAT Settings).".into(),
+            description: "Tools GitHub hébergés (Copilot MCP) ou self-host.".into(),
             category: "devops".into(),
             docs_url: Some("https://github.com/github/github-mcp-server".into()),
-            default_url: None,
+            default_url: Some("https://api.githubcopilot.com/mcp/".into()),
             fields: vec![
                 field(
                     "token",
                     "Personal Access Token",
                     true,
                     true,
-                    Some("ghp_…"),
-                    None,
+                    Some("ghp_… / github_pat_…"),
+                    Some("Bearer requis. Le MCP Copilot hébergé attend un token GitHub valide."),
                 ),
                 field(
                     "url",
                     "URL MCP",
                     false,
-                    true,
-                    Some("http://127.0.0.1:3001/mcp"),
-                    Some("Endpoint de ton github-mcp-server"),
+                    false,
+                    Some("https://api.githubcopilot.com/mcp/"),
+                    Some("Hébergé GitHub ; ou ton github-mcp-server self-host"),
                 ),
             ],
             resource_kind: None,
             popular: false,
+        setup_notes: None,
         },
         CatalogPreset {
             id: "custom".into(),
@@ -556,6 +614,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
             ],
             resource_kind: None,
             popular: false,
+        setup_notes: None,
         },
     ]
 }

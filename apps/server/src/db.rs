@@ -265,6 +265,8 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ("sso_oauth2_proxy_url", "TEXT NOT NULL DEFAULT ''"),
         ("sso_apps_client_id", "TEXT NOT NULL DEFAULT ''"),
         ("sso_apps_client_secret", "TEXT NOT NULL DEFAULT ''"),
+        ("sso_pocket_id_api_token", "TEXT NOT NULL DEFAULT ''"),
+        ("sso_oidc_provider", "TEXT NOT NULL DEFAULT 'generic'"),
     ] {
         let sql = format!("ALTER TABLE instance_settings ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;

@@ -128,6 +128,8 @@ pub struct DeployRequest {
     pub is_static: bool,
     pub github_token: Option<String>,
     pub env_file: Option<String>,
+    /// Labels Traefik (tous les hosts) appliqués au `docker run`.
+    pub proxy_labels: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -639,6 +641,7 @@ impl DeployFacade {
                                 &image,
                                 port,
                                 80,
+                                req.proxy_labels.as_ref(),
                                 &mut logs,
                             )
                             .await
@@ -680,6 +683,7 @@ impl DeployFacade {
                                 &image,
                                 port,
                                 port,
+                                req.proxy_labels.as_ref(),
                                 &mut logs,
                             )
                             .await
@@ -721,6 +725,7 @@ impl DeployFacade {
                             &image,
                             port,
                             port,
+                            req.proxy_labels.as_ref(),
                             &mut logs,
                         )
                         .await
@@ -749,6 +754,7 @@ impl DeployFacade {
                                         &image,
                                         port,
                                         port,
+                                        req.proxy_labels.as_ref(),
                                         &mut logs,
                                     )
                                     .await
@@ -782,6 +788,7 @@ impl DeployFacade {
                                         &image,
                                         port,
                                         port,
+                                        req.proxy_labels.as_ref(),
                                         &mut logs,
                                     )
                                     .await
@@ -950,6 +957,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         image: &str,
         host_port: u16,
         container_port: u16,
+        proxy_labels: Option<&serde_json::Value>,
         logs: &mut String,
     ) -> bool {
         let prepare = docker::docker_prepare_run(name, host_port);
@@ -966,7 +974,20 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         } else {
             None
         };
-        let run = docker::docker_run(name, image, &[(host_port, container_port)], env_file);
+        let network = std::env::var("DEVFORGE_DOCKER_NETWORK")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+        let run = docker::docker_run_ex(
+            name,
+            image,
+            &[(host_port, container_port)],
+            env_file,
+            network.as_deref(),
+            proxy_labels,
+        );
+        if proxy_labels.is_some() {
+            logs.push_str("[start] traefik labels applied\n");
+        }
         match self.executor.exec(server, workdir, &run, 120).await {
             Ok(r) => {
                 logs.push_str(&format!(

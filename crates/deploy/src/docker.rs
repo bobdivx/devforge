@@ -194,27 +194,74 @@ pub fn docker_ps_status(name: &str) -> String {
     )
 }
 
+/// Docker ne permet pas de muter les labels d’un conteneur existant (`docker update`
+/// n’a pas `--label-add`). On recrée le conteneur en préservant image / env / réseau / ports.
 pub fn docker_update_labels(name: &str, labels: &Value) -> String {
-    let mut parts = vec!["docker update".to_string()];
+    docker_recreate_with_labels(name, labels)
+}
+
+/// Recrée `name` avec les labels fournis (Traefik sync après changement de domaine).
+pub fn docker_recreate_with_labels(name: &str, labels: &Value) -> String {
+    let mut label_args = String::new();
     if let Some(obj) = labels.as_object() {
         for (k, v) in obj {
             let val = v.as_str().unwrap_or("");
-            parts.push(format!(
-                "--label-add {}={}",
+            label_args.push_str(&format!(
+                " --label {}={}",
                 shell_escape(k),
                 shell_escape(val)
             ));
         }
     }
-    parts.push(shell_escape(name));
-    parts.join(" ")
+    let n = shell_escape(name);
+    // Script POSIX : inspect → stop/rm → run (image/env/network/ports + nouveaux labels).
+    format!(
+        r#"sh -c 'set -e
+N={n}
+if ! docker inspect "$N" >/dev/null 2>&1; then echo "container $N introuvable"; exit 1; fi
+IMG=$(docker inspect -f "{{{{.Config.Image}}}}" "$N")
+NET=$(docker inspect -f "{{{{range $k,$v := .NetworkSettings.Networks}}}}{{{{println $k}}}}{{{{end}}}}" "$N" | head -n1)
+ENV_FILE=$(mktemp)
+docker inspect -f "{{{{range .Config.Env}}}}{{{{println .}}}}{{{{end}}}}" "$N" > "$ENV_FILE"
+PORT_ARGS=""
+for spec in $(docker inspect -f "{{{{range $p, $conf := .HostConfig.PortBindings}}}}{{{{range $conf}}}}{{{{.HostPort}}}}:{{{{$p}}}} {{{{end}}}}{{{{end}}}}" "$N"); do
+  [ -n "$spec" ] && PORT_ARGS="$PORT_ARGS -p $spec"
+done
+docker stop "$N" >/dev/null
+docker rm -f "$N" >/dev/null
+NET_ARG=""
+[ -n "$NET" ] && [ "$NET" != "bridge" ] && NET_ARG="--network $NET"
+# shellcheck disable=SC2086
+docker run -d --name "$N" --restart unless-stopped{label_args} $NET_ARG $PORT_ARGS --env-file "$ENV_FILE" "$IMG"
+rm -f "$ENV_FILE"
+echo "recreated $N with traefik labels"
+'"#
+    )
 }
 
 /// Nom du middleware Traefik ForwardAuth SSO (IdP externe / oauth2-proxy).
 pub const SSO_MIDDLEWARE_NAME: &str = "devforge-sso-auth";
 
-/// Traefik labels (entrypoints http/https — compatible Traefik v3 local/NAS).
-/// Si `forward_auth_address` est fourni, attache le middleware ForwardAuth SSO.
+fn host_router_key(host: &str) -> String {
+    let mut out = String::new();
+    for c in host.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let trimmed = out.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        "host".into()
+    } else {
+        // garder la clé courte pour les labels Traefik
+        trimmed.chars().take(48).collect()
+    }
+}
+
+/// Traefik labels pour **un** host (router unique par FQDN, service partagé par projet).
+/// Plusieurs appels peuvent être fusionnés : chaque domaine garde son `Host(...)`.
 pub fn traefik_labels(
     project_uuid: &str,
     host: &str,
@@ -223,7 +270,8 @@ pub fn traefik_labels(
     forward_auth_address: Option<&str>,
 ) -> Value {
     let short = project_uuid.chars().take(8).collect::<String>();
-    let router = format!("df-{short}");
+    let service = format!("df-{short}");
+    let router = format!("df-{short}-{}", host_router_key(host));
     let path = if path_prefix.trim().is_empty() {
         "/"
     } else {
@@ -257,16 +305,16 @@ pub fn traefik_labels(
         Value::String("true".into()),
     );
     map.insert(
-        format!("traefik.http.services.{router}.loadbalancer.server.port"),
+        format!("traefik.http.services.{service}.loadbalancer.server.port"),
         Value::String(port.to_string()),
     );
     map.insert(
         format!("traefik.http.routers.http-{router}.service"),
-        Value::String(router.clone()),
+        Value::String(service.clone()),
     );
     map.insert(
         format!("traefik.http.routers.https-{router}.service"),
-        Value::String(router.clone()),
+        Value::String(service),
     );
 
     if let Some(addr) = forward_auth_address.map(str::trim).filter(|a| !a.is_empty()) {
@@ -297,6 +345,35 @@ pub fn traefik_labels(
     Value::Object(map)
 }
 
+/// Fusionne les labels Traefik pour tous les hosts d’un projet.
+/// Chaque entrée = `(host, path_prefix, target_port)`.
+pub fn traefik_labels_for_routes(
+    project_uuid: &str,
+    routes: &[(&str, &str, u16)],
+    forward_auth_address: Option<&str>,
+) -> Value {
+    let mut map = Map::new();
+    map.insert("traefik.enable".into(), Value::String("true".into()));
+    for (host, path, port) in routes {
+        let piece = traefik_labels(
+            project_uuid,
+            host,
+            path,
+            *port,
+            forward_auth_address,
+        );
+        if let Some(obj) = piece.as_object() {
+            for (k, v) in obj {
+                if k == "traefik.enable" {
+                    continue;
+                }
+                map.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    Value::Object(map)
+}
+
 fn shell_escape(s: &str) -> String {
     if s.chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '='))
@@ -304,5 +381,46 @@ fn shell_escape(s: &str) -> String {
         s.to_string()
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn traefik_multi_host_keeps_distinct_routers() {
+        let a = traefik_labels("fbb6a152-ef01", "starbasefr.jeser.app", "/", 4321, None);
+        let b = traefik_labels("fbb6a152-ef01", "starbasefr.com", "/", 4321, None);
+        let mut map = serde_json::Map::new();
+        for piece in [a, b] {
+            if let Some(obj) = piece.as_object() {
+                for (k, v) in obj {
+                    map.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        let rule_jeser = map
+            .get("traefik.http.routers.http-df-fbb6a152-starbasefr-jeser-app.rule")
+            .and_then(|v| v.as_str());
+        let rule_com = map
+            .get("traefik.http.routers.http-df-fbb6a152-starbasefr-com.rule")
+            .and_then(|v| v.as_str());
+        assert_eq!(rule_jeser, Some("Host(`starbasefr.jeser.app`)"));
+        assert_eq!(rule_com, Some("Host(`starbasefr.com`)"));
+        assert_eq!(
+            map.get("traefik.http.services.df-fbb6a152.loadbalancer.server.port"),
+            Some(&json!("4321"))
+        );
+    }
+
+    #[test]
+    fn docker_update_labels_recreates_not_label_add() {
+        let labels = json!({"traefik.enable": "true"});
+        let cmd = docker_update_labels("df-fbb6a152-ef0", &labels);
+        assert!(cmd.contains("docker run"));
+        assert!(!cmd.contains("--label-add"));
+        assert!(cmd.contains("--label traefik.enable=true"));
     }
 }

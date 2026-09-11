@@ -7,6 +7,7 @@ import { projectStatusMeta } from '../lib/status';
 import { AppIcon, statusDotClass } from './AppIcon';
 import { AppShell } from './AppShell';
 import { ProjectAgentsPanel } from './ProjectAgentsPanel';
+import { ProjectActionsPanel } from './ProjectActionsPanel';
 import {
   Alert,
   Badge,
@@ -27,6 +28,7 @@ import {
 type Tab =
   | 'overview'
   | 'deployments'
+  | 'actions'
   | 'agents'
   | 'domains'
   | 'database'
@@ -45,6 +47,7 @@ function readQuery(): { uuid: string; tab: Tab } {
   const allowed: Tab[] = [
     'overview',
     'deployments',
+    'actions',
     'agents',
     'domains',
     'database',
@@ -100,6 +103,7 @@ export function ProjectDetailPage(props: Props) {
   const titles: Record<string, string> = {
     overview: project?.name ?? 'Projet',
     deployments: 'Deployments',
+    actions: 'Actions',
     agents: 'Agents',
     domains: 'Domains',
     env: 'Env',
@@ -152,6 +156,12 @@ export function ProjectDetailPage(props: Props) {
           projectUuid={uuid}
           initial={deployments}
           onRefresh={(d) => setDeployments(d)}
+        />
+      )}
+      {tab === 'actions' && (
+        <ProjectActionsPanel
+          projectUuid={uuid}
+          gitRepository={project?.git_repository}
         />
       )}
       {tab === 'agents' && <ProjectAgentsPanel projectUuid={uuid} />}
@@ -242,7 +252,7 @@ function ProjectOverview({
 
   const statusMeta = projectStatusMeta(project.status);
 
-  const health: Array<HealthItem & { icon: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' }> = [
+  const health: Array<HealthItem & { icon: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' }> = [
     {
       key: 'deploy',
       icon: 'deploy',
@@ -252,6 +262,16 @@ function ProjectOverview({
         : 'Aucun déploiement',
       tone: latest ? deployTone(latest.status) : 'warn',
       href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`,
+    },
+    {
+      key: 'actions',
+      icon: 'actions',
+      label: 'GitHub Actions',
+      detail: project.git_repository
+        ? 'Workflows & runners'
+        : 'Repo GitHub requis',
+      tone: project.git_repository ? 'ok' : 'neutral',
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=actions`,
     },
     {
       key: 'errors',
@@ -628,7 +648,7 @@ function HealthIcon({
   kind,
   tone,
 }: {
-  kind: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe';
+  kind: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions';
   tone: 'ok' | 'warn' | 'danger' | 'neutral';
 }) {
   const color =
@@ -670,6 +690,11 @@ function HealthIcon({
       <>
         <circle cx="12" cy="12" r="9" />
         <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+      </>
+    ),
+    actions: (
+      <>
+        <path d="M13 2 4 14h7l-1 8 10-14h-7l1-6z" />
       </>
     ),
   };

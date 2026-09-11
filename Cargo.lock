@@ -536,6 +536,7 @@ dependencies = [
  "devforge-wireguard",
  "dotenvy",
  "futures-util",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",

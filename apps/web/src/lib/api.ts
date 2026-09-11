@@ -636,6 +636,7 @@ export const api = {
         }>;
         resource_kind?: string | null;
         popular: boolean;
+        setup_notes?: string | null;
       }>;
     }>('/mcp/catalog'),
   listTokens: () =>
@@ -804,6 +805,8 @@ export const api = {
     request<{
       ok: boolean;
       config: {
+        provider: string;
+        issuer_url: string;
         protect_apps_by_default: boolean;
         forward_auth_address: string;
         hide_local_login: boolean;
@@ -811,12 +814,15 @@ export const api = {
         oauth2_proxy_url: string;
         apps_client_id: string;
         apps_client_secret_set: boolean;
+        pocket_id_api_token_set: boolean;
         forward_auth_configured: boolean;
         oidc_configured: boolean;
         middleware_name: string;
       };
     }>('/settings/sso'),
   ssoSave: (body: {
+    provider?: 'generic' | 'pocket_id' | string;
+    issuer_url?: string;
     protect_apps_by_default?: boolean;
     forward_auth_address?: string;
     hide_local_login?: boolean;
@@ -824,10 +830,15 @@ export const api = {
     oauth2_proxy_url?: string;
     apps_client_id?: string;
     apps_client_secret?: string;
+    pocket_id_api_token?: string;
+    provision?: boolean;
+    rotate_secret?: boolean;
   }) =>
     request<{
       ok: boolean;
       config: {
+        provider: string;
+        issuer_url: string;
         protect_apps_by_default: boolean;
         forward_auth_address: string;
         hide_local_login: boolean;
@@ -835,10 +846,17 @@ export const api = {
         oauth2_proxy_url: string;
         apps_client_id: string;
         apps_client_secret_set: boolean;
+        pocket_id_api_token_set: boolean;
         forward_auth_configured: boolean;
         oidc_configured: boolean;
         middleware_name: string;
       };
+      provision?: {
+        ok?: boolean;
+        created_client?: boolean;
+        created_secret?: boolean;
+        callback_urls?: string[];
+      } | null;
     }>('/settings/sso', {
       method: 'PUT',
       body: JSON.stringify(body),
@@ -987,7 +1005,59 @@ export const api = {
     ),
   runnersJobs: (id: string) =>
     request<{ ok: boolean; jobs: RunnerJob[] }>(`/runners/${encodeURIComponent(id)}/jobs`),
-  runnersSync: () => request<{ ok: boolean; changed: number }>('/runners/sync', { method: 'POST', body: '{}' }),
+    runnersSync: () => request<{ ok: boolean; changed: number }>('/runners/sync', { method: 'POST', body: '{}' }),
+
+  projectActions: (uuid: string) =>
+    request<{
+      ok: boolean;
+      available: boolean;
+      reason?: string;
+      owner?: string;
+      repo?: string;
+      branch?: string;
+      has_workflows?: boolean;
+      needs_patch?: boolean;
+      workflows?: Array<{
+        name: string;
+        path: string;
+        uses_devforge: boolean;
+        runs_on: string[];
+        skipped_dynamic: boolean;
+      }>;
+      runs?: Array<{
+        id: number;
+        name: string;
+        status: string;
+        conclusion?: string | null;
+        html_url: string;
+        branch?: string | null;
+      }>;
+      runners?: ManagedRunner[];
+    }>(`/projects/${encodeURIComponent(uuid)}/actions`),
+  projectActionsEnsureRunner: (
+    uuid: string,
+    body?: { runner_name?: string; image?: string; labels?: string },
+  ) =>
+    request<{
+      ok: boolean;
+      created: boolean;
+      message?: string;
+      runner?: ManagedRunner;
+    }>(`/projects/${encodeURIComponent(uuid)}/actions/ensure-runner`, {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    }),
+  projectActionsUseDevforge: (uuid: string, dry_run = false) =>
+    request<{
+      ok: boolean;
+      dry_run?: boolean;
+      message?: string;
+      patched?: Array<{ path: string; changes: number; sha?: string; dry_run?: boolean }>;
+      skipped?: Array<{ path: string; reason: string }>;
+    }>(`/projects/${encodeURIComponent(uuid)}/actions/use-devforge-runners`, {
+      method: 'POST',
+      body: JSON.stringify({ dry_run }),
+    }),
 };
 
 export type ManagedRunner = {

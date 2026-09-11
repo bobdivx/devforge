@@ -1,4 +1,4 @@
-//! SSO OIDC pour apps (IdP externe, ex. Pocket ID) — ForwardAuth Traefik + env OIDC.
+//! SSO OIDC pour apps (IdP externe générique ou Pocket ID) — ForwardAuth Traefik + env OIDC.
 
 use chrono::Utc;
 use serde::Serialize;
@@ -7,6 +7,8 @@ use sqlx::FromRow;
 use crate::state::{AppState, Project};
 
 pub const MIDDLEWARE_NAME: &str = "devforge-sso-auth";
+pub const PROVIDER_GENERIC: &str = "generic";
+pub const PROVIDER_POCKET_ID: &str = "pocket_id";
 
 #[derive(Debug, Clone, Default, Serialize, FromRow)]
 pub struct SsoSettings {
@@ -17,6 +19,8 @@ pub struct SsoSettings {
     pub sso_oauth2_proxy_url: String,
     pub sso_apps_client_id: String,
     pub sso_apps_client_secret: String,
+    pub sso_pocket_id_api_token: String,
+    pub sso_oidc_provider: String,
 }
 
 impl SsoSettings {
@@ -32,10 +36,24 @@ impl SsoSettings {
         !self.sso_forward_auth_address.trim().is_empty()
     }
 
+    pub fn provider(&self) -> &str {
+        let p = self.sso_oidc_provider.trim();
+        if p == PROVIDER_POCKET_ID {
+            PROVIDER_POCKET_ID
+        } else {
+            PROVIDER_GENERIC
+        }
+    }
+
+    pub fn is_pocket_id(&self) -> bool {
+        self.provider() == PROVIDER_POCKET_ID
+    }
+
     pub fn oidc_configured(&self) -> bool {
         !self.sso_pocket_id_url.trim().is_empty() && !self.sso_apps_client_id.trim().is_empty()
     }
 
+    /// Issuer OIDC (colonne historique `sso_pocket_id_url`).
     pub fn issuer(&self) -> &str {
         self.sso_pocket_id_url.trim().trim_end_matches('/')
     }
@@ -54,6 +72,13 @@ impl SsoSettings {
     }
 }
 
+pub fn normalize_provider(raw: &str) -> String {
+    match raw.trim().to_lowercase().as_str() {
+        "pocket_id" | "pocket-id" | "pocketid" => PROVIDER_POCKET_ID.to_string(),
+        _ => PROVIDER_GENERIC.to_string(),
+    }
+}
+
 fn normalize_forward_auth(addr: &str) -> String {
     let a = addr.trim();
     if a.ends_with('/') {
@@ -66,7 +91,8 @@ fn normalize_forward_auth(addr: &str) -> String {
 pub async fn load_sso_settings(pool: &sqlx::SqlitePool) -> SsoSettings {
     let row: Option<SsoSettings> = sqlx::query_as(
         r#"SELECT sso_protect_apps_by_default, sso_forward_auth_address, sso_hide_local_login,
-                  sso_pocket_id_url, sso_oauth2_proxy_url, sso_apps_client_id, sso_apps_client_secret
+                  sso_pocket_id_url, sso_oauth2_proxy_url, sso_apps_client_id, sso_apps_client_secret,
+                  sso_pocket_id_api_token, sso_oidc_provider
            FROM instance_settings WHERE id = 1"#,
     )
     .fetch_optional(pool)
@@ -130,22 +156,34 @@ pub async fn ensure_oidc_env(pool: &sqlx::SqlitePool, project: &Project) -> usiz
         ("OIDC_DISCOVERY_URL", discovery, false),
         ("OIDC_CLIENT_ID", client_id.clone(), false),
         ("OIDC_SCOPES", "openid email profile".into(), false),
-        ("POCKET_ID_URL", issuer.clone(), false),
-        ("AUTH_POCKET_ID_ID", client_id.clone(), false),
-        ("AUTH_POCKET_ID_ISSUER", issuer.clone(), false),
+        ("OIDC_PROVIDER", settings.provider().to_string(), false),
     ];
+    if settings.is_pocket_id() {
+        pairs.push(("POCKET_ID_URL", issuer.clone(), false));
+        pairs.push(("AUTH_POCKET_ID_ID", client_id.clone(), false));
+        pairs.push(("AUTH_POCKET_ID_ISSUER", issuer.clone(), false));
+    }
     if !client_secret.is_empty() {
         pairs.push(("OIDC_CLIENT_SECRET", client_secret.clone(), true));
-        pairs.push(("AUTH_POCKET_ID_SECRET", client_secret, true));
+        if settings.is_pocket_id() {
+            pairs.push(("AUTH_POCKET_ID_SECRET", client_secret, true));
+        }
     }
 
     if let Some(origin) = app_origin(project.production_url.as_deref()) {
         pairs.push(("AUTH_URL", origin.clone(), false));
         pairs.push(("NEXTAUTH_URL", origin.clone(), false));
         pairs.push(("AUTH_TRUST_HOST", "true".into(), false));
-        let redirect = format!("{origin}/api/auth/callback/pocket-id");
+        let callback_path = if settings.is_pocket_id() {
+            "pocket-id"
+        } else {
+            "oidc"
+        };
+        let redirect = format!("{origin}/api/auth/callback/{callback_path}");
         pairs.push(("OIDC_REDIRECT_URI", redirect.clone(), false));
-        pairs.push(("AUTH_POCKET_ID_REDIRECT_URI", redirect, false));
+        if settings.is_pocket_id() {
+            pairs.push(("AUTH_POCKET_ID_REDIRECT_URI", redirect, false));
+        }
     }
 
     let now = Utc::now().to_rfc3339();

@@ -763,6 +763,7 @@ async fn run_real_deploy(state: &AppState, project: &Project) -> devforge_deploy
         is_static: project.is_static != 0,
         github_token: token,
         env_file,
+        proxy_labels: proxy_labels_for_project(state, project).await,
     };
     let result = state.deploy.deploy(&req).await;
     if result.ok {
@@ -1410,17 +1411,8 @@ pub(crate) async fn ensure_project_primary_domain(
     if !existing {
         let _ = state.domains.attach(project_uuid, &fqdn, true).await;
     }
-    let _ = state
-        .proxy
-        .upsert(devforge_proxy::ProxyRoute {
-            id: format!("primary-{project_uuid}"),
-            project_uuid: project_uuid.into(),
-            host: fqdn,
-            path_prefix: "/".into(),
-            target_port: port.max(1),
-            https_redirect: true,
-        })
-        .await;
+    // Primary + tous les alias : chaque domaine du projet doit avoir une route Traefik.
+    ensure_all_domain_proxy_routes(state, project_uuid, &fqdn, port.max(1)).await;
     if let Ok(project) = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ?")
         .bind(project_uuid)
         .fetch_one(&state.pool)
@@ -1431,6 +1423,140 @@ pub(crate) async fn ensure_project_primary_domain(
         let _ = state.proxy.sync(project_uuid).await;
     }
     Ok(())
+}
+
+fn proxy_route_id(project_uuid: &str, fqdn: &str, is_primary: bool) -> String {
+    if is_primary {
+        format!("primary-{project_uuid}")
+    } else {
+        format!(
+            "alias-{}-{}",
+            &project_uuid[..8.min(project_uuid.len())],
+            fqdn.replace('.', "-")
+        )
+    }
+}
+
+/// Assure une route proxy Traefik pour **chaque** domaine du projet (primary + alias).
+pub(crate) async fn ensure_all_domain_proxy_routes(
+    state: &AppState,
+    project_uuid: &str,
+    primary_fqdn: &str,
+    port: u16,
+) {
+    let port = port.max(1);
+    let mut hosts: Vec<(String, bool)> = Vec::new();
+    let primary = primary_fqdn.trim().to_lowercase();
+    if !primary.is_empty() && primary.contains('.') {
+        hosts.push((primary.clone(), true));
+    }
+
+    if let Ok(listed) = state.domains.list(project_uuid).await {
+        if let Some(arr) = listed.get("domains").and_then(|d| d.as_array()) {
+            for d in arr {
+                let Some(fqdn) = d.get("fqdn").and_then(|f| f.as_str()) else {
+                    continue;
+                };
+                let fqdn = fqdn.to_lowercase();
+                if fqdn.is_empty() || !fqdn.contains('.') {
+                    continue;
+                }
+                if hosts.iter().any(|(h, _)| h == &fqdn) {
+                    continue;
+                }
+                let is_primary = !primary.is_empty() && fqdn == primary;
+                hosts.push((fqdn, is_primary));
+            }
+        }
+    }
+
+    // Retirer les routes orphelines (host plus dans la liste domaines)
+    if let Ok(existing) = state.proxy.list(project_uuid).await {
+        if let Some(arr) = existing.get("routes").and_then(|r| r.as_array()) {
+            for r in arr {
+                let Some(host) = r.get("host").and_then(|h| h.as_str()) else {
+                    continue;
+                };
+                let Some(id) = r.get("id").and_then(|i| i.as_str()) else {
+                    continue;
+                };
+                if !hosts
+                    .iter()
+                    .any(|(h, _)| h.eq_ignore_ascii_case(host))
+                {
+                    let _ = state.proxy.delete(project_uuid, id).await;
+                }
+            }
+        }
+    }
+
+    for (fqdn, is_primary) in hosts {
+        let _ = state
+            .proxy
+            .upsert(devforge_proxy::ProxyRoute {
+                id: proxy_route_id(project_uuid, &fqdn, is_primary),
+                project_uuid: project_uuid.into(),
+                host: fqdn,
+                path_prefix: "/".into(),
+                target_port: port,
+                https_redirect: true,
+            })
+            .await;
+    }
+}
+
+/// Labels Traefik pour le deploy (`docker run`), couvrant tous les hosts proxy.
+pub(crate) async fn proxy_labels_for_project(
+    state: &AppState,
+    project: &Project,
+) -> Option<serde_json::Value> {
+    let uuid = &project.uuid;
+    let port = project.port.clamp(1, 65535) as u16;
+    if let Some(url) = project.production_url.as_deref().and_then(fqdn_from_url) {
+        ensure_all_domain_proxy_routes(state, uuid, &url, port).await;
+    }
+    let listed = state.proxy.list(uuid).await.ok()?;
+    let routes = listed.get("routes")?.as_array()?;
+    if routes.is_empty() {
+        return None;
+    }
+    let settings = crate::sso::load_sso_settings(&state.pool).await;
+    let fwd = if crate::sso::should_protect_project(&settings, project) {
+        settings.effective_forward_auth_address()
+    } else {
+        None
+    };
+    let mut map = serde_json::Map::new();
+    map.insert("traefik.enable".into(), serde_json::json!("true"));
+    for r in routes {
+        let Some(host) = r.get("host").and_then(|h| h.as_str()) else {
+            continue;
+        };
+        let path = r
+            .get("path_prefix")
+            .and_then(|p| p.as_str())
+            .unwrap_or("/");
+        let target = r
+            .get("target_port")
+            .and_then(|p| p.as_u64())
+            .unwrap_or(port as u64) as u16;
+        let piece = devforge_deploy::docker::traefik_labels(
+            uuid,
+            host,
+            path,
+            target.max(1),
+            fwd.as_deref(),
+        );
+        if let Some(obj) = piece.as_object() {
+            for (k, v) in obj {
+                if k == "traefik.enable" {
+                    continue;
+                }
+                map.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    Some(serde_json::Value::Object(map))
 }
 
 pub(crate) async fn ensure_production_url(

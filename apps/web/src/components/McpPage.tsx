@@ -31,6 +31,7 @@ type CatalogItem = {
   }>;
   resource_kind?: string | null;
   popular: boolean;
+  setup_notes?: string | null;
 };
 
 type McpServer = {
@@ -154,6 +155,8 @@ export function McpPage() {
   const [busy, setBusy] = useState(false);
   const [toolsFor, setToolsFor] = useState<string | null>(null);
   const [tools, setTools] = useState<Array<{ name: string; description: string }>>([]);
+  const [toolsError, setToolsError] = useState<string | null>(null);
+  const [toolsLoading, setToolsLoading] = useState(false);
 
   async function load() {
     try {
@@ -215,11 +218,20 @@ export function McpPage() {
   async function showTools(id: string) {
     setToolsFor(id);
     setTools([]);
+    setToolsError(null);
+    setToolsLoading(true);
     try {
       const r = await api.mcpTools(id);
       setTools(r.data ?? []);
+      if (!(r.data ?? []).length) {
+        setToolsError('Aucun tool exposé par ce serveur.');
+      }
     } catch (err) {
-      toast.push({ title: 'Tools KO', detail: String(err), tone: 'warn' });
+      const detail = String(err);
+      setToolsError(detail);
+      toast.push({ title: 'Tools KO', detail, tone: 'warn' });
+    } finally {
+      setToolsLoading(false);
     }
   }
 
@@ -328,6 +340,11 @@ export function McpPage() {
               <McpIcon id={preset.id} name={preset.name} />
               <span class="text-sm text-[var(--color-ink-muted)]">{preset.category}</span>
             </div>
+            {preset.setup_notes && (
+              <Alert tone="info" class="whitespace-pre-wrap text-xs leading-relaxed">
+                {preset.setup_notes}
+              </Alert>
+            )}
             {preset.fields.map((f) => (
               <div key={f.key}>
                 <Input
@@ -372,13 +389,20 @@ export function McpPage() {
 
       <Modal
         open={!!toolsFor}
-        onClose={() => setToolsFor(null)}
+        onClose={() => {
+          setToolsFor(null);
+          setToolsError(null);
+        }}
         title="Tools MCP"
-        description="Liste distante (échec si l’URL MCP n’est pas joignable)."
+        description="Liste distante JSON-RPC (tools/list). Turso hébergé exige OAuth — le token Platform ne suffit pas."
         size="lg"
       >
-        {tools.length === 0 ? (
-          <p class="text-sm text-[var(--color-ink-muted)]">Aucun tool ou endpoint injoignable.</p>
+        {toolsLoading ? (
+          <p class="text-sm text-[var(--color-ink-muted)]">Chargement…</p>
+        ) : toolsError ? (
+          <Alert tone="warn">{toolsError}</Alert>
+        ) : tools.length === 0 ? (
+          <p class="text-sm text-[var(--color-ink-muted)]">Aucun tool exposé.</p>
         ) : (
           <ul class="space-y-2 text-sm">
             {tools.map((t) => (

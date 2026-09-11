@@ -256,18 +256,14 @@ async fn list_domains(
                 .unwrap_or(true);
             if missing {
                 let _ = state.domains.attach(&uuid, &fqdn, true).await;
-                let _ = state
-                    .proxy
-                    .upsert(devforge_proxy::ProxyRoute {
-                        id: format!("primary-{uuid}"),
-                        project_uuid: uuid.clone(),
-                        host: fqdn.clone(),
-                        path_prefix: "/".into(),
-                        target_port: project.port.clamp(1, 65535) as u16,
-                        https_redirect: true,
-                    })
-                    .await;
             }
+            crate::routes::ensure_all_domain_proxy_routes(
+                &state,
+                &uuid,
+                &fqdn,
+                project.port.clamp(1, 65535) as u16,
+            )
+            .await;
         }
     }
 
@@ -392,26 +388,21 @@ async fn attach_domain(
             obj.insert("primary".into(), json!(true));
             obj.insert("primary_fqdn".into(), json!(fqdn));
         }
-    } else {
-        // Alias : route proxy secondaire (même port)
-        if let Some(fqdn) = normalize_fqdn(&body.fqdn) {
-            let _ = state
-                .proxy
-                .upsert(devforge_proxy::ProxyRoute {
-                    id: format!(
-                        "alias-{}-{}",
-                        &uuid[..8.min(uuid.len())],
-                        fqdn.replace('.', "-")
-                    ),
-                    project_uuid: uuid.clone(),
-                    host: fqdn,
-                    path_prefix: "/".into(),
-                    target_port: project.port.clamp(1, 65535) as u16,
-                    https_redirect: true,
-                })
-                .await;
-            crate::sso::sync_project_proxy(&state, &project).await;
-        }
+    } else if let Some(fqdn) = normalize_fqdn(&body.fqdn) {
+        // Alias : sync toutes les routes (primary inchangé + nouvel host)
+        let primary = project
+            .production_url
+            .as_deref()
+            .and_then(normalize_fqdn)
+            .unwrap_or_else(|| fqdn.clone());
+        crate::routes::ensure_all_domain_proxy_routes(
+            &state,
+            &uuid,
+            &primary,
+            project.port.clamp(1, 65535) as u16,
+        )
+        .await;
+        crate::sso::sync_project_proxy(&state, &project).await;
     }
     Ok(Json(out))
 }
@@ -472,7 +463,26 @@ async fn detach_domain(
             .bind(&uuid)
             .execute(&state.pool)
             .await;
+            // Plus de domaines : retirer toutes les routes proxy orphelines
+            crate::routes::ensure_all_domain_proxy_routes(
+                &state,
+                &uuid,
+                "",
+                project.port.clamp(1, 65535) as u16,
+            )
+            .await;
+            crate::sso::sync_project_proxy(&state, &project).await;
         }
+    } else if let Some(ref kept_primary) = primary {
+        // Alias retiré : resync les routes restantes (primary + autres alias)
+        crate::routes::ensure_all_domain_proxy_routes(
+            &state,
+            &uuid,
+            kept_primary,
+            project.port.clamp(1, 65535) as u16,
+        )
+        .await;
+        crate::sso::sync_project_proxy(&state, &project).await;
     }
     Ok(Json(out))
 }
@@ -1492,6 +1502,7 @@ async fn github_webhook(
             is_static: project.is_static != 0,
             github_token: token,
             env_file,
+            proxy_labels: crate::routes::proxy_labels_for_project(&state, &project).await,
         };
         let result = state.deploy.deploy(&req).await;
         let finished = crate::state::now_str();
