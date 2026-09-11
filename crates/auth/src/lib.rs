@@ -4,6 +4,7 @@ use argon2::{
 };
 use devforge_shared::{DevForgeError, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +28,9 @@ pub const PLAN_FREE: &str = "free";
 pub const PLAN_PRO: &str = "pro";
 pub const ROLE_INSTANCE_ADMIN: &str = "instance_admin";
 pub const ROLE_USER: &str = "user";
+
+pub const ABILITY_READ: &str = "read";
+pub const ABILITY_WRITE: &str = "write";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OnboardingSteps {
@@ -85,6 +89,56 @@ pub fn verify_password(password: &str, password_hash: &str) -> Result<bool> {
 
 pub fn new_session_token() -> String {
     format!("df_{}", Uuid::new_v4().simple())
+}
+
+/// Plaintext API token (shown once). Prefix `dfat_` for routing vs session `df_`.
+pub fn new_api_token() -> String {
+    format!("dfat_{}", Uuid::new_v4().simple())
+}
+
+pub fn hash_api_token(plaintext: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(plaintext.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+pub fn api_token_prefix(plaintext: &str) -> String {
+    plaintext.chars().take(12).collect()
+}
+
+pub fn normalize_abilities(abilities: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for a in abilities {
+        let t = a.trim().to_lowercase();
+        if (t == ABILITY_READ || t == ABILITY_WRITE) && !out.iter().any(|x| x == &t) {
+            out.push(t);
+        }
+    }
+    if out.is_empty() {
+        out.push(ABILITY_READ.into());
+    }
+    // write implique read
+    if out.iter().any(|a| a == ABILITY_WRITE) && !out.iter().any(|a| a == ABILITY_READ) {
+        out.insert(0, ABILITY_READ.into());
+    }
+    out
+}
+
+pub fn abilities_csv(abilities: &[String]) -> String {
+    normalize_abilities(abilities).join(",")
+}
+
+pub fn parse_abilities_csv(csv: &str) -> Vec<String> {
+    let parts: Vec<String> = csv
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    normalize_abilities(&parts)
+}
+
+pub fn has_ability(abilities: &[String], need: &str) -> bool {
+    abilities.iter().any(|a| a == need)
 }
 
 pub fn new_uuid() -> String {

@@ -4,7 +4,7 @@ pub const DEFAULT_IMAGE: &str = "myoung34/github-runner:latest";
 pub const DEFAULT_LABELS: &str = "self-hosted,devforge";
 pub const DEFAULT_SERVER_ID: &str = "default";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthMode {
     Registration,
@@ -27,7 +27,7 @@ impl AuthMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OpStatus {
     Idle,

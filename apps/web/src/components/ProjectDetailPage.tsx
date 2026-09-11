@@ -395,7 +395,7 @@ function ProjectOverview({
                     href={project.production_url}
                     target="_blank"
                     rel="noreferrer"
-                    class="mt-1.5 inline-flex text-sm text-[var(--color-accent)] hover:underline"
+                    class="mt-1.5 block break-all text-sm text-[var(--color-accent)] hover:underline"
                   >
                     {project.production_url.replace(/^https?:\/\//, '')}
                   </a>
@@ -1076,9 +1076,9 @@ function DatabaseManager({ uuid }: { uuid: string }) {
           ) : (
             <ul class="divide-y divide-[var(--color-line)] text-sm">
               {dbs.map((db) => (
-                <li key={db.name} class="flex items-center justify-between gap-3 py-2">
+                <li key={db.name} class="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                   <div class="min-w-0">
-                    <div class="font-medium">{db.name}</div>
+                    <div class="break-all font-medium">{db.name}</div>
                     <div class="truncate font-mono text-xs text-[var(--color-ink-muted)]">
                       {db.hostname}
                     </div>
@@ -1258,35 +1258,35 @@ function EnvPanel({ uuid }: { uuid: string }) {
               </Button>
             }
           />
-          <form class="mb-4 flex flex-wrap items-end gap-2" onSubmit={add}>
-            <div class="w-40">
+          <form class="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end" onSubmit={add}>
+            <div class="w-full sm:w-40 sm:shrink-0">
               <Input
                 placeholder="KEY"
                 value={key}
                 onInput={(ev) => setKey((ev.target as HTMLInputElement).value)}
               />
             </div>
-            <div class="min-w-[180px] flex-1">
+            <div class="min-w-0 w-full flex-1">
               <Input
                 placeholder="value"
                 value={value}
                 onInput={(ev) => setValue((ev.target as HTMLInputElement).value)}
               />
             </div>
-            <Button type="submit" variant="secondary" disabled={busy}>
+            <Button type="submit" variant="secondary" disabled={busy} class="w-full sm:w-auto">
               Ajouter
             </Button>
           </form>
           <ul class="divide-y divide-[var(--color-line)] text-sm">
             {rows.map((r) => (
-              <li key={r.key} class="flex items-center justify-between gap-4 py-2">
+              <li key={r.key} class="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                 <button
                   type="button"
                   class="min-w-0 flex-1 text-left hover:opacity-90"
                   onClick={() => openEdit(r.key)}
                 >
-                  <span class="font-mono">{r.key}</span>
-                  <span class="ml-3 text-[var(--color-ink-muted)]">
+                  <span class="break-all font-mono">{r.key}</span>
+                  <span class="ml-3 break-all text-[var(--color-ink-muted)]">
                     {r.secret ? '••••••••' : r.value}
                   </span>
                 </button>
@@ -1540,8 +1540,8 @@ function DomainsPanel({
             title="Domaine principal"
             description="URL publique de l’app (production). Un FQDN saisi manuellement devient principal par défaut."
           />
-          <form class="flex flex-wrap items-end gap-2" onSubmit={savePrimary}>
-            <div class="min-w-[220px] flex-1">
+          <form class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end" onSubmit={savePrimary}>
+            <div class="min-w-0 w-full flex-1">
               <Input
                 label="FQDN principal"
                 placeholder="app.example.com"
@@ -1554,7 +1554,7 @@ function DomainsPanel({
                 }
               />
             </div>
-            <Button type="submit" size="sm" variant="secondary" disabled={busy}>
+            <Button type="submit" size="sm" variant="secondary" disabled={busy} class="w-full sm:w-auto">
               Enregistrer
             </Button>
           </form>
@@ -1566,15 +1566,15 @@ function DomainsPanel({
             description="Aliases + sous-domaine auto. L’ajout manuel est principal par défaut."
           />
           <form class="mb-4 space-y-3" onSubmit={attach}>
-            <div class="flex flex-wrap items-end gap-2">
-              <div class="min-w-[220px] flex-1">
+            <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+              <div class="min-w-0 w-full flex-1">
                 <Input
                   placeholder="autre.example.com"
                   value={fqdn}
                   onInput={(e) => setFqdn((e.target as HTMLInputElement).value)}
                 />
               </div>
-              <Button type="submit" size="sm" variant="secondary" disabled={busy}>
+              <Button type="submit" size="sm" variant="secondary" disabled={busy} class="w-full sm:w-auto">
                 Attacher
               </Button>
             </div>
@@ -1589,10 +1589,10 @@ function DomainsPanel({
           </form>
           <ul class="divide-y divide-[var(--color-line)]">
             {items.map((d) => (
-              <li key={d.id} class="flex items-center justify-between gap-2 py-2 text-sm">
-                <div>
+              <li key={d.id} class="flex flex-col gap-2 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+                <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2 font-medium">
-                    {d.fqdn}
+                    <span class="break-all">{d.fqdn}</span>
                     {d.is_primary && <Badge tone="ok">Principal</Badge>}
                   </div>
                   <div class="text-xs text-[var(--color-ink-muted)]">
@@ -1626,6 +1626,12 @@ function DomainsPanel({
   );
 }
 
+function ssoModeFromProject(project: Project): 'auto' | 'on' | 'off' {
+  if (project.is_sso_protected === true || project.is_sso_protected === 1) return 'on';
+  if (project.is_sso_protected === false || project.is_sso_protected === 0) return 'off';
+  return 'auto';
+}
+
 function ProjectSettingsPanel({
   project,
   onSaved,
@@ -1640,6 +1646,12 @@ function ProjectSettingsPanel({
   const [buildPack, setBuildPack] = useState(project.build_pack || 'nixpacks');
   const [port, setPort] = useState(Number(project.port ?? 3000));
   const [isStatic, setIsStatic] = useState(Boolean(project.is_static));
+  const [ssoProtection, setSsoProtection] = useState<'auto' | 'on' | 'off'>(() =>
+    ssoModeFromProject(project),
+  );
+  const [ownUserSystem, setOwnUserSystem] = useState(
+    project.has_own_user_system === true || project.has_own_user_system === 1,
+  );
   const [publishDir, setPublishDir] = useState(project.publish_directory || '');
   const [baseDir, setBaseDir] = useState(project.base_directory || '/');
   const [composePath, setComposePath] = useState(project.docker_compose_location || '');
@@ -1657,6 +1669,8 @@ function ProjectSettingsPanel({
     setBuildPack(project.build_pack || 'nixpacks');
     setPort(Number(project.port ?? 3000));
     setIsStatic(Boolean(project.is_static));
+    setSsoProtection(ssoModeFromProject(project));
+    setOwnUserSystem(project.has_own_user_system === true || project.has_own_user_system === 1);
     setPublishDir(project.publish_directory || '');
     setBaseDir(project.base_directory || '/');
     setComposePath(project.docker_compose_location || '');
@@ -1678,6 +1692,8 @@ function ProjectSettingsPanel({
         build_pack: buildPack,
         port,
         is_static: isStatic,
+        sso_protection: ssoProtection,
+        has_own_user_system: ownUserSystem,
         publish_directory: publishDir.trim() || null,
         base_directory: baseDir.trim() || '/',
         docker_compose_location: composePath.trim() || null,
@@ -1797,6 +1813,33 @@ function ProjectSettingsPanel({
               onChange={(e) => setIsStatic((e.target as HTMLInputElement).checked)}
             />
             Static site
+          </label>
+          <label class="flex items-center gap-2 text-sm md:col-span-2">
+            <input
+              type="checkbox"
+              checked={ownUserSystem}
+              onChange={(e) => {
+                const v = (e.target as HTMLInputElement).checked;
+                setOwnUserSystem(v);
+                if (v) setSsoProtection('off');
+              }}
+            />
+            App avec son propre login (pas de barrière Traefik SSO)
+          </label>
+          <label class="flex flex-col gap-1.5 text-sm md:col-span-2">
+            <span class="font-medium">Protection SSO Traefik</span>
+            <select
+              class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
+              value={ssoProtection}
+              disabled={ownUserSystem}
+              onChange={(e) =>
+                setSsoProtection((e.target as HTMLSelectElement).value as 'auto' | 'on' | 'off')
+              }
+            >
+              <option value="auto">Auto (réglage instance)</option>
+              <option value="on">Toujours protégé</option>
+              <option value="off">Jamais protégé</option>
+            </select>
           </label>
           <Input
             label="Publish directory"

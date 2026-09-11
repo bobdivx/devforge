@@ -85,6 +85,31 @@ pub struct GitCompare {
     pub head_sha: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistrationToken {
+    pub token: String,
+    pub expires_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoRunner {
+    pub id: u64,
+    pub name: String,
+    pub status: String,
+    pub busy: bool,
+    pub labels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowJob {
+    pub id: u64,
+    pub name: String,
+    pub status: String,
+    pub conclusion: Option<String>,
+    pub runner_name: Option<String>,
+    pub html_url: Option<String>,
+}
+
 #[async_trait]
 pub trait GitHubClient: Send + Sync {
     async fn current_user(&self) -> Result<GitUser>;
@@ -142,6 +167,21 @@ pub trait GitHubClient: Send + Sync {
         path: &str,
         r#ref: Option<&str>,
     ) -> Result<Option<String>>;
+
+    async fn create_registration_token(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<RegistrationToken>;
+
+    async fn list_repo_runners(&self, owner: &str, repo: &str) -> Result<Vec<RepoRunner>>;
+
+    async fn list_workflow_jobs(
+        &self,
+        owner: &str,
+        repo: &str,
+        run_id: u64,
+    ) -> Result<Vec<WorkflowJob>>;
 }
 
 pub struct StubGitHubClient;
@@ -246,6 +286,33 @@ impl GitHubClient for StubGitHubClient {
             "GitHub non configuré — connecte un token dans Settings".into(),
         ))
     }
+
+    async fn create_registration_token(
+        &self,
+        _owner: &str,
+        _repo: &str,
+    ) -> Result<RegistrationToken> {
+        Err(DevForgeError::Message(
+            "GitHub non configuré — connecte un token dans Settings".into(),
+        ))
+    }
+
+    async fn list_repo_runners(&self, _owner: &str, _repo: &str) -> Result<Vec<RepoRunner>> {
+        Err(DevForgeError::Message(
+            "GitHub non configuré — connecte un token dans Settings".into(),
+        ))
+    }
+
+    async fn list_workflow_jobs(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _run_id: u64,
+    ) -> Result<Vec<WorkflowJob>> {
+        Err(DevForgeError::Message(
+            "GitHub non configuré — connecte un token dans Settings".into(),
+        ))
+    }
 }
 
 pub fn client_from_env() -> (Arc<dyn GitHubClient>, &'static str) {
@@ -267,6 +334,8 @@ pub fn client_from_token(token: &str) -> (Arc<dyn GitHubClient>, &'static str) {
 pub struct GitHubFacade {
     client: RwLock<Arc<dyn GitHubClient>>,
     mode: RwLock<String>,
+    /// Raw PAT for runners that need ACCESS_TOKEN (never logged).
+    token: RwLock<Option<String>>,
 }
 
 impl GitHubFacade {
@@ -274,6 +343,7 @@ impl GitHubFacade {
         Self {
             client: RwLock::new(client),
             mode: RwLock::new(mode.into()),
+            token: RwLock::new(None),
         }
     }
 
@@ -288,6 +358,19 @@ impl GitHubFacade {
         if let Ok(mut m) = self.mode.write() {
             *m = mode.into();
         }
+    }
+
+    pub fn set_token(&self, token: Option<String>) {
+        if let Ok(mut t) = self.token.write() {
+            *t = token.filter(|s| !s.trim().is_empty());
+        }
+    }
+
+    pub fn instance_token(&self) -> Option<String> {
+        self.token
+            .read()
+            .ok()
+            .and_then(|t| t.clone())
     }
 
     fn client(&self) -> Arc<dyn GitHubClient> {
@@ -372,6 +455,29 @@ impl GitHubFacade {
         r#ref: Option<&str>,
     ) -> Result<Option<String>> {
         self.client().read_file(owner, repo, path, r#ref).await
+    }
+
+    pub async fn create_registration_token(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<RegistrationToken> {
+        self.client().create_registration_token(owner, repo).await
+    }
+
+    pub async fn list_repo_runners(&self, owner: &str, repo: &str) -> Result<Vec<RepoRunner>> {
+        self.client().list_repo_runners(owner, repo).await
+    }
+
+    pub async fn list_workflow_jobs(
+        &self,
+        owner: &str,
+        repo: &str,
+        run_id: u64,
+    ) -> Result<Vec<WorkflowJob>> {
+        self.client()
+            .list_workflow_jobs(owner, repo, run_id)
+            .await
     }
 }
 

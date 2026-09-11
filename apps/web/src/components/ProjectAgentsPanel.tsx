@@ -193,7 +193,7 @@ export function ProjectAgentsPanel({ projectUuid }: { projectUuid: string }) {
           )}
         </Card>
 
-        <Card padding="none" class="flex h-[min(64vh,600px)] flex-col overflow-hidden">
+        <Card padding="none" class="flex h-[min(calc(100dvh-14rem),600px)] flex-col overflow-hidden lg:h-[min(64vh,600px)]">
           <div class="flex items-center justify-between gap-2 border-b border-[var(--color-line)] px-4 py-3">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
@@ -252,7 +252,7 @@ export function ProjectAgentsPanel({ projectUuid }: { projectUuid: string }) {
               <div
                 key={i}
                 class={cn(
-                  'max-w-[90%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm',
+                  'max-w-[90%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm',
                   m.role === 'user'
                     ? 'ml-auto bg-[var(--color-accent)] text-white'
                     : 'bg-[var(--color-surface)]',
@@ -271,8 +271,8 @@ export function ProjectAgentsPanel({ projectUuid }: { projectUuid: string }) {
             <div ref={endRef} />
           </div>
 
-          <form class="flex gap-2 border-t border-[var(--color-line)] p-3" onSubmit={onSubmit}>
-            <div class="flex-1">
+          <form class="flex min-w-0 gap-2 border-t border-[var(--color-line)] p-3" onSubmit={onSubmit}>
+            <div class="min-w-0 flex-1">
               <Input
                 value={input}
                 placeholder={
@@ -282,7 +282,7 @@ export function ProjectAgentsPanel({ projectUuid }: { projectUuid: string }) {
                 disabled={busy || !selected}
               />
             </div>
-            <Button type="submit" variant="secondary" disabled={busy || !selected || !input.trim()}>
+            <Button type="submit" variant="secondary" disabled={busy || !selected || !input.trim()} class="shrink-0">
               {busy ? '…' : 'Envoyer'}
             </Button>
           </form>

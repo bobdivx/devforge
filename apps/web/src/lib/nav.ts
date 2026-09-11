@@ -4,7 +4,9 @@ export type NavItem = { href: string; label: string; key: string };
 export const GLOBAL_NAV: NavItem[] = [
   { href: '/app', label: 'Apps', key: 'home' },
   { href: '/app/projects', label: 'Projects', key: 'projects' },
+  { href: '/app/runners', label: 'Runners', key: 'runners' },
   { href: '/app/mcp', label: 'MCP', key: 'mcp' },
+  { href: '/app/tokens', label: 'Tokens', key: 'tokens' },
   { href: '/app/team', label: 'Compte', key: 'team' },
   { href: '/app/settings', label: 'Settings', key: 'settings' },
 ];
@@ -49,6 +51,7 @@ export const SETTINGS_NAV: NavItem[] = [
   { href: '/app/settings?tab=github', label: 'GitHub', key: 'github' },
   { href: '/app/settings?tab=serveur', label: 'Serveur', key: 'serveur' },
   { href: '/app/settings?tab=llm', label: 'Agents / LLM', key: 'llm' },
+  { href: '/app/settings?tab=sso', label: 'SSO / OIDC', key: 'sso' },
   { href: '/app/settings?tab=backup', label: 'Sauvegardes', key: 'backup' },
   { href: '/app/update', label: 'Mise à jour', key: 'update' },
 ];

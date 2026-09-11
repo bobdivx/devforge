@@ -44,7 +44,7 @@ export function Modal({
   if (!open) return null;
 
   return (
-    <div class="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center">
+    <div class="fixed inset-0 z-50 flex items-end justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:items-center sm:p-4">
       <button
         type="button"
         aria-label="Fermer"
@@ -56,7 +56,7 @@ export function Modal({
         aria-modal="true"
         aria-labelledby="df-modal-title"
         class={cn(
-          'relative z-10 flex max-h-[min(90vh,880px)] w-full flex-col overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] shadow-2xl',
+          'relative z-10 flex max-h-[min(90dvh,880px)] w-full flex-col overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] shadow-2xl',
           sizes[size],
           className,
         )}

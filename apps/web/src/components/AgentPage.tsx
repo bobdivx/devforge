@@ -56,9 +56,9 @@ export function AgentPage() {
 
   return (
     <AppShell active="agent" title="Agent">
-      <Card padding="none" class="flex h-[min(70vh,640px)] flex-col overflow-hidden">
-        <div class="flex items-center justify-between border-b border-[var(--color-line)] px-4 py-3 text-sm text-[var(--color-ink-muted)]">
-          <span>Chat global · tools DevForge</span>
+      <Card padding="none" class="flex h-[min(calc(100dvh-14rem),640px)] flex-col overflow-hidden lg:h-[min(70vh,640px)]">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-line)] px-4 py-3 text-sm text-[var(--color-ink-muted)]">
+          <span class="min-w-0">Chat global · tools DevForge</span>
           <Badge tone={llm === 'stub' || llm === 'offline' ? 'warn' : 'ok'}>LLM {llm}</Badge>
         </div>
         <div class="flex-1 space-y-3 overflow-y-auto p-4">
@@ -70,7 +70,7 @@ export function AgentPage() {
           {messages.map((m, i) => (
             <div
               key={i}
-              class={`max-w-[90%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm ${
+              class={`max-w-[90%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${
                 m.role === 'user'
                   ? 'ml-auto bg-[var(--color-accent)] text-white'
                   : 'bg-[var(--color-surface)] text-[var(--color-ink)]'
@@ -82,8 +82,8 @@ export function AgentPage() {
           ))}
           <div ref={endRef} />
         </div>
-        <form class="flex gap-2 border-t border-[var(--color-line)] p-3" onSubmit={send}>
-          <div class="flex-1">
+        <form class="flex min-w-0 gap-2 border-t border-[var(--color-line)] p-3" onSubmit={send}>
+          <div class="min-w-0 flex-1">
             <Input
               value={input}
               onInput={(e) => setInput((e.target as HTMLInputElement).value)}
@@ -91,7 +91,7 @@ export function AgentPage() {
               disabled={busy}
             />
           </div>
-          <Button type="submit" variant="secondary" disabled={busy}>
+          <Button type="submit" variant="secondary" disabled={busy} class="shrink-0">
             Envoyer
           </Button>
         </form>

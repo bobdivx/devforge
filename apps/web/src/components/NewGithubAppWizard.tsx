@@ -496,8 +496,8 @@ export function NewGithubAppWizard({
               setEnvFileName(null);
             }}
           />
-          <form class="flex flex-wrap items-end gap-2" onSubmit={addManualEnv}>
-            <div class="w-36">
+          <form class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end" onSubmit={addManualEnv}>
+            <div class="w-full sm:w-36 sm:shrink-0">
               <Input
                 label="Clé"
                 placeholder="KEY"
@@ -505,7 +505,7 @@ export function NewGithubAppWizard({
                 onInput={(e) => setManualKey((e.target as HTMLInputElement).value)}
               />
             </div>
-            <div class="min-w-[140px] flex-1">
+            <div class="min-w-0 w-full flex-1">
               <Input
                 label="Valeur"
                 placeholder="value"
@@ -513,7 +513,7 @@ export function NewGithubAppWizard({
                 onInput={(e) => setManualValue((e.target as HTMLInputElement).value)}
               />
             </div>
-            <Button type="submit" size="sm" variant="outline" disabled={!manualKey.trim()}>
+            <Button type="submit" size="sm" variant="outline" disabled={!manualKey.trim()} class="w-full sm:w-auto">
               Ajouter
             </Button>
           </form>

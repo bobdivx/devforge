@@ -210,8 +210,18 @@ pub fn docker_update_labels(name: &str, labels: &Value) -> String {
     parts.join(" ")
 }
 
+/// Nom du middleware Traefik ForwardAuth SSO (IdP externe / oauth2-proxy).
+pub const SSO_MIDDLEWARE_NAME: &str = "devforge-sso-auth";
+
 /// Traefik labels (entrypoints http/https — compatible Traefik v3 local/NAS).
-pub fn traefik_labels(project_uuid: &str, host: &str, path_prefix: &str, port: u16) -> Value {
+/// Si `forward_auth_address` est fourni, attache le middleware ForwardAuth SSO.
+pub fn traefik_labels(
+    project_uuid: &str,
+    host: &str,
+    path_prefix: &str,
+    port: u16,
+    forward_auth_address: Option<&str>,
+) -> Value {
     let short = project_uuid.chars().take(8).collect::<String>();
     let router = format!("df-{short}");
     let path = if path_prefix.trim().is_empty() {
@@ -256,8 +266,34 @@ pub fn traefik_labels(project_uuid: &str, host: &str, path_prefix: &str, port: u
     );
     map.insert(
         format!("traefik.http.routers.https-{router}.service"),
-        Value::String(router),
+        Value::String(router.clone()),
     );
+
+    if let Some(addr) = forward_auth_address.map(str::trim).filter(|a| !a.is_empty()) {
+        let mw = SSO_MIDDLEWARE_NAME;
+        let headers = "X-Auth-Request-User,X-Auth-Request-Email,X-Auth-Request-Preferred-Username,X-Auth-Request-Groups,Authorization";
+        map.insert(
+            format!("traefik.http.middlewares.{mw}.forwardauth.address"),
+            Value::String(addr.to_string()),
+        );
+        map.insert(
+            format!("traefik.http.middlewares.{mw}.forwardauth.trustForwardHeader"),
+            Value::String("true".into()),
+        );
+        map.insert(
+            format!("traefik.http.middlewares.{mw}.forwardauth.authResponseHeaders"),
+            Value::String(headers.into()),
+        );
+        map.insert(
+            format!("traefik.http.routers.http-{router}.middlewares"),
+            Value::String(mw.into()),
+        );
+        map.insert(
+            format!("traefik.http.routers.https-{router}.middlewares"),
+            Value::String(mw.into()),
+        );
+    }
+
     Value::Object(map)
 }
 

@@ -13,15 +13,15 @@ export function Table({
   return (
     <div
       class={cn(
-        'overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]',
+        'overflow-x-auto rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]',
         className,
       )}
     >
-      <table class="w-full text-left text-sm">
+      <table class="w-full min-w-[32rem] text-left text-sm">
         <thead class="border-b border-[var(--color-line)] text-xs uppercase tracking-wider text-[var(--color-ink-faint)]">
           <tr>
             {headers.map((h) => (
-              <th key={h} class="px-4 py-3 font-medium">
+              <th key={h} class="whitespace-nowrap px-4 py-3 font-medium">
                 {h}
               </th>
             ))}

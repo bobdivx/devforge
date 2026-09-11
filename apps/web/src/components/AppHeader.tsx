@@ -50,7 +50,7 @@ function StatChip({
 
   return (
     <div
-      class="flex items-center gap-2 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1"
+      class="flex shrink-0 items-center gap-2 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1"
       title={label}
     >
       <span class={cn('h-1.5 w-1.5 rounded-full', dot)} aria-hidden />
@@ -131,7 +131,7 @@ export function AppHeader() {
 
   return (
     <header class="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-line)] pb-4">
-      <div class="flex min-w-0 flex-wrap items-center gap-2">
+      <div class="-mx-1 flex min-w-0 max-w-full flex-1 items-center gap-2 overflow-x-auto px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {stats ? (
           <>
             <StatChip label="En ligne" value={stats.live} tone="ok" />

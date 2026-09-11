@@ -9,6 +9,7 @@ use devforge_github::{client_from_env, client_from_token, GitHubClient, GitHubFa
 use devforge_mcp::McpFacade;
 use devforge_ports::PortsFacade;
 use devforge_proxy::ProxyFacade;
+use devforge_runner::RunnerFacade;
 use devforge_shared::{ProjectTestContext, Result as DfResult};
 use devforge_wireguard::{MemoryWireguardStore, WireguardFacade};
 use devforge_storage::StorageFacade;
@@ -39,6 +40,7 @@ pub struct AppState {
     pub storage: Arc<StorageFacade>,
     pub backup: Arc<BackupFacade>,
     pub updater: Arc<UpdateFacade>,
+    pub runners: Arc<RunnerFacade>,
     /// Active backends: executor / github / storage / llm.
     pub backends: Arc<BackendModes>,
 }
@@ -110,6 +112,10 @@ pub struct Project {
     pub build_pack: String,
     pub port: i64,
     pub is_static: i64,
+    /// NULL = hérite / non défini ; 0 = off ; 1 = on (barrière Traefik SSO).
+    pub is_sso_protected: Option<i64>,
+    /// NULL = non défini ; 1 = app gère son propre login (pas de ForwardAuth).
+    pub has_own_user_system: Option<i64>,
     pub publish_directory: Option<String>,
     pub base_directory: String,
     pub docker_compose_location: Option<String>,
@@ -335,7 +341,7 @@ impl AppState {
         crate::db::migrate(&pool).await?;
 
         let (executor, executor_mode) = executor_from_env();
-        let (gh_client, github_mode) = resolve_github_client(&pool).await;
+        let (gh_client, github_mode, github_token) = resolve_github_client(&pool).await;
         let storage = Arc::new(StorageFacade::memory());
         let s3_cfg = crate::backup_routes::load_s3_config(&pool).await;
         storage.apply_config_unchecked(s3_cfg).await;
@@ -363,6 +369,9 @@ impl AppState {
 
         let deploy = Arc::new(DeployFacade::new(executor.clone()));
         let github = Arc::new(GitHubFacade::new(gh_client, github_mode));
+        if let Some(t) = github_token {
+            github.set_token(Some(t));
+        }
         let mcp = Arc::new(McpFacade::with_http_client());
         let _mem = MemoryEnvStore::new();
         let env = Arc::new(EnvFacade::new(Arc::new(SqliteEnvStore {
@@ -411,6 +420,14 @@ impl AppState {
             deploy.executor(),
         ));
 
+        let runners = Arc::new(RunnerFacade::new(
+            Arc::new(crate::runner_store::SqliteRunnerStore {
+                pool: pool.clone(),
+            }),
+            deploy.executor(),
+            github.clone(),
+        ));
+
         let state = Self {
             pool,
             db_path,
@@ -428,6 +445,7 @@ impl AppState {
             storage,
             backup,
             updater,
+            runners,
             backends,
         };
 
@@ -454,6 +472,7 @@ impl AppState {
         if t.is_empty() {
             let (client, mode) = client_from_token("");
             self.github.set_client(client, mode);
+            self.github.set_token(None);
             self.backends.set_github_mode(mode);
             return Ok(());
         }
@@ -465,6 +484,7 @@ impl AppState {
         }
         let (client, mode) = client_from_token(&t);
         self.github.set_client(client, mode);
+        self.github.set_token(Some(t.clone()));
         self.backends.set_github_mode(mode);
         if std::env::var("DEVFORGE_GITHUB_TOKEN").is_err() {
             std::env::set_var("DEVFORGE_GITHUB_TOKEN", &t);
@@ -671,9 +691,13 @@ async fn resolve_llm_provider(pool: &SqlitePool) -> (Arc<dyn devforge_llm::LlmPr
 
 async fn resolve_github_client(
     pool: &SqlitePool,
-) -> (Arc<dyn devforge_github::GitHubClient>, &'static str) {
-    if let Some(c) = HttpGitHubClient::from_env() {
-        return (Arc::new(c), "http");
+) -> (Arc<dyn devforge_github::GitHubClient>, &'static str, Option<String>) {
+    if let Ok(token) = std::env::var("DEVFORGE_GITHUB_TOKEN").or_else(|_| std::env::var("GITHUB_TOKEN"))
+    {
+        if !token.trim().is_empty() {
+            let (c, m) = client_from_token(&token);
+            return (c, m, Some(token));
+        }
     }
     let row: Option<(String,)> =
         sqlx::query_as("SELECT github_token FROM instance_settings WHERE id = 1")
@@ -683,10 +707,12 @@ async fn resolve_github_client(
             .flatten();
     if let Some((token,)) = row {
         if !token.trim().is_empty() {
-            return client_from_token(&token);
+            let (c, m) = client_from_token(&token);
+            return (c, m, Some(token));
         }
     }
-    client_from_env()
+    let (c, m) = client_from_env();
+    (c, m, None)
 }
 
 pub fn now_str() -> String {

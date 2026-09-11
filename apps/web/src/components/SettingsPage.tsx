@@ -4,6 +4,7 @@ import { SETTINGS_NAV } from '../lib/nav';
 import { AppShell } from './AppShell';
 import { BackupSettingsPanel } from './BackupSettingsPanel';
 import { LlmProvidersPanel } from './LlmProvidersPanel';
+import { SsoSettingsPanel } from './SsoSettingsPanel';
 import {
   Alert,
   Badge,
@@ -38,7 +39,7 @@ type GhUser = {
   avatar_url?: string | null;
 };
 
-type SettingsSection = 'general' | 'domaine' | 'github' | 'serveur' | 'llm' | 'backup';
+type SettingsSection = 'general' | 'domaine' | 'github' | 'serveur' | 'llm' | 'sso' | 'backup';
 
 const SECTION_KEYS: SettingsSection[] = [
   'general',
@@ -46,6 +47,7 @@ const SECTION_KEYS: SettingsSection[] = [
   'github',
   'serveur',
   'llm',
+  'sso',
   'backup',
 ];
 
@@ -62,6 +64,7 @@ const SECTION_TITLES: Record<SettingsSection, string> = {
   github: 'GitHub',
   serveur: 'Serveur',
   llm: 'Agents / LLM',
+  sso: 'SSO / OIDC',
   backup: 'Sauvegardes',
 };
 
@@ -271,7 +274,7 @@ export function SettingsPage() {
             </p>
             {isAdmin ? (
               <form
-                class="flex flex-wrap items-end gap-2"
+                class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end"
                 onSubmit={async (e) => {
                   e.preventDefault();
                   const d = wildcard.trim().replace(/^\.+/, '').toLowerCase();
@@ -306,7 +309,7 @@ export function SettingsPage() {
                   }
                 }}
               >
-                <div class="min-w-[200px] flex-1">
+                <div class="min-w-0 w-full flex-1">
                   <Input
                     label="Wildcard / domaine racine"
                     placeholder="jeser.app"
@@ -443,7 +446,7 @@ export function SettingsPage() {
             ) : (
               <div class="space-y-4">
                 <form
-                  class="flex flex-wrap items-end gap-2"
+                  class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end"
                   onSubmit={async (e) => {
                     e.preventDefault();
                     setSshBusy(true);
@@ -465,7 +468,7 @@ export function SettingsPage() {
                     }
                   }}
                 >
-                  <div class="min-w-[160px] flex-1">
+                  <div class="min-w-0 w-full flex-1">
                     <Input
                       label="Host (optionnel)"
                       placeholder="vide = Docker local"
@@ -473,7 +476,7 @@ export function SettingsPage() {
                       onInput={(e) => setSshHost((e.target as HTMLInputElement).value)}
                     />
                   </div>
-                  <div class="w-36">
+                  <div class="w-full sm:w-36 sm:shrink-0">
                     <Input
                       label="User"
                       value={sshUser}
@@ -574,6 +577,7 @@ export function SettingsPage() {
         </FadeIn>
       )}
 
+      {section === 'sso' && <SsoSettingsPanel isAdmin={isAdmin} />}
       {section === 'backup' && <BackupSettingsPanel isAdmin={isAdmin} />}
     </AppShell>
   );

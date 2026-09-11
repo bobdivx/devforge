@@ -433,6 +433,9 @@ pub struct UpdateProject {
     pub build_pack: Option<String>,
     pub port: Option<u16>,
     pub is_static: Option<bool>,
+    /// `auto` (hérite) | `on` | `off`
+    pub sso_protection: Option<String>,
+    pub has_own_user_system: Option<bool>,
     pub publish_directory: Option<String>,
     pub base_directory: Option<String>,
     pub docker_compose_location: Option<String>,
@@ -451,12 +454,40 @@ async fn update_project(
         .map(|v| if v { 1i64 } else { 0 })
         .unwrap_or(existing.is_static);
     let port = body.port.map(i64::from).unwrap_or(existing.port);
+
+    let is_sso_protected = match body.sso_protection.as_deref().map(str::trim) {
+        Some("on") | Some("true") | Some("1") => Some(Some(1i64)),
+        Some("off") | Some("false") | Some("0") => Some(Some(0i64)),
+        Some("auto") | Some("") => Some(None),
+        Some(_) => {
+            return Err(ApiError::message("sso_protection must be auto|on|off"));
+        }
+        None => None,
+    };
+    let is_sso_protected = match is_sso_protected {
+        Some(v) => v,
+        None => existing.is_sso_protected,
+    };
+
+    let has_own_user_system = match body.has_own_user_system {
+        Some(true) => Some(1i64),
+        Some(false) => Some(0i64),
+        None => existing.has_own_user_system,
+    };
+    // Own user system force SSO barrier off.
+    let is_sso_protected = if has_own_user_system == Some(1) {
+        Some(0)
+    } else {
+        is_sso_protected
+    };
+
     sqlx::query(
         r#"UPDATE projects SET
             name = ?, status = ?, git_repository = ?, git_branch = ?,
             server_id = ?, workdir = ?, test_command = ?, production_url = ?,
             build_pack = ?, port = ?, is_static = ?, publish_directory = ?,
-            base_directory = ?, docker_compose_location = ?, updated_at = ?
+            base_directory = ?, docker_compose_location = ?,
+            is_sso_protected = ?, has_own_user_system = ?, updated_at = ?
         WHERE uuid = ?"#,
     )
     .bind(body.name.unwrap_or(existing.name))
@@ -473,6 +504,8 @@ async fn update_project(
     .bind(body.publish_directory.or(existing.publish_directory))
     .bind(body.base_directory.unwrap_or(existing.base_directory))
     .bind(body.docker_compose_location.or(existing.docker_compose_location))
+    .bind(is_sso_protected)
+    .bind(has_own_user_system)
     .bind(&now)
     .bind(&uuid)
     .execute(&state.pool)
@@ -487,7 +520,10 @@ async fn update_project(
     let (_user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
     if let Some(ref url) = project.production_url {
         let _ = ensure_project_primary_domain(&state, &uuid, url, port as u16).await;
+    } else {
+        crate::sso::sync_project_proxy(&state, &project).await;
     }
+    let _ = crate::sso::ensure_oidc_env(&state.pool, &project).await;
     Ok(Json(json!({"data": project})))
 }
 
@@ -691,6 +727,8 @@ async fn run_real_deploy(state: &AppState, project: &Project) -> devforge_deploy
             .map(|(t,)| t)
             .filter(|t| !t.trim().is_empty());
 
+    let _ = crate::sso::ensure_oidc_env(&state.pool, project).await;
+
     let env_vars = state.env.list_public(&project.uuid).await.ok().unwrap_or_default();
     // Need raw values for .env — list from store via upsert path; use facade list that masks.
     // Fetch unmasked from SQLite directly for deploy.
@@ -726,7 +764,11 @@ async fn run_real_deploy(state: &AppState, project: &Project) -> devforge_deploy
         github_token: token,
         env_file,
     };
-    state.deploy.deploy(&req).await
+    let result = state.deploy.deploy(&req).await;
+    if result.ok {
+        crate::sso::sync_project_proxy(state, project).await;
+    }
+    result
 }
 
 async fn load_env_file_content(pool: &sqlx::SqlitePool, project_uuid: &str) -> Option<String> {
@@ -1379,7 +1421,15 @@ pub(crate) async fn ensure_project_primary_domain(
             https_redirect: true,
         })
         .await;
-    let _ = state.proxy.sync(project_uuid).await;
+    if let Ok(project) = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ?")
+        .bind(project_uuid)
+        .fetch_one(&state.pool)
+        .await
+    {
+        crate::sso::sync_project_proxy(state, &project).await;
+    } else {
+        let _ = state.proxy.sync(project_uuid).await;
+    }
     Ok(())
 }
 

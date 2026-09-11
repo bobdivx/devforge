@@ -1,11 +1,12 @@
-use crate::auth_routes::current_workspace;
+use crate::auth_routes::{bearer_from, current_workspace, resolve_auth, user_team};
 use crate::routes::ApiError;
 use crate::state::{AppState, Project};
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::Utc;
+use devforge_auth::{has_ability, ABILITY_READ, ABILITY_WRITE};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -25,6 +26,8 @@ pub fn router() -> Router<AppState> {
             get(list_mcp_resources),
         )
         .route("/api/v1/mcp/tools", get(list_local_mcp_tools))
+        .route("/api/v1/mcp", post(mcp_jsonrpc))
+        .route("/mcp", post(mcp_jsonrpc))
         .route(
             "/api/v1/projects/{uuid}/resources",
             get(list_project_resources).post(link_project_resource),
@@ -246,6 +249,143 @@ async fn list_local_mcp_tools(
 ) -> Result<Json<Value>, ApiError> {
     let _ = workspace_uuid(&state, &headers).await?;
     Ok(Json(json!({ "data": state.mcp.server.tools_list_payload().await })))
+}
+
+#[derive(Deserialize)]
+struct JsonRpcRequest {
+    #[serde(default)]
+    jsonrpc: Option<String>,
+    id: Option<Value>,
+    method: String,
+    #[serde(default)]
+    params: Option<Value>,
+}
+
+/// Endpoint MCP JSON-RPC pour clients externes (Cursor, Claude…).
+/// Auth: Bearer session `df_…` ou API token `dfat_…`.
+async fn mcp_jsonrpc(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<JsonRpcRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let token = bearer_from(&headers).ok_or_else(|| ApiError {
+        status: axum::http::StatusCode::UNAUTHORIZED,
+        message: "Bearer token requis (dfat_… ou session)".into(),
+    })?;
+    let (user, abilities) = resolve_auth(&state, &token)
+        .await
+        .map_err(|(status, Json(v))| ApiError {
+            status,
+            message: v
+                .get("error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("auth")
+                .to_string(),
+        })?
+        .ok_or_else(|| ApiError {
+            status: axum::http::StatusCode::UNAUTHORIZED,
+            message: "Token invalide ou expiré".into(),
+        })?;
+    let _team = user_team(&state, &user.uuid)
+        .await
+        .map_err(|(status, Json(v))| ApiError {
+            status,
+            message: v
+                .get("error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("auth")
+                .to_string(),
+        })?
+        .ok_or_else(|| ApiError {
+            status: axum::http::StatusCode::FORBIDDEN,
+            message: "Aucun workspace".into(),
+        })?;
+
+    if !has_ability(&abilities, ABILITY_READ) {
+        return Err(ApiError {
+            status: axum::http::StatusCode::FORBIDDEN,
+            message: "Ability `read` requise".into(),
+        });
+    }
+
+    let id = body.id.clone().unwrap_or(Value::Null);
+    let rpc_ok = |result: Value| {
+        Json(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": result,
+        }))
+    };
+    let rpc_err = |code: i64, message: &str| {
+        Json(json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": code, "message": message },
+        }))
+    };
+
+    match body.method.as_str() {
+        "initialize" => Ok(rpc_ok(json!({
+            "protocolVersion": "2024-11-05",
+            "capabilities": { "tools": { "listChanged": false } },
+            "serverInfo": {
+                "name": "devforge",
+                "version": env!("CARGO_PKG_VERSION"),
+            },
+        }))),
+        "notifications/initialized" | "notifications/cancelled" => Ok(rpc_ok(json!({}))),
+        "ping" => Ok(rpc_ok(json!({}))),
+        "tools/list" => {
+            let payload = state.mcp.server.tools_list_payload().await;
+            let tools = payload.get("tools").cloned().unwrap_or_else(|| json!([]));
+            // MCP expects inputSchema; our ToolDefinition uses `parameters`.
+            let mapped: Vec<Value> = tools
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(|t| {
+                    json!({
+                        "name": t.get("name"),
+                        "description": t.get("description"),
+                        "inputSchema": t.get("inputSchema")
+                            .or_else(|| t.get("parameters"))
+                            .cloned()
+                            .unwrap_or_else(|| json!({"type":"object","properties":{}})),
+                    })
+                })
+                .collect();
+            Ok(rpc_ok(json!({ "tools": mapped })))
+        }
+        "tools/call" => {
+            if !has_ability(&abilities, ABILITY_WRITE) {
+                return Ok(rpc_err(-32001, "Ability `write` requise pour tools/call"));
+            }
+            let params = body.params.unwrap_or(json!({}));
+            let name = params
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or("")
+                .to_string();
+            if name.is_empty() {
+                return Ok(rpc_err(-32602, "params.name requis"));
+            }
+            let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+            match state.registry.execute(&name, arguments).await {
+                Ok(result) => Ok(rpc_ok(json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()),
+                    }],
+                    "isError": false,
+                }))),
+                Err(e) => Ok(rpc_ok(json!({
+                    "content": [{ "type": "text", "text": e.to_string() }],
+                    "isError": true,
+                }))),
+            }
+        }
+        other => Ok(rpc_err(-32601, &format!("Method not found: {other}"))),
+    }
 }
 
 async fn list_mcp_resources(

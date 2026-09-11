@@ -9,7 +9,8 @@ use axum::{
 use chrono::{Duration, Utc};
 use devforge_auth::{
     hash_password, new_session_token, new_uuid, slugify, verify_password, AuthTeam, AuthUser,
-    OnboardingSteps, PLAN_FREE, PLAN_PRO, ROLE_INSTANCE_ADMIN, ROLE_USER,
+    OnboardingSteps, PLAN_FREE, PLAN_PRO, ROLE_INSTANCE_ADMIN, ROLE_USER, ABILITY_READ,
+    ABILITY_WRITE, hash_api_token, parse_abilities_csv,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -60,7 +61,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/admin/workspaces/{uuid}", patch(admin_update_workspace))
 }
 
-fn bearer_from(headers: &HeaderMap) -> Option<String> {
+pub fn bearer_from(headers: &HeaderMap) -> Option<String> {
     headers
         .get(AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -88,10 +89,19 @@ async fn load_settings(
     .map_err(internal)
 }
 
+/// Resolve user from session (`df_…`) or API token (`dfat_…`).
 async fn session_user(
     state: &AppState,
     token: &str,
 ) -> Result<Option<UserRow>, (axum::http::StatusCode, Json<Value>)> {
+    Ok(resolve_auth(state, token).await?.map(|(u, _)| u))
+}
+
+/// Returns user + abilities (sessions always have read+write).
+pub async fn resolve_auth(
+    state: &AppState,
+    token: &str,
+) -> Result<Option<(UserRow, Vec<String>)>, (axum::http::StatusCode, Json<Value>)> {
     let now = Utc::now().to_rfc3339();
     let row: Option<(String,)> = sqlx::query_as(
         "SELECT user_uuid FROM sessions WHERE token = ? AND expires_at > ? LIMIT 1",
@@ -101,9 +111,47 @@ async fn session_user(
     .fetch_optional(&state.pool)
     .await
     .map_err(internal)?;
-    let Some((user_uuid,)) = row else {
+    if let Some((user_uuid,)) = row {
+        let user = sqlx::query_as::<_, UserRow>(
+            "SELECT uuid, email, name, password_hash, role FROM users WHERE uuid = ?",
+        )
+        .bind(user_uuid)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(internal)?;
+        return Ok(user.map(|u| {
+            (
+                u,
+                vec![ABILITY_READ.to_string(), ABILITY_WRITE.to_string()],
+            )
+        }));
+    }
+
+    if !token.starts_with("dfat_") {
+        return Ok(None);
+    }
+    let hash = hash_api_token(token);
+    let tok: Option<(String, String, Option<String>, String)> = sqlx::query_as(
+        r#"SELECT id, user_uuid, expires_at, abilities FROM api_tokens
+           WHERE token_hash = ? LIMIT 1"#,
+    )
+    .bind(&hash)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(internal)?;
+    let Some((id, user_uuid, expires_at, abilities)) = tok else {
         return Ok(None);
     };
+    if let Some(exp) = &expires_at {
+        if exp.as_str() < now.as_str() {
+            return Ok(None);
+        }
+    }
+    let _ = sqlx::query("UPDATE api_tokens SET last_used_at = ? WHERE id = ?")
+        .bind(&now)
+        .bind(&id)
+        .execute(&state.pool)
+        .await;
     let user = sqlx::query_as::<_, UserRow>(
         "SELECT uuid, email, name, password_hash, role FROM users WHERE uuid = ?",
     )
@@ -111,10 +159,10 @@ async fn session_user(
     .fetch_optional(&state.pool)
     .await
     .map_err(internal)?;
-    Ok(user)
+    Ok(user.map(|u| (u, parse_abilities_csv(&abilities))))
 }
 
-async fn user_team(
+pub async fn user_team(
     state: &AppState,
     user_uuid: &str,
 ) -> Result<Option<TeamRow>, (axum::http::StatusCode, Json<Value>)> {

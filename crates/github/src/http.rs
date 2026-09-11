@@ -1,6 +1,6 @@
 use crate::{
     map_http_err, parse_json_array, require_ok, GitBranch, GitCommit, GitHubClient, GitRelease,
-    GitRepo, GitTag, GitUser, PullRequest, WorkflowRun,
+    GitRepo, GitTag, GitUser, PullRequest, RegistrationToken, RepoRunner, WorkflowJob, WorkflowRun,
 };
 use async_trait::async_trait;
 use devforge_shared::Result;
@@ -51,6 +51,21 @@ impl HttpGitHubClient {
     async fn get(&self, path: &str) -> Result<serde_json::Value> {
         let url = format!("{}{path}", self.base);
         let res = self.http.get(&url).send().await.map_err(map_http_err)?;
+        let status = res.status();
+        let body = res.text().await.map_err(map_http_err)?;
+        require_ok(status, &body)?;
+        parse_json_array(&body)
+    }
+
+    async fn post_empty(&self, path: &str) -> Result<serde_json::Value> {
+        let url = format!("{}{path}", self.base);
+        let res = self
+            .http
+            .post(&url)
+            .header("Content-Length", "0")
+            .send()
+            .await
+            .map_err(map_http_err)?;
         let status = res.status();
         let body = res.text().await.map_err(map_http_err)?;
         require_ok(status, &body)?;
@@ -431,6 +446,114 @@ impl GitHubClient for HttpGitHubClient {
         } else {
             Ok(Some(content.to_string()))
         }
+    }
+
+    async fn create_registration_token(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<RegistrationToken> {
+        let data = self
+            .post_empty(&format!(
+                "/repos/{owner}/{repo}/actions/runners/registration-token"
+            ))
+            .await?;
+        let token = data
+            .get("token")
+            .and_then(|t| t.as_str())
+            .ok_or_else(|| {
+                devforge_shared::DevForgeError::Message(
+                    "registration-token: champ token manquant".into(),
+                )
+            })?
+            .to_string();
+        Ok(RegistrationToken {
+            token,
+            expires_at: data
+                .get("expires_at")
+                .and_then(|e| e.as_str())
+                .map(str::to_string),
+        })
+    }
+
+    async fn list_repo_runners(&self, owner: &str, repo: &str) -> Result<Vec<RepoRunner>> {
+        let data = self
+            .get(&format!("/repos/{owner}/{repo}/actions/runners?per_page=100"))
+            .await?;
+        let arr = data
+            .get("runners")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        Ok(arr
+            .into_iter()
+            .filter_map(|r| {
+                let labels = r
+                    .get("labels")
+                    .and_then(|l| l.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.get("name")?.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Some(RepoRunner {
+                    id: r.get("id")?.as_u64()?,
+                    name: r.get("name")?.as_str()?.to_string(),
+                    status: r
+                        .get("status")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("offline")
+                        .to_string(),
+                    busy: r.get("busy").and_then(|b| b.as_bool()).unwrap_or(false),
+                    labels,
+                })
+            })
+            .collect())
+    }
+
+    async fn list_workflow_jobs(
+        &self,
+        owner: &str,
+        repo: &str,
+        run_id: u64,
+    ) -> Result<Vec<WorkflowJob>> {
+        let data = self
+            .get(&format!(
+                "/repos/{owner}/{repo}/actions/runs/{run_id}/jobs?per_page=100"
+            ))
+            .await?;
+        let arr = data
+            .get("jobs")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        Ok(arr
+            .into_iter()
+            .filter_map(|j| {
+                Some(WorkflowJob {
+                    id: j.get("id")?.as_u64()?,
+                    name: j
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("job")
+                        .to_string(),
+                    status: j.get("status")?.as_str()?.to_string(),
+                    conclusion: j
+                        .get("conclusion")
+                        .and_then(|c| c.as_str())
+                        .map(str::to_string),
+                    runner_name: j
+                        .get("runner_name")
+                        .and_then(|n| n.as_str())
+                        .map(str::to_string),
+                    html_url: j
+                        .get("html_url")
+                        .and_then(|u| u.as_str())
+                        .map(str::to_string),
+                })
+            })
+            .collect())
     }
 }
 

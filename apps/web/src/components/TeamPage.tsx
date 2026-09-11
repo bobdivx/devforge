@@ -34,28 +34,28 @@ export function TeamPage() {
           ) : (
             <dl class="space-y-3 text-sm">
               <div class="flex justify-between gap-4">
-                <dt class="text-[var(--color-ink-muted)]">Nom</dt>
-                <dd>{name || '—'}</dd>
+                <dt class="shrink-0 text-[var(--color-ink-muted)]">Nom</dt>
+                <dd class="min-w-0 break-words text-right">{name || '—'}</dd>
               </div>
               <div class="flex justify-between gap-4">
-                <dt class="text-[var(--color-ink-muted)]">Email</dt>
-                <dd>{email || '—'}</dd>
+                <dt class="shrink-0 text-[var(--color-ink-muted)]">Email</dt>
+                <dd class="min-w-0 break-all text-right">{email || '—'}</dd>
               </div>
               <div class="flex justify-between gap-4">
-                <dt class="text-[var(--color-ink-muted)]">Rôle</dt>
-                <dd>
+                <dt class="shrink-0 text-[var(--color-ink-muted)]">Rôle</dt>
+                <dd class="min-w-0 text-right">
                   <Badge tone={role === 'instance_admin' ? 'accent' : 'neutral'}>
                     {role === 'instance_admin' ? 'Admin instance' : 'Utilisateur'}
                   </Badge>
                 </dd>
               </div>
               <div class="flex justify-between gap-4">
-                <dt class="text-[var(--color-ink-muted)]">Workspace</dt>
-                <dd>{workspace || '—'}</dd>
+                <dt class="shrink-0 text-[var(--color-ink-muted)]">Workspace</dt>
+                <dd class="min-w-0 break-words text-right">{workspace || '—'}</dd>
               </div>
               <div class="flex justify-between gap-4">
-                <dt class="text-[var(--color-ink-muted)]">Forfait</dt>
-                <dd>
+                <dt class="shrink-0 text-[var(--color-ink-muted)]">Forfait</dt>
+                <dd class="min-w-0 text-right">
                   <Badge tone={plan === 'pro' ? 'accent' : 'neutral'}>{plan || 'free'}</Badge>
                 </dd>
               </div>
@@ -69,6 +69,14 @@ export function TeamPage() {
                   </a>
                 </div>
               )}
+              <div class="pt-2">
+                <a
+                  href="/app/tokens"
+                  class="text-sm font-medium text-[var(--color-accent)] hover:underline"
+                >
+                  Gérer mes tokens API / MCP →
+                </a>
+              </div>
             </dl>
           )}
         </Card>

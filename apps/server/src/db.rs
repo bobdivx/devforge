@@ -44,6 +44,8 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ("publish_directory", "TEXT"),
         ("base_directory", "TEXT NOT NULL DEFAULT '/'"),
         ("docker_compose_location", "TEXT"),
+        ("is_sso_protected", "INTEGER"),
+        ("has_own_user_system", "INTEGER"),
     ] {
         let sql = format!("ALTER TABLE projects ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;
@@ -193,6 +195,24 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     sqlx::query(
         r#"
+        CREATE TABLE IF NOT EXISTS api_tokens (
+            id TEXT PRIMARY KEY,
+            user_uuid TEXT NOT NULL,
+            name TEXT NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            token_prefix TEXT NOT NULL,
+            abilities TEXT NOT NULL DEFAULT 'read,write',
+            last_used_at TEXT,
+            expires_at TEXT,
+            created_at TEXT NOT NULL
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
         CREATE TABLE IF NOT EXISTS instance_settings (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             instance_name TEXT NOT NULL DEFAULT '',
@@ -238,6 +258,13 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ("backup_s3_bucket", "TEXT NOT NULL DEFAULT ''"),
         ("backup_s3_region", "TEXT NOT NULL DEFAULT 'fr-par'"),
         ("backup_s3_endpoint", "TEXT NOT NULL DEFAULT ''"),
+        ("sso_protect_apps_by_default", "INTEGER NOT NULL DEFAULT 1"),
+        ("sso_forward_auth_address", "TEXT NOT NULL DEFAULT ''"),
+        ("sso_hide_local_login", "INTEGER NOT NULL DEFAULT 0"),
+        ("sso_pocket_id_url", "TEXT NOT NULL DEFAULT ''"),
+        ("sso_oauth2_proxy_url", "TEXT NOT NULL DEFAULT ''"),
+        ("sso_apps_client_id", "TEXT NOT NULL DEFAULT ''"),
+        ("sso_apps_client_secret", "TEXT NOT NULL DEFAULT ''"),
     ] {
         let sql = format!("ALTER TABLE instance_settings ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;
@@ -379,7 +406,7 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    sqlx::query(
+        sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS project_proxy_routes (
             id TEXT PRIMARY KEY,
@@ -388,6 +415,45 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             path_prefix TEXT NOT NULL DEFAULT '/',
             target_port INTEGER NOT NULL,
             https_redirect INTEGER NOT NULL DEFAULT 1
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS managed_runners (
+            id TEXT PRIMARY KEY,
+            server_id TEXT NOT NULL DEFAULT 'default',
+            container_name TEXT NOT NULL,
+            runner_name TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            repo TEXT NOT NULL,
+            repo_url TEXT NOT NULL,
+            image TEXT NOT NULL,
+            labels TEXT NOT NULL DEFAULT 'self-hosted,devforge',
+            network_mode TEXT NOT NULL DEFAULT 'bridge',
+            timezone TEXT NOT NULL DEFAULT 'UTC',
+            replace_existing INTEGER NOT NULL DEFAULT 1,
+            pull_image INTEGER NOT NULL DEFAULT 1,
+            volumes_json TEXT NOT NULL DEFAULT '[]',
+            extra_env_json TEXT NOT NULL DEFAULT '[]',
+            auth_mode TEXT NOT NULL DEFAULT 'registration',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            project_uuid TEXT,
+            live_state TEXT NOT NULL DEFAULT 'pending',
+            live_status TEXT NOT NULL DEFAULT '',
+            container_id TEXT,
+            github_status TEXT,
+            github_busy INTEGER,
+            github_runner_id INTEGER,
+            last_synced_at TEXT,
+            last_error TEXT,
+            op_status TEXT NOT NULL DEFAULT 'idle',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(server_id, container_name)
         );
         "#,
     )

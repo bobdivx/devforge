@@ -123,6 +123,15 @@ impl ProxyFacade {
 
     /// Generate Traefik labels and apply via `docker update` when an executor is wired.
     pub async fn sync(&self, project_uuid: &str) -> Result<Value> {
+        self.sync_with(project_uuid, None).await
+    }
+
+    /// Comme [`sync`], avec ForwardAuth SSO optionnel (adresse oauth2-proxy / TinyAuth).
+    pub async fn sync_with(
+        &self,
+        project_uuid: &str,
+        forward_auth_address: Option<&str>,
+    ) -> Result<Value> {
         let routes = self.store.list(project_uuid).await?;
         let mut labels = serde_json::Map::new();
         for route in &routes {
@@ -131,6 +140,7 @@ impl ProxyFacade {
                 &route.host,
                 &route.path_prefix,
                 route.target_port,
+                forward_auth_address,
             );
             if let Some(obj) = piece.as_object() {
                 for (k, v) in obj {
@@ -152,6 +162,7 @@ impl ProxyFacade {
                 "synced": routes.len(),
                 "container": container,
                 "labels": labels_val,
+                "sso": forward_auth_address.is_some(),
                 "command": cmd,
                 "output": res.output,
             }));
@@ -162,6 +173,7 @@ impl ProxyFacade {
             "project_uuid": project_uuid,
             "synced": routes.len(),
             "labels": labels_val,
+            "sso": forward_auth_address.is_some(),
             "note": "executor non branché — labels générés seulement"
         }))
     }

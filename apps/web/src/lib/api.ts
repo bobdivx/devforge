@@ -62,6 +62,9 @@ export type Project = {
   build_pack?: string;
   port?: number;
   is_static?: number | boolean;
+  /** null/undefined = auto ; 0/false = off ; 1/true = on */
+  is_sso_protected?: number | boolean | null;
+  has_own_user_system?: number | boolean | null;
   publish_directory?: string | null;
   base_directory?: string | null;
   docker_compose_location?: string | null;
@@ -444,7 +447,15 @@ export const api = {
       `/projects/${projectUuid}/backups/${backupId}/restore-preview`,
       { method: 'POST', body: '{}' },
     ),
-  updateProject: (uuid: string, body: Partial<Project> & { is_static?: boolean; port?: number }) =>
+  updateProject: (
+    uuid: string,
+    body: Partial<Project> & {
+      is_static?: boolean;
+      port?: number;
+      sso_protection?: 'auto' | 'on' | 'off';
+      has_own_user_system?: boolean;
+    },
+  ) =>
     request<{ data: Project }>(`/projects/${uuid}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
@@ -627,6 +638,37 @@ export const api = {
         popular: boolean;
       }>;
     }>('/mcp/catalog'),
+  listTokens: () =>
+    request<{
+      data: Array<{
+        id: string;
+        name: string;
+        token_prefix: string;
+        abilities: string[];
+        last_used_at?: string | null;
+        expires_at?: string | null;
+        created_at: string;
+      }>;
+    }>('/tokens'),
+  createToken: (body: {
+    name: string;
+    abilities?: string[];
+    expires_in_days?: number | null;
+  }) =>
+    request<{
+      data: {
+        id: string;
+        name: string;
+        token: string;
+        token_prefix: string;
+        abilities: string[];
+        expires_at?: string | null;
+        created_at: string;
+        hint?: string;
+      };
+    }>('/tokens', { method: 'POST', body: JSON.stringify(body) }),
+  revokeToken: (id: string) =>
+    request<{ ok: boolean }>(`/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   mcpServers: () =>
     request<{
       data: Array<{
@@ -758,6 +800,50 @@ export const api = {
       body: JSON.stringify(body ?? {}),
     }),
 
+  ssoGet: () =>
+    request<{
+      ok: boolean;
+      config: {
+        protect_apps_by_default: boolean;
+        forward_auth_address: string;
+        hide_local_login: boolean;
+        pocket_id_url: string;
+        oauth2_proxy_url: string;
+        apps_client_id: string;
+        apps_client_secret_set: boolean;
+        forward_auth_configured: boolean;
+        oidc_configured: boolean;
+        middleware_name: string;
+      };
+    }>('/settings/sso'),
+  ssoSave: (body: {
+    protect_apps_by_default?: boolean;
+    forward_auth_address?: string;
+    hide_local_login?: boolean;
+    pocket_id_url?: string;
+    oauth2_proxy_url?: string;
+    apps_client_id?: string;
+    apps_client_secret?: string;
+  }) =>
+    request<{
+      ok: boolean;
+      config: {
+        protect_apps_by_default: boolean;
+        forward_auth_address: string;
+        hide_local_login: boolean;
+        pocket_id_url: string;
+        oauth2_proxy_url: string;
+        apps_client_id: string;
+        apps_client_secret_set: boolean;
+        forward_auth_configured: boolean;
+        oidc_configured: boolean;
+        middleware_name: string;
+      };
+    }>('/settings/sso', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
   backupS3Get: () =>
     request<{
       ok: boolean;
@@ -873,4 +959,116 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  // —— GitHub Runners ——
+  runnersList: () =>
+    request<{ ok: boolean; runners: ManagedRunner[] }>('/runners'),
+  runnersGet: (id: string) =>
+    request<{ ok: boolean; runner: ManagedRunner; environment: Array<{ key: string; value: string }> }>(
+      `/runners/${encodeURIComponent(id)}`,
+    ),
+  runnersCreate: (body: CreateRunnerBody) =>
+    request<{ ok: boolean; accepted?: boolean; message?: string; runner: ManagedRunner }>('/runners', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  runnersAction: (id: string, action: 'start' | 'stop' | 'restart' | 'recreate') =>
+    request<{ ok: boolean; accepted?: boolean; message?: string; runner: ManagedRunner }>(
+      `/runners/${encodeURIComponent(id)}/${action}`,
+      { method: 'POST', body: '{}' },
+    ),
+  runnersDelete: (id: string) =>
+    request<{ ok: boolean; message?: string }>(`/runners/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+  runnersLogs: (id: string, lines = 200) =>
+    request<{ ok: boolean; logs: RunnerLogs }>(
+      `/runners/${encodeURIComponent(id)}/logs?lines=${lines}`,
+    ),
+  runnersJobs: (id: string) =>
+    request<{ ok: boolean; jobs: RunnerJob[] }>(`/runners/${encodeURIComponent(id)}/jobs`),
+  runnersSync: () => request<{ ok: boolean; changed: number }>('/runners/sync', { method: 'POST', body: '{}' }),
 };
+
+export type ManagedRunner = {
+  id: string;
+  server_id: string;
+  container_name: string;
+  runner_name: string;
+  owner: string;
+  repo: string;
+  repo_url: string;
+  image: string;
+  labels: string;
+  network_mode: string;
+  timezone: string;
+  replace_existing: boolean;
+  pull_image: boolean;
+  volumes: string[];
+  extra_env: Array<{ key: string; value: string }>;
+  auth_mode: string;
+  enabled: boolean;
+  project_uuid?: string | null;
+  live_state: string;
+  live_status: string;
+  container_id?: string | null;
+  github_status?: string | null;
+  github_busy?: boolean | null;
+  github_runner_id?: number | null;
+  last_synced_at?: string | null;
+  last_error?: string | null;
+  op_status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateRunnerBody = {
+  owner: string;
+  repo: string;
+  runner_name: string;
+  container_name?: string;
+  labels?: string;
+  image?: string;
+  network_mode?: string;
+  timezone?: string;
+  replace_existing?: boolean;
+  pull_image?: boolean;
+  volumes?: string[];
+  extra_env?: Array<{ key: string; value: string }>;
+  auth_mode?: string;
+  project_uuid?: string;
+};
+
+export type RunnerLogs = {
+  available: boolean;
+  reason?: string | null;
+  message?: string | null;
+  container: string;
+  container_status?: string | null;
+  line_count: number;
+  items: Array<{ cursor: number; message: string }>;
+  runner_version?: string | null;
+};
+
+export type RunnerJob = {
+  run_id: number;
+  run_name: string;
+  run_status: string;
+  run_conclusion?: string | null;
+  run_url: string;
+  job_id?: number | null;
+  job_name?: string | null;
+  job_status?: string | null;
+  job_conclusion?: string | null;
+  runner_name?: string | null;
+};
+
+export function runnersEventsUrl(): string {
+  const base = SERVER_BASE.replace(/\/$/, '');
+  const token = getToken();
+  const url = `${base}/runners/events`;
+  // EventSource cannot set Authorization header — pass token as query if needed.
+  // Prefer cookie-less Bearer via query only when required; server uses Authorization header.
+  // Fall back: open with fetch stream is harder — we pass token as `access_token` query.
+  return token ? `${url}?access_token=${encodeURIComponent(token)}` : url;
+}

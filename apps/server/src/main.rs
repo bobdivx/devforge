@@ -7,11 +7,16 @@ mod infra_sqlite;
 mod llm_routes;
 mod mcp_routes;
 mod routes;
+mod runner_routes;
+mod runner_store;
 mod security;
+mod sso;
+mod sso_routes;
 mod state;
+mod token_routes;
 mod update_routes;
 
-use axum::{routing::get, Json, Router};
+use axum::{middleware, routing::get, Json, Router};
 use serde_json::{json, Value};
 use state::AppState;
 use std::net::SocketAddr;
@@ -38,6 +43,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:devforge.db?mode=rwc".into());
     let state = AppState::new(&database_url).await?;
 
+    // Background sync for GitHub runners (Docker + Actions status → SQLite snapshot).
+    {
+        let worker = state.runners.sync_worker();
+        tokio::spawn(async move {
+            worker.run_loop().await;
+        });
+    }
+
     // Advertise agent tools on the local MCP server surface.
     state
         .mcp
@@ -47,12 +60,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut app = Router::new()
         .merge(auth_routes::router())
+        .merge(token_routes::router())
         .merge(routes::router())
         .merge(infra_routes::router())
         .merge(backup_routes::router())
+        .merge(sso_routes::router())
         .merge(llm_routes::router())
         .merge(mcp_routes::router())
+        .merge(runner_routes::router())
         .merge(update_routes::router())
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            token_routes::enforce_api_token_write,
+        ))
         .layer(security::cors_layer())
         .layer(TraceLayer::new_for_http())
         .with_state(state);

@@ -45,7 +45,7 @@ export function ToastProvider({ children }: { children: ComponentChildren }) {
   return (
     <ToastCtx.Provider value={{ push, dismiss }}>
       {children}
-      <div class="pointer-events-none fixed bottom-20 right-4 z-50 flex w-[min(100%,20rem)] flex-col gap-2 lg:bottom-6">
+      <div class="pointer-events-none fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-3 z-50 flex w-[min(calc(100%-1.5rem),20rem)] flex-col gap-2 lg:bottom-6 lg:right-4">
         {items.map((t) => (
           <div
             key={t.id}

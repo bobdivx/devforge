@@ -410,7 +410,7 @@ async fn attach_domain(
                     https_redirect: true,
                 })
                 .await;
-            let _ = state.proxy.sync(&uuid).await;
+            crate::sso::sync_project_proxy(&state, &project).await;
         }
     }
     Ok(Json(out))
@@ -580,11 +580,17 @@ async fn sync_proxy(
     headers: HeaderMap,
     Path(uuid): Path<String>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    let _ = auth_project(&state, &headers, &uuid).await?;
+    let project = auth_project(&state, &headers, &uuid).await?;
+    let settings = crate::sso::load_sso_settings(&state.pool).await;
+    let addr = if crate::sso::should_protect_project(&settings, &project) {
+        settings.effective_forward_auth_address()
+    } else {
+        None
+    };
     Ok(Json(
         state
             .proxy
-            .sync(&uuid)
+            .sync_with(&uuid, addr.as_deref())
             .await
             .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
     ))

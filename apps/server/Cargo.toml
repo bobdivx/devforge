@@ -25,6 +25,7 @@ devforge-auth = { workspace = true }
 devforge-detect = { workspace = true }
 devforge-llm = { workspace = true }
 devforge-update = { workspace = true }
+devforge-runner = { workspace = true }
 axum = { workspace = true }
 tower-http = { workspace = true }
 tokio = { workspace = true }

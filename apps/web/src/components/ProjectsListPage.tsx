@@ -129,15 +129,15 @@ export function ProjectsListPage() {
         {mode === 'github' ? (
           <NewGithubAppWizard bare />
         ) : (
-          <form class="flex flex-wrap items-end gap-2" onSubmit={createEmpty}>
-            <div class="min-w-[220px] flex-1">
+          <form class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end" onSubmit={createEmpty}>
+            <div class="min-w-0 w-full flex-1">
               <Input
                 placeholder="Nom du projet…"
                 value={name}
                 onInput={(e) => setName((e.target as HTMLInputElement).value)}
               />
             </div>
-            <Button type="submit" variant="outline" disabled={busy}>
+            <Button type="submit" variant="outline" disabled={busy} class="w-full sm:w-auto">
               Créer
             </Button>
           </form>

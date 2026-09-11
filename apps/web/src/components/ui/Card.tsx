@@ -38,14 +38,14 @@ export function CardHeader({
   action?: ComponentChildren;
 }) {
   return (
-    <div class="mb-4 flex items-start justify-between gap-3">
-      <div>
+    <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <div class="min-w-0 flex-1">
         <h2 class="text-sm font-medium tracking-tight text-[var(--color-ink)]">{title}</h2>
         {description && (
           <p class="mt-1 text-sm text-[var(--color-ink-muted)]">{description}</p>
         )}
       </div>
-      {action}
+      {action && <div class="shrink-0">{action}</div>}
     </div>
   );
 }
