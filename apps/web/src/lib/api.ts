@@ -812,6 +812,7 @@ export const api = {
         protect_apps_by_default: boolean;
         forward_auth_address: string;
         hide_local_login: boolean;
+        enable_platform_login: boolean;
         pocket_id_url: string;
         oauth2_proxy_url: string;
         apps_client_id: string;
@@ -828,6 +829,7 @@ export const api = {
     protect_apps_by_default?: boolean;
     forward_auth_address?: string;
     hide_local_login?: boolean;
+    enable_platform_login?: boolean;
     pocket_id_url?: string;
     oauth2_proxy_url?: string;
     apps_client_id?: string;
@@ -846,6 +848,7 @@ export const api = {
         protect_apps_by_default: boolean;
         forward_auth_address: string;
         hide_local_login: boolean;
+        enable_platform_login: boolean;
         pocket_id_url: string;
         oauth2_proxy_url: string;
         apps_client_id: string;

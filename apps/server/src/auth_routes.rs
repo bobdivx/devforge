@@ -162,7 +162,7 @@ pub async fn resolve_auth(
     Ok(user.map(|u| (u, parse_abilities_csv(&abilities))))
 }
 
-pub async fn user_team(
+pub pub async fn user_team(
     state: &AppState,
     user_uuid: &str,
 ) -> Result<Option<TeamRow>, (axum::http::StatusCode, Json<Value>)> {
@@ -201,7 +201,7 @@ pub async fn current_workspace(
     Ok((user, team))
 }
 
-async fn create_session(
+pub async fn create_session(
     state: &AppState,
     user_uuid: &str,
 ) -> Result<String, (axum::http::StatusCode, Json<Value>)> {
@@ -254,6 +254,7 @@ async fn bootstrap(
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let count = user_count(&state).await?;
     let settings = load_settings(&state).await?;
+    let sso_settings = crate::sso::load_sso_settings(&state.pool).await;
     let token = bearer_from(&headers);
     let mut user = None;
     let mut team = None;
@@ -297,6 +298,13 @@ async fn bootstrap(
             "github_connected": !settings.github_token.is_empty(),
             "ssh_host": settings.ssh_host,
             "ssh_user": settings.ssh_user,
+        },
+        "sso": {
+            "enabled": sso_settings.enable_platform_login(),
+            "oidc_configured": sso_settings.oidc_configured(),
+            "hide_local_login": sso_settings.hide_local_login(),
+            "provider": sso_settings.provider(),
+            "issuer_url": sso_settings.issuer(),
         }
     })))
 }

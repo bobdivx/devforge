@@ -267,6 +267,7 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ("sso_apps_client_secret", "TEXT NOT NULL DEFAULT ''"),
         ("sso_pocket_id_api_token", "TEXT NOT NULL DEFAULT ''"),
         ("sso_oidc_provider", "TEXT NOT NULL DEFAULT 'generic'"),
+        ("sso_enable_platform_login", "INTEGER NOT NULL DEFAULT 0"),
     ] {
         let sql = format!("ALTER TABLE instance_settings ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;
@@ -417,6 +418,19 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             path_prefix TEXT NOT NULL DEFAULT '/',
             target_port INTEGER NOT NULL,
             https_redirect INTEGER NOT NULL DEFAULT 1
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS oidc_states (
+            state TEXT PRIMARY KEY,
+            nonce TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL
         );
         "#,
     )

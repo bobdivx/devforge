@@ -21,6 +21,7 @@ pub struct SsoSettings {
     pub sso_apps_client_secret: String,
     pub sso_pocket_id_api_token: String,
     pub sso_oidc_provider: String,
+    pub sso_enable_platform_login: i64,
 }
 
 impl SsoSettings {
@@ -30,6 +31,10 @@ impl SsoSettings {
 
     pub fn hide_local_login(&self) -> bool {
         self.sso_hide_local_login != 0
+    }
+
+    pub fn enable_platform_login(&self) -> bool {
+        self.sso_enable_platform_login != 0
     }
 
     pub fn forward_auth_configured(&self) -> bool {
@@ -92,7 +97,7 @@ pub async fn load_sso_settings(pool: &sqlx::SqlitePool) -> SsoSettings {
     let row: Option<SsoSettings> = sqlx::query_as(
         r#"SELECT sso_protect_apps_by_default, sso_forward_auth_address, sso_hide_local_login,
                   sso_pocket_id_url, sso_oauth2_proxy_url, sso_apps_client_id, sso_apps_client_secret,
-                  sso_pocket_id_api_token, sso_oidc_provider
+                  sso_pocket_id_api_token, sso_oidc_provider, sso_enable_platform_login
            FROM instance_settings WHERE id = 1"#,
     )
     .fetch_optional(pool)

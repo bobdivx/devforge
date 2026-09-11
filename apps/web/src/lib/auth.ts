@@ -14,6 +14,7 @@ export function setToken(token: string | null) {
 export type Bootstrap = {
   ok: boolean;
   needs_setup: boolean;
+  allow_register?: boolean;
   authenticated: boolean;
   user?: { uuid: string; email: string; name: string; role: string } | null;
   team?: {
@@ -47,5 +48,12 @@ export type Bootstrap = {
     github_connected: boolean;
     ssh_host: string;
     ssh_user: string;
+  };
+  sso?: {
+    enabled: boolean;
+    oidc_configured: boolean;
+    hide_local_login: boolean;
+    provider: string;
+    issuer_url: string;
   };
 };
