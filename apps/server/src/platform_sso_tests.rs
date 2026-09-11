@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod platform_sso_tests {
-    use crate::sso::{load_sso_settings, SsoSettings};
+    use crate::sso::SsoSettings;
 
     #[test]
     fn test_enable_platform_login_default_false() {

@@ -8,7 +8,7 @@ use axum::{
     Json, Router,
 };
 use chrono::{Duration, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize};
 use serde_json::{json, Value};
 
 use crate::auth_routes;

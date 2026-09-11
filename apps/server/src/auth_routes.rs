@@ -162,7 +162,7 @@ pub async fn resolve_auth(
     Ok(user.map(|u| (u, parse_abilities_csv(&abilities))))
 }
 
-pub pub async fn user_team(
+pub async fn user_team(
     state: &AppState,
     user_uuid: &str,
 ) -> Result<Option<TeamRow>, (axum::http::StatusCode, Json<Value>)> {
