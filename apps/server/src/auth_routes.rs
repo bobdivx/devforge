@@ -201,7 +201,7 @@ pub async fn current_workspace(
     Ok((user, team))
 }
 
-async fn create_session(
+pub async fn create_session(
     state: &AppState,
     user_uuid: &str,
 ) -> Result<String, (axum::http::StatusCode, Json<Value>)> {
@@ -254,6 +254,7 @@ async fn bootstrap(
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let count = user_count(&state).await?;
     let settings = load_settings(&state).await?;
+    let sso_settings = crate::sso::load_sso_settings(&state.pool).await;
     let token = bearer_from(&headers);
     let mut user = None;
     let mut team = None;
@@ -278,6 +279,21 @@ async fn bootstrap(
             .map(|u| u.role == ROLE_INSTANCE_ADMIN)
             .unwrap_or(false);
 
+    // Break-glass: DEVFORGE_FORCE_LOCAL_LOGIN=1 force le login local même si hide_local_login est activé
+    let force_local_login = matches!(
+        std::env::var("DEVFORGE_FORCE_LOCAL_LOGIN")
+            .unwrap_or_default()
+            .to_lowercase()
+            .as_str(),
+        "1" | "true" | "yes"
+    );
+
+    let hide_local_login = if force_local_login {
+        false
+    } else {
+        sso_settings.hide_local_login()
+    };
+
     Ok(Json(json!({
         "ok": true,
         "needs_setup": count == 0,
@@ -297,6 +313,13 @@ async fn bootstrap(
             "github_connected": !settings.github_token.is_empty(),
             "ssh_host": settings.ssh_host,
             "ssh_user": settings.ssh_user,
+        },
+        "sso": {
+            "enabled": sso_settings.enable_platform_login(),
+            "oidc_configured": sso_settings.oidc_configured(),
+            "hide_local_login": hide_local_login,
+            "provider": sso_settings.provider(),
+            "issuer_url": sso_settings.issuer(),
         }
     })))
 }

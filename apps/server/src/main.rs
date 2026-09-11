@@ -8,6 +8,9 @@ mod infra_routes;
 mod infra_sqlite;
 mod llm_routes;
 mod mcp_routes;
+mod platform_sso;
+#[cfg(test)]
+mod platform_sso_tests;
 mod routes;
 mod runner_routes;
 mod runner_store;
@@ -72,6 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = Router::new()
         .merge(auth_routes::router())
         .merge(token_routes::router())
+        .merge(platform_sso::router())
         .merge(routes::router())
         .merge(infra_routes::router())
         .merge(backup_routes::router())

@@ -20,6 +20,7 @@ type SsoConfig = {
   protect_apps_by_default: boolean;
   forward_auth_address: string;
   hide_local_login: boolean;
+  enable_platform_login: boolean;
   pocket_id_url: string;
   oauth2_proxy_url: string;
   apps_client_id: string;
@@ -46,6 +47,7 @@ export function SsoSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
   const [clientSecret, setClientSecret] = useState('');
   const [protectDefault, setProtectDefault] = useState(true);
   const [hideLocal, setHideLocal] = useState(false);
+  const [enablePlatform, setEnablePlatform] = useState(false);
   const [rotateSecret, setRotateSecret] = useState(false);
   const [logoUrl, setLogoUrl] = useState('');
   const [backgroundUrl, setBackgroundUrl] = useState('');
@@ -64,6 +66,7 @@ export function SsoSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
       setClientId(r.config.apps_client_id || '');
       setProtectDefault(!!r.config.protect_apps_by_default);
       setHideLocal(!!r.config.hide_local_login);
+      setEnablePlatform(!!r.config.enable_platform_login);
       setApiToken('');
       setClientSecret('');
       setRotateSecret(false);
@@ -99,6 +102,7 @@ export function SsoSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
         ...(clientSecret.trim() ? { apps_client_secret: clientSecret.trim() } : {}),
         protect_apps_by_default: protectDefault,
         hide_local_login: hideLocal,
+        enable_platform_login: enablePlatform,
         provision: isPocket && hasToken && !!issuerUrl.trim(),
         rotate_secret: isPocket && rotateSecret,
         ...(isPocket && logoUrl.trim() ? { logo_url: logoUrl.trim() } : {}),
@@ -289,6 +293,15 @@ export function SsoSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
               Protéger par défaut les apps sans login propre
             </label>
 
+            <label class="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={enablePlatform}
+                onChange={(e) => setEnablePlatform((e.target as HTMLInputElement).checked)}
+              />
+              Activer la connexion SSO à DevForge (se connecter à DevForge lui-même via OIDC)
+            </label>
+
             <button
               type="button"
               class="justify-self-start text-sm text-[var(--muted)] underline-offset-2 hover:underline"
@@ -316,9 +329,15 @@ export function SsoSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
                     type="checkbox"
                     checked={hideLocal}
                     onChange={(e) => setHideLocal((e.target as HTMLInputElement).checked)}
+                    disabled={!enablePlatform}
                   />
-                  Masquer le login local DevForge (réglage réservé — login plateforme OIDC à venir)
+                  Masquer le login local DevForge (uniquement si le SSO plateforme est activé)
                 </label>
+                {enablePlatform && hideLocal && (
+                  <p class="text-xs text-[var(--color-accent)]">
+                    ⚠️ Le login par email/password sera masqué. Assure-toi que le SSO fonctionne avant !
+                  </p>
+                )}
               </div>
             )}
 

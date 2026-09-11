@@ -40,6 +40,7 @@ fn view(cfg: &SsoSettings) -> Value {
         "protect_apps_by_default": cfg.protect_by_default(),
         "forward_auth_address": cfg.sso_forward_auth_address,
         "hide_local_login": cfg.hide_local_login(),
+        "enable_platform_login": cfg.enable_platform_login(),
         "pocket_id_url": cfg.sso_pocket_id_url,
         "oauth2_proxy_url": cfg.sso_oauth2_proxy_url,
         "apps_client_id": cfg.sso_apps_client_id,
@@ -80,6 +81,7 @@ pub struct PutSsoBody {
     pub protect_apps_by_default: Option<bool>,
     pub forward_auth_address: Option<String>,
     pub hide_local_login: Option<bool>,
+    pub enable_platform_login: Option<bool>,
     pub pocket_id_url: Option<String>,
     pub oauth2_proxy_url: Option<String>,
     pub apps_client_id: Option<String>,
@@ -119,6 +121,10 @@ async fn put_sso(
         .hide_local_login
         .map(|v| if v { 1i64 } else { 0 })
         .unwrap_or(current.sso_hide_local_login);
+    let enable_platform = body
+        .enable_platform_login
+        .map(|v| if v { 1i64 } else { 0 })
+        .unwrap_or(current.sso_enable_platform_login);
     let forward = body
         .forward_auth_address
         .map(|s| s.trim().to_string())
@@ -247,6 +253,7 @@ async fn put_sso(
             sso_protect_apps_by_default = ?,
             sso_forward_auth_address = ?,
             sso_hide_local_login = ?,
+            sso_enable_platform_login = ?,
             sso_pocket_id_url = ?,
             sso_oauth2_proxy_url = ?,
             sso_apps_client_id = ?,
@@ -259,6 +266,7 @@ async fn put_sso(
     .bind(protect)
     .bind(&forward)
     .bind(hide)
+    .bind(enable_platform)
     .bind(&issuer)
     .bind(&proxy_url)
     .bind(&client_id)
