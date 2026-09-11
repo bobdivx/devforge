@@ -16,6 +16,16 @@ pub fn docker_run(name: &str, image: &str, ports: &[(u16, u16)], env_file: Optio
 }
 
 /// Run with optional Docker network + Traefik labels.
+///
+/// ## Traefik network requirement
+/// If `labels` contains Traefik routing rules, `network` should point to the same Docker
+/// network Traefik monitors (typically from `DEVFORGE_DOCKER_NETWORK`). Without a shared network,
+/// Traefik can match routes but cannot reach the container → requests hang/timeout.
+///
+/// Common network names: `devforge-net`, `traefik-public`, `coolify`
+///
+/// Port publishing (`-p`) alone is insufficient for Traefik reverse-proxy; containers must
+/// share a network for Traefik to forward traffic.
 pub fn docker_run_ex(
     name: &str,
     image: &str,
@@ -201,47 +211,66 @@ pub fn docker_update_labels(name: &str, labels: &Value) -> String {
 }
 
 /// Recrée `name` avec les labels fournis (Traefik sync après changement de domaine).
+///
+/// ## Network preservation
+/// The script inspects and preserves the container's original Docker network(s).
+/// Critical for Traefik: if the original container was on a custom network (e.g. `devforge-net`),
+/// the recreated container **must** rejoin it, otherwise Traefik routing will match but hang
+/// (Traefik cannot reach containers on different networks).
+///
+/// ## Label safety
+/// Labels are passed via heredoc → tempfile → POSIX positional parameters (`set -- "$@" --label "$line"`).
+/// Each label becomes its own argv element, preventing shell command substitution of backticks
+/// in Traefik `Host(\`fqdn\`)` rules.
 pub fn docker_recreate_with_labels(name: &str, labels: &Value) -> String {
-    // Pour éviter tout problème d'échappement avec les caractères spéciaux Traefik
-    // (backticks, parenthèses, &&, etc.), on utilise un heredoc pour passer les labels.
     let mut label_heredoc = String::new();
     if let Some(obj) = labels.as_object() {
         for (k, v) in obj {
             let val = v.as_str().unwrap_or("");
-            // Format: key=value, un par ligne (pas d'échappement nécessaire dans un heredoc)
             label_heredoc.push_str(&format!("{}={}\n", k, val));
         }
     }
     let n = shell_escape(name);
     
-    // Script POSIX : inspect → stop/rm → run (image/env/network/ports + nouveaux labels).
-    // Les labels sont passés via un heredoc pour éviter complètement les problèmes
-    // d'échappement shell avec les règles Traefik Host(`...`) et autres syntaxes complexes.
     format!(
         r#"sh -c 'set -e
 N={n}
 if ! docker inspect "$N" >/dev/null 2>&1; then echo "container $N introuvable"; exit 1; fi
 IMG=$(docker inspect -f "{{{{.Config.Image}}}}" "$N")
-NET=$(docker inspect -f "{{{{range $k,$v := .NetworkSettings.Networks}}}}{{{{println $k}}}}{{{{end}}}}" "$N" | head -n1)
+NET=$(docker inspect -f "{{{{range $k, $v := .NetworkSettings.Networks}}}}{{{{println $k}}}}{{{{end}}}}" "$N" | head -n1)
 ENV_FILE=$(mktemp)
 docker inspect -f "{{{{range .Config.Env}}}}{{{{println .}}}}{{{{end}}}}" "$N" > "$ENV_FILE"
-PORT_ARGS=""
-for spec in $(docker inspect -f "{{{{range $p, $conf := .HostConfig.PortBindings}}}}{{{{range $conf}}}}{{{{.HostPort}}}}:{{{{$p}}}} {{{{end}}}}{{{{end}}}}" "$N"); do
-  [ -n "$spec" ] && PORT_ARGS="$PORT_ARGS -p $spec"
-done
 LABEL_FILE=$(mktemp)
-cat > "$LABEL_FILE" <<'"'"'LABELS_EOF'"'"'
+cat >"$LABEL_FILE" <<'"'"'LABELS_EOF'"'"'
 {label_heredoc}LABELS_EOF
-LABEL_ARGS=""
+
+# Build docker run args via positional parameters (safe for backticks/special chars)
+set -- -d --name "$N" --restart unless-stopped
+
+# Add labels from file (each --label is a separate argv, preventing command substitution)
 while IFS= read -r line; do
-  [ -n "$line" ] && LABEL_ARGS="$LABEL_ARGS --label $line"
+  [ -n "$line" ] && set -- "$@" --label "$line"
 done < "$LABEL_FILE"
+
+# Add network if present and not bridge
+if [ -n "$NET" ] && [ "$NET" != "bridge" ]; then
+  set -- "$@" --network "$NET"
+fi
+
+# Add port mappings
+for spec in $(docker inspect -f "{{{{range $p, $conf := .HostConfig.PortBindings}}}}{{{{range $conf}}}}{{{{.HostPort}}}}:{{{{$p}}}} {{{{end}}}}{{{{end}}}}" "$N"); do
+  [ -n "$spec" ] && set -- "$@" -p "$spec"
+done
+
+# Add env file
+set -- "$@" --env-file "$ENV_FILE"
+
+# Add image
+set -- "$@" "$IMG"
+
 docker stop "$N" >/dev/null
 docker rm -f "$N" >/dev/null
-NET_ARG=""
-[ -n "$NET" ] && [ "$NET" != "bridge" ] && NET_ARG="--network $NET"
-# shellcheck disable=SC2086
-docker run -d --name "$N" --restart unless-stopped $LABEL_ARGS $NET_ARG $PORT_ARGS --env-file "$ENV_FILE" "$IMG"
+docker run "$@"
 rm -f "$ENV_FILE" "$LABEL_FILE"
 echo "recreated $N with traefik labels"
 '"#
@@ -431,6 +460,56 @@ mod tests {
         assert!(cmd.contains("docker run"));
         assert!(!cmd.contains("--label-add"));
         assert!(cmd.contains("traefik.enable"));
+    }
+
+    #[test]
+    fn docker_recreate_network_template_has_space_after_comma() {
+        let labels = json!({"traefik.enable": "true"});
+        let cmd = docker_recreate_with_labels("test-container", &labels);
+        assert!(
+            cmd.contains("{{range $k, $v := .NetworkSettings.Networks}}"),
+            "Network template must have space after comma to avoid Docker template parse error"
+        );
+        assert!(
+            !cmd.contains("{{range $k,$v :="),
+            "Network template should not have comma without space"
+        );
+    }
+
+    #[test]
+    fn docker_recreate_preserves_host_labels_with_backticks() {
+        let labels = json!({
+            "traefik.enable": "true",
+            "traefik.http.routers.test.rule": "Host(`starbasefr.jeser.app`)"
+        });
+        let cmd = docker_recreate_with_labels("df-test", &labels);
+        assert!(
+            cmd.contains("Host(`starbasefr.jeser.app`)"),
+            "Host label with backticks must survive in heredoc"
+        );
+        // Must use positional params (set -- "$@" ...) not LABEL_ARGS variable
+        assert!(
+            cmd.contains("set -- \"$@\" --label"),
+            "Must use positional parameters to protect backticks from command substitution"
+        );
+        assert!(
+            !cmd.contains("LABEL_ARGS=") || cmd.contains("set -- "),
+            "If using intermediate storage, must switch to positional params before docker run"
+        );
+    }
+
+    #[test]
+    fn docker_recreate_uses_network_when_not_bridge() {
+        let labels = json!({"traefik.enable": "true"});
+        let cmd = docker_recreate_with_labels("test-app", &labels);
+        assert!(
+            cmd.contains(r#"[ "$NET" != "bridge" ]"#),
+            "Should skip --network flag if bridge (default network)"
+        );
+        assert!(
+            cmd.contains("--network \"$NET\"") || cmd.contains(r#"set -- "$@" --network "$NET""#),
+            "Should add --network argument for non-bridge networks"
+        );
     }
 
     #[test]

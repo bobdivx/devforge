@@ -992,6 +992,11 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         );
         if proxy_labels.is_some() {
             logs.push_str("[start] traefik labels applied\n");
+            if network.is_none() {
+                logs.push_str("[start] WARNING: Traefik labels set but DEVFORGE_DOCKER_NETWORK is empty.\n");
+                logs.push_str("[start] WARNING: Traefik may not reach this container (no shared network).\n");
+                logs.push_str("[start] WARNING: Set DEVFORGE_DOCKER_NETWORK to 'devforge-net', 'traefik-public', or 'coolify'.\n");
+            }
         }
         match self.executor.exec(server, workdir, &run, 120).await {
             Ok(r) => {
