@@ -163,6 +163,26 @@ pub fn docker_stop(name: &str) -> String {
     }
 }
 
+/// Stop/remove our container, then any other container publishing `host_port`
+/// (avoids `Bind for 0.0.0.0:PORT failed: port is already allocated`).
+pub fn docker_prepare_run(name: &str, host_port: u16) -> String {
+    if cfg!(windows) {
+        format!(
+            "docker rm -f {n} 2>$null; $ids = @(docker ps -aq --filter publish={p} 2>$null); if ($ids) {{ docker rm -f @($ids) }}",
+            n = shell_escape(name),
+            p = host_port
+        )
+    } else {
+        format!(
+            "docker rm -f {n} >/dev/null 2>&1 || true; \
+ids=$(docker ps -aq --filter publish={p} 2>/dev/null || true); \
+if [ -n \"$ids\" ]; then docker rm -f $ids >/dev/null 2>&1 || true; fi",
+            n = shell_escape(name),
+            p = host_port
+        )
+    }
+}
+
 pub fn docker_restart(name: &str) -> String {
     format!("docker restart {}", shell_escape(name))
 }

@@ -71,6 +71,9 @@ fn format_nixpacks_env_flags(build_envs: &[(String, String)]) -> String {
 
 /// Nixpacks via Docker image — no host CLI required.
 ///
+/// Forces `--entrypoint nixpacks` because some image tags have an empty
+/// ENTRYPOINT (otherwise Docker tries to exec `build` → exit 127).
+///
 /// At runtime (Unix), prefers `--volumes-from` when DevForge runs nested with a
 /// docker.sock (ZimaOS), otherwise bind-mounts `$PWD`. Decision is made on the
 /// execution host so SSH remotes do not inherit a wrong `--volumes-from`.
@@ -84,31 +87,34 @@ pub fn nixpacks_docker_build(image: &str, build_envs: &[(String, String)]) -> St
         .filter(|s| !s.is_empty())
         .unwrap_or_default();
 
+    // Common args after image: nixpacks subcommand (ENTRYPOINT forced below).
+    let nix_args = format!(
+        "build . --name {image}{env_flags}",
+        image = shell_escape_token(image),
+        env_flags = env_flags,
+    );
+
     if cfg!(windows) {
-        // Docker Desktop: bind-mount current directory (PowerShell).
         format!(
-            "docker run --rm -v \"{pwd}:/app\" -w /app {builder} build . --name {image}{env_flags}",
+            "docker run --rm --entrypoint nixpacks -v \"{pwd}:/app\" -w /app {builder} {nix_args}",
             pwd = "$(Get-Location)",
             builder = shell_escape_token(&builder),
-            image = shell_escape_token(image),
-            env_flags = env_flags,
+            nix_args = nix_args,
         )
     } else {
-        // Portable sh: detect nested DevForge vs bare host at execution time.
         format!(
             r#"SELF_CTR="{self_hint}"; \
 if [ -z "$SELF_CTR" ] && [ -n "${{DEVFORGE_SELF_CONTAINER:-}}" ]; then SELF_CTR="$DEVFORGE_SELF_CONTAINER"; fi; \
 if [ -n "$SELF_CTR" ] && docker inspect "$SELF_CTR" >/dev/null 2>&1; then \
-  docker run --rm -v /var/run/docker.sock:/var/run/docker.sock --volumes-from "$SELF_CTR" -w "$PWD" {builder} build . --name {image}{env_flags}; \
+  docker run --rm --entrypoint nixpacks -v /var/run/docker.sock:/var/run/docker.sock --volumes-from "$SELF_CTR" -w "$PWD" {builder} {nix_args}; \
 elif [ -f /.dockerenv ] && docker inspect "$(hostname)" >/dev/null 2>&1; then \
-  docker run --rm -v /var/run/docker.sock:/var/run/docker.sock --volumes-from "$(hostname)" -w "$PWD" {builder} build . --name {image}{env_flags}; \
+  docker run --rm --entrypoint nixpacks -v /var/run/docker.sock:/var/run/docker.sock --volumes-from "$(hostname)" -w "$PWD" {builder} {nix_args}; \
 else \
-  docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD":/app -w /app {builder} build . --name {image}{env_flags}; \
+  docker run --rm --entrypoint nixpacks -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD":/app -w /app {builder} {nix_args}; \
 fi"#,
             self_hint = self_hint.replace('"', "").replace('`', "").replace('$', ""),
             builder = shell_escape_token(&builder),
-            image = shell_escape_token(image),
-            env_flags = env_flags,
+            nix_args = nix_args,
         )
     }
 }
@@ -165,6 +171,7 @@ mod tests {
     fn nixpacks_cmd_contains_builder_and_name() {
         let cmd = nixpacks_docker_build("df-abc:latest", &collect_build_envs(None));
         assert!(cmd.contains("docker run"));
+        assert!(cmd.contains("--entrypoint nixpacks"));
         assert!(cmd.contains("build . --name"));
         assert!(cmd.contains("df-abc:latest"));
         assert!(cmd.contains("PUPPETEER_SKIP_DOWNLOAD=1"));

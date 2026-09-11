@@ -952,8 +952,15 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         container_port: u16,
         logs: &mut String,
     ) -> bool {
-        let stop = docker::docker_stop(name);
-        let _ = self.executor.exec(server, workdir, &stop, 60).await;
+        let prepare = docker::docker_prepare_run(name, host_port);
+        match self.executor.exec(server, workdir, &prepare, 60).await {
+            Ok(r) => {
+                if !r.output.trim().is_empty() {
+                    logs.push_str(&format!("[prepare] {}\n", trim_out(&r.output)));
+                }
+            }
+            Err(e) => logs.push_str(&format!("[prepare] warn: {e}\n")),
+        }
         let env_file = if std::path::Path::new(&format!("{workdir}/.env")).exists() {
             Some(".env")
         } else {
