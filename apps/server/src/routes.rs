@@ -783,12 +783,7 @@ async fn load_env_file_content(pool: &sqlx::SqlitePool, project_uuid: &str) -> O
     if rows.is_empty() {
         return None;
     }
-    let mut body = String::new();
-    for (k, v) in rows {
-        let escaped = v.replace('\\', "\\\\").replace('"', "\\\"");
-        body.push_str(&format!("{k}=\"{escaped}\"\n"));
-    }
-    Some(body)
+    Some(devforge_env::serialize_docker_env_file(&rows))
 }
 
 async fn get_deployment(

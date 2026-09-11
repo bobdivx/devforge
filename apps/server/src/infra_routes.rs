@@ -1475,13 +1475,7 @@ async fn github_webhook(
         let env_file = if env_rows.is_empty() {
             None
         } else {
-            Some(
-                env_rows
-                    .into_iter()
-                    .map(|(k, v)| format!("{k}=\"{}\"", v.replace('"', "\\\"")))
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            )
+            Some(devforge_env::serialize_docker_env_file(&env_rows))
         };
 
         let req = devforge_deploy::DeployRequest {
