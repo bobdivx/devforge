@@ -1,6 +1,7 @@
 mod deploy_logs;
 mod env;
 mod github;
+mod github_ops;
 mod http;
 mod mcp;
 mod projects;
@@ -9,6 +10,7 @@ mod tests;
 pub use deploy_logs::GetDeploymentLogsTool;
 pub use env::{ListEnvVarsTool, UpsertEnvVarTool};
 pub use github::{GitHubListPrsTool, GitHubWorkflowRunsTool};
+pub use github_ops::{CreateGitHubFixTool, ReadGitHubFileTool};
 pub use http::HttpSmokeTool;
 pub use mcp::{McpCallTool, McpListRemoteToolsTool, McpListServersTool};
 pub use projects::{GetProjectTool, ListProjectsTool};

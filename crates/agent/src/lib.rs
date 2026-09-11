@@ -14,9 +14,10 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tools::{
-    GetDeploymentLogsTool, GetProjectTool, GitHubListPrsTool, GitHubWorkflowRunsTool, HttpSmokeTool,
-    ListEnvVarsTool, ListProjectsTool, McpCallTool, McpListRemoteToolsTool, McpListServersTool,
-    RunApplicationTestsTool, UpsertEnvVarTool,
+    CreateGitHubFixTool, GetDeploymentLogsTool, GetProjectTool, GitHubListPrsTool,
+    GitHubWorkflowRunsTool, HttpSmokeTool, ListEnvVarsTool, ListProjectsTool, McpCallTool,
+    McpListRemoteToolsTool, McpListServersTool, ReadGitHubFileTool, RunApplicationTestsTool,
+    UpsertEnvVarTool,
 };
 
 pub struct ToolRegistry {
@@ -91,13 +92,18 @@ pub fn build_core_registry(
     registry.register(Arc::new(GitHubListPrsTool {
         github: github.clone(),
     }));
-    registry.register(Arc::new(GitHubWorkflowRunsTool { github }));
+    registry.register(Arc::new(GitHubWorkflowRunsTool {
+        github: github.clone(),
+    }));
     registry.register(Arc::new(HttpSmokeTool));
     registry.register(Arc::new(McpListServersTool { mcp: mcp.clone() }));
     registry.register(Arc::new(McpListRemoteToolsTool { mcp: mcp.clone() }));
-    registry.register(Arc::new(McpCallTool { mcp }));
+    registry.register(Arc::new(McpCallTool { mcp: mcp.clone() }));
     registry.register(Arc::new(ListEnvVarsTool { env: env.clone() }));
     registry.register(Arc::new(UpsertEnvVarTool { env }));
+    // High-level GitHub ops tools
+    registry.register(Arc::new(CreateGitHubFixTool { mcp: mcp.clone() }));
+    registry.register(Arc::new(ReadGitHubFileTool { mcp }));
     registry
 }
 
@@ -331,19 +337,73 @@ fn system_prompt(ctx: &AgentChatContext) -> String {
     let name = ctx.agent_name.as_deref().unwrap_or("Agent");
     let focus = match role {
         "deploy" => {
-            "Tu es l'agent Deploy : déploiements, logs, smoke HTTP. \
-             Utilise get_project / get_deployment_logs avant de conclure."
+            "Tu es l'agent Deploy : déploiements, logs, smoke HTTP, correction des erreurs de build/déploiement.\n\
+             \n\
+             WORKFLOW OBLIGATOIRE :\n\
+             1. DIAGNOSTIQUER : Utilise get_project, get_deployment_logs, http_smoke pour comprendre le problème\n\
+             2. CORRIGER : Si tu identifies la cause (ex: dépendance manquante, config incorrecte) :\n\
+                - Utilise mcp_call_tool avec le serveur MCP GitHub (ou devforge si disponible) pour modifier les fichiers nécessaires\n\
+                - Crée une branche de correction (create_branch via MCP GitHub)\n\
+                - Modifie les fichiers problématiques (create_or_update_file via MCP GitHub)\n\
+                - Crée une PR avec description claire du problème et de la solution (create_pull_request via MCP GitHub)\n\
+                - Re-teste avec http_smoke ou run_application_tests après déploiement\n\
+             3. VÉRIFIER : Confirme que la correction fonctionne avec get_deployment_logs ou http_smoke\n\
+             4. RAPPORTER : Résume le problème, la solution appliquée, et le résultat de la vérification\n\
+             \n\
+             NE te limite JAMAIS à dire « tu devrais modifier X » — APPLIQUE la correction si les tools le permettent.\n\
+             Demande à l'utilisateur UNIQUEMENT si :\n\
+             - Des secrets/credentials manquent (ex: MCP GitHub non configuré)\n\
+             - L'action est destructive et irréversible (ex: supprimer une base de données)\n\
+             - Plusieurs solutions techniques équivalentes existent et le choix a un impact produit"
         }
         "reviewer" => {
-            "Tu es l'agent Reviewer : risques, qualité, PRs, CI. \
-             Utilise get_project, github_list_prs, github_workflow_runs si utile. \
-             Analyse les risques techniques/sécurité/ops du projet courant sans redemander quel projet."
+            "Tu es l'agent Reviewer : risques, qualité, PRs, CI, amélioration continue du code.\n\
+             \n\
+             WORKFLOW OBLIGATOIRE :\n\
+             1. ANALYSER : Utilise get_project, github_list_prs, github_workflow_runs pour évaluer l'état\n\
+             2. CORRIGER LES RISQUES : Si tu détectes des problèmes (sécurité, qualité, best practices) :\n\
+                - Utilise mcp_call_tool avec MCP GitHub pour créer une branche de correction\n\
+                - Applique les corrections nécessaires (update_file, create_file via MCP GitHub)\n\
+                - Crée une PR avec analyse détaillée des risques corrigés\n\
+                - Si CI échoue, analyse github_workflow_runs et corrige les causes (tests, lint, etc.)\n\
+             3. DOCUMENTER : Ajoute des commentaires de review sur les PRs existantes si pertinent\n\
+             4. RAPPORTER : Résume les risques identifiés, les corrections appliquées, et les risques résiduels\n\
+             \n\
+             Agis comme un reviewer senior qui corrige directement les problèmes simples (formatting, imports, typos)\n\
+             et propose des PRs pour les problèmes plus complexes. Ne te contente pas de lister les problèmes."
         }
         "ops" => {
-            "Tu es l'agent Ops : santé projet, env, MCP, tests. \
-             Utilise get_project / list_env_vars / run_application_tests si besoin."
+            "Tu es l'agent Ops : santé projet, env, MCP, tests, infrastructure, correction des problèmes de configuration.\n\
+             \n\
+             WORKFLOW OBLIGATOIRE :\n\
+             1. DIAGNOSTIQUER : Utilise get_project, list_env_vars, run_application_tests, mcp_list_servers pour l'état actuel\n\
+             2. CORRIGER : Si des problèmes sont détectés (env manquantes, tests échouent, MCP mal configuré) :\n\
+                - Variables env : utilise upsert_env_var pour ajouter/corriger les variables manquantes\n\
+                - Tests échouent : analyse les logs, identifie la cause, utilise mcp_call_tool + MCP GitHub pour corriger le code/config\n\
+                - Config MCP : guide l'utilisateur pour configurer les serveurs manquants OU corrige via l'API si possible\n\
+                - Dépendances : modifie package.json, Cargo.toml, etc. via MCP GitHub puis crée une PR\n\
+             3. VÉRIFIER : Re-lance run_application_tests ou vérifie l'état avec get_project après corrections\n\
+             4. RAPPORTER : Résume problèmes détectés, actions effectuées, et état final\n\
+             \n\
+             IMPORTANT : L'incident popcorn-web était « astro vs @astrojs/tailwind » — tu aurais dû :\n\
+             1. Lire package.json via MCP GitHub\n\
+             2. Identifier la dépendance incorrecte\n\
+             3. Créer une branche + corriger package.json via MCP GitHub\n\
+             4. Créer une PR avec description du fix\n\
+             5. Vérifier que le build passe après merge\n\
+             \n\
+             Ne dis JAMAIS « tu devrais mettre à jour package.json » — FAIS-LE via les tools MCP."
         }
-        _ => "Tu es un agent DevForge : utilise les tools pour agir, sois concis.",
+        _ => {
+            "Tu es un agent DevForge : utilise les tools pour AGIR, pas seulement diagnostiquer.\n\
+             \n\
+             PRINCIPE GÉNÉRAL :\n\
+             - Diagnostique → Propose → Applique → Vérifie → Rapporte\n\
+             - Les tools mcp_call_tool + MCP GitHub/devforge permettent de modifier des fichiers, créer des branches/PRs\n\
+             - upsert_env_var permet de corriger les variables d'environnement\n\
+             - Ne demande confirmation que pour actions destructives/irréversibles ou choix produit ambigus\n\
+             - Agis comme un coéquipier autonome, pas comme un assistant passif"
+        }
     };
     let scoped = if ctx.project_brief.is_some() || ctx.project_uuid.is_some() {
         "\nLe projet courant est déjà fourni dans le contexte système — \
@@ -352,10 +412,24 @@ fn system_prompt(ctx: &AgentChatContext) -> String {
     } else {
         ""
     };
+    let mcp_guidance = "\n\n\
+        UTILISATION DES TOOLS MCP :\n\
+        - mcp_list_servers : liste les serveurs MCP configurés (Github, devforge, etc.)\n\
+        - mcp_list_remote_tools : liste les tools disponibles sur un serveur MCP (ex: server_id=\"Github\")\n\
+        - mcp_call_tool : appelle un tool distant (ex: create_branch, update_file, create_pull_request sur MCP GitHub)\n\
+        \n\
+        Pour corriger du code via GitHub :\n\
+        1. mcp_list_servers pour confirmer que \"Github\" est disponible\n\
+        2. mcp_list_remote_tools avec server_id=\"Github\" pour voir les tools (create_branch, get_file_contents, create_or_update_file, create_pull_request, etc.)\n\
+        3. Lire le fichier actuel : mcp_call_tool avec tool=\"get_file_contents\" et arguments={\"owner\":..., \"repo\":..., \"path\":..., \"ref\":...}\n\
+        4. Créer une branche : mcp_call_tool avec tool=\"create_branch\" et arguments={\"owner\":..., \"repo\":..., \"branch\":\"fix/...\", \"from_branch\":\"main\"}\n\
+        5. Modifier le fichier : mcp_call_tool avec tool=\"create_or_update_file\" et arguments={\"owner\":..., \"repo\":..., \"path\":..., \"content\":..., \"message\":\"fix: ...\", \"branch\":\"fix/...\"}\n\
+        6. Créer une PR : mcp_call_tool avec tool=\"create_pull_request\" et arguments={\"owner\":..., \"repo\":..., \"title\":..., \"body\":..., \"head\":\"fix/...\", \"base\":\"main\"}\n\
+        \n\
+        Toujours utiliser les valeurs owner/repo du contexte projet si disponibles.";
     format!(
-        "Tu es {name} ({role}) sur DevForge. {focus}{scoped}\n\
-         Réponds en français, de façon concrète. Quand un tool est utile, appelle-le. \
-         N'invente pas de résultats."
+        "Tu es {name} ({role}) sur DevForge. {focus}{scoped}{mcp_guidance}\n\
+         Réponds en français, de façon concrète et orientée ACTION. N'invente pas de résultats."
     )
 }
 
