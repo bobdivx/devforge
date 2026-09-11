@@ -22,7 +22,7 @@ export function AgentPage() {
         
         if (mode === 'stub') {
           const providers = await api.llmProviders();
-          const unhealthy = providers.data.filter(p => p.enabled && !p.healthy);
+          const unhealthy = providers.data.filter((p) => p.enabled && p.healthy === false);
           if (unhealthy.length > 0) {
             const err = unhealthy[0];
             setLlmError(err.last_probe_error || 'provider unhealthy');

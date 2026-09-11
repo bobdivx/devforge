@@ -158,7 +158,6 @@ mod tests {
         assert!(!r.ok);
         assert!(r.error.is_some());
     }
-}
 
     #[tokio::test]
     async fn probe_returns_error_message_when_model_fails() {
