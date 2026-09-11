@@ -76,13 +76,16 @@ export function UpdatePage() {
   const [busy, setBusy] = useState(false);
 
   async function loadCheck() {
+    setLoading(true);
+    setError(null);
     try {
       const r = await api.updateCheck();
       setCheck(r.data);
       if (r.job) setJob(r.job);
-      setError(null);
     } catch (e: unknown) {
-      setError(String((e as Error).message || e));
+      const errorMsg = String((e as Error).message || e);
+      setError(errorMsg);
+      toast.push({ title: 'Erreur de vérification', detail: errorMsg, tone: 'danger' });
     } finally {
       setLoading(false);
     }
@@ -229,8 +232,14 @@ export function UpdatePage() {
                     'Mettre à jour DevForge'
                   )}
                 </Button>
-                <Button type="button" variant="outline" size="sm" onClick={loadCheck}>
-                  Vérifier
+                <Button type="button" variant="outline" size="sm" onClick={loadCheck} disabled={loading}>
+                  {loading ? (
+                    <>
+                      <Spinner class="mr-2" /> Vérification…
+                    </>
+                  ) : (
+                    'Vérifier'
+                  )}
                 </Button>
               </div>
             </div>
