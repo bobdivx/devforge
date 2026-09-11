@@ -1,7 +1,4 @@
 ---
-import BaseLayout from '../../../layouts/BaseLayout.astro';
-import { ProjectsListPage } from '../../../components/ProjectsListPage';
+// Redirect to /app/ (home page with project cards) to avoid duplication
+return Astro.redirect('/app/', 302);
 ---
-<BaseLayout title="Projects · DevForge">
-  <ProjectsListPage client:load />
-</BaseLayout>
