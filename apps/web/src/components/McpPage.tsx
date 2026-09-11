@@ -332,10 +332,27 @@ export function McpPage() {
         onClose={() => setPreset(null)}
         title={preset ? `Configurer ${preset.name}` : 'MCP'}
         description={preset?.description}
-        size="md"
+        size="lg"
+        footer={
+          preset ? (
+            <>
+              <Button type="button" variant="ghost" onClick={() => setPreset(null)}>
+                Annuler
+              </Button>
+              <Button
+                type="submit"
+                form="mcp-preset-form"
+                variant="secondary"
+                disabled={busy}
+              >
+                {busy ? 'Enregistrement…' : 'Connecter'}
+              </Button>
+            </>
+          ) : null
+        }
       >
         {preset && (
-          <form class="space-y-3" onSubmit={submit}>
+          <form id="mcp-preset-form" class="space-y-3" onSubmit={submit}>
             <div class="mb-1 flex items-center gap-3">
               <McpIcon id={preset.id} name={preset.name} />
               <span class="text-sm text-[var(--color-ink-muted)]">{preset.category}</span>
@@ -375,14 +392,6 @@ export function McpPage() {
                 Documentation
               </a>
             )}
-            <div class="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="ghost" onClick={() => setPreset(null)}>
-                Annuler
-              </Button>
-              <Button type="submit" variant="secondary" disabled={busy}>
-                {busy ? 'Enregistrement…' : 'Connecter'}
-              </Button>
-            </div>
           </form>
         )}
       </Modal>

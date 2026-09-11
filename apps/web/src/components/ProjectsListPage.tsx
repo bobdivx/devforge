@@ -168,9 +168,13 @@ export function ProjectsListPage() {
               {formatUpdatedAt(p.updated_at)}
             </Td>
             <Td>
-              <Badge tone={sync.tone} title={sync.title}>
-                {sync.label}
-              </Badge>
+              <a
+                href={`/app/projects/view?uuid=${encodeURIComponent(p.uuid)}&tab=git`}
+                class="inline-flex"
+                title={sync.title}
+              >
+                <Badge tone={sync.tone}>{sync.label}</Badge>
+              </a>
             </Td>
           </Tr>
           );

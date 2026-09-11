@@ -8,6 +8,7 @@ import { AppIcon, statusDotClass } from './AppIcon';
 import { AppShell } from './AppShell';
 import { ProjectAgentsPanel } from './ProjectAgentsPanel';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
+import { ProjectGitPanel } from './ProjectGitPanel';
 import {
   Alert,
   Badge,
@@ -28,6 +29,7 @@ import {
 type Tab =
   | 'overview'
   | 'deployments'
+  | 'git'
   | 'actions'
   | 'agents'
   | 'domains'
@@ -47,6 +49,7 @@ function readQuery(): { uuid: string; tab: Tab } {
   const allowed: Tab[] = [
     'overview',
     'deployments',
+    'git',
     'actions',
     'agents',
     'domains',
@@ -103,6 +106,7 @@ export function ProjectDetailPage(props: Props) {
   const titles: Record<string, string> = {
     overview: project?.name ?? 'Projet',
     deployments: 'Deployments',
+    git: 'Git',
     actions: 'Actions',
     agents: 'Agents',
     domains: 'Domains',
@@ -156,6 +160,14 @@ export function ProjectDetailPage(props: Props) {
           projectUuid={uuid}
           initial={deployments}
           onRefresh={(d) => setDeployments(d)}
+        />
+      )}
+      {tab === 'git' && (
+        <ProjectGitPanel
+          projectUuid={uuid}
+          onDeployed={() => {
+            void api.deployments(uuid).then((r) => setDeployments(r.data ?? []));
+          }}
         />
       )}
       {tab === 'actions' && (
@@ -520,13 +532,14 @@ function ProjectOverview({
         title="Historique des déploiements"
         description={`${deployments.length} entrée${deployments.length > 1 ? 's' : ''}`}
         size="lg"
+        padded={false}
       >
         {deployments.length === 0 ? (
-          <p class="px-5 py-8 text-sm text-[var(--color-ink-muted)]">Aucun déploiement.</p>
+          <p class="px-4 py-8 text-sm text-[var(--color-ink-muted)] sm:px-5">Aucun déploiement.</p>
         ) : (
-          <ul class="divide-y divide-[var(--color-line)] overflow-y-auto">
+          <ul class="divide-y divide-[var(--color-line)]">
             {deployments.map((d) => (
-              <li key={d.uuid} class="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+              <li key={d.uuid} class="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 sm:px-5">
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
                     <Badge tone={deployTone(d.status)}>{d.status}</Badge>
@@ -1075,7 +1088,7 @@ function DatabaseManager({ uuid }: { uuid: string }) {
         size="lg"
       >
         {servers.length > 1 && (
-          <label class="mb-3 flex flex-col gap-1.5 px-5 pt-4 text-sm">
+          <label class="mb-3 flex flex-col gap-1.5 text-sm">
             <span class="font-medium">Compte Turso</span>
             <select
               class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
@@ -1090,7 +1103,7 @@ function DatabaseManager({ uuid }: { uuid: string }) {
             </select>
           </label>
         )}
-        <div class="px-5 pb-5">
+        <div>
           {listError && (
             <Alert tone="warn" class="mb-3">
               {listError}
@@ -1338,11 +1351,34 @@ function EnvPanel({ uuid }: { uuid: string }) {
         title={editKey ? `Variable · ${editKey}` : 'Variable'}
         description="Valeur réelle chargée depuis le serveur."
         size="md"
+        footer={
+          !editLoading ? (
+            <div class="flex w-full flex-wrap items-center justify-between gap-2">
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                disabled={busy}
+                onClick={() => editKey && remove(editKey)}
+              >
+                Supprimer
+              </Button>
+              <div class="flex gap-2">
+                <Button type="button" variant="ghost" onClick={closeEdit}>
+                  Annuler
+                </Button>
+                <Button type="submit" form="env-edit-form" variant="secondary" disabled={busy}>
+                  {busy ? 'Enregistrement…' : 'Enregistrer'}
+                </Button>
+              </div>
+            </div>
+          ) : null
+        }
       >
         {editLoading ? (
           <p class="text-sm text-[var(--color-ink-muted)]">Chargement…</p>
         ) : (
-          <form class="space-y-4" onSubmit={saveEdit}>
+          <form id="env-edit-form" class="space-y-4" onSubmit={saveEdit}>
             <div class="relative">
               <div class="mb-1.5 flex items-center justify-between gap-2">
                 <span class="text-sm font-medium">Valeur</span>
@@ -1357,7 +1393,7 @@ function EnvPanel({ uuid }: { uuid: string }) {
               </div>
               {reveal ? (
                 <textarea
-                  class="min-h-[120px] w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3 font-mono text-xs"
+                  class="min-h-[120px] max-h-[40dvh] w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3 font-mono text-xs"
                   value={editValue}
                   onInput={(ev) => setEditValue((ev.target as HTMLTextAreaElement).value)}
                 />
@@ -1378,25 +1414,6 @@ function EnvPanel({ uuid }: { uuid: string }) {
               />
               Secret (masqué dans la liste)
             </label>
-            <div class="flex flex-wrap justify-between gap-2">
-              <Button
-                type="button"
-                variant="danger"
-                size="sm"
-                disabled={busy}
-                onClick={() => editKey && remove(editKey)}
-              >
-                Supprimer
-              </Button>
-              <div class="flex gap-2">
-                <Button type="button" variant="ghost" onClick={closeEdit}>
-                  Annuler
-                </Button>
-                <Button type="submit" variant="secondary" disabled={busy}>
-                  {busy ? 'Enregistrement…' : 'Enregistrer'}
-                </Button>
-              </div>
-            </div>
           </form>
         )}
       </Modal>
@@ -1407,8 +1424,23 @@ function EnvPanel({ uuid }: { uuid: string }) {
         title="Importer un fichier .env"
         description="Choisis un fichier ou colle le contenu — les clés existantes seront écrasées."
         size="lg"
+        footer={
+          <>
+            <Button type="button" variant="ghost" onClick={closeImport}>
+              Annuler
+            </Button>
+            <Button
+              type="submit"
+              form="env-import-form"
+              variant="secondary"
+              disabled={busy || !dotenv.trim()}
+            >
+              {busy ? 'Import…' : 'Importer'}
+            </Button>
+          </>
+        }
       >
-        <form class="space-y-4" onSubmit={runImport}>
+        <form id="env-import-form" class="space-y-4" onSubmit={runImport}>
           <label class="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-[var(--color-line)] px-3 py-2 text-sm hover:bg-white/5">
             <input
               type="file"
@@ -1422,7 +1454,7 @@ function EnvPanel({ uuid }: { uuid: string }) {
             <p class="text-xs text-[var(--color-ink-muted)]">Fichier : {fileName}</p>
           )}
           <textarea
-            class="min-h-[180px] w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3 font-mono text-xs"
+            class="min-h-[120px] max-h-[45dvh] w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3 font-mono text-xs"
             placeholder={'FOO=bar\nSECRET=…'}
             value={dotenv}
             onInput={(ev) => {
@@ -1430,14 +1462,6 @@ function EnvPanel({ uuid }: { uuid: string }) {
               setFileName(null);
             }}
           />
-          <div class="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={closeImport}>
-              Annuler
-            </Button>
-            <Button type="submit" variant="secondary" disabled={busy || !dotenv.trim()}>
-              {busy ? 'Import…' : 'Importer'}
-            </Button>
-          </div>
         </form>
       </Modal>
     </div>
@@ -1657,6 +1681,17 @@ function ssoModeFromProject(project: Project): 'auto' | 'on' | 'off' {
   return 'auto';
 }
 
+function parseGithubOwnerRepo(url: string): { owner: string; repo: string } | null {
+  const cleaned = url
+    .trim()
+    .replace(/^https?:\/\/(www\.)?github\.com\//i, '')
+    .replace(/\.git$/i, '')
+    .replace(/^git@github\.com:/i, '');
+  const parts = cleaned.split('/').filter(Boolean);
+  if (parts.length < 2) return null;
+  return { owner: parts[0], repo: parts[1].replace(/\.git$/i, '') };
+}
+
 function ProjectSettingsPanel({
   project,
   onSaved,
@@ -1668,6 +1703,8 @@ function ProjectSettingsPanel({
   const [name, setName] = useState(project.name);
   const [branch, setBranch] = useState(project.git_branch || 'main');
   const [repo, setRepo] = useState(project.git_repository || '');
+  const [branches, setBranches] = useState<string[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
   const [buildPack, setBuildPack] = useState(project.build_pack || 'nixpacks');
   const [port, setPort] = useState(Number(project.port ?? 3000));
   const [isStatic, setIsStatic] = useState(Boolean(project.is_static));
@@ -1691,6 +1728,7 @@ function ProjectSettingsPanel({
     setName(project.name);
     setBranch(project.git_branch || 'main');
     setRepo(project.git_repository || '');
+    setBranches([]);
     setBuildPack(project.build_pack || 'nixpacks');
     setPort(Number(project.port ?? 3000));
     setIsStatic(Boolean(project.is_static));
@@ -1705,6 +1743,36 @@ function ProjectSettingsPanel({
     setConfirmDelete(false);
     setDetectInfo(null);
   }, [project.uuid]);
+
+  useEffect(() => {
+    const parsed = parseGithubOwnerRepo(repo);
+    if (!parsed) {
+      setBranches([]);
+      setBranchesLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setBranchesLoading(true);
+      api
+        .githubBranches(parsed.owner, parsed.repo)
+        .then((r) => {
+          if (cancelled) return;
+          setBranches(r.data.map((b) => b.name));
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setBranches([]);
+        })
+        .finally(() => {
+          if (!cancelled) setBranchesLoading(false);
+        });
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [repo]);
 
   async function save(e: Event) {
     e.preventDefault();
@@ -1799,11 +1867,29 @@ function ProjectSettingsPanel({
         )}
         <form class="grid gap-3 md:grid-cols-2" onSubmit={save}>
           <Input label="Nom" value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
-          <Input
-            label="Branche"
-            value={branch}
-            onInput={(e) => setBranch((e.target as HTMLInputElement).value)}
-          />
+          {branches.length > 0 ? (
+            <label class="flex flex-col gap-1.5 text-sm">
+              <span class="font-medium">Branche</span>
+              <select
+                class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
+                value={branch}
+                disabled={busy || branchesLoading}
+                onChange={(e) => setBranch((e.target as HTMLSelectElement).value)}
+              >
+                {(branches.includes(branch) ? branches : [branch, ...branches]).map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <Input
+              label={branchesLoading ? 'Branche (chargement…)' : 'Branche'}
+              value={branch}
+              onInput={(e) => setBranch((e.target as HTMLInputElement).value)}
+            />
+          )}
           <div class="md:col-span-2">
             <Input
               label="Repository"

@@ -21,10 +21,22 @@ import {
 } from './ui';
 
 const IMAGE_PRESETS = [
-  'myoung34/github-runner:latest',
-  'ghcr.io/actions/actions-runner:latest',
-  'summerwind/actions-runner:latest',
-];
+  {
+    image: 'myoung34/github-runner:latest',
+    label: 'myoung34',
+    hint: 'Recommandé — self-hosted Docker (PAT)',
+  },
+  {
+    image: 'ghcr.io/actions/actions-runner:latest',
+    label: 'GitHub officiel',
+    hint: 'Image Actions officielle (GHCR)',
+  },
+  {
+    image: 'summerwind/actions-runner:latest',
+    label: 'summerwind',
+    hint: 'Actions Runner Controller (souvent K8s)',
+  },
+] as const;
 
 function stateTone(state: string): 'ok' | 'warn' | 'danger' | 'accent' | 'neutral' {
   switch (state) {
@@ -89,7 +101,7 @@ export function RunnersPage() {
     owner: '',
     repo: '',
     runner_name: '',
-    image: IMAGE_PRESETS[0],
+    image: IMAGE_PRESETS[0].image,
     labels: 'self-hosted,devforge',
     network_mode: 'bridge',
     pull_image: true,
@@ -303,7 +315,7 @@ export function RunnersPage() {
     <AppShell
       active="runners"
       title="Runners"
-      description="GitHub Actions self-hosted — snapshot local + SSE"
+      description="GitHub Actions self-hosted"
       actions={
         <div class="flex gap-2">
           <Button size="sm" variant="outline" disabled={busy} onClick={() => void syncNow()}>
@@ -323,7 +335,6 @@ export function RunnersPage() {
 
       <FadeIn>
         <Card>
-          <CardHeader title="Inventaire" description="Lecture SQLite (ms) — état live poussé en SSE" />
           {runners.length === 0 ? (
             <p class="text-sm text-[var(--color-ink-muted)]">
               Aucun runner. Crée-en un pour enregistrer un conteneur self-hosted sur le host Docker.
@@ -467,8 +478,22 @@ export function RunnersPage() {
         title="Nouveau runner"
         description="Le token GitHub Settings est utilisé automatiquement"
         size="lg"
+        footer={
+          <>
+            <Button type="button" variant="ghost" onClick={() => setWizard(false)}>
+              Annuler
+            </Button>
+            <Button
+              type="submit"
+              form="runner-create-form"
+              disabled={busy || ghConnected === false}
+            >
+              Créer
+            </Button>
+          </>
+        }
       >
-        <form class="space-y-4" onSubmit={createRunner}>
+        <form id="runner-create-form" class="space-y-4" onSubmit={createRunner}>
           {ghConnected === false && (
             <Alert tone="warn">
               GitHub n’est pas connecté.{' '}
@@ -531,19 +556,33 @@ export function RunnersPage() {
 
           <div>
             <div class="mb-1.5 text-sm text-[var(--color-ink-muted)]">Image Docker</div>
-            <div class="mb-2 flex flex-wrap gap-1.5">
+            <div class="mb-2 grid gap-1.5 sm:grid-cols-3">
               {IMAGE_PRESETS.map((p) => (
                 <button
-                  key={p}
+                  key={p.image}
                   type="button"
-                  class={`rounded-md border px-2 py-1 font-mono text-[11px] transition ${
-                    form.image === p
-                      ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                      : 'border-[var(--color-line)] text-[var(--color-ink-muted)] hover:bg-white/5'
+                  class={`rounded-lg border px-2.5 py-2 text-left transition ${
+                    form.image === p.image
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
+                      : 'border-[var(--color-line)] hover:bg-white/5'
                   }`}
-                  onClick={() => setForm((f) => ({ ...f, image: p }))}
+                  onClick={() => setForm((f) => ({ ...f, image: p.image }))}
                 >
-                  {p.split('/').pop()}
+                  <div
+                    class={`text-xs font-medium ${
+                      form.image === p.image
+                        ? 'text-[var(--color-accent)]'
+                        : 'text-[var(--color-ink)]'
+                    }`}
+                  >
+                    {p.label}
+                  </div>
+                  <div class="mt-0.5 text-[10px] leading-snug text-[var(--color-ink-muted)]">
+                    {p.hint}
+                  </div>
+                  <div class="mt-1 truncate font-mono text-[10px] text-[var(--color-ink-faint)]">
+                    {p.image}
+                  </div>
                 </button>
               ))}
             </div>
@@ -704,14 +743,6 @@ export function RunnersPage() {
             </div>
           )}
 
-          <div class="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="ghost" onClick={() => setWizard(false)}>
-              Annuler
-            </Button>
-            <Button type="submit" disabled={busy || ghConnected === false}>
-              Créer
-            </Button>
-          </div>
         </form>
       </Modal>
     </AppShell>

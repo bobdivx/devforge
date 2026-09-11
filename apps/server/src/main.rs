@@ -3,6 +3,7 @@ mod actions_routes;
 mod auth_routes;
 mod backup_routes;
 mod detect_svc;
+mod git_routes;
 mod infra_routes;
 mod infra_sqlite;
 mod llm_routes;
@@ -71,6 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(mcp_routes::router())
         .merge(runner_routes::router())
         .merge(actions_routes::router())
+        .merge(git_routes::router())
         .merge(update_routes::router())
         .layer(middleware::from_fn_with_state(
             state.clone(),

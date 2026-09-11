@@ -232,7 +232,7 @@ impl GitHubClient for HttpGitHubClient {
         repo: &str,
         branch: Option<&str>,
     ) -> Result<Vec<WorkflowRun>> {
-        let mut path = format!("/repos/{owner}/{repo}/actions/runs?per_page=20");
+        let mut path = format!("/repos/{owner}/{repo}/actions/runs?per_page=5");
         if let Some(b) = branch {
             path.push_str(&format!("&branch={b}"));
         }
@@ -242,7 +242,7 @@ impl GitHubClient for HttpGitHubClient {
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
-        Ok(arr
+        let mut runs: Vec<WorkflowRun> = arr
             .into_iter()
             .filter_map(|r| {
                 Some(WorkflowRun {
@@ -266,9 +266,16 @@ impl GitHubClient for HttpGitHubClient {
                         .get("head_branch")
                         .and_then(|b| b.as_str())
                         .map(str::to_string),
+                    created_at: r
+                        .get("created_at")
+                        .and_then(|c| c.as_str())
+                        .map(str::to_string),
                 })
             })
-            .collect())
+            .collect();
+        // Plus récent en premier (API GitHub en général déjà triée, on force).
+        runs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(runs)
     }
 
     async fn list_tags(&self, owner: &str, repo: &str) -> Result<Vec<GitTag>> {
@@ -353,12 +360,49 @@ impl GitHubClient for HttpGitHubClient {
                 "/repos/{owner}/{repo}/compare/{base}...{head}"
             ))
             .await?;
-        let commits = data.get("commits").and_then(|c| c.as_array());
-        let tip = commits
-            .and_then(|a| a.last())
+        let commits_raw = data
+            .get("commits")
+            .and_then(|c| c.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let tip = commits_raw
+            .last()
             .and_then(|c| c.get("sha"))
             .and_then(|s| s.as_str())
-            .unwrap_or(head);
+            .unwrap_or(head)
+            .to_string();
+        let commits = commits_raw
+            .into_iter()
+            .rev() // plus récent d’abord
+            .take(20)
+            .filter_map(|c| {
+                let sha = c.get("sha")?.as_str()?.to_string();
+                let message = c
+                    .pointer("/commit/message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("(sans message)")
+                    .lines()
+                    .next()
+                    .unwrap_or("(sans message)")
+                    .to_string();
+                Some(crate::GitCompareCommit {
+                    sha: sha.chars().take(12).collect(),
+                    message,
+                    author: c
+                        .pointer("/commit/author/name")
+                        .and_then(|a| a.as_str())
+                        .map(str::to_string),
+                    date: c
+                        .pointer("/commit/author/date")
+                        .and_then(|d| d.as_str())
+                        .map(str::to_string),
+                    html_url: c
+                        .get("html_url")
+                        .and_then(|u| u.as_str())
+                        .map(str::to_string),
+                })
+            })
+            .collect();
         Ok(crate::GitCompare {
             status: data
                 .get("status")
@@ -375,6 +419,11 @@ impl GitHubClient for HttpGitHubClient {
                 .take(12)
                 .collect(),
             head_sha: tip.chars().take(12).collect(),
+            commits,
+            html_url: data
+                .get("html_url")
+                .and_then(|u| u.as_str())
+                .map(str::to_string),
         })
     }
 
@@ -488,6 +537,8 @@ impl GitHubClient for HttpGitHubClient {
             path: path.to_string(),
             content,
             sha,
+            commit_sha: None,
+            html_url: None,
         }))
     }
 
@@ -522,10 +573,20 @@ impl GitHubClient for HttpGitHubClient {
             .or_else(|| data.get("sha").and_then(|s| s.as_str()))
             .unwrap_or("")
             .to_string();
+        let commit_sha = data
+            .pointer("/commit/sha")
+            .and_then(|s| s.as_str())
+            .map(str::to_string);
+        let commit_url = data
+            .pointer("/commit/html_url")
+            .and_then(|s| s.as_str())
+            .map(str::to_string);
         Ok(RepoFile {
             path: path.to_string(),
             content: content.to_string(),
             sha: new_sha,
+            commit_sha,
+            html_url: commit_url,
         })
     }
 

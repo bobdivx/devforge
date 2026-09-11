@@ -29,6 +29,8 @@ type Props = {
   target?: string;
   rel?: string;
   type?: 'button' | 'submit' | 'reset';
+  /** Associe un submit hors `<form>` (footer de Modal). */
+  form?: string;
   disabled?: boolean;
   children: ComponentChildren;
   onClick?: JSX.MouseEventHandler<HTMLButtonElement>;
@@ -42,6 +44,7 @@ export function Button({
   target,
   rel,
   type = 'button',
+  form,
   disabled,
   children,
   onClick,
@@ -60,7 +63,7 @@ export function Button({
     );
   }
   return (
-    <button type={type} class={cls} disabled={disabled} onClick={onClick}>
+    <button type={type} form={form} class={cls} disabled={disabled} onClick={onClick}>
       {children}
     </button>
   );

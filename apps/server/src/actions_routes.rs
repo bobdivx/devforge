@@ -474,22 +474,37 @@ async fn patch_workflows(
             "path": wf.path,
             "changes": n,
             "sha": written.sha,
+            "commit_sha": written.commit_sha,
+            "html_url": written.html_url,
             "dry_run": false,
         }));
     }
+
+    let commit_urls: Vec<String> = patched
+        .iter()
+        .filter_map(|p| p.get("html_url").and_then(|u| u.as_str()).map(str::to_string))
+        .collect();
 
     Ok(Json(json!({
         "ok": true,
         "dry_run": dry,
         "branch": branch,
+        "owner": owner,
+        "repo": repo,
         "patched": patched,
         "skipped": skipped,
+        "commit_urls": commit_urls,
+        "next_step": if dry || patched.is_empty() {
+            Value::Null
+        } else {
+            json!("Les workflows ont été commités sur GitHub. Déploie depuis l’onglet Git pour appliquer en production.")
+        },
         "message": if dry {
             "Simulation — aucun commit"
         } else if patched.is_empty() {
             "Rien à modifier"
         } else {
-            "Workflows mis à jour pour utiliser les runners DevForge"
+            "Workflows mis à jour pour utiliser les runners DevForge (commit sur GitHub)"
         },
     })))
 }

@@ -244,21 +244,21 @@ export function TokensPage() {
         onClose={() => setCreatedPlain(null)}
         title="Token créé"
         description="Copie-le maintenant — il ne sera plus réaffiché."
+        footer={
+          <>
+            <Button size="sm" onClick={() => createdPlain && copy(createdPlain)}>
+              Copier le token
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setCreatedPlain(null)}>
+              Fermer
+            </Button>
+          </>
+        }
       >
         {createdPlain && (
-          <div class="space-y-3">
-            <code class="block break-all rounded-xl border border-[var(--color-line)] p-3 text-xs">
-              {createdPlain}
-            </code>
-            <div class="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => copy(createdPlain)}>
-                Copier le token
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setCreatedPlain(null)}>
-                Fermer
-              </Button>
-            </div>
-          </div>
+          <code class="block break-all rounded-xl border border-[var(--color-line)] p-3 text-xs">
+            {createdPlain}
+          </code>
         )}
       </Modal>
     </AppShell>

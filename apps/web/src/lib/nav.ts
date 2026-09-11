@@ -35,6 +35,7 @@ export function projectNav(uuid: string): NavItem[] {
   return [
     { href: `${base}&tab=overview`, label: 'Overview', key: 'overview' },
     { href: `${base}&tab=deployments`, label: 'Deployments', key: 'deployments' },
+    { href: `${base}&tab=git`, label: 'Git', key: 'git' },
     { href: `${base}&tab=actions`, label: 'Actions', key: 'actions' },
     { href: `${base}&tab=agents`, label: 'Agents', key: 'agents' },
     { href: `${base}&tab=domains`, label: 'Domains', key: 'domains' },

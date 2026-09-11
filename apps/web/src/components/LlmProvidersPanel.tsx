@@ -562,14 +562,39 @@ export function LlmProvidersPanel({
             : 'LLM'
         }
         description={preset?.description}
-        size="md"
+        size="lg"
+        footer={
+          preset ? (
+            <>
+              {preset.docs_url && (
+                <Button href={preset.docs_url} size="sm" variant="ghost" target="_blank">
+                  Docs
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setPreset(null);
+                  setEditingId(null);
+                }}
+              >
+                Annuler
+              </Button>
+              <Button type="submit" form="llm-provider-form" size="sm" disabled={busy}>
+                {busy ? '…' : editingId ? 'Enregistrer' : 'Ajouter'}
+              </Button>
+            </>
+          ) : null
+        }
       >
         {preset && (
-          <form class="space-y-3" onSubmit={submit}>
+          <form id="llm-provider-form" class="space-y-3" onSubmit={submit}>
             <div class="mb-1 flex items-center gap-3">
               <LlmIcon domain={preset.icon_domain} name={preset.name} />
               <span class="text-sm text-[var(--color-ink-muted)]">
-                {editingId ? 'Modifier' : 'nouvelle instance'}
+                {editingId ? 'modifier' : 'nouvelle instance'}
               </span>
             </div>
 
@@ -667,28 +692,6 @@ export function LlmProvidersPanel({
               />
               Priorité haute (essayer en premier)
             </label>
-
-            <div class="flex flex-wrap justify-end gap-2 pt-2">
-              {preset.docs_url && (
-                <Button href={preset.docs_url} size="sm" variant="ghost" target="_blank">
-                  Docs
-                </Button>
-              )}
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setPreset(null);
-                  setEditingId(null);
-                }}
-              >
-                Annuler
-              </Button>
-              <Button type="submit" size="sm" disabled={busy}>
-                {busy ? '…' : editingId ? 'Enregistrer' : 'Ajouter'}
-              </Button>
-            </div>
           </form>
         )}
       </Modal>

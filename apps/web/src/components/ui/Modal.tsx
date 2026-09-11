@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect } from 'preact/hooks';
+import { useEffect, useId } from 'preact/hooks';
 import { cn } from '../../lib/cn';
 
 type Props = {
@@ -8,14 +8,22 @@ type Props = {
   title: string;
   description?: string;
   children: ComponentChildren;
+  /** Actions sticky en bas (Annuler / Connecter…). Restent visibles hors scroll. */
+  footer?: ComponentChildren;
   class?: string;
-  size?: 'md' | 'lg' | 'xl';
+  /** Classes additionnelles sur la zone scrollable. */
+  bodyClass?: string;
+  /** Padding horizontal/vertical du body. Défaut true. */
+  padded?: boolean;
+  size?: 'sm' | 'md' | 'lg' | 'xl';
 };
 
 const sizes = {
-  md: 'max-w-lg',
-  lg: 'max-w-2xl',
-  xl: 'max-w-3xl',
+  // Mobile : presque pleine largeur (parent). Desktop : largeurs utiles, pas des colonnes étroites.
+  sm: 'max-w-md sm:max-w-lg',
+  md: 'max-w-lg sm:max-w-xl md:max-w-2xl',
+  lg: 'max-w-xl sm:max-w-2xl md:max-w-3xl',
+  xl: 'max-w-2xl sm:max-w-3xl md:max-w-4xl lg:max-w-5xl',
 };
 
 export function Modal({
@@ -24,9 +32,15 @@ export function Modal({
   title,
   description,
   children,
+  footer,
   class: className,
+  bodyClass,
+  padded = true,
   size = 'lg',
 }: Props) {
+  const titleId = useId();
+  const descId = useId();
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -44,7 +58,13 @@ export function Modal({
   if (!open) return null;
 
   return (
-    <div class="fixed inset-0 z-50 flex items-end justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:items-center sm:p-4">
+    <div
+      class={cn(
+        'fixed inset-0 z-50 flex justify-center',
+        // Mobile : sheet bas d’écran ; desktop : centré
+        'items-end p-0 sm:items-center sm:p-4',
+      )}
+    >
       <button
         type="button"
         aria-label="Fermer"
@@ -54,23 +74,33 @@ export function Modal({
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="df-modal-title"
+        aria-labelledby={titleId}
+        aria-describedby={description ? descId : undefined}
         class={cn(
-          'relative z-10 flex max-h-[min(90dvh,880px)] w-full flex-col overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] shadow-2xl',
+          'relative z-10 flex w-full flex-col overflow-hidden border border-[var(--color-line)] bg-[var(--color-card)] shadow-2xl',
+          // Hauteur bornée au viewport (dvh = mobile chrome / clavier)
+          'max-h-[min(100dvh,100%)] sm:max-h-[min(90dvh,880px)]',
+          // Sheet mobile → panneau centré desktop
+          'rounded-t-2xl border-b-0 sm:rounded-2xl sm:border',
           sizes[size],
           className,
         )}
       >
-        <div class="flex items-start justify-between gap-3 border-b border-[var(--color-line)] px-5 py-4">
+        <div class="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--color-line)] px-4 py-3 sm:px-5 sm:py-4">
           <div class="min-w-0">
             <h2
-              id="df-modal-title"
+              id={titleId}
               class="text-base font-medium tracking-tight text-[var(--color-ink)]"
             >
               {title}
             </h2>
             {description && (
-              <p class="mt-1 text-sm text-[var(--color-ink-muted)]">{description}</p>
+              <p
+                id={descId}
+                class="mt-1 line-clamp-3 text-sm text-[var(--color-ink-muted)] sm:line-clamp-none"
+              >
+                {description}
+              </p>
             )}
           </div>
           <button
@@ -82,7 +112,30 @@ export function Modal({
             ✕
           </button>
         </div>
-        <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+
+        <div
+          class={cn(
+            'min-h-0 flex-1 overflow-y-auto overscroll-contain',
+            padded && 'px-4 py-3 sm:px-5 sm:py-4',
+            // Safe area si pas de footer (sinon le footer l’absorbe)
+            footer == null && 'pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] sm:pb-4',
+            bodyClass,
+          )}
+        >
+          {children}
+        </div>
+
+        {footer != null && (
+          <div
+            class={cn(
+              'flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-[var(--color-line)]',
+              'bg-[var(--color-card)] px-4 py-3 sm:px-5 sm:py-3.5',
+              'pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] sm:pb-3.5',
+            )}
+          >
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );

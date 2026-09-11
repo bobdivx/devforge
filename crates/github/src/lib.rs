@@ -24,6 +24,9 @@ pub struct WorkflowRun {
     pub conclusion: Option<String>,
     pub html_url: String,
     pub branch: Option<String>,
+    /// ISO 8601 (`created_at` GitHub).
+    #[serde(default)]
+    pub created_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,12 +80,24 @@ pub struct GitBranch {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitCompareCommit {
+    pub sha: String,
+    pub message: String,
+    pub author: Option<String>,
+    pub date: Option<String>,
+    pub html_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitCompare {
     pub status: String,
     pub ahead_by: u64,
     pub behind_by: u64,
     pub base_sha: String,
     pub head_sha: String,
+    #[serde(default)]
+    pub commits: Vec<GitCompareCommit>,
+    pub html_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +130,12 @@ pub struct RepoFile {
     pub path: String,
     pub content: String,
     pub sha: String,
+    /// SHA du commit GitHub (Contents API), si disponible.
+    #[serde(default)]
+    pub commit_sha: Option<String>,
+    /// URL HTML du commit, si disponible.
+    #[serde(default)]
+    pub html_url: Option<String>,
 }
 
 #[async_trait]

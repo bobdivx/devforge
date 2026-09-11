@@ -1052,12 +1052,61 @@ export const api = {
       ok: boolean;
       dry_run?: boolean;
       message?: string;
-      patched?: Array<{ path: string; changes: number; sha?: string; dry_run?: boolean }>;
+      branch?: string;
+      owner?: string;
+      repo?: string;
+      next_step?: string | null;
+      commit_urls?: string[];
+      patched?: Array<{
+        path: string;
+        changes: number;
+        sha?: string;
+        commit_sha?: string | null;
+        html_url?: string | null;
+        dry_run?: boolean;
+      }>;
       skipped?: Array<{ path: string; reason: string }>;
     }>(`/projects/${encodeURIComponent(uuid)}/actions/use-devforge-runners`, {
       method: 'POST',
       body: JSON.stringify({ dry_run }),
     }),
+
+  projectGit: (uuid: string) =>
+    request<{
+      ok: boolean;
+      available: boolean;
+      reason?: string;
+      owner?: string;
+      repo?: string;
+      branch?: string;
+      repo_url?: string;
+      sync?: ProjectSync & {
+        commits?: Array<{
+          sha: string;
+          message: string;
+          author?: string | null;
+          date?: string | null;
+          html_url?: string | null;
+        }>;
+        html_url?: string | null;
+        error?: string;
+        ahead_by_remote?: number;
+      };
+      workdir?: {
+        available: boolean;
+        dirty: boolean;
+        files?: Array<{ status: string; path: string }>;
+        head?: string | null;
+        note?: string | null;
+        reason?: string;
+      };
+    }>(`/projects/${encodeURIComponent(uuid)}/git`),
+
+  projectGitDiscard: (uuid: string) =>
+    request<{ ok: boolean; message?: string; output?: string }>(
+      `/projects/${encodeURIComponent(uuid)}/git/discard`,
+      { method: 'POST', body: JSON.stringify({ confirm: true }) },
+    ),
 };
 
 export type ManagedRunner = {

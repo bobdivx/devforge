@@ -26,6 +26,7 @@ type WorkflowRun = {
   conclusion?: string | null;
   html_url: string;
   branch?: string | null;
+  created_at?: string | null;
 };
 
 type ActionsSummary = {
@@ -50,6 +51,20 @@ function runTone(status: string, conclusion?: string | null): 'ok' | 'warn' | 'd
   return 'warn';
 }
 
+function formatRunWhen(iso?: string | null) {
+  if (!iso) return null;
+  try {
+    return new Date(iso).toLocaleString('fr-FR', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
 export function ProjectActionsPanel({
   projectUuid,
   gitRepository,
@@ -62,6 +77,13 @@ export function ProjectActionsPanel({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastResult, setLastResult] = useState<{
+    title: string;
+    detail: string;
+    tone: 'ok' | 'info' | 'warn';
+    files: string[];
+    gitHref?: string;
+  } | null>(null);
 
   async function load() {
     setLoading(true);
@@ -103,15 +125,41 @@ export function ProjectActionsPanel({
     setBusy(true);
     try {
       const r = await api.projectActionsUseDevforge(projectUuid, dryRun);
-      const n = (r.patched ?? []).length;
+      const patched = r.patched ?? [];
+      const skipped = r.skipped ?? [];
+      const n = patched.length;
+      const files = patched.map((p) => p.path);
+      const detailParts = [
+        r.message,
+        files.length ? `Fichiers : ${files.join(', ')}` : null,
+        skipped.length
+          ? `Ignorés : ${skipped.map((s) => `${s.path} (${s.reason})`).join(' · ')}`
+          : null,
+        !dryRun && n > 0 ? r.next_step : null,
+      ].filter(Boolean);
+      const detail = detailParts.join('\n');
       toast.push({
-        title: dryRun ? 'Simulation' : 'Workflows mis à jour',
-        detail: r.message || `${n} fichier(s)`,
-        tone: n > 0 ? 'info' : 'warn',
+        title: dryRun ? 'Simulation' : n > 0 ? 'Commit GitHub OK' : 'Rien à faire',
+        detail: detail.slice(0, 280),
+        tone: n > 0 ? 'ok' : 'warn',
+      });
+      setLastResult({
+        title: dryRun
+          ? `Simulation — ${n} fichier(s)`
+          : n > 0
+            ? `Commit sur ${r.branch || 'la branche'}`
+            : 'Aucun changement',
+        detail,
+        tone: n > 0 ? (dryRun ? 'info' : 'ok') : 'warn',
+        files,
+        gitHref: !dryRun && n > 0
+          ? `/app/projects/view?uuid=${encodeURIComponent(projectUuid)}&tab=git`
+          : undefined,
       });
       if (!dryRun) await load();
     } catch (e) {
       toast.push({ title: 'Patch KO', detail: String(e), tone: 'danger' });
+      setLastResult(null);
     } finally {
       setBusy(false);
     }
@@ -142,12 +190,36 @@ export function ProjectActionsPanel({
   }
 
   const workflows = data?.workflows ?? [];
-  const runs = data?.runs ?? [];
+  const runs = [...(data?.runs ?? [])].sort((a, b) => {
+    const ta = a.created_at ? Date.parse(a.created_at) : 0;
+    const tb = b.created_at ? Date.parse(b.created_at) : 0;
+    return tb - ta;
+  });
   const runners = data?.runners ?? [];
   const hasWf = !!data?.has_workflows;
 
   return (
     <div class="space-y-6">
+      {lastResult && (
+        <FadeIn>
+          <Alert tone={lastResult.tone === 'ok' ? 'ok' : lastResult.tone === 'warn' ? 'warn' : 'info'}>
+            <div class="font-medium">{lastResult.title}</div>
+            <pre class="mt-2 whitespace-pre-wrap font-sans text-xs leading-relaxed opacity-90">
+              {lastResult.detail}
+            </pre>
+            {lastResult.gitHref && (
+              <div class="mt-3">
+                <a
+                  href={lastResult.gitHref}
+                  class="text-sm font-medium text-[var(--color-accent)] underline"
+                >
+                  Voir l’onglet Git → déployer ces commits
+                </a>
+              </div>
+            )}
+          </Alert>
+        </FadeIn>
+      )}
       <FadeIn>
         <Card>
           <CardHeader
@@ -243,12 +315,14 @@ export function ProjectActionsPanel({
       <FadeIn delay={80}>
         <div class="grid gap-4 lg:grid-cols-2">
           <Card>
-            <CardHeader title="Runs récents" description="Suivi Actions" />
+            <CardHeader title="Runs récents" description="5 derniers" />
             {runs.length === 0 ? (
               <p class="text-sm text-[var(--color-ink-muted)]">Aucun run récent.</p>
             ) : (
               <ul class="divide-y divide-[var(--color-line)]">
-                {runs.slice(0, 12).map((r) => (
+                {runs.slice(0, 5).map((r) => {
+                  const when = formatRunWhen(r.created_at);
+                  return (
                   <li key={r.id} class="py-2">
                     <a
                       href={r.html_url}
@@ -262,10 +336,12 @@ export function ProjectActionsPanel({
                       <Badge tone={runTone(r.status, r.conclusion)}>
                         {r.conclusion || r.status}
                       </Badge>
+                      {when && <time dateTime={r.created_at || undefined}>{when}</time>}
                       {r.branch && <span>{r.branch}</span>}
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </Card>
