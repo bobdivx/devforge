@@ -62,6 +62,40 @@ pub fn parse_dotenv(content: &str) -> Result<Vec<EnvVar>> {
     Ok(out)
 }
 
+/// Format a single env var for Docker `--env-file` consumption.
+///
+/// Docker `docker run --env-file` does **not** strip outer quotes. If you write `KEY="value"`,
+/// the container gets the literal string `"value"` including quote characters.
+///
+/// This function:
+/// - Emits `KEY=value` (no outer quotes) when the value is safe (no newlines/special chars)
+/// - Escapes embedded newlines as `\n`, backslashes as `\\`, etc. per Docker env-file spec
+/// - Does **not** wrap the value in `"…"` that would become part of the runtime value
+///
+/// References:
+/// - https://docs.docker.com/engine/reference/commandline/run/#env-file
+/// - Docker env-file format: each line is `VAR=val` with backslash escapes, no outer quotes
+pub fn format_docker_env_line(key: &str, value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            _ => escaped.push(ch),
+        }
+    }
+    format!("{key}={escaped}\n")
+}
+
+/// Serialize a list of env vars into Docker `--env-file` format.
+pub fn serialize_docker_env_file(vars: &[(String, String)]) -> String {
+    vars.iter()
+        .map(|(k, v)| format_docker_env_line(k, v))
+        .collect()
+}
+
 #[async_trait]
 pub trait EnvStore: Send + Sync {
     async fn list(&self, project_uuid: &str) -> Result<Vec<EnvVar>>;
@@ -215,5 +249,49 @@ EMPTY=
         assert_eq!(vars[0].value, "bar");
         assert_eq!(vars[1].key, "BAZ");
         assert_eq!(vars[1].value, "hello world");
+    }
+
+    #[test]
+    fn docker_env_line_no_outer_quotes() {
+        let line = format_docker_env_line("KEY", "value");
+        assert_eq!(line, "KEY=value\n");
+        assert!(!line.contains('"'), "Docker env-file must not wrap value in quotes");
+    }
+
+    #[test]
+    fn docker_env_line_escapes_special_chars() {
+        let line = format_docker_env_line("URL", "libsql://host\nline2");
+        assert_eq!(line, "URL=libsql://host\\nline2\n");
+        
+        let line = format_docker_env_line("PATH", "C:\\Users\\test");
+        assert_eq!(line, "PATH=C:\\\\Users\\\\test\n");
+    }
+
+    #[test]
+    fn docker_env_round_trip_no_literal_quotes() {
+        let input = vec![
+            ("TURSO_DATABASE_URL".to_string(), "libsql://turso.io/db".to_string()),
+            ("API_KEY".to_string(), "secret-key-123".to_string()),
+        ];
+        let serialized = serialize_docker_env_file(&input);
+        
+        assert!(!serialized.contains("=\""), "Must not contain =\"");
+        assert!(!serialized.contains("\""), "Must not contain any quotes");
+        
+        assert!(serialized.contains("TURSO_DATABASE_URL=libsql://turso.io/db\n"));
+        assert!(serialized.contains("API_KEY=secret-key-123\n"));
+    }
+
+    #[test]
+    fn docker_env_preserves_embedded_quotes() {
+        let line = format_docker_env_line("JSON", r#"{"key":"value"}"#);
+        assert_eq!(line, "JSON={\"key\":\"value\"}\n");
+        assert!(!line.starts_with("JSON=\""), "Must not wrap in outer quotes");
+    }
+
+    #[test]
+    fn docker_env_escapes_all_special_chars() {
+        let line = format_docker_env_line("MULTI", "line1\nline2\rline3\tline4\\end");
+        assert_eq!(line, "MULTI=line1\\nline2\\rline3\\tline4\\\\end\n");
     }
 }

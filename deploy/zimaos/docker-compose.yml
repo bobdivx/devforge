@@ -23,6 +23,11 @@ services:
       - type: bind
         source: /var/run/docker.sock
         target: /var/run/docker.sock
+    environment:
+      # Docker network shared with Traefik for reverse-proxy routing.
+      # Apps with Traefik labels must be on this network for Traefik to reach them.
+      # ZimaOS/CasaOS typical shared network name: devforge
+      DEVFORGE_DOCKER_NETWORK: ${DEVFORGE_DOCKER_NETWORK:-devforge}
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/api/v1/health || exit 1"]
       interval: 10s
