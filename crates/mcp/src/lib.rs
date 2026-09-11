@@ -1,6 +1,8 @@
 mod catalog;
 mod http_client;
 mod turso;
+#[cfg(test)]
+mod smoke_test;
 
 pub use catalog::{
     catalog, catalog_as_json, find_preset, CatalogField, CatalogPreset, SetupSection,

@@ -40,6 +40,9 @@ pub struct CatalogPreset {
     /// Texte d’aide du modal « Tools MCP » (spécifique au preset).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools_help: Option<String>,
+    /// Mode d'authentification requis pour tools/list : "token" (Bearer API OK), "oauth" (token ne suffit pas), "self_hosted" (URL requise)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_mode: Option<String>,
 }
 
 fn section(title: &str, body: &str) -> SetupSection {
@@ -112,6 +115,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
                 "⚠️ Liste MCP tools distante requiert OAuth (non supporté). Le token Platform configure uniquement les ressources (DBs). Les tools retourneront 401."
                     .into(),
             ),
+                    auth_mode: Some("oauth".into()),
         },
         CatalogPreset {
             id: "cloudflare".into(),
@@ -200,6 +204,7 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
                 "Liste distante JSON-RPC (tools/list) via Streamable HTTP. Jeton Mon profil : Utilisateur → Détails de l'utilisateur → Lu + Paramètres du compte → Lu."
                     .into(),
             ),
+                    auth_mode: Some("token".into()),
         },
         CatalogPreset {
             id: "vercel".into(),
@@ -239,7 +244,11 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             popular: true,
         setup_intro: None,
             setup_sections: None,
-            tools_help: None,
+            tools_help: Some(
+                "Le MCP hébergé Vercel utilise OAuth. Un Access Token API seul peut ne pas suffire pour tools/list."
+                    .into(),
+            ),
+                    auth_mode: Some("oauth".into()),
         },
         CatalogPreset {
             id: "supabase".into(),
@@ -278,7 +287,11 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             popular: true,
         setup_intro: None,
             setup_sections: None,
-            tools_help: None,
+            tools_help: Some(
+                "Personal Access Token (Bearer) fonctionne pour tools/list. OAuth aussi disponible via le dashboard MCP."
+                    .into(),
+            ),
+                    auth_mode: Some("token".into()),
         },
         CatalogPreset {
             id: "neon".into(),
@@ -309,7 +322,11 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             popular: true,
         setup_intro: None,
             setup_sections: None,
-            tools_help: None,
+            tools_help: Some(
+                "API Key (Bearer napi_…) fonctionne pour tools/list. OAuth également supporté."
+                    .into(),
+            ),
+                    auth_mode: Some("token".into()),
         },
         CatalogPreset {
             id: "upstash".into(),
@@ -348,7 +365,11 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             popular: false,
         setup_intro: None,
             setup_sections: None,
-            tools_help: None,
+            tools_help: Some(
+                "Serveur MCP self-hosted requis (pas d'endpoint hébergé officiel). Configure l'URL MCP locale ou distante."
+                    .into(),
+            ),
+                    auth_mode: Some("self_hosted".into()),
         },
         CatalogPreset {
             id: "slack".into(),
@@ -379,7 +400,11 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             popular: true,
         setup_intro: None,
             setup_sections: None,
-            tools_help: None,
+            tools_help: Some(
+                "Serveur MCP self-hosted requis. Bot User OAuth Token (xoxb-…) dans le header Authorization."
+                    .into(),
+            ),
+                    auth_mode: Some("self_hosted".into()),
         },
         CatalogPreset {
             id: "linear".into(),
@@ -410,7 +435,11 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             popular: true,
         setup_intro: None,
             setup_sections: None,
-            tools_help: None,
+            tools_help: Some(
+                "Le MCP hébergé Linear peut exiger OAuth. Un API Key seul peut ne pas suffire."
+                    .into(),
+            ),
+                    auth_mode: Some("oauth".into()),
         },
         CatalogPreset {
             id: "sentry".into(),
@@ -442,7 +471,11 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             popular: true,
         setup_intro: None,
             setup_sections: None,
-            tools_help: None,
+            tools_help: Some(
+                "Le MCP hébergé Sentry utilise principalement OAuth. Auth Token seul peut ne pas suffire."
+                    .into(),
+            ),
+                    auth_mode: Some("oauth".into()),
         },
         CatalogPreset {
             id: "resend".into(),
@@ -473,7 +506,11 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             popular: false,
         setup_intro: None,
             setup_sections: None,
-            tools_help: None,
+            tools_help: Some(
+                "Serveur MCP self-hosted requis (pas d'endpoint hébergé officiel)."
+                    .into(),
+            ),
+                    auth_mode: Some("self_hosted".into()),
         },
         CatalogPreset {
             id: "posthog".into(),
@@ -512,7 +549,11 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             popular: false,
         setup_intro: None,
             setup_sections: None,
-            tools_help: None,
+            tools_help: Some(
+                "Personal API Key (Bearer phx_…) fonctionne pour tools/list."
+                    .into(),
+            ),
+                    auth_mode: Some("token".into()),
         },
         CatalogPreset {
             id: "discord".into(),
@@ -543,7 +584,11 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             popular: false,
         setup_intro: None,
             setup_sections: None,
-            tools_help: None,
+            tools_help: Some(
+                "Serveur MCP self-hosted requis. Bot Token dans le header Authorization."
+                    .into(),
+            ),
+                    auth_mode: Some("self_hosted".into()),
         },
         CatalogPreset {
             id: "railway".into(),
@@ -574,7 +619,11 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             popular: false,
         setup_intro: None,
             setup_sections: None,
-            tools_help: None,
+            tools_help: Some(
+                "Serveur MCP self-hosted requis (pas d'endpoint hébergé officiel)."
+                    .into(),
+            ),
+                    auth_mode: Some("self_hosted".into()),
         },
         CatalogPreset {
             id: "notion".into(),
@@ -605,7 +654,11 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             popular: false,
         setup_intro: None,
             setup_sections: None,
-            tools_help: None,
+            tools_help: Some(
+                "Le MCP hébergé Notion utilise principalement OAuth. Integration Token seul peut ne pas suffire."
+                    .into(),
+            ),
+                    auth_mode: Some("oauth".into()),
         },
         CatalogPreset {
             id: "stripe".into(),
@@ -636,7 +689,11 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             popular: true,
         setup_intro: None,
             setup_sections: None,
-            tools_help: None,
+            tools_help: Some(
+                "Le MCP hébergé Stripe recommande OAuth. Secret Key seul peut ne pas suffire. Voir docs.stripe.com/mcp."
+                    .into(),
+            ),
+                    auth_mode: Some("oauth".into()),
         },
         CatalogPreset {
             id: "github".into(),
@@ -667,7 +724,11 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             popular: false,
         setup_intro: None,
             setup_sections: None,
-            tools_help: None,
+            tools_help: Some(
+                "Personal Access Token (Bearer ghp_… / github_pat_…) fonctionne pour tools/list. MCP Copilot hébergé strict sur Content-Type."
+                    .into(),
+            ),
+                    auth_mode: Some("token".into()),
         },
         CatalogPreset {
             id: "custom".into(),
@@ -700,6 +761,7 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
         setup_intro: None,
             setup_sections: None,
             tools_help: None,
+                    auth_mode: Some("self_hosted".into()),
         },
     ]
 }
