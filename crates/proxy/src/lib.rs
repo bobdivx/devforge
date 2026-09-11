@@ -137,12 +137,15 @@ impl ProxyFacade {
     /// - Name: devforge-traefik
     /// - Network: devforge (created if missing)
     /// - Ports: 80:80, 443:443 (TCP+UDP)
-    /// - Volume: data_dir/proxy for dynamic config & acme.json
+    /// - Volume: HOST path (resolved from DevForge container mount) for dynamic config & acme.json
     /// - Restart: unless-stopped
     /// - Docker provider: exposedbydefault=false, network=devforge
     /// - File provider: /traefik/dynamic/
     /// - Let's Encrypt: HTTP challenge, acme.json storage
     /// - Labels: devforge.managed=true, devforge.proxy=true
+    /// - Extra hosts: host.docker.internal:host-gateway
+    /// - API dashboard: enabled with self-router
+    /// - Ping healthcheck: enabled on http entrypoint
     pub async fn ensure_traefik(&self) -> Result<Value> {
         let executor = self.executor.as_ref().ok_or_else(|| {
             DevForgeError::Message("executor required for ensure_traefik".into())
@@ -196,16 +199,16 @@ impl ProxyFacade {
         );
         executor.exec(&self.apply_server_id, "", &network_cmd, 30).await?;
 
-        // Prepare data directory structure
-        let data_dir = format!("{}/proxy", self.traefik_data_dir);
-        let dynamic_dir = format!("{}/dynamic", data_dir);
-        let acme_file = format!("{}/acme.json", data_dir);
-        
-        let prep_dirs_cmd = format!(
-            r#"mkdir -p {} && touch {} && chmod 600 {}"#,
-            dynamic_dir, acme_file, acme_file
+        // Resolve host path for Traefik data volume
+        // When DevForge runs in Docker with /data bind, we need the HOST path
+        let host_data_path = self.resolve_traefik_host_volume_path(executor).await?;
+
+        // Prepare data directory structure on host (via one-shot container mount)
+        let prep_cmd = format!(
+            r#"docker run --rm -v {}:/mnt alpine sh -c 'mkdir -p /mnt/dynamic && touch /mnt/acme.json && chmod 600 /mnt/acme.json'"#,
+            shell_escape(&host_data_path)
         );
-        executor.exec(&self.apply_server_id, "", &prep_dirs_cmd, 30).await?;
+        executor.exec(&self.apply_server_id, "", &prep_cmd, 60).await?;
 
         // Create Traefik container with full production config
         let create_cmd = format!(
@@ -216,16 +219,17 @@ impl ProxyFacade {
   -p 80:80 \
   -p 443:443 \
   -p 443:443/udp \
+  --add-host host.docker.internal:host-gateway \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   -v {}:/traefik \
   --label devforge.managed=true \
   --label devforge.proxy=true \
   --label traefik.enable=true \
-  --label traefik.http.routers.api.rule='Host(`traefik.local`)' \
+  --label 'traefik.http.routers.api.rule=Host(`traefik.local`)' \
   --label traefik.http.routers.api.service=api@internal \
   --label traefik.http.services.dummy.loadbalancer.server.port=9999 \
   {} \
-  --api.dashboard=false \
+  --api.dashboard=true \
   --log.level=INFO \
   --accesslog=false \
   --entrypoints.http.address=:80 \
@@ -243,7 +247,7 @@ impl ProxyFacade {
   --ping.entrypoint=http"#,
             TRAEFIK_CONTAINER_NAME,
             TRAEFIK_NETWORK,
-            data_dir,
+            shell_escape(&host_data_path),
             TRAEFIK_IMAGE,
             TRAEFIK_NETWORK
         );
@@ -257,7 +261,7 @@ impl ProxyFacade {
                 "container": TRAEFIK_CONTAINER_NAME,
                 "image": TRAEFIK_IMAGE,
                 "network": TRAEFIK_NETWORK,
-                "data_dir": data_dir,
+                "host_data_path": host_data_path,
                 "message": "Traefik container created and started",
                 "container_id": create_res.output.trim()
             }))
@@ -267,6 +271,81 @@ impl ProxyFacade {
                 create_res.output
             )))
         }
+    }
+
+    /// Resolve the host filesystem path for Traefik data volume.
+    /// 
+    /// When DevForge runs inside Docker with a bind mount (e.g. `/DATA/AppData/devforge:/data`),
+    /// the `docker run` command executed via mounted docker.sock needs the **host** path,
+    /// not the container path.
+    /// 
+    /// Strategy:
+    /// 1. Check explicit env override `DEVFORGE_TRAEFIK_HOST_DIR`
+    /// 2. Inspect running DevForge container's mounts where Destination matches `DEVFORGE_DATA_DIR`
+    /// 3. Append `/proxy` (or `/data/proxy` depending on mount layout)
+    /// 4. Fallback to container path (bare metal / non-containerized case)
+    async fn resolve_traefik_host_volume_path(
+        &self,
+        executor: &Arc<dyn RemoteExecutor>,
+    ) -> Result<String> {
+        // 1. Explicit override (for custom deployments)
+        if let Ok(explicit) = std::env::var("DEVFORGE_TRAEFIK_HOST_DIR") {
+            if !explicit.trim().is_empty() {
+                return Ok(explicit.trim().to_string());
+            }
+        }
+
+        // 2. Detect if running in container and find bind mount
+        let container_data_dir = &self.traefik_data_dir;
+        
+        // Try to find DevForge's own container name
+        let self_container = std::env::var("DEVFORGE_SELF_CONTAINER")
+            .or_else(|_| std::env::var("HOSTNAME"))
+            .unwrap_or_else(|_| "devforge".into());
+
+        // Inspect DevForge container mounts
+        let inspect_cmd = format!(
+            r#"docker inspect --format '{{{{json .Mounts}}}}' {} 2>/dev/null || echo '[]'"#,
+            shell_escape(&self_container)
+        );
+        let inspect_res = executor.exec(&self.apply_server_id, "", &inspect_cmd, 30).await?;
+        
+        if inspect_res.ok {
+            if let Ok(mounts) = serde_json::from_str::<Value>(&inspect_res.output) {
+                if let Some(arr) = mounts.as_array() {
+                    // Look for bind mount where Destination contains our data dir
+                    for mount in arr {
+                        let typ = mount.get("Type").and_then(|t| t.as_str()).unwrap_or("");
+                        if typ != "bind" {
+                            continue;
+                        }
+                        let dest = mount.get("Destination")
+                            .or_else(|| mount.get("Target"))
+                            .and_then(|d| d.as_str())
+                            .unwrap_or("");
+                        let src = mount.get("Source").and_then(|s| s.as_str()).unwrap_or("");
+                        
+                        if src.is_empty() {
+                            continue;
+                        }
+
+                        // Match: Destination is /data or contains DEVFORGE_DATA_DIR
+                        if dest == "/data" || dest == container_data_dir.trim_end_matches('/') {
+                            // Host path found, append /proxy (or /data/proxy if Source is parent)
+                            let host_proxy_path = if src.ends_with("/devforge") || src.ends_with("/devforge/") {
+                                format!("{}/data/proxy", src.trim_end_matches('/'))
+                            } else {
+                                format!("{}/proxy", src.trim_end_matches('/'))
+                            };
+                            return Ok(host_proxy_path);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Fallback: use container path (bare metal or unusual setup)
+        Ok(format!("{}/proxy", container_data_dir))
     }
 
     pub async fn list(&self, project_uuid: &str) -> Result<Value> {
@@ -354,6 +433,16 @@ impl ProxyFacade {
             "sso": forward_auth_address.is_some(),
             "note": "executor non branché — labels générés seulement"
         }))
+    }
+}
+
+fn shell_escape(s: &str) -> String {
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '='))
+    {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
     }
 }
 
