@@ -22,7 +22,7 @@ pub fn docker_run(name: &str, image: &str, ports: &[(u16, u16)], env_file: Optio
 /// network Traefik monitors (typically from `DEVFORGE_DOCKER_NETWORK`). Without a shared network,
 /// Traefik can match routes but cannot reach the container → requests hang/timeout.
 ///
-/// Common network names: `devforge-net`, `traefik-public`, `coolify`
+/// Common network names: `devforge-net`, `traefik-public`, or legacy shared proxy network
 ///
 /// Port publishing (`-p`) alone is insufficient for Traefik reverse-proxy; containers must
 /// share a network for Traefik to forward traffic.
@@ -214,7 +214,7 @@ pub fn docker_update_labels(name: &str, labels: &Value) -> String {
 /// Returns shell command that outputs network name or empty string.
 ///
 /// Strategies (in order):
-/// 1. Container name patterns (traefik, coolify (substring), caddy, proxy (substring), zima (substring), casaos (substring))
+/// 1. Container name patterns (traefik, caddy, proxy (substring), zima (substring), casaos (substring))
 /// 2. Container image containing 'traefik'
 /// 3. Containers publishing port 80 or 443 (reverse proxy indicators)
 /// 4. Containers with traefik.enable=true label (proxy itself)
@@ -226,7 +226,7 @@ pub fn docker_update_labels(name: &str, labels: &Value) -> String {
 pub fn docker_detect_traefik_network() -> String {
     r#"sh -c '
 # Strategy 1: Check common proxy container name patterns
-for pattern in traefik coolify caddy proxy devforge zima casaos; do
+for pattern in traefik caddy proxy devforge zima casaos; do
   for cid in $(docker ps -q --filter "name=$pattern" 2>/dev/null); do
     NET=$(docker inspect "$cid" --format "{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
     if [ -n "$NET" ]; then
@@ -274,7 +274,7 @@ done
 
 # Strategy 5: Check for host-network mode proxies
 # If proxy uses NetworkMode=host, return special marker "host-network-detected"
-for pattern in traefik coolify caddy proxy zima casaos; do
+for pattern in traefik caddy proxy zima casaos; do
   for cid in $(docker ps -q --filter "name=$pattern" 2>/dev/null); do
     MODE=$(docker inspect "$cid" --format "{{.HostConfig.NetworkMode}}" 2>/dev/null || echo "")
     if [ "$MODE" = "host" ]; then

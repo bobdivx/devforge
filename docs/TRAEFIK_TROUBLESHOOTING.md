@@ -27,7 +27,7 @@ docker inspect <container-name> --format '{{range $k, $v := .NetworkSettings.Net
 docker inspect traefik --format '{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}'
 ```
 
-**Attendu** : Au moins un réseau commun (ex: `devforge-net`, `traefik-public`, `coolify`)
+**Attendu** : Au moins un réseau commun (ex: `devforge-net`, `traefik-public`, ou legacy proxy network)
 
 **Si aucun réseau partagé** : ⚠️ **C'EST LE PROBLÈME**
 - Traefik match le router mais ne peut pas joindre le container
@@ -36,7 +36,7 @@ docker inspect traefik --format '{{range $k, $v := .NetworkSettings.Networks}}{{
 
 ```bash
 # Fix container existant
-NETWORK=devforge-net  # ou traefik-public, coolify, etc.
+NETWORK=devforge-net  # ou traefik-public, legacy proxy network, etc.
 docker network connect $NETWORK <container-name>
 ```
 
@@ -88,7 +88,7 @@ curl http://traefik:8080/api/http/services | jq '.[] | select(.name == "df-<uuid
 echo $DEVFORGE_DOCKER_NETWORK
 ```
 
-**Attendu** : Non-vide, ex: `devforge-net` ou `traefik-public` ou `coolify`
+**Attendu** : Non-vide, ex: `devforge-net` ou `traefik-public` ou legacy proxy network
 
 **Si vide** : 
 1. Définir dans `/etc/environment` ou systemd service
@@ -96,7 +96,7 @@ echo $DEVFORGE_DOCKER_NETWORK
 3. **Logs deploy afficheront warning** (après PR #48) :
    ```
    [start] WARNING: Traefik labels set but DEVFORGE_DOCKER_NETWORK is empty.
-   [start] WARNING: Set DEVFORGE_DOCKER_NETWORK to 'devforge-net', 'traefik-public', or 'coolify'.
+   [start] WARNING: Set DEVFORGE_DOCKER_NETWORK to 'devforge-net', 'traefik-public', or legacy proxy network.
    ```
 
 ### Vérifier proxy/sync préserve réseau

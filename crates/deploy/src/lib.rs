@@ -1007,7 +1007,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
                 _ => {
                     logs.push_str("[start] Auto-detection strategies failed. Trying fallback network names...\n");
                     // Fallback: try common network names
-                    for candidate in ["coolify", "devforge-net", "traefik-public", "traefik"] {
+                    for candidate in ["devforge-net", "traefik-public", "traefik"] {
                         let check = format!("docker network inspect {} >/dev/null 2>&1 && echo {}", candidate, candidate);
                         if let Ok(r) = self.executor.exec(server, workdir, &check, 5).await {
                             if r.ok && !r.output.trim().is_empty() {
