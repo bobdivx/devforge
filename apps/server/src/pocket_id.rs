@@ -122,6 +122,8 @@ pub fn default_callback_urls(wildcard_domain: &str, instance_url: &str) -> Vec<S
     if !origin.is_empty() {
         urls.push(format!("{origin}/api/auth/callback/pocket-id"));
         urls.push(format!("{origin}/api/auth/callback/pocket-id/"));
+        urls.push(format!("{origin}/api/v1/auth/sso/callback"));
+        urls.push(format!("{origin}/api/v1/auth/sso/callback/"));
     }
     urls
 }
@@ -489,6 +491,12 @@ mod tests {
         assert!(urls
             .iter()
             .any(|u| u == "https://forge.example.com/api/auth/callback/pocket-id"));
+        assert!(urls
+            .iter()
+            .any(|u| u == "https://forge.example.com/api/v1/auth/sso/callback"));
+        assert!(urls
+            .iter()
+            .any(|u| u == "https://forge.example.com/api/v1/auth/sso/callback/"));
     }
 
     #[test]
