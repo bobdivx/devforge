@@ -19,5 +19,10 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "optionalDependencies": {
+    "@astrojs/compiler-binding-linux-x64-gnu": "^0.54.2",
+    "@bruits/satteri-linux-x64-gnu": "^0.10.5",
+    "@rolldown/binding-linux-x64-gnu": "^1.2.8"
   }
 }

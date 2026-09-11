@@ -50,6 +50,7 @@ export function ProjectAgentsPanel({ projectUuid }: { projectUuid: string }) {
   >([]);
   const [busy, setBusy] = useState(false);
   const [llmMode, setLlmMode] = useState<string>('—');
+  const [llmError, setLlmError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   const current = agents.find((a) => a.uuid === selected) ?? null;
@@ -89,10 +90,32 @@ export function ProjectAgentsPanel({ projectUuid }: { projectUuid: string }) {
 
   useEffect(() => {
     void loadAgents();
-    api
-      .health()
-      .then((h) => setLlmMode(h.backends?.llm ?? 'stub'))
-      .catch(() => setLlmMode('offline'));
+    
+    async function checkLlm() {
+      try {
+        const h = await api.health();
+        const mode = h.backends?.llm ?? 'stub';
+        setLlmMode(mode);
+        
+        if (mode === 'stub') {
+          const providers = await api.llmProviders();
+          const unhealthy = providers.data.filter((p) => p.enabled && p.healthy === false);
+          if (unhealthy.length > 0) {
+            const err = unhealthy[0];
+            setLlmError(err.last_probe_error || 'provider unhealthy');
+          } else {
+            setLlmError(null);
+          }
+        } else {
+          setLlmError(null);
+        }
+      } catch {
+        setLlmMode('offline');
+        setLlmError(null);
+      }
+    }
+    
+    void checkLlm();
   }, [projectUuid]);
 
   useEffect(() => {
@@ -219,11 +242,23 @@ export function ProjectAgentsPanel({ projectUuid }: { projectUuid: string }) {
 
           {!llmReady && (
             <Alert tone="warn" class="m-3 mb-0">
-              Aucun LLM prêt — configure Ollama / Gemini dans{' '}
-              <a class="underline" href="/app/settings?tab=llm">
-                Settings → Agents / LLM
-              </a>
-              . Les agents répondront dès qu’un modèle est actif.
+              {llmError ? (
+                <>
+                  LLM configuré mais erreur : <strong>{llmError}</strong> —{' '}
+                  <a class="underline" href="/app/settings?tab=llm">
+                    corrige dans Settings → Agents / LLM
+                  </a>
+                  .
+                </>
+              ) : (
+                <>
+                  Aucun LLM prêt — configure Ollama / Gemini dans{' '}
+                  <a class="underline" href="/app/settings?tab=llm">
+                    Settings → Agents / LLM
+                  </a>
+                  . Les agents répondront dès qu'un modèle est actif.
+                </>
+              )}
             </Alert>
           )}
 
