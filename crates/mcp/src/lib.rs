@@ -42,6 +42,35 @@ pub struct McpServerConfig {
 
 impl McpServerConfig {
     pub fn public_view(&self) -> Value {
+        // Masquer les valeurs des secrets (critique : ne jamais renvoyer Bearer/tokens en clair)
+        let masked_secrets: HashMap<String, String> = self
+            .secrets
+            .iter()
+            .map(|(k, v)| {
+                let hint = if v.len() > 8 {
+                    format!("{}••••{}", &v[..4], &v[v.len() - 4..])
+                } else if v.len() > 4 {
+                    format!("{}••••", &v[..2])
+                } else {
+                    "••••".into()
+                };
+                (k.clone(), hint)
+            })
+            .collect();
+        
+        // Masquer Authorization header (contient souvent Bearer tokens)
+        let masked_headers: HashMap<String, String> = self
+            .headers
+            .iter()
+            .map(|(k, v)| {
+                if k.to_ascii_lowercase() == "authorization" {
+                    (k.clone(), "Bearer ••••".into())
+                } else {
+                    (k.clone(), v.clone())
+                }
+            })
+            .collect();
+        
         json!({
             "id": self.id,
             "name": self.name,
@@ -52,6 +81,8 @@ impl McpServerConfig {
             "workspace_uuid": self.workspace_uuid,
             "has_secrets": !self.secrets.is_empty(),
             "secret_keys": self.secrets.keys().cloned().collect::<Vec<_>>(),
+            "secrets_masked": masked_secrets,
+            "headers": masked_headers,
         })
     }
 
@@ -220,6 +251,12 @@ impl McpClientRegistry {
             {
                 DevForgeError::Message(format!(
                     "{msg}\n→ Jeton créé depuis Mon profil : ajoute Utilisateur → Détails de l'utilisateur → Lu, puis recrée/reconnecte le jeton.\n→ Ou restreins Ressources du compte à un seul compte (surtout pour cfat_)."
+                ))
+            } else if server.catalog_id.as_deref() == Some("turso")
+                && (msg.contains("401") || msg.contains("could not parse jwt") || msg.contains("unauthorized"))
+            {
+                DevForgeError::Message(format!(
+                    "{msg}\n→ Le serveur MCP Turso hébergé (mcp.turso.ai) exige une connexion OAuth, pas un Platform API Token.\n→ Le token Platform sert uniquement à lister et lier les bases de données (resources), pas à appeler les tools MCP.\n→ Pour utiliser les tools MCP Turso, configure l'authentification OAuth (non supporté actuellement dans DevForge)."
                 ))
             } else {
                 e

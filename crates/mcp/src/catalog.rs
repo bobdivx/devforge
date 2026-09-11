@@ -89,7 +89,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
                     true,
                     Some("eyJ…"),
                     Some(
-                        "Turso → Account → API Tokens. Sert à lister/lier les DBs. Les tools MCP hébergés exigent OAuth (pas le token Platform).",
+                        "Turso → Account → API Tokens. IMPORTANT : sert uniquement à lister/lier les DBs (resources). Pour appeler les tools MCP, le serveur Turso hébergé exige OAuth (non supporté actuellement). Les tools retourneront 401.",
                     ),
                 ),
                 field(
@@ -103,10 +103,13 @@ pub fn catalog() -> Vec<CatalogPreset> {
             ],
             resource_kind: Some("database".into()),
             popular: true,
-            setup_intro: None,
+            setup_intro: Some(
+                "⚠️ Limitation : Le serveur MCP Turso hébergé (mcp.turso.ai) exige OAuth pour les tools/list et tools/call. Le token Platform permet uniquement de gérer les ressources (lier des DBs aux projets). Les appels MCP tools retourneront 401 jusqu'à l'implémentation OAuth."
+                    .into(),
+            ),
             setup_sections: None,
             tools_help: Some(
-                "Liste distante JSON-RPC (tools/list). Turso hébergé exige OAuth — le token Platform ne suffit pas."
+                "⚠️ Liste MCP tools distante requiert OAuth (non supporté). Le token Platform configure uniquement les ressources (DBs). Les tools retourneront 401."
                     .into(),
             ),
         },
