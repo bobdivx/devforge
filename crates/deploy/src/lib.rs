@@ -169,6 +169,11 @@ fn resolve_workdir(workdir: &str, project_uuid: &str) -> String {
     abs.to_string_lossy().to_string()
 }
 
+/// Résout le workdir projet (remap `/data/...` → local sous Windows).
+pub fn resolve_project_workdir(workdir: &str, project_uuid: &str) -> String {
+    resolve_workdir(workdir, project_uuid)
+}
+
 fn git_clone_url(repo: &str, token: Option<&str>) -> String {
     let repo = repo.trim().trim_end_matches(".git");
     let https = if repo.starts_with("http://") || repo.starts_with("https://") {

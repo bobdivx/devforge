@@ -47,6 +47,9 @@ export function SsoSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
   const [protectDefault, setProtectDefault] = useState(true);
   const [hideLocal, setHideLocal] = useState(false);
   const [rotateSecret, setRotateSecret] = useState(false);
+  const [logoUrl, setLogoUrl] = useState('');
+  const [backgroundUrl, setBackgroundUrl] = useState('');
+  const [showBranding, setShowBranding] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -64,6 +67,8 @@ export function SsoSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
       setApiToken('');
       setClientSecret('');
       setRotateSecret(false);
+      setLogoUrl('');
+      setBackgroundUrl('');
       setShowProxy(!!(r.config.forward_auth_address || r.config.oauth2_proxy_url));
     } catch (e) {
       toast.push({ title: 'Chargement SSO KO', detail: String(e), tone: 'danger' });
@@ -96,21 +101,27 @@ export function SsoSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
         hide_local_login: hideLocal,
         provision: isPocket && hasToken && !!issuerUrl.trim(),
         rotate_secret: isPocket && rotateSecret,
+        ...(isPocket && logoUrl.trim() ? { logo_url: logoUrl.trim() } : {}),
+        ...(isPocket && backgroundUrl.trim() ? { background_url: backgroundUrl.trim() } : {}),
       });
       setCfg(r.config);
       setApiToken('');
       setClientSecret('');
       setRotateSecret(false);
+      setBackgroundUrl('');
       const p = r.provision;
       if (p && typeof p === 'object' && p.ok) {
         const bits = [
           p.created_client ? 'client créé' : 'client à jour',
           p.created_secret ? 'secret généré' : null,
+          p.logo_set ? 'logo poussé' : null,
+          p.background_set ? 'fond poussé' : null,
         ].filter(Boolean);
+        const warn = Array.isArray(p.branding_warnings) ? p.branding_warnings.filter(Boolean) : [];
         toast.push({
           title: 'Pocket ID connecté',
-          detail: bits.join(' · '),
-          tone: 'ok',
+          detail: [...bits, ...warn].join(' · ') || undefined,
+          tone: warn.length ? 'warn' : 'ok',
         });
       } else {
         toast.push({ title: 'SSO enregistré', tone: 'ok' });
@@ -219,6 +230,33 @@ export function SsoSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
                   />
                   Régénérer le client secret
                 </label>
+                <button
+                  type="button"
+                  class="justify-self-start text-sm text-[var(--muted)] underline-offset-2 hover:underline"
+                  onClick={() => setShowBranding((v) => !v)}
+                >
+                  {showBranding ? 'Masquer branding Pocket ID' : 'Branding Pocket ID (logo / fond)'}
+                </button>
+                {showBranding && (
+                  <div class="grid gap-3 border-t border-[var(--border)] pt-3">
+                    <Input
+                      label="Logo client OIDC (URL, optionnel)"
+                      placeholder="Par défaut : {URL instance}/favicon.svg"
+                      value={logoUrl}
+                      onInput={(e) => setLogoUrl((e.target as HTMLInputElement).value)}
+                    />
+                    <Input
+                      label="Image de fond login Pocket ID (URL)"
+                      placeholder="https://cdn.example.com/bg.jpg"
+                      value={backgroundUrl}
+                      onInput={(e) => setBackgroundUrl((e.target as HTMLInputElement).value)}
+                    />
+                    <p class="text-xs text-[var(--muted)]">
+                      Le logo est poussé sur le client OIDC DevForge. Le fond s’applique à l’écran de
+                      login Pocket ID (instance entière). Pocket ID doit pouvoir télécharger ces URLs.
+                    </p>
+                  </div>
+                )}
               </>
             ) : (
               <div class="grid gap-3 md:grid-cols-2">
@@ -297,7 +335,7 @@ export function SsoSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
         </Card>
         <Alert tone="info">
           {isPocket
-            ? 'Pocket ID : une clé API admin crée le client OIDC automatiquement.'
+            ? 'Pocket ID : une clé API admin crée le client OIDC automatiquement (logo DevForge inclus).'
             : 'OIDC générique : authentik, Keycloak, Authelia, Zitadel, etc. — saisis issuer + client ID/secret.'}{' '}
           Middleware Traefik : <code>{cfg?.middleware_name || 'devforge-sso-auth'}</code>. Sur chaque
           projet : Settings → SSO.

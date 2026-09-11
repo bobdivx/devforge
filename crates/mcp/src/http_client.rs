@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use devforge_shared::{DevForgeError, Result};
 use serde_json::{json, Value};
 
-/// Client MCP HTTP minimal (JSON-RPC POST). Pas de simulation : erreur claire si KO.
+/// Client MCP HTTP (Streamable HTTP : JSON-RPC POST + Accept SSE/JSON).
 pub struct HttpMcpRemoteClient {
     http: reqwest::Client,
 }
@@ -12,13 +12,70 @@ impl HttpMcpRemoteClient {
     pub fn new() -> Self {
         Self {
             http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(20))
+                .timeout(std::time::Duration::from_secs(45))
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new()),
         }
     }
 
-    async fn rpc(&self, server: &McpServerConfig, method: &str, params: Value) -> Result<Value> {
+    fn apply_auth(
+        mut req: reqwest::RequestBuilder,
+        server: &McpServerConfig,
+        session_id: Option<&str>,
+    ) -> reqwest::RequestBuilder {
+        req = req
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .header("MCP-Protocol-Version", "2025-03-26");
+        for (k, v) in &server.headers {
+            // Ne pas écraser Accept / Content-Type posés ci-dessus.
+            let key = k.to_ascii_lowercase();
+            if key == "accept" || key == "content-type" {
+                continue;
+            }
+            req = req.header(k.as_str(), v.as_str());
+        }
+        if let Some(sid) = session_id {
+            req = req.header("Mcp-Session-Id", sid);
+        }
+        req
+    }
+
+    /// Extrait le dernier JSON-RPC `result`/`error` d’un flux SSE (`data: {...}`).
+    fn parse_sse_jsonrpc(text: &str) -> Result<Value> {
+        let mut last: Option<Value> = None;
+        for line in text.lines() {
+            let Some(data) = line.strip_prefix("data:") else {
+                continue;
+            };
+            let data = data.trim();
+            if data.is_empty() || data == "[DONE]" {
+                continue;
+            }
+            if let Ok(v) = serde_json::from_str::<Value>(data) {
+                if v.get("result").is_some() || v.get("error").is_some() {
+                    last = Some(v);
+                } else if last.is_none() {
+                    last = Some(v);
+                }
+            }
+        }
+        last.ok_or_else(|| {
+            DevForgeError::Message(format!(
+                "Réponse SSE MCP sans JSON-RPC: {}",
+                text.chars().take(200).collect::<String>()
+            ))
+        })
+    }
+
+    async fn post_rpc(
+        &self,
+        server: &McpServerConfig,
+        method: &str,
+        params: Value,
+        session_id: Option<&str>,
+        id: u64,
+    ) -> Result<(Value, Option<String>)> {
         if server.url.trim().is_empty() {
             return Err(DevForgeError::Message(
                 "URL MCP vide — configure l’endpoint du serveur".into(),
@@ -26,34 +83,121 @@ impl HttpMcpRemoteClient {
         }
         let body = json!({
             "jsonrpc": "2.0",
-            "id": 1,
+            "id": id,
             "method": method,
             "params": params,
         });
-        let mut req = self.http.post(&server.url).json(&body);
-        for (k, v) in &server.headers {
-            req = req.header(k.as_str(), v.as_str());
+        let req = Self::apply_auth(self.http.post(&server.url).json(&body), server, session_id);
+        let res = req
+            .send()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("MCP HTTP {}: {e}", server.url)))?;
+
+        let status = res.status();
+        let new_session = res
+            .headers()
+            .get("mcp-session-id")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        let content_type = res
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let text = res.text().await.unwrap_or_default();
+
+        if !status.is_success() {
+            return Err(DevForgeError::Message(format!(
+                "MCP {} → HTTP {status}: {}",
+                server.name,
+                text.chars().take(280).collect::<String>()
+            )));
         }
+
+        let v = if content_type.contains("text/event-stream") || text.contains("\ndata:") {
+            Self::parse_sse_jsonrpc(&text)?
+        } else {
+            serde_json::from_str(&text).map_err(|e| {
+                DevForgeError::Message(format!(
+                    "Réponse MCP invalide: {e} — {}",
+                    text.chars().take(160).collect::<String>()
+                ))
+            })?
+        };
+
+        if let Some(err) = v.get("error") {
+            return Err(DevForgeError::Message(format!("MCP error: {err}")));
+        }
+        Ok((v.get("result").cloned().unwrap_or(v), new_session))
+    }
+
+    async fn post_notification(
+        &self,
+        server: &McpServerConfig,
+        method: &str,
+        params: Value,
+        session_id: Option<&str>,
+    ) -> Result<()> {
+        let body = json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        });
+        let req = Self::apply_auth(self.http.post(&server.url).json(&body), server, session_id);
         let res = req
             .send()
             .await
             .map_err(|e| DevForgeError::Message(format!("MCP HTTP {}: {e}", server.url)))?;
         let status = res.status();
-        let text = res.text().await.unwrap_or_default();
-        if !status.is_success() {
+        // 202 Accepted (spec) ou 200 selon les implémentations.
+        if !(status.is_success() || status.as_u16() == 202) {
+            let text = res.text().await.unwrap_or_default();
             return Err(DevForgeError::Message(format!(
-                "MCP {} → HTTP {status}: {}",
+                "MCP {} notification {method} → HTTP {status}: {}",
                 server.name,
-                text.chars().take(240).collect::<String>()
+                text.chars().take(200).collect::<String>()
             )));
         }
-        let v: Value = serde_json::from_str(&text).map_err(|e| {
-            DevForgeError::Message(format!("Réponse MCP invalide: {e}"))
-        })?;
-        if let Some(err) = v.get("error") {
-            return Err(DevForgeError::Message(format!("MCP error: {err}")));
-        }
-        Ok(v.get("result").cloned().unwrap_or(v))
+        Ok(())
+    }
+
+    /// Handshake Streamable HTTP puis exécute la méthode.
+    async fn rpc(&self, server: &McpServerConfig, method: &str, params: Value) -> Result<Value> {
+        let (init, session) = self
+            .post_rpc(
+                server,
+                "initialize",
+                json!({
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {
+                        "name": "devforge",
+                        "version": env!("CARGO_PKG_VERSION"),
+                    }
+                }),
+                None,
+                1,
+            )
+            .await?;
+
+        let session_id = session.as_deref();
+        let _ = init; // capabilities serveur ignorées pour list/call
+
+        // Notification (pas d’id) — certaines plateformes l’exigent avant tools/*.
+        let _ = self
+            .post_notification(
+                server,
+                "notifications/initialized",
+                json!({}),
+                session_id,
+            )
+            .await;
+
+        let (result, _) = self
+            .post_rpc(server, method, params, session_id, 2)
+            .await?;
+        Ok(result)
     }
 }
 

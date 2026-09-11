@@ -12,6 +12,14 @@ pub struct CatalogField {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetupSection {
+    /// Titre = libellé exact de la section dans le dashboard (ex. « Autorisations »).
+    pub title: String,
+    /// Contenu court, une consigne par ligne.
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogPreset {
     pub id: String,
     pub name: String,
@@ -23,9 +31,22 @@ pub struct CatalogPreset {
     /// e.g. "database" — enables resource linking UI
     pub resource_kind: Option<String>,
     pub popular: bool,
-    /// Guide affiché dans le modal de config (étapes jeton, scopes, pièges).
+    /// Chemin court vers l’écran de config (au-dessus des sections).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub setup_notes: Option<String>,
+    pub setup_intro: Option<String>,
+    /// Sections alignées sur l’UI du fournisseur (une carte = un bloc du formulaire).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup_sections: Option<Vec<SetupSection>>,
+    /// Texte d’aide du modal « Tools MCP » (spécifique au preset).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools_help: Option<String>,
+}
+
+fn section(title: &str, body: &str) -> SetupSection {
+    SetupSection {
+        title: title.into(),
+        body: body.into(),
+    }
 }
 
 fn field(
@@ -82,7 +103,12 @@ pub fn catalog() -> Vec<CatalogPreset> {
             ],
             resource_kind: Some("database".into()),
             popular: true,
-        setup_notes: None,
+            setup_intro: None,
+            setup_sections: None,
+            tools_help: Some(
+                "Liste distante JSON-RPC (tools/list). Turso hébergé exige OAuth — le token Platform ne suffit pas."
+                    .into(),
+            ),
         },
         CatalogPreset {
             id: "cloudflare".into(),
@@ -104,7 +130,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
                     true,
                     Some("cfat_…"),
                     Some(
-                        "Profil → API Tokens → Create Token (Custom). Pas un jeton « compte entier ». Copie-le une seule fois.",
+                        "Mon profil → Jetons API → Créer un jeton → Créer un jeton personnalisé. Copie-le une seule fois.",
                     ),
                 ),
                 field(
@@ -114,7 +140,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
                     false,
                     Some("32 hex chars"),
                     Some(
-                        "Dashboard Cloudflare → barre latérale droite / overview du compte. Affiché aussi après création du jeton.",
+                        "Dashboard Cloudflare → barre latérale droite / aperçu du compte. Affiché aussi après création du jeton.",
                     ),
                 ),
                 field(
@@ -128,21 +154,47 @@ pub fn catalog() -> Vec<CatalogPreset> {
             ],
             resource_kind: None,
             popular: true,
-            setup_notes: Some(
-                "Créer le jeton (droits minimaux)\n\
-• Cloudflare → My Profile → API Tokens → Create Token → Custom token\n\
-• Account → Cloudflare Tunnel → Edit\n\
-• Account → Account Settings → Read (optionnel)\n\
-• Zone → DNS → Edit\n\
-• Zone → Zone → Read\n\
-• Zone Resources : seulement tes zones apps (ex. jeser.app), pas « All zones »\n\
-• Client IP Filtering : laisser vide (sinon le NAS / MCP hébergé sera bloqué)\n\
-• Ne colle jamais le jeton dans un chat / ticket / commit\n\
-\n\
-Dans ce formulaire\n\
-• API Token = Bearer cfat_… (secret)\n\
-• Account ID = id du compte (pas secret)\n\
-• Les clés S3/R2 affichées à la création du jeton ne sont PAS nécessaires ici"
+            setup_intro: Some(
+                "Cloudflare → Mon profil → Jetons API → Créer un jeton → Créer un jeton personnalisé"
+                    .into(),
+            ),
+            setup_sections: Some(vec![
+                section("Nom du jeton", "devforge"),
+                section(
+                    "Autorisations",
+                    "Utilisateur  ·  Détails de l'utilisateur  ·  Lu\n\
+  ↑ obligatoire (jeton « Mon profil ») — sinon tools/list → 403\n\
+Compte  ·  Paramètres du compte  ·  Lu\n\
+Compte  ·  Cloudflare Tunnel  ·  Modifier\n\
+Zone    ·  DNS                  ·  Modifier",
+                ),
+                section(
+                    "Ressources du compte",
+                    "Inclure  ·  un seul compte (pas « Tous les comptes »)\n\
+Les jetons compte (cfat_) doivent résoudre exactement 1 compte",
+                ),
+                section(
+                    "Ressources de la zone",
+                    "Inclure  ·  ta zone app (ex. jeser.app)\nÉviter « Toutes les zones » si possible",
+                ),
+                section(
+                    "Filtrage d'adresse IP client",
+                    "Laisser vide\n(sinon le NAS / MCP hébergé sera bloqué)",
+                ),
+                section("TTL", "Laisser vide"),
+                section(
+                    "Ensuite",
+                    "Continuer vers le résumé → Créer le jeton\nNe jamais coller le jeton dans un chat / ticket / commit",
+                ),
+                section(
+                    "Dans ce formulaire DevForge",
+                    "API Token = le secret affiché une seule fois\n\
+Account ID = id du compte (pas secret)\n\
+Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
+                ),
+            ]),
+            tools_help: Some(
+                "Liste distante JSON-RPC (tools/list) via Streamable HTTP. Jeton Mon profil : Utilisateur → Détails de l'utilisateur → Lu + Paramètres du compte → Lu."
                     .into(),
             ),
         },
@@ -182,7 +234,9 @@ Dans ce formulaire\n\
             ],
             resource_kind: None,
             popular: true,
-        setup_notes: None,
+        setup_intro: None,
+            setup_sections: None,
+            tools_help: None,
         },
         CatalogPreset {
             id: "supabase".into(),
@@ -219,7 +273,9 @@ Dans ce formulaire\n\
             ],
             resource_kind: Some("database".into()),
             popular: true,
-        setup_notes: None,
+        setup_intro: None,
+            setup_sections: None,
+            tools_help: None,
         },
         CatalogPreset {
             id: "neon".into(),
@@ -248,7 +304,9 @@ Dans ce formulaire\n\
             ],
             resource_kind: Some("database".into()),
             popular: true,
-        setup_notes: None,
+        setup_intro: None,
+            setup_sections: None,
+            tools_help: None,
         },
         CatalogPreset {
             id: "upstash".into(),
@@ -285,7 +343,9 @@ Dans ce formulaire\n\
             ],
             resource_kind: None,
             popular: false,
-        setup_notes: None,
+        setup_intro: None,
+            setup_sections: None,
+            tools_help: None,
         },
         CatalogPreset {
             id: "slack".into(),
@@ -314,7 +374,9 @@ Dans ce formulaire\n\
             ],
             resource_kind: None,
             popular: true,
-        setup_notes: None,
+        setup_intro: None,
+            setup_sections: None,
+            tools_help: None,
         },
         CatalogPreset {
             id: "linear".into(),
@@ -343,7 +405,9 @@ Dans ce formulaire\n\
             ],
             resource_kind: None,
             popular: true,
-        setup_notes: None,
+        setup_intro: None,
+            setup_sections: None,
+            tools_help: None,
         },
         CatalogPreset {
             id: "sentry".into(),
@@ -373,7 +437,9 @@ Dans ce formulaire\n\
             ],
             resource_kind: None,
             popular: true,
-        setup_notes: None,
+        setup_intro: None,
+            setup_sections: None,
+            tools_help: None,
         },
         CatalogPreset {
             id: "resend".into(),
@@ -402,7 +468,9 @@ Dans ce formulaire\n\
             ],
             resource_kind: None,
             popular: false,
-        setup_notes: None,
+        setup_intro: None,
+            setup_sections: None,
+            tools_help: None,
         },
         CatalogPreset {
             id: "posthog".into(),
@@ -439,7 +507,9 @@ Dans ce formulaire\n\
             ],
             resource_kind: None,
             popular: false,
-        setup_notes: None,
+        setup_intro: None,
+            setup_sections: None,
+            tools_help: None,
         },
         CatalogPreset {
             id: "discord".into(),
@@ -468,7 +538,9 @@ Dans ce formulaire\n\
             ],
             resource_kind: None,
             popular: false,
-        setup_notes: None,
+        setup_intro: None,
+            setup_sections: None,
+            tools_help: None,
         },
         CatalogPreset {
             id: "railway".into(),
@@ -497,7 +569,9 @@ Dans ce formulaire\n\
             ],
             resource_kind: None,
             popular: false,
-        setup_notes: None,
+        setup_intro: None,
+            setup_sections: None,
+            tools_help: None,
         },
         CatalogPreset {
             id: "notion".into(),
@@ -526,7 +600,9 @@ Dans ce formulaire\n\
             ],
             resource_kind: None,
             popular: false,
-        setup_notes: None,
+        setup_intro: None,
+            setup_sections: None,
+            tools_help: None,
         },
         CatalogPreset {
             id: "stripe".into(),
@@ -555,7 +631,9 @@ Dans ce formulaire\n\
             ],
             resource_kind: None,
             popular: true,
-        setup_notes: None,
+        setup_intro: None,
+            setup_sections: None,
+            tools_help: None,
         },
         CatalogPreset {
             id: "github".into(),
@@ -584,7 +662,9 @@ Dans ce formulaire\n\
             ],
             resource_kind: None,
             popular: false,
-        setup_notes: None,
+        setup_intro: None,
+            setup_sections: None,
+            tools_help: None,
         },
         CatalogPreset {
             id: "custom".into(),
@@ -614,7 +694,9 @@ Dans ce formulaire\n\
             ],
             resource_kind: None,
             popular: false,
-        setup_notes: None,
+        setup_intro: None,
+            setup_sections: None,
+            tools_help: None,
         },
     ]
 }

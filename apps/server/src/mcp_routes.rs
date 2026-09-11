@@ -184,9 +184,12 @@ async fn upsert_mcp_server(
             .or_else(|| secrets.get("secret_key"))
             .or_else(|| secrets.get("integration_token"))
         {
-            headers_map
-                .entry("Authorization".into())
-                .or_insert_with(|| format!("Bearer {tok}"));
+            let bearer = if tok.starts_with("Bearer ") {
+                tok.clone()
+            } else {
+                format!("Bearer {tok}")
+            };
+            headers_map.insert("Authorization".into(), bearer);
         }
     }
 

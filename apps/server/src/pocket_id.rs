@@ -5,12 +5,25 @@ use serde_json::{json, Value};
 
 pub const DEFAULT_CLIENT_ID: &str = "devforge";
 
+#[derive(Debug, Clone, Default)]
+pub struct BrandingUrls {
+    /// Logo clair du client OIDC (URL téléchargeable par Pocket ID).
+    pub logo_url: Option<String>,
+    /// Logo sombre du client OIDC.
+    pub dark_logo_url: Option<String>,
+    /// Fond d’écran login Pocket ID (application-images/background).
+    pub background_url: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ProvisionResult {
     pub client_id: String,
     pub client_secret: Option<String>,
     pub created_client: bool,
     pub created_secret: bool,
+    pub logo_set: bool,
+    pub background_set: bool,
+    pub branding_warnings: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -74,6 +87,10 @@ struct ClientUpsertBody<'a> {
     #[serde(rename = "launchURL", skip_serializing_if = "Option::is_none")]
     launch_url: Option<&'a str>,
     description: &'a str,
+    #[serde(rename = "logoUrl", skip_serializing_if = "Option::is_none")]
+    logo_url: Option<&'a str>,
+    #[serde(rename = "darkLogoUrl", skip_serializing_if = "Option::is_none")]
+    dark_logo_url: Option<&'a str>,
 }
 
 fn http() -> reqwest::Client {
@@ -158,6 +175,8 @@ fn upsert_payload<'a>(
     client_id: &'a str,
     callbacks: &'a [String],
     launch_url: Option<&'a str>,
+    logo_url: Option<&'a str>,
+    dark_logo_url: Option<&'a str>,
     include_id: bool,
 ) -> ClientUpsertBody<'a> {
     ClientUpsertBody {
@@ -170,6 +189,18 @@ fn upsert_payload<'a>(
         requires_reauthentication: false,
         launch_url,
         description: "Client OIDC provisionné par DevForge",
+        logo_url,
+        dark_logo_url,
+    }
+}
+
+/// Logo public DevForge à partir de l’URL d’instance (favicon.svg).
+pub fn default_logo_url(instance_url: &str) -> Option<String> {
+    let origin = instance_url.trim().trim_end_matches('/');
+    if origin.is_empty() {
+        None
+    } else {
+        Some(format!("{origin}/favicon.svg"))
     }
 }
 
@@ -179,10 +210,19 @@ async fn create_client(
     client_id: &str,
     callbacks: &[String],
     launch_url: Option<&str>,
+    logo_url: Option<&str>,
+    dark_logo_url: Option<&str>,
 ) -> Result<ClientDto, PocketIdError> {
     let url = format!("{base}/api/oidc/clients");
-    let body = serde_json::to_value(upsert_payload(client_id, callbacks, launch_url, true))
-        .map_err(|e| PocketIdError::msg(e.to_string()))?;
+    let body = serde_json::to_value(upsert_payload(
+        client_id,
+        callbacks,
+        launch_url,
+        logo_url,
+        dark_logo_url,
+        true,
+    ))
+    .map_err(|e| PocketIdError::msg(e.to_string()))?;
     let (status, val) = request_json(reqwest::Method::POST, &url, api_key, Some(body)).await?;
     if !(200..300).contains(&status) {
         return Err(PocketIdError::http(status, &val.to_string()));
@@ -197,13 +237,112 @@ async fn update_client(
     client_id: &str,
     callbacks: &[String],
     launch_url: Option<&str>,
+    logo_url: Option<&str>,
+    dark_logo_url: Option<&str>,
 ) -> Result<(), PocketIdError> {
     let url = format!("{base}/api/oidc/clients/{client_id}");
-    let body = serde_json::to_value(upsert_payload(client_id, callbacks, launch_url, false))
-        .map_err(|e| PocketIdError::msg(e.to_string()))?;
+    let body = serde_json::to_value(upsert_payload(
+        client_id,
+        callbacks,
+        launch_url,
+        logo_url,
+        dark_logo_url,
+        false,
+    ))
+    .map_err(|e| PocketIdError::msg(e.to_string()))?;
     let (status, val) = request_json(reqwest::Method::PUT, &url, api_key, Some(body)).await?;
     if !(200..300).contains(&status) {
         return Err(PocketIdError::http(status, &val.to_string()));
+    }
+    Ok(())
+}
+
+fn filename_from_url_and_ctype(url: &str, content_type: &str) -> String {
+    let from_url = url
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .split('?')
+        .next()
+        .unwrap_or("")
+        .trim();
+    if from_url.contains('.') && from_url.len() < 120 {
+        return from_url.to_string();
+    }
+    let ext = if content_type.contains("svg") {
+        "svg"
+    } else if content_type.contains("webp") {
+        "webp"
+    } else if content_type.contains("png") {
+        "png"
+    } else if content_type.contains("jpeg") || content_type.contains("jpg") {
+        "jpg"
+    } else {
+        "bin"
+    };
+    format!("background.{ext}")
+}
+
+/// Télécharge une image puis l’upload en fond Pocket ID (multipart).
+async fn upload_background_from_url(
+    base: &str,
+    api_key: &str,
+    image_url: &str,
+) -> Result<(), PocketIdError> {
+    let url = image_url.trim();
+    if url.is_empty() {
+        return Err(PocketIdError::msg("URL fond manquante"));
+    }
+    let client = http();
+    let res = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| PocketIdError::msg(format!("Téléchargement fond KO: {e}")))?;
+    if !res.status().is_success() {
+        return Err(PocketIdError::msg(format!(
+            "Téléchargement fond HTTP {}",
+            res.status().as_u16()
+        )));
+    }
+    let ctype = res
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .to_string();
+    let bytes = res
+        .bytes()
+        .await
+        .map_err(|e| PocketIdError::msg(format!("Lecture fond KO: {e}")))?;
+    if bytes.is_empty() {
+        return Err(PocketIdError::msg("Image de fond vide"));
+    }
+    if bytes.len() > 8 * 1024 * 1024 {
+        return Err(PocketIdError::msg("Image de fond trop volumineuse (>8 Mo)"));
+    }
+    let filename = filename_from_url_and_ctype(url, &ctype);
+    let data = bytes.to_vec();
+    let part = match reqwest::multipart::Part::bytes(data.clone())
+        .file_name(filename.clone())
+        .mime_str(&ctype)
+    {
+        Ok(p) => p,
+        Err(_) => reqwest::multipart::Part::bytes(data).file_name(filename),
+    };
+    let form = reqwest::multipart::Form::new().part("file", part);
+    let put_url = format!("{base}/api/application-images/background");
+    let put = client
+        .put(&put_url)
+        .header("X-API-Key", api_key)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| PocketIdError::msg(format!("Upload fond Pocket ID KO: {e}")))?;
+    let status = put.status().as_u16();
+    if !(200..300).contains(&status) {
+        let body = put.text().await.unwrap_or_default();
+        return Err(PocketIdError::http(status, &body));
     }
     Ok(())
 }
@@ -250,6 +389,7 @@ pub async fn provision_oidc_client(
     callback_urls: &[String],
     launch_url: Option<&str>,
     need_secret: bool,
+    branding: &BrandingUrls,
 ) -> Result<ProvisionResult, PocketIdError> {
     let base = normalize_base(pocket_id_url);
     if base.is_empty() {
@@ -265,14 +405,47 @@ pub async fn provision_oidc_client(
         client_id.trim()
     };
 
+    let logo = branding
+        .logo_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let dark_logo = branding
+        .dark_logo_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or(logo);
+
     let existing = get_client(&base, key, id).await?;
     let created_client = if let Some(c) = existing {
-        update_client(&base, key, &c.id, callback_urls, launch_url).await?;
+        update_client(
+            &base,
+            key,
+            &c.id,
+            callback_urls,
+            launch_url,
+            logo,
+            dark_logo,
+        )
+        .await?;
         false
     } else {
-        let _ = create_client(&base, key, id, callback_urls, launch_url).await?;
+        let _ = create_client(
+            &base,
+            key,
+            id,
+            callback_urls,
+            launch_url,
+            logo,
+            dark_logo,
+        )
+        .await?;
         true
     };
+
+    let logo_set = logo.is_some();
+    let mut branding_warnings = Vec::new();
 
     let (client_secret, created_secret) = if need_secret {
         let secret = create_secret(&base, key, id).await?;
@@ -281,11 +454,27 @@ pub async fn provision_oidc_client(
         (None, false)
     };
 
+    let mut background_set = false;
+    if let Some(bg) = branding
+        .background_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        match upload_background_from_url(&base, key, bg).await {
+            Ok(()) => background_set = true,
+            Err(e) => branding_warnings.push(format!("Fond: {e}")),
+        }
+    }
+
     Ok(ProvisionResult {
         client_id: id.to_string(),
         client_secret,
         created_client,
         created_secret,
+        logo_set,
+        background_set,
+        branding_warnings,
     })
 }
 
@@ -300,5 +489,14 @@ mod tests {
         assert!(urls
             .iter()
             .any(|u| u == "https://forge.example.com/api/auth/callback/pocket-id"));
+    }
+
+    #[test]
+    fn default_logo_from_instance() {
+        assert_eq!(
+            default_logo_url("https://forge.example.com/"),
+            Some("https://forge.example.com/favicon.svg".into())
+        );
+        assert_eq!(default_logo_url(""), None);
     }
 }

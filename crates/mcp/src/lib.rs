@@ -2,7 +2,9 @@ mod catalog;
 mod http_client;
 mod turso;
 
-pub use catalog::{catalog, catalog_as_json, find_preset, CatalogField, CatalogPreset};
+pub use catalog::{
+    catalog, catalog_as_json, find_preset, CatalogField, CatalogPreset, SetupSection,
+};
 pub use http_client::HttpMcpRemoteClient;
 pub use turso::{create_db_token, libsql_url, list_databases, TursoDatabase};
 
@@ -56,6 +58,8 @@ impl McpServerConfig {
     pub fn api_token(&self) -> Option<&str> {
         self.secrets
             .get("api_token")
+            .or_else(|| self.secrets.get("api_key"))
+            .or_else(|| self.secrets.get("access_token"))
             .or_else(|| self.secrets.get("bot_token"))
             .or_else(|| self.secrets.get("token"))
             .or_else(|| self.secrets.get("auth_token"))
@@ -191,7 +195,7 @@ impl McpClientRegistry {
     }
 
     pub async fn list_remote_tools(&self, server_id: &str) -> Result<Vec<RemoteTool>> {
-        let server = self
+        let mut server = self
             .get(server_id)
             .await
             .ok_or_else(|| DevForgeError::NotFound(format!("MCP server: {server_id}")))?;
@@ -200,7 +204,27 @@ impl McpClientRegistry {
                 "MCP server désactivé: {server_id}"
             )));
         }
-        self.client.list_tools(&server).await
+        // Toujours dériver Authorization du secret (évite un header stale).
+        if let Some(tok) = server.api_token() {
+            let bearer = if tok.starts_with("Bearer ") {
+                tok.to_string()
+            } else {
+                format!("Bearer {tok}")
+            };
+            server.headers.insert("Authorization".into(), bearer);
+        }
+        self.client.list_tools(&server).await.map_err(|e| {
+            let msg = e.to_string();
+            if server.catalog_id.as_deref() == Some("cloudflare")
+                && (msg.contains("insufficient_scope") || msg.contains("403"))
+            {
+                DevForgeError::Message(format!(
+                    "{msg}\n→ Jeton créé depuis Mon profil : ajoute Utilisateur → Détails de l'utilisateur → Lu, puis recrée/reconnecte le jeton.\n→ Ou restreins Ressources du compte à un seul compte (surtout pour cfat_)."
+                ))
+            } else {
+                e
+            }
+        })
     }
 
     pub async fn call_remote_tool(

@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, type ProjectSync } from '../lib/api';
 import { projectSyncMeta } from '../lib/status';
+import { DiffViewer, type DiffFile } from './DiffViewer';
 import {
-  Alert,
   Badge,
   Button,
   Card,
-  CardHeader,
   FadeIn,
   Spinner,
   useToast,
@@ -33,6 +32,7 @@ type GitStatus = {
     html_url?: string | null;
     error?: string;
     ahead_by_remote?: number;
+    files_count?: number;
   };
   workdir?: {
     available: boolean;
@@ -41,6 +41,8 @@ type GitStatus = {
     head?: string | null;
     note?: string | null;
     reason?: string;
+    path?: string;
+    configured?: string;
   };
 };
 
@@ -71,6 +73,13 @@ export function ProjectGitPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [diffOpen, setDiffOpen] = useState(false);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffError, setDiffError] = useState<string | null>(null);
+  const [diffTitle, setDiffTitle] = useState('Diff');
+  const [diffDesc, setDiffDesc] = useState<string | undefined>();
+  const [diffFiles, setDiffFiles] = useState<DiffFile[]>([]);
+
   async function load() {
     setLoading(true);
     try {
@@ -88,30 +97,64 @@ export function ProjectGitPanel({
     void load();
   }, [projectUuid]);
 
+  async function openDiff(source: 'sync' | 'workdir', path?: string) {
+    setDiffOpen(true);
+    setDiffLoading(true);
+    setDiffError(null);
+    setDiffFiles([]);
+    setDiffTitle(source === 'workdir' ? 'Modifications locales' : 'À déployer');
+    setDiffDesc(undefined);
+    try {
+      const r = await api.projectGitDiff(projectUuid, source, path);
+      if (r.title) setDiffTitle(r.title);
+      setDiffFiles(r.files ?? []);
+    } catch (e) {
+      setDiffError(String(e));
+    } finally {
+      setDiffLoading(false);
+    }
+  }
+
   async function deploy() {
     setBusy(true);
     try {
       await api.createDeployment(projectUuid, { git_message: 'Deploy depuis onglet Git' });
-      toast.push({
-        title: 'Déploiement lancé',
-        detail: 'Le tip GitHub va être tiré puis rebuild.',
-        tone: 'ok',
-      });
+      toast.push({ title: 'Déploiement lancé', tone: 'ok' });
       onDeployed?.();
       await load();
     } catch (e) {
-      toast.push({ title: 'Deploy KO', detail: String(e), tone: 'danger' });
+      toast.push({ title: 'Déploiement impossible', detail: String(e), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revertUndeployed() {
+    if (
+      !confirm(
+        'Retirer ces commits de la branche GitHub ?\nLa branche revient au tip déjà en production.',
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await api.projectGitRevertUndeployed(projectUuid);
+      toast.push({
+        title: r.ok ? 'Branche rétablie' : 'Échec',
+        detail: r.message,
+        tone: r.ok ? 'ok' : 'danger',
+      });
+      await load();
+    } catch (e) {
+      toast.push({ title: 'Annulation impossible', detail: String(e), tone: 'danger' });
     } finally {
       setBusy(false);
     }
   }
 
   async function discardLocal() {
-    if (
-      !confirm(
-        'Annuler toutes les modifications locales du workdir ? (git reset --hard + clean). Irréversible.',
-      )
-    ) {
+    if (!confirm('Jeter toutes les modifications locales ? Irréversible.')) {
       return;
     }
     setBusy(true);
@@ -124,7 +167,7 @@ export function ProjectGitPanel({
       });
       await load();
     } catch (e) {
-      toast.push({ title: 'Discard KO', detail: String(e), tone: 'danger' });
+      toast.push({ title: 'Discard impossible', detail: String(e), tone: 'danger' });
     } finally {
       setBusy(false);
     }
@@ -139,18 +182,14 @@ export function ProjectGitPanel({
   }
 
   if (error) {
-    return (
-      <Alert tone="warn" class="mb-4">
-        {error}
-      </Alert>
-    );
+    return <p class="text-sm text-rose-300">{error}</p>;
   }
 
   if (data?.available === false) {
     return (
-      <Alert tone="warn">
-        Lie un dépôt GitHub pour suivre les commits et le workdir.
-      </Alert>
+      <p class="text-sm text-[var(--color-ink-muted)]">
+        Lie un dépôt GitHub pour suivre commits et workdir.
+      </p>
     );
   }
 
@@ -159,146 +198,178 @@ export function ProjectGitPanel({
   const commits = sync?.commits ?? [];
   const workdir = data?.workdir;
   const behind = sync?.state === 'behind';
+  const repoLabel =
+    data?.owner && data?.repo
+      ? `${data.owner}/${data.repo}${data.branch ? ` · ${data.branch}` : ''}`
+      : null;
 
   return (
-    <div class="space-y-6">
+    <div class="space-y-5">
+      <DiffViewer
+        open={diffOpen}
+        onClose={() => setDiffOpen(false)}
+        title={diffTitle}
+        description={diffDesc}
+        loading={diffLoading}
+        error={diffError}
+        files={diffFiles}
+      />
+
       <FadeIn>
-        <Card>
-          <CardHeader
-            title="Sync production"
-            description={
-              data?.owner && data?.repo
-                ? `${data.owner}/${data.repo}${data.branch ? ` @ ${data.branch}` : ''}`
-                : 'GitHub ↔ dernier déploiement'
-            }
-          />
-          <div class="flex flex-wrap items-center gap-2">
-            <Badge tone={syncMeta.tone} title={syncMeta.title}>
-              {syncMeta.label}
-            </Badge>
-            {sync?.deployed_sha && (
-              <span class="font-mono text-xs text-[var(--color-ink-faint)]">
-                deploy {sync.deployed_sha}
-              </span>
-            )}
-            {sync?.head_sha && (
-              <span class="font-mono text-xs text-[var(--color-ink-faint)]">
-                tip {sync.head_sha}
-              </span>
-            )}
-          </div>
-
-          {behind && (
-            <Alert tone="info" class="mt-4">
-              GitHub a des commits que la prod n’a pas encore. Souvent après un patch Actions
-              (« Utiliser runners DevForge ») ou un push. Déploie pour les appliquer.
-            </Alert>
-          )}
-
-          <div class="mt-4 flex flex-wrap gap-2">
-            <Button size="sm" disabled={busy || !behind} onClick={() => void deploy()}>
-              {behind ? 'Déployer les commits' : 'À jour'}
-            </Button>
-            {sync?.html_url && (
-              <Button size="sm" variant="outline" href={sync.html_url} target="_blank">
-                Voir le diff GitHub
-              </Button>
-            )}
-            {data?.repo_url && (
-              <Button
-                size="sm"
-                variant="ghost"
-                href={`${data.repo_url}/tree/${encodeURIComponent(data.branch || 'main')}`}
-                target="_blank"
-              >
-                Ouvrir le repo
-              </Button>
-            )}
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => void load()}>
-              Rafraîchir
-            </Button>
-          </div>
-        </Card>
-      </FadeIn>
-
-      <FadeIn delay={40}>
-        <Card>
-          <CardHeader
-            title="Commits non déployés"
-            description={behind ? `${sync?.behind_by ?? commits.length} en attente` : 'Aucun'}
-          />
-          {commits.length === 0 ? (
-            <p class="text-sm text-[var(--color-ink-muted)]">
-              {behind
-                ? 'Commits non listés — ouvre le diff GitHub.'
-                : 'La prod est alignée sur le tip de la branche.'}
-            </p>
-          ) : (
-            <ul class="divide-y divide-[var(--color-line)]">
-              {commits.map((c) => (
-                <li key={c.sha} class="py-2.5">
-                  {c.html_url ? (
-                    <a
-                      href={c.html_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      class="text-sm font-medium text-[var(--color-accent)] hover:underline"
-                    >
-                      {c.message}
-                    </a>
-                  ) : (
-                    <div class="text-sm font-medium">{c.message}</div>
+        <Card padding="lg" class="space-y-6">
+          {/* Header sync */}
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div class="min-w-0 space-y-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <Badge tone={syncMeta.tone}>{syncMeta.label}</Badge>
+                {repoLabel && (
+                  <span class="truncate font-mono text-xs text-[var(--color-ink-faint)]">
+                    {repoLabel}
+                  </span>
+                )}
+              </div>
+              {(sync?.deployed_sha || sync?.head_sha) && (
+                <p class="font-mono text-[11px] text-[var(--color-ink-faint)]">
+                  {sync.deployed_sha && <span>prod {sync.deployed_sha}</span>}
+                  {sync.deployed_sha && sync.head_sha && <span class="mx-1.5">→</span>}
+                  {sync.head_sha && <span>github {sync.head_sha}</span>}
+                  {typeof sync.files_count === 'number' && sync.files_count > 0 && (
+                    <span class="ml-2">· {sync.files_count} fichiers</span>
                   )}
-                  <div class="mt-0.5 flex flex-wrap gap-2 font-mono text-xs text-[var(--color-ink-faint)]">
-                    <span>{c.sha}</span>
-                    {c.author && <span>{c.author}</span>}
-                    {formatWhen(c.date) && <time dateTime={c.date || undefined}>{formatWhen(c.date)}</time>}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      </FadeIn>
+                </p>
+              )}
+            </div>
+            <div class="flex flex-wrap gap-2">
+              {behind ? (
+                <>
+                  <Button size="sm" disabled={busy} onClick={() => void deploy()}>
+                    Déployer
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => void openDiff('sync')}
+                  >
+                    Diff
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => void revertUndeployed()}
+                  >
+                    Annuler
+                  </Button>
+                </>
+              ) : (
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => void load()}>
+                  Rafraîchir
+                </Button>
+              )}
+              {data?.repo_url && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  href={`${data.repo_url}/tree/${encodeURIComponent(data.branch || 'main')}`}
+                  target="_blank"
+                >
+                  Repo
+                </Button>
+              )}
+            </div>
+          </div>
 
-      <FadeIn delay={80}>
-        <Card>
-          <CardHeader
-            title="Workdir local"
-            description="Fichiers modifiés sur le serveur (agents, edits) — pas encore sur GitHub"
-          />
-          {!workdir?.available ? (
-            <p class="text-sm text-[var(--color-ink-muted)]">
-              {workdir?.reason || 'Workdir inaccessible.'}
-            </p>
-          ) : workdir.dirty ? (
-            <>
-              <Alert tone="warn" class="mb-3">
-                {workdir.note ||
-                  'Des fichiers locaux diffèrent. Un deploy fera reset --hard et les perdra.'}
-              </Alert>
-              <ul class="mb-4 divide-y divide-[var(--color-line)] font-mono text-xs">
-                {(workdir.files ?? []).map((f) => (
-                  <li key={f.path} class="flex gap-3 py-1.5">
-                    <span class="w-8 shrink-0 text-[var(--color-ink-faint)]">{f.status}</span>
-                    <span>{f.path}</span>
+          {/* Commits en attente */}
+          <section>
+            <h3 class="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-faint)]">
+              {behind
+                ? `${sync?.behind_by ?? commits.length} commit${(sync?.behind_by ?? commits.length) > 1 ? 's' : ''} à déployer`
+                : 'Rien à déployer'}
+            </h3>
+            {commits.length === 0 ? (
+              !behind && (
+                <p class="text-sm text-[var(--color-ink-muted)]">Production alignée sur GitHub.</p>
+              )
+            ) : (
+              <ul class="divide-y divide-[var(--color-line)] rounded-xl border border-[var(--color-line)]">
+                {commits.map((c) => (
+                  <li key={c.sha} class="px-3.5 py-3">
+                    <div class="text-sm text-[var(--color-ink)]">{c.message}</div>
+                    <div class="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 font-mono text-[11px] text-[var(--color-ink-faint)]">
+                      <span>{c.sha}</span>
+                      {c.author && <span>{c.author}</span>}
+                      {formatWhen(c.date) && (
+                        <time dateTime={c.date || undefined}>{formatWhen(c.date)}</time>
+                      )}
+                    </div>
                   </li>
                 ))}
               </ul>
-              <div class="flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => void discardLocal()}>
-                  Annuler les changements locaux
-                </Button>
-              </div>
-              <p class="mt-3 text-xs text-[var(--color-ink-faint)]">
-                Prochaine étape agents : éditer / commit / push depuis ce panneau.
+            )}
+          </section>
+
+          {/* Workdir */}
+          <section class="border-t border-[var(--color-line)] pt-5">
+            <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h3 class="text-xs font-medium uppercase tracking-wide text-[var(--color-ink-faint)]">
+                Workdir
+                {workdir?.dirty && (
+                  <span class="ml-2 normal-case tracking-normal text-amber-400/90">
+                    · modifié
+                  </span>
+                )}
+              </h3>
+              {workdir?.available && workdir.dirty && (
+                <div class="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => void openDiff('workdir')}
+                  >
+                    Diff
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => void discardLocal()}
+                  >
+                    Jeter
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {!workdir?.available ? (
+              <p class="text-sm text-[var(--color-ink-muted)]">
+                {workdir?.reason || 'Workdir inaccessible.'}
               </p>
-            </>
-          ) : (
-            <p class="text-sm text-[var(--color-ink-muted)]">
-              Workdir propre{workdir.head ? ` · HEAD ${workdir.head}` : ''}.
-            </p>
-          )}
+            ) : workdir.dirty ? (
+              <ul class="divide-y divide-[var(--color-line)] rounded-xl border border-[var(--color-line)] font-mono text-xs">
+                {(workdir.files ?? []).map((f) => (
+                  <li key={f.path}>
+                    <button
+                      type="button"
+                      class="flex w-full items-center gap-3 px-3.5 py-2 text-left hover:bg-white/[0.03]"
+                      onClick={() => void openDiff('workdir', f.path)}
+                    >
+                      <span class="w-7 shrink-0 text-[var(--color-ink-faint)]">{f.status}</span>
+                      <span class="min-w-0 truncate text-[var(--color-accent)]">{f.path}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p class="text-sm text-[var(--color-ink-muted)]">
+                Propre
+                {workdir.head ? (
+                  <span class="font-mono text-[var(--color-ink-faint)]"> · {workdir.head}</span>
+                ) : null}
+              </p>
+            )}
+          </section>
         </Card>
       </FadeIn>
     </div>

@@ -18,20 +18,22 @@ crates/
 ## Quick start
 
 ```bash
-# Server HTTP (SQLite local) — apps/server, binaire devforge-server
-cargo run -p devforge-server
-# → http://0.0.0.0:8000  (routes sous /api/v1)
+npm install
+npm run dev
+# → front http://127.0.0.1:8080  ·  API http://127.0.0.1:8000
+# (cargo-watch relance le serveur Rust à chaque modif dans apps/server + crates)
 
-# Frontend
-cd apps/web && npm install && npm run dev
-# → http://localhost:8080  (API reste :8000 ; apps déployées type Astro souvent :4321)
+# Séparé si besoin :
+# npm run dev:web
+# npm run dev:server
 ```
 
 Variables :
 
-- `DATABASE_URL` — défaut `sqlite:devforge.db?mode=rwc`
+- `DATABASE_URL` — défaut `sqlite:devforge.db?mode=rwc` (fichier à la racine du monorepo)
 - `HOST` / `PORT` — bind du **server** (défaut `0.0.0.0:8000`)
 - `PUBLIC_SERVER_URL` — base HTTP du front vers le server (défaut `http://127.0.0.1:8000/api/v1`)
+- Optionnel : `apps/server/.env` (chargé automatiquement par `npm run dev`)
 
 ## Tests
 

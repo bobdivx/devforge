@@ -636,7 +636,9 @@ export const api = {
         }>;
         resource_kind?: string | null;
         popular: boolean;
-        setup_notes?: string | null;
+        setup_intro?: string | null;
+        setup_sections?: Array<{ title: string; body: string }> | null;
+        tools_help?: string | null;
       }>;
     }>('/mcp/catalog'),
   listTokens: () =>
@@ -833,6 +835,8 @@ export const api = {
     pocket_id_api_token?: string;
     provision?: boolean;
     rotate_secret?: boolean;
+    logo_url?: string;
+    background_url?: string;
   }) =>
     request<{
       ok: boolean;
@@ -855,6 +859,9 @@ export const api = {
         ok?: boolean;
         created_client?: boolean;
         created_secret?: boolean;
+        logo_set?: boolean;
+        background_set?: boolean;
+        branding_warnings?: string[];
         callback_urls?: string[];
       } | null;
     }>('/settings/sso', {
@@ -1091,6 +1098,9 @@ export const api = {
         html_url?: string | null;
         error?: string;
         ahead_by_remote?: number;
+        files_count?: number;
+        deployed_sha_full?: string | null;
+        head_sha_full?: string | null;
       };
       workdir?: {
         available: boolean;
@@ -1102,11 +1112,42 @@ export const api = {
       };
     }>(`/projects/${encodeURIComponent(uuid)}/git`),
 
+  projectGitDiff: (uuid: string, source: 'sync' | 'workdir', path?: string) => {
+    const q = new URLSearchParams({ source });
+    if (path) q.set('path', path);
+    return request<{
+      ok: boolean;
+      source: string;
+      title?: string;
+      base?: string;
+      head?: string;
+      files: Array<{
+        filename: string;
+        status: string;
+        additions: number;
+        deletions: number;
+        patch?: string | null;
+        previous_filename?: string | null;
+      }>;
+    }>(`/projects/${encodeURIComponent(uuid)}/git/diff?${q}`);
+  },
+
   projectGitDiscard: (uuid: string) =>
     request<{ ok: boolean; message?: string; output?: string }>(
       `/projects/${encodeURIComponent(uuid)}/git/discard`,
       { method: 'POST', body: JSON.stringify({ confirm: true }) },
     ),
+
+  projectGitRevertUndeployed: (uuid: string) =>
+    request<{
+      ok: boolean;
+      message?: string;
+      sha?: string;
+      cancelled_count?: number;
+    }>(`/projects/${encodeURIComponent(uuid)}/git/revert-undeployed`, {
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+    }),
 };
 
 export type ManagedRunner = {

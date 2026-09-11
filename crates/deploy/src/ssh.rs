@@ -172,6 +172,16 @@ impl RemoteExecutor for LocalShellExecutor {
         };
         enrich_path_for_docker(&mut cmd);
         if !workdir.trim().is_empty() {
+            let dir = std::path::Path::new(workdir);
+            if !dir.is_dir() {
+                return Ok(ExecResult {
+                    ok: false,
+                    exit_code: 1,
+                    output: format!(
+                        "workdir introuvable: {workdir}\n(chemin distant NAS ? clone local absent)"
+                    ),
+                });
+            }
             cmd.current_dir(workdir);
         }
         let output = tokio::time::timeout(Duration::from_secs(timeout_secs.max(5)), cmd.output())

@@ -2,18 +2,18 @@
 #
 # Usage :
 #   cp .env.example .env   # optionnel
-#   export DEVFORGE_VERSION=2.0.9
+#   export DEVFORGE_VERSION=2.0.10
 #   docker compose -f deploy/docker-compose.yml up -d
 #
 # Images :
-#   bobdivx/devforge:2.0.9  (Docker Hub)
-#   ghcr.io/bobdivx/devforge:2.0.9
+#   bobdivx/devforge:2.0.10  (Docker Hub)
+#   ghcr.io/bobdivx/devforge:2.0.10
 
 name: devforge
 
 services:
   devforge:
-    image: ${DEVFORGE_IMAGE:-bobdivx/devforge}:${DEVFORGE_VERSION:-2.0.9}
+    image: ${DEVFORGE_IMAGE:-bobdivx/devforge}:${DEVFORGE_VERSION:-2.0.10}
     container_name: ${DEVFORGE_CONTAINER_NAME:-devforge}
     restart: unless-stopped
     ports:
@@ -28,7 +28,7 @@ services:
       DATABASE_URL: sqlite:/data/devforge.db?mode=rwc
       DEVFORGE_DATA_DIR: /data
       DEVFORGE_STATIC_DIR: /app/web
-      DEVFORGE_VERSION: ${DEVFORGE_VERSION:-2.0.9}
+      DEVFORGE_VERSION: ${DEVFORGE_VERSION:-2.0.10}
       DEVFORGE_UPDATE_MODE: compose
       DEVFORGE_UPDATE_COMPOSE_FILE: /opt/devforge/docker-compose.yml
       DEVFORGE_UPDATE_COMPOSE_SERVICE: devforge

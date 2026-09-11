@@ -91,6 +91,10 @@ pub struct PutSsoBody {
     pub provision: Option<bool>,
     /// Force la génération d'un nouveau client secret côté Pocket ID.
     pub rotate_secret: Option<bool>,
+    /// Override logo client OIDC (sinon `{instance_url}/favicon.svg`).
+    pub logo_url: Option<String>,
+    /// Fond login Pocket ID (URL publique téléchargeable).
+    pub background_url: Option<String>,
 }
 
 async fn put_sso(
@@ -174,6 +178,24 @@ async fn put_sso(
                 Some(u.trim_end_matches('/').to_string())
             }
         };
+        let logo_override = body
+            .logo_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let logo = logo_override.or_else(|| pocket_id::default_logo_url(&instance_url));
+        let background = body
+            .background_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let branding = pocket_id::BrandingUrls {
+            logo_url: logo.clone(),
+            dark_logo_url: logo,
+            background_url: background,
+        };
         let target_id = if client_id.trim().is_empty() {
             pocket_id::DEFAULT_CLIENT_ID.to_string()
         } else {
@@ -188,6 +210,7 @@ async fn put_sso(
             &callbacks,
             launch.as_deref(),
             need_secret,
+            &branding,
         )
         .await
         {
@@ -200,6 +223,9 @@ async fn put_sso(
                     "ok": true,
                     "created_client": r.created_client,
                     "created_secret": r.created_secret,
+                    "logo_set": r.logo_set,
+                    "background_set": r.background_set,
+                    "branding_warnings": r.branding_warnings,
                     "callback_urls": callbacks,
                 });
             }

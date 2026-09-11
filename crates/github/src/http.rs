@@ -87,6 +87,21 @@ impl HttpGitHubClient {
         require_ok(status, &text)?;
         parse_json_array(&text)
     }
+
+    async fn patch_json(&self, path: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
+        let url = format!("{}{path}", self.base);
+        let res = self
+            .http
+            .patch(&url)
+            .json(body)
+            .send()
+            .await
+            .map_err(map_http_err)?;
+        let status = res.status();
+        let text = res.text().await.map_err(map_http_err)?;
+        require_ok(status, &text)?;
+        parse_json_array(&text)
+    }
 }
 
 #[async_trait]
@@ -403,6 +418,33 @@ impl GitHubClient for HttpGitHubClient {
                 })
             })
             .collect();
+        let files = data
+            .get("files")
+            .and_then(|f| f.as_array())
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|f| {
+                Some(crate::GitCompareFile {
+                    filename: f.get("filename")?.as_str()?.to_string(),
+                    status: f
+                        .get("status")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("modified")
+                        .to_string(),
+                    additions: f.get("additions").and_then(|v| v.as_u64()).unwrap_or(0),
+                    deletions: f.get("deletions").and_then(|v| v.as_u64()).unwrap_or(0),
+                    patch: f
+                        .get("patch")
+                        .and_then(|p| p.as_str())
+                        .map(str::to_string),
+                    previous_filename: f
+                        .get("previous_filename")
+                        .and_then(|p| p.as_str())
+                        .map(str::to_string),
+                })
+            })
+            .collect();
         Ok(crate::GitCompare {
             status: data
                 .get("status")
@@ -415,16 +457,36 @@ impl GitHubClient for HttpGitHubClient {
                 .pointer("/base_commit/sha")
                 .and_then(|s| s.as_str())
                 .unwrap_or(base)
-                .chars()
-                .take(12)
-                .collect(),
-            head_sha: tip.chars().take(12).collect(),
+                .to_string(),
+            head_sha: tip,
             commits,
+            files,
             html_url: data
                 .get("html_url")
                 .and_then(|u| u.as_str())
                 .map(str::to_string),
         })
+    }
+
+    async fn update_ref(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+        sha: &str,
+        force: bool,
+    ) -> Result<()> {
+        let branch = branch.trim().trim_start_matches("refs/heads/");
+        let path = format!("/repos/{owner}/{repo}/git/refs/heads/{branch}");
+        self.patch_json(
+            &path,
+            &serde_json::json!({
+                "sha": sha,
+                "force": force,
+            }),
+        )
+        .await?;
+        Ok(())
     }
 
     async fn list_releases(&self, owner: &str, repo: &str) -> Result<Vec<GitRelease>> {

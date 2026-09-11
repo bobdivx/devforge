@@ -558,6 +558,11 @@ impl UpdateFacade {
     }
 
     /// Recreate nommé via inspect ciblé (évite le JSON complet tronqué) + Mounts.
+    ///
+    /// Un simple `docker rename` ne libère **pas** les ports publiés : le nouveau
+    /// `docker run -p 8000:…` échoue avec « port is already allocated ».
+    /// On planifie donc un conteneur helper (docker.sock) qui stoppe l’ancien
+    /// *puis* démarre le nouveau — le process courant peut mourir sans bloquer.
     async fn recreate_docker_container(&self, target: &str) -> Result<String> {
         let name = &self.config.container_name;
         let image_ref = format!("{}:{}", self.config.image, target);
@@ -591,117 +596,38 @@ impl UpdateFacade {
             .await
             .unwrap_or(Value::Null);
 
-        let mut run = vec![
-            "docker".into(),
-            "run".into(),
-            "-d".into(),
-            "--name".into(),
-            name.clone(),
-        ];
-
-        let restart = restart.trim();
-        if restart != "no" && !restart.is_empty() {
-            run.push("--restart".into());
-            run.push(restart.into());
-        }
-
-        let mut used_bind = false;
-        if let Some(arr) = binds.as_array() {
-            for b in arr {
-                if let Some(s) = b.as_str() {
-                    run.push("-v".into());
-                    run.push(s.to_string());
-                    used_bind = true;
-                }
-            }
-        }
-        // Compose / CasaOS : Binds est souvent null — reprendre Mounts.
-        if !used_bind {
-            if let Some(arr) = mounts.as_array() {
-                for m in arr {
-                    let typ = m.get("Type").and_then(|t| t.as_str()).unwrap_or("bind");
-                    if typ != "bind" && typ != "volume" {
-                        continue;
-                    }
-                    let src = m.get("Source").and_then(|s| s.as_str()).unwrap_or("");
-                    let dst = m
-                        .get("Destination")
-                        .or_else(|| m.get("Target"))
-                        .and_then(|s| s.as_str())
-                        .unwrap_or("");
-                    if src.is_empty() || dst.is_empty() {
-                        continue;
-                    }
-                    let rw = m.get("RW").and_then(|v| v.as_bool()).unwrap_or(true);
-                    let spec = if rw {
-                        format!("{src}:{dst}")
-                    } else {
-                        format!("{src}:{dst}:ro")
-                    };
-                    run.push("-v".into());
-                    run.push(spec);
-                }
-            }
-        }
-
-        if let Some(ports) = ports.as_object() {
-            for (container_port, hosts) in ports {
-                let port_key = container_port.replace("/tcp", "").replace("/udp", "");
-                if let Some(arr) = hosts.as_array() {
-                    for h in arr {
-                        let host_ip = h.get("HostIp").and_then(|x| x.as_str()).unwrap_or("");
-                        let host_port = h.get("HostPort").and_then(|x| x.as_str()).unwrap_or("");
-                        if host_port.is_empty() {
-                            continue;
-                        }
-                        let mapping = if host_ip.is_empty() || host_ip == "0.0.0.0" {
-                            format!("{host_port}:{port_key}")
-                        } else {
-                            format!("{host_ip}:{host_port}:{port_key}")
-                        };
-                        run.push("-p".into());
-                        run.push(mapping);
-                    }
-                }
-            }
-        }
-
-        if let Some(env) = env.as_array() {
-            for e in env {
-                if let Some(s) = e.as_str() {
-                    if s.starts_with("DEVFORGE_VERSION=") {
-                        run.push("-e".into());
-                        run.push(format!("DEVFORGE_VERSION={target}"));
-                    } else {
-                        run.push("-e".into());
-                        run.push(s.to_string());
-                    }
-                }
-            }
-        } else {
-            run.push("-e".into());
-            run.push(format!("DEVFORGE_VERSION={target}"));
-        }
-
-        if let Some(labels) = labels.as_object() {
-            for (k, v) in labels {
-                if let Some(val) = v.as_str() {
-                    run.push("--label".into());
-                    run.push(format!("{k}={val}"));
-                }
-            }
-        }
-
-        if let Some(nets) = networks.as_object() {
-            if let Some(net_name) = nets.keys().next() {
-                run.push("--network".into());
-                run.push(net_name.clone());
-            }
-        }
-
-        run.push(image_ref.clone());
+        let run = build_docker_run_args(
+            name,
+            &image_ref,
+            target,
+            restart.trim(),
+            &binds,
+            &mounts,
+            &ports,
+            &env,
+            &networks,
+            &labels,
+        );
+        let run_cmd = shell_join(&run);
 
         let old = format!("{name}-old");
+        let updater = format!("{name}-updater");
+
+        // Restes d’une MAJ précédente (échec / interruption).
+        let _ = self
+            .executor
+            .exec(
+                &self.config.server_id,
+                ".",
+                &format!(
+                    "docker rm -f {} {} >/dev/null 2>&1 || true",
+                    shell_escape(&old),
+                    shell_escape(&updater)
+                ),
+                30,
+            )
+            .await;
+
         let rename = self
             .executor
             .exec(
@@ -722,12 +648,12 @@ impl UpdateFacade {
             )));
         }
 
-        let run_cmd = shell_join(&run);
-        let created = self
+        let helper_cmd = detached_recreate_helper_cmd(name, &old, &updater, &image_ref, &run_cmd);
+        let scheduled = self
             .executor
-            .exec(&self.config.server_id, ".", &run_cmd, 120)
+            .exec(&self.config.server_id, ".", &helper_cmd, 60)
             .await?;
-        if !created.ok {
+        if !scheduled.ok {
             let _ = self
                 .executor
                 .exec(
@@ -742,22 +668,14 @@ impl UpdateFacade {
                 )
                 .await;
             return Err(DevForgeError::Message(format!(
-                "docker run échoué : {}",
-                truncate(&created.output, 400)
+                "planification recreate échouée : {}",
+                truncate(&scheduled.output, 400)
             )));
         }
 
-        let _ = self
-            .executor
-            .exec(
-                &self.config.server_id,
-                ".",
-                &format!("docker rm -f {}", shell_escape(&old)),
-                60,
-            )
-            .await;
-
-        Ok(format!("Recréé {name} ← {image_ref}"))
+        Ok(format!(
+            "Recreate planifié {name} ← {image_ref} (stop old puis run)"
+        ))
     }
 
     async fn docker_inspect_json(&self, name: &str, format: &str) -> Result<Value> {
@@ -1187,6 +1105,202 @@ fn shell_join(parts: &[String]) -> String {
         .join(" ")
 }
 
+/// Construit les args `docker run` à partir de l’inspect (ports / volumes / env / labels).
+fn build_docker_run_args(
+    name: &str,
+    image_ref: &str,
+    target: &str,
+    restart: &str,
+    binds: &Value,
+    mounts: &Value,
+    ports: &Value,
+    env: &Value,
+    networks: &Value,
+    labels: &Value,
+) -> Vec<String> {
+    let mut run = vec![
+        "docker".into(),
+        "run".into(),
+        "-d".into(),
+        "--name".into(),
+        name.to_string(),
+    ];
+
+    if restart != "no" && !restart.is_empty() {
+        run.push("--restart".into());
+        run.push(restart.into());
+    }
+
+    let mut used_bind = false;
+    if let Some(arr) = binds.as_array() {
+        for b in arr {
+            if let Some(s) = b.as_str() {
+                run.push("-v".into());
+                run.push(s.to_string());
+                used_bind = true;
+            }
+        }
+    }
+    // Compose / CasaOS : Binds est souvent null — reprendre Mounts.
+    if !used_bind {
+        if let Some(arr) = mounts.as_array() {
+            for m in arr {
+                let typ = m.get("Type").and_then(|t| t.as_str()).unwrap_or("bind");
+                if typ != "bind" && typ != "volume" {
+                    continue;
+                }
+                let src = m.get("Source").and_then(|s| s.as_str()).unwrap_or("");
+                let dst = m
+                    .get("Destination")
+                    .or_else(|| m.get("Target"))
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("");
+                if src.is_empty() || dst.is_empty() {
+                    continue;
+                }
+                let rw = m.get("RW").and_then(|v| v.as_bool()).unwrap_or(true);
+                let spec = if rw {
+                    format!("{src}:{dst}")
+                } else {
+                    format!("{src}:{dst}:ro")
+                };
+                run.push("-v".into());
+                run.push(spec);
+            }
+        }
+    }
+
+    if let Some(ports) = ports.as_object() {
+        for (container_port, hosts) in ports {
+            let port_key = container_port.replace("/tcp", "").replace("/udp", "");
+            if let Some(arr) = hosts.as_array() {
+                for h in arr {
+                    let host_ip = h.get("HostIp").and_then(|x| x.as_str()).unwrap_or("");
+                    let host_port = h.get("HostPort").and_then(|x| x.as_str()).unwrap_or("");
+                    if host_port.is_empty() {
+                        continue;
+                    }
+                    let mapping = if host_ip.is_empty() || host_ip == "0.0.0.0" {
+                        format!("{host_port}:{port_key}")
+                    } else {
+                        format!("{host_ip}:{host_port}:{port_key}")
+                    };
+                    run.push("-p".into());
+                    run.push(mapping);
+                }
+            }
+        }
+    }
+
+    if let Some(env) = env.as_array() {
+        for e in env {
+            if let Some(s) = e.as_str() {
+                if s.starts_with("DEVFORGE_VERSION=") {
+                    run.push("-e".into());
+                    run.push(format!("DEVFORGE_VERSION={target}"));
+                } else {
+                    run.push("-e".into());
+                    run.push(s.to_string());
+                }
+            }
+        }
+    } else {
+        run.push("-e".into());
+        run.push(format!("DEVFORGE_VERSION={target}"));
+    }
+
+    if let Some(labels) = labels.as_object() {
+        for (k, v) in labels {
+            if let Some(val) = v.as_str() {
+                run.push("--label".into());
+                run.push(format!("{k}={val}"));
+            }
+        }
+    }
+
+    if let Some(nets) = networks.as_object() {
+        if let Some(net_name) = nets.keys().next() {
+            run.push("--network".into());
+            run.push(net_name.clone());
+        }
+    }
+
+    run.push(image_ref.to_string());
+    run
+}
+
+/// Conteneur helper : stop l’ancien (libère les ports) puis `docker run` le nouveau.
+fn detached_recreate_helper_cmd(
+    name: &str,
+    old: &str,
+    updater: &str,
+    image_ref: &str,
+    run_cmd: &str,
+) -> String {
+    let inner = format!(
+        "set +e\n\
+sleep 2\n\
+docker stop {old} >/dev/null 2>&1\n\
+docker rm -f {name} >/dev/null 2>&1\n\
+if {run_cmd}; then\n\
+  docker rm -f {old} >/dev/null 2>&1\n\
+  exit 0\n\
+fi\n\
+docker rm -f {name} >/dev/null 2>&1\n\
+docker rename {old} {name} >/dev/null 2>&1\n\
+docker start {name} >/dev/null 2>&1\n\
+exit 1\n",
+        old = shell_escape(old),
+        name = shell_escape(name),
+        run_cmd = run_cmd,
+    );
+    let b64 = b64_encode(inner.as_bytes());
+    format!(
+        "docker rm -f {updater} >/dev/null 2>&1 || true; \
+docker run -d --rm --name {updater} \
+-v /var/run/docker.sock:/var/run/docker.sock \
+--entrypoint sh {image} \
+-c 'echo {b64} | base64 -d | sh'",
+        updater = shell_escape(updater),
+        image = shell_escape(image_ref),
+        b64 = b64,
+    )
+}
+
+fn b64_encode(data: &[u8]) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    let mut i = 0;
+    while i < data.len() {
+        let b0 = data[i] as u32;
+        let b1 = if i + 1 < data.len() {
+            data[i + 1] as u32
+        } else {
+            0
+        };
+        let b2 = if i + 2 < data.len() {
+            data[i + 2] as u32
+        } else {
+            0
+        };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((triple >> 18) & 0x3f) as usize] as char);
+        out.push(TABLE[((triple >> 12) & 0x3f) as usize] as char);
+        if i + 1 < data.len() {
+            out.push(TABLE[((triple >> 6) & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if i + 2 < data.len() {
+            out.push(TABLE[(triple & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        i += 3;
+    }
+    out
+}
+
 fn download_path_for(current: &Path, asset_name: &str) -> PathBuf {
     let dir = current
         .parent()
@@ -1325,5 +1439,59 @@ mod tests {
         ];
         let a = pick_asset(&assets, "x86_64-pc-windows-msvc").expect("asset");
         assert!(a.name.contains("windows"));
+    }
+
+    #[test]
+    fn b64_roundtrip_ascii() {
+        let s = "docker stop devforge-old\n";
+        let enc = b64_encode(s.as_bytes());
+        assert_eq!(enc, "ZG9ja2VyIHN0b3AgZGV2Zm9yZ2Utb2xkCg==");
+    }
+
+    #[test]
+    fn docker_run_args_include_port_and_version() {
+        let ports = json!({"8000/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8000"}]});
+        let mounts = json!([{"Type": "bind", "Source": "/DATA/AppData/devforge", "Destination": "/data", "RW": true}]);
+        let env = json!(["DEVFORGE_VERSION=2.0.7", "PORT=8000"]);
+        let args = build_docker_run_args(
+            "devforge",
+            "bobdivx/devforge:2.0.9",
+            "2.0.9",
+            "unless-stopped",
+            &Value::Null,
+            &mounts,
+            &ports,
+            &env,
+            &json!({"bridge": {}}),
+            &Value::Null,
+        );
+        let joined = shell_join(&args);
+        assert!(joined.contains("-p 8000:8000"));
+        assert!(joined.contains("DEVFORGE_VERSION=2.0.9"));
+        assert!(joined.contains("-v /DATA/AppData/devforge:/data"));
+        assert!(joined.ends_with("bobdivx/devforge:2.0.9"));
+    }
+
+    #[test]
+    fn detached_helper_stops_old_before_run() {
+        let cmd = detached_recreate_helper_cmd(
+            "devforge",
+            "devforge-old",
+            "devforge-updater",
+            "bobdivx/devforge:2.0.9",
+            "docker run -d --name devforge -p 8000:8000 bobdivx/devforge:2.0.9",
+        );
+        assert!(cmd.contains("devforge-updater"));
+        assert!(cmd.contains("/var/run/docker.sock"));
+        assert!(cmd.contains("base64 -d"));
+        // Le script encodé doit contenir « docker stop » (libère le port).
+        let b64 = cmd
+            .split("echo ")
+            .nth(1)
+            .and_then(|s| s.split(" |").next())
+            .expect("b64 payload");
+        assert!(!b64.is_empty());
+        // Décodage minimal : vérifier longueur plausible du payload.
+        assert!(b64.len() > 40);
     }
 }

@@ -31,7 +31,9 @@ type CatalogItem = {
   }>;
   resource_kind?: string | null;
   popular: boolean;
-  setup_notes?: string | null;
+  setup_intro?: string | null;
+  setup_sections?: Array<{ title: string; body: string }> | null;
+  tools_help?: string | null;
 };
 
 type McpServer = {
@@ -238,6 +240,11 @@ export function McpPage() {
   const popular = catalog.filter((c) => c.popular);
   const rest = catalog.filter((c) => !c.popular);
   const connectedIds = new Set(servers.map((s) => s.catalog_id).filter(Boolean));
+  const toolsServer = toolsFor ? servers.find((s) => s.id === toolsFor) : undefined;
+  const toolsHelp =
+    (toolsServer?.catalog_id &&
+      catalog.find((c) => c.id === toolsServer.catalog_id)?.tools_help) ||
+    'Liste distante JSON-RPC (tools/list).';
 
   return (
     <AppShell active="mcp" title="MCP" description="Connecte Turso, Slack, GitHub…">
@@ -357,9 +364,21 @@ export function McpPage() {
               <McpIcon id={preset.id} name={preset.name} />
               <span class="text-sm text-[var(--color-ink-muted)]">{preset.category}</span>
             </div>
-            {preset.setup_notes && (
-              <Alert tone="info" class="whitespace-pre-wrap text-xs leading-relaxed">
-                {preset.setup_notes}
+            {(preset.setup_intro || (preset.setup_sections && preset.setup_sections.length > 0)) && (
+              <Alert tone="info" class="space-y-0 text-xs leading-relaxed">
+                {preset.setup_intro && (
+                  <p class="pb-2.5 text-[var(--color-ink-muted)]">{preset.setup_intro}</p>
+                )}
+                <div class="divide-y divide-[var(--color-border)]/60">
+                  {preset.setup_sections?.map((sec) => (
+                    <div key={sec.title} class="py-2.5 first:pt-0 last:pb-0">
+                      <p class="font-medium text-[var(--color-ink)]">{sec.title}</p>
+                      <p class="mt-0.5 whitespace-pre-wrap font-mono text-[11px] text-[var(--color-ink-muted)]">
+                        {sec.body}
+                      </p>
+                    </div>
+                  ))}
+                </div>
               </Alert>
             )}
             {preset.fields.map((f) => (
@@ -403,7 +422,7 @@ export function McpPage() {
           setToolsError(null);
         }}
         title="Tools MCP"
-        description="Liste distante JSON-RPC (tools/list). Turso hébergé exige OAuth — le token Platform ne suffit pas."
+        description={toolsHelp}
         size="lg"
       >
         {toolsLoading ? (

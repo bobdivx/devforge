@@ -89,6 +89,18 @@ pub struct GitCompareCommit {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitCompareFile {
+    pub filename: String,
+    pub status: String,
+    pub additions: u64,
+    pub deletions: u64,
+    #[serde(default)]
+    pub patch: Option<String>,
+    #[serde(default)]
+    pub previous_filename: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitCompare {
     pub status: String,
     pub ahead_by: u64,
@@ -97,6 +109,8 @@ pub struct GitCompare {
     pub head_sha: String,
     #[serde(default)]
     pub commits: Vec<GitCompareCommit>,
+    #[serde(default)]
+    pub files: Vec<GitCompareFile>,
     pub html_url: Option<String>,
 }
 
@@ -177,6 +191,16 @@ pub trait GitHubClient: Send + Sync {
         base: &str,
         head: &str,
     ) -> Result<GitCompare>;
+
+    /// Met à jour la ref `heads/{branch}` vers `sha` (`force` pour rewind non-fast-forward).
+    async fn update_ref(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+        sha: &str,
+        force: bool,
+    ) -> Result<()>;
 
     /// List root (or path) directory entries: (name, is_file).
     async fn list_dir(
@@ -307,6 +331,19 @@ impl GitHubClient for StubGitHubClient {
         _base: &str,
         _head: &str,
     ) -> Result<GitCompare> {
+        Err(DevForgeError::Message(
+            "GitHub non configuré — connecte un token dans Settings".into(),
+        ))
+    }
+
+    async fn update_ref(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _branch: &str,
+        _sha: &str,
+        _force: bool,
+    ) -> Result<()> {
         Err(DevForgeError::Message(
             "GitHub non configuré — connecte un token dans Settings".into(),
         ))
@@ -511,6 +548,19 @@ impl GitHubFacade {
         head: &str,
     ) -> Result<GitCompare> {
         self.client().compare(owner, repo, base, head).await
+    }
+
+    pub async fn update_ref(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+        sha: &str,
+        force: bool,
+    ) -> Result<()> {
+        self.client()
+            .update_ref(owner, repo, branch, sha, force)
+            .await
     }
 
     pub async fn list_dir(

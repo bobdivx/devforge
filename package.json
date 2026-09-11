@@ -1,19 +1,20 @@
 {
   "name": "devforge",
   "private": true,
-  "version": "2.0.9",
+  "version": "2.0.10",
   "description": "DevForge monorepo — PaaS with AI agents (Rust + Astro)",
   "workspaces": [
     "apps/web"
   ],
   "scripts": {
+    "dev": "node scripts/dev.mjs",
     "dev:web": "npm run dev -w apps/web",
+    "dev:server": "cargo watch -q -c -w apps/server -w crates -x \"run -p devforge-server\"",
     "build:web": "npm run build -w apps/web",
     "check:forbidden": "node scripts/check-forbidden-names.mjs",
     "sanitize:lock": "node scripts/sanitize-lockfile.mjs",
     "postinstall": "node scripts/sanitize-lockfile.mjs",
     "ci:web": "npm run build -w apps/web",
-    "dev:server": "cargo run -p devforge-server",
     "test:rust": "cargo test --workspace"
   },
   "engines": {
