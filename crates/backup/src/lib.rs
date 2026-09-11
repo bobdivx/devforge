@@ -496,23 +496,41 @@ impl InstanceBackupService {
 
     /// Download object and stage as pending restore (applied on next boot).
     pub async fn restore(&self, storage_key: &str, override_cfg: Option<S3Config>) -> Result<Value> {
-        let bytes = if let Some(cfg) = override_cfg {
-            if !cfg.is_ready() {
-                return Err(DevForgeError::Message(
-                    "Identifiants S3 incomplets".into(),
-                ));
+        // Detect if storage_key is a local file path or an S3 key
+        let is_local = storage_key.starts_with('/') || Path::new(storage_key).exists();
+
+        let bytes = if is_local {
+            // Local backup: read from filesystem
+            let local_path = Path::new(storage_key);
+            if !local_path.exists() {
+                return Err(DevForgeError::Message(format!(
+                    "Fichier de sauvegarde introuvable : {}",
+                    storage_key
+                )));
             }
-            let tmp = StorageFacade::memory();
-            tmp.configure(cfg.clone()).await?;
-            tmp.get_bytes(&cfg.bucket, storage_key).await?
+            tokio::fs::read(local_path)
+                .await
+                .map_err(|e| DevForgeError::Message(format!("Lecture backup local échouée : {e}")))?
         } else {
-            let cfg = self.storage.config().await;
-            if !cfg.is_ready() {
-                return Err(DevForgeError::Message(
-                    "Configure le stockage S3 d’abord".into(),
-                ));
+            // S3 backup: download from S3
+            if let Some(cfg) = override_cfg {
+                if !cfg.is_ready() {
+                    return Err(DevForgeError::Message(
+                        "Identifiants S3 incomplets".into(),
+                    ));
+                }
+                let tmp = StorageFacade::memory();
+                tmp.configure(cfg.clone()).await?;
+                tmp.get_bytes(&cfg.bucket, storage_key).await?
+            } else {
+                let cfg = self.storage.config().await;
+                if !cfg.is_ready() {
+                    return Err(DevForgeError::Message(
+                        "Configure le stockage S3 d'abord".into(),
+                    ));
+                }
+                self.storage.get_bytes(&cfg.bucket, storage_key).await?
             }
-            self.storage.get_bytes(&cfg.bucket, storage_key).await?
         };
 
         if bytes.len() < 100 || !looks_like_sqlite(&bytes) {
