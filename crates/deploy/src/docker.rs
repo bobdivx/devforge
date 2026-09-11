@@ -210,22 +210,76 @@ pub fn docker_update_labels(name: &str, labels: &Value) -> String {
     docker_recreate_with_labels(name, labels)
 }
 
-/// Detect Traefik Docker network by inspecting common reverse-proxy container names.
+/// Detect Traefik Docker network using multiple strategies.
 /// Returns shell command that outputs network name or empty string.
 ///
-/// Checks containers in order: traefik, coolify, caddy, proxy, devforge-proxy
-/// and returns the first network found (excluding bridge).
+/// Strategies (in order):
+/// 1. Container name patterns (traefik, coolify*, caddy, proxy*, zima*, casaos*)
+/// 2. Container image containing 'traefik'
+/// 3. Containers publishing port 80 or 443 (reverse proxy indicators)
+/// 4. Containers with traefik.enable=true label (proxy itself)
+/// 5. Networks containing known working apps (sonozz, df-) alongside proxy containers
 pub fn docker_detect_traefik_network() -> String {
-    r#"sh -c 'for candidate in traefik coolify caddy proxy devforge-proxy; do
-  if docker inspect "$candidate" >/dev/null 2>&1; then
-    NET=$(docker inspect "$candidate" --format "{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}" | grep -v "^bridge$" | head -n1)
+    r#"sh -c '
+# Strategy 1: Check common proxy container name patterns
+for pattern in traefik "coolify*" caddy "proxy*" devforge-proxy "zima*" "casaos*"; do
+  for cid in $(docker ps -q --filter "name=$pattern" 2>/dev/null); do
+    NET=$(docker inspect "$cid" --format "{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
+    if [ -n "$NET" ]; then
+      echo "$NET"
+      exit 0
+    fi
+  done
+done
+
+# Strategy 2: Check containers by image containing "traefik"
+for cid in $(docker ps -q 2>/dev/null); do
+  IMG=$(docker inspect "$cid" --format "{{.Config.Image}}" 2>/dev/null || echo "")
+  if echo "$IMG" | grep -qi "traefik"; then
+    NET=$(docker inspect "$cid" --format "{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
     if [ -n "$NET" ]; then
       echo "$NET"
       exit 0
     fi
   fi
 done
-echo ""'"#
+
+# Strategy 3: Containers publishing port 80 or 443 (likely reverse proxy)
+for port in 80 443; do
+  for cid in $(docker ps -q --filter "publish=$port" 2>/dev/null); do
+    NET=$(docker inspect "$cid" --format "{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
+    if [ -n "$NET" ]; then
+      echo "$NET"
+      exit 0
+    fi
+  done
+done
+
+# Strategy 4: Containers with traefik.enable=true label (proxy infrastructure)
+for cid in $(docker ps -q 2>/dev/null); do
+  ENABLED=$(docker inspect "$cid" --format "{{index .Config.Labels \"traefik.enable\"}}" 2>/dev/null || echo "")
+  if [ "$ENABLED" = "true" ]; then
+    NET=$(docker inspect "$cid" --format "{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
+    if [ -n "$NET" ]; then
+      echo "$NET"
+      exit 0
+    fi
+  fi
+done
+
+# Strategy 5: Networks with known working apps (sonozz, df-*) - inherit their network
+for pattern in sonozz "df-*"; do
+  for cid in $(docker ps -q --filter "name=$pattern" 2>/dev/null); do
+    NET=$(docker inspect "$cid" --format "{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
+    if [ -n "$NET" ]; then
+      echo "$NET"
+      exit 0
+    fi
+  done
+done
+
+echo ""
+'"#
         .to_string()
 }
 
