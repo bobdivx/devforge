@@ -988,23 +988,24 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         let has_traefik_labels = proxy_labels.is_some();
         
         if has_traefik_labels && network.is_none() {
-            // Auto-detect Traefik network by inspecting common proxy containers
+            // Auto-detect Traefik network using multiple strategies
             logs.push_str("[start] DEVFORGE_DOCKER_NETWORK not set, attempting auto-detection...\n");
+            logs.push_str("[start] Trying: name patterns, image scan, port 80/443, labels, working apps...\n");
             let detect_cmd = docker::docker_detect_traefik_network();
-            match self.executor.exec(server, workdir, &detect_cmd, 10).await {
+            match self.executor.exec(server, workdir, &detect_cmd, 20).await {
                 Ok(r) if r.ok && !r.output.trim().is_empty() => {
                     let detected = r.output.trim().to_string();
-                    logs.push_str(&format!("[start] Detected Traefik network: {}\n", detected));
+                    logs.push_str(&format!("[start] ✓ Detected Traefik network: {}\n", detected));
                     network = Some(detected);
                 }
                 _ => {
-                    logs.push_str("[start] Auto-detection failed. Checking common network names...\n");
+                    logs.push_str("[start] Auto-detection strategies failed. Trying fallback network names...\n");
                     // Fallback: try common network names
                     for candidate in ["coolify", "devforge-net", "traefik-public", "traefik"] {
                         let check = format!("docker network inspect {} >/dev/null 2>&1 && echo {}", candidate, candidate);
                         if let Ok(r) = self.executor.exec(server, workdir, &check, 5).await {
                             if r.ok && !r.output.trim().is_empty() {
-                                logs.push_str(&format!("[start] Using network: {}\n", candidate));
+                                logs.push_str(&format!("[start] Using fallback network: {}\n", candidate));
                                 network = Some(candidate.to_string());
                                 break;
                             }
