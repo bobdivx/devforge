@@ -6,7 +6,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::openai::OpenAiCompatibleProvider;
-use crate::{err, provider_from_config, ChatMessage, ChatRequest, LlmProvider, Result};
+use crate::{err, humanize_llm_error, provider_from_config, ChatMessage, ChatRequest, LlmProvider, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProbeRequest {
@@ -75,13 +75,17 @@ pub async fn probe(req: &ProbeRequest) -> ProbeResult {
             message: format!("chat OK · {resolved} · {preview}"),
             error: None,
         },
-        Err(e) => ProbeResult {
-            ok: false,
-            provider: req.provider.clone(),
-            resolved_model: resolved,
-            latency_ms: elapsed_ms(started),
-            message: "chat KO".into(),
-            error: Some(e.to_string()),
+        Err(e) => {
+            let raw_error = e.to_string();
+            let human_error = humanize_llm_error(&raw_error);
+            ProbeResult {
+                ok: false,
+                provider: req.provider.clone(),
+                resolved_model: resolved,
+                latency_ms: elapsed_ms(started),
+                message: "chat KO".into(),
+                error: Some(human_error),
+            }
         },
     }
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { api, type LlmProviderRow } from '../lib/api';
 import { AUTO_MODEL_VALUE, isModelTooSmallForTools, SMALL_MODEL_TOOLS_WARNING } from '../lib/llm-models';
 import { cn } from '../lib/cn';
+import { formatLlmError, getLlmErrorTone } from '../lib/llm-errors';
 import {
   Alert,
   Badge,
@@ -478,7 +479,7 @@ export function LlmProvidersPanel({
                           </Badge>
                           <span class="truncate font-medium">{p.name}</span>
                           {p.healthy === false ? (
-                            <Badge tone="danger" title={p.last_probe_error || 'KO'}>
+                            <Badge tone={getLlmErrorTone(p.last_probe_error)} title={formatLlmError(p.last_probe_error, false)}>
                               KO
                             </Badge>
                           ) : p.in_chain !== false ? (
@@ -491,7 +492,7 @@ export function LlmProvidersPanel({
                           {showUrl ? ` · ${p.base_url}` : ''}
                           {p.has_api_key ? ` · ${p.key_hint}` : ''}
                           {p.healthy === false && p.last_probe_error
-                            ? ` · ${p.last_probe_error.slice(0, 80)}`
+                            ? ` · ${formatLlmError(p.last_probe_error)}`
                             : ''}
                         </div>
                       </div>
