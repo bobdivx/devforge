@@ -130,8 +130,8 @@ export function AppHeader() {
     : boot?.user?.email || boot?.team?.name || boot?.workspace?.name || '';
 
   return (
-    <header class="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-line)] pb-4">
-      <div class="-mx-1 flex min-w-0 max-w-full flex-1 items-center gap-2 overflow-x-auto px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <header class="mb-6 flex flex-col gap-3 border-b border-[var(--color-line)] pb-4 sm:flex-row sm:items-center sm:justify-between">
+      <div class="-mx-1 flex min-w-0 flex-1 items-center gap-2 overflow-x-auto px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {stats ? (
           <>
             <StatChip label="En ligne" value={stats.live} tone="ok" />
@@ -147,7 +147,7 @@ export function AppHeader() {
       <div class="relative" ref={menuRef}>
         <button
           type="button"
-          class="flex items-center gap-2.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] py-1 pl-1 pr-3 transition hover:border-white/20 hover:bg-white/[0.06]"
+          class="flex min-h-[44px] w-full items-center gap-2.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] py-1 pl-1 pr-3 transition hover:border-white/20 hover:bg-white/[0.06] sm:w-auto"
           aria-expanded={menuOpen}
           aria-haspopup="menu"
           onClick={() => setMenuOpen((o) => !o)}
@@ -156,16 +156,16 @@ export function AppHeader() {
             <img
               src={ghAvatar}
               alt=""
-              class="h-8 w-8 rounded-full object-cover"
+              class="h-8 w-8 shrink-0 rounded-full object-cover"
               referrerpolicy="no-referrer"
             />
           ) : (
-            <span class="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-xs font-semibold text-[var(--color-accent)]">
+            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-xs font-semibold text-[var(--color-accent)]">
               {initials(boot?.user?.name || boot?.user?.email || 'DF')}
             </span>
           )}
-          <span class="hidden max-w-[10rem] truncate text-left sm:block">
-            <span class="block text-sm font-medium leading-tight text-[var(--color-ink)]">
+          <span class="min-w-0 flex-1 truncate text-left sm:max-w-[10rem]">
+            <span class="block truncate text-sm font-medium leading-tight text-[var(--color-ink)]">
               {displayName}
             </span>
             {subtitle && (
@@ -192,7 +192,7 @@ export function AppHeader() {
         {menuOpen && (
           <div
             role="menu"
-            class="absolute right-0 z-30 mt-2 w-56 overflow-hidden rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] py-1 shadow-xl shadow-black/40"
+            class="absolute right-0 z-30 mt-2 w-full min-w-[14rem] overflow-hidden rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] py-1 shadow-xl shadow-black/40 sm:w-56"
           >
             <div class="border-b border-[var(--color-line)] px-3 py-2.5 sm:hidden">
               <p class="truncate text-sm font-medium">{displayName}</p>
@@ -203,7 +203,7 @@ export function AppHeader() {
             <a
               role="menuitem"
               href="/app/team"
-              class="block px-3 py-2 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
+              class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
               onClick={() => setMenuOpen(false)}
             >
               Compte
@@ -212,7 +212,7 @@ export function AppHeader() {
               <a
                 role="menuitem"
                 href="/app/admin"
-                class="block px-3 py-2 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
+                class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
                 onClick={() => setMenuOpen(false)}
               >
                 Admin
@@ -221,7 +221,7 @@ export function AppHeader() {
             <a
               role="menuitem"
               href="/app/settings"
-              class="block px-3 py-2 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
+              class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
               onClick={() => setMenuOpen(false)}
             >
               Paramètres
@@ -232,7 +232,7 @@ export function AppHeader() {
                 href={ghUrl}
                 target="_blank"
                 rel="noreferrer"
-                class="block px-3 py-2 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
+                class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
                 onClick={() => setMenuOpen(false)}
               >
                 Profil GitHub
@@ -242,7 +242,7 @@ export function AppHeader() {
               <a
                 role="menuitem"
                 href="/app/settings?tab=github"
-                class="block px-3 py-2 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
+                class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
                 onClick={() => setMenuOpen(false)}
               >
                 Connecter GitHub
@@ -253,7 +253,7 @@ export function AppHeader() {
               type="button"
               role="menuitem"
               disabled={loggingOut}
-              class="block w-full px-3 py-2 text-left text-sm text-[var(--color-danger)] transition hover:bg-white/5 disabled:opacity-50"
+              class="block w-full px-3 py-2.5 text-left text-sm text-[var(--color-danger)] transition hover:bg-white/5 disabled:opacity-50"
               onClick={logout}
             >
               {loggingOut ? 'Déconnexion…' : 'Se déconnecter'}

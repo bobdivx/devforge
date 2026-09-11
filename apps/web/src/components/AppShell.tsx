@@ -136,10 +136,10 @@ function ShellInner({
           <main class="min-w-0 flex-1 py-2">
             <AppHeader />
             {(title || actions) && (
-              <div class="mb-4 flex flex-wrap items-end justify-between gap-3 sm:mb-6">
+              <div class="mb-4 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-end sm:justify-between">
                 <div class="min-w-0">
                   {title && (
-                    <h1 class="text-2xl font-semibold tracking-tight md:text-3xl">{title}</h1>
+                    <h1 class="break-words text-2xl font-semibold tracking-tight md:text-3xl">{title}</h1>
                   )}
                   {description && (
                     <p class="mt-2 text-sm text-[var(--color-ink-muted)]">{description}</p>
@@ -183,18 +183,20 @@ function ShellInner({
         <nav
           class="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--color-line)] bg-[var(--color-bg)]/95 backdrop-blur lg:hidden"
           style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+          aria-label="Navigation principale"
         >
-          <div class="mx-auto flex max-w-lg justify-around gap-0.5 overflow-x-auto px-1 py-1.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div class="mx-auto flex max-w-lg justify-around gap-0.5 px-1 py-1.5">
             {navItems.map((item) => (
               <a
                 key={item.key}
                 href={item.href}
                 class={cn(
-                  'flex min-w-[3.25rem] flex-1 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] leading-tight',
+                  'flex min-h-[44px] min-w-[3.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] leading-tight transition-colors',
                   active === item.key
-                    ? 'font-medium text-[var(--color-accent)]'
-                    : 'text-[var(--color-ink-muted)]',
+                    ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
+                    : 'text-[var(--color-ink-muted)] active:bg-white/5',
                 )}
+                aria-current={active === item.key ? 'page' : undefined}
               >
                 <span class="text-base leading-none" aria-hidden>
                   •
