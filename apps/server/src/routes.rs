@@ -485,6 +485,9 @@ async fn update_project(
         .await;
 
     let (_user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
+    if let Some(ref url) = project.production_url {
+        let _ = ensure_project_primary_domain(&state, &uuid, url, port as u16).await;
+    }
     Ok(Json(json!({"data": project})))
 }
 

@@ -27,6 +27,14 @@ pub fn router() -> Router<AppState> {
             axum::routing::delete(detach_domain),
         )
         .route(
+            "/api/v1/projects/{uuid}/domains/{id}/primary",
+            post(set_primary_domain),
+        )
+        .route(
+            "/api/v1/projects/{uuid}/domains/primary",
+            post(set_primary_domain_fqdn),
+        )
+        .route(
             "/api/v1/projects/{uuid}/proxy/routes",
             get(list_proxy).post(upsert_proxy),
         )
@@ -230,13 +238,9 @@ async fn list_domains(
     Path(uuid): Path<String>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let project = auth_project(&state, &headers, &uuid).await?;
-    // Rehydrate domaine principal depuis production_url (store mÃ©moire perdu au restart)
+    // Rehydrate domaine principal depuis production_url
     if let Some(ref url) = project.production_url {
-        if let Some(fqdn) = url
-            .strip_prefix("https://")
-            .or_else(|| url.strip_prefix("http://"))
-            .map(|s| s.split('/').next().unwrap_or(s).to_string())
-        {
+        if let Some(fqdn) = normalize_fqdn(url) {
             let listed = state.domains.list(&uuid).await.ok();
             let missing = listed
                 .as_ref()
@@ -257,7 +261,7 @@ async fn list_domains(
                     .upsert(devforge_proxy::ProxyRoute {
                         id: format!("primary-{uuid}"),
                         project_uuid: uuid.clone(),
-                        host: fqdn,
+                        host: fqdn.clone(),
                         path_prefix: "/".into(),
                         target_port: project.port.clamp(1, 65535) as u16,
                         https_redirect: true,
@@ -266,19 +270,106 @@ async fn list_domains(
             }
         }
     }
-    Ok(Json(
-        state
-            .domains
-            .list(&uuid)
-            .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
-    ))
+
+    let mut payload = state
+        .domains
+        .list(&uuid)
+        .await
+        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+
+    let primary_fqdn = project
+        .production_url
+        .as_deref()
+        .and_then(normalize_fqdn);
+    if let Some(arr) = payload.get_mut("domains").and_then(|d| d.as_array_mut()) {
+        for d in arr.iter_mut() {
+            let is_primary = d
+                .get("fqdn")
+                .and_then(|f| f.as_str())
+                .zip(primary_fqdn.as_deref())
+                .map(|(f, p)| f.eq_ignore_ascii_case(p))
+                .unwrap_or(false);
+            if let Some(obj) = d.as_object_mut() {
+                obj.insert("is_primary".into(), json!(is_primary));
+            }
+        }
+        // Domaine principal en premier
+        arr.sort_by_key(|d| {
+            !d.get("is_primary")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        });
+    }
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("primary_fqdn".into(), json!(primary_fqdn));
+        obj.insert(
+            "production_url".into(),
+            json!(project.production_url.clone()),
+        );
+    }
+    Ok(Json(payload))
+}
+
+fn normalize_fqdn(raw: &str) -> Option<String> {
+    let host = raw
+        .trim()
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_end_matches('.')
+        .to_lowercase();
+    if host.is_empty() || !host.contains('.') {
+        None
+    } else {
+        Some(host)
+    }
+}
+
+async fn apply_primary_fqdn(
+    state: &AppState,
+    project: &Project,
+    fqdn_raw: &str,
+) -> Result<String, (axum::http::StatusCode, Json<Value>)> {
+    let fqdn = normalize_fqdn(fqdn_raw).ok_or_else(|| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": "fqdn invalide"})),
+        )
+    })?;
+    let url = format!("https://{fqdn}");
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query("UPDATE projects SET production_url = ?, updated_at = ? WHERE uuid = ?")
+        .bind(&url)
+        .bind(&now)
+        .bind(&project.uuid)
+        .execute(&state.pool)
+        .await
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+    crate::routes::ensure_project_primary_domain(
+        state,
+        &project.uuid,
+        &url,
+        project.port.clamp(1, 65535) as u16,
+    )
+    .await
+    .map_err(|e| (e.status, Json(json!({"error": e.message}))))?;
+    Ok(fqdn)
 }
 
 #[derive(Deserialize)]
 pub struct AttachDomainBody {
     pub fqdn: String,
     pub tls: Option<bool>,
+    /// Défaut true : un domaine ajouté manuellement devient le principal.
+    pub primary: Option<bool>,
 }
 
 async fn attach_domain(
@@ -287,14 +378,42 @@ async fn attach_domain(
     Path(uuid): Path<String>,
     Json(body): Json<AttachDomainBody>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    let _ = auth_project(&state, &headers, &uuid).await?;
-    Ok(Json(
-        state
-            .domains
-            .attach(&uuid, &body.fqdn, body.tls.unwrap_or(true))
-            .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
-    ))
+    let project = auth_project(&state, &headers, &uuid).await?;
+    let as_primary = body.primary.unwrap_or(true);
+    let mut out = state
+        .domains
+        .attach(&uuid, &body.fqdn, body.tls.unwrap_or(true))
+        .await
+        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+
+    if as_primary {
+        let fqdn = apply_primary_fqdn(&state, &project, &body.fqdn).await?;
+        if let Some(obj) = out.as_object_mut() {
+            obj.insert("primary".into(), json!(true));
+            obj.insert("primary_fqdn".into(), json!(fqdn));
+        }
+    } else {
+        // Alias : route proxy secondaire (même port)
+        if let Some(fqdn) = normalize_fqdn(&body.fqdn) {
+            let _ = state
+                .proxy
+                .upsert(devforge_proxy::ProxyRoute {
+                    id: format!(
+                        "alias-{}-{}",
+                        &uuid[..8.min(uuid.len())],
+                        fqdn.replace('.', "-")
+                    ),
+                    project_uuid: uuid.clone(),
+                    host: fqdn,
+                    path_prefix: "/".into(),
+                    target_port: project.port.clamp(1, 65535) as u16,
+                    https_redirect: true,
+                })
+                .await;
+            let _ = state.proxy.sync(&uuid).await;
+        }
+    }
+    Ok(Json(out))
 }
 
 async fn detach_domain(
@@ -302,14 +421,112 @@ async fn detach_domain(
     headers: HeaderMap,
     Path((uuid, id)): Path<(String, String)>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    let _ = auth_project(&state, &headers, &uuid).await?;
-    Ok(Json(
-        state
+    let project = auth_project(&state, &headers, &uuid).await?;
+    let listed = state.domains.list(&uuid).await.ok();
+    let detached_fqdn = listed
+        .as_ref()
+        .and_then(|v| v.get("domains").and_then(|d| d.as_array()))
+        .and_then(|arr| {
+            arr.iter().find(|d| d.get("id").and_then(|i| i.as_str()) == Some(id.as_str()))
+        })
+        .and_then(|d| d.get("fqdn").and_then(|f| f.as_str()).map(|s| s.to_string()));
+
+    let out = state
+        .domains
+        .detach(&uuid, &id)
+        .await
+        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+
+    // Si on retire le principal, basculer vers un autre domaine restant (sinon clear).
+    let primary = project
+        .production_url
+        .as_deref()
+        .and_then(normalize_fqdn);
+    if primary
+        .as_ref()
+        .zip(detached_fqdn.as_ref())
+        .is_some_and(|(p, d)| p.eq_ignore_ascii_case(d))
+    {
+        let remaining = state
             .domains
-            .detach(&uuid, &id)
+            .list(&uuid)
             .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
-    ))
+            .ok()
+            .and_then(|v| {
+                v.get("domains")
+                    .and_then(|d| d.as_array())
+                    .and_then(|arr| {
+                        arr.iter()
+                            .filter_map(|d| d.get("fqdn").and_then(|f| f.as_str()).map(|s| s.to_string()))
+                            .next()
+                    })
+            });
+        if let Some(next) = remaining {
+            let _ = apply_primary_fqdn(&state, &project, &next).await;
+        } else {
+            let now = chrono::Utc::now().to_rfc3339();
+            let _ = sqlx::query(
+                "UPDATE projects SET production_url = NULL, updated_at = ? WHERE uuid = ?",
+            )
+            .bind(&now)
+            .bind(&uuid)
+            .execute(&state.pool)
+            .await;
+        }
+    }
+    Ok(Json(out))
+}
+
+async fn set_primary_domain(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((uuid, id)): Path<(String, String)>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let project = auth_project(&state, &headers, &uuid).await?;
+    let listed = state
+        .domains
+        .list(&uuid)
+        .await
+        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+    let fqdn = listed
+        .get("domains")
+        .and_then(|d| d.as_array())
+        .and_then(|arr| {
+            arr.iter().find(|d| d.get("id").and_then(|i| i.as_str()) == Some(id.as_str()))
+        })
+        .and_then(|d| d.get("fqdn").and_then(|f| f.as_str()))
+        .ok_or_else(|| {
+            (
+                axum::http::StatusCode::NOT_FOUND,
+                Json(json!({"error": "domaine introuvable"})),
+            )
+        })?;
+    let primary_fqdn = apply_primary_fqdn(&state, &project, fqdn).await?;
+    Ok(Json(json!({
+        "ok": true,
+        "primary_fqdn": primary_fqdn,
+        "production_url": format!("https://{primary_fqdn}"),
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct PrimaryFqdnBody {
+    pub fqdn: String,
+}
+
+async fn set_primary_domain_fqdn(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+    Json(body): Json<PrimaryFqdnBody>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let project = auth_project(&state, &headers, &uuid).await?;
+    let primary_fqdn = apply_primary_fqdn(&state, &project, &body.fqdn).await?;
+    Ok(Json(json!({
+        "ok": true,
+        "primary_fqdn": primary_fqdn,
+        "production_url": format!("https://{primary_fqdn}"),
+    })))
 }
 
 async fn list_proxy(

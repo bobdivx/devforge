@@ -19,10 +19,11 @@ members = [
     "crates/detect",
     "crates/llm",
     "crates/update",
+    "crates/runner",
 ]
 
 [workspace.package]
-version = "2.0.4"
+version = "2.0.5"
 edition = "2021"
 license = "proprietary"
 authors = ["DevForge"]
@@ -57,3 +58,4 @@ devforge-auth = { path = "crates/auth" }
 devforge-detect = { path = "crates/detect" }
 devforge-llm = { path = "crates/llm" }
 devforge-update = { path = "crates/update" }
+devforge-runner = { path = "crates/runner" }

@@ -557,39 +557,39 @@ impl UpdateFacade {
         Ok(())
     }
 
-    /// Recreate nommé via inspect JSON (portable Windows/Linux).
+    /// Recreate nommé via inspect ciblé (évite le JSON complet tronqué) + Mounts.
     async fn recreate_docker_container(&self, target: &str) -> Result<String> {
         let name = &self.config.container_name;
         let image_ref = format!("{}:{}", self.config.image, target);
 
-        let inspect = self
-            .executor
-            .exec(
-                &self.config.server_id,
-                ".",
-                &format!("docker inspect {}", shell_escape(name)),
-                30,
-            )
-            .await?;
-        if !inspect.ok {
-            return Err(DevForgeError::Message(format!(
-                "Conteneur {} introuvable : {}",
-                name,
-                truncate(&inspect.output, 200)
-            )));
-        }
-        let v: Value = {
-            let raw = inspect.output.trim();
-            let start = raw.find('[').or_else(|| raw.find('{')).unwrap_or(0);
-            serde_json::from_str(&raw[start..]).map_err(|e| {
-                DevForgeError::Message(format!("inspect JSON: {e}"))
-            })?
-        };
-        let obj = v
-            .as_array()
-            .and_then(|a| a.first())
-            .cloned()
-            .unwrap_or(v);
+        let restart = self
+            .docker_inspect_str(name, "{{.HostConfig.RestartPolicy.Name}}")
+            .await
+            .unwrap_or_else(|_| "unless-stopped".into());
+        let binds = self
+            .docker_inspect_json(name, "{{json .HostConfig.Binds}}")
+            .await
+            .unwrap_or(Value::Null);
+        let mounts = self
+            .docker_inspect_json(name, "{{json .Mounts}}")
+            .await
+            .unwrap_or(Value::Null);
+        let ports = self
+            .docker_inspect_json(name, "{{json .HostConfig.PortBindings}}")
+            .await
+            .unwrap_or(Value::Null);
+        let env = self
+            .docker_inspect_json(name, "{{json .Config.Env}}")
+            .await
+            .unwrap_or(Value::Null);
+        let networks = self
+            .docker_inspect_json(name, "{{json .NetworkSettings.Networks}}")
+            .await
+            .unwrap_or(Value::Null);
+        let labels = self
+            .docker_inspect_json(name, "{{json .Config.Labels}}")
+            .await
+            .unwrap_or(Value::Null);
 
         let mut run = vec![
             "docker".into(),
@@ -599,28 +599,52 @@ impl UpdateFacade {
             name.clone(),
         ];
 
-        let restart = obj
-            .pointer("/HostConfig/RestartPolicy/Name")
-            .and_then(|x| x.as_str())
-            .unwrap_or("unless-stopped");
+        let restart = restart.trim();
         if restart != "no" && !restart.is_empty() {
             run.push("--restart".into());
             run.push(restart.into());
         }
 
-        if let Some(binds) = obj.pointer("/HostConfig/Binds").and_then(|x| x.as_array()) {
-            for b in binds {
+        let mut used_bind = false;
+        if let Some(arr) = binds.as_array() {
+            for b in arr {
                 if let Some(s) = b.as_str() {
                     run.push("-v".into());
                     run.push(s.to_string());
+                    used_bind = true;
+                }
+            }
+        }
+        // Compose / CasaOS : Binds est souvent null — reprendre Mounts.
+        if !used_bind {
+            if let Some(arr) = mounts.as_array() {
+                for m in arr {
+                    let typ = m.get("Type").and_then(|t| t.as_str()).unwrap_or("bind");
+                    if typ != "bind" && typ != "volume" {
+                        continue;
+                    }
+                    let src = m.get("Source").and_then(|s| s.as_str()).unwrap_or("");
+                    let dst = m
+                        .get("Destination")
+                        .or_else(|| m.get("Target"))
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("");
+                    if src.is_empty() || dst.is_empty() {
+                        continue;
+                    }
+                    let rw = m.get("RW").and_then(|v| v.as_bool()).unwrap_or(true);
+                    let spec = if rw {
+                        format!("{src}:{dst}")
+                    } else {
+                        format!("{src}:{dst}:ro")
+                    };
+                    run.push("-v".into());
+                    run.push(spec);
                 }
             }
         }
 
-        if let Some(ports) = obj
-            .pointer("/HostConfig/PortBindings")
-            .and_then(|x| x.as_object())
-        {
+        if let Some(ports) = ports.as_object() {
             for (container_port, hosts) in ports {
                 let port_key = container_port.replace("/tcp", "").replace("/udp", "");
                 if let Some(arr) = hosts.as_array() {
@@ -642,10 +666,9 @@ impl UpdateFacade {
             }
         }
 
-        if let Some(env) = obj.pointer("/Config/Env").and_then(|x| x.as_array()) {
+        if let Some(env) = env.as_array() {
             for e in env {
                 if let Some(s) = e.as_str() {
-                    // La nouvelle image doit porter DEVFORGE_VERSION = target.
                     if s.starts_with("DEVFORGE_VERSION=") {
                         run.push("-e".into());
                         run.push(format!("DEVFORGE_VERSION={target}"));
@@ -660,10 +683,16 @@ impl UpdateFacade {
             run.push(format!("DEVFORGE_VERSION={target}"));
         }
 
-        if let Some(nets) = obj
-            .pointer("/NetworkSettings/Networks")
-            .and_then(|x| x.as_object())
-        {
+        if let Some(labels) = labels.as_object() {
+            for (k, v) in labels {
+                if let Some(val) = v.as_str() {
+                    run.push("--label".into());
+                    run.push(format!("{k}={val}"));
+                }
+            }
+        }
+
+        if let Some(nets) = networks.as_object() {
             if let Some(net_name) = nets.keys().next() {
                 run.push("--network".into());
                 run.push(net_name.clone());
@@ -729,6 +758,40 @@ impl UpdateFacade {
             .await;
 
         Ok(format!("Recréé {name} ← {image_ref}"))
+    }
+
+    async fn docker_inspect_json(&self, name: &str, format: &str) -> Result<Value> {
+        let raw = self.docker_inspect_str(name, format).await?;
+        let raw = raw.trim();
+        if raw.is_empty() || raw == "null" {
+            return Ok(Value::Null);
+        }
+        serde_json::from_str(raw).map_err(|e| {
+            DevForgeError::Message(format!(
+                "inspect JSON ({format}): {e} — {}",
+                truncate(raw, 120)
+            ))
+        })
+    }
+
+    async fn docker_inspect_str(&self, name: &str, format: &str) -> Result<String> {
+        let cmd = format!(
+            "docker inspect --format {} {}",
+            shell_escape(format),
+            shell_escape(name)
+        );
+        let inspect = self
+            .executor
+            .exec(&self.config.server_id, ".", &cmd, 30)
+            .await?;
+        if !inspect.ok {
+            return Err(DevForgeError::Message(format!(
+                "Conteneur {} introuvable : {}",
+                name,
+                truncate(&inspect.output, 200)
+            )));
+        }
+        Ok(inspect.output)
     }
 
     async fn run_binary_pipeline(&self, job_id: &str, target: &str) -> Result<()> {

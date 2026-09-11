@@ -22,9 +22,10 @@ type GhRepo = {
   description?: string | null;
 };
 
-type Step = 'repo' | 'branch' | 'build' | 'runtime' | 'env' | 'review';
+type Step = 'repo' | 'branch' | 'build' | 'runtime' | 'env' | 'domain' | 'review';
+type DomainMode = 'auto' | 'custom';
 
-const STEPS: Step[] = ['repo', 'branch', 'build', 'runtime', 'env', 'review'];
+const STEPS: Step[] = ['repo', 'branch', 'build', 'runtime', 'env', 'domain', 'review'];
 
 const STEP_LABELS: Record<Step, string> = {
   repo: 'Repo',
@@ -32,8 +33,24 @@ const STEP_LABELS: Record<Step, string> = {
   build: 'Build',
   runtime: 'Runtime',
   env: 'Env',
+  domain: 'Domaine',
   review: 'Revue',
 };
+
+function normalizeFqdn(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+    .replace(/\.$/, '');
+}
+
+function isValidFqdn(host: string): boolean {
+  if (!host || host.length > 253 || !host.includes('.')) return false;
+  if (host.startsWith('.') || host.endsWith('.') || host.includes('..')) return false;
+  return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host);
+}
 
 const BUILD_PACKS = [
   { id: 'nixpacks', label: 'Nixpacks', hint: 'Détection auto (Node, Python…)' },
@@ -78,6 +95,8 @@ export function NewGithubAppWizard({
   const [manualValue, setManualValue] = useState('');
   const [testCommand, setTestCommand] = useState('npm test --if-present');
   const [wildcardDomain, setWildcardDomain] = useState('');
+  const [domainMode, setDomainMode] = useState<DomainMode>('auto');
+  const [customFqdn, setCustomFqdn] = useState('');
 
   const idx = STEPS.indexOf(step);
   const projectNamePreview = name.trim() || (selected ? selected.name : 'app');
@@ -85,10 +104,19 @@ export function NewGithubAppWizard({
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
-  const previewUrl =
+  const autoUrl =
     wildcardDomain && appSlug ? `https://${appSlug}.${wildcardDomain}` : null;
+  const customHost = normalizeFqdn(customFqdn);
+  const customUrl = customHost ? `https://${customHost}` : null;
+  const productionUrl = domainMode === 'custom' ? customUrl : autoUrl;
   const progress = ((idx + 1) / STEPS.length) * 100;
   const envKeyCount = countEnvKeys(dotenv);
+
+  useEffect(() => {
+    if (!wildcardDomain) {
+      setDomainMode('custom');
+    }
+  }, [wildcardDomain]);
 
   useEffect(() => {
     (async () => {
@@ -155,6 +183,17 @@ export function NewGithubAppWizard({
       setError('Branche requise');
       return;
     }
+    if (step === 'domain') {
+      if (domainMode === 'auto') {
+        if (!autoUrl) {
+          setError('Domaine wildcard manquant — Settings → Domaine, ou FQDN custom');
+          return;
+        }
+      } else if (!isValidFqdn(customHost)) {
+        setError('FQDN invalide (ex. app.example.com)');
+        return;
+      }
+    }
     const i = STEPS.indexOf(step);
     if (step === 'branch' && selected) {
       void runDetect(selected.owner, selected.name, branch);
@@ -187,6 +226,7 @@ export function NewGithubAppWizard({
         server_id: 'default',
         workdir: `/data/devforge/applications/${selected.name}`,
         test_command: testCommand || 'npm test --if-present',
+        production_url: productionUrl,
       });
       if (dotenv.trim()) {
         const imported = await api.envImport(p.data.uuid, dotenv, true);
@@ -198,7 +238,7 @@ export function NewGithubAppWizard({
       }
       toast.push({
         title: 'Application créée',
-        detail: p.data.production_url || `${selected.full_name}@${branch}`,
+        detail: p.data.production_url || productionUrl || `${selected.full_name}@${branch}`,
         tone: 'ok',
       });
       window.location.href = `/app/projects/view?uuid=${encodeURIComponent(p.data.uuid)}&tab=overview`;
@@ -480,6 +520,74 @@ export function NewGithubAppWizard({
         </div>
       )}
 
+      {step === 'domain' && (
+        <div class="space-y-4">
+          <p class="text-sm text-[var(--color-ink-muted)]">
+            Choisis l’URL publique de l’app. Le proxy (Traefik) utilisera ce FQDN.
+          </p>
+          <Input
+            label="Nom de l’application"
+            value={name}
+            placeholder={selected?.name || 'mon-app'}
+            onInput={(e) => setName((e.target as HTMLInputElement).value)}
+            hint="Sert aussi pour le sous-domaine auto"
+          />
+          <div class="space-y-2">
+            <button
+              type="button"
+              class={`w-full rounded-xl border px-3 py-3 text-left text-sm transition ${
+                domainMode === 'auto'
+                  ? 'border-[var(--color-accent)] bg-white/5'
+                  : 'border-[var(--color-line)] hover:bg-white/5'
+              } ${!wildcardDomain ? 'opacity-50' : ''}`}
+              disabled={!wildcardDomain}
+              onClick={() => setDomainMode('auto')}
+            >
+              <div class="font-medium">Sous-domaine auto</div>
+              <div class="mt-0.5 text-xs text-[var(--color-ink-muted)]">
+                {autoUrl || (
+                  <>
+                    Wildcard manquant —{' '}
+                    <a class="underline" href="/app/settings?tab=domaine">
+                      Settings → Domaine
+                    </a>
+                  </>
+                )}
+              </div>
+            </button>
+            <button
+              type="button"
+              class={`w-full rounded-xl border px-3 py-3 text-left text-sm transition ${
+                domainMode === 'custom'
+                  ? 'border-[var(--color-accent)] bg-white/5'
+                  : 'border-[var(--color-line)] hover:bg-white/5'
+              }`}
+              onClick={() => setDomainMode('custom')}
+            >
+              <div class="font-medium">FQDN custom</div>
+              <div class="mt-0.5 text-xs text-[var(--color-ink-muted)]">
+                Ex. starbasefr.com ou app.jeser.app
+              </div>
+            </button>
+          </div>
+          {domainMode === 'custom' && (
+            <Input
+              label="Nom de domaine"
+              placeholder="app.example.com"
+              value={customFqdn}
+              onInput={(e) => setCustomFqdn((e.target as HTMLInputElement).value)}
+              hint={customUrl ? `URL → ${customUrl}` : 'Sans https://'}
+            />
+          )}
+          {productionUrl && (
+            <div class="rounded-xl border border-[var(--color-line)] px-3 py-2 text-sm">
+              <span class="text-[var(--color-ink-muted)]">URL finale </span>
+              <span class="font-medium">{productionUrl}</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {step === 'review' && selected && (
         <ul class="space-y-2 text-sm">
           <li>
@@ -510,12 +618,11 @@ export function NewGithubAppWizard({
             </li>
           )}
           <li>
-            <span class="text-[var(--color-ink-muted)]">URL </span>
-            {previewUrl || (
-              <span class="text-[var(--color-warn)]">
-                configure le domaine dans Settings (ex. jeser.app)
-              </span>
+            <span class="text-[var(--color-ink-muted)]">Domaine </span>
+            {productionUrl || (
+              <span class="text-[var(--color-warn)]">non défini</span>
             )}
+            {domainMode === 'custom' ? ' · custom' : ' · auto'}
           </li>
           <li>
             <span class="text-[var(--color-ink-muted)]">Env </span>

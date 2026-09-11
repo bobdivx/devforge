@@ -116,7 +116,7 @@ impl RemoteExecutor for SshRemoteExecutor {
         Ok(ExecResult {
             ok: output.status.success(),
             exit_code,
-            output: combined.chars().take(12000).collect(),
+            output: combined.chars().take(512_000).collect(),
         })
     }
 }
@@ -189,7 +189,7 @@ impl RemoteExecutor for LocalShellExecutor {
         Ok(ExecResult {
             ok: output.status.success(),
             exit_code: output.status.code().unwrap_or(1),
-            output: combined.chars().take(12000).collect(),
+            output: combined.chars().take(512_000).collect(),
         })
     }
 }

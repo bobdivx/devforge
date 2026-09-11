@@ -158,7 +158,13 @@ export function ProjectDetailPage(props: Props) {
       {tab === 'database' && <DatabasePanel uuid={uuid} />}
       {tab === 'env' && <EnvPanel uuid={uuid} />}
       {tab === 'backups' && <BackupsPanel projectUuid={uuid} />}
-      {tab === 'domains' && <DomainsPanel uuid={uuid} />}
+      {tab === 'domains' && (
+        <DomainsPanel
+          uuid={uuid}
+          project={project}
+          onProjectUpdate={(p) => setProject(p)}
+        />
+      )}
       {tab === 'settings' && project && (
         <ProjectSettingsPanel project={project} onSaved={(p) => setProject(p)} />
       )}
@@ -1413,34 +1419,100 @@ function EnvPanel({ uuid }: { uuid: string }) {
   );
 }
 
-function DomainsPanel({ uuid }: { uuid: string }) {
+function DomainsPanel({
+  uuid,
+  project,
+  onProjectUpdate,
+}: {
+  uuid: string;
+  project: Project | null;
+  onProjectUpdate: (p: Project) => void;
+}) {
   const toast = useToast();
   const [items, setItems] = useState<
-    Array<{ id: string; fqdn: string; tls: boolean; status: string }>
+    Array<{ id: string; fqdn: string; tls: boolean; status: string; is_primary?: boolean }>
   >([]);
+  const [primaryFqdn, setPrimaryFqdn] = useState('');
   const [fqdn, setFqdn] = useState('');
+  const [asPrimary, setAsPrimary] = useState(true);
   const [busy, setBusy] = useState(false);
 
   async function load() {
     const r = await api.domains(uuid);
-    setItems(r.domains ?? r.data ?? []);
+    const list = r.domains ?? r.data ?? [];
+    setItems(list);
+    const fromApi =
+      r.primary_fqdn ||
+      list.find((d) => d.is_primary)?.fqdn ||
+      (project?.production_url || '')
+        .replace(/^https?:\/\//, '')
+        .split('/')[0] ||
+      '';
+    setPrimaryFqdn(fromApi);
   }
 
   useEffect(() => {
     load().catch((e) => toast.push({ title: 'Domains KO', detail: String(e), tone: 'warn' }));
   }, [uuid]);
 
+  async function savePrimary(e: Event) {
+    e.preventDefault();
+    const host = primaryFqdn.trim().replace(/^https?:\/\//, '').split('/')[0];
+    if (!host || !host.includes('.')) {
+      toast.push({ title: 'FQDN invalide', detail: 'ex. app.example.com', tone: 'warn' });
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await api.setPrimaryDomainFqdn(uuid, host);
+      toast.push({ title: 'Domaine principal', detail: r.primary_fqdn, tone: 'ok' });
+      const p = await api.project(uuid);
+      onProjectUpdate(p.data);
+      await load();
+    } catch (err) {
+      toast.push({ title: 'Principal KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function attach(e: Event) {
     e.preventDefault();
     if (!fqdn.trim()) return;
     setBusy(true);
     try {
-      await api.attachDomain(uuid, { fqdn: fqdn.trim(), tls: true });
+      await api.attachDomain(uuid, {
+        fqdn: fqdn.trim(),
+        tls: true,
+        primary: asPrimary,
+      });
       setFqdn('');
-      toast.push({ title: 'Domaine ajouté', tone: 'ok' });
+      toast.push({
+        title: asPrimary ? 'Domaine principal défini' : 'Domaine ajouté',
+        tone: 'ok',
+      });
+      if (asPrimary) {
+        const p = await api.project(uuid);
+        onProjectUpdate(p.data);
+      }
       await load();
     } catch (err) {
       toast.push({ title: 'Attach KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function makePrimary(id: string) {
+    setBusy(true);
+    try {
+      const r = await api.setPrimaryDomain(uuid, id);
+      toast.push({ title: 'Domaine principal', detail: r.primary_fqdn, tone: 'ok' });
+      const p = await api.project(uuid);
+      onProjectUpdate(p.data);
+      await load();
+    } catch (err) {
+      toast.push({ title: 'Principal KO', detail: String(err), tone: 'danger' });
     } finally {
       setBusy(false);
     }
@@ -1450,6 +1522,8 @@ function DomainsPanel({ uuid }: { uuid: string }) {
     setBusy(true);
     try {
       await api.detachDomain(uuid, id);
+      const p = await api.project(uuid);
+      onProjectUpdate(p.data);
       await load();
     } catch (err) {
       toast.push({ title: 'Detach KO', detail: String(err), tone: 'danger' });
@@ -1460,39 +1534,94 @@ function DomainsPanel({ uuid }: { uuid: string }) {
 
   return (
     <FadeIn>
-      <Card>
-        <CardHeader title="Domains" description="Sous-domaine auto {app}.{domaine} + FQDN custom." />
-        <form class="mb-4 flex flex-wrap items-end gap-2" onSubmit={attach}>
-          <div class="min-w-[220px] flex-1">
-            <Input
-              placeholder="app.example.com"
-              value={fqdn}
-              onInput={(e) => setFqdn((e.target as HTMLInputElement).value)}
-            />
-          </div>
-          <Button type="submit" size="sm" variant="secondary" disabled={busy}>
-            Attacher
-          </Button>
-        </form>
-        <ul class="divide-y divide-[var(--color-line)]">
-          {items.map((d) => (
-            <li key={d.id} class="flex items-center justify-between gap-2 py-2 text-sm">
-              <div>
-                <div class="font-medium">{d.fqdn}</div>
-                <div class="text-xs text-[var(--color-ink-muted)]">
-                  {d.tls ? 'TLS' : 'HTTP'} · {d.status}
-                </div>
+      <div class="space-y-4">
+        <Card>
+          <CardHeader
+            title="Domaine principal"
+            description="URL publique de l’app (production). Un FQDN saisi manuellement devient principal par défaut."
+          />
+          <form class="flex flex-wrap items-end gap-2" onSubmit={savePrimary}>
+            <div class="min-w-[220px] flex-1">
+              <Input
+                label="FQDN principal"
+                placeholder="app.example.com"
+                value={primaryFqdn}
+                onInput={(e) => setPrimaryFqdn((e.target as HTMLInputElement).value)}
+                hint={
+                  primaryFqdn.trim()
+                    ? `https://${primaryFqdn.trim().replace(/^https?:\/\//, '').split('/')[0]}`
+                    : undefined
+                }
+              />
+            </div>
+            <Button type="submit" size="sm" variant="secondary" disabled={busy}>
+              Enregistrer
+            </Button>
+          </form>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Domains"
+            description="Aliases + sous-domaine auto. L’ajout manuel est principal par défaut."
+          />
+          <form class="mb-4 space-y-3" onSubmit={attach}>
+            <div class="flex flex-wrap items-end gap-2">
+              <div class="min-w-[220px] flex-1">
+                <Input
+                  placeholder="autre.example.com"
+                  value={fqdn}
+                  onInput={(e) => setFqdn((e.target as HTMLInputElement).value)}
+                />
               </div>
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => detach(d.id)}>
-                Retirer
+              <Button type="submit" size="sm" variant="secondary" disabled={busy}>
+                Attacher
               </Button>
-            </li>
-          ))}
-          {items.length === 0 && (
-            <li class="py-2 text-sm text-[var(--color-ink-muted)]">Aucun domaine.</li>
-          )}
-        </ul>
-      </Card>
+            </div>
+            <label class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)]">
+              <input
+                type="checkbox"
+                checked={asPrimary}
+                onChange={(e) => setAsPrimary((e.target as HTMLInputElement).checked)}
+              />
+              Définir comme domaine principal
+            </label>
+          </form>
+          <ul class="divide-y divide-[var(--color-line)]">
+            {items.map((d) => (
+              <li key={d.id} class="flex items-center justify-between gap-2 py-2 text-sm">
+                <div>
+                  <div class="flex flex-wrap items-center gap-2 font-medium">
+                    {d.fqdn}
+                    {d.is_primary && <Badge tone="ok">Principal</Badge>}
+                  </div>
+                  <div class="text-xs text-[var(--color-ink-muted)]">
+                    {d.tls ? 'TLS' : 'HTTP'} · {d.status}
+                  </div>
+                </div>
+                <div class="flex shrink-0 gap-1">
+                  {!d.is_primary && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => makePrimary(d.id)}
+                    >
+                      Principal
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => detach(d.id)}>
+                    Retirer
+                  </Button>
+                </div>
+              </li>
+            ))}
+            {items.length === 0 && (
+              <li class="py-2 text-sm text-[var(--color-ink-muted)]">Aucun domaine.</li>
+            )}
+          </ul>
+        </Card>
+      </div>
     </FadeIn>
   );
 }

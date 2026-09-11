@@ -478,14 +478,41 @@ export const api = {
     ),
   domains: (projectUuid: string) =>
     request<{
-      data?: Array<{ id: string; fqdn: string; tls: boolean; status: string }>;
-      domains?: Array<{ id: string; fqdn: string; tls: boolean; status: string }>;
+      data?: Array<{
+        id: string;
+        fqdn: string;
+        tls: boolean;
+        status: string;
+        is_primary?: boolean;
+      }>;
+      domains?: Array<{
+        id: string;
+        fqdn: string;
+        tls: boolean;
+        status: string;
+        is_primary?: boolean;
+      }>;
+      primary_fqdn?: string | null;
+      production_url?: string | null;
     }>(`/projects/${projectUuid}/domains`),
-  attachDomain: (projectUuid: string, body: { fqdn: string; tls?: boolean }) =>
+  attachDomain: (
+    projectUuid: string,
+    body: { fqdn: string; tls?: boolean; primary?: boolean },
+  ) =>
     request(`/projects/${projectUuid}/domains`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  setPrimaryDomain: (projectUuid: string, id: string) =>
+    request<{ ok: boolean; primary_fqdn: string; production_url: string }>(
+      `/projects/${projectUuid}/domains/${encodeURIComponent(id)}/primary`,
+      { method: 'POST', body: '{}' },
+    ),
+  setPrimaryDomainFqdn: (projectUuid: string, fqdn: string) =>
+    request<{ ok: boolean; primary_fqdn: string; production_url: string }>(
+      `/projects/${projectUuid}/domains/primary`,
+      { method: 'POST', body: JSON.stringify({ fqdn }) },
+    ),
   detachDomain: (projectUuid: string, id: string) =>
     request(`/projects/${projectUuid}/domains/${encodeURIComponent(id)}`, {
       method: 'DELETE',
