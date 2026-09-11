@@ -202,19 +202,21 @@ pub fn docker_update_labels(name: &str, labels: &Value) -> String {
 
 /// Recrée `name` avec les labels fournis (Traefik sync après changement de domaine).
 pub fn docker_recreate_with_labels(name: &str, labels: &Value) -> String {
-    let mut label_args = String::new();
+    // Pour éviter tout problème d'échappement avec les caractères spéciaux Traefik
+    // (backticks, parenthèses, &&, etc.), on utilise un heredoc pour passer les labels.
+    let mut label_heredoc = String::new();
     if let Some(obj) = labels.as_object() {
         for (k, v) in obj {
             let val = v.as_str().unwrap_or("");
-            label_args.push_str(&format!(
-                " --label {}={}",
-                shell_escape(k),
-                shell_escape(val)
-            ));
+            // Format: key=value, un par ligne (pas d'échappement nécessaire dans un heredoc)
+            label_heredoc.push_str(&format!("{}={}\n", k, val));
         }
     }
     let n = shell_escape(name);
+    
     // Script POSIX : inspect → stop/rm → run (image/env/network/ports + nouveaux labels).
+    // Les labels sont passés via un heredoc pour éviter complètement les problèmes
+    // d'échappement shell avec les règles Traefik Host(`...`) et autres syntaxes complexes.
     format!(
         r#"sh -c 'set -e
 N={n}
@@ -227,13 +229,20 @@ PORT_ARGS=""
 for spec in $(docker inspect -f "{{{{range $p, $conf := .HostConfig.PortBindings}}}}{{{{range $conf}}}}{{{{.HostPort}}}}:{{{{$p}}}} {{{{end}}}}{{{{end}}}}" "$N"); do
   [ -n "$spec" ] && PORT_ARGS="$PORT_ARGS -p $spec"
 done
+LABEL_FILE=$(mktemp)
+cat > "$LABEL_FILE" <<'"'"'LABELS_EOF'"'"'
+{label_heredoc}LABELS_EOF
+LABEL_ARGS=""
+while IFS= read -r line; do
+  [ -n "$line" ] && LABEL_ARGS="$LABEL_ARGS --label $line"
+done < "$LABEL_FILE"
 docker stop "$N" >/dev/null
 docker rm -f "$N" >/dev/null
 NET_ARG=""
 [ -n "$NET" ] && [ "$NET" != "bridge" ] && NET_ARG="--network $NET"
 # shellcheck disable=SC2086
-docker run -d --name "$N" --restart unless-stopped{label_args} $NET_ARG $PORT_ARGS --env-file "$ENV_FILE" "$IMG"
-rm -f "$ENV_FILE"
+docker run -d --name "$N" --restart unless-stopped $LABEL_ARGS $NET_ARG $PORT_ARGS --env-file "$ENV_FILE" "$IMG"
+rm -f "$ENV_FILE" "$LABEL_FILE"
 echo "recreated $N with traefik labels"
 '"#
     )
@@ -421,6 +430,132 @@ mod tests {
         let cmd = docker_update_labels("df-fbb6a152-ef0", &labels);
         assert!(cmd.contains("docker run"));
         assert!(!cmd.contains("--label-add"));
-        assert!(cmd.contains("--label traefik.enable=true"));
+        assert!(cmd.contains("traefik.enable"));
+    }
+
+    #[test]
+    fn docker_recreate_with_traefik_host_labels_shell_valid() {
+        // Regression test: Traefik Host(`fqdn`) labels with backticks/parentheses
+        // must not break POSIX shell syntax when embedded in sh -c '...'
+        let labels = traefik_labels(
+            "fbb6a152-ef01",
+            "starbasefr.jeser.app",
+            "/",
+            4321,
+            None,
+        );
+        let cmd = docker_recreate_with_labels("df-fbb6a152-ef0", &labels);
+        
+        // Write the generated script to a temp file and validate with sh -n
+        let temp_dir = std::env::temp_dir();
+        let script_path = temp_dir.join("test_recreate_labels.sh");
+        std::fs::write(&script_path, &cmd).expect("failed to write test script");
+        
+        let output = std::process::Command::new("sh")
+            .arg("-n")
+            .arg(&script_path)
+            .output()
+            .expect("failed to run sh -n");
+        
+        std::fs::remove_file(&script_path).ok();
+        
+        assert!(
+            output.status.success(),
+            "Generated shell script has syntax errors:\n{}\n\nScript:\n{}",
+            String::from_utf8_lossy(&output.stderr),
+            cmd
+        );
+        
+        // Verify the script contains expected Traefik labels
+        assert!(cmd.contains("starbasefr.jeser.app"));
+        assert!(cmd.contains("4321"));
+    }
+
+    #[test]
+    fn docker_recreate_multi_host_labels_shell_valid() {
+        // Test multiple hosts with complex Traefik rules
+        let labels = traefik_labels_for_routes(
+            "fbb6a152-ef01",
+            &[
+                ("starbasefr.jeser.app", "/", 4321),
+                ("starbasefr.com", "/api", 4321),
+            ],
+            None,
+        );
+        let cmd = docker_recreate_with_labels("df-fbb6a152-ef0", &labels);
+        
+        let temp_dir = std::env::temp_dir();
+        let script_path = temp_dir.join("test_recreate_multi_labels.sh");
+        std::fs::write(&script_path, &cmd).expect("failed to write test script");
+        
+        let output = std::process::Command::new("sh")
+            .arg("-n")
+            .arg(&script_path)
+            .output()
+            .expect("failed to run sh -n");
+        
+        std::fs::remove_file(&script_path).ok();
+        
+        assert!(
+            output.status.success(),
+            "Multi-host script has syntax errors:\n{}\n\nScript:\n{}",
+            String::from_utf8_lossy(&output.stderr),
+            cmd
+        );
+        
+        assert!(cmd.contains("starbasefr.jeser.app"));
+        assert!(cmd.contains("starbasefr.com"));
+    }
+
+    #[test]
+    fn docker_recreate_with_sso_middleware_shell_valid() {
+        // Test ForwardAuth SSO middleware labels (contains && in Traefik rules potentially)
+        let labels = traefik_labels(
+            "fbb6a152-ef01",
+            "secure.example.com",
+            "/",
+            8080,
+            Some("http://oauth2-proxy:4180/auth"),
+        );
+        let cmd = docker_recreate_with_labels("df-secure", &labels);
+        
+        let temp_dir = std::env::temp_dir();
+        let script_path = temp_dir.join("test_recreate_sso_labels.sh");
+        std::fs::write(&script_path, &cmd).expect("failed to write test script");
+        
+        let output = std::process::Command::new("sh")
+            .arg("-n")
+            .arg(&script_path)
+            .output()
+            .expect("failed to run sh -n");
+        
+        std::fs::remove_file(&script_path).ok();
+        
+        assert!(
+            output.status.success(),
+            "SSO middleware script has syntax errors:\n{}\n\nScript:\n{}",
+            String::from_utf8_lossy(&output.stderr),
+            cmd
+        );
+        
+        assert!(cmd.contains("forwardauth.address"));
+    }
+
+    #[test]
+    fn shell_escape_preserves_simple_values() {
+        // Ensure simple labels still work without unnecessary quoting
+        assert_eq!(shell_escape("traefik.enable"), "traefik.enable");
+        assert_eq!(shell_escape("true"), "true");
+        assert_eq!(shell_escape("df-fbb6a152"), "df-fbb6a152");
+        assert_eq!(shell_escape("4321"), "4321");
+        assert_eq!(shell_escape("/api/v1"), "/api/v1");
+    }
+
+    #[test]
+    fn shell_escape_handles_special_chars() {
+        // Complex values should be quoted
+        assert!(shell_escape("Host(`example.com`)").contains('\''));
+        assert!(shell_escape("value with spaces").contains('\''));
+        assert!(shell_escape("a && b").contains('\''));
     }
 }
