@@ -97,6 +97,13 @@ export function RunnersPage() {
   const [ghConnected, setGhConnected] = useState<boolean | null>(null);
   const [ghLogin, setGhLogin] = useState<string | null>(null);
   const [repos, setRepos] = useState<Array<{ full_name: string; owner: string; name: string }>>([]);
+  const [suggestions, setSuggestions] = useState<Array<{
+    project_uuid: string;
+    project_name: string;
+    repo: string;
+    owner: string;
+    needs_runner: boolean;
+  }>>([]);
   const [form, setForm] = useState<CreateRunnerBody>({
     owner: '',
     repo: '',
@@ -157,8 +164,57 @@ export function RunnersPage() {
       const r = await api.runnersList();
       setRunners(r.runners ?? []);
       setError(null);
+      await detectSuggestions();
     } catch (e) {
       setError(String(e));
+    }
+  }
+
+  async function detectSuggestions() {
+    try {
+      const projectsResp = await api.projects();
+      const projects = projectsResp.data ?? [];
+      const allRunners = runners;
+      const suggested: Array<{
+        project_uuid: string;
+        project_name: string;
+        repo: string;
+        owner: string;
+        needs_runner: boolean;
+      }> = [];
+
+      for (const project of projects) {
+        if (!project.git_repository) continue;
+        
+        const match = project.git_repository.match(/github\.com[/:]([\w-]+)\/([\w.-]+?)(?:\.git)?$/i);
+        if (!match) continue;
+        
+        const owner = match[1];
+        const repo = match[2];
+        
+        try {
+          const actions = await api.projectActions(project.uuid);
+          if (!actions.available || !actions.has_workflows) continue;
+          
+          const hasRunner = (actions.runners?.length ?? 0) > 0;
+          
+          if (!hasRunner) {
+            suggested.push({
+              project_uuid: project.uuid,
+              project_name: project.name,
+              repo,
+              owner,
+              needs_runner: true,
+            });
+          }
+        } catch {
+          // Skip projects with API errors
+        }
+      }
+      
+      setSuggestions(suggested);
+    } catch {
+      // Soft fail
     }
   }
 
@@ -309,6 +365,23 @@ export function RunnersPage() {
     }
   }
 
+  async function createSuggestedRunner(projectUuid: string) {
+    setBusy(true);
+    try {
+      const result = await api.projectActionsEnsureRunner(projectUuid);
+      toast.push({
+        title: result.created ? 'Runner créé' : 'Runner existant',
+        detail: result.message,
+        tone: 'ok',
+      });
+      await load();
+    } catch (err) {
+      toast.push({ title: 'Erreur', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const detail = runners.find((r) => r.id === selected) || null;
 
   return (
@@ -331,6 +404,41 @@ export function RunnersPage() {
         <Alert tone="warn" class="mb-4">
           {error}
         </Alert>
+      )}
+
+      {suggestions.length > 0 && (
+        <FadeIn>
+          <Card class="mb-6">
+            <CardHeader
+              title="Projets nécessitant des runners"
+              description={`${suggestions.length} projet${suggestions.length > 1 ? 's' : ''} avec GitHub Actions`}
+            />
+            <ul class="divide-y divide-[var(--color-line)]">
+              {suggestions.map((s) => (
+                <li key={s.project_uuid} class="flex items-center justify-between gap-3 py-3">
+                  <div class="min-w-0 flex-1">
+                    <a
+                      href={`/app/projects/view?uuid=${encodeURIComponent(s.project_uuid)}&tab=actions`}
+                      class="font-medium text-[var(--color-accent)] hover:underline"
+                    >
+                      {s.project_name}
+                    </a>
+                    <div class="mt-0.5 font-mono text-xs text-[var(--color-ink-faint)]">
+                      {s.owner}/{s.repo}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => void createSuggestedRunner(s.project_uuid)}
+                  >
+                    Créer runner
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </FadeIn>
       )}
 
       <FadeIn>

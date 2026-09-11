@@ -3,7 +3,6 @@ export type NavItem = { href: string; label: string; key: string };
 /** Nav globale : pas d’entrée Agent — les agents vivent dans le project. */
 export const GLOBAL_NAV: NavItem[] = [
   { href: '/app', label: 'Apps', key: 'home' },
-  { href: '/app/projects', label: 'Projects', key: 'projects' },
   { href: '/app/runners', label: 'Runners', key: 'runners' },
   { href: '/app/mcp', label: 'MCP', key: 'mcp' },
   { href: '/app/tokens', label: 'Tokens', key: 'tokens' },

@@ -5,6 +5,7 @@ import { AppShell } from './AppShell';
 import { AppIcon, statusDotClass } from './AppIcon';
 import { Alert, FadeIn, Skeleton } from './ui';
 import { useEffect, useState } from 'preact/hooks';
+import { NewGithubAppWizard } from './NewGithubAppWizard';
 
 function AppCard({ project, index }: { project: Project; index: number }) {
   const status = projectStatusMeta(project.status);
@@ -64,6 +65,7 @@ export function HomePage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   useEffect(() => {
     api
@@ -94,8 +96,9 @@ export function HomePage() {
           ))}
 
           <FadeIn delay={Math.min(projects.length * 40, 280)}>
-            <a
-              href="/app/projects"
+            <button
+              type="button"
+              onClick={() => setWizardOpen(true)}
               class="flex aspect-square flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/15 bg-transparent px-3 py-4 text-[var(--color-ink-muted)] transition hover:border-white/30 hover:bg-white/[0.03] hover:text-white"
             >
               <div class="flex h-16 w-16 items-center justify-center rounded-[1.15rem] border border-dashed border-white/20 sm:h-[4.5rem] sm:w-[4.5rem]">
@@ -104,15 +107,41 @@ export function HomePage() {
                 </svg>
               </div>
               <span class="text-sm font-medium">Ajouter</span>
-            </a>
+            </button>
           </FadeIn>
         </div>
       )}
 
       {!loading && !error && projects.length === 0 && (
         <p class="mt-6 text-center text-sm text-[var(--color-ink-muted)]">
-          Aucune application pour l’instant. Crée-en une pour commencer.
+          Aucune application pour l'instant. Crée-en une pour commencer.
         </p>
+      )}
+
+      {wizardOpen && (
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div class="w-full max-w-2xl rounded-2xl bg-[var(--color-card)] p-6 shadow-2xl">
+            <div class="mb-4 flex items-start justify-between">
+              <div>
+                <h2 class="text-xl font-semibold">Nouveau projet</h2>
+                <p class="mt-1 text-sm text-[var(--color-ink-muted)]">
+                  Importer depuis GitHub
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWizardOpen(false)}
+                class="text-[var(--color-ink-muted)] transition hover:text-white"
+                aria-label="Fermer"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <NewGithubAppWizard bare />
+          </div>
+        </div>
       )}
     </AppShell>
   );
