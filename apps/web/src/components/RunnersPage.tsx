@@ -453,11 +453,11 @@ export function RunnersPage() {
                       href={j.run_url}
                       target="_blank"
                       rel="noreferrer"
-                      class="text-sm font-medium text-[var(--color-accent)] hover:underline"
+                      class="break-words text-sm font-medium text-[var(--color-accent)] hover:underline"
                     >
                       {j.job_name || j.run_name}
                     </a>
-                    <div class="mt-0.5 text-xs text-[var(--color-ink-faint)]">
+                    <div class="mt-0.5 break-words text-xs text-[var(--color-ink-faint)]">
                       {j.job_status || j.run_status}
                       {j.job_conclusion || j.run_conclusion
                         ? ` · ${j.job_conclusion || j.run_conclusion}`
