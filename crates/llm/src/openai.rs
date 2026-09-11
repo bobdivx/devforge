@@ -420,6 +420,18 @@ impl OpenAiCompatibleProvider {
             }
         }
 
+        // Try to list and pick a working model for specific providers
+        if provider == "gemini" {
+            if let Ok(models) =
+                Self::list_models_for_provider(provider, base_url, api_key).await
+            {
+                if let Some(pick) = Self::pick_preferred_gemini_model(&models) {
+                    tracing::info!(model = %pick, "Gemini auto → modèle chat détecté");
+                    return pick;
+                }
+            }
+        }
+
         match provider {
             "ollama" => "llama3.2".into(),
             "gemini" => "gemini-2.5-flash".into(),
@@ -435,7 +447,8 @@ impl OpenAiCompatibleProvider {
         }
     }
 
-    /// Préfère un modèle léger (7b/8b/3b) s’il est listé, sinon le premier.
+
+    /// Préfère un modèle léger (7b/8b/3b) s'il est listé, sinon le premier.
     fn pick_preferred_ollama_model(models: &[String]) -> Option<String> {
         if models.is_empty() {
             return None;
@@ -447,5 +460,125 @@ impl OpenAiCompatibleProvider {
             }
         }
         Some(models[0].clone())
+    }
+
+    /// Préfère un modèle Gemini chat-compatible, évite les modèles Interactions-only.
+    /// Filtre : exclut les modèles avec `-exp-`, `-preview-`, `antigravity`, ou patterns non-chat.
+    /// Préfère : `flash`, `pro`, versions stables comme `gemini-2.5-flash` ou `gemini-2.0-flash`.
+    fn pick_preferred_gemini_model(models: &[String]) -> Option<String> {
+        if models.is_empty() {
+            return None;
+        }
+
+        // Filter out known bad patterns (Interactions-only, experimental, preview)
+        let bad_patterns = [
+            "-exp-",
+            "-preview-",
+            "antigravity",
+            "interactions",
+            "experimental",
+        ];
+        
+        let mut candidates: Vec<String> = models
+            .iter()
+            .filter(|m| {
+                let lower = m.to_lowercase();
+                // Reject if contains bad patterns
+                if bad_patterns.iter().any(|p| lower.contains(p)) {
+                    return false;
+                }
+                // Accept if looks like a chat model
+                lower.contains("gemini") || lower.contains("flash") || lower.contains("pro")
+            })
+            .cloned()
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        // Prefer known-good stable models first
+        let preferred = [
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-2.5-pro",
+            "gemini-2.0-pro",
+            "gemini-1.5-pro",
+        ];
+
+        for pref in preferred {
+            if let Some(m) = candidates.iter().find(|m| {
+                m.to_lowercase() == pref || m.to_lowercase() == format!("models/{}", pref)
+            }) {
+                return Some(m.clone());
+            }
+        }
+
+        // Prefer flash over pro (faster, cheaper)
+        if let Some(m) = candidates.iter().find(|m| m.to_lowercase().contains("flash")) {
+            return Some(m.clone());
+        }
+
+        if let Some(m) = candidates.iter().find(|m| m.to_lowercase().contains("pro")) {
+            return Some(m.clone());
+        }
+
+        // Fallback to first candidate
+        candidates.into_iter().next()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pick_preferred_gemini_model_filters_antigravity() {
+        let models = vec![
+            "models/antigravity-preview-05-2026".to_string(),
+            "models/gemini-2.5-flash".to_string(),
+        ];
+        let picked = OpenAiCompatibleProvider::pick_preferred_gemini_model(&models);
+        assert_eq!(picked, Some("models/gemini-2.5-flash".to_string()));
+    }
+
+    #[test]
+    fn test_pick_preferred_gemini_model_filters_experimental() {
+        let models = vec![
+            "models/gemini-exp-1234".to_string(),
+            "models/gemini-2.5-pro".to_string(),
+        ];
+        let picked = OpenAiCompatibleProvider::pick_preferred_gemini_model(&models);
+        assert_eq!(picked, Some("models/gemini-2.5-pro".to_string()));
+    }
+
+    #[test]
+    fn test_pick_preferred_gemini_model_prefers_flash() {
+        let models = vec![
+            "models/gemini-2.5-pro".to_string(),
+            "models/gemini-2.5-flash".to_string(),
+        ];
+        let picked = OpenAiCompatibleProvider::pick_preferred_gemini_model(&models);
+        // Should prefer known stable model first (flash comes before pro in preferred list)
+        assert_eq!(picked, Some("models/gemini-2.5-flash".to_string()));
+    }
+
+    #[test]
+    fn test_pick_preferred_gemini_model_handles_empty() {
+        let models: Vec<String> = vec![];
+        let picked = OpenAiCompatibleProvider::pick_preferred_gemini_model(&models);
+        assert_eq!(picked, None);
+    }
+
+    #[test]
+    fn test_pick_preferred_gemini_model_all_bad() {
+        let models = vec![
+            "models/antigravity-preview-05-2026".to_string(),
+            "models/gemini-exp-test".to_string(),
+            "models/interactions-only-model".to_string(),
+        ];
+        let picked = OpenAiCompatibleProvider::pick_preferred_gemini_model(&models);
+        assert_eq!(picked, None);
     }
 }

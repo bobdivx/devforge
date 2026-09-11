@@ -117,7 +117,7 @@ impl LlmProvider for StubLlmProvider {
 
         Ok(AssistantTurn {
             content: format!(
-                "[stub LLM] Mode sans clé API. Outils : {}.\nExemples : « liste les projets », « logs », « tests », « smoke ».\nConfigure DEVFORGE_LLM_API_KEY (+ DEVFORGE_LLM_PROVIDER=openai) pour un vrai modèle.",
+                "[stub LLM] Mode sans LLM actif. Outils disponibles : {}.\nExemples : « liste les projets », « logs », « tests », « smoke ».\n\nConfigure un provider (Ollama, Gemini, OpenAI…) dans Settings → Agents / LLM pour obtenir des réponses intelligentes.",
                 tool_names.join(", ")
             ),
             tool_calls: vec![],

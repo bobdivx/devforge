@@ -159,3 +159,23 @@ mod tests {
         assert!(r.error.is_some());
     }
 }
+
+    #[tokio::test]
+    async fn probe_returns_error_message_when_model_fails() {
+        // This test demonstrates that probe captures the actual error from bad models
+        let r = probe(&ProbeRequest {
+            provider: "gemini".into(),
+            base_url: "https://generativelanguage.googleapis.com/v1beta/openai".into(),
+            api_key: "fake-key-for-test".into(),
+            model: "models/antigravity-preview-05-2026".into(),
+        })
+        .await;
+        
+        // Should fail and have an error message (not just "stub")
+        assert!(!r.ok);
+        assert!(r.error.is_some());
+        let err = r.error.unwrap();
+        // Should not be the generic stub error
+        assert!(!err.contains("config incomplète"));
+    }
+}

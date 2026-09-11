@@ -10,13 +10,35 @@ export function AgentPage() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [busy, setBusy] = useState(false);
   const [llm, setLlm] = useState<string>('—');
+  const [llmError, setLlmError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    api
-      .health()
-      .then((h) => setLlm(h.backends?.llm ?? 'stub'))
-      .catch(() => setLlm('offline'));
+    async function checkLlm() {
+      try {
+        const h = await api.health();
+        const mode = h.backends?.llm ?? 'stub';
+        setLlm(mode);
+        
+        if (mode === 'stub') {
+          const providers = await api.llmProviders();
+          const unhealthy = providers.data.filter(p => p.enabled && !p.healthy);
+          if (unhealthy.length > 0) {
+            const err = unhealthy[0];
+            setLlmError(err.last_probe_error || 'provider unhealthy');
+          } else {
+            setLlmError(null);
+          }
+        } else {
+          setLlmError(null);
+        }
+      } catch {
+        setLlm('offline');
+        setLlmError(null);
+      }
+    }
+    
+    void checkLlm();
   }, []);
 
   useEffect(() => {
@@ -63,9 +85,23 @@ export function AgentPage() {
         </div>
         <div class="flex-1 space-y-3 overflow-y-auto p-4">
           {messages.length === 0 && (
-            <p class="text-sm text-[var(--color-ink-muted)]">
-              « liste les projets », « smoke », ou configure DEVFORGE_LLM_API_KEY pour un vrai modèle.
-            </p>
+            <>
+              {llmError ? (
+                <p class="text-sm text-[var(--color-ink-muted)]">
+                  LLM configuré mais erreur : <strong>{llmError}</strong> —{' '}
+                  <a class="underline" href="/app/settings?tab=llm">
+                    corrige dans Settings
+                  </a>.
+                </p>
+              ) : (
+                <p class="text-sm text-[var(--color-ink-muted)]">
+                  « liste les projets », « smoke », ou configure Ollama / Gemini dans{' '}
+                  <a class="underline" href="/app/settings?tab=llm">
+                    Settings
+                  </a>.
+                </p>
+              )}
+            </>
           )}
           {messages.map((m, i) => (
             <div
