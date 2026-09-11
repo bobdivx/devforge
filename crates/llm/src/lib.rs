@@ -7,12 +7,14 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 mod catalog;
+mod errors;
 mod health;
 mod openai;
 mod resilient;
 mod stub;
 
 pub use catalog::{catalog, catalog_as_json, find_preset, CatalogField, CatalogPreset};
+pub use errors::humanize_llm_error;
 pub use health::{probe, ProbeRequest, ProbeResult};
 pub use openai::OpenAiCompatibleProvider;
 pub use resilient::{ChainEntry, ResilientLlmProvider};
