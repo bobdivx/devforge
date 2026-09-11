@@ -46,6 +46,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:devforge.db?mode=rwc".into());
     let state = AppState::new(&database_url).await?;
 
+    // Ensure Traefik reverse proxy is running (durable fix for outage 2026-09-11).
+    // If the container was deleted/stopped, recreate/start it before accepting requests.
+    if let Err(e) = state.proxy.ensure_traefik().await {
+        tracing::error!(error = %e, "Failed to ensure Traefik container — proxy may be unavailable");
+    } else {
+        tracing::info!("Traefik reverse proxy ready");
+    }
+
     // Background sync for GitHub runners (Docker + Actions status → SQLite snapshot).
     {
         let worker = state.runners.sync_worker();
