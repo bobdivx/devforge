@@ -953,6 +953,18 @@ export const api = {
         created_at: string;
       };
     }>('/instance/backups', { method: 'POST', body: '{}' }),
+  instanceBackupsLocal: () =>
+    request<{
+      ok: boolean;
+      backups: Array<{
+        id: string;
+        storage_key: string;
+        size_bytes: number;
+        status: string;
+        message: string;
+        created_at: string;
+      }>;
+    }>('/instance/backups/local'),
   instanceBackupsRemote: (body?: {
     use_inline?: boolean;
     key?: string;
@@ -967,6 +979,31 @@ export const api = {
     }>('/instance/backups/remote', {
       method: 'POST',
       body: JSON.stringify(body ?? {}),
+    }),
+  backupAutoGet: () =>
+    request<{
+      ok: boolean;
+      config: {
+        enabled: boolean;
+        interval_hours: number;
+        retention_count: number;
+      };
+    }>('/settings/backup-auto'),
+  backupAutoSave: (body: {
+    enabled?: boolean;
+    interval_hours?: number;
+    retention_count?: number;
+  }) =>
+    request<{
+      ok: boolean;
+      config: {
+        enabled: boolean;
+        interval_hours: number;
+        retention_count: number;
+      };
+    }>('/settings/backup-auto', {
+      method: 'PUT',
+      body: JSON.stringify(body),
     }),
   instanceBackupRestore: (body: {
     storage_key: string;

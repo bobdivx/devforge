@@ -1,3 +1,7 @@
+mod scheduler;
+
+pub use scheduler::{BackupScheduler, BackupSchedulerConfig};
+
 use async_trait::async_trait;
 use chrono::Utc;
 use devforge_shared::{DevForgeError, Result};
@@ -211,6 +215,7 @@ pub struct InstanceBackupMeta {
 
 impl InstanceBackupService {
     pub const PREFIX: &'static str = "instance/";
+    const LOCAL_BACKUP_SUBDIR: &'static str = "backups/instance";
 
     pub fn new(storage: Arc<StorageFacade>, db_path: PathBuf) -> Self {
         Self { storage, db_path }
@@ -222,6 +227,14 @@ impl InstanceBackupService {
 
     pub fn pending_restore_path(&self) -> PathBuf {
         PathBuf::from(format!("{}.pending-restore", self.db_path.display()))
+    }
+
+    fn local_backup_dir(&self) -> PathBuf {
+        if let Some(parent) = self.db_path.parent() {
+            parent.join(Self::LOCAL_BACKUP_SUBDIR)
+        } else {
+            PathBuf::from(Self::LOCAL_BACKUP_SUBDIR)
+        }
     }
 
     /// Apply pending restore file before opening the SQLite pool.
@@ -248,6 +261,15 @@ impl InstanceBackupService {
     }
 
     pub async fn create(&self) -> Result<Value> {
+        let cfg = self.storage.config().await;
+        if cfg.is_ready() {
+            return self.create_s3().await;
+        } else {
+            return self.create_local().await;
+        }
+    }
+
+    async fn create_s3(&self) -> Result<Value> {
         let cfg = self.storage.config().await;
         if !cfg.is_ready() {
             return Err(DevForgeError::Message(
@@ -280,6 +302,37 @@ impl InstanceBackupService {
             })),
             Err(e) => Err(e),
         }
+    }
+
+    async fn create_local(&self) -> Result<Value> {
+        let id = format!("ib_{}", &Uuid::new_v4().to_string()[..8]);
+        let stamp = Utc::now().format("%Y%m%d-%H%M%S");
+        let filename = format!("devforge-{stamp}-{id}.db");
+        
+        let backup_dir = self.local_backup_dir();
+        tokio::fs::create_dir_all(&backup_dir)
+            .await
+            .map_err(|e| DevForgeError::Message(format!("création répertoire backup: {e}")))?;
+        
+        let backup_path = backup_dir.join(&filename);
+        let bytes = snapshot_sqlite(&self.db_path).await?;
+        let size = bytes.len() as u64;
+
+        tokio::fs::write(&backup_path, &bytes)
+            .await
+            .map_err(|e| DevForgeError::Message(format!("écriture backup local: {e}")))?;
+
+        Ok(json!({
+            "ok": true,
+            "backup": InstanceBackupMeta {
+                id,
+                storage_key: backup_path.display().to_string(),
+                size_bytes: size,
+                created_at: Utc::now().to_rfc3339(),
+                status: "completed".into(),
+                message: "Base DevForge sauvegardée localement".into(),
+            }
+        }))
     }
 
     pub async fn list_remote(&self, override_cfg: Option<S3Config>) -> Result<Value> {
@@ -320,6 +373,124 @@ impl InstanceBackupService {
             "bucket": bucket,
             "prefix": prefix,
             "objects": objects.get("objects").cloned().unwrap_or(json!([])),
+        }))
+    }
+
+    /// List local backups in the instance backup directory.
+    pub async fn list_local(&self) -> Result<Vec<InstanceBackupMeta>> {
+        let backup_dir = self.local_backup_dir();
+        if !backup_dir.exists() {
+            return Ok(vec![]);
+        }
+
+        let mut entries = tokio::fs::read_dir(&backup_dir)
+            .await
+            .map_err(|e| DevForgeError::Message(format!("lecture backups locaux: {e}")))?;
+
+        let mut backups = Vec::new();
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("entrée dir: {e}")))?
+        {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !filename.ends_with(".db") {
+                continue;
+            }
+
+            let metadata = tokio::fs::metadata(&path).await.ok();
+            let size_bytes = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+            
+            let created_at = metadata
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| {
+                    let duration = t.duration_since(std::time::UNIX_EPOCH).ok()?;
+                    let datetime = chrono::DateTime::<Utc>::from_timestamp(duration.as_secs() as i64, 0)?;
+                    Some(datetime.to_rfc3339())
+                })
+                .unwrap_or_else(|| Utc::now().to_rfc3339());
+
+            let id = filename
+                .strip_prefix("devforge-")
+                .and_then(|s| s.strip_suffix(".db"))
+                .map(|s| {
+                    if let Some(idx) = s.rfind("-ib_") {
+                        s[idx + 1..].to_string()
+                    } else {
+                        format!("local_{}", &Uuid::new_v4().to_string()[..8])
+                    }
+                })
+                .unwrap_or_else(|| format!("local_{}", &Uuid::new_v4().to_string()[..8]));
+
+            backups.push(InstanceBackupMeta {
+                id,
+                storage_key: path.display().to_string(),
+                size_bytes,
+                created_at,
+                status: "completed".into(),
+                message: "Backup local".into(),
+            });
+        }
+
+        backups.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(backups)
+    }
+
+    /// Prune old backups to maintain retention policy (local and/or S3).
+    pub async fn prune(&self, retention_count: usize) -> Result<Value> {
+        let mut deleted_local = 0;
+        let mut deleted_s3 = 0;
+
+        let local_backups = self.list_local().await?;
+        if local_backups.len() > retention_count {
+            for backup in local_backups.iter().skip(retention_count) {
+                let path = PathBuf::from(&backup.storage_key);
+                if path.exists() {
+                    if let Err(e) = tokio::fs::remove_file(&path).await {
+                        tracing::warn!(path = %path.display(), error = %e, "échec suppression backup local");
+                    } else {
+                        deleted_local += 1;
+                    }
+                }
+            }
+        }
+
+        let cfg = self.storage.config().await;
+        if cfg.is_ready() {
+            match self.list_remote(None).await {
+                Ok(response) => {
+                    if let Some(objects) = response.get("objects").and_then(|v| v.as_array()) {
+                        if objects.len() > retention_count {
+                            let to_delete: Vec<String> = objects
+                                .iter()
+                                .skip(retention_count)
+                                .filter_map(|obj| obj.get("key").and_then(|k| k.as_str()).map(|s| s.to_string()))
+                                .collect();
+
+                            for key in to_delete {
+                                match self.storage.delete(&cfg.bucket, &key).await {
+                                    Ok(_) => deleted_s3 += 1,
+                                    Err(e) => tracing::warn!(key = %key, error = %e, "échec suppression S3"),
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "impossible de lister backups S3 pour pruning");
+                }
+            }
+        }
+
+        Ok(json!({
+            "ok": true,
+            "deleted_local": deleted_local,
+            "deleted_s3": deleted_s3,
+            "message": format!("Nettoyage: {} local, {} S3 supprimés", deleted_local, deleted_s3)
         }))
     }
 

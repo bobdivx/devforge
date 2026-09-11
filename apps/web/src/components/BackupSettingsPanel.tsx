@@ -60,14 +60,24 @@ export function BackupSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
   const [key, setKey] = useState('');
   const [secret, setSecret] = useState('');
 
+  const [autoEnabled, setAutoEnabled] = useState(true);
+  const [autoIntervalHours, setAutoIntervalHours] = useState(24);
+  const [autoRetentionCount, setAutoRetentionCount] = useState(7);
+
   const [backups, setBackups] = useState<BackupRow[]>([]);
+  const [localBackups, setLocalBackups] = useState<BackupRow[]>([]);
   const [remote, setRemote] = useState<RemoteObj[]>([]);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
 
   async function load() {
     setLoading(true);
     try {
-      const [s, b] = await Promise.all([api.backupS3Get(), api.instanceBackups()]);
+      const [s, b, a, l] = await Promise.all([
+        api.backupS3Get(),
+        api.instanceBackups(),
+        api.backupAutoGet(),
+        api.instanceBackupsLocal(),
+      ]);
       setCfg(s.config);
       setMode(s.mode || 'memory');
       setEnabled(!!s.config.enabled);
@@ -76,6 +86,10 @@ export function BackupSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
       setRegion(s.config.region || 'fr-par');
       setBucket(s.config.bucket || '');
       setBackups(b.backups ?? []);
+      setAutoEnabled(!!a.config.enabled);
+      setAutoIntervalHours(a.config.interval_hours || 24);
+      setAutoRetentionCount(a.config.retention_count || 7);
+      setLocalBackups(l.backups ?? []);
     } catch (e) {
       toast.push({ title: 'Chargement KO', detail: String(e), tone: 'danger' });
     } finally {
@@ -213,6 +227,29 @@ export function BackupSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
+  async function saveAutoConfig() {
+    setBusy(true);
+    try {
+      const r = await api.backupAutoSave({
+        enabled: autoEnabled,
+        interval_hours: autoIntervalHours,
+        retention_count: autoRetentionCount,
+      });
+      setAutoEnabled(r.config.enabled);
+      setAutoIntervalHours(r.config.interval_hours);
+      setAutoRetentionCount(r.config.retention_count);
+      toast.push({
+        title: 'Config auto-backup enregistrée',
+        detail: r.config.enabled ? 'Backups automatiques activés' : 'Désactivés',
+        tone: 'ok',
+      });
+    } catch (e) {
+      toast.push({ title: 'Enregistrement KO', detail: String(e), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!isAdmin) {
     return <Alert tone="warn">Réservé à l’admin instance.</Alert>;
   }
@@ -224,6 +261,47 @@ export function BackupSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
   return (
     <FadeIn>
       <div class="space-y-4">
+        <Card>
+          <CardHeader title="Backups automatiques" />
+          <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
+            Sauvegarde automatique de la base DevForge selon un planning. Les backups sont envoyés
+            vers S3 si configuré, sinon sauvegardés localement.
+          </p>
+          <div class="space-y-3">
+            <label class="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={autoEnabled}
+                onChange={(e) => setAutoEnabled((e.target as HTMLInputElement).checked)}
+              />
+              Activer les backups automatiques
+            </label>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <Input
+                label="Intervalle (heures)"
+                type="number"
+                min="1"
+                value={String(autoIntervalHours)}
+                onInput={(e) =>
+                  setAutoIntervalHours(Number((e.target as HTMLInputElement).value) || 24)
+                }
+              />
+              <Input
+                label="Rétention (nombre)"
+                type="number"
+                min="1"
+                value={String(autoRetentionCount)}
+                onInput={(e) =>
+                  setAutoRetentionCount(Number((e.target as HTMLInputElement).value) || 7)
+                }
+              />
+            </div>
+            <Button size="sm" disabled={busy} onClick={saveAutoConfig}>
+              Enregistrer
+            </Button>
+          </div>
+        </Card>
+
         <Card>
           <CardHeader
             title="Stockage S3"
@@ -310,56 +388,89 @@ export function BackupSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
           <CardHeader
             title="Backups instance"
             action={
-              <Button size="sm" disabled={busy || !cfg?.ready} onClick={runBackup}>
+              <Button size="sm" disabled={busy} onClick={runBackup}>
                 Lancer un backup
               </Button>
             }
           />
           <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
-            Copie de <code>devforge.db</code> vers le bucket (
-            <code>instance/devforge-…</code>).
+            Copie manuelle de <code>devforge.db</code>. Destination : S3 si configuré, sinon
+            local.
           </p>
           <div class="mb-3 flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy || !cfg?.ready}
-              onClick={() => listRemote(false)}
-            >
-              Lister sur S3
-            </Button>
+            {cfg?.ready && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => listRemote(false)}
+              >
+                Lister sur S3
+              </Button>
+            )}
           </div>
-          {backups.length === 0 && remote.length === 0 ? (
+
+          {localBackups.length > 0 && (
+            <div class="mb-4">
+              <h4 class="mb-2 text-sm font-medium">Backups locaux</h4>
+              <ul class="space-y-2">
+                {localBackups.map((b) => (
+                  <li
+                    key={b.id}
+                    class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--color-line)] px-3 py-2"
+                  >
+                    <div class="min-w-0">
+                      <p class="truncate text-sm font-medium">{b.storage_key}</p>
+                      <p class="text-xs text-[var(--color-ink-faint)]">
+                        {formatBytes(b.size_bytes)} · {b.created_at}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => restore(b.storage_key, false)}
+                    >
+                      Restaurer
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {backups.length === 0 && remote.length === 0 && localBackups.length === 0 ? (
             <p class="text-sm text-[var(--color-ink-muted)]">Aucun backup pour l’instant.</p>
           ) : (
-            <ul class="space-y-2">
-              {(remote.length ? remote : backups.map((b) => ({
-                key: b.storage_key,
-                size_bytes: b.size_bytes,
-                updated_at: b.created_at,
-              }))).map((o) => (
-                <li
-                  key={o.key}
-                  class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--color-line)] px-3 py-2"
-                >
-                  <div class="min-w-0">
-                    <p class="truncate text-sm font-medium">{o.key}</p>
-                    <p class="text-xs text-[var(--color-ink-faint)]">
-                      {formatBytes(o.size_bytes || 0)}
-                      {o.updated_at ? ` · ${o.updated_at}` : ''}
-                    </p>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => restore(o.key, false)}
-                  >
-                    Restaurer
-                  </Button>
-                </li>
-              ))}
-            </ul>
+            remote.length > 0 && (
+              <div>
+                <h4 class="mb-2 text-sm font-medium">Backups S3</h4>
+                <ul class="space-y-2">
+                  {remote.map((o) => (
+                    <li
+                      key={o.key}
+                      class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--color-line)] px-3 py-2"
+                    >
+                      <div class="min-w-0">
+                        <p class="truncate text-sm font-medium">{o.key}</p>
+                        <p class="text-xs text-[var(--color-ink-faint)]">
+                          {formatBytes(o.size_bytes || 0)}
+                          {o.updated_at ? ` · ${o.updated_at}` : ''}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => restore(o.key, false)}
+                      >
+                        Restaurer
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
           )}
         </Card>
 
