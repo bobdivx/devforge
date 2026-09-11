@@ -102,7 +102,7 @@ export function LoginPage() {
         : 'Connexion';
   const subtitle =
     mode === 'setup'
-      ? 'Compte admin — tu configures l'instance.'
+      ? "Compte admin — tu configures l'instance."
       : mode === 'register'
         ? 'Ton workspace isolé, forfait free.'
         : 'Heureux de te revoir.';
