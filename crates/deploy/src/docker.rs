@@ -214,15 +214,19 @@ pub fn docker_update_labels(name: &str, labels: &Value) -> String {
 /// Returns shell command that outputs network name or empty string.
 ///
 /// Strategies (in order):
-/// 1. Container name patterns (traefik, coolify*, caddy, proxy*, zima*, casaos*)
+/// 1. Container name patterns (traefik, coolify (substring), caddy, proxy (substring), zima (substring), casaos (substring))
 /// 2. Container image containing 'traefik'
 /// 3. Containers publishing port 80 or 443 (reverse proxy indicators)
 /// 4. Containers with traefik.enable=true label (proxy itself)
 /// 5. Networks containing known working apps (sonozz, df-) alongside proxy containers
+/// 5. Check for host-network mode proxies (NetworkMode=host)
+/// 6. Networks containing DevForge apps (df- substring)
+///
+/// NOTE: Docker --filter name= uses substring matching, NOT shell globs.
 pub fn docker_detect_traefik_network() -> String {
     r#"sh -c '
 # Strategy 1: Check common proxy container name patterns
-for pattern in traefik "coolify*" caddy "proxy*" devforge-proxy "zima*" "casaos*"; do
+for pattern in traefik coolify caddy proxy devforge zima casaos; do
   for cid in $(docker ps -q --filter "name=$pattern" 2>/dev/null); do
     NET=$(docker inspect "$cid" --format "{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
     if [ -n "$NET" ]; then
@@ -267,8 +271,21 @@ for cid in $(docker ps -q 2>/dev/null); do
   fi
 done
 
-# Strategy 5: Networks with known working apps (sonozz, df-*) - inherit their network
-for pattern in sonozz "df-*"; do
+
+# Strategy 5: Check for host-network mode proxies
+# If proxy uses NetworkMode=host, return special marker "host-network-detected"
+for pattern in traefik coolify caddy proxy zima casaos; do
+  for cid in $(docker ps -q --filter "name=$pattern" 2>/dev/null); do
+    MODE=$(docker inspect "$cid" --format "{{.HostConfig.NetworkMode}}" 2>/dev/null || echo "")
+    if [ "$MODE" = "host" ]; then
+      echo "host-network-detected"
+      exit 0
+    fi
+  done
+done
+
+# Strategy 6: Networks containing DevForge apps (df- substring)
+for pattern in df-; do
   for cid in $(docker ps -q --filter "name=$pattern" 2>/dev/null); do
     NET=$(docker inspect "$cid" --format "{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
     if [ -n "$NET" ]; then

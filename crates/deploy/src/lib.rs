@@ -990,13 +990,19 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         if has_traefik_labels && network.is_none() {
             // Auto-detect Traefik network using multiple strategies
             logs.push_str("[start] DEVFORGE_DOCKER_NETWORK not set, attempting auto-detection...\n");
-            logs.push_str("[start] Trying: name patterns, image scan, port 80/443, labels, working apps...\n");
+            logs.push_str("[start] Trying: name substrings, image scan, port 80/443, labels, host-network, df- apps...\n");
             let detect_cmd = docker::docker_detect_traefik_network();
             match self.executor.exec(server, workdir, &detect_cmd, 20).await {
                 Ok(r) if r.ok && !r.output.trim().is_empty() => {
                     let detected = r.output.trim().to_string();
-                    logs.push_str(&format!("[start] ✓ Detected Traefik network: {}\n", detected));
-                    network = Some(detected);
+                    if detected == "host-network-detected" {
+                        logs.push_str("[start] ✓ Detected host-network proxy (NetworkMode=host)\n");
+                        logs.push_str("[start] Will publish host port (proxy on host network can reach it)\n");
+                        // Leave network as None, ports will be published
+                    } else {
+                        logs.push_str(&format!("[start] ✓ Detected Traefik network: {}\n", detected));
+                        network = Some(detected);
+                    }
                 }
                 _ => {
                     logs.push_str("[start] Auto-detection strategies failed. Trying fallback network names...\n");
@@ -1015,8 +1021,8 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             }
         }
         
-        // When using Traefik routing, don't publish host ports (conflicts with multiple apps)
-        // unless explicitly requested. Traefik reaches containers via Docker network.
+        // When using Traefik routing, don't publish host ports IF we have a shared network.
+        // BUT: always publish if network detection failed (fallback for debugging).
         let ports = if has_traefik_labels && network.is_some() {
             vec![] // No host port publish - Traefik routes via Docker network
         } else {
@@ -1039,11 +1045,14 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
                 logs.push_str("[start] No host port published (Traefik routes internally)\n");
             } else {
                 logs.push_str("[start] WARNING: Traefik labels set but no Docker network found.\n");
-                logs.push_str("[start] WARNING: Traefik may not reach this container (no shared network).\n");
-                logs.push_str("[start] WARNING: Set DEVFORGE_DOCKER_NETWORK to 'devforge-net', 'traefik-public', or 'coolify',\n");
-                logs.push_str("[start] WARNING: or ensure a proxy container (traefik/coolify/caddy) is running.\n");
+                logs.push_str("[start] WARNING: Publishing host port as fallback (may conflict with other apps).\n");
+                logs.push_str("[start] WARNING: Set DEVFORGE_DOCKER_NETWORK or ensure proxy container is running.\n");
             }
         }
+        
+        // Log the actual docker run command for debugging
+        logs.push_str(&format!("[start] Executing: docker run -d --name {} ...\n", name));
+        
         match self.executor.exec(server, workdir, &run, 120).await {
             Ok(r) => {
                 logs.push_str(&format!(
@@ -1051,6 +1060,32 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
                     r.exit_code,
                     trim_out(&r.output)
                 ));
+                
+                // Debug: inspect container after start
+                if r.ok {
+                    let inspect_net = format!(
+                        "docker inspect {} --format '{{{{range $k, $v := .NetworkSettings.Networks}}}}{{{{$k}}}} {{{{end}}}}'",
+                        name
+                    );
+                    if let Ok(net_r) = self.executor.exec(server, workdir, &inspect_net, 5).await {
+                        if !net_r.output.trim().is_empty() {
+                            logs.push_str(&format!("[start] Container networks: {}\n", net_r.output.trim()));
+                        }
+                    }
+                    
+                    let inspect_ports = format!(
+                        "docker inspect {} --format '{{{{json .HostConfig.PortBindings}}}}'",
+                        name
+                    );
+                    if let Ok(port_r) = self.executor.exec(server, workdir, &inspect_ports, 5).await {
+                        if !port_r.output.trim().is_empty() && port_r.output.trim() != "null" && port_r.output.trim() != "{}" {
+                            logs.push_str(&format!("[start] Port bindings: {}\n", port_r.output.trim()));
+                        } else {
+                            logs.push_str("[start] Port bindings: none (Traefik internal routing)\n");
+                        }
+                    }
+                }
+                
                 r.ok
             }
             Err(e) => {
