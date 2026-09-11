@@ -23,9 +23,14 @@ pub fn router() -> Router<AppState> {
         )
         .route("/api/v1/settings/backup-s3/test", post(test_backup_s3))
         .route(
+            "/api/v1/settings/backup-auto",
+            get(get_backup_auto).put(put_backup_auto),
+        )
+        .route(
             "/api/v1/instance/backups",
             get(list_instance_backups).post(create_instance_backup),
         )
+        .route("/api/v1/instance/backups/local", get(list_local_backups))
         .route("/api/v1/instance/backups/remote", post(list_remote_backups))
         .route("/api/v1/instance/backups/restore", post(restore_instance_backup))
 }
@@ -421,4 +426,102 @@ async fn restore_instance_backup(
             .await
             .map_err(err_map)?,
     ))
+}
+
+async fn list_local_backups(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    let svc = InstanceBackupService::new(state.storage.clone(), state.db_path.clone());
+    let backups = svc.list_local().await.map_err(err_map)?;
+    Ok(Json(json!({
+        "ok": true,
+        "backups": backups,
+    })))
+}
+
+async fn get_backup_auto(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    let row: Option<(i64, i64, i64)> = sqlx::query_as(
+        r#"SELECT backup_auto_enabled, backup_auto_interval_hours, backup_auto_retention_count
+           FROM instance_settings WHERE id = 1"#,
+    )
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(err_map)?;
+
+    let (enabled, interval, retention) = row.unwrap_or((1, 24, 7));
+    Ok(Json(json!({
+        "ok": true,
+        "config": {
+            "enabled": enabled != 0,
+            "interval_hours": interval,
+            "retention_count": retention,
+        }
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct PutBackupAutoBody {
+    pub enabled: Option<bool>,
+    pub interval_hours: Option<i64>,
+    pub retention_count: Option<i64>,
+}
+
+async fn put_backup_auto(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<PutBackupAutoBody>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+
+    let row: Option<(i64, i64, i64)> = sqlx::query_as(
+        r#"SELECT backup_auto_enabled, backup_auto_interval_hours, backup_auto_retention_count
+           FROM instance_settings WHERE id = 1"#,
+    )
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(err_map)?;
+
+    let (mut enabled, mut interval, mut retention) = row.unwrap_or((1, 24, 7));
+
+    if let Some(v) = body.enabled {
+        enabled = if v { 1 } else { 0 };
+    }
+    if let Some(v) = body.interval_hours {
+        interval = v.max(1);
+    }
+    if let Some(v) = body.retention_count {
+        retention = v.max(1);
+    }
+
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        r#"UPDATE instance_settings SET
+            backup_auto_enabled = ?,
+            backup_auto_interval_hours = ?,
+            backup_auto_retention_count = ?,
+            updated_at = ?
+         WHERE id = 1"#,
+    )
+    .bind(enabled)
+    .bind(interval)
+    .bind(retention)
+    .bind(&now)
+    .execute(&state.pool)
+    .await
+    .map_err(err_map)?;
+
+    Ok(Json(json!({
+        "ok": true,
+        "config": {
+            "enabled": enabled != 0,
+            "interval_hours": interval,
+            "retention_count": retention,
+        }
+    })))
 }

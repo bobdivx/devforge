@@ -27,6 +27,7 @@ use serde_json::{json, Value};
 use state::AppState;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -62,6 +63,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let worker = state.runners.sync_worker();
         tokio::spawn(async move {
             worker.run_loop().await;
+        });
+    }
+
+    // Background scheduler for automatic instance backups (local + S3).
+    {
+        let scheduler = Arc::new(devforge_backup::BackupScheduler::new(
+            state.pool.clone(),
+            state.storage.clone(),
+            state.db_path.clone(),
+        ));
+        tokio::spawn(async move {
+            scheduler.run_loop().await;
         });
     }
 
