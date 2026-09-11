@@ -979,23 +979,68 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         } else {
             None
         };
-        let network = std::env::var("DEVFORGE_DOCKER_NETWORK")
+        
+        // Try to get network from env, then auto-detect if Traefik labels are present
+        let mut network = std::env::var("DEVFORGE_DOCKER_NETWORK")
             .ok()
             .filter(|s| !s.trim().is_empty());
+        
+        let has_traefik_labels = proxy_labels.is_some();
+        
+        if has_traefik_labels && network.is_none() {
+            // Auto-detect Traefik network by inspecting common proxy containers
+            logs.push_str("[start] DEVFORGE_DOCKER_NETWORK not set, attempting auto-detection...\n");
+            let detect_cmd = docker::docker_detect_traefik_network();
+            match self.executor.exec(server, workdir, &detect_cmd, 10).await {
+                Ok(r) if r.ok && !r.output.trim().is_empty() => {
+                    let detected = r.output.trim().to_string();
+                    logs.push_str(&format!("[start] Detected Traefik network: {}\n", detected));
+                    network = Some(detected);
+                }
+                _ => {
+                    logs.push_str("[start] Auto-detection failed. Checking common network names...\n");
+                    // Fallback: try common network names
+                    for candidate in ["coolify", "devforge-net", "traefik-public", "traefik"] {
+                        let check = format!("docker network inspect {} >/dev/null 2>&1 && echo {}", candidate, candidate);
+                        if let Ok(r) = self.executor.exec(server, workdir, &check, 5).await {
+                            if r.ok && !r.output.trim().is_empty() {
+                                logs.push_str(&format!("[start] Using network: {}\n", candidate));
+                                network = Some(candidate.to_string());
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // When using Traefik routing, don't publish host ports (conflicts with multiple apps)
+        // unless explicitly requested. Traefik reaches containers via Docker network.
+        let ports = if has_traefik_labels && network.is_some() {
+            vec![] // No host port publish - Traefik routes via Docker network
+        } else {
+            vec![(host_port, container_port)]
+        };
+        
         let run = docker::docker_run_ex(
             name,
             image,
-            &[(host_port, container_port)],
+            &ports,
             env_file,
             network.as_deref(),
             proxy_labels,
         );
-        if proxy_labels.is_some() {
+        
+        if has_traefik_labels {
             logs.push_str("[start] traefik labels applied\n");
-            if network.is_none() {
-                logs.push_str("[start] WARNING: Traefik labels set but DEVFORGE_DOCKER_NETWORK is empty.\n");
+            if let Some(net) = &network {
+                logs.push_str(&format!("[start] Traefik routing via Docker network: {}\n", net));
+                logs.push_str("[start] No host port published (Traefik routes internally)\n");
+            } else {
+                logs.push_str("[start] WARNING: Traefik labels set but no Docker network found.\n");
                 logs.push_str("[start] WARNING: Traefik may not reach this container (no shared network).\n");
-                logs.push_str("[start] WARNING: Set DEVFORGE_DOCKER_NETWORK to 'devforge-net', 'traefik-public', or 'coolify'.\n");
+                logs.push_str("[start] WARNING: Set DEVFORGE_DOCKER_NETWORK to 'devforge-net', 'traefik-public', or 'coolify',\n");
+                logs.push_str("[start] WARNING: or ensure a proxy container (traefik/coolify/caddy) is running.\n");
             }
         }
         match self.executor.exec(server, workdir, &run, 120).await {

@@ -210,6 +210,25 @@ pub fn docker_update_labels(name: &str, labels: &Value) -> String {
     docker_recreate_with_labels(name, labels)
 }
 
+/// Detect Traefik Docker network by inspecting common reverse-proxy container names.
+/// Returns shell command that outputs network name or empty string.
+///
+/// Checks containers in order: traefik, coolify, caddy, proxy, devforge-proxy
+/// and returns the first network found (excluding bridge).
+pub fn docker_detect_traefik_network() -> String {
+    r#"sh -c 'for candidate in traefik coolify caddy proxy devforge-proxy; do
+  if docker inspect "$candidate" >/dev/null 2>&1; then
+    NET=$(docker inspect "$candidate" --format "{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}" | grep -v "^bridge$" | head -n1)
+    if [ -n "$NET" ]; then
+      echo "$NET"
+      exit 0
+    fi
+  fi
+done
+echo ""'"#
+        .to_string()
+}
+
 /// Recrée `name` avec les labels fournis (Traefik sync après changement de domaine).
 ///
 /// ## Network preservation
