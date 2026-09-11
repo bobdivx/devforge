@@ -10,10 +10,35 @@ use axum::{
 use chrono::{Duration, Utc};
 use serde::{Deserialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use std::time::Instant;
 
 use crate::auth_routes;
 use crate::sso::{load_sso_settings, SsoSettings};
 use crate::state::{now_str, AppState};
+
+/// Cache global des découvertes OIDC (issuer → endpoints + timestamp).
+static OIDC_DISCOVERY_CACHE: once_cell::sync::Lazy<Arc<RwLock<HashMap<String, CachedDiscovery>>>> =
+    once_cell::sync::Lazy::new(|| Arc::new(RwLock::new(HashMap::new())));
+
+/// Durée de cache pour les endpoints découverts (5 minutes).
+const DISCOVERY_CACHE_TTL_SECS: u64 = 300;
+
+#[derive(Debug, Clone)]
+struct CachedDiscovery {
+    authorization_endpoint: Option<String>,
+    token_endpoint: String,
+    userinfo_endpoint: String,
+    cached_at: Instant,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct OidcDiscoveryDocument {
+    pub authorization_endpoint: Option<String>,
+    pub token_endpoint: Option<String>,
+    pub userinfo_endpoint: Option<String>,
+}
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -61,7 +86,8 @@ async fn authorize(State(state): State<AppState>) -> Result<impl IntoResponse, (
     .map_err(internal)?;
 
     let redirect_uri = platform_redirect_uri(&state).await?;
-    let auth_url = build_authorization_url(&cfg, &state_token, &nonce, &redirect_uri);
+    let endpoints = resolve_oidc_endpoints(&cfg).await;
+    let auth_url = build_authorization_url(&cfg, &endpoints, &state_token, &nonce, &redirect_uri);
     
     Ok(Redirect::to(&auth_url))
 }
@@ -143,10 +169,11 @@ async fn callback(
 
     // Échange du code contre un token
     let redirect_uri = platform_redirect_uri(&state).await?;
-    let token_response = exchange_code_for_token(&cfg, &code, &redirect_uri).await?;
+    let endpoints = resolve_oidc_endpoints(&cfg).await;
+    let token_response = exchange_code_for_token(&cfg, &endpoints, &code, &redirect_uri).await?;
     
     // Récupération des infos utilisateur
-    let user_info = fetch_user_info(&cfg, &token_response.access_token, &nonce).await?;
+    let user_info = fetch_user_info(&cfg, &endpoints, &token_response.access_token, &nonce).await?;
     
     // Mapping de l'utilisateur IdP vers DevForge
     let user_uuid = map_or_create_user(&state, &user_info).await?;
@@ -191,7 +218,108 @@ async fn platform_redirect_uri(state: &AppState) -> Result<String, (StatusCode, 
     Ok(format!("{}/api/v1/auth/sso/callback", instance_url.trim_end_matches('/')))
 }
 
-fn build_authorization_url(cfg: &SsoSettings, state: &str, nonce: &str, redirect_uri: &str) -> String {
+/// Résout les endpoints OIDC via découverte, avec fallbacks.
+pub(crate) async fn resolve_oidc_endpoints(cfg: &SsoSettings) -> OidcEndpoints {
+    let issuer = cfg.issuer().to_string();
+    
+    // Vérifier le cache d'abord
+    if let Some(cached) = get_cached_discovery(&issuer) {
+        return OidcEndpoints {
+            authorization_endpoint: cached.authorization_endpoint.clone(),
+            token_endpoint: cached.token_endpoint.clone(),
+            userinfo_endpoint: cached.userinfo_endpoint.clone(),
+        };
+    }
+    
+    // Tentative de découverte OIDC
+    if let Some(discovered) = discover_oidc_endpoints(&issuer).await {
+        // Mise en cache
+        let cached = CachedDiscovery {
+            authorization_endpoint: discovered.authorization_endpoint.clone(),
+            token_endpoint: discovered.token_endpoint.clone(),
+            userinfo_endpoint: discovered.userinfo_endpoint.clone(),
+            cached_at: Instant::now(),
+        };
+        
+        if let Ok(mut cache) = OIDC_DISCOVERY_CACHE.write() {
+            cache.insert(issuer.clone(), cached);
+        }
+        
+        return discovered;
+    }
+    
+    // Fallback selon le provider
+    if cfg.is_pocket_id() {
+        OidcEndpoints {
+            authorization_endpoint: Some(format!("{}/authorize", issuer)),
+            token_endpoint: format!("{}/api/oidc/token", issuer),
+            userinfo_endpoint: format!("{}/api/oidc/userinfo", issuer),
+        }
+    } else {
+        // Fallback OIDC générique
+        OidcEndpoints {
+            authorization_endpoint: Some(format!("{}/authorize", issuer)),
+            token_endpoint: format!("{}/token", issuer),
+            userinfo_endpoint: format!("{}/userinfo", issuer),
+        }
+    }
+}
+
+/// Récupère les endpoints depuis le cache si valides.
+fn get_cached_discovery(issuer: &str) -> Option<CachedDiscovery> {
+    let cache = OIDC_DISCOVERY_CACHE.read().ok()?;
+    let cached = cache.get(issuer)?;
+    
+    // Vérifier la durée de vie
+    if cached.cached_at.elapsed().as_secs() < DISCOVERY_CACHE_TTL_SECS {
+        Some(cached.clone())
+    } else {
+        None
+    }
+}
+
+/// Tente de découvrir les endpoints OIDC via /.well-known/openid-configuration.
+async fn discover_oidc_endpoints(issuer: &str) -> Option<OidcEndpoints> {
+    let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
+    
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .ok()?;
+    
+    let response = client.get(&discovery_url).send().await.ok()?;
+    
+    if !response.status().is_success() {
+        return None;
+    }
+    
+    let doc: OidcDiscoveryDocument = response.json().await.ok()?;
+    
+    // Les endpoints token et userinfo sont requis
+    let token_endpoint = doc.token_endpoint?;
+    let userinfo_endpoint = doc.userinfo_endpoint?;
+    
+    Some(OidcEndpoints {
+        authorization_endpoint: doc.authorization_endpoint,
+        token_endpoint,
+        userinfo_endpoint,
+    })
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct OidcEndpoints {
+    pub authorization_endpoint: Option<String>,
+    pub token_endpoint: String,
+    pub userinfo_endpoint: String,
+}
+
+pub(crate) fn build_authorization_url(
+    cfg: &SsoSettings,
+    endpoints: &OidcEndpoints,
+    state: &str,
+    nonce: &str,
+    redirect_uri: &str,
+) -> String {
     let issuer = cfg.issuer();
     let client_id = cfg.sso_apps_client_id.trim();
     
@@ -210,7 +338,14 @@ fn build_authorization_url(cfg: &SsoSettings, state: &str, nonce: &str, redirect
         .collect::<Vec<_>>()
         .join("&");
     
-    format!("{}/authorize?{}", issuer, query)
+    // Utiliser le endpoint découvert si disponible, sinon fallback
+    let default_auth_endpoint = format!("{}/authorize", issuer);
+    let auth_endpoint = endpoints
+        .authorization_endpoint
+        .as_deref()
+        .unwrap_or(&default_auth_endpoint);
+    
+    format!("{}?{}", auth_endpoint, query)
 }
 
 #[derive(Deserialize)]
@@ -223,11 +358,11 @@ struct TokenResponse {
 
 async fn exchange_code_for_token(
     cfg: &SsoSettings,
+    endpoints: &OidcEndpoints,
     code: &str,
     redirect_uri: &str,
 ) -> Result<TokenResponse, (StatusCode, Json<Value>)> {
-    let issuer = cfg.issuer();
-    let token_endpoint = format!("{}/token", issuer);
+    let token_endpoint = &endpoints.token_endpoint;
     
     let params = [
         ("grant_type", "authorization_code"),
@@ -239,7 +374,7 @@ async fn exchange_code_for_token(
     
     let client = reqwest::Client::new();
     let response = client
-        .post(&token_endpoint)
+        .post(token_endpoint)
         .form(&params)
         .send()
         .await
@@ -277,16 +412,16 @@ struct UserInfo {
 }
 
 async fn fetch_user_info(
-    cfg: &SsoSettings,
+    _cfg: &SsoSettings,
+    endpoints: &OidcEndpoints,
     access_token: &str,
     _nonce: &str,
 ) -> Result<UserInfo, (StatusCode, Json<Value>)> {
-    let issuer = cfg.issuer();
-    let userinfo_endpoint = format!("{}/userinfo", issuer);
+    let userinfo_endpoint = &endpoints.userinfo_endpoint;
     
     let client = reqwest::Client::new();
     let response = client
-        .get(&userinfo_endpoint)
+        .get(userinfo_endpoint)
         .bearer_auth(access_token)
         .send()
         .await
