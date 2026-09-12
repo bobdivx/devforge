@@ -14,10 +14,10 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tools::{
-    CreateGitHubFixTool, GetDeploymentLogsTool, GetProjectTool, GitHubListPrsTool,
-    GitHubWorkflowRunsTool, HttpSmokeTool, ListEnvVarsTool, ListProjectsTool, McpCallTool,
-    McpListRemoteToolsTool, McpListServersTool, ReadGitHubFileTool, RunApplicationTestsTool,
-    UpsertEnvVarTool,
+    CreateGitHubFixTool, CreateGitHubRepoTool, GetDeploymentLogsTool, GetProjectTool,
+    GitHubListPrsTool, GitHubWorkflowRunsTool, HttpSmokeTool, ListEnvVarsTool, ListProjectsTool,
+    McpCallTool, McpListRemoteToolsTool, McpListServersTool, ReadGitHubFileTool,
+    RunApplicationTestsTool, UpsertEnvVarTool, WriteProjectFileTool,
 };
 
 pub struct ToolRegistry {
@@ -74,6 +74,7 @@ pub fn build_core_registry(
     store: Arc<dyn ProjectStore>,
     mcp: Arc<McpFacade>,
     env: Arc<EnvFacade>,
+    pool: Arc<sqlx::SqlitePool>,
 ) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     registry.register(Arc::new(ListProjectsTool {
@@ -103,7 +104,13 @@ pub fn build_core_registry(
     registry.register(Arc::new(UpsertEnvVarTool { env }));
     // High-level GitHub ops tools
     registry.register(Arc::new(CreateGitHubFixTool { mcp: mcp.clone() }));
-    registry.register(Arc::new(ReadGitHubFileTool { mcp }));
+    registry.register(Arc::new(ReadGitHubFileTool { mcp: mcp.clone() }));
+    // Builder slice 2 tools
+    registry.register(Arc::new(CreateGitHubRepoTool {
+        mcp: mcp.clone(),
+        pool: pool.clone(),
+    }));
+    registry.register(Arc::new(WriteProjectFileTool { mcp, pool }));
     registry
 }
 
@@ -526,12 +533,18 @@ mod tests {
         let github = Arc::new(GitHubFacade::new(Arc::new(StubGitHubClient), "off"));
         let mcp = Arc::new(McpFacade::stub());
         let env = Arc::new(EnvFacade::new(Arc::new(MemoryEnvStore::new())));
+        let pool = Arc::new(
+            sqlx::SqlitePool::connect(":memory:")
+                .await
+                .expect("memory pool"),
+        );
         let registry = Arc::new(build_core_registry(
             deploy,
             github,
             Arc::new(MemStore),
             mcp,
             env,
+            pool,
         ));
         let runner = AgentRunner::stub(registry);
         let reply = runner

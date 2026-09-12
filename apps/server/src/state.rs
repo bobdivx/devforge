@@ -408,6 +408,7 @@ impl AppState {
             store,
             mcp.clone(),
             env.clone(),
+            Arc::new(pool.clone()),
         ));
         let agent = Arc::new(AgentRunner::new(registry.clone()));
         // Prefer DB/Settings LLM over plain env when configured.
