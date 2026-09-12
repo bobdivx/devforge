@@ -14,10 +14,10 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tools::{
-    CreateGitHubFixTool, GetDeploymentLogsTool, GetProjectTool, GitHubListPrsTool,
-    GitHubWorkflowRunsTool, HttpSmokeTool, ListEnvVarsTool, ListProjectsTool, McpCallTool,
-    McpListRemoteToolsTool, McpListServersTool, ReadGitHubFileTool, RunApplicationTestsTool,
-    UpsertEnvVarTool,
+    CreateGitHubFixTool, CreateGitHubRepoTool, GetDeploymentLogsTool, GetProjectTool,
+    GitHubListPrsTool, GitHubWorkflowRunsTool, HttpSmokeTool, ListEnvVarsTool, ListProjectsTool,
+    McpCallTool, McpListRemoteToolsTool, McpListServersTool, ReadGitHubFileTool,
+    RunApplicationTestsTool, UpsertEnvVarTool, WriteProjectFileTool,
 };
 
 pub struct ToolRegistry {
@@ -74,6 +74,7 @@ pub fn build_core_registry(
     store: Arc<dyn ProjectStore>,
     mcp: Arc<McpFacade>,
     env: Arc<EnvFacade>,
+    pool: Arc<sqlx::SqlitePool>,
 ) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     registry.register(Arc::new(ListProjectsTool {
@@ -103,7 +104,13 @@ pub fn build_core_registry(
     registry.register(Arc::new(UpsertEnvVarTool { env }));
     // High-level GitHub ops tools
     registry.register(Arc::new(CreateGitHubFixTool { mcp: mcp.clone() }));
-    registry.register(Arc::new(ReadGitHubFileTool { mcp }));
+    registry.register(Arc::new(ReadGitHubFileTool { mcp: mcp.clone() }));
+    // Builder slice 2 tools
+    registry.register(Arc::new(CreateGitHubRepoTool {
+        mcp: mcp.clone(),
+        pool: pool.clone(),
+    }));
+    registry.register(Arc::new(WriteProjectFileTool { mcp, pool }));
     registry
 }
 
@@ -354,7 +361,19 @@ fn system_prompt(ctx: &AgentChatContext) -> String {
              Demande à l'utilisateur UNIQUEMENT si :\n\
              - Des secrets/credentials manquent (ex: MCP GitHub non configuré)\n\
              - L'action est destructive et irréversible (ex: supprimer une base de données)\n\
-             - Plusieurs solutions techniques équivalentes existent et le choix a un impact produit"
+             - Plusieurs solutions techniques équivalentes existent et le choix a un impact produit\n\
+             \n\
+             SCAFFOLD DEPUIS PROMPT (builder slice 1+2) :\n\
+             Si tu dois scaffolder un nouveau projet depuis un prompt utilisateur :\n\
+             1. CRÉER LE REPO : utilise create_github_repo pour créer le dépôt GitHub et l'attacher au projet\n\
+             2. ÉCRIRE LES FICHIERS : utilise write_project_file (mode='local' ou 'github') pour créer les fichiers initiaux\n\
+                - mode='local' : rapide, écrit dans le workdir local (pas de commit immédiat)\n\
+                - mode='github' : pousse directement sur GitHub avec commit automatique\n\
+             3. CONFIGURER : ajoute les variables d'environnement nécessaires avec upsert_env_var\n\
+             4. DÉPLOYER : lance le premier déploiement (slice future)\n\
+             \n\
+             Exemple workflow scaffold :\n\
+             - create_github_repo → écriture package.json, src/*, config → upsert_env_var → deploy"
         }
         "reviewer" => {
             "Tu es l'agent Reviewer : risques, qualité, PRs, CI, amélioration continue du code.\n\
@@ -526,12 +545,18 @@ mod tests {
         let github = Arc::new(GitHubFacade::new(Arc::new(StubGitHubClient), "off"));
         let mcp = Arc::new(McpFacade::stub());
         let env = Arc::new(EnvFacade::new(Arc::new(MemoryEnvStore::new())));
+        let pool = Arc::new(
+            sqlx::SqlitePool::connect(":memory:")
+                .await
+                .expect("memory pool"),
+        );
         let registry = Arc::new(build_core_registry(
             deploy,
             github,
             Arc::new(MemStore),
             mcp,
             env,
+            pool,
         ));
         let runner = AgentRunner::stub(registry);
         let reply = runner
