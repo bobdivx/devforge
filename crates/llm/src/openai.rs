@@ -395,8 +395,16 @@ impl LlmProvider for OpenAiCompatibleProvider {
 /// 3. Array direct `[{"name":"...","arguments":{...}}]`
 /// 4. Lignes numérotées : `1. tool_name {...}` / `2) tool_name {...}` / `- tool_name {...}`
 /// 5. Lignes simples : `tool_name {...}` où tool_name matche `[a-z][a-z0-9_]*`
+/// 6. Blocs markdown : ` ```json ... ``` ` / ` ```JSON ... ``` ` / ` ``` ... ``` `
 fn parse_tool_calls_from_text(content: &str) -> Option<Vec<ToolCallRequest>> {
     let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Étape 1 : Retirer les fences markdown optionnels (```json / ```JSON / ```)
+    let content_stripped = strip_markdown_fences(trimmed);
+    let trimmed = content_stripped.trim();
     if trimmed.is_empty() {
         return None;
     }
@@ -414,6 +422,33 @@ fn parse_tool_calls_from_text(content: &str) -> Option<Vec<ToolCallRequest>> {
     }
 
     None
+}
+
+/// Retire les fences markdown (```json / ```JSON / ```) au début et à la fin du contenu
+fn strip_markdown_fences(content: &str) -> String {
+    let trimmed = content.trim();
+    
+    // Vérifier si ça commence par ``` (avec ou sans json/JSON)
+    if let Some(rest) = trimmed.strip_prefix("```") {
+        // Retirer le language tag optionnel (json, JSON, etc.)
+        let after_opening = rest.trim_start();
+        let after_lang = if after_opening.to_lowercase().starts_with("json") {
+            after_opening[4..].trim_start()
+        } else {
+            after_opening
+        };
+        
+        // Retirer le ``` de fermeture à la fin
+        if let Some(without_closing) = after_lang.trim_end().strip_suffix("```") {
+            return without_closing.trim().to_string();
+        }
+        
+        // Pas de fence de fermeture, retourner tel quel après le tag d'ouverture
+        return after_lang.trim().to_string();
+    }
+    
+    // Pas de fence markdown, retourner tel quel
+    trimmed.to_string()
 }
 
 /// Tente de parser les formats JSON complets (objet simple, OpenAI-style, array)
@@ -774,6 +809,9 @@ impl OpenAiCompatibleProvider {
 mod tests {
     use super::*;
 
+    // Expose strip_markdown_fences pour les tests
+    use super::strip_markdown_fences;
+
     #[test]
     fn test_parse_tool_calls_from_text_simple_format() {
         let text = r#"{"name":"list_projects","arguments":{}}"#;
@@ -1025,5 +1063,125 @@ Some random text here that should be ignored
         // Vérifie trigger_deploy
         assert_eq!(calls[3].name, "trigger_deploy");
         assert!(calls[3].arguments.get("project_uuid").is_none()); // placeholder supprimé
+    }
+
+    #[test]
+    fn test_parse_markdown_fenced_json_simple() {
+        // Bug E2E exact : Ollama retourne du JSON dans un bloc markdown
+        let text = r#"```json
+{
+  "name": "create_github_repo",
+  "arguments": {
+    "owner": "bobdivx",
+    "repo_name": "e2e-hello6-test",
+    "private": true
+  }
+}
+```"#;
+        
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_some());
+        let calls = calls.unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "create_github_repo");
+        assert_eq!(calls[0].arguments["owner"], "bobdivx");
+        assert_eq!(calls[0].arguments["repo_name"], "e2e-hello6-test");
+        assert_eq!(calls[0].arguments["private"], true);
+    }
+
+    #[test]
+    fn test_parse_markdown_fenced_uppercase() {
+        // Teste avec ```JSON en majuscules
+        let text = r#"```JSON
+{"name": "list_projects", "arguments": {}}
+```"#;
+        
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_some());
+        let calls = calls.unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "list_projects");
+    }
+
+    #[test]
+    fn test_parse_markdown_fenced_no_language() {
+        // Teste avec ``` sans tag de language
+        let text = r#"```
+{"name": "get_project", "arguments": {"project_uuid": "abc123"}}
+```"#;
+        
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_some());
+        let calls = calls.unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "get_project");
+        assert_eq!(calls[0].arguments["project_uuid"], "abc123");
+    }
+
+    #[test]
+    fn test_parse_markdown_fenced_with_numbered_lines() {
+        // Teste la combinaison fence + lignes numérotées
+        let text = r#"```
+1. create_github_repo {"owner": "test", "repo": "repo1", "private": false}
+2. trigger_deploy {"project_uuid": "proj-123"}
+```"#;
+        
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_some());
+        let calls = calls.unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].name, "create_github_repo");
+        assert_eq!(calls[0].arguments["owner"], "test");
+        assert_eq!(calls[1].name, "trigger_deploy");
+        assert_eq!(calls[1].arguments["project_uuid"], "proj-123");
+    }
+
+    #[test]
+    fn test_parse_markdown_fenced_whitespace_handling() {
+        // Teste avec espaces/newlines supplémentaires
+        let text = r#"
+
+```json
+
+{"name": "list_projects", "arguments": {}}
+
+```
+
+"#;
+        
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_some());
+        let calls = calls.unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "list_projects");
+    }
+
+    #[test]
+    fn test_strip_markdown_fences_function() {
+        // Teste la fonction strip_markdown_fences directement
+        let input = r#"```json
+{"key": "value"}
+```"#;
+        let result = strip_markdown_fences(input);
+        assert_eq!(result, r#"{"key": "value"}"#);
+
+        // Teste sans tag de language
+        let input2 = r#"```
+{"key": "value"}
+```"#;
+        let result2 = strip_markdown_fences(input2);
+        assert_eq!(result2, r#"{"key": "value"}"#);
+
+        // Teste avec JSON majuscule
+        let input3 = r#"```JSON
+{"key": "value"}
+```"#;
+        let result3 = strip_markdown_fences(input3);
+        assert_eq!(result3, r#"{"key": "value"}"#);
+
+        // Teste sans fence (ne doit pas modifier)
+        let input4 = r#"{"key": "value"}"#;
+        let result4 = strip_markdown_fences(input4);
+        assert_eq!(result4, r#"{"key": "value"}"#);
     }
 }
