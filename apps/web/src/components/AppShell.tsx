@@ -6,6 +6,7 @@ import { cn } from '../lib/cn';
 import { ToastProvider } from './ui';
 import { AuthGate } from './AuthGate';
 import { AppHeader } from './AppHeader';
+import { MobileMenuSheet } from './MobileMenuSheet';
 
 type Props = {
   active?: string;
@@ -15,7 +16,7 @@ type Props = {
   sideNavLabel?: string;
   /** @deprecated préférer sideNav */
   projectNav?: NavItem[];
-  title?: string;
+  title?: ComponentChildren;
   description?: string;
   actions?: ComponentChildren;
   skipAuth?: boolean;
@@ -58,6 +59,8 @@ function ShellInner({
   actions,
 }: Props) {
   const [navItems, setNavItems] = useState(() => globalNavForRole(null));
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const nav = sideNav ?? projectNav;
   const navLabel = sideNav ? sideNavLabel : projectNav ? 'Projet' : sideNavLabel;
 
@@ -66,7 +69,10 @@ function ShellInner({
     api
       .bootstrap()
       .then((b) => {
-        if (!cancelled) setNavItems(globalNavForRole(b.user?.role));
+        if (!cancelled) {
+          setNavItems(globalNavForRole(b.user?.role));
+          setUserRole(b.user?.role ?? null);
+        }
       })
       .catch(() => {
         /* AuthGate gère */
@@ -78,6 +84,12 @@ function ShellInner({
 
   return (
     <ToastProvider>
+      <MobileMenuSheet
+        open={mobileSheetOpen}
+        onClose={() => setMobileSheetOpen(false)}
+        active={active}
+        userRole={userRole}
+      />
       <div class="min-h-screen pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-8">
         <div class="mx-auto flex min-h-screen max-w-6xl gap-8 px-4 pt-4 lg:px-6">
           <aside class="hidden w-52 shrink-0 lg:block">
@@ -149,10 +161,15 @@ function ShellInner({
               </div>
             )}
 
-            {/* Sous-nav mobile (projet / settings) — scroll horizontal */}
+            {/* Sous-nav mobile (projet / settings) — scroll horizontal + label pour éviter confusion */}
             {nav && (
               <div class="-mx-4 mb-4 border-b border-[var(--color-line)] lg:hidden">
                 <div class="overflow-x-auto px-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <div class="mb-1.5 flex items-center gap-2">
+                    <span class="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-ink-faint)]">
+                      {navLabel}
+                    </span>
+                  </div>
                   <nav class="flex w-max gap-1 pb-3" aria-label={navLabel}>
                     {nav.map((item) => {
                       const on = sideNavItemActive(item);
@@ -186,24 +203,46 @@ function ShellInner({
           aria-label="Navigation principale"
         >
           <div class="mx-auto flex max-w-lg justify-around gap-0.5 px-1 py-1.5">
-            {mobileBottomNav().map((item) => (
-              <a
-                key={item.key}
-                href={item.href}
-                class={cn(
-                  'flex min-h-[44px] min-w-[3.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] leading-tight transition-colors',
-                  active === item.key
-                    ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
-                    : 'text-[var(--color-ink-muted)] active:bg-white/5',
-                )}
-                aria-current={active === item.key ? 'page' : undefined}
-              >
-                <span class="text-base leading-none" aria-hidden>
-                  •
-                </span>
-                <span class="max-w-full truncate">{shortLabel(item.label)}</span>
-              </a>
-            ))}
+            {mobileBottomNav().map((item) => {
+              const isPlusButton = item.key === 'plus';
+              if (isPlusButton) {
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    class={cn(
+                      'flex min-h-[44px] min-w-[3.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] leading-tight transition-colors',
+                      'text-[var(--color-ink-muted)] active:bg-white/5',
+                    )}
+                    onClick={() => setMobileSheetOpen(true)}
+                    aria-label="Ouvrir le menu"
+                  >
+                    <span class="text-base leading-none" aria-hidden>
+                      +
+                    </span>
+                    <span class="max-w-full truncate">{item.label}</span>
+                  </button>
+                );
+              }
+              return (
+                <a
+                  key={item.key}
+                  href={item.href}
+                  class={cn(
+                    'flex min-h-[44px] min-w-[3.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] leading-tight transition-colors',
+                    active === item.key
+                      ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
+                      : 'text-[var(--color-ink-muted)] active:bg-white/5',
+                  )}
+                  aria-current={active === item.key ? 'page' : undefined}
+                >
+                  <span class="text-base leading-none" aria-hidden>
+                    •
+                  </span>
+                  <span class="max-w-full truncate">{shortLabel(item.label)}</span>
+                </a>
+              );
+            })}
           </div>
         </nav>
       </div>
