@@ -170,7 +170,7 @@ impl AgentRunner {
         Self {
             registry,
             llm: tokio::sync::RwLock::new((llm, mode.to_string())),
-            max_rounds: 6,
+            max_rounds: 12,
         }
     }
 
@@ -178,7 +178,7 @@ impl AgentRunner {
         Self {
             registry,
             llm: tokio::sync::RwLock::new((llm, mode.into())),
-            max_rounds: 6,
+            max_rounds: 12,
         }
     }
 
@@ -255,7 +255,14 @@ impl AgentRunner {
             (g.0.clone(), g.1.clone())
         };
 
-        for _round in 0..self.max_rounds {
+        for round in 0..self.max_rounds {
+            // Détection anti-boucle : si on détecte des duplicatas dans les 2-3 derniers rounds
+            if round >= 2 {
+                let loop_nudge = detect_duplicate_calls(&records);
+                if let Some(nudge) = loop_nudge {
+                    messages.push(ChatMessage::system(nudge));
+                }
+            }
             let turn: AssistantTurn = llm
                 .chat(ChatRequest {
                     messages: messages.clone(),
@@ -324,6 +331,72 @@ impl AgentRunner {
             tool_calls: records,
             provider,
         })
+    }
+}
+
+/// Détecte si l'agent répète les mêmes tool calls en boucle.
+/// Retourne un message de nudge système si des duplicatas sont détectés.
+fn detect_duplicate_calls(records: &[ToolCallRecord]) -> Option<String> {
+    if records.len() < 2 {
+        return None;
+    }
+
+    // Prendre les 3 derniers appels
+    let recent = if records.len() >= 3 {
+        &records[records.len() - 3..]
+    } else {
+        &records[records.len() - 2..]
+    };
+
+    // Compter les occurrences de chaque combinaison (tool_name, normalized_args)
+    let mut call_counts: HashMap<(String, String), usize> = HashMap::new();
+    
+    for record in recent {
+        let normalized = normalize_tool_call(&record.name, &record.arguments);
+        *call_counts.entry((record.name.clone(), normalized)).or_insert(0) += 1;
+    }
+
+    // Si un même appel apparaît 2+ fois dans les 3 derniers rounds
+    for ((tool_name, _normalized), count) in &call_counts {
+        if *count >= 2 {
+            // Cas spécial pour write_project_file : nudge spécifique
+            if tool_name == "write_project_file" {
+                return Some(
+                    "⚠️ DÉTECTION DE BOUCLE : Tu viens d'appeler write_project_file plusieurs fois avec les mêmes arguments. \
+                    STOP ! Ne réécris pas le même fichier en boucle. \
+                    \n\nACTIONS REQUISES :\n\
+                    1. Écris les fichiers MANQUANTS de l'application (package.json, fichiers d'entrée HTML/JS, etc.)\n\
+                    2. Une fois les fichiers locaux écrits, utilise mode='github' pour pousser sur GitHub\n\
+                    3. Puis appelle trigger_deploy pour déployer le projet\n\
+                    \n\
+                    Ne perds plus de tours sur des fichiers déjà écrits. Avance dans le workflow scaffold.".into()
+                );
+            }
+
+            // Nudge générique pour autres tools
+            return Some(format!(
+                "⚠️ DÉTECTION DE BOUCLE : Tu viens d'appeler '{}' plusieurs fois avec les mêmes arguments. \
+                STOP ! Ne répète pas le même tool call en boucle. \
+                \n\nSoit tu passes à l'étape suivante du workflow, soit tu termines ton tour si la tâche est complète.",
+                tool_name
+            ));
+        }
+    }
+
+    None
+}
+
+/// Normalise les arguments d'un tool call pour détecter les duplicatas.
+/// Pour write_project_file, on compare (path, mode).
+/// Pour les autres tools, on compare la sérialisation JSON complète.
+fn normalize_tool_call(tool_name: &str, args: &Value) -> String {
+    if tool_name == "write_project_file" {
+        let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        let mode = args.get("mode").and_then(|v| v.as_str()).unwrap_or("local");
+        format!("{path}::{mode}")
+    } else {
+        // Pour les autres tools, utiliser la sérialisation JSON normalisée
+        serde_json::to_string(args).unwrap_or_default()
     }
 }
 
@@ -411,18 +484,34 @@ fn system_prompt(ctx: &AgentChatContext) -> String {
              Si tu dois scaffolder un nouveau projet depuis un prompt utilisateur :\n\
              1. CRÉER LE REPO : utilise create_github_repo pour créer le dépôt GitHub et l'attacher au projet\n\
                 - Fonctionne avec le token GitHub configuré dans Settings (pas besoin de MCP GitHub)\n\
-             2. ÉCRIRE LES FICHIERS : utilise write_project_file (PRÉFÈRE mode='local') pour créer les fichiers initiaux\n\
+             2. ÉCRIRE LES FICHIERS : utilise write_project_file (PRÉFÈRE mode='local') pour créer TOUS les fichiers initiaux\n\
+                - OBLIGATOIRE : crée AU MINIMUM package.json (ou équivalent selon stack) + fichier d'entrée (index.html/js, App.jsx, etc.)\n\
+                - INTERDIT : ne passe pas 2+ tours sur le même fichier (ex: README.md) — écris-le une fois puis PASSE AUX AUTRES FICHIERS\n\
                 - mode='local' (PRÉFÉRÉ) : rapide, écrit dans le workdir local, permet commits/push manuels après\n\
-                - mode='github' : pousse directement sur GitHub avec commit automatique (si nécessaire)\n\
+                - mode='github' : pousse directement sur GitHub avec commit automatique (utilise après local pour sync)\n\
                 - Les deux modes fonctionnent avec le token GitHub instance (pas besoin de MCP GitHub)\n\
-             3. CONFIGURER : ajoute les variables d'environnement nécessaires avec upsert_env_var\n\
-             4. DÉPLOYER : utilise trigger_deploy pour lancer le premier déploiement automatique\n\
+             3. SYNC GITHUB : une fois les fichiers locaux écrits, utilise mode='github' pour au moins un fichier clé (ex: package.json) pour sync sur GitHub\n\
+             4. CONFIGURER : ajoute les variables d'environnement nécessaires avec upsert_env_var\n\
+             5. DÉPLOYER : utilise trigger_deploy pour lancer le premier déploiement automatique\n\
                 - Pré-requis : git_repository configuré (fait par create_github_repo), workdir défini, fichiers écrits\n\
                 - Le déploiement synchronise le repo Git, build selon build_pack (nixpacks/dockerfile/static), et démarre le conteneur\n\
                 - Vérifie le statut avec get_deployment_logs après déclenchement\n\
              \n\
              Exemple workflow scaffold complet :\n\
-             - create_github_repo → write_project_file(mode='local') × N → git commit + push (optionnel) → upsert_env_var (si nécessaire) → trigger_deploy → get_deployment_logs → http_smoke\n\
+             - create_github_repo\n\
+             - write_project_file(path='package.json', mode='local')\n\
+             - write_project_file(path='index.html', mode='local')\n\
+             - write_project_file(path='README.md', mode='local')\n\
+             - write_project_file(path='package.json', mode='github') [sync sur GitHub]\n\
+             - upsert_env_var (si nécessaire)\n\
+             - trigger_deploy\n\
+             - get_deployment_logs\n\
+             - http_smoke\n\
+             \n\
+             ⚠️ ANTI-PATTERNS À ÉVITER :\n\
+             - NE réécris PAS le même fichier plusieurs fois (détection anti-boucle active)\n\
+             - NE passe PAS tous tes tours sur README.md — écris les fichiers ESSENTIELS de l'app d'abord\n\
+             - NE déploie PAS sans avoir créé au moins package.json (ou équivalent selon stack)\n\
              \n\
              NOTE IMPORTANTE : create_github_repo et write_project_file fonctionnent maintenant avec le token GitHub instance.\n\
              Le MCP GitHub n'est plus requis pour ces opérations de base."
@@ -630,5 +719,83 @@ mod tests {
         assert_eq!(reply.tool_calls[0].name, "run_application_tests");
         assert_eq!(reply.tool_calls[0].result["ok"], true);
         assert_eq!(reply.provider, "stub");
+    }
+
+    #[test]
+    fn test_detect_duplicate_calls_no_duplicates() {
+        let records = vec![
+            ToolCallRecord {
+                name: "list_projects".into(),
+                arguments: json!({}),
+                result: json!({"ok": true}),
+            },
+            ToolCallRecord {
+                name: "get_project".into(),
+                arguments: json!({"project_uuid": "abc123"}),
+                result: json!({"ok": true}),
+            },
+        ];
+        let nudge = detect_duplicate_calls(&records);
+        assert!(nudge.is_none(), "Pas de nudge attendu quand il n'y a pas de duplicatas");
+    }
+
+    #[test]
+    fn test_detect_duplicate_calls_write_project_file() {
+        let records = vec![
+            ToolCallRecord {
+                name: "write_project_file".into(),
+                arguments: json!({"path": "README.md", "mode": "local", "content": "v1"}),
+                result: json!({"ok": true}),
+            },
+            ToolCallRecord {
+                name: "write_project_file".into(),
+                arguments: json!({"path": "README.md", "mode": "local", "content": "v2"}),
+                result: json!({"ok": true}),
+            },
+            ToolCallRecord {
+                name: "write_project_file".into(),
+                arguments: json!({"path": "README.md", "mode": "local", "content": "v3"}),
+                result: json!({"ok": true}),
+            },
+        ];
+        let nudge = detect_duplicate_calls(&records);
+        assert!(nudge.is_some(), "Nudge attendu pour 3 appels identiques write_project_file");
+        let msg = nudge.unwrap();
+        assert!(msg.contains("DÉTECTION DE BOUCLE"), "Message doit contenir DÉTECTION DE BOUCLE");
+        assert!(msg.contains("write_project_file"), "Message doit mentionner write_project_file");
+    }
+
+    #[test]
+    fn test_detect_duplicate_calls_different_paths() {
+        let records = vec![
+            ToolCallRecord {
+                name: "write_project_file".into(),
+                arguments: json!({"path": "README.md", "mode": "local"}),
+                result: json!({"ok": true}),
+            },
+            ToolCallRecord {
+                name: "write_project_file".into(),
+                arguments: json!({"path": "package.json", "mode": "local"}),
+                result: json!({"ok": true}),
+            },
+        ];
+        let nudge = detect_duplicate_calls(&records);
+        assert!(nudge.is_none(), "Pas de nudge attendu quand les paths sont différents");
+    }
+
+    #[test]
+    fn test_normalize_tool_call_write_project_file() {
+        let args1 = json!({"path": "src/index.js", "mode": "local", "content": "console.log('hello')"});
+        let args2 = json!({"path": "src/index.js", "mode": "local", "content": "console.log('world')"});
+        let args3 = json!({"path": "src/index.js", "mode": "github", "content": "console.log('hello')"});
+        
+        let norm1 = normalize_tool_call("write_project_file", &args1);
+        let norm2 = normalize_tool_call("write_project_file", &args2);
+        let norm3 = normalize_tool_call("write_project_file", &args3);
+        
+        // Même path+mode = même normalisation (le content est ignoré)
+        assert_eq!(norm1, norm2, "Même path+mode doit donner même normalisation");
+        // Différent mode = différente normalisation
+        assert_ne!(norm1, norm3, "Modes différents doivent donner normalisations différentes");
     }
 }
