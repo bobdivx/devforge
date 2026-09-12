@@ -54,9 +54,14 @@ impl LlmProvider for ResilientLlmProvider {
                     return Ok(turn);
                 }
                 Err(e) => {
+                    // Si c'est une erreur de parsing de tool JSON, on peut aussi fallback
+                    let err_msg = e.to_string();
+                    let is_parse_error = err_msg.contains("JSON") || err_msg.contains("parse");
+                    
                     tracing::warn!(
                         provider = %entry.label,
                         error = %e,
+                        is_parse_error = is_parse_error,
                         "LLM KO — fallback suivant"
                     );
                     errors.push(format!("{}: {e}", entry.label));
