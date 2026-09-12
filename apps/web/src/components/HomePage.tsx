@@ -99,14 +99,14 @@ export function HomePage() {
             <button
               type="button"
               onClick={() => setWizardOpen(true)}
-              class="flex aspect-square flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/15 bg-transparent px-3 py-4 text-[var(--color-ink-muted)] transition hover:border-white/30 hover:bg-white/[0.03] hover:text-white"
+              class="group flex aspect-square flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/15 bg-[#1c1c1e] px-3 py-4 transition duration-200 hover:-translate-y-0.5 hover:border-white/25 hover:bg-[#252528] hover:ring-1 hover:ring-white/10"
             >
-              <div class="flex h-16 w-16 items-center justify-center rounded-[1.15rem] border border-dashed border-white/20 sm:h-[4.5rem] sm:w-[4.5rem]">
+              <div class="flex h-16 w-16 items-center justify-center rounded-[1.15rem] border border-dashed border-white/20 text-[var(--color-ink-muted)] transition group-hover:scale-[1.03] group-hover:border-white/30 group-hover:text-white sm:h-[4.5rem] sm:w-[4.5rem]">
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden>
                   <path d="M12 5v14M5 12h14" stroke-linecap="round" />
                 </svg>
               </div>
-              <span class="text-sm font-medium">Ajouter</span>
+              <span class="text-sm font-medium text-[var(--color-ink-muted)] group-hover:text-white">Ajouter</span>
             </button>
           </FadeIn>
         </div>

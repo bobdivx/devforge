@@ -78,8 +78,9 @@ export function Modal({
         aria-describedby={description ? descId : undefined}
         class={cn(
           'relative z-10 flex w-full flex-col overflow-hidden border border-[var(--color-line)] bg-[var(--color-card)] shadow-2xl',
-          // Hauteur bornée au viewport (dvh = mobile chrome / clavier)
-          'max-h-[min(100dvh,100%)] sm:max-h-[min(90dvh,880px)]',
+          // Hauteur bornée au viewport MOINS le dock mobile (4.5rem + safe area)
+          // Sur mobile : laisse de la place pour le dock en bas (72px = 4.5rem)
+          'max-h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom,0px))] sm:max-h-[min(90dvh,880px)]',
           // Sheet mobile → panneau centré desktop
           'rounded-t-2xl border-b-0 sm:rounded-2xl sm:border',
           sizes[size],

@@ -30,6 +30,7 @@ export function projectNav(uuid: string): NavItem[] {
   const base = `/app/projects/view?uuid=${encodeURIComponent(uuid)}`;
   return [
     { href: `${base}&tab=overview`, label: 'Overview', key: 'overview' },
+    { href: `${base}&tab=workspace`, label: 'Workspace', key: 'workspace' },
     { href: `${base}&tab=deployments`, label: 'Deployments', key: 'deployments' },
     { href: `${base}&tab=git`, label: 'Git', key: 'git' },
     { href: `${base}&tab=actions`, label: 'Actions', key: 'actions' },
