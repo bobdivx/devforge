@@ -83,15 +83,54 @@ export function ProjectAgentsPanel({
       // Masquer les sous-agents dans la liste principale (spawn auto plus tard).
       const main = (r.data ?? []).filter((a) => a.kind !== 'subagent');
       setAgents(main);
-      setSelected((prev) => {
+      
+      // Sélection intelligente de l'agent par défaut
+      const selectDefault = async (prev: string | null) => {
         if (prev && main.some((a) => a.uuid === prev)) return prev;
-        // En mode builder, sélectionner l'agent deploy par défaut
-        if (builderMode || defaultAgentUuid) {
-          const deployAgent = main.find((a) => a.role === 'deploy');
-          if (deployAgent) return deployAgent.uuid;
+        
+        // Priorité 1 : agent actuellement en cours de travail (status=working)
+        const working = main.find((a) => a.status === 'working');
+        if (working) return working.uuid;
+        
+        // Priorité 2 : agent Deploy (celui qui construit le projet après scaffold)
+        const deployAgent = main.find((a) => a.role === 'deploy');
+        
+        // Vérifier si Deploy a des messages (signe qu'il a été utilisé)
+        if (deployAgent) {
+          try {
+            const msgs = await api.agentMessages(projectUuid, deployAgent.uuid);
+            if (msgs.data && msgs.data.length > 0) {
+              return deployAgent.uuid;
+            }
+          } catch {
+            // Ignorer erreur
+          }
+          
+          // Si en mode builder, sélectionner Deploy même sans messages
+          if (builderMode || defaultAgentUuid) {
+            return deployAgent.uuid;
+          }
         }
+        
+        // Priorité 3 : vérifier les autres agents pour celui qui a des messages
+        for (const agent of main) {
+          if (agent.uuid === deployAgent?.uuid) continue; // Déjà vérifié
+          try {
+            const msgs = await api.agentMessages(projectUuid, agent.uuid);
+            if (msgs.data && msgs.data.length > 0) {
+              return agent.uuid;
+            }
+          } catch {
+            // Ignorer erreur, passer au suivant
+          }
+        }
+        
+        // Priorité 4 : fallback sur le premier agent
         return main[0]?.uuid ?? null;
-      });
+      };
+      
+      const selected = await selectDefault(null);
+      setSelected(selected);
       setError(null);
     } catch (e: unknown) {
       setError(String((e as Error).message || e));
