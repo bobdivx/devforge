@@ -18,14 +18,6 @@ export const ADMIN_NAV_ITEM: NavItem = {
 };
 
 export function globalNavForRole(role?: string | null): NavItem[] {
-  if (role === 'instance_admin') {
-    // Admin juste avant Settings — config instance + clients.
-    const out = [...GLOBAL_NAV];
-    const idx = out.findIndex((i) => i.key === 'settings');
-    if (idx >= 0) out.splice(idx, 0, ADMIN_NAV_ITEM);
-    else out.push(ADMIN_NAV_ITEM);
-    return out;
-  }
   return GLOBAL_NAV;
 }
 
