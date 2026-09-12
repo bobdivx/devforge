@@ -196,11 +196,7 @@ impl Tool for CreateGitHubRepoTool {
             });
 
             let Some(server) = github_server else {
-                return Ok(json!({
-                    "ok": false,
-                    "error": "GitHub non configuré. Configure un token GitHub dans Settings ou connecte le MCP GitHub.",
-                    "hint": "L'agent ne peut pas créer de repo sans accès GitHub."
-                }));
+                return Err(devforge_shared::DevForgeError::missing_github());
             };
 
             let server_id = &server.id;
@@ -220,9 +216,13 @@ impl Tool for CreateGitHubRepoTool {
                     .trim()
                     .to_string(),
                 Err(e) => {
+                    let err_str = e.to_string();
+                    if err_str.contains("auth") || err_str.contains("401") || err_str.contains("403") {
+                        return Err(devforge_shared::DevForgeError::mcp_auth_failed("Github", &err_str));
+                    }
                     return Ok(json!({
                         "ok": false,
-                        "error": format!("Impossible de récupérer l'utilisateur GitHub courant : {e}"),
+                        "error": format!("Impossible de récupérer l'utilisateur GitHub courant : {err_str}"),
                         "hint": "Vérifie que le token GitHub MCP est valide."
                     }));
                 }

@@ -287,7 +287,27 @@ impl AgentRunner {
                 inject_tool_defaults(&mut args, &ctx);
                 let result = match self.registry.execute(&call.name, args.clone()).await {
                     Ok(v) => v,
-                    Err(e) => json!({ "ok": false, "error": e.to_string() }),
+                    Err(e) => {
+                        // Convertir les erreurs NeedsUserAction en JSON structuré
+                        match e {
+                            devforge_shared::DevForgeError::NeedsUserAction {
+                                kind,
+                                message_fr,
+                                settings_href,
+                                resume_hint,
+                            } => {
+                                json!({
+                                    "ok": false,
+                                    "needs_user_action": true,
+                                    "kind": kind,
+                                    "message_fr": message_fr,
+                                    "settings_href": settings_href,
+                                    "resume_hint": resume_hint,
+                                })
+                            }
+                            _ => json!({ "ok": false, "error": e.to_string() }),
+                        }
+                    }
                 };
                 records.push(ToolCallRecord {
                     name: call.name.clone(),
