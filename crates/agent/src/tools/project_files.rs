@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use devforge_github::GitHubFacade;
 use devforge_mcp::McpFacade;
 use devforge_shared::{Result, Tool};
 use serde_json::{json, Value};
@@ -7,6 +8,7 @@ use std::sync::Arc;
 
 /// Tool pour écrire des fichiers dans le workdir du projet (local) ou sur GitHub.
 pub struct WriteProjectFileTool {
+    pub github: Arc<GitHubFacade>,
     pub mcp: Arc<McpFacade>,
     pub pool: Arc<SqlitePool>,
 }
@@ -24,21 +26,23 @@ impl Tool for WriteProjectFileTool {
          - project_uuid : UUID du projet DevForge (contexte par défaut)\n\
          - path : chemin du fichier (ex: src/index.js, package.json)\n\
          - content : contenu du fichier à écrire\n\
-         - mode : 'local' (défaut) ou 'github' — local écrit dans workdir, github pousse via MCP\n\
+         - mode : 'local' (PRÉFÉRÉ, défaut) ou 'github' — local écrit dans workdir, github pousse via API\n\
          - commit_message : message de commit (pour mode github, défaut: auto-généré)\n\
          - branch : branche cible (pour mode github, défaut: main)\n\
          \n\
-         Mode 'local' (défaut) :\n\
+         Mode 'local' (PRÉFÉRÉ, défaut) :\n\
          - Écrit le fichier directement dans le workdir du projet\n\
          - Crée les répertoires parents si nécessaire\n\
          - Rapide, pas de commit/push immédiat\n\
+         - Permet de grouper plusieurs fichiers avant commit/push manuel\n\
          \n\
          Mode 'github' :\n\
-         - Écrit via MCP GitHub (create_or_update_file)\n\
+         - Écrit via GitHub API HTTP (ou MCP en fallback)\n\
          - Crée un commit automatiquement\n\
          - Nécessite que le projet ait un git_repository configuré\n\
+         - Fonctionne avec le token GitHub instance (pas besoin de MCP GitHub)\n\
          \n\
-         Exemple (local) :\n\
+         Exemple (local - PRÉFÉRÉ) :\n\
          {\n\
            \"project_uuid\": \"abc123\",\n\
            \"path\": \"src/App.jsx\",\n\
@@ -262,22 +266,6 @@ impl WriteProjectFileTool {
             }
         };
 
-        // Vérifier que le serveur MCP GitHub est disponible
-        let servers = self.mcp.clients.list().await;
-        let github_server = servers.iter().find(|s| {
-            s.id.to_lowercase().contains("github") || s.name.to_lowercase().contains("github")
-        });
-
-        let Some(server) = github_server else {
-            return Ok(json!({
-                "ok": false,
-                "error": "Serveur MCP GitHub non configuré.",
-                "hint": "Configure GitHub dans Settings → MCP."
-            }));
-        };
-
-        let server_id = &server.id;
-
         // Message de commit par défaut
         let message = commit_message.unwrap_or_else(|| {
             if path.contains('/') {
@@ -286,6 +274,65 @@ impl WriteProjectFileTool {
                 "feat: add root file"
             }
         });
+
+        // Essayer d'abord avec GitHubFacade (HTTP PAT)
+        let github_mode = self.github.mode();
+        if github_mode == "http" {
+            // Récupérer le SHA existant si le fichier existe déjà
+            let existing_file = self
+                .github
+                .get_file(&owner, &repo, path, Some(branch))
+                .await
+                .ok()
+                .flatten();
+
+            let sha_opt = existing_file.as_ref().map(|f| f.sha.as_str());
+
+            match self
+                .github
+                .write_file(&owner, &repo, path, content, message, Some(branch), sha_opt)
+                .await
+            {
+                Ok(file) => {
+                    return Ok(json!({
+                        "ok": true,
+                        "mode": "github",
+                        "path": path,
+                        "owner": owner,
+                        "repo": repo,
+                        "branch": branch,
+                        "commit_message": message,
+                        "sha": file.sha,
+                        "commit_sha": file.commit_sha,
+                        "html_url": file.html_url,
+                        "message": format!("✓ Fichier écrit sur GitHub : {owner}/{repo}/{path}")
+                    }));
+                }
+                Err(e) => {
+                    return Ok(json!({
+                        "ok": false,
+                        "error": format!("Échec écriture GitHub : {e}"),
+                        "step": "write_file"
+                    }));
+                }
+            }
+        }
+
+        // Fallback MCP si GitHub HTTP n'est pas configuré
+        let servers = self.mcp.clients.list().await;
+        let github_server = servers.iter().find(|s| {
+            s.id.to_lowercase().contains("github") || s.name.to_lowercase().contains("github")
+        });
+
+        let Some(server) = github_server else {
+            return Ok(json!({
+                "ok": false,
+                "error": "GitHub non configuré. Configure un token GitHub dans Settings ou connecte le MCP GitHub.",
+                "hint": "L'agent ne peut pas écrire sur GitHub sans accès."
+            }));
+        };
+
+        let server_id = &server.id;
 
         // Appeler create_or_update_file via MCP GitHub
         let result = self

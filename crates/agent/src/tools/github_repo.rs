@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use devforge_github::GitHubFacade;
 use devforge_mcp::McpFacade;
 use devforge_shared::{Result, Tool};
 use serde_json::{json, Value};
@@ -7,6 +8,7 @@ use std::sync::Arc;
 
 /// Tool pour créer un dépôt GitHub et l'attacher au projet DevForge.
 pub struct CreateGitHubRepoTool {
+    pub github: Arc<GitHubFacade>,
     pub mcp: Arc<McpFacade>,
     pub pool: Arc<SqlitePool>,
 }
@@ -28,11 +30,14 @@ impl Tool for CreateGitHubRepoTool {
          - auto_init : true pour initialiser avec README (défaut: true)\n\
          \n\
          Workflow :\n\
-         1. Vérifie que le MCP GitHub est configuré\n\
+         1. Vérifie que GitHub est configuré (token HTTP PAT ou MCP)\n\
          2. Récupère le user GitHub courant (owner)\n\
-         3. Crée le dépôt via MCP GitHub\n\
+         3. Crée le dépôt via GitHub API HTTP (ou MCP en fallback)\n\
          4. Attache le dépôt au projet DevForge (git_repository, git_branch=main)\n\
          5. Retourne owner, repo, url\n\
+         \n\
+         NOTE : Fonctionne avec le token GitHub instance configuré dans Settings.\n\
+         Le MCP GitHub n'est plus requis.\n\
          \n\
          Exemple :\n\
          {\n\
@@ -128,101 +133,156 @@ impl Tool for CreateGitHubRepoTool {
             }));
         }
 
-        // Vérifier que le serveur MCP GitHub est disponible
-        let servers = self.mcp.clients.list().await;
-        let github_server = servers.iter().find(|s| {
-            s.id.to_lowercase().contains("github") || s.name.to_lowercase().contains("github")
-        });
+        // Essayer d'abord avec GitHubFacade (HTTP PAT)
+        let github_mode = self.github.mode();
+        let (owner, html_url, full_name) = if github_mode == "http" {
+            // Récupérer le user courant
+            let current_user = match self.github.current_user().await {
+                Ok(user) => user,
+                Err(e) => {
+                    return Ok(json!({
+                        "ok": false,
+                        "error": format!("Impossible de récupérer l'utilisateur GitHub courant : {e}"),
+                        "hint": "Vérifie que le token GitHub est configuré dans Settings."
+                    }));
+                }
+            };
 
-        let Some(server) = github_server else {
-            return Ok(json!({
-                "ok": false,
-                "error": "Serveur MCP GitHub non configuré. Configure GitHub dans Settings → MCP pour créer des dépôts.",
-                "hint": "L'agent ne peut pas créer de repo sans accès GitHub via MCP."
-            }));
-        };
+            let owner = current_user.login;
+            if owner.is_empty() {
+                return Ok(json!({
+                    "ok": false,
+                    "error": "Impossible de récupérer l'owner GitHub (login vide)."
+                }));
+            }
 
-        let server_id = &server.id;
+            // Créer le repo via HTTP
+            let desc_opt = if description.is_empty() {
+                None
+            } else {
+                Some(description)
+            };
 
-        // Récupérer le user GitHub courant (owner)
-        let current_user_result = self
-            .mcp
-            .clients
-            .call_remote_tool(server_id, "get_me", json!({}))
-            .await;
+            match self
+                .github
+                .create_repository(repo_name, desc_opt, private, auto_init)
+                .await
+            {
+                Ok(repo) => (owner, repo.html_url, repo.full_name),
+                Err(e) => {
+                    let err_msg = e.to_string();
+                    // Si le repo existe déjà, construire son URL
+                    if err_msg.contains("already exists")
+                        || err_msg.contains("name already exists")
+                        || err_msg.contains("422")
+                    {
+                        let repo_url = format!("https://github.com/{owner}/{repo_name}");
+                        let full = format!("{owner}/{repo_name}");
+                        (owner, repo_url, full)
+                    } else {
+                        return Ok(json!({
+                            "ok": false,
+                            "error": format!("Échec création dépôt GitHub : {err_msg}"),
+                            "step": "create_repository"
+                        }));
+                    }
+                }
+            }
+        } else {
+            // Fallback MCP si GitHub HTTP n'est pas configuré
+            let servers = self.mcp.clients.list().await;
+            let github_server = servers.iter().find(|s| {
+                s.id.to_lowercase().contains("github") || s.name.to_lowercase().contains("github")
+            });
 
-        let owner = match current_user_result {
-            Ok(user_data) => {
-                user_data
+            let Some(server) = github_server else {
+                return Ok(json!({
+                    "ok": false,
+                    "error": "GitHub non configuré. Configure un token GitHub dans Settings ou connecte le MCP GitHub.",
+                    "hint": "L'agent ne peut pas créer de repo sans accès GitHub."
+                }));
+            };
+
+            let server_id = &server.id;
+
+            // Récupérer le user via MCP
+            let current_user_result = self
+                .mcp
+                .clients
+                .call_remote_tool(server_id, "get_me", json!({}))
+                .await;
+
+            let owner = match current_user_result {
+                Ok(user_data) => user_data
                     .get("login")
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .trim()
-                    .to_string()
-            }
-            Err(e) => {
-                return Ok(json!({
-                    "ok": false,
-                    "error": format!("Impossible de récupérer l'utilisateur GitHub courant : {e}"),
-                    "hint": "Vérifie que le token GitHub MCP est valide."
-                }));
-            }
-        };
-
-        if owner.is_empty() {
-            return Ok(json!({
-                "ok": false,
-                "error": "Impossible de récupérer l'owner GitHub (login vide)."
-            }));
-        }
-
-        // Créer le dépôt via MCP GitHub
-        let mut create_args = json!({
-            "name": repo_name,
-            "private": private,
-            "auto_init": auto_init
-        });
-
-        if !description.is_empty() {
-            create_args["description"] = json!(description);
-        }
-
-        let create_result = self
-            .mcp
-            .clients
-            .call_remote_tool(server_id, "create_repository", create_args)
-            .await;
-
-        let (html_url, full_name) = match create_result {
-            Ok(repo_data) => {
-                let url = repo_data
-                    .get("html_url")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let full = repo_data
-                    .get("full_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                (url, full)
-            }
-            Err(e) => {
-                let err_msg = e.to_string();
-                // Si le repo existe déjà, récupérer son URL
-                if err_msg.contains("already exists")
-                    || err_msg.contains("name already exists")
-                    || err_msg.contains("422")
-                {
-                    let repo_url = format!("https://github.com/{owner}/{repo_name}");
-                    let full_name = format!("{owner}/{repo_name}");
-                    (repo_url, full_name)
-                } else {
+                    .to_string(),
+                Err(e) => {
                     return Ok(json!({
                         "ok": false,
-                        "error": format!("Échec création dépôt GitHub : {err_msg}"),
-                        "step": "create_repository"
+                        "error": format!("Impossible de récupérer l'utilisateur GitHub courant : {e}"),
+                        "hint": "Vérifie que le token GitHub MCP est valide."
                     }));
+                }
+            };
+
+            if owner.is_empty() {
+                return Ok(json!({
+                    "ok": false,
+                    "error": "Impossible de récupérer l'owner GitHub (login vide)."
+                }));
+            }
+
+            // Créer le repo via MCP
+            let mut create_args = json!({
+                "name": repo_name,
+                "private": private,
+                "auto_init": auto_init
+            });
+
+            if !description.is_empty() {
+                create_args["description"] = json!(description);
+            }
+
+            let create_result = self
+                .mcp
+                .clients
+                .call_remote_tool(server_id, "create_repository", create_args)
+                .await;
+
+            match create_result {
+                Ok(repo_data) => {
+                    let url = repo_data
+                        .get("html_url")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let full = repo_data
+                        .get("full_name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    (owner, url, full)
+                }
+                Err(e) => {
+                    let err_msg = e.to_string();
+                    // Si le repo existe déjà, récupérer son URL
+                    if err_msg.contains("already exists")
+                        || err_msg.contains("name already exists")
+                        || err_msg.contains("422")
+                    {
+                        let repo_url = format!("https://github.com/{owner}/{repo_name}");
+                        let full_name = format!("{owner}/{repo_name}");
+                        (owner, repo_url, full_name)
+                    } else {
+                        return Ok(json!({
+                            "ok": false,
+                            "error": format!("Échec création dépôt GitHub : {err_msg}"),
+                            "step": "create_repository"
+                        }));
+                    }
                 }
             }
         };

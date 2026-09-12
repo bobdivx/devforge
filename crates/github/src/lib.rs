@@ -255,6 +255,15 @@ pub trait GitHubClient: Send + Sync {
         repo: &str,
         run_id: u64,
     ) -> Result<Vec<WorkflowJob>>;
+
+    /// Crée un nouveau dépôt GitHub. Retourne GitRepo avec full_name, html_url, etc.
+    async fn create_repository(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        private: bool,
+        auto_init: bool,
+    ) -> Result<GitRepo>;
 }
 
 pub struct StubGitHubClient;
@@ -422,6 +431,18 @@ impl GitHubClient for StubGitHubClient {
         _repo: &str,
         _run_id: u64,
     ) -> Result<Vec<WorkflowJob>> {
+        Err(DevForgeError::Message(
+            "GitHub non configuré — connecte un token dans Settings".into(),
+        ))
+    }
+
+    async fn create_repository(
+        &self,
+        _name: &str,
+        _description: Option<&str>,
+        _private: bool,
+        _auto_init: bool,
+    ) -> Result<GitRepo> {
         Err(DevForgeError::Message(
             "GitHub non configuré — connecte un token dans Settings".into(),
         ))
@@ -628,6 +649,18 @@ impl GitHubFacade {
     ) -> Result<Vec<WorkflowJob>> {
         self.client()
             .list_workflow_jobs(owner, repo, run_id)
+            .await
+    }
+
+    pub async fn create_repository(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        private: bool,
+        auto_init: bool,
+    ) -> Result<GitRepo> {
+        self.client()
+            .create_repository(name, description, private, auto_init)
             .await
     }
 }
