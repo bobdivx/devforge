@@ -361,7 +361,19 @@ fn system_prompt(ctx: &AgentChatContext) -> String {
              Demande à l'utilisateur UNIQUEMENT si :\n\
              - Des secrets/credentials manquent (ex: MCP GitHub non configuré)\n\
              - L'action est destructive et irréversible (ex: supprimer une base de données)\n\
-             - Plusieurs solutions techniques équivalentes existent et le choix a un impact produit"
+             - Plusieurs solutions techniques équivalentes existent et le choix a un impact produit\n\
+             \n\
+             SCAFFOLD DEPUIS PROMPT (builder slice 1+2) :\n\
+             Si tu dois scaffolder un nouveau projet depuis un prompt utilisateur :\n\
+             1. CRÉER LE REPO : utilise create_github_repo pour créer le dépôt GitHub et l'attacher au projet\n\
+             2. ÉCRIRE LES FICHIERS : utilise write_project_file (mode='local' ou 'github') pour créer les fichiers initiaux\n\
+                - mode='local' : rapide, écrit dans le workdir local (pas de commit immédiat)\n\
+                - mode='github' : pousse directement sur GitHub avec commit automatique\n\
+             3. CONFIGURER : ajoute les variables d'environnement nécessaires avec upsert_env_var\n\
+             4. DÉPLOYER : lance le premier déploiement (slice future)\n\
+             \n\
+             Exemple workflow scaffold :\n\
+             - create_github_repo → écriture package.json, src/*, config → upsert_env_var → deploy"
         }
         "reviewer" => {
             "Tu es l'agent Reviewer : risques, qualité, PRs, CI, amélioration continue du code.\n\
