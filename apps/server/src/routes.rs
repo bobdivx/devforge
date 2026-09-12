@@ -910,7 +910,10 @@ async fn run_real_deploy(state: &AppState, project: &Project) -> devforge_deploy
     result
 }
 
-async fn load_env_file_content(pool: &sqlx::SqlitePool, project_uuid: &str) -> Option<String> {
+pub(crate) async fn load_env_file_content(
+    pool: &sqlx::SqlitePool,
+    project_uuid: &str,
+) -> Option<String> {
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT key, value FROM project_env_vars WHERE project_uuid = ? ORDER BY key",
     )

@@ -138,10 +138,10 @@ pub struct Deployment {
     pub updated_at: String,
 }
 
-struct SqliteProjectStore {
-    pool: SqlitePool,
-    deploy: Arc<DeployFacade>,
-    config: Arc<super::Config>,
+pub(crate) struct SqliteProjectStore {
+    pub(crate) pool: SqlitePool,
+    pub(crate) deploy: Arc<DeployFacade>,
+    pub(crate) config: Arc<super::Config>,
 }
 
 #[async_trait]
@@ -248,10 +248,10 @@ impl ProjectStore for SqliteProjectStore {
     async fn trigger_deploy(
         &self,
         project_uuid: &str,
-        git_sha: Option<String>,
+        _git_sha: Option<String>,
         message: &str,
     ) -> DfResult<Value> {
-        use devforge_deploy::{resolve_project_workdir, DeployRequest};
+        use devforge_deploy::DeployRequest;
 
         // Récupérer le projet
         let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ?")
@@ -297,7 +297,7 @@ impl ProjectStore for SqliteProjectStore {
         )
         .bind(&dep_uuid)
         .bind(project.id)
-        .bind(git_sha.as_deref().unwrap_or("pending"))
+        .bind("pending")
         .bind(message)
         .bind("[devforge] démarrage du déploiement…\n")
         .bind(&now)
@@ -314,49 +314,53 @@ impl ProjectStore for SqliteProjectStore {
             .await
             .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
-        // Préparer la requête de déploiement
-        let workdir_resolved = resolve_project_workdir(
-            self.config.clone(),
-            &project.uuid,
-        );
-
-        let env_vars: Vec<(String, String, i64)> = sqlx::query_as(
-            "SELECT key, value, secret FROM project_env_vars WHERE project_uuid = ?",
+        // Récupérer le token GitHub depuis instance_settings (même pattern que run_real_deploy)
+        let token: Option<String> = sqlx::query_as::<_, (String,)>(
+            "SELECT github_token FROM instance_settings WHERE id = 1",
         )
-        .bind(&project.uuid)
-        .fetch_all(&self.pool)
+        .fetch_optional(&self.pool)
         .await
-        .unwrap_or_default();
+        .ok()
+        .flatten()
+        .map(|(t,)| t)
+        .filter(|t| !t.trim().is_empty());
 
-        let mut env_map = std::collections::HashMap::new();
-        for (key, val, _secret) in env_vars {
-            env_map.insert(key, val);
-        }
+        // Charger le fichier .env (même pattern que run_real_deploy)
+        let env_file = crate::routes::load_env_file_content(&self.pool, &project.uuid).await;
 
+        // Construire la DeployRequest (même pattern que run_real_deploy)
         let req = DeployRequest {
             project_uuid: project.uuid.clone(),
             server_id: project.server_id.clone().unwrap_or_else(|| "default".into()),
-            workdir: workdir_resolved.clone(),
-            git_repository: git_repo.to_string(),
+            workdir: project.workdir.clone().unwrap_or_default(),
+            git_repository: project.git_repository.clone().unwrap_or_default(),
             git_branch: project.git_branch.clone().unwrap_or_else(|| "main".into()),
-            build_pack: project.build_pack.clone().unwrap_or_else(|| "nixpacks".into()),
+            build_pack: if project.build_pack.is_empty() {
+                "nixpacks".into()
+            } else {
+                project.build_pack.clone()
+            },
             port: project.port.clamp(1, 65535) as u16,
-            env: env_map,
-            git_sha: git_sha.clone(),
-            is_static: project.is_static != 0,
-            publish_directory: project.publish_directory.clone().unwrap_or_default(),
-            base_directory: project.base_directory.clone().unwrap_or_else(|| "/".into()),
+            base_directory: if project.base_directory.is_empty() {
+                "/".into()
+            } else {
+                project.base_directory.clone()
+            },
             docker_compose_location: project.docker_compose_location.clone(),
+            publish_directory: project.publish_directory.clone(),
+            is_static: project.is_static != 0,
+            github_token: token,
+            env_file,
+            // proxy_labels sera configuré ultérieurement si nécessaire
+            // Pour le déploiement initial via agent, on peut utiliser None
+            proxy_labels: None,
         };
 
-        // Exécuter le déploiement (asynchrone via self.deploy)
+        // Exécuter le déploiement
         let result = self.deploy.deploy(&req).await;
         let finished = now_str();
         let status = if result.ok { "success" } else { "failed" };
-        let final_sha = result
-            .git_sha
-            .or(git_sha)
-            .unwrap_or_else(|| "unknown".into());
+        let final_sha = result.git_sha.unwrap_or_else(|| "unknown".into());
 
         // Mettre à jour le déploiement avec le résultat
         sqlx::query(
