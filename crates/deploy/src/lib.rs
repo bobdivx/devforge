@@ -197,6 +197,12 @@ fn git_clone_url(repo: &str, token: Option<&str>) -> String {
     }
 }
 
+/// Commande shell pour synchroniser Git : fetch/pull si .git existe, sinon clone.
+/// 
+/// IMPORTANT : Gère le cas du workdir non-vide sans .git (issue #2) :
+/// - Si .git existe : fetch + checkout + reset
+/// - Si .git n'existe pas mais le workdir a des fichiers : clone dans .tmp puis move
+/// - Si le workdir est vide : clone directement
 fn git_sync_command(workdir: &str, clone_url: &str, branch: &str) -> String {
     let w = shell_single_quote(workdir);
     let url = shell_single_quote(clone_url);
@@ -207,11 +213,41 @@ fn git_sync_command(workdir: &str, clone_url: &str, branch: &str) -> String {
         let up = clone_url.replace('\'', "''").replace('"', "");
         let bp = branch.replace('\'', "''");
         format!(
-            "if (Test-Path -LiteralPath '{wp}\\.git') {{ git -C '{wp}' fetch origin; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}; git -C '{wp}' checkout '{bp}'; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}; git -C '{wp}' reset --hard origin/{bp}; exit $LASTEXITCODE }} else {{ git clone --branch '{bp}' --single-branch '{up}' '{wp}'; exit $LASTEXITCODE }}"
+            "if (Test-Path -LiteralPath '{wp}\\.git') {{ \
+                git -C '{wp}' fetch origin; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}; \
+                git -C '{wp}' checkout '{bp}'; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}; \
+                git -C '{wp}' reset --hard origin/{bp}; exit $LASTEXITCODE \
+            }} else {{ \
+                if (Test-Path -LiteralPath '{wp}' ) {{ \
+                    $files = Get-ChildItem -LiteralPath '{wp}' -Force -ErrorAction SilentlyContinue; \
+                    if ($files.Count -gt 0) {{ \
+                        $tmp = '{wp}.tmp.git'; \
+                        git clone --branch '{bp}' --single-branch '{up}' $tmp; \
+                        if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}; \
+                        Get-ChildItem -Path $tmp -Force | Move-Item -Destination '{wp}' -Force; \
+                        Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue; \
+                        exit 0 \
+                    }} \
+                }}; \
+                git clone --branch '{bp}' --single-branch '{up}' '{wp}'; exit $LASTEXITCODE \
+            }}"
         )
     } else {
         format!(
-            "if [ -d {w}/.git ]; then git -C {w} fetch origin && git -C {w} checkout {b} && git -C {w} reset --hard origin/{b}; else git clone --branch {b} --single-branch {url} {w}; fi"
+            "if [ -d {w}/.git ]; then \
+                git -C {w} fetch origin && git -C {w} checkout {b} && git -C {w} reset --hard origin/{b}; \
+            else \
+                if [ -d {w} ] && [ \"$(ls -A {w} 2>/dev/null)\" ]; then \
+                    tmp=\"{w}.tmp.git\"; \
+                    git clone --branch {b} --single-branch {url} \"$tmp\" && \
+                    mv \"$tmp\"/.git {w}/.git && \
+                    mv \"$tmp\"/* {w}/ 2>/dev/null; \
+                    mv \"$tmp\"/.[!.]* {w}/ 2>/dev/null; \
+                    rm -rf \"$tmp\"; \
+                else \
+                    git clone --branch {b} --single-branch {url} {w}; \
+                fi; \
+            fi"
         )
     }
 }

@@ -70,6 +70,8 @@ impl Tool for TriggerDeployTool {
     }
 
     async fn execute(&self, arguments: Value) -> Result<Value> {
+        // Note : project_uuid est automatiquement injecté par inject_tool_defaults
+        // depuis le contexte d'agent (issue #1 corrigée).
         let project_uuid = arguments
             .get("project_uuid")
             .and_then(|v| v.as_str())
@@ -79,7 +81,7 @@ impl Tool for TriggerDeployTool {
         if project_uuid.is_empty() {
             return Ok(json!({
                 "ok": false,
-                "error": "project_uuid requis"
+                "error": "project_uuid requis. Le project_uuid aurait dû être injecté automatiquement depuis le contexte."
             }));
         }
 

@@ -327,20 +327,30 @@ impl AgentRunner {
     }
 }
 
+/// Injecte automatiquement les valeurs du contexte dans les arguments du tool call.
+/// Ceci garantit que l'agent utilise toujours le bon project_uuid, owner, repo, branch
+/// même si le LLM hallucine ou omet ces valeurs.
 fn inject_tool_defaults(args: &mut Value, ctx: &AgentChatContext) {
     let Some(obj) = args.as_object_mut() else {
         return;
     };
+    
+    // TOUJOURS forcer le project_uuid du contexte s'il existe,
+    // même si le LLM a fourni une valeur (hallucination possible).
     if let Some(uuid) = &ctx.project_uuid {
-        let empty = obj
+        let provided = obj
             .get("project_uuid")
             .and_then(|v| v.as_str())
             .unwrap_or("")
-            .is_empty();
-        if !obj.contains_key("project_uuid") || empty {
+            .trim();
+        
+        // Si le LLM a fourni un UUID différent, on l'écrase avec celui du contexte.
+        // Ceci prévient les hallucinations de UUID (issue #1).
+        if provided.is_empty() || provided != uuid {
             obj.insert("project_uuid".into(), json!(uuid));
         }
     }
+    
     if let Some(owner) = &ctx.git_owner {
         let empty = obj
             .get("owner")

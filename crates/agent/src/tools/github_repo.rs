@@ -101,10 +101,13 @@ impl Tool for CreateGitHubRepoTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 
+        // Note : project_uuid est automatiquement injecté par inject_tool_defaults
+        // depuis le contexte d'agent. Même si le LLM hallucine ou omet cette valeur,
+        // elle sera forcée au bon UUID avant d'arriver ici (issue #1 corrigée).
         if project_uuid.is_empty() || repo_name.is_empty() {
             return Ok(json!({
                 "ok": false,
-                "error": "project_uuid et repo_name requis"
+                "error": "project_uuid et repo_name requis. Le project_uuid aurait dû être injecté automatiquement depuis le contexte."
             }));
         }
 
