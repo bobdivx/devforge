@@ -1645,12 +1645,20 @@ async fn list_templates() -> Json<Value> {
 }
 
 fn apply_template(template_id: &str, dest_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let template_base = FsPath::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../crates/templates")
-        .join(template_id);
+    // Résolution runtime du répertoire templates
+    let templates_root = if let Ok(env_dir) = std::env::var("DEVFORGE_TEMPLATES_DIR") {
+        // Production: env var définie dans Dockerfile
+        FsPath::new(&env_dir).to_path_buf()
+    } else {
+        // Dev local: fallback relatif au CARGO_MANIFEST_DIR
+        FsPath::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/templates")
+    };
+    
+    let template_base = templates_root.join(template_id);
     
     if !template_base.exists() {
-        return Err(format!("Template {} not found", template_id).into());
+        return Err(format!("Template {} not found at {:?}", template_id, template_base).into());
     }
     
     let dest_path = FsPath::new(dest_dir);
