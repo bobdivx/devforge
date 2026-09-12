@@ -34,9 +34,20 @@ Safe-area, scroll, tap targets 44px, highlight route active.
 
 Desktop + mobile : inclut maintenant toutes les pages principales.
 
-### 4. Settings clarifiées
+### 4. Settings : grille de cartes (comme Apps) 🆕
 
-Label **"Sections"** au-dessus des chips mobile → plus de confusion avec menu global.
+**Changement majeur selon feedback Mathieu :**
+
+`/app/settings` affiche une **grille de 8 cartes** au lieu de chips horizontales :
+- Général, Domaine, GitHub, Serveur, Agents/LLM, SSO/OIDC, Sauvegardes, Mise à jour
+- Chaque carte : icône, titre, description courte en français
+- Visual language identique à `/app` (rounded-2xl, hover effects, aspect-square)
+- Click card → section s'ouvre avec bouton **← Paramètres** (retour à la grille)
+
+**Résultat :**
+- Plus de chips confuses = "ancien menu global"
+- Navigation claire : grille → section → retour
+- Cohérence UI avec la page Apps
 
 ---
 
@@ -46,14 +57,14 @@ Label **"Sections"** au-dessus des chips mobile → plus de confusion avec menu 
 |------------------------------------------|-----------|------------------------------------------|
 | `apps/web/src/components/MobileMenuSheet.tsx` | ✨ Nouveau | Bottom sheet mobile pour accès rapide    |
 | `apps/web/src/lib/nav.ts`                | 📝 Modifié | `mobileBottomNav()` + doc                |
-| `apps/web/src/components/AppShell.tsx`   | 🔧 Modifié | Intégration sheet + label sections       |
+| `apps/web/src/components/AppShell.tsx`   | 🔧 Modifié | Intégration sheet + `title` JSX          |
 | `apps/web/src/components/AppHeader.tsx`  | 🔧 Modifié | Avatar enrichi (+ MCP, Tokens)           |
-| `apps/web/src/components/SettingsPage.tsx` | 🔧 Modifié | Label "Sections" au lieu de "Settings"   |
+| `apps/web/src/components/SettingsPage.tsx` | 🎨 Modifié | **Grille de cartes** au lieu de chips    |
 | `MOBILE_NAV_FIX.md`                      | 📚 Doc     | Résumé technique du fix                  |
 | `apps/web/TEST_MOBILE_NAV.md`            | ✅ Test    | Plan de test complet (checklist)         |
 | `VISUAL_GUIDE_MOBILE_NAV.md`             | 📊 Guide   | Schémas et flows utilisateur             |
 
-**Stats :** +447 lignes, -5627 lignes (cleanup package-lock inclus)
+**Stats :** +649 lignes, -5635 lignes (cleanup + card grid)
 
 ---
 
@@ -97,7 +108,7 @@ npm run dev
 | Taps pour atteindre Tokens depuis `/app`    | ❌ Inconnu | ✅ 2 taps |
 | Taps pour atteindre Settings                 | ❌ Complexe | ✅ 2 taps |
 | Dock items                                   | 2 (Apps, Runners) | 3 (Apps, Plus, Runners) |
-| Settings ressemble à ancien menu global      | ❌ Oui | ✅ Non (label clair) |
+| Settings UX                                  | ❌ Chips confuses (ancien menu) | ✅ Grille de cartes (comme Apps) |
 | Avatar contient MCP + Tokens                 | ❌ Non | ✅ Oui |
 | Interface français                           | ✅ Oui | ✅ Oui |
 | Safe-area iOS/Android                        | ⚠️ Partiel | ✅ Complet |
@@ -111,7 +122,7 @@ npm run dev
 
 1. **Mathieu (@bobdivx)** : test mobile sur device réel
 2. Vérifier flow : Apps → Plus → MCP/Tokens
-3. Vérifier Settings chips (label "Sections")
+3. **Nouveau :** Vérifier Settings = grille de cartes (8 cartes, bouton retour)
 4. Valider desktop inchangé
 
 ### Après validation

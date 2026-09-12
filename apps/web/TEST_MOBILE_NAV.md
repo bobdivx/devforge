@@ -63,14 +63,24 @@ Desktop + mobile :
 - [ ] **Séparateur**
 - [ ] Déconnexion
 
-### 4. Settings (mobile)
+### 4. Settings card grid (tous écrans)
 
-Aller sur `/app/settings/` (responsive < 1024px) :
+Aller sur `/app/settings/` (root, sans `?tab=...`) :
 
-- [ ] **Label « Sections »** en uppercase faint au-dessus des chips
-- [ ] Chips horizontales scroll (Général, Domaine, GitHub, Serveur, LLM, SSO, Sauvegardes, Mise à jour)
-- [ ] Chips clairement identifiées comme onglets de page (pas menu global)
-- [ ] Active en accent, autres en muted
+- [ ] **Grille de 8 cartes** (2-4 colonnes selon écran)
+- [ ] Cartes : Général, Domaine, GitHub, Serveur, Agents/LLM, SSO/OIDC, Sauvegardes, Mise à jour
+- [ ] Chaque carte : icône, titre, description courte en français
+- [ ] Style identique à Apps (rounded-2xl, aspect-square, hover effects)
+- [ ] Animations FadeIn progressives
+
+**Détail d'une section :**
+
+Cliquer une card (ex: GitHub) :
+
+- [ ] Section s'ouvre avec `?tab=github`
+- [ ] **Bouton ← Paramètres** en haut à gauche
+- [ ] Plus de chips horizontales
+- [ ] Click bouton retour → revient à la grille de cartes
 
 ### 5. Navigation générale mobile
 
@@ -119,10 +129,11 @@ Vérifier que le desktop est inchangé :
 
 1. MCP et Tokens accessibles en ≤2 taps depuis n'importe quelle page mobile
 2. Dock minimal (3 items) + sheet pratique pour le reste
-3. Settings ne ressemble plus à l'ancien menu global
-4. Interface 100% français, zéro mention legacy
-5. Safe-area iOS/Android respectée partout
-6. Desktop inchangé (sidebar OK)
+3. **Settings = grille de cartes moderne (comme Apps, pas de chips confuses)**
+4. Navigation Settings claire : grille → click card → section avec retour
+5. Interface 100% français, zéro mention legacy
+6. Safe-area iOS/Android respectée partout
+7. Desktop inchangé (sidebar OK)
 
 ---
 

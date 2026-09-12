@@ -33,9 +33,17 @@ Dock mobile: [Apps] [Plus] [Runners]
                │  • Admin (si OK)│
                └─────────────────┘
 
+Settings page (/app/settings):
+┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
+│ ⚙️ Général│ │ 🌍 Domaine│ │ GitHub │ │ 💾 Serveur│
+└─────────┘ └─────────┘ └─────────┘ └─────────┘
+... (grille de 8 cartes, comme Apps)
+
+Click card → section avec bouton [← Paramètres]
+
 ✅ Tout accessible en ≤2 taps
 ✅ Avatar menu enrichi (+ MCP, Tokens)
-✅ Settings chips labelisées "Sections" (clarté)
+✅ Settings = grille moderne (plus de chips)
 ```
 
 ## Architecture
@@ -50,9 +58,12 @@ Dock mobile: [Apps] [Plus] [Runners]
 
 ### Modifications
 1. **`nav.ts`** : `mobileBottomNav()` retourne Apps/Plus/Runners
-2. **`AppShell.tsx`** : intègre `MobileMenuSheet`, labellise chips Settings
+2. **`AppShell.tsx`** : intègre `MobileMenuSheet`, `title` accepte JSX
 3. **`AppHeader.tsx`** : ajoute MCP + Tokens dans avatar dropdown
-4. **`SettingsPage.tsx`** : change label "Settings" → "Sections"
+4. **`SettingsPage.tsx`** : **grille de cartes** au lieu de chips
+   - `SETTINGS_CARDS` avec metadata (title, description, icon)
+   - `SettingsIcon()` + `SettingCard()` components
+   - Bouton retour dans chaque section
 
 ## Test
 
@@ -61,15 +72,17 @@ Mobile ou responsive < 1024px :
 2. Tap Plus → sheet s'ouvre
 3. Vérifier accès MCP, Tokens, Compte, Paramètres, Admin
 4. Avatar menu contient aussi MCP + Tokens
-5. Sur `/app/settings/` → chips précédées du label "Sections"
+5. Sur `/app/settings/` → **grille de 8 cartes** (Général, Domaine, GitHub, Serveur, LLM, SSO, Sauvegardes, Mise à jour)
+6. Click une card → section s'ouvre avec bouton **← Paramètres** en haut
 
 ## Contraintes respectées
 
-- ✅ Dock minimal (3 items max demandé par Mathieu)
-- ✅ Accès pratique et clair à tout le reste
+- ✅ Dock minimal (3 items Apps/Plus/Runners — demandé par Mathieu)
+- ✅ Accès pratique et clair à tout le reste (sheet organisé)
+- ✅ Settings = card grid moderne (comme Apps — demandé par Mathieu)
 - ✅ Interface 100% français
 - ✅ Aucune mention legacy (Dyad, etc.)
-- ✅ Patterns UI cohérents avec Modal existant
+- ✅ Patterns UI cohérents avec Apps + Modal
 - ✅ Safe-area et a11y (tap targets, ARIA, keyboard)
 
 ---
