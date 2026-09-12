@@ -458,32 +458,34 @@ async fn scaffold_project(
         .await
         .map_err(ApiError::from)?;
 
-    // Get the deploy agent to seed the prompt
-    let agent: Option<crate::infra_routes::AgentRow> = sqlx::query_as(
-        "SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status FROM project_agents WHERE project_uuid = ? AND role = 'deploy' LIMIT 1",
+    // Get the deploy agent UUID to seed the prompt
+    let agent_uuid_row: Option<(String,)> = sqlx::query_as(
+        "SELECT uuid FROM project_agents WHERE project_uuid = ? AND role = 'deploy' LIMIT 1",
     )
     .bind(&uuid)
     .fetch_optional(&state.pool)
     .await
     .map_err(ApiError::from)?;
 
-    let agent_uuid = agent.as_ref().map(|a| a.uuid.clone()).unwrap_or_else(new_uuid);
-
-    // If no deploy agent found, create one
-    if agent.is_none() {
+    let agent_uuid = if let Some((uuid,)) = agent_uuid_row {
+        uuid
+    } else {
+        // If no deploy agent found, create one
+        let new_id = new_uuid();
         sqlx::query(
             r#"INSERT INTO project_agents (
                 uuid, project_uuid, name, role, kind, parent_agent_uuid, status, created_at, updated_at
             ) VALUES (?, ?, 'Builder', 'deploy', 'custom', NULL, 'idle', ?, ?)"#,
         )
-        .bind(&agent_uuid)
+        .bind(&new_id)
         .bind(&uuid)
         .bind(&now)
         .bind(&now)
         .execute(&state.pool)
         .await
         .map_err(ApiError::from)?;
-    }
+        new_id
+    };
 
     // Seed first message with the user prompt
     let msg_uuid = new_uuid();
@@ -512,17 +514,16 @@ async fn scaffold_project(
         .await
         .map_err(ApiError::from)?;
 
-    let agent_row = sqlx::query_as::<_, crate::infra_routes::AgentRow>(
-        "SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status FROM project_agents WHERE uuid = ?",
-    )
-    .bind(&agent_uuid)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(ApiError::from)?;
+    // Return agent info as simple JSON value
+    let agent_info = serde_json::json!({
+        "uuid": agent_uuid,
+        "project_uuid": uuid,
+        "role": "deploy"
+    });
 
     Ok((
         axum::http::StatusCode::CREATED,
-        Json(json!({ "data": { "project": project, "agent": agent_row } })),
+        Json(json!({ "data": { "project": project, "agent": agent_info } })),
     ))
 }
 
