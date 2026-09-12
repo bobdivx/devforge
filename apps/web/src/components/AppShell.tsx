@@ -1,6 +1,6 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
-import { globalNavForRole, type NavItem } from '../lib/nav';
+import { globalNavForRole, mobileBottomNav, type NavItem } from '../lib/nav';
 import { api } from '../lib/api';
 import { cn } from '../lib/cn';
 import { ToastProvider } from './ui';
@@ -186,7 +186,7 @@ function ShellInner({
           aria-label="Navigation principale"
         >
           <div class="mx-auto flex max-w-lg justify-around gap-0.5 px-1 py-1.5">
-            {navItems.map((item) => (
+            {mobileBottomNav().map((item) => (
               <a
                 key={item.key}
                 href={item.href}
