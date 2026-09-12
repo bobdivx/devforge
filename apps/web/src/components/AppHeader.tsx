@@ -201,11 +201,36 @@ export function AppHeader() {
             </div>
             <a
               role="menuitem"
+              href="/app/mcp"
+              class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
+              onClick={() => setMenuOpen(false)}
+            >
+              MCP
+            </a>
+            <a
+              role="menuitem"
+              href="/app/tokens"
+              class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
+              onClick={() => setMenuOpen(false)}
+            >
+              Tokens
+            </a>
+            <div class="my-1 border-t border-[var(--color-line)]" />
+            <a
+              role="menuitem"
               href="/app/team"
               class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
               onClick={() => setMenuOpen(false)}
             >
               Compte
+            </a>
+            <a
+              role="menuitem"
+              href="/app/settings"
+              class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
+              onClick={() => setMenuOpen(false)}
+            >
+              Paramètres
             </a>
             {isAdmin && (
               <a
@@ -217,14 +242,6 @@ export function AppHeader() {
                 Admin
               </a>
             )}
-            <a
-              role="menuitem"
-              href="/app/settings"
-              class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
-              onClick={() => setMenuOpen(false)}
-            >
-              Paramètres
-            </a>
             {ghUrl && (
               <a
                 role="menuitem"

@@ -191,7 +191,7 @@ export function SettingsPage() {
       active="settings"
       title={SECTION_TITLES[section]}
       sideNav={SETTINGS_NAV}
-      sideNavLabel="Settings"
+      sideNavLabel="Sections"
     >
       {section === 'general' && (
         <FadeIn>

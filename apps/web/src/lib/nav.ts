@@ -21,9 +21,16 @@ export function globalNavForRole(role?: string | null): NavItem[] {
   return GLOBAL_NAV;
 }
 
-/** Nav minimaliste pour la bottom bar mobile — uniquement Apps et Runners. */
+/**
+ * Nav mobile bottom dock : Apps · Plus · Runners.
+ * "Plus" ouvre un sheet avec MCP, Tokens, Compte, Paramètres, Admin.
+ */
 export function mobileBottomNav(): NavItem[] {
-  return GLOBAL_NAV.filter(item => item.key === 'home' || item.key === 'runners');
+  return [
+    { href: '/app', label: 'Apps', key: 'home' },
+    { href: '#plus', label: 'Plus', key: 'plus' },
+    { href: '/app/runners', label: 'Runners', key: 'runners' },
+  ];
 }
 
 export function projectNav(uuid: string): NavItem[] {
