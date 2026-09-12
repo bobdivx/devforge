@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, type Deployment, type Project } from '../lib/api';
 import { cn } from '../lib/cn';
+import { BuilderProgress } from './BuilderProgress';
 import { ProjectAgentsPanel } from './ProjectAgentsPanel';
 import { Badge, Button, Card, FadeIn, Spinner } from './ui';
 
 type Props = {
   projectUuid: string;
   project: Project | null;
+  builderMode?: boolean;
+  builderAgentUuid?: string;
 };
 
 type PanelMode = 'split' | 'chat' | 'preview';
@@ -32,12 +35,13 @@ function deployTone(status: string): 'ok' | 'warn' | 'danger' | 'neutral' {
   return 'neutral';
 }
 
-export function ProjectWorkspace({ projectUuid, project }: Props) {
-  const [mode, setMode] = useState<PanelMode>('split');
+export function ProjectWorkspace({ projectUuid, project, builderMode, builderAgentUuid }: Props) {
+  const [mode, setMode] = useState<PanelMode>(builderMode ? 'chat' : 'split');
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [selectedDeploy, setSelectedDeploy] = useState<string | null>(null);
   const [logs, setLogs] = useState<string>('');
   const [logsLoading, setLogsLoading] = useState(false);
+  const [showBuilder, setShowBuilder] = useState(builderMode && !project?.production_url);
 
   useEffect(() => {
     loadDeployments();
@@ -77,6 +81,13 @@ export function ProjectWorkspace({ projectUuid, project }: Props) {
 
   const latest = deployments[0] ?? null;
   const productionUrl = project?.production_url;
+
+  // Cacher le builder progress quand la preview est prête
+  useEffect(() => {
+    if (productionUrl && showBuilder) {
+      setShowBuilder(false);
+    }
+  }, [productionUrl, showBuilder]);
 
   return (
     <FadeIn>
@@ -119,7 +130,11 @@ export function ProjectWorkspace({ projectUuid, project }: Props) {
             mode === 'split' && 'block',
           )}
         >
-          <ProjectAgentsPanel projectUuid={projectUuid} />
+          <ProjectAgentsPanel
+            projectUuid={projectUuid}
+            defaultAgentUuid={builderAgentUuid}
+            builderMode={builderMode}
+          />
         </div>
 
         {/* Right panel: Preview + Logs */}
@@ -161,6 +176,14 @@ export function ProjectWorkspace({ projectUuid, project }: Props) {
                   title="App preview"
                   sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
                 />
+              ) : showBuilder && builderAgentUuid ? (
+                <div class="flex h-full min-h-[300px] items-center justify-center p-4">
+                  <BuilderProgress
+                    projectUuid={projectUuid}
+                    agentUuid={builderAgentUuid}
+                    onComplete={() => setShowBuilder(false)}
+                  />
+                </div>
               ) : (
                 <div class="flex h-full min-h-[300px] items-center justify-center p-8 text-center">
                   <div>
