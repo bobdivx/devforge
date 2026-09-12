@@ -43,6 +43,9 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
   const [logsLoading, setLogsLoading] = useState(false);
   const [showBuilder, setShowBuilder] = useState(builderMode && !project?.production_url);
 
+  // Détecter workflow local-first : template appliqué mais pas de git_repository
+  const isLocalFirst = builderMode && !project?.git_repository?.trim();
+
   useEffect(() => {
     loadDeployments();
   }, [projectUuid]);
@@ -181,8 +184,29 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
                   <BuilderProgress
                     projectUuid={projectUuid}
                     agentUuid={builderAgentUuid}
+                    localFirst={isLocalFirst}
                     onComplete={() => setShowBuilder(false)}
                   />
+                </div>
+              ) : isLocalFirst ? (
+                <div class="flex h-full min-h-[300px] items-center justify-center p-8 text-center">
+                  <div class="max-w-md">
+                    <div class="mb-4 text-4xl">🎨</div>
+                    <h3 class="mb-2 font-medium">Preview locale en préparation</h3>
+                    <p class="text-sm text-[var(--color-ink-muted)]">
+                      Le template a été appliqué dans le workdir local. 
+                      Testez l'application, puis cliquez sur « Valider et publier » pour créer le dépôt GitHub.
+                    </p>
+                    <div class="mt-4 rounded-lg bg-[var(--color-surface)] p-3 text-left text-xs text-[var(--color-ink-faint)]">
+                      <p>💡 <strong>Workflow local-first :</strong></p>
+                      <ol class="mt-2 ml-4 space-y-1 list-decimal">
+                        <li>Template prêt dans le workdir local</li>
+                        <li>Testez via la preview</li>
+                        <li>Validez et publiez sur GitHub</li>
+                        <li>Déploiement automatique</li>
+                      </ol>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div class="flex h-full min-h-[300px] items-center justify-center p-8 text-center">

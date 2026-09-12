@@ -37,6 +37,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/agent/tools", get(agent_tools))
         .route("/api/v1/agent/chat", post(agent_chat))
         .route("/api/v1/agent/tools/{tool}", post(agent_execute_tool))
+        .route("/api/v1/projects/{uuid}/publish", post(publish_project))
         .route("/api/v1/databases", post(create_database))
         .route("/api/v1/databases/{uuid}", get(get_database))
         .route(
@@ -1523,6 +1524,79 @@ async fn import_env(
         .await
         .map_err(|e| ApiError::message(e.to_string()))?;
     Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+pub struct PublishProjectBody {
+    pub repo_name: Option<String>,
+    pub description: Option<String>,
+    pub private: Option<bool>,
+}
+
+/// POST /api/v1/projects/{uuid}/publish
+/// Workflow complet validé par l'utilisateur : create repo GitHub + sync workdir + optionnel deploy.
+async fn publish_project(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+    Json(body): Json<PublishProjectBody>,
+) -> Result<(axum::http::StatusCode, Json<Value>), ApiError> {
+    let (_user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
+
+    // Dériver repo_name depuis le slug si non fourni
+    let repo_name = body.repo_name.unwrap_or_else(|| {
+        // Nettoyer le slug : retirer le suffixe -xxxx
+        let slug = &project.slug;
+        if let Some(idx) = slug.rfind('-') {
+            if slug[idx + 1..].len() == 4 && slug[idx + 1..].chars().all(|c| c.is_ascii_alphanumeric()) {
+                return slug[..idx].to_string();
+            }
+        }
+        slug.clone()
+    });
+
+    let description = body.description.unwrap_or_else(|| {
+        format!("Application {} générée par DevForge", project.name)
+    });
+    let private = body.private.unwrap_or(true);
+
+    // Vérifier si déjà publié
+    if let Some(ref repo_url) = project.git_repository {
+        if !repo_url.trim().is_empty() {
+            return Ok((
+                axum::http::StatusCode::OK,
+                Json(json!({
+                    "ok": true,
+                    "already_published": true,
+                    "git_repository": repo_url,
+                    "message": "Le projet est déjà publié sur GitHub."
+                })),
+            ));
+        }
+    }
+
+    // Appeler le tool publish_to_github via l'agent registry
+    let args = json!({
+        "project_uuid": uuid,
+        "repo_name": repo_name,
+        "description": description,
+        "private": private
+    });
+
+    let result = state
+        .registry
+        .execute("publish_to_github", args)
+        .await
+        .map_err(|e| ApiError::message(e.to_string()))?;
+
+    let ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+    let status_code = if ok {
+        axum::http::StatusCode::OK
+    } else {
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    };
+
+    Ok((status_code, Json(json!({ "data": result }))))
 }
 
 #[allow(dead_code)]
