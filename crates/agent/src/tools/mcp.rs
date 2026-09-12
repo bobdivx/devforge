@@ -51,7 +51,17 @@ impl Tool for McpListRemoteToolsTool {
         }
         match self.mcp.clients.list_remote_tools(id).await {
             Ok(tools) => Ok(json!({"ok": true, "tools": tools})),
-            Err(e) => Ok(json!({"ok": false, "error": e.to_string()})),
+            Err(e) => {
+                let err_str = e.to_string();
+                // Détecter les erreurs d'intégration manquante
+                if err_str.contains("not found") || err_str.contains("MCP server:") {
+                    return Err(devforge_shared::DevForgeError::missing_mcp(id));
+                }
+                if err_str.contains("auth") || err_str.contains("401") || err_str.contains("403") {
+                    return Err(devforge_shared::DevForgeError::mcp_auth_failed(id, &err_str));
+                }
+                Ok(json!({"ok": false, "error": err_str}))
+            }
         }
     }
 }
@@ -88,7 +98,17 @@ impl Tool for McpCallTool {
         }
         match self.mcp.clients.call_remote_tool(server_id, tool, args).await {
             Ok(result) => Ok(json!({"ok": true, "result": result})),
-            Err(e) => Ok(json!({"ok": false, "error": e.to_string()})),
+            Err(e) => {
+                let err_str = e.to_string();
+                // Détecter les erreurs d'intégration manquante
+                if err_str.contains("not found") || err_str.contains("MCP server:") {
+                    return Err(devforge_shared::DevForgeError::missing_mcp(server_id));
+                }
+                if err_str.contains("auth") || err_str.contains("401") || err_str.contains("403") {
+                    return Err(devforge_shared::DevForgeError::mcp_auth_failed(server_id, &err_str));
+                }
+                Ok(json!({"ok": false, "error": err_str}))
+            }
         }
     }
 }

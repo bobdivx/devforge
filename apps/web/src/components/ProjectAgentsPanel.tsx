@@ -46,7 +46,18 @@ export function ProjectAgentsPanel({ projectUuid }: { projectUuid: string }) {
   const [error, setError] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<
-    Array<{ role: string; content: string; provider?: string; tools?: string }>
+    Array<{ 
+      role: string; 
+      content: string; 
+      provider?: string; 
+      tools?: string;
+      needsUserAction?: {
+        kind: string;
+        message_fr: string;
+        settings_href?: string;
+        resume_hint?: string;
+      };
+    }>
   >([]);
   const [busy, setBusy] = useState(false);
   const [llmMode, setLlmMode] = useState<string>('—');
@@ -144,7 +155,22 @@ export function ProjectAgentsPanel({ projectUuid }: { projectUuid: string }) {
         project_uuid: projectUuid,
         agent_uuid: selected,
       });
-      const tools = (res.data.tool_calls as Array<{ name?: string }> | undefined) ?? [];
+      const tools = (res.data.tool_calls as Array<{ name?: string; result?: any }> | undefined) ?? [];
+      
+      // Détecter si un tool a retourné needs_user_action
+      let needsUserAction: any = undefined;
+      for (const tool of tools) {
+        if (tool.result?.needs_user_action === true) {
+          needsUserAction = {
+            kind: tool.result.kind || 'unknown',
+            message_fr: tool.result.message_fr || 'Action utilisateur requise',
+            settings_href: tool.result.settings_href,
+            resume_hint: tool.result.resume_hint,
+          };
+          break;
+        }
+      }
+
       setMessages((m) => [
         ...m,
         {
@@ -155,6 +181,7 @@ export function ProjectAgentsPanel({ projectUuid }: { projectUuid: string }) {
             tools.length > 0
               ? tools.map((t) => t.name ?? '?').join(', ')
               : undefined,
+          needsUserAction,
         },
       ]);
       // Refresh LLM badge if chain just became available
@@ -284,22 +311,60 @@ export function ProjectAgentsPanel({ projectUuid }: { projectUuid: string }) {
               </div>
             )}
             {messages.map((m, i) => (
-              <div
-                key={i}
-                class={cn(
-                  'max-w-[90%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm',
-                  m.role === 'user'
-                    ? 'ml-auto bg-[var(--color-accent)] text-white'
-                    : 'bg-[var(--color-surface)]',
-                )}
-              >
-                {m.content}
-                {(m.provider || m.tools) && (
-                  <div class="mt-1 text-[11px] opacity-60">
-                    {[m.provider, m.tools ? `tools: ${m.tools}` : null]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </div>
+              <div key={i}>
+                <div
+                  class={cn(
+                    'max-w-[90%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm',
+                    m.role === 'user'
+                      ? 'ml-auto bg-[var(--color-accent)] text-white'
+                      : 'bg-[var(--color-surface)]',
+                  )}
+                >
+                  {m.content}
+                  {(m.provider || m.tools) && (
+                    <div class="mt-1 text-[11px] opacity-60">
+                      {[m.provider, m.tools ? `tools: ${m.tools}` : null]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </div>
+                  )}
+                </div>
+                {m.needsUserAction && (
+                  <Card class="mt-2 max-w-[90%] border-l-4 border-l-[var(--color-warn)]">
+                    <div class="flex items-start gap-3">
+                      <span class="text-2xl">⚠️</span>
+                      <div class="flex-1">
+                        <p class="font-medium text-sm mb-2">Action requise</p>
+                        <p class="text-sm text-[var(--color-ink-muted)] mb-3">
+                          {m.needsUserAction.message_fr}
+                        </p>
+                        {m.needsUserAction.settings_href && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            href={m.needsUserAction.settings_href}
+                            class="mb-2"
+                          >
+                            Ouvrir les paramètres
+                          </Button>
+                        )}
+                        {m.needsUserAction.resume_hint && (
+                          <p class="text-xs text-[var(--color-ink-faint)] mt-2">
+                            {m.needsUserAction.resume_hint}
+                          </p>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy}
+                          onClick={() => void sendText('Continuer')}
+                          class="mt-3"
+                        >
+                          Continuer
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
                 )}
               </div>
             ))}
