@@ -138,8 +138,9 @@ pub struct Deployment {
     pub updated_at: String,
 }
 
-struct SqliteProjectStore {
-    pool: SqlitePool,
+pub(crate) struct SqliteProjectStore {
+    pub(crate) pool: SqlitePool,
+    pub(crate) deploy: Arc<DeployFacade>,
 }
 
 #[async_trait]
@@ -241,6 +242,162 @@ impl ProjectStore for SqliteProjectStore {
             })),
             None => Ok(json!({"ok": false, "error": format!("Déploiement introuvable: {uuid}")})),
         }
+    }
+
+    async fn trigger_deploy(
+        &self,
+        project_uuid: &str,
+        _git_sha: Option<String>,
+        message: &str,
+    ) -> DfResult<Value> {
+        use devforge_deploy::DeployRequest;
+
+        // Récupérer le projet
+        let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ?")
+            .bind(project_uuid)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+
+        let Some(project) = project else {
+            return Ok(json!({
+                "ok": false,
+                "error": format!("Projet introuvable : {project_uuid}")
+            }));
+        };
+
+        // Vérifier les pré-requis
+        let git_repo = project.git_repository.as_deref().unwrap_or("").trim();
+        if git_repo.is_empty() {
+            return Ok(json!({
+                "ok": false,
+                "error": "git_repository manquant — configure le projet ou crée un dépôt avec create_github_repo",
+                "hint": "Le déploiement nécessite un dépôt Git configuré."
+            }));
+        }
+
+        let workdir = project.workdir.as_deref().unwrap_or("").trim();
+        if workdir.is_empty() {
+            return Ok(json!({
+                "ok": false,
+                "error": "workdir manquant — le projet doit avoir un répertoire de travail défini",
+                "hint": "Configure le workdir du projet avant de déployer."
+            }));
+        }
+
+        // Créer le déploiement
+        let dep_uuid = new_uuid();
+        let now = now_str();
+
+        sqlx::query(
+            r#"INSERT INTO deployments (
+                uuid, project_id, status, git_sha, git_message, logs, finished_at, created_at, updated_at
+            ) VALUES (?, ?, 'running', ?, ?, ?, NULL, ?, ?)"#,
+        )
+        .bind(&dep_uuid)
+        .bind(project.id)
+        .bind("pending")
+        .bind(message)
+        .bind("[devforge] démarrage du déploiement…\n")
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+
+        // Mettre à jour le statut du projet
+        sqlx::query("UPDATE projects SET status = 'deploying', updated_at = ? WHERE id = ?")
+            .bind(&now)
+            .bind(project.id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+
+        // Récupérer le token GitHub depuis instance_settings (même pattern que run_real_deploy)
+        let token: Option<String> = sqlx::query_as::<_, (String,)>(
+            "SELECT github_token FROM instance_settings WHERE id = 1",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|(t,)| t)
+        .filter(|t| !t.trim().is_empty());
+
+        // Charger le fichier .env (même pattern que run_real_deploy)
+        let env_file = crate::routes::load_env_file_content(&self.pool, &project.uuid).await;
+
+        // Construire la DeployRequest (même pattern que run_real_deploy)
+        let req = DeployRequest {
+            project_uuid: project.uuid.clone(),
+            server_id: project.server_id.clone().unwrap_or_else(|| "default".into()),
+            workdir: project.workdir.clone().unwrap_or_default(),
+            git_repository: project.git_repository.clone().unwrap_or_default(),
+            git_branch: project.git_branch.clone().unwrap_or_else(|| "main".into()),
+            build_pack: if project.build_pack.is_empty() {
+                "nixpacks".into()
+            } else {
+                project.build_pack.clone()
+            },
+            port: project.port.clamp(1, 65535) as u16,
+            base_directory: if project.base_directory.is_empty() {
+                "/".into()
+            } else {
+                project.base_directory.clone()
+            },
+            docker_compose_location: project.docker_compose_location.clone(),
+            publish_directory: project.publish_directory.clone(),
+            is_static: project.is_static != 0,
+            github_token: token,
+            env_file,
+            // proxy_labels sera configuré ultérieurement si nécessaire
+            // Pour le déploiement initial via agent, on peut utiliser None
+            proxy_labels: None,
+        };
+
+        // Exécuter le déploiement
+        let result = self.deploy.deploy(&req).await;
+        let finished = now_str();
+        let status = if result.ok { "success" } else { "failed" };
+        let final_sha = result.git_sha.unwrap_or_else(|| "unknown".into());
+
+        // Mettre à jour le déploiement avec le résultat
+        sqlx::query(
+            r#"UPDATE deployments SET status = ?, git_sha = ?, logs = ?, finished_at = ?, updated_at = ?
+               WHERE uuid = ?"#,
+        )
+        .bind(status)
+        .bind(&final_sha)
+        .bind(&result.logs)
+        .bind(&finished)
+        .bind(&finished)
+        .bind(&dep_uuid)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+
+        // Mettre à jour le statut du projet
+        let project_status = if result.ok { "live" } else { "failed" };
+        sqlx::query("UPDATE projects SET status = ?, updated_at = ? WHERE id = ?")
+            .bind(project_status)
+            .bind(&finished)
+            .bind(project.id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+
+        Ok(json!({
+            "ok": result.ok,
+            "deployment_uuid": dep_uuid,
+            "status": status,
+            "git_sha": final_sha,
+            "logs": result.logs,
+            "message": if result.ok {
+                format!("✓ Déploiement {} réussi ({})", dep_uuid, final_sha)
+            } else {
+                format!("✗ Déploiement {} échoué", dep_uuid)
+            }
+        }))
     }
 }
 
@@ -401,6 +558,7 @@ impl AppState {
         let wireguard = Arc::new(wireguard);
         let store: Arc<dyn ProjectStore> = Arc::new(SqliteProjectStore {
             pool: pool.clone(),
+            deploy: deploy.clone(),
         });
         let registry = Arc::new(build_core_registry(
             deploy.clone(),

@@ -17,7 +17,7 @@ use tools::{
     CreateGitHubFixTool, CreateGitHubRepoTool, GetDeploymentLogsTool, GetProjectTool,
     GitHubListPrsTool, GitHubWorkflowRunsTool, HttpSmokeTool, ListEnvVarsTool, ListProjectsTool,
     McpCallTool, McpListRemoteToolsTool, McpListServersTool, ReadGitHubFileTool,
-    RunApplicationTestsTool, UpsertEnvVarTool, WriteProjectFileTool,
+    RunApplicationTestsTool, TriggerDeployTool, UpsertEnvVarTool, WriteProjectFileTool,
 };
 
 pub struct ToolRegistry {
@@ -66,6 +66,12 @@ pub trait ProjectStore: Send + Sync {
     async fn get_project(&self, uuid: &str) -> Result<Option<Value>>;
     async fn resolve_project(&self, uuid: &str) -> Result<Option<ProjectTestContext>>;
     async fn deployment_logs(&self, uuid: &str) -> Result<Value>;
+    async fn trigger_deploy(
+        &self,
+        project_uuid: &str,
+        git_sha: Option<String>,
+        message: &str,
+    ) -> Result<Value>;
 }
 
 pub fn build_core_registry(
@@ -88,6 +94,9 @@ pub fn build_core_registry(
         store: store.clone(),
     }));
     registry.register(Arc::new(GetDeploymentLogsTool {
+        store: store.clone(),
+    }));
+    registry.register(Arc::new(TriggerDeployTool {
         store: store.clone(),
     }));
     registry.register(Arc::new(GitHubListPrsTool {
@@ -363,17 +372,20 @@ fn system_prompt(ctx: &AgentChatContext) -> String {
              - L'action est destructive et irréversible (ex: supprimer une base de données)\n\
              - Plusieurs solutions techniques équivalentes existent et le choix a un impact produit\n\
              \n\
-             SCAFFOLD DEPUIS PROMPT (builder slice 1+2) :\n\
+             SCAFFOLD DEPUIS PROMPT (builder slices 1+2+3) :\n\
              Si tu dois scaffolder un nouveau projet depuis un prompt utilisateur :\n\
              1. CRÉER LE REPO : utilise create_github_repo pour créer le dépôt GitHub et l'attacher au projet\n\
              2. ÉCRIRE LES FICHIERS : utilise write_project_file (mode='local' ou 'github') pour créer les fichiers initiaux\n\
                 - mode='local' : rapide, écrit dans le workdir local (pas de commit immédiat)\n\
                 - mode='github' : pousse directement sur GitHub avec commit automatique\n\
              3. CONFIGURER : ajoute les variables d'environnement nécessaires avec upsert_env_var\n\
-             4. DÉPLOYER : lance le premier déploiement (slice future)\n\
+             4. DÉPLOYER : utilise trigger_deploy pour lancer le premier déploiement automatique\n\
+                - Pré-requis : git_repository configuré (fait par create_github_repo), workdir défini, fichiers écrits\n\
+                - Le déploiement synchronise le repo Git, build selon build_pack (nixpacks/dockerfile/static), et démarre le conteneur\n\
+                - Vérifie le statut avec get_deployment_logs après déclenchement\n\
              \n\
-             Exemple workflow scaffold :\n\
-             - create_github_repo → écriture package.json, src/*, config → upsert_env_var → deploy"
+             Exemple workflow scaffold complet :\n\
+             - create_github_repo → write_project_file (tous les fichiers) → upsert_env_var (si nécessaire) → trigger_deploy → get_deployment_logs → http_smoke"
         }
         "reviewer" => {
             "Tu es l'agent Reviewer : risques, qualité, PRs, CI, amélioration continue du code.\n\
@@ -536,6 +548,17 @@ mod tests {
         }
         async fn deployment_logs(&self, _uuid: &str) -> Result<Value> {
             Ok(json!({"ok": true, "logs": "ok"}))
+        }
+        async fn trigger_deploy(
+            &self,
+            _project_uuid: &str,
+            _git_sha: Option<String>,
+            _message: &str,
+        ) -> Result<Value> {
+            Ok(json!({
+                "ok": false,
+                "error": "trigger_deploy n'est pas implémenté dans le stub de test"
+            }))
         }
     }
 
