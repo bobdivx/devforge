@@ -12,6 +12,8 @@ use futures_util::stream::{self, StreamExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{convert::Infallible, time::Duration};
+use std::fs;
+use std::path::Path as FsPath;
 
 use crate::state::{new_uuid, now_str, AppState, Deployment, Project};
 use devforge_shared::ProjectTestContext;
@@ -21,6 +23,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/health", get(health))
         .route("/api/v1/projects", get(list_projects).post(create_project))
         .route("/api/v1/projects/scaffold", post(scaffold_project))
+        .route("/api/v1/templates", get(list_templates))
         .route(
             "/api/v1/projects/{uuid}",
             get(get_project).patch(update_project).delete(delete_project),
@@ -407,6 +410,7 @@ async fn create_project(
 pub struct ScaffoldProject {
     pub title: String,
     pub prompt: String,
+    pub template: Option<String>,
 }
 
 async fn scaffold_project(
@@ -489,10 +493,27 @@ async fn scaffold_project(
 
     // Seed first message with the user prompt
     let msg_uuid = new_uuid();
-    let seed_content = format!(
-        "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\nScaffold ce projet, configure le build, et prépare le déploiement.",
-        body.title, body.prompt
-    );
+    
+    // Apply template if provided
+    let template_name = body.template.as_deref().unwrap_or("astro-preact-sqlite");
+    let template_applied = if let Err(e) = apply_template(template_name, &format!("/data/devforge/applications/{slug}")) {
+        eprintln!("[scaffold] Erreur lors de l'application du template {} : {}", template_name, e);
+        false
+    } else {
+        true
+    };
+    
+    let seed_content = if template_applied {
+        format!(
+            "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\n✅ Template {} déjà appliqué (Astro + Preact + Tailwind + DaisyUI + SQLite).\n\nTon rôle : customise l'app selon l'objectif utilisateur. NE réécris PAS toute la stack depuis zéro.\n\nWorkflow obligatoire :\n1. `create_github_repo` pour créer le repo GitHub\n2. `write_project_file` (mode github ou sync) pour TOUS les fichiers modifiés/ajoutés\n3. `trigger_deploy` pour déployer\n\nPas de README loop : le code doit être fonctionnel et pushé sur GitHub.",
+            body.title, body.prompt, template_name
+        )
+    } else {
+        format!(
+            "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\nScaffold ce projet, configure le build, et prépare le déploiement.",
+            body.title, body.prompt
+        )
+    };
 
     sqlx::query(
         r#"INSERT INTO agent_messages (
@@ -1608,6 +1629,57 @@ async fn resolve_project_status(state: &AppState, project: &Project) -> Result<S
     }
 
     Ok(derived)
+}
+
+async fn list_templates() -> Json<Value> {
+    Json(json!({
+        "data": [
+            {
+                "id": "astro-preact-sqlite",
+                "name": "Astro + Preact + DaisyUI + SQLite",
+                "description": "Application Astro SSR avec Preact, Tailwind CSS, DaisyUI et base SQLite locale",
+                "stack": ["Astro", "Preact", "Tailwind CSS", "DaisyUI", "SQLite"]
+            }
+        ]
+    }))
+}
+
+fn apply_template(template_id: &str, dest_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let template_base = FsPath::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/templates")
+        .join(template_id);
+    
+    if !template_base.exists() {
+        return Err(format!("Template {} not found", template_id).into());
+    }
+    
+    let dest_path = FsPath::new(dest_dir);
+    fs::create_dir_all(dest_path)?;
+    
+    copy_dir_recursive(&template_base, dest_path)?;
+    
+    Ok(())
+}
+
+fn copy_dir_recursive(src: &FsPath, dst: &FsPath) -> Result<(), Box<dyn std::error::Error>> {
+    if !dst.exists() {
+        fs::create_dir_all(dst)?;
+    }
+    
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let dest_path = dst.join(&file_name);
+        
+        if path.is_dir() {
+            copy_dir_recursive(&path, &dest_path)?;
+        } else {
+            fs::copy(&path, &dest_path)?;
+        }
+    }
+    
+    Ok(())
 }
 
 fn slugify(s: &str) -> String {
