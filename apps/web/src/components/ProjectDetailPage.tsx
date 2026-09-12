@@ -2037,6 +2037,8 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
   const [enabled, setEnabled] = useState(true);
   const [runsOpen, setRunsOpen] = useState<string | null>(null);
   const [runs, setRuns] = useState<import('../lib/api').CronRun[]>([]);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState('');
 
   async function load() {
     try {
@@ -2057,15 +2059,24 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
     setCronExpr('');
     setCommand('');
     setEnabled(true);
+    setSelectedPreset('');
+    setShowAdvanced(false);
     setFormOpen(true);
   }
 
-  function openEdit(cron: import('../lib/api').ProjectCron) {
+  async function openEdit(cron: import('../lib/api').ProjectCron) {
     setEditingId(cron.id);
     setName(cron.name);
     setCronExpr(cron.cron_expression);
     setCommand(cron.command);
     setEnabled(cron.enabled === 1);
+    
+    // Check if it matches a preset
+    const { CRON_PRESETS } = await import('../lib/cron-utils');
+    const matchingPreset = CRON_PRESETS.find(p => p.value === cron.cron_expression);
+    setSelectedPreset(matchingPreset ? cron.cron_expression : '');
+    setShowAdvanced(!matchingPreset || matchingPreset.value === '');
+    
     setFormOpen(true);
   }
 
@@ -2166,11 +2177,21 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
         {crons.length === 0 ? (
           <p class="text-sm text-[var(--color-ink-muted)]">Aucune tâche planifiée.</p>
         ) : (
-          <Table headers={['Nom', 'Expression', 'Commande', 'Statut', '']}>
-            {crons.map((c) => (
+          <Table headers={['Nom', 'Planification', 'Commande', 'Statut', '']}>
+            {crons.map((c) => {
+              const { cronToFrench } = require('../lib/cron-utils');
+              const schedule = cronToFrench(c.cron_expression);
+              return (
               <Tr key={c.id}>
                 <Td class="font-medium">{c.name}</Td>
-                <Td class="font-mono text-xs">{c.cron_expression}</Td>
+                <Td>
+                  <div class="flex flex-col gap-0.5">
+                    <span class="text-sm">{schedule}</span>
+                    <span class="font-mono text-xs text-[var(--color-ink-faint)]" title={c.cron_expression}>
+                      {c.cron_expression}
+                    </span>
+                  </div>
+                </Td>
                 <Td class="truncate max-w-xs font-mono text-xs" title={c.command}>
                   {c.command}
                 </Td>
@@ -2206,7 +2227,8 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
                   </div>
                 </Td>
               </Tr>
-            ))}
+              );
+            })}
           </Table>
         )}
       </Card>
@@ -2234,13 +2256,74 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
             value={name}
             onInput={(e) => setName((e.target as HTMLInputElement).value)}
           />
-          <Input
-            label="Expression cron"
-            placeholder="0 2 * * *"
-            value={cronExpr}
-            onInput={(e) => setCronExpr((e.target as HTMLInputElement).value)}
-            hint="Ex: 0 2 * * * = chaque jour à 2h"
-          />
+          
+          <div>
+            <label class="mb-1.5 block text-sm font-medium">Planification</label>
+            <select
+              class="w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-sm"
+              value={selectedPreset}
+              onChange={(e) => {
+                const value = (e.target as HTMLSelectElement).value;
+                setSelectedPreset(value);
+                if (value === '') {
+                  setShowAdvanced(true);
+                } else {
+                  setCronExpr(value);
+                  setShowAdvanced(false);
+                }
+              }}
+            >
+              {(() => {
+                const { CRON_PRESETS } = require('../lib/cron-utils');
+                return CRON_PRESETS.map((preset: any) => (
+                  <option key={preset.label} value={preset.value}>
+                    {preset.label}
+                  </option>
+                ));
+              })()}
+            </select>
+            {selectedPreset && selectedPreset !== '' && (
+              <p class="mt-1.5 text-xs text-[var(--color-ink-muted)]">
+                Expression : <code class="font-mono">{selectedPreset}</code>
+              </p>
+            )}
+          </div>
+
+          {(showAdvanced || selectedPreset === '') && (
+            <div>
+              <div class="mb-1.5 flex items-center justify-between">
+                <label class="block text-sm font-medium">Expression cron personnalisée</label>
+                {!showAdvanced && (
+                  <button
+                    type="button"
+                    class="text-xs text-[var(--color-ink-faint)] hover:underline"
+                    onClick={() => setShowAdvanced(true)}
+                  >
+                    Avancé
+                  </button>
+                )}
+              </div>
+              <Input
+                placeholder="*/5 * * * *"
+                value={cronExpr}
+                onInput={(e) => {
+                  const val = (e.target as HTMLInputElement).value;
+                  setCronExpr(val);
+                  setSelectedPreset('');
+                }}
+                hint="Format Unix 5 champs : minute heure jour mois jour-semaine"
+              />
+              {cronExpr && (
+                <p class="mt-1.5 text-xs text-[var(--color-ink-muted)]">
+                  Aperçu : {(() => {
+                    const { cronToFrench } = require('../lib/cron-utils');
+                    return cronToFrench(cronExpr);
+                  })()}
+                </p>
+              )}
+            </div>
+          )}
+          
           <div>
             <label class="mb-1.5 block text-sm font-medium">Commande</label>
             <textarea
@@ -2250,6 +2333,7 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
               onInput={(e) => setCommand((e.target as HTMLTextAreaElement).value)}
             />
           </div>
+          
           <label class="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
