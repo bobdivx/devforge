@@ -48,16 +48,28 @@ pub struct UpdateCronRequest {
     pub timezone: Option<String>,
 }
 
+/// Normalise une expression cron 5-champs (Unix standard) vers 6-champs (avec secondes).
+fn normalize_cron_expression(expr: &str) -> String {
+    let fields: Vec<&str> = expr.trim().split_whitespace().collect();
+    if fields.len() == 5 {
+        format!("0 {}", expr)
+    } else {
+        expr.to_string()
+    }
+}
+
 /// Valide une expression cron (format standard Unix 5 ou 6 champs).
 pub fn validate_cron_expression(expr: &str) -> Result<(), String> {
-    cron::Schedule::from_str(expr)
+    let normalized = normalize_cron_expression(expr);
+    cron::Schedule::from_str(&normalized)
         .map(|_| ())
         .map_err(|e| format!("Expression cron invalide : {}", e))
 }
 
 /// Calcule le prochain instant d'exécution pour une expression cron donnée.
 pub fn next_run_time(expr: &str, timezone: Option<&str>) -> Option<DateTime<Utc>> {
-    let schedule = cron::Schedule::from_str(expr).ok()?;
+    let normalized = normalize_cron_expression(expr);
+    let schedule = cron::Schedule::from_str(&normalized).ok()?;
     let tz = timezone
         .and_then(|tz_str| tz_str.parse::<chrono_tz::Tz>().ok())
         .unwrap_or(chrono_tz::UTC);
