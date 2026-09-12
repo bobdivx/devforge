@@ -16,8 +16,9 @@ use std::sync::Arc;
 use tools::{
     CreateGitHubFixTool, CreateGitHubRepoTool, GetDeploymentLogsTool, GetProjectTool,
     GitHubListPrsTool, GitHubWorkflowRunsTool, HttpSmokeTool, ListEnvVarsTool, ListProjectsTool,
-    McpCallTool, McpListRemoteToolsTool, McpListServersTool, ReadGitHubFileTool,
-    RunApplicationTestsTool, TriggerDeployTool, UpsertEnvVarTool, WriteProjectFileTool,
+    McpCallTool, McpListRemoteToolsTool, McpListServersTool, PublishToGitHubTool,
+    ReadGitHubFileTool, RunApplicationTestsTool, StartLocalPreviewTool, SyncWorkdirToGitHubTool,
+    TriggerDeployTool, UpsertEnvVarsTool, WriteProjectFileTool,
 };
 
 pub struct ToolRegistry {
@@ -90,7 +91,7 @@ pub fn build_core_registry(
         store: store.clone(),
     }));
     registry.register(Arc::new(RunApplicationTestsTool {
-        deploy,
+        deploy: deploy.clone(),
         store: store.clone(),
     }));
     registry.register(Arc::new(GetDeploymentLogsTool {
@@ -110,7 +111,7 @@ pub fn build_core_registry(
     registry.register(Arc::new(McpListRemoteToolsTool { mcp: mcp.clone() }));
     registry.register(Arc::new(McpCallTool { mcp: mcp.clone() }));
     registry.register(Arc::new(ListEnvVarsTool { env: env.clone() }));
-    registry.register(Arc::new(UpsertEnvVarTool { env }));
+    registry.register(Arc::new(UpsertEnvVarsTool { env }));
     // High-level GitHub ops tools
     registry.register(Arc::new(CreateGitHubFixTool { mcp: mcp.clone() }));
     registry.register(Arc::new(ReadGitHubFileTool { mcp: mcp.clone() }));
@@ -121,8 +122,20 @@ pub fn build_core_registry(
         pool: pool.clone(),
     }));
     registry.register(Arc::new(WriteProjectFileTool {
-        github,
+        github: github.clone(),
         mcp,
+        pool: pool.clone(),
+    }));
+    registry.register(Arc::new(SyncWorkdirToGitHubTool {
+        github: github.clone(),
+        pool: pool.clone(),
+    }));
+    registry.register(Arc::new(PublishToGitHubTool {
+        github: github.clone(),
+        deploy,
+        pool: pool.clone(),
+    }));
+    registry.register(Arc::new(StartLocalPreviewTool {
         pool,
     }));
     registry
@@ -263,6 +276,19 @@ impl AgentRunner {
                     messages.push(ChatMessage::system(nudge));
                 }
             }
+            
+            // Détection anti-boucle renforcée : tools inconnus répétés + erreurs répétées
+            if round >= 2 {
+                if let Some(nudge) = detect_repeated_failures(&records) {
+                    // Erreur critique : stop early au lieu de brûler max_rounds
+                    return Ok(AgentReply {
+                        reply: nudge,
+                        tool_calls: records,
+                        provider,
+                    });
+                }
+            }
+            
             let turn: AssistantTurn = llm
                 .chat(ChatRequest {
                     messages: messages.clone(),
@@ -365,8 +391,8 @@ fn detect_duplicate_calls(records: &[ToolCallRecord]) -> Option<String> {
                     "⚠️ DÉTECTION DE BOUCLE : Tu viens d'appeler write_project_file plusieurs fois avec les mêmes arguments. \
                     STOP ! Ne réécris pas le même fichier en boucle. \
                     \n\nACTIONS REQUISES :\n\
-                    1. Écris les fichiers MANQUANTS de l'application (package.json, fichiers d'entrée HTML/JS, etc.)\n\
-                    2. Une fois les fichiers locaux écrits, utilise mode='github' pour pousser sur GitHub\n\
+                    1. Si tu as des MULTIPLES fichiers à écrire : écris CHAQUE fichier UNE SEULE FOIS\n\
+                    2. Si tous les fichiers sont écrits : utilise sync_workdir_to_github pour tout pousser sur GitHub\n\
                     3. Puis appelle trigger_deploy pour déployer le projet\n\
                     \n\
                     Ne perds plus de tours sur des fichiers déjà écrits. Avance dans le workflow scaffold.".into()
@@ -379,6 +405,103 @@ fn detect_duplicate_calls(records: &[ToolCallRecord]) -> Option<String> {
                 STOP ! Ne répète pas le même tool call en boucle. \
                 \n\nSoit tu passes à l'étape suivante du workflow, soit tu termines ton tour si la tâche est complète.",
                 tool_name
+            ));
+        }
+    }
+
+    None
+}
+
+/// Détecte les échecs répétés (unknown tools, erreurs identiques).
+/// Retourne un message d'erreur terminal pour stop early.
+fn detect_repeated_failures(records: &[ToolCallRecord]) -> Option<String> {
+    if records.len() < 2 {
+        return None;
+    }
+
+    // Prendre les 4 derniers appels pour détecter les patterns d'échec
+    let recent = if records.len() >= 4 {
+        &records[records.len() - 4..]
+    } else {
+        records
+    };
+
+    // Compter les unknown tools
+    let unknown_count = recent
+        .iter()
+        .filter(|r| {
+            r.result
+                .get("error")
+                .and_then(|e| e.as_str())
+                .map(|s| s.contains("Unknown tool") || s.contains("tool introuvable"))
+                .unwrap_or(false)
+        })
+        .count();
+
+    // Si 2+ unknown tools dans les 4 derniers appels : stop early
+    if unknown_count >= 2 {
+        return Some(
+            "❌ ERREUR CRITIQUE : Tu as appelé des tools INEXISTANTS plusieurs fois.\n\
+            \n\
+            ✅ TOOLS VALIDES pour scaffold :\n\
+            - create_github_repo : créer le dépôt GitHub\n\
+            - write_project_file (mode='local') : écrire des fichiers localement\n\
+            - sync_workdir_to_github : pousser TOUS les fichiers locaux vers GitHub en un appel\n\
+            - trigger_deploy : déployer le projet\n\
+            - get_project : consulter l'état du projet\n\
+            - get_deployment_logs : consulter les logs de déploiement\n\
+            \n\
+            ❌ TOOLS INEXISTANTS (ne pas utiliser) :\n\
+            - github_create_repo (n'existe pas, utilise create_github_repo)\n\
+            - push_files, sync_files, etc. (n'existent pas, utilise sync_workdir_to_github)\n\
+            \n\
+            Le workflow s'arrête ici. Vérifie les tools disponibles et recommence.".into()
+        );
+    }
+
+    // Compter les erreurs répétées avec les mêmes arguments
+    let mut error_patterns: HashMap<(String, String, String), usize> = HashMap::new();
+    
+    for record in recent {
+        if let Some(error) = record.result.get("error").and_then(|e| e.as_str()) {
+            let key = (
+                record.name.clone(),
+                normalize_tool_call(&record.name, &record.arguments),
+                error.chars().take(100).collect(), // Premières 100 chars de l'erreur
+            );
+            *error_patterns.entry(key).or_insert(0) += 1;
+        }
+    }
+
+    // Si un même pattern d'erreur apparaît 2+ fois : stop early
+    for ((tool_name, _args, error_prefix), count) in &error_patterns {
+        if *count >= 2 {
+            // Cas spécial pour get_deployment_logs avec deployment_uuid invalide
+            if tool_name == "get_deployment_logs" && (error_prefix.contains("introuvable") || error_prefix.contains("not found")) {
+                return Some(
+                    "❌ ERREUR CRITIQUE : Tu appelles get_deployment_logs avec un deployment_uuid INVALIDE de manière répétée.\n\
+                    \n\
+                    ⚠️ INTERDIT : get_deployment_logs avec 'abc123', 'unknown', ou tout UUID inventé.\n\
+                    \n\
+                    ✅ WORKFLOW CORRECT :\n\
+                    1. create_github_repo (si pas encore fait)\n\
+                    2. write_project_file ou sync_workdir_to_github\n\
+                    3. trigger_deploy (retourne un deployment_uuid réel)\n\
+                    4. ENSUITE seulement get_deployment_logs avec le vrai UUID\n\
+                    \n\
+                    Le workflow s'arrête ici. Suis le workflow correct.".into()
+                );
+            }
+
+            return Some(format!(
+                "❌ ERREUR CRITIQUE : Le tool '{}' échoue de manière répétée avec la même erreur.\n\
+                \n\
+                Erreur : {}\n\
+                \n\
+                Le workflow s'arrête ici pour éviter de brûler tous les tours. \
+                Analyse l'erreur et corrige ton approche avant de continuer.",
+                tool_name,
+                error_prefix.chars().take(200).collect::<String>()
             ));
         }
     }
@@ -459,62 +582,67 @@ fn inject_tool_defaults(args: &mut Value, ctx: &AgentChatContext) {
 fn system_prompt(ctx: &AgentChatContext) -> String {
     let role = ctx.agent_role.as_deref().unwrap_or("ops");
     let name = ctx.agent_name.as_deref().unwrap_or("Agent");
+    
+    // CRITICAL : Détection template déjà appliqué depuis l'historique
+    let has_template_applied = ctx.history.iter().any(|(role, content)| {
+        role == "user" && (
+            content.contains("Template") && content.contains("déjà appliqué") ||
+            content.contains("template") && content.contains("already applied")
+        )
+    });
+    
     let focus = match role {
         "deploy" => {
-            "Tu es l'agent Deploy : déploiements, logs, smoke HTTP, correction des erreurs de build/déploiement.\n\
+            let template_nudge = if has_template_applied {
+                "\n\n🚨 TEMPLATE DÉJÀ APPLIQUÉ — WORKFLOW LOCAL-FIRST 🚨\n\
+                Le workdir contient DÉJÀ tous les fichiers du template.\n\
+                \n\
+                ✅ WORKFLOW OBLIGATOIRE (PREVIEW LOCALE D'ABORD) :\n\
+                1. NE RIEN FAIRE si le template est déjà prêt — l'utilisateur teste la preview\n\
+                2. Si des customisations sont demandées : write_project_file mode='local'\n\
+                3. Attendre que l'utilisateur VALIDE la preview\n\
+                4. SEULEMENT après validation : publish_to_github (crée repo + pousse fichiers + optionnel deploy)\n\
+                \n\
+                ❌ INTERDIT (l'utilisateur n'a PAS encore validé) :\n\
+                - create_github_repo (pas avant validation utilisateur)\n\
+                - sync_workdir_to_github (pas avant validation)\n\
+                - trigger_deploy (pas avant validation)\n\
+                \n\
+                Le workflow est LOCAL-FIRST. GitHub/deploy arrive APRÈS validation explicite.\n\n"
+            } else {
+                "\n\n🎯 WORKFLOW LOCAL-FIRST (pas d'auto-publish) :\n\
+                1. Scaffold les fichiers en LOCAL (write_project_file mode='local')\n\
+                2. Prépare une preview locale testable\n\
+                3. Attendre validation utilisateur\n\
+                4. SEULEMENT après validation : publish_to_github\n\n"
+            };
+            
+            format!("Tu es l'agent Deploy : déploiements, logs, smoke HTTP, correction des erreurs de build/déploiement.\n\
+             {template_nudge}\
+             IMPORTANT : DevForge utilise un workflow LOCAL-FIRST.\n\
+             - Les projets sont scaffoldés EN LOCAL\n\
+             - L'utilisateur teste via PREVIEW LOCALE\n\
+             - La publication GitHub + deploy n'arrive QUE sur validation explicite\n\
              \n\
-             WORKFLOW OBLIGATOIRE :\n\
-             1. DIAGNOSTIQUER : Utilise get_project, get_deployment_logs, http_smoke pour comprendre le problème\n\
-             2. CORRIGER : Si tu identifies la cause (ex: dépendance manquante, config incorrecte) :\n\
-                - Utilise mcp_call_tool avec le serveur MCP GitHub (ou devforge si disponible) pour modifier les fichiers nécessaires\n\
-                - Crée une branche de correction (create_branch via MCP GitHub)\n\
-                - Modifie les fichiers problématiques (create_or_update_file via MCP GitHub)\n\
-                - Crée une PR avec description claire du problème et de la solution (create_pull_request via MCP GitHub)\n\
-                - Re-teste avec http_smoke ou run_application_tests après déploiement\n\
-             3. VÉRIFIER : Confirme que la correction fonctionne avec get_deployment_logs ou http_smoke\n\
-             4. RAPPORTER : Résume le problème, la solution appliquée, et le résultat de la vérification\n\
+             TOOLS DISPONIBLES :\n\
+             - write_project_file (mode='local') : écrire/modifier des fichiers localement\n\
+             - start_local_preview : démarrer le serveur dev pour preview\n\
+             - publish_to_github : SEULEMENT sur demande utilisateur (crée repo + pousse + optionnel deploy)\n\
+             - trigger_deploy : déployer (après publish_to_github)\n\
+             - get_project, get_deployment_logs, http_smoke : diagnostics\n\
              \n\
-             NE te limite JAMAIS à dire « tu devrais modifier X » — APPLIQUE la correction si les tools le permettent.\n\
-             Demande à l'utilisateur UNIQUEMENT si :\n\
-             - Des secrets/credentials manquent (ex: MCP GitHub non configuré)\n\
-             - L'action est destructive et irréversible (ex: supprimer une base de données)\n\
-             - Plusieurs solutions techniques équivalentes existent et le choix a un impact produit\n\
+             ❌ INTERDIT sans validation utilisateur :\n\
+             - create_github_repo (remplacé par publish_to_github)\n\
+             - sync_workdir_to_github (sauf si utilisateur demande explicitement)\n\
              \n\
-             SCAFFOLD DEPUIS PROMPT (builder slices 1+2+3) :\n\
-             Si tu dois scaffolder un nouveau projet depuis un prompt utilisateur :\n\
-             1. CRÉER LE REPO : utilise create_github_repo pour créer le dépôt GitHub et l'attacher au projet\n\
-                - Fonctionne avec le token GitHub configuré dans Settings (pas besoin de MCP GitHub)\n\
-             2. ÉCRIRE LES FICHIERS : utilise write_project_file (PRÉFÈRE mode='local') pour créer TOUS les fichiers initiaux\n\
-                - OBLIGATOIRE : crée AU MINIMUM package.json (ou équivalent selon stack) + fichier d'entrée (index.html/js, App.jsx, etc.)\n\
-                - INTERDIT : ne passe pas 2+ tours sur le même fichier (ex: README.md) — écris-le une fois puis PASSE AUX AUTRES FICHIERS\n\
-                - mode='local' (PRÉFÉRÉ) : rapide, écrit dans le workdir local, permet commits/push manuels après\n\
-                - mode='github' : pousse directement sur GitHub avec commit automatique (utilise après local pour sync)\n\
-                - Les deux modes fonctionnent avec le token GitHub instance (pas besoin de MCP GitHub)\n\
-             3. SYNC GITHUB : une fois les fichiers locaux écrits, utilise mode='github' pour au moins un fichier clé (ex: package.json) pour sync sur GitHub\n\
-             4. CONFIGURER : ajoute les variables d'environnement nécessaires avec upsert_env_var\n\
-             5. DÉPLOYER : utilise trigger_deploy pour lancer le premier déploiement automatique\n\
-                - Pré-requis : git_repository configuré (fait par create_github_repo), workdir défini, fichiers écrits\n\
-                - Le déploiement synchronise le repo Git, build selon build_pack (nixpacks/dockerfile/static), et démarre le conteneur\n\
-                - Vérifie le statut avec get_deployment_logs après déclenchement\n\
+             Workflow typique :\n\
+             1. Template appliqué → fichiers locaux prêts\n\
+             2. Utilisateur teste preview → demande éventuellement des ajustements\n\
+             3. write_project_file mode='local' pour customisations\n\
+             4. Utilisateur clique « Publier » → tool publish_to_github\n\
+             5. Optionnellement trigger_deploy si pas fait auto par publish_to_github\n\
              \n\
-             Exemple workflow scaffold complet :\n\
-             - create_github_repo\n\
-             - write_project_file(path='package.json', mode='local')\n\
-             - write_project_file(path='index.html', mode='local')\n\
-             - write_project_file(path='README.md', mode='local')\n\
-             - write_project_file(path='package.json', mode='github') [sync sur GitHub]\n\
-             - upsert_env_var (si nécessaire)\n\
-             - trigger_deploy\n\
-             - get_deployment_logs\n\
-             - http_smoke\n\
-             \n\
-             ⚠️ ANTI-PATTERNS À ÉVITER :\n\
-             - NE réécris PAS le même fichier plusieurs fois (détection anti-boucle active)\n\
-             - NE passe PAS tous tes tours sur README.md — écris les fichiers ESSENTIELS de l'app d'abord\n\
-             - NE déploie PAS sans avoir créé au moins package.json (ou équivalent selon stack)\n\
-             \n\
-             NOTE IMPORTANTE : create_github_repo et write_project_file fonctionnent maintenant avec le token GitHub instance.\n\
-             Le MCP GitHub n'est plus requis pour ces opérations de base."
+             NOTE : Ne crée JAMAIS de repo GitHub avant que l'utilisateur ne le demande explicitement.")
         }
         "reviewer" => {
             "Tu es l'agent Reviewer : risques, qualité, PRs, CI, amélioration continue du code.\n\
@@ -530,7 +658,7 @@ fn system_prompt(ctx: &AgentChatContext) -> String {
              4. RAPPORTER : Résume les risques identifiés, les corrections appliquées, et les risques résiduels\n\
              \n\
              Agis comme un reviewer senior qui corrige directement les problèmes simples (formatting, imports, typos)\n\
-             et propose des PRs pour les problèmes plus complexes. Ne te contente pas de lister les problèmes."
+             et propose des PRs pour les problèmes plus complexes. Ne te contente pas de lister les problèmes.".into()
         }
         "ops" => {
             "Tu es l'agent Ops : santé projet, env, MCP, tests, infrastructure, correction des problèmes de configuration.\n\
@@ -552,7 +680,7 @@ fn system_prompt(ctx: &AgentChatContext) -> String {
              4. Créer une PR avec description du fix\n\
              5. Vérifier que le build passe après merge\n\
              \n\
-             Ne dis JAMAIS « tu devrais mettre à jour package.json » — FAIS-LE via les tools MCP."
+             Ne dis JAMAIS « tu devrais mettre à jour package.json » — FAIS-LE via les tools MCP.".into()
         }
         _ => {
             "Tu es un agent DevForge : utilise les tools pour AGIR, pas seulement diagnostiquer.\n\
@@ -562,7 +690,7 @@ fn system_prompt(ctx: &AgentChatContext) -> String {
              - Les tools mcp_call_tool + MCP GitHub/devforge permettent de modifier des fichiers, créer des branches/PRs\n\
              - upsert_env_var permet de corriger les variables d'environnement\n\
              - Ne demande confirmation que pour actions destructives/irréversibles ou choix produit ambigus\n\
-             - Agis comme un coéquipier autonome, pas comme un assistant passif"
+             - Agis comme un coéquipier autonome, pas comme un assistant passif".into()
         }
     };
     let scoped = if ctx.project_brief.is_some() || ctx.project_uuid.is_some() {
@@ -781,6 +909,77 @@ mod tests {
         ];
         let nudge = detect_duplicate_calls(&records);
         assert!(nudge.is_none(), "Pas de nudge attendu quand les paths sont différents");
+    }
+
+    #[test]
+    fn test_detect_repeated_failures_unknown_tools() {
+        let records = vec![
+            ToolCallRecord {
+                name: "github_create_repo".into(),
+                arguments: json!({"repo_name": "test"}),
+                result: json!({"ok": false, "error": "Unknown tool: github_create_repo"}),
+            },
+            ToolCallRecord {
+                name: "list_projects".into(),
+                arguments: json!({}),
+                result: json!({"ok": true}),
+            },
+            ToolCallRecord {
+                name: "push_files".into(),
+                arguments: json!({}),
+                result: json!({"ok": false, "error": "Unknown tool: push_files"}),
+            },
+        ];
+        let msg = detect_repeated_failures(&records);
+        assert!(msg.is_some(), "Devrait détecter 2 unknown tools");
+        let msg_text = msg.unwrap();
+        assert!(msg_text.contains("ERREUR CRITIQUE"), "Message doit contenir ERREUR CRITIQUE");
+        assert!(msg_text.contains("INEXISTANTS"), "Message doit mentionner tools inexistants");
+        assert!(msg_text.contains("create_github_repo"), "Message doit lister le bon tool");
+    }
+
+    #[test]
+    fn test_detect_repeated_failures_deployment_logs_invalid() {
+        let records = vec![
+            ToolCallRecord {
+                name: "get_deployment_logs".into(),
+                arguments: json!({"deployment_uuid": "abc123"}),
+                result: json!({"ok": false, "error": "Déploiement introuvable : abc123"}),
+            },
+            ToolCallRecord {
+                name: "get_project".into(),
+                arguments: json!({"project_uuid": "real-uuid"}),
+                result: json!({"ok": true}),
+            },
+            ToolCallRecord {
+                name: "get_deployment_logs".into(),
+                arguments: json!({"deployment_uuid": "abc123"}),
+                result: json!({"ok": false, "error": "Déploiement introuvable : abc123"}),
+            },
+        ];
+        let msg = detect_repeated_failures(&records);
+        assert!(msg.is_some(), "Devrait détecter get_deployment_logs avec UUID invalide répété");
+        let msg_text = msg.unwrap();
+        assert!(msg_text.contains("ERREUR CRITIQUE"), "Message doit contenir ERREUR CRITIQUE");
+        assert!(msg_text.contains("deployment_uuid INVALIDE"), "Message doit mentionner UUID invalide");
+    }
+
+    #[test]
+    fn test_detect_repeated_failures_no_failures() {
+        let records = vec![
+            ToolCallRecord {
+                name: "list_projects".into(),
+                arguments: json!({}),
+                result: json!({"ok": true}),
+            },
+            ToolCallRecord {
+                name: "get_project".into(),
+                arguments: json!({"project_uuid": "abc123"}),
+                result: json!({"ok": true}),
+            },
+        ];
+        let msg = detect_repeated_failures(&records);
+        assert!(msg.is_none(), "Pas de message si aucun échec");
     }
 
     #[test]

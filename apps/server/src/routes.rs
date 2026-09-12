@@ -505,12 +505,12 @@ async fn scaffold_project(
     
     let seed_content = if template_applied {
         format!(
-            "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\n✅ Template {} déjà appliqué (Astro + Preact + Tailwind + DaisyUI + SQLite).\n\nTon rôle : customise l'app selon l'objectif utilisateur. NE réécris PAS toute la stack depuis zéro.\n\nWorkflow obligatoire :\n1. `create_github_repo` pour créer le repo GitHub\n2. `write_project_file` (mode github ou sync) pour TOUS les fichiers modifiés/ajoutés\n3. `trigger_deploy` pour déployer\n\nPas de README loop : le code doit être fonctionnel et pushé sur GitHub.",
+            "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\n✅ Template {} déjà appliqué (Astro + Preact + Tailwind + DaisyUI + SQLite).\n\n🎯 TON RÔLE : Prépare une PREVIEW LOCALE testable.\n\n🚨 WORKFLOW OBLIGATOIRE :\n1. Le template est déjà dans le workdir — NE réécris PAS les fichiers\n2. Si des customisations sont demandées : applique-les en local avec write_project_file mode='local'\n3. Lance le serveur dev local (npm run dev ou équivalent) pour que la Preview fonctionne\n\n❌ INTERDIT (l'utilisateur n'a PAS encore validé) :\n- create_github_repo (pas de repo GitHub avant validation utilisateur)\n- sync_workdir_to_github (pas de push avant validation)\n- trigger_deploy (pas de déploiement avant validation)\n\n✅ APRÈS validation utilisateur, il pourra cliquer « Publier » pour déclencher GitHub + deploy.\n\nPour l'instant : preview locale uniquement.",
             body.title, body.prompt, template_name
         )
     } else {
         format!(
-            "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\nScaffold ce projet, configure le build, et prépare le déploiement.",
+            "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\nScaffold ce projet en LOCAL. Prépare une preview testable. NE crée PAS de repo GitHub avant validation utilisateur.",
             body.title, body.prompt
         )
     };
@@ -542,18 +542,15 @@ async fn scaffold_project(
         "role": "deploy"
     });
 
-    // SLICE 3 FIX: Déclencher automatiquement le premier tour de l'agent après scaffold
-    // Cela lance immédiatement le workflow : create_github_repo → write_project_file → trigger_deploy
-    let state_clone = state.clone();
-    let uuid_clone = uuid.clone();
-    let agent_uuid_clone = agent_uuid.clone();
-    tokio::spawn(async move {
-        // Petit délai pour laisser la transaction de scaffold se terminer
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        if let Err(e) = trigger_agent_turn(&state_clone, &uuid_clone, &agent_uuid_clone).await {
-            eprintln!("[scaffold] Erreur lors du déclenchement automatique de l'agent : {}", e);
-        }
-    });
+    // CHANGEMENT : Ne plus auto-kick l'agent Deploy au scaffold.
+    // L'utilisateur teste la preview locale, puis clique explicitement « Publier »
+    // pour déclencher create_github_repo + sync + deploy.
+    //
+    // Workflow local-first :
+    // 1. Scaffold → template copié dans workdir
+    // 2. Preview locale (serveur dev dans le workdir)
+    // 3. Utilisateur valide → appelle publish_to_github tool (nouveau)
+    // 4. publish_to_github fait : create_github_repo + sync_workdir_to_github + trigger_deploy
 
     Ok((
         axum::http::StatusCode::CREATED,
