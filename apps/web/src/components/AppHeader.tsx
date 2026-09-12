@@ -137,7 +137,6 @@ export function AppHeader() {
             <StatChip label="En ligne" value={stats.live} tone="ok" />
             <StatChip label="Déploiement" value={stats.deploying} tone="warn" />
             <StatChip label="Échec" value={stats.failed} tone="danger" />
-            <StatChip label="Total" value={stats.total} tone="neutral" />
           </>
         ) : (
           <div class="h-7 w-48 animate-pulse rounded-full bg-white/5" aria-hidden />

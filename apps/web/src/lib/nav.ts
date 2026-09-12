@@ -21,6 +21,11 @@ export function globalNavForRole(role?: string | null): NavItem[] {
   return GLOBAL_NAV;
 }
 
+/** Nav minimaliste pour la bottom bar mobile — uniquement Apps et Runners. */
+export function mobileBottomNav(): NavItem[] {
+  return GLOBAL_NAV.filter(item => item.key === 'home' || item.key === 'runners');
+}
+
 export function projectNav(uuid: string): NavItem[] {
   const base = `/app/projects/view?uuid=${encodeURIComponent(uuid)}`;
   return [
