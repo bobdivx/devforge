@@ -549,6 +549,17 @@ mod tests {
         async fn deployment_logs(&self, _uuid: &str) -> Result<Value> {
             Ok(json!({"ok": true, "logs": "ok"}))
         }
+        async fn trigger_deploy(
+            &self,
+            _project_uuid: &str,
+            _git_sha: Option<String>,
+            _message: &str,
+        ) -> Result<Value> {
+            Ok(json!({
+                "ok": false,
+                "error": "trigger_deploy n'est pas implémenté dans le stub de test"
+            }))
+        }
     }
 
     #[tokio::test]

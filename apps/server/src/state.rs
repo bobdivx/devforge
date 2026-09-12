@@ -141,7 +141,6 @@ pub struct Deployment {
 pub(crate) struct SqliteProjectStore {
     pub(crate) pool: SqlitePool,
     pub(crate) deploy: Arc<DeployFacade>,
-    pub(crate) config: Arc<super::Config>,
 }
 
 #[async_trait]
@@ -560,7 +559,6 @@ impl AppState {
         let store: Arc<dyn ProjectStore> = Arc::new(SqliteProjectStore {
             pool: pool.clone(),
             deploy: deploy.clone(),
-            config: Arc::new(config.clone()),
         });
         let registry = Arc::new(build_core_registry(
             deploy.clone(),
