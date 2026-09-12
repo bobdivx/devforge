@@ -102,6 +102,21 @@ impl HttpGitHubClient {
         require_ok(status, &text)?;
         parse_json_array(&text)
     }
+
+    async fn post_json(&self, path: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
+        let url = format!("{}{path}", self.base);
+        let res = self
+            .http
+            .post(&url)
+            .json(body)
+            .send()
+            .await
+            .map_err(map_http_err)?;
+        let status = res.status();
+        let text = res.text().await.map_err(map_http_err)?;
+        require_ok(status, &text)?;
+        parse_json_array(&text)
+    }
 }
 
 #[async_trait]
@@ -758,6 +773,65 @@ impl GitHubClient for HttpGitHubClient {
                 })
             })
             .collect())
+    }
+
+    async fn create_repository(
+        &self,
+        name: &str,
+        description: Option<&str>,
+        private: bool,
+        auto_init: bool,
+    ) -> Result<crate::GitRepo> {
+        let mut body = serde_json::json!({
+            "name": name,
+            "private": private,
+            "auto_init": auto_init
+        });
+        if let Some(desc) = description {
+            if !desc.trim().is_empty() {
+                body["description"] = serde_json::Value::String(desc.to_string());
+            }
+        }
+
+        let data = self.post_json("/user/repos", &body).await?;
+
+        let owner = data
+            .get("owner")
+            .and_then(|o| o.get("login"))
+            .and_then(|l| l.as_str())
+            .unwrap_or("")
+            .to_string();
+        let repo_name = data
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or(name)
+            .to_string();
+        let full_name = data
+            .get("full_name")
+            .and_then(|n| n.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{owner}/{repo_name}"));
+
+        Ok(crate::GitRepo {
+            full_name,
+            name: repo_name,
+            owner,
+            private: data.get("private").and_then(|p| p.as_bool()).unwrap_or(private),
+            default_branch: data
+                .get("default_branch")
+                .and_then(|b| b.as_str())
+                .unwrap_or("main")
+                .to_string(),
+            html_url: data
+                .get("html_url")
+                .and_then(|u| u.as_str())
+                .unwrap_or("")
+                .to_string(),
+            description: data
+                .get("description")
+                .and_then(|d| d.as_str())
+                .map(str::to_string),
+        })
     }
 }
 

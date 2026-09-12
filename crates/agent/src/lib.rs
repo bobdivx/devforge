@@ -116,10 +116,15 @@ pub fn build_core_registry(
     registry.register(Arc::new(ReadGitHubFileTool { mcp: mcp.clone() }));
     // Builder slice 2 tools
     registry.register(Arc::new(CreateGitHubRepoTool {
+        github: github.clone(),
         mcp: mcp.clone(),
         pool: pool.clone(),
     }));
-    registry.register(Arc::new(WriteProjectFileTool { mcp, pool }));
+    registry.register(Arc::new(WriteProjectFileTool {
+        github,
+        mcp,
+        pool,
+    }));
     registry
 }
 
@@ -375,9 +380,11 @@ fn system_prompt(ctx: &AgentChatContext) -> String {
              SCAFFOLD DEPUIS PROMPT (builder slices 1+2+3) :\n\
              Si tu dois scaffolder un nouveau projet depuis un prompt utilisateur :\n\
              1. CRÉER LE REPO : utilise create_github_repo pour créer le dépôt GitHub et l'attacher au projet\n\
-             2. ÉCRIRE LES FICHIERS : utilise write_project_file (mode='local' ou 'github') pour créer les fichiers initiaux\n\
-                - mode='local' : rapide, écrit dans le workdir local (pas de commit immédiat)\n\
-                - mode='github' : pousse directement sur GitHub avec commit automatique\n\
+                - Fonctionne avec le token GitHub configuré dans Settings (pas besoin de MCP GitHub)\n\
+             2. ÉCRIRE LES FICHIERS : utilise write_project_file (PRÉFÈRE mode='local') pour créer les fichiers initiaux\n\
+                - mode='local' (PRÉFÉRÉ) : rapide, écrit dans le workdir local, permet commits/push manuels après\n\
+                - mode='github' : pousse directement sur GitHub avec commit automatique (si nécessaire)\n\
+                - Les deux modes fonctionnent avec le token GitHub instance (pas besoin de MCP GitHub)\n\
              3. CONFIGURER : ajoute les variables d'environnement nécessaires avec upsert_env_var\n\
              4. DÉPLOYER : utilise trigger_deploy pour lancer le premier déploiement automatique\n\
                 - Pré-requis : git_repository configuré (fait par create_github_repo), workdir défini, fichiers écrits\n\
@@ -385,7 +392,10 @@ fn system_prompt(ctx: &AgentChatContext) -> String {
                 - Vérifie le statut avec get_deployment_logs après déclenchement\n\
              \n\
              Exemple workflow scaffold complet :\n\
-             - create_github_repo → write_project_file (tous les fichiers) → upsert_env_var (si nécessaire) → trigger_deploy → get_deployment_logs → http_smoke"
+             - create_github_repo → write_project_file(mode='local') × N → git commit + push (optionnel) → upsert_env_var (si nécessaire) → trigger_deploy → get_deployment_logs → http_smoke\n\
+             \n\
+             NOTE IMPORTANTE : create_github_repo et write_project_file fonctionnent maintenant avec le token GitHub instance.\n\
+             Le MCP GitHub n'est plus requis pour ces opérations de base."
         }
         "reviewer" => {
             "Tu es l'agent Reviewer : risques, qualité, PRs, CI, amélioration continue du code.\n\
