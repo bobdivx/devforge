@@ -36,6 +36,7 @@ type Tab =
   | 'database'
   | 'env'
   | 'backups'
+  | 'crons'
   | 'settings';
 
 type Props = { uuid?: string; tab?: Tab };
@@ -56,6 +57,7 @@ function readQuery(): { uuid: string; tab: Tab } {
     'database',
     'env',
     'backups',
+    'crons',
     'settings',
   ];
   return {
@@ -112,6 +114,7 @@ export function ProjectDetailPage(props: Props) {
     domains: 'Domains',
     env: 'Env',
     backups: 'Backups',
+    crons: 'Crons',
     settings: 'Settings',
   };
 
@@ -180,6 +183,7 @@ export function ProjectDetailPage(props: Props) {
       {tab === 'database' && <DatabasePanel uuid={uuid} />}
       {tab === 'env' && <EnvPanel uuid={uuid} />}
       {tab === 'backups' && <BackupsPanel projectUuid={uuid} />}
+      {tab === 'crons' && <CronsPanel projectUuid={uuid} />}
       {tab === 'domains' && (
         <DomainsPanel
           uuid={uuid}
@@ -2020,3 +2024,279 @@ function ProjectSettingsPanel({
   );
 }
 
+
+function CronsPanel({ projectUuid }: { projectUuid: string }) {
+  const toast = useToast();
+  const [crons, setCrons] = useState<import('../lib/api').ProjectCron[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [cronExpr, setCronExpr] = useState('');
+  const [command, setCommand] = useState('');
+  const [enabled, setEnabled] = useState(true);
+  const [runsOpen, setRunsOpen] = useState<string | null>(null);
+  const [runs, setRuns] = useState<import('../lib/api').CronRun[]>([]);
+
+  async function load() {
+    try {
+      const r = await api.cronsList(projectUuid);
+      setCrons(r.data);
+    } catch (e) {
+      toast.push({ title: 'Erreur chargement crons', detail: String(e), tone: 'warn' });
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, [projectUuid]);
+
+  function openCreate() {
+    setEditingId(null);
+    setName('');
+    setCronExpr('');
+    setCommand('');
+    setEnabled(true);
+    setFormOpen(true);
+  }
+
+  function openEdit(cron: import('../lib/api').ProjectCron) {
+    setEditingId(cron.id);
+    setName(cron.name);
+    setCronExpr(cron.cron_expression);
+    setCommand(cron.command);
+    setEnabled(cron.enabled === 1);
+    setFormOpen(true);
+  }
+
+  async function save(e: Event) {
+    e.preventDefault();
+    if (!name.trim() || !cronExpr.trim() || !command.trim()) return;
+    setBusy(true);
+    try {
+      if (editingId) {
+        await api.cronUpdate(projectUuid, editingId, {
+          name: name.trim(),
+          cron_expression: cronExpr.trim(),
+          command: command.trim(),
+          enabled,
+        });
+        toast.push({ title: 'Cron mis à jour', tone: 'ok' });
+      } else {
+        await api.cronCreate(projectUuid, {
+          name: name.trim(),
+          cron_expression: cronExpr.trim(),
+          command: command.trim(),
+          enabled,
+        });
+        toast.push({ title: 'Cron créé', tone: 'ok' });
+      }
+      setFormOpen(false);
+      await load();
+    } catch (e) {
+      toast.push({ title: 'Erreur', detail: String(e), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(id: string) {
+    setBusy(true);
+    try {
+      await api.cronDelete(projectUuid, id);
+      toast.push({ title: 'Cron supprimé', tone: 'info' });
+      await load();
+    } catch (e) {
+      toast.push({ title: 'Erreur suppression', detail: String(e), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggle(cron: import('../lib/api').ProjectCron) {
+    setBusy(true);
+    try {
+      if (cron.enabled) {
+        await api.cronDisable(projectUuid, cron.id);
+      } else {
+        await api.cronEnable(projectUuid, cron.id);
+      }
+      await load();
+    } catch (e) {
+      toast.push({ title: 'Erreur', detail: String(e), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runNow(id: string) {
+    setBusy(true);
+    try {
+      const r = await api.cronRunNow(projectUuid, id);
+      toast.push({ title: r.message, tone: 'info' });
+    } catch (e) {
+      toast.push({ title: 'Erreur', detail: String(e), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function showRuns(cronId: string) {
+    setRunsOpen(cronId);
+    try {
+      const r = await api.cronRuns(projectUuid, cronId);
+      setRuns(r.data);
+    } catch {
+      setRuns([]);
+    }
+  }
+
+  return (
+    <FadeIn>
+      <Card>
+        <CardHeader
+          title="Tâches planifiées"
+          description="Commandes exécutées automatiquement dans le conteneur du projet."
+          action={
+            <Button size="sm" variant="secondary" onClick={openCreate}>
+              Nouveau cron
+            </Button>
+          }
+        />
+        {crons.length === 0 ? (
+          <p class="text-sm text-[var(--color-ink-muted)]">Aucune tâche planifiée.</p>
+        ) : (
+          <Table headers={['Nom', 'Expression', 'Commande', 'Statut', '']}>
+            {crons.map((c) => (
+              <Tr key={c.id}>
+                <Td class="font-medium">{c.name}</Td>
+                <Td class="font-mono text-xs">{c.cron_expression}</Td>
+                <Td class="truncate max-w-xs font-mono text-xs" title={c.command}>
+                  {c.command}
+                </Td>
+                <Td>
+                  <div class="flex items-center gap-2">
+                    <Badge tone={c.enabled ? 'ok' : 'neutral'}>
+                      {c.enabled ? 'Activé' : 'Désactivé'}
+                    </Badge>
+                    {c.last_status && (
+                      <Badge tone={c.last_status === 'success' ? 'ok' : 'danger'}>
+                        {c.last_status}
+                      </Badge>
+                    )}
+                  </div>
+                </Td>
+                <Td>
+                  <div class="flex gap-1">
+                    <Button size="sm" variant="ghost" onClick={() => toggle(c)} disabled={busy}>
+                      {c.enabled ? 'Désactiver' : 'Activer'}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => runNow(c.id)} disabled={busy}>
+                      Lancer
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => showRuns(c.id)}>
+                      Historique
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => openEdit(c)} disabled={busy}>
+                      Modifier
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => remove(c.id)} disabled={busy}>
+                      Supprimer
+                    </Button>
+                  </div>
+                </Td>
+              </Tr>
+            ))}
+          </Table>
+        )}
+      </Card>
+
+      <Modal
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        title={editingId ? 'Modifier la tâche' : 'Nouvelle tâche planifiée'}
+        size="lg"
+        footer={
+          <>
+            <Button type="button" variant="ghost" onClick={() => setFormOpen(false)}>
+              Annuler
+            </Button>
+            <Button type="submit" form="cron-form" variant="secondary" disabled={busy}>
+              {busy ? 'Enregistrement…' : 'Enregistrer'}
+            </Button>
+          </>
+        }
+      >
+        <form id="cron-form" class="space-y-4" onSubmit={save}>
+          <Input
+            label="Nom"
+            placeholder="Nettoyage cache"
+            value={name}
+            onInput={(e) => setName((e.target as HTMLInputElement).value)}
+          />
+          <Input
+            label="Expression cron"
+            placeholder="0 2 * * *"
+            value={cronExpr}
+            onInput={(e) => setCronExpr((e.target as HTMLInputElement).value)}
+            hint="Ex: 0 2 * * * = chaque jour à 2h"
+          />
+          <div>
+            <label class="mb-1.5 block text-sm font-medium">Commande</label>
+            <textarea
+              class="min-h-[80px] w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3 font-mono text-xs"
+              placeholder="npm run cleanup"
+              value={command}
+              onInput={(e) => setCommand((e.target as HTMLTextAreaElement).value)}
+            />
+          </div>
+          <label class="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled((e.target as HTMLInputElement).checked)}
+            />
+            Activé
+          </label>
+        </form>
+      </Modal>
+
+      <Modal
+        open={!!runsOpen}
+        onClose={() => setRunsOpen(null)}
+        title="Historique d'exécution"
+        size="lg"
+        padded={false}
+      >
+        {runs.length === 0 ? (
+          <p class="px-4 py-8 text-sm text-[var(--color-ink-muted)] sm:px-5">Aucune exécution.</p>
+        ) : (
+          <ul class="divide-y divide-[var(--color-line)]">
+            {runs.map((r) => (
+              <li key={r.id} class="px-4 py-3.5 sm:px-5">
+                <div class="flex flex-wrap items-center gap-2">
+                  <Badge tone={r.status === 'success' ? 'ok' : r.status === 'running' ? 'warn' : 'danger'}>
+                    {r.status}
+                  </Badge>
+                  <span class="text-xs text-[var(--color-ink-faint)]">
+                    {formatWhen(r.started_at)}
+                  </span>
+                  {r.exit_code != null && (
+                    <span class="font-mono text-xs text-[var(--color-ink-muted)]">
+                      exit {r.exit_code}
+                    </span>
+                  )}
+                </div>
+                {r.output && (
+                  <pre class="mt-2 max-h-40 overflow-auto rounded border border-[var(--color-line)] bg-black/20 p-2 font-mono text-xs">
+                    {r.output}
+                  </pre>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
+    </FadeIn>
+  );
+}

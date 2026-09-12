@@ -2,6 +2,7 @@ mod db;
 mod actions_routes;
 mod auth_routes;
 mod backup_routes;
+mod cron_routes;
 mod detect_svc;
 mod git_routes;
 mod infra_routes;
@@ -78,6 +79,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // Background scheduler for project cron jobs.
+    {
+        let scheduler = state.cron_scheduler.clone();
+        tokio::spawn(async move {
+            scheduler.run_loop().await;
+        });
+    }
+
     // Advertise agent tools on the local MCP server surface.
     state
         .mcp
@@ -99,6 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(actions_routes::router())
         .merge(git_routes::router())
         .merge(update_routes::router())
+        .merge(cron_routes::router())
         .layer(middleware::from_fn_with_state(
             state.clone(),
             token_routes::enforce_api_token_write,

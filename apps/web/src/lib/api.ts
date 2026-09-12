@@ -97,6 +97,32 @@ export type LlmProviderRow = {
   in_chain?: boolean;
 };
 
+export type ProjectCron = {
+  id: string;
+  project_uuid: string;
+  name: string;
+  cron_expression: string;
+  command: string;
+  enabled: number;
+  timezone?: string | null;
+  last_status?: string | null;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CronRun = {
+  id: string;
+  cron_id: string;
+  project_uuid: string;
+  status: string;
+  output?: string | null;
+  exit_code?: number | null;
+  started_at: string;
+  finished_at?: string | null;
+};
+
 export type Deployment = {
   uuid: string;
   status: string;
@@ -1188,6 +1214,53 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ confirm: true }),
     }),
+
+  // Crons
+  cronsList: (projectUuid: string) =>
+    request<{ data: ProjectCron[] }>(`/projects/${projectUuid}/crons`),
+  cronCreate: (projectUuid: string, body: {
+    name: string;
+    cron_expression: string;
+    command: string;
+    enabled?: boolean;
+    timezone?: string;
+  }) =>
+    request<{ data: ProjectCron }>(`/projects/${projectUuid}/crons`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  cronUpdate: (projectUuid: string, cronId: string, body: {
+    name?: string;
+    cron_expression?: string;
+    command?: string;
+    enabled?: boolean;
+    timezone?: string;
+  }) =>
+    request<{ data: ProjectCron }>(`/projects/${projectUuid}/crons/${cronId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  cronDelete: (projectUuid: string, cronId: string) =>
+    request<{ ok: boolean }>(`/projects/${projectUuid}/crons/${cronId}`, {
+      method: 'DELETE',
+    }),
+  cronEnable: (projectUuid: string, cronId: string) =>
+    request<{ data: ProjectCron }>(`/projects/${projectUuid}/crons/${cronId}/enable`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  cronDisable: (projectUuid: string, cronId: string) =>
+    request<{ data: ProjectCron }>(`/projects/${projectUuid}/crons/${cronId}/disable`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  cronRunNow: (projectUuid: string, cronId: string) =>
+    request<{ ok: boolean; message: string }>(`/projects/${projectUuid}/crons/${cronId}/run`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  cronRuns: (projectUuid: string, cronId: string, limit = 50) =>
+    request<{ data: CronRun[] }>(`/projects/${projectUuid}/crons/${cronId}/runs?limit=${limit}`),
 };
 
 export type ManagedRunner = {
