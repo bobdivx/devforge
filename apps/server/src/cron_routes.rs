@@ -14,15 +14,15 @@ use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/v1/projects/:uuid/crons", get(list_crons).post(create_cron))
+        .route("/api/v1/projects/{uuid}/crons", get(list_crons).post(create_cron))
         .route(
-            "/api/v1/projects/:uuid/crons/:id",
+            "/api/v1/projects/{uuid}/crons/{id}",
             get(get_cron).patch(update_cron).delete(delete_cron),
         )
-        .route("/api/v1/projects/:uuid/crons/:id/enable", post(enable_cron))
-        .route("/api/v1/projects/:uuid/crons/:id/disable", post(disable_cron))
-        .route("/api/v1/projects/:uuid/crons/:id/run", post(run_now))
-        .route("/api/v1/projects/:uuid/crons/:id/runs", get(list_runs))
+        .route("/api/v1/projects/{uuid}/crons/{id}/enable", post(enable_cron))
+        .route("/api/v1/projects/{uuid}/crons/{id}/disable", post(disable_cron))
+        .route("/api/v1/projects/{uuid}/crons/{id}/run", post(run_now))
+        .route("/api/v1/projects/{uuid}/crons/{id}/runs", get(list_runs))
 }
 
 async fn list_crons(
