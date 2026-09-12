@@ -393,84 +393,217 @@ impl LlmProvider for OpenAiCompatibleProvider {
 /// 1. `{"name":"tool_name","arguments":{...}}` (simple)
 /// 2. `{"tool_calls":[{"id":"...","type":"function","function":{"name":"...","arguments":"..."}}]}` (OpenAI-style)
 /// 3. Array direct `[{"name":"...","arguments":{...}}]`
+/// 4. Lignes numérotées : `1. tool_name {...}` / `2) tool_name {...}` / `- tool_name {...}`
+/// 5. Lignes simples : `tool_name {...}` où tool_name matche `[a-z][a-z0-9_]*`
 fn parse_tool_calls_from_text(content: &str) -> Option<Vec<ToolCallRequest>> {
     let trimmed = content.trim();
-    if trimmed.is_empty() || (!trimmed.starts_with('{') && !trimmed.starts_with('[')) {
+    if trimmed.is_empty() {
         return None;
     }
 
-    // Tentative 1 : objet simple avec name + arguments
-    if let Ok(obj) = serde_json::from_str::<serde_json::Value>(trimmed) {
-        // Format simple : {"name":"...", "arguments":{...}}
-        if let (Some(name), Some(args)) = (
-            obj.get("name").and_then(|n| n.as_str()),
-            obj.get("arguments"),
-        ) {
+    // Tentative formats JSON complets d'abord
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        if let Some(calls) = try_parse_json_formats(trimmed) {
+            return Some(calls);
+        }
+    }
+
+    // Tentative formats ligne par ligne (Ollama Qwen)
+    if let Some(calls) = try_parse_line_formats(trimmed) {
+        return Some(calls);
+    }
+
+    None
+}
+
+/// Tente de parser les formats JSON complets (objet simple, OpenAI-style, array)
+fn try_parse_json_formats(trimmed: &str) -> Option<Vec<ToolCallRequest>> {
+    let obj = serde_json::from_str::<serde_json::Value>(trimmed).ok()?;
+
+    // Format simple : {"name":"...", "arguments":{...}}
+    if let (Some(name), Some(args)) = (
+        obj.get("name").and_then(|n| n.as_str()),
+        obj.get("arguments"),
+    ) {
+        if !name.is_empty() {
+            return Some(vec![ToolCallRequest {
+                id: format!("call_{}", uuid::Uuid::new_v4()),
+                name: name.to_string(),
+                arguments: strip_placeholder_values(args.clone()),
+            }]);
+        }
+    }
+
+    // Format OpenAI-style : {"tool_calls":[...]}
+    if let Some(arr) = obj.get("tool_calls").and_then(|t| t.as_array()) {
+        let mut calls = Vec::new();
+        for (i, tc) in arr.iter().enumerate() {
+            let id = tc
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&format!("call_{i}"))
+                .to_string();
+            let name = tc
+                .pointer("/function/name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let args_raw = tc
+                .pointer("/function/arguments")
+                .and_then(|v| v.as_str())
+                .unwrap_or("{}");
+            let arguments = serde_json::from_str(args_raw)
+                .map(strip_placeholder_values)
+                .unwrap_or_else(|_| json!({}));
             if !name.is_empty() {
-                return Some(vec![ToolCallRequest {
-                    id: format!("call_{}", uuid::Uuid::new_v4()),
-                    name: name.to_string(),
-                    arguments: args.clone(),
-                }]);
+                calls.push(ToolCallRequest {
+                    id,
+                    name,
+                    arguments,
+                });
             }
         }
+        if !calls.is_empty() {
+            return Some(calls);
+        }
+    }
 
-        // Format OpenAI-style : {"tool_calls":[...]}
-        if let Some(arr) = obj.get("tool_calls").and_then(|t| t.as_array()) {
-            let mut calls = Vec::new();
-            for (i, tc) in arr.iter().enumerate() {
-                let id = tc
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(&format!("call_{i}"))
-                    .to_string();
-                let name = tc
-                    .pointer("/function/name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let args_raw = tc
-                    .pointer("/function/arguments")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("{}");
-                let arguments = serde_json::from_str(args_raw).unwrap_or_else(|_| json!({}));
+    // Format array direct : [{"name":"...","arguments":{...}},...]
+    if let Some(arr) = obj.as_array() {
+        let mut calls = Vec::new();
+        for (i, item) in arr.iter().enumerate() {
+            if let (Some(name), Some(args)) = (
+                item.get("name").and_then(|n| n.as_str()),
+                item.get("arguments"),
+            ) {
                 if !name.is_empty() {
                     calls.push(ToolCallRequest {
-                        id,
-                        name,
-                        arguments,
+                        id: format!("call_{i}"),
+                        name: name.to_string(),
+                        arguments: strip_placeholder_values(args.clone()),
                     });
                 }
             }
-            if !calls.is_empty() {
-                return Some(calls);
-            }
         }
-
-        // Format array direct : [{"name":"...","arguments":{...}},...]
-        if let Some(arr) = obj.as_array() {
-            let mut calls = Vec::new();
-            for (i, item) in arr.iter().enumerate() {
-                if let (Some(name), Some(args)) = (
-                    item.get("name").and_then(|n| n.as_str()),
-                    item.get("arguments"),
-                ) {
-                    if !name.is_empty() {
-                        calls.push(ToolCallRequest {
-                            id: format!("call_{i}"),
-                            name: name.to_string(),
-                            arguments: args.clone(),
-                        });
-                    }
-                }
-            }
-            if !calls.is_empty() {
-                return Some(calls);
-            }
+        if !calls.is_empty() {
+            return Some(calls);
         }
     }
 
     None
+}
+
+/// Tente de parser les formats ligne par ligne (Ollama Qwen, etc.)
+/// Formats : `1. tool_name {...}` / `2) tool_name {...}` / `- tool_name {...}` / `tool_name {...}`
+fn try_parse_line_formats(content: &str) -> Option<Vec<ToolCallRequest>> {
+    use regex::Regex;
+    
+    // Pattern pour capturer une ligne complète : préfixe + nom + JSON
+    // Le JSON doit commencer immédiatement après le nom (avec seulement des espaces)
+    lazy_static::lazy_static! {
+        static ref LINE_PATTERN: Regex = Regex::new(
+            r"(?m)^\s*(?:\d+[.)]\s*|-\s*)?([a-z][a-z0-9_]*)\s+(\{)"
+        ).unwrap();
+    }
+
+    let mut calls = Vec::new();
+    
+    for caps in LINE_PATTERN.captures_iter(content) {
+        let full_match = caps.get(0).unwrap();
+        let name = caps.get(1).unwrap().as_str();
+        let json_start_offset = full_match.end() - 1; // -1 pour inclure le '{'
+        
+        // Extraire le JSON depuis le '{' jusqu'à la fermeture
+        let remaining = &content[json_start_offset..];
+        
+        if let Some(json_str) = extract_json_object(remaining) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
+                calls.push(ToolCallRequest {
+                    id: format!("call_{}", uuid::Uuid::new_v4()),
+                    name: name.to_string(),
+                    arguments: strip_placeholder_values(val),
+                });
+            }
+        }
+    }
+    
+    if calls.is_empty() {
+        None
+    } else {
+        Some(calls)
+    }
+}
+
+/// Extrait un objet JSON complet depuis le début d'une chaîne (qui doit commencer par '{')
+/// Retourne la sous-chaîne JSON complète avec les accolades équilibrées
+fn extract_json_object(s: &str) -> Option<&str> {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.is_empty() || chars[0] != '{' {
+        return None;
+    }
+    
+    let mut depth = 0;
+    let mut in_string = false;
+    let mut escape_next = false;
+    
+    for (i, &ch) in chars.iter().enumerate() {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+        
+        match ch {
+            '\\' if in_string => escape_next = true,
+            '"' => in_string = !in_string,
+            '{' if !in_string => depth += 1,
+            '}' if !in_string => {
+                depth -= 1;
+                if depth == 0 {
+                    // Trouvé la fin de l'objet JSON
+                    return Some(&s[..=i]);
+                }
+            }
+            _ => {}
+        }
+    }
+    
+    None
+}
+
+/// Remplace les placeholders angle-bracket comme "<project_uuid>" par des chaînes vides
+/// ou les supprime du JSON. Le serveur injectera les valeurs réelles via inject_tool_defaults.
+fn strip_placeholder_values(mut value: serde_json::Value) -> serde_json::Value {
+    match &mut value {
+        serde_json::Value::Object(map) => {
+            let keys_to_remove: Vec<String> = map
+                .iter()
+                .filter_map(|(k, v)| {
+                    if let Some(s) = v.as_str() {
+                        if s.starts_with('<') && s.ends_with('>') {
+                            return Some(k.clone());
+                        }
+                    }
+                    None
+                })
+                .collect();
+            
+            for key in keys_to_remove {
+                map.remove(&key);
+            }
+            
+            // Récursion dans les valeurs restantes
+            for v in map.values_mut() {
+                *v = strip_placeholder_values(v.clone());
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr.iter_mut() {
+                *item = strip_placeholder_values(item.clone());
+            }
+        }
+        _ => {}
+    }
+    value
 }
 
 impl OpenAiCompatibleProvider {
@@ -741,5 +874,156 @@ mod tests {
         ];
         let picked = OpenAiCompatibleProvider::pick_preferred_gemini_model(&models);
         assert_eq!(picked, None);
+    }
+
+    #[test]
+    fn test_parse_numbered_lines_format() {
+        // Format E2E réel d'Ollama Qwen
+        let text = r#"1. create_github_repo {"owner": "bobdivx", "repo": "test-repo", "private": true}
+2. write_project_file {"project_uuid": "<project_uuid>", "path": "index.html", "content": "<html></html>", "mode": "local"}
+3. trigger_deploy {"project_uuid": "<project_uuid>"}"#;
+        
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_some());
+        let calls = calls.unwrap();
+        assert_eq!(calls.len(), 3);
+        
+        assert_eq!(calls[0].name, "create_github_repo");
+        assert_eq!(calls[0].arguments["owner"], "bobdivx");
+        assert_eq!(calls[0].arguments["repo"], "test-repo");
+        assert_eq!(calls[0].arguments["private"], true);
+        
+        assert_eq!(calls[1].name, "write_project_file");
+        // Les placeholders doivent être supprimés
+        assert!(calls[1].arguments.get("project_uuid").is_none());
+        assert_eq!(calls[1].arguments["path"], "index.html");
+        assert_eq!(calls[1].arguments["mode"], "local");
+        
+        assert_eq!(calls[2].name, "trigger_deploy");
+        assert!(calls[2].arguments.get("project_uuid").is_none());
+    }
+
+    #[test]
+    fn test_parse_numbered_lines_with_parenthesis() {
+        let text = r#"1) list_projects {}
+2) get_project {"project_uuid": "abc123"}"#;
+        
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_some());
+        let calls = calls.unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].name, "list_projects");
+        assert_eq!(calls[1].name, "get_project");
+        assert_eq!(calls[1].arguments["project_uuid"], "abc123");
+    }
+
+    #[test]
+    fn test_parse_bulleted_format() {
+        let text = r#"- create_github_repo {"owner": "test", "repo": "repo1", "private": false}
+- trigger_deploy {"project_uuid": "proj-123"}"#;
+        
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_some());
+        let calls = calls.unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].name, "create_github_repo");
+        assert_eq!(calls[1].name, "trigger_deploy");
+    }
+
+    #[test]
+    fn test_parse_plain_lines_format() {
+        let text = r#"list_projects {}
+get_project {"project_uuid": "xyz"}"#;
+        
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_some());
+        let calls = calls.unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].name, "list_projects");
+        assert_eq!(calls[1].name, "get_project");
+    }
+
+    #[test]
+    fn test_parse_mixed_valid_and_invalid_lines() {
+        let text = r#"1. create_github_repo {"owner": "test", "repo": "repo1"}
+Some random text here that should be ignored
+2. trigger_deploy {"project_uuid": "proj-123"}"#;
+        
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_some());
+        let calls = calls.unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].name, "create_github_repo");
+        assert_eq!(calls[1].name, "trigger_deploy");
+    }
+
+    #[test]
+    fn test_strip_placeholder_values() {
+        let input = json!({
+            "project_uuid": "<project_uuid>",
+            "path": "index.html",
+            "nested": {
+                "id": "<some_id>",
+                "value": "real_value"
+            },
+            "array": ["<placeholder>", "real"]
+        });
+        
+        let result = strip_placeholder_values(input);
+        
+        // Les placeholders doivent être supprimés
+        assert!(result.get("project_uuid").is_none());
+        assert_eq!(result["path"], "index.html");
+        assert!(result["nested"].get("id").is_none());
+        assert_eq!(result["nested"]["value"], "real_value");
+        // Les arrays gardent les placeholders (pas de suppression dans arrays pour simplicité)
+        assert_eq!(result["array"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_parse_tool_calls_ignores_invalid_json_lines() {
+        let text = r#"1. valid_tool {"key": "value"}
+2. invalid_tool {this is not json}
+3. another_valid_tool {"foo": "bar"}"#;
+        
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_some());
+        let calls = calls.unwrap();
+        // Devrait ignorer la ligne 2 avec JSON invalide
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].name, "valid_tool");
+        assert_eq!(calls[1].name, "another_valid_tool");
+    }
+
+    #[test]
+    fn test_exact_e2e_bug_format() {
+        // Format exact du bug E2E live
+        let text = r#"1. create_github_repo {"owner": "bobdivx", "repo": "e2e-hello5-1789212839", "private": true}
+2. write_project_file {"project_uuid": "<project_uuid>", "path": "index.html", "content": "...", "mode": "local"}
+3. write_project_file {"project_uuid": "<project_uuid>", "path": "index.html", "content": "...", "mode": "github"}
+4. trigger_deploy {"project_uuid": "<project_uuid>"}"#;
+        
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_some());
+        let calls = calls.unwrap();
+        assert_eq!(calls.len(), 4);
+        
+        // Vérifie create_github_repo
+        assert_eq!(calls[0].name, "create_github_repo");
+        assert_eq!(calls[0].arguments["owner"], "bobdivx");
+        assert_eq!(calls[0].arguments["repo"], "e2e-hello5-1789212839");
+        
+        // Vérifie write_project_file local
+        assert_eq!(calls[1].name, "write_project_file");
+        assert!(calls[1].arguments.get("project_uuid").is_none()); // placeholder supprimé
+        assert_eq!(calls[1].arguments["mode"], "local");
+        
+        // Vérifie write_project_file github
+        assert_eq!(calls[2].name, "write_project_file");
+        assert_eq!(calls[2].arguments["mode"], "github");
+        
+        // Vérifie trigger_deploy
+        assert_eq!(calls[3].name, "trigger_deploy");
+        assert!(calls[3].arguments.get("project_uuid").is_none()); // placeholder supprimé
     }
 }
