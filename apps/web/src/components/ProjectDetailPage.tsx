@@ -9,6 +9,7 @@ import { AppShell } from './AppShell';
 import { ProjectAgentsPanel } from './ProjectAgentsPanel';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
 import { ProjectGitPanel } from './ProjectGitPanel';
+import { ProjectWorkspace } from './ProjectWorkspace';
 import {
   Alert,
   Badge,
@@ -28,6 +29,7 @@ import {
 
 type Tab =
   | 'overview'
+  | 'workspace'
   | 'deployments'
   | 'git'
   | 'actions'
@@ -48,6 +50,7 @@ function readQuery(): { uuid: string; tab: Tab } {
   const tab = (q.get('tab') as Tab) || 'overview';
   const allowed: Tab[] = [
     'overview',
+    'workspace',
     'deployments',
     'git',
     'actions',
@@ -105,6 +108,7 @@ export function ProjectDetailPage(props: Props) {
 
   const titles: Record<string, string> = {
     overview: project?.name ?? 'Projet',
+    workspace: 'Espace de travail',
     deployments: 'Deployments',
     git: 'Git',
     actions: 'Actions',
@@ -153,6 +157,12 @@ export function ProjectDetailPage(props: Props) {
           project={project}
           deployments={deployments}
           onDeployments={(d) => setDeployments(d)}
+        />
+      )}
+      {tab === 'workspace' && (
+        <ProjectWorkspace
+          projectUuid={uuid}
+          project={project}
         />
       )}
       {tab === 'deployments' && (
