@@ -521,6 +521,19 @@ async fn scaffold_project(
         "role": "deploy"
     });
 
+    // SLICE 3 FIX: Déclencher automatiquement le premier tour de l'agent après scaffold
+    // Cela lance immédiatement le workflow : create_github_repo → write_project_file → trigger_deploy
+    let state_clone = state.clone();
+    let uuid_clone = uuid.clone();
+    let agent_uuid_clone = agent_uuid.clone();
+    tokio::spawn(async move {
+        // Petit délai pour laisser la transaction de scaffold se terminer
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        if let Err(e) = trigger_agent_turn(&state_clone, &uuid_clone, &agent_uuid_clone).await {
+            eprintln!("[scaffold] Erreur lors du déclenchement automatique de l'agent : {}", e);
+        }
+    });
+
     Ok((
         axum::http::StatusCode::CREATED,
         Json(json!({ "data": { "project": project, "agent": agent_info } })),
@@ -1032,6 +1045,133 @@ async fn build_project_agent_brief(
         git_repo,
         git_branch,
     })
+}
+
+/// Déclenche un tour d'agent de manière interne (sans requête HTTP).
+/// Utilisé après scaffold pour lancer automatiquement l'agent.
+async fn trigger_agent_turn(
+    state: &AppState,
+    project_uuid: &str,
+    agent_uuid: &str,
+) -> Result<(), String> {
+    let mut ctx = devforge_agent::AgentChatContext {
+        project_uuid: Some(project_uuid.to_string()),
+        agent_uuid: Some(agent_uuid.to_string()),
+        agent_role: None,
+        agent_name: None,
+        project_brief: None,
+        git_owner: None,
+        git_repo: None,
+        git_branch: None,
+        history: vec![],
+    };
+
+    // Charger les infos de l'agent
+    if let Ok(Some((name, role))) = sqlx::query_as::<_, (String, String)>(
+        "SELECT name, role FROM project_agents WHERE uuid = ?",
+    )
+    .bind(agent_uuid)
+    .fetch_optional(&state.pool)
+    .await
+    {
+        ctx.agent_name = Some(name);
+        ctx.agent_role = Some(role);
+    }
+
+    // Charger l'historique (derniers 20 messages)
+    if let Ok(rows) = sqlx::query_as::<_, (String, String)>(
+        "SELECT role, content FROM agent_messages WHERE agent_uuid = ? ORDER BY id DESC LIMIT 20",
+    )
+    .bind(agent_uuid)
+    .fetch_all(&state.pool)
+    .await
+    {
+        let mut hist = rows;
+        hist.reverse();
+        ctx.history = hist;
+    }
+
+    // Charger le contexte projet
+    if let Ok(brief) = build_project_agent_brief(state, project_uuid).await {
+        ctx.git_owner = brief.git_owner;
+        ctx.git_repo = brief.git_repo;
+        ctx.git_branch = brief.git_branch;
+        ctx.project_brief = Some(brief.text);
+    }
+
+    // Mettre l'agent en statut 'working'
+    let now = now_str();
+    let _ = sqlx::query(
+        "UPDATE project_agents SET status = 'working', updated_at = ? WHERE uuid = ?",
+    )
+    .bind(&now)
+    .bind(agent_uuid)
+    .execute(&state.pool)
+    .await;
+
+    // Vérifier si l'agent a déjà répondu (éviter les double-runs)
+    let has_assistant_reply = sqlx::query_as::<_, (i64,)>(
+        "SELECT COUNT(*) FROM agent_messages WHERE agent_uuid = ? AND role = 'assistant'",
+    )
+    .bind(agent_uuid)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    if has_assistant_reply.0 > 0 {
+        // L'agent a déjà répondu, pas besoin de relancer
+        return Ok(());
+    }
+
+    // Le dernier message utilisateur (seed) est déjà dans agent_messages.
+    // On récupère son contenu pour le passer à l'agent.
+    let last_user_msg = sqlx::query_as::<_, (String,)>(
+        "SELECT content FROM agent_messages WHERE agent_uuid = ? AND role = 'user' ORDER BY id DESC LIMIT 1",
+    )
+    .bind(agent_uuid)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let Some((user_message,)) = last_user_msg else {
+        return Err("Aucun message utilisateur trouvé pour cet agent".to_string());
+    };
+
+    // Exécuter le tour de l'agent
+    let result = state
+        .agent
+        .handle_with_context(&user_message, None, None, ctx)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Sauvegarder la réponse de l'agent
+    let now = now_str();
+    let tools_json = serde_json::to_string(&result.tool_calls).unwrap_or_else(|_| "[]".into());
+
+    let _ = sqlx::query(
+        r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
+           VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?)"#,
+    )
+    .bind(new_uuid())
+    .bind(project_uuid)
+    .bind(agent_uuid)
+    .bind(&result.reply)
+    .bind(&tools_json)
+    .bind(&result.provider)
+    .bind(&now)
+    .execute(&state.pool)
+    .await;
+
+    // Marquer l'agent comme 'idle'
+    let _ = sqlx::query(
+        "UPDATE project_agents SET status = 'idle', updated_at = ? WHERE uuid = ?",
+    )
+    .bind(&now)
+    .bind(agent_uuid)
+    .execute(&state.pool)
+    .await;
+
+    Ok(())
 }
 
 async fn agent_chat(
