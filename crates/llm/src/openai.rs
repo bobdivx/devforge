@@ -7,6 +7,9 @@ use crate::{
     ToolCallRequest,
 };
 
+// Import uuid pour générer des IDs uniques
+extern crate uuid;
+
 /// OpenAI Chat Completions compatible (OpenAI, OpenRouter, Ollama `/v1`).
 pub struct OpenAiCompatibleProvider {
     pub base_url: String,
@@ -357,12 +360,117 @@ impl LlmProvider for OpenAiCompatibleProvider {
             }
         }
 
-        Ok(AssistantTurn {
-            content,
-            tool_calls,
-            finish_reason: finish,
-        })
+        let turn = AssistantTurn {
+            content: content.clone(),
+            tool_calls: tool_calls.clone(),
+            finish_reason: finish.clone(),
+        };
+
+        // Fallback : certains LLM (ex: Ollama qwen2.5-coder) retournent les tool calls
+        // comme JSON brut dans content au lieu de tool_calls structurés.
+        if tool_calls.is_empty() && !content.trim().is_empty() {
+            if let Some(parsed_calls) = parse_tool_calls_from_text(&content) {
+                if !parsed_calls.is_empty() {
+                    tracing::info!(
+                        count = parsed_calls.len(),
+                        "tool calls parsés depuis le texte de réponse (LLM qui ne supporte pas tool_calls structurés)"
+                    );
+                    return Ok(AssistantTurn {
+                        content: String::new(),
+                        tool_calls: parsed_calls,
+                        finish_reason: finish,
+                    });
+                }
+            }
+        }
+
+        Ok(turn)
     }
+}
+
+/// Parse tool calls depuis du JSON textuel dans la réponse (fallback pour Ollama / LLM simples).
+/// Formats supportés :
+/// 1. `{"name":"tool_name","arguments":{...}}` (simple)
+/// 2. `{"tool_calls":[{"id":"...","type":"function","function":{"name":"...","arguments":"..."}}]}` (OpenAI-style)
+/// 3. Array direct `[{"name":"...","arguments":{...}}]`
+fn parse_tool_calls_from_text(content: &str) -> Option<Vec<ToolCallRequest>> {
+    let trimmed = content.trim();
+    if trimmed.is_empty() || (!trimmed.starts_with('{') && !trimmed.starts_with('[')) {
+        return None;
+    }
+
+    // Tentative 1 : objet simple avec name + arguments
+    if let Ok(obj) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        // Format simple : {"name":"...", "arguments":{...}}
+        if let (Some(name), Some(args)) = (
+            obj.get("name").and_then(|n| n.as_str()),
+            obj.get("arguments"),
+        ) {
+            if !name.is_empty() {
+                return Some(vec![ToolCallRequest {
+                    id: format!("call_{}", uuid::Uuid::new_v4()),
+                    name: name.to_string(),
+                    arguments: args.clone(),
+                }]);
+            }
+        }
+
+        // Format OpenAI-style : {"tool_calls":[...]}
+        if let Some(arr) = obj.get("tool_calls").and_then(|t| t.as_array()) {
+            let mut calls = Vec::new();
+            for (i, tc) in arr.iter().enumerate() {
+                let id = tc
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&format!("call_{i}"))
+                    .to_string();
+                let name = tc
+                    .pointer("/function/name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let args_raw = tc
+                    .pointer("/function/arguments")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("{}");
+                let arguments = serde_json::from_str(args_raw).unwrap_or_else(|_| json!({}));
+                if !name.is_empty() {
+                    calls.push(ToolCallRequest {
+                        id,
+                        name,
+                        arguments,
+                    });
+                }
+            }
+            if !calls.is_empty() {
+                return Some(calls);
+            }
+        }
+
+        // Format array direct : [{"name":"...","arguments":{...}},...]
+        if let Some(arr) = obj.as_array() {
+            let mut calls = Vec::new();
+            for (i, item) in arr.iter().enumerate() {
+                if let (Some(name), Some(args)) = (
+                    item.get("name").and_then(|n| n.as_str()),
+                    item.get("arguments"),
+                ) {
+                    if !name.is_empty() {
+                        calls.push(ToolCallRequest {
+                            id: format!("call_{i}"),
+                            name: name.to_string(),
+                            arguments: args.clone(),
+                        });
+                    }
+                }
+            }
+            if !calls.is_empty() {
+                return Some(calls);
+            }
+        }
+    }
+
+    None
 }
 
 impl OpenAiCompatibleProvider {
@@ -479,7 +587,7 @@ impl OpenAiCompatibleProvider {
             "experimental",
         ];
         
-        let mut candidates: Vec<String> = models
+        let candidates: Vec<String> = models
             .iter()
             .filter(|m| {
                 let lower = m.to_lowercase();
@@ -532,6 +640,59 @@ impl OpenAiCompatibleProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_tool_calls_from_text_simple_format() {
+        let text = r#"{"name":"list_projects","arguments":{}}"#;
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_some());
+        let calls = calls.unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "list_projects");
+        assert!(calls[0].arguments.is_object());
+    }
+
+    #[test]
+    fn test_parse_tool_calls_from_text_openai_style() {
+        let text = r#"{"tool_calls":[{"id":"call_123","type":"function","function":{"name":"get_project","arguments":"{\"project_uuid\":\"abc\"}"}}]}"#;
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_some());
+        let calls = calls.unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "get_project");
+        assert_eq!(calls[0].id, "call_123");
+    }
+
+    #[test]
+    fn test_parse_tool_calls_from_text_array_format() {
+        let text = r#"[{"name":"tool1","arguments":{"a":1}},{"name":"tool2","arguments":{"b":2}}]"#;
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_some());
+        let calls = calls.unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].name, "tool1");
+        assert_eq!(calls[1].name, "tool2");
+    }
+
+    #[test]
+    fn test_parse_tool_calls_from_text_not_json() {
+        let text = "This is just plain text, not JSON";
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_none());
+    }
+
+    #[test]
+    fn test_parse_tool_calls_from_text_empty() {
+        let calls = parse_tool_calls_from_text("");
+        assert!(calls.is_none());
+    }
+
+    #[test]
+    fn test_parse_tool_calls_from_text_invalid_json() {
+        let text = r#"{"name":"tool","arguments":{invalid}}"#;
+        let calls = parse_tool_calls_from_text(text);
+        assert!(calls.is_none());
+    }
 
     #[test]
     fn test_pick_preferred_gemini_model_filters_antigravity() {
