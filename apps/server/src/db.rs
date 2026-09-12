@@ -429,6 +429,48 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     sqlx::query(
         r#"
+        CREATE TABLE IF NOT EXISTS project_crons (
+            id TEXT PRIMARY KEY,
+            project_uuid TEXT NOT NULL,
+            name TEXT NOT NULL,
+            cron_expression TEXT NOT NULL,
+            command TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            timezone TEXT,
+            last_status TEXT,
+            last_run_at TEXT,
+            next_run_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS project_cron_runs (
+            id TEXT PRIMARY KEY,
+            cron_id TEXT NOT NULL,
+            project_uuid TEXT NOT NULL,
+            status TEXT NOT NULL,
+            output TEXT,
+            exit_code INTEGER,
+            started_at TEXT NOT NULL,
+            finished_at TEXT
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_cron_runs_cron ON project_cron_runs(cron_id, started_at DESC)")
+        .execute(pool)
+        .await?;
+
+    sqlx::query(
+        r#"
         CREATE TABLE IF NOT EXISTS oidc_states (
             state TEXT PRIMARY KEY,
             nonce TEXT NOT NULL,

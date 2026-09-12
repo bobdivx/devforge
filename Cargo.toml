@@ -20,6 +20,7 @@ members = [
     "crates/llm",
     "crates/update",
     "crates/runner",
+    "crates/cron",
 ]
 
 [workspace.package]
@@ -59,3 +60,4 @@ devforge-detect = { path = "crates/detect" }
 devforge-llm = { path = "crates/llm" }
 devforge-update = { path = "crates/update" }
 devforge-runner = { path = "crates/runner" }
+devforge-cron = { path = "crates/cron" }

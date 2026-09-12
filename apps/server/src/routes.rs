@@ -1250,7 +1250,7 @@ async fn fetch_project(state: &AppState, uuid: &str) -> Result<Project, ApiError
 }
 
 /// Auth + projet appartenant au workspace de l’utilisateur.
-async fn auth_project(
+pub(crate) async fn auth_project(
     state: &AppState,
     headers: &HeaderMap,
     uuid: &str,

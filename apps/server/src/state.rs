@@ -41,6 +41,7 @@ pub struct AppState {
     pub backup: Arc<BackupFacade>,
     pub updater: Arc<UpdateFacade>,
     pub runners: Arc<RunnerFacade>,
+    pub cron_scheduler: Arc<devforge_cron::CronScheduler>,
     /// Active backends: executor / github / storage / llm.
     pub backends: Arc<BackendModes>,
 }
@@ -428,6 +429,11 @@ impl AppState {
             github.clone(),
         ));
 
+        let cron_scheduler = Arc::new(devforge_cron::CronScheduler::new(
+            pool.clone(),
+            executor.clone(),
+        ));
+
         let state = Self {
             pool,
             db_path,
@@ -446,6 +452,7 @@ impl AppState {
             backup,
             updater,
             runners,
+            cron_scheduler,
             backends,
         };
 
