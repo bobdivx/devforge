@@ -198,6 +198,17 @@ pre {
   }
 }
 
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .df-status-spin {
   animation: df-status-spin 1.1s linear infinite;
 }

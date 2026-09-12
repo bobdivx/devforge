@@ -67,8 +67,9 @@ export function NewBuilderWizard({
         tone: 'ok',
       });
 
-      // Redirect to workspace tab where the agent is ready
-      window.location.href = `/app/projects/view?uuid=${encodeURIComponent(res.data.project.uuid)}&tab=workspace`;
+      // Redirect to workspace tab in builder mode
+      const agentUuid = res.data.agent?.uuid || '';
+      window.location.href = `/app/projects/view?uuid=${encodeURIComponent(res.data.project.uuid)}&tab=workspace&builder=1${agentUuid ? `&agent=${encodeURIComponent(agentUuid)}` : ''}`;
     } catch (err: unknown) {
       const msg = String((err as Error).message || err);
       setError(msg);

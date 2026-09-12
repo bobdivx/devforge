@@ -39,10 +39,18 @@ function metaFor(agent: ProjectAgent) {
 }
 
 /** Agents projet — seed auto, chat prêt, zéro config manuelle. */
-export function ProjectAgentsPanel({ projectUuid }: { projectUuid: string }) {
+export function ProjectAgentsPanel({ 
+  projectUuid, 
+  defaultAgentUuid, 
+  builderMode 
+}: { 
+  projectUuid: string;
+  defaultAgentUuid?: string;
+  builderMode?: boolean;
+}) {
   const toast = useToast();
   const [agents, setAgents] = useState<ProjectAgent[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(defaultAgentUuid || null);
   const [error, setError] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<
@@ -62,6 +70,7 @@ export function ProjectAgentsPanel({ projectUuid }: { projectUuid: string }) {
   const [busy, setBusy] = useState(false);
   const [llmMode, setLlmMode] = useState<string>('—');
   const [llmError, setLlmError] = useState<string | null>(null);
+  const [pollEnabled, setPollEnabled] = useState(builderMode || false);
   const endRef = useRef<HTMLDivElement>(null);
 
   const current = agents.find((a) => a.uuid === selected) ?? null;
@@ -76,6 +85,11 @@ export function ProjectAgentsPanel({ projectUuid }: { projectUuid: string }) {
       setAgents(main);
       setSelected((prev) => {
         if (prev && main.some((a) => a.uuid === prev)) return prev;
+        // En mode builder, sélectionner l'agent deploy par défaut
+        if (builderMode || defaultAgentUuid) {
+          const deployAgent = main.find((a) => a.role === 'deploy');
+          if (deployAgent) return deployAgent.uuid;
+        }
         return main[0]?.uuid ?? null;
       });
       setError(null);
@@ -128,6 +142,34 @@ export function ProjectAgentsPanel({ projectUuid }: { projectUuid: string }) {
     
     void checkLlm();
   }, [projectUuid]);
+
+  // Polling des messages en mode builder
+  useEffect(() => {
+    if (!pollEnabled || !selected) return;
+
+    let pollCount = 0;
+    const interval = setInterval(async () => {
+      try {
+        await loadMessages(selected);
+        
+        // Vérifier le statut de l'agent
+        const agentsRes = await api.projectAgents(projectUuid);
+        const currentAgent = agentsRes.data.find((a) => a.uuid === selected);
+        
+        pollCount++;
+        
+        // Arrêter le polling après 60 secondes ou si l'agent est idle
+        if (pollCount > 60 || (currentAgent && currentAgent.status === 'idle')) {
+          setPollEnabled(false);
+          clearInterval(interval);
+        }
+      } catch (err) {
+        console.error('[ProjectAgentsPanel] Poll error:', err);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [pollEnabled, selected, projectUuid]);
 
   useEffect(() => {
     if (selected) void loadMessages(selected);

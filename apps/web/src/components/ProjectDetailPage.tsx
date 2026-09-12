@@ -43,7 +43,7 @@ type Tab =
 
 type Props = { uuid?: string; tab?: Tab };
 
-function readQuery(): { uuid: string; tab: Tab } {
+function readQuery(): { uuid: string; tab: Tab; builder?: boolean; agent?: string } {
   if (typeof window === 'undefined') {
     return { uuid: '', tab: 'overview' };
   }
@@ -66,6 +66,8 @@ function readQuery(): { uuid: string; tab: Tab } {
   return {
     uuid: q.get('uuid') || '',
     tab: allowed.includes(tab) ? tab : 'overview',
+    builder: q.get('builder') === '1',
+    agent: q.get('agent') || undefined,
   };
 }
 
@@ -91,6 +93,8 @@ export function ProjectDetailPage(props: Props) {
   const initial = readQuery();
   const uuid = props.uuid ?? initial.uuid;
   const tab = props.tab ?? initial.tab;
+  const builderMode = initial.builder;
+  const builderAgentUuid = initial.agent;
   const [project, setProject] = useState<Project | null>(null);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -166,6 +170,8 @@ export function ProjectDetailPage(props: Props) {
         <ProjectWorkspace
           projectUuid={uuid}
           project={project}
+          builderMode={builderMode}
+          builderAgentUuid={builderAgentUuid}
         />
       )}
       {tab === 'deployments' && (
