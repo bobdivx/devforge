@@ -265,6 +265,11 @@ export const api = {
   },
   createProject: (body: Partial<Project> & { name: string; is_static?: boolean; port?: number }) =>
     request<{ data: Project }>('/projects', { method: 'POST', body: JSON.stringify(body) }),
+  scaffoldProject: (body: { title: string; prompt: string }) =>
+    request<{ data: { project: Project; agent: ProjectAgent } }>('/projects/scaffold', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   deployments: (projectUuid: string) =>
     request<{ data: Deployment[] }>(`/projects/${projectUuid}/deployments`),
   createDeployment: (projectUuid: string, body?: { git_message?: string }) =>

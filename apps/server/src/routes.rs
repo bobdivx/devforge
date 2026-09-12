@@ -20,6 +20,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/projects", get(list_projects).post(create_project))
+        .route("/api/v1/projects/scaffold", post(scaffold_project))
         .route(
             "/api/v1/projects/{uuid}",
             get(get_project).patch(update_project).delete(delete_project),
@@ -400,6 +401,129 @@ async fn create_project(
         .map_err(ApiError::from)?;
 
     Ok((axum::http::StatusCode::CREATED, Json(json!({"data": project}))))
+}
+
+#[derive(Deserialize)]
+pub struct ScaffoldProject {
+    pub title: String,
+    pub prompt: String,
+}
+
+async fn scaffold_project(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ScaffoldProject>,
+) -> Result<(axum::http::StatusCode, Json<Value>), ApiError> {
+    let (_user, workspace) = crate::auth_routes::current_workspace(&state, &headers)
+        .await
+        .map_err(|(status, Json(v))| ApiError {
+            status,
+            message: v
+                .get("error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("auth")
+                .to_string(),
+        })?;
+
+    let uuid = new_uuid();
+    let slug = format!(
+        "{}-{}",
+        slugify(&body.title),
+        &uuid.replace('-', "")[..4]
+    );
+    let now = now_str();
+
+    // Create minimal project
+    sqlx::query(
+        r#"INSERT INTO projects (
+            uuid, name, slug, status, git_repository, git_branch,
+            server_id, workdir, test_command, production_url, workspace_uuid,
+            build_pack, port, is_static, publish_directory, base_directory, docker_compose_location,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, 'draft', '', 'main', 'default', ?, '', '', ?, 'nixpacks', 3000, 0, '', '/', '', ?, ?)"#,
+    )
+    .bind(&uuid)
+    .bind(&body.title)
+    .bind(&slug)
+    .bind(&format!("/data/devforge/applications/{slug}"))
+    .bind(&workspace.uuid)
+    .bind(&now)
+    .bind(&now)
+    .execute(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+
+    // Seed agents
+    crate::db::seed_required_agents(&state.pool, &uuid)
+        .await
+        .map_err(ApiError::from)?;
+
+    // Get the deploy agent to seed the prompt
+    let agent: Option<crate::infra_routes::AgentRow> = sqlx::query_as(
+        "SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status FROM project_agents WHERE project_uuid = ? AND role = 'deploy' LIMIT 1",
+    )
+    .bind(&uuid)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+
+    let agent_uuid = agent.as_ref().map(|a| a.uuid.clone()).unwrap_or_else(new_uuid);
+
+    // If no deploy agent found, create one
+    if agent.is_none() {
+        sqlx::query(
+            r#"INSERT INTO project_agents (
+                uuid, project_uuid, name, role, kind, parent_agent_uuid, status, created_at, updated_at
+            ) VALUES (?, ?, 'Builder', 'deploy', 'custom', NULL, 'idle', ?, ?)"#,
+        )
+        .bind(&agent_uuid)
+        .bind(&uuid)
+        .bind(&now)
+        .bind(&now)
+        .execute(&state.pool)
+        .await
+        .map_err(ApiError::from)?;
+    }
+
+    // Seed first message with the user prompt
+    let msg_uuid = new_uuid();
+    let seed_content = format!(
+        "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\nScaffold ce projet, configure le build, et prépare le déploiement.",
+        body.title, body.prompt
+    );
+
+    sqlx::query(
+        r#"INSERT INTO agent_messages (
+            uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at
+        ) VALUES (?, ?, ?, 'user', ?, '[]', 'system', ?)"#,
+    )
+    .bind(&msg_uuid)
+    .bind(&uuid)
+    .bind(&agent_uuid)
+    .bind(&seed_content)
+    .bind(&now)
+    .execute(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+
+    let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ?")
+        .bind(&uuid)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(ApiError::from)?;
+
+    let agent_row = sqlx::query_as::<_, crate::infra_routes::AgentRow>(
+        "SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status FROM project_agents WHERE uuid = ?",
+    )
+    .bind(&agent_uuid)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(json!({ "data": { "project": project, "agent": agent_row } })),
+    ))
 }
 
 async fn get_project(
