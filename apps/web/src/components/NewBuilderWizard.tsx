@@ -1,5 +1,5 @@
 import { useState } from 'preact/hooks';
-import { api } from '../lib/api';
+import { api, type ProjectTemplate } from '../lib/api';
 import { Alert, Button, FadeIn, Input, useToast } from './ui';
 
 /**
@@ -16,8 +16,26 @@ export function NewBuilderWizard({
   const toast = useToast();
   const [title, setTitle] = useState('');
   const [prompt, setPrompt] = useState('');
+  const [template, setTemplate] = useState('astro-preact-sqlite');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
+  const [templatesLoaded, setTemplatesLoaded] = useState(false);
+
+  async function loadTemplates() {
+    if (templatesLoaded) return;
+    try {
+      const res = await api.templates();
+      setTemplates(res.data);
+      if (res.data.length > 0 && !template) {
+        setTemplate(res.data[0].id);
+      }
+    } catch (err) {
+      console.error('Erreur de chargement des templates:', err);
+    } finally {
+      setTemplatesLoaded(true);
+    }
+  }
 
   async function submit(e: Event) {
     e.preventDefault();
@@ -40,6 +58,7 @@ export function NewBuilderWizard({
       const res = await api.scaffoldProject({
         title: cleanTitle,
         prompt: cleanPrompt,
+        template,
       });
 
       toast.push({
@@ -55,6 +74,10 @@ export function NewBuilderWizard({
       setError(msg);
       setBusy(false);
     }
+  }
+
+  if (!templatesLoaded) {
+    loadTemplates();
   }
 
   const body = (
@@ -89,6 +112,29 @@ export function NewBuilderWizard({
           L'agent DevForge va scaffolder le projet et configurer le build.
         </span>
       </label>
+
+      {templates.length > 0 && (
+        <label class="flex flex-col gap-1.5 text-sm">
+          <span class="font-medium">Template de base</span>
+          <select
+            class="w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-sm"
+            value={template}
+            onChange={(ev) => setTemplate((ev.target as HTMLSelectElement).value)}
+            disabled={busy}
+          >
+            {templates.map((tpl) => (
+              <option key={tpl.id} value={tpl.id}>
+                {tpl.name}
+              </option>
+            ))}
+          </select>
+          {template && templates.find((t) => t.id === template) && (
+            <span class="text-xs text-[var(--color-ink-faint)]">
+              {templates.find((t) => t.id === template)!.description}
+            </span>
+          )}
+        </label>
+      )}
 
       <div class="flex flex-wrap justify-between gap-2">
         {onClose && (

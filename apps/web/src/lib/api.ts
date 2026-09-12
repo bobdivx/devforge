@@ -5,6 +5,13 @@ const SERVER_BASE =
   import.meta.env.PUBLIC_API_URL ??
   'http://127.0.0.1:8000/api/v1';
 
+export type ProjectTemplate = {
+  id: string;
+  name: string;
+  description: string;
+  stack: string[];
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
   const res = await fetch(`${SERVER_BASE}${path}`, {
@@ -29,8 +36,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return res.json() as Promise<T>;
 }
-
-
 export type ProjectSync = {
   state:
     | 'up_to_date'
@@ -265,11 +270,12 @@ export const api = {
   },
   createProject: (body: Partial<Project> & { name: string; is_static?: boolean; port?: number }) =>
     request<{ data: Project }>('/projects', { method: 'POST', body: JSON.stringify(body) }),
-  scaffoldProject: (body: { title: string; prompt: string }) =>
+  scaffoldProject: (body: { title: string; prompt: string; template?: string }) =>
     request<{ data: { project: Project; agent: ProjectAgent } }>('/projects/scaffold', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  templates: () => request<{ data: ProjectTemplate[] }>('/templates'),
   deployments: (projectUuid: string) =>
     request<{ data: Deployment[] }>(`/projects/${projectUuid}/deployments`),
   createDeployment: (projectUuid: string, body?: { git_message?: string }) =>

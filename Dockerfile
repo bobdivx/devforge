@@ -25,11 +25,13 @@ COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=dockercli /usr/local/libexec/docker/cli-plugins /usr/local/libexec/docker/cli-plugins
 COPY --from=builder /src/target/release/devforge-server /usr/local/bin/devforge-server
 COPY --from=web /web/dist /app/web
+COPY crates/templates /app/templates
 ENV HOST=0.0.0.0 \
     PORT=8000 \
     DATABASE_URL=sqlite:/data/devforge.db?mode=rwc \
     DEVFORGE_DATA_DIR=/data \
     DEVFORGE_STATIC_DIR=/app/web \
+    DEVFORGE_TEMPLATES_DIR=/app/templates \
     DEVFORGE_UPDATE_MODE=docker \
     DEVFORGE_SELF_CONTAINER=devforge \
     DEVFORGE_UPDATE_IMAGE=bobdivx/devforge \
