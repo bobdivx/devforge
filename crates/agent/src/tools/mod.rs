@@ -1,3 +1,4 @@
+mod deploy;
 mod deploy_logs;
 mod env;
 mod github;
@@ -9,6 +10,7 @@ mod project_files;
 mod projects;
 mod tests;
 
+pub use deploy::TriggerDeployTool;
 pub use deploy_logs::GetDeploymentLogsTool;
 pub use env::{ListEnvVarsTool, UpsertEnvVarTool};
 pub use github::{GitHubListPrsTool, GitHubWorkflowRunsTool};
