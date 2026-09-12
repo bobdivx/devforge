@@ -131,12 +131,14 @@ mod endpoint_resolution_tests {
             userinfo_endpoint: "https://id.example.com/custom/userinfo".to_string(),
         };
         
-        let url = build_authorization_url(&cfg, &endpoints, "state123", "nonce456", "https://app.example.com/callback");
+        let url = build_authorization_url(&cfg, &endpoints, "state123", "nonce456", "https://app.example.com/callback", "challenge789");
         
         assert!(url.starts_with("https://id.example.com/custom/authorize?"));
         assert!(url.contains("client_id=test-client"));
         assert!(url.contains("state=state123"));
         assert!(url.contains("nonce=nonce456"));
+        assert!(url.contains("code_challenge=challenge789"));
+        assert!(url.contains("code_challenge_method=S256"));
     }
 
     #[test]
@@ -151,8 +153,43 @@ mod endpoint_resolution_tests {
             userinfo_endpoint: "https://id.example.com/userinfo".to_string(),
         };
         
-        let url = build_authorization_url(&cfg, &endpoints, "state123", "nonce456", "https://app.example.com/callback");
+        let url = build_authorization_url(&cfg, &endpoints, "state123", "nonce456", "https://app.example.com/callback", "challenge789");
         
         assert!(url.starts_with("https://id.example.com/authorize?"));
+        assert!(url.contains("code_challenge=challenge789"));
+        assert!(url.contains("code_challenge_method=S256"));
+    }
+}
+
+#[cfg(test)]
+mod pkce_tests {
+    use super::*;
+    use crate::platform_sso::{compute_code_challenge};
+
+    #[test]
+    fn test_compute_code_challenge_known_vector() {
+        // RFC 7636 example
+        let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+        let challenge = compute_code_challenge(verifier);
+        // Expected: E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM
+        assert_eq!(challenge, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+    }
+
+    #[test]
+    fn test_compute_code_challenge_no_padding() {
+        let verifier = "test";
+        let challenge = compute_code_challenge(verifier);
+        // Vérifier absence de padding '='
+        assert!(!challenge.contains('='));
+        // Vérifier caractères base64url uniquement
+        assert!(challenge.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+    }
+
+    #[test]
+    fn test_code_challenge_deterministic() {
+        let verifier = "my_test_verifier_123";
+        let challenge1 = compute_code_challenge(verifier);
+        let challenge2 = compute_code_challenge(verifier);
+        assert_eq!(challenge1, challenge2);
     }
 }

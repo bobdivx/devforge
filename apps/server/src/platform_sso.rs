@@ -13,6 +13,8 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
+use sha2::{Sha256, Digest};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
 use crate::auth_routes;
 use crate::sso::{load_sso_settings, SsoSettings};
@@ -66,20 +68,24 @@ async fn authorize(State(state): State<AppState>) -> Result<impl IntoResponse, (
 
     let state_token = generate_state_token();
     let nonce = generate_nonce();
+    let code_verifier = generate_code_verifier();
+    let code_challenge = compute_code_challenge(&code_verifier);
     
-    // Stockage temporaire du state/nonce (15 min expiration)
+    // Stockage temporaire du state/nonce/verifier (15 min expiration)
     let now = now_str();
     let expires = (Utc::now() + Duration::minutes(15)).to_rfc3339();
     sqlx::query(
-        r#"INSERT INTO oidc_states (state, nonce, expires_at, created_at)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(state) DO UPDATE SET nonce = ?, expires_at = ?"#
+        r#"INSERT INTO oidc_states (state, nonce, code_verifier, expires_at, created_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(state) DO UPDATE SET nonce = ?, code_verifier = ?, expires_at = ?"#
     )
     .bind(&state_token)
     .bind(&nonce)
+    .bind(&code_verifier)
     .bind(&expires)
     .bind(&now)
     .bind(&nonce)
+    .bind(&code_verifier)
     .bind(&expires)
     .execute(&state.pool)
     .await
@@ -87,7 +93,7 @@ async fn authorize(State(state): State<AppState>) -> Result<impl IntoResponse, (
 
     let redirect_uri = platform_redirect_uri(&state).await?;
     let endpoints = resolve_oidc_endpoints(&cfg).await;
-    let auth_url = build_authorization_url(&cfg, &endpoints, &state_token, &nonce, &redirect_uri);
+    let auth_url = build_authorization_url(&cfg, &endpoints, &state_token, &nonce, &redirect_uri, &code_challenge);
     
     Ok(Redirect::to(&auth_url))
 }
@@ -138,15 +144,15 @@ async fn callback(
     })?;
 
     // Vérification du state CSRF
-    let nonce_row: Option<(String, String)> = sqlx::query_as(
-        r#"SELECT nonce, expires_at FROM oidc_states WHERE state = ?"#
+    let nonce_row: Option<(String, String, String)> = sqlx::query_as(
+        r#"SELECT nonce, code_verifier, expires_at FROM oidc_states WHERE state = ?"#
     )
     .bind(&state_param)
     .fetch_optional(&state.pool)
     .await
     .map_err(internal)?;
 
-    let (nonce, expires_at) = nonce_row.ok_or_else(|| {
+    let (nonce, code_verifier, expires_at) = nonce_row.ok_or_else(|| {
         (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "State invalide ou expiré"})),
@@ -170,7 +176,7 @@ async fn callback(
     // Échange du code contre un token
     let redirect_uri = platform_redirect_uri(&state).await?;
     let endpoints = resolve_oidc_endpoints(&cfg).await;
-    let token_response = exchange_code_for_token(&cfg, &endpoints, &code, &redirect_uri).await?;
+    let token_response = exchange_code_for_token(&cfg, &endpoints, &code, &redirect_uri, &code_verifier).await?;
     
     // Récupération des infos utilisateur
     let user_info = fetch_user_info(&cfg, &endpoints, &token_response.access_token, &nonce).await?;
@@ -195,6 +201,21 @@ fn generate_state_token() -> String {
 
 fn generate_nonce() -> String {
     uuid::Uuid::new_v4().to_string()
+}
+
+/// Génère un code_verifier PKCE (43-128 caractères, unreserved).
+fn generate_code_verifier() -> String {
+    let uuid1 = uuid::Uuid::new_v4();
+    let uuid2 = uuid::Uuid::new_v4();
+    format!("{}{}", uuid1.as_simple(), uuid2.as_simple())
+}
+
+/// Calcule le code_challenge S256 : BASE64URL(SHA256(verifier)) sans padding.
+pub(crate) fn compute_code_challenge(verifier: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(verifier.as_bytes());
+    let hash = hasher.finalize();
+    URL_SAFE_NO_PAD.encode(&hash)
 }
 
 async fn platform_redirect_uri(state: &AppState) -> Result<String, (StatusCode, Json<Value>)> {
@@ -319,6 +340,7 @@ pub(crate) fn build_authorization_url(
     state: &str,
     nonce: &str,
     redirect_uri: &str,
+    code_challenge: &str,
 ) -> String {
     let issuer = cfg.issuer();
     let client_id = cfg.sso_apps_client_id.trim();
@@ -330,6 +352,8 @@ pub(crate) fn build_authorization_url(
         ("scope", "openid email profile"),
         ("state", state),
         ("nonce", nonce),
+        ("code_challenge", code_challenge),
+        ("code_challenge_method", "S256"),
     ];
     
     let query = params
@@ -361,6 +385,7 @@ async fn exchange_code_for_token(
     endpoints: &OidcEndpoints,
     code: &str,
     redirect_uri: &str,
+    code_verifier: &str,
 ) -> Result<TokenResponse, (StatusCode, Json<Value>)> {
     let token_endpoint = &endpoints.token_endpoint;
     
@@ -370,6 +395,7 @@ async fn exchange_code_for_token(
         ("redirect_uri", redirect_uri),
         ("client_id", cfg.sso_apps_client_id.trim()),
         ("client_secret", cfg.sso_apps_client_secret.trim()),
+        ("code_verifier", code_verifier),
     ];
     
     let client = reqwest::Client::new();
@@ -379,25 +405,28 @@ async fn exchange_code_for_token(
         .send()
         .await
         .map_err(|e| {
+            tracing::error!("Erreur requête token IdP: {}", e);
             (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({"error": format!("Erreur IdP token: {}", e)})),
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Impossible de contacter le serveur d'authentification"})),
             )
         })?;
     
     if !response.status().is_success() {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
+        tracing::error!("Token exchange failed {}: {}", status, text);
         return Err((
-            StatusCode::BAD_GATEWAY,
-            Json(json!({"error": format!("IdP token error {}: {}", status, text)})),
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Échec de l'authentification. Vérifie tes identifiants."})),
         ));
     }
     
     response.json::<TokenResponse>().await.map_err(|e| {
+        tracing::error!("Erreur parsing token response: {}", e);
         (
-            StatusCode::BAD_GATEWAY,
-            Json(json!({"error": format!("Erreur parsing token: {}", e)})),
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Réponse invalide du serveur d'authentification"})),
         )
     })
 }
@@ -426,25 +455,28 @@ async fn fetch_user_info(
         .send()
         .await
         .map_err(|e| {
+            tracing::error!("Erreur requête userinfo IdP: {}", e);
             (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({"error": format!("Erreur IdP userinfo: {}", e)})),
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Impossible de récupérer tes informations utilisateur"})),
             )
         })?;
     
     if !response.status().is_success() {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
+        tracing::error!("Userinfo failed {}: {}", status, text);
         return Err((
-            StatusCode::BAD_GATEWAY,
-            Json(json!({"error": format!("IdP userinfo error {}: {}", status, text)})),
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Impossible de récupérer tes informations utilisateur"})),
         ));
     }
     
     response.json::<UserInfo>().await.map_err(|e| {
+        tracing::error!("Erreur parsing userinfo response: {}", e);
         (
-            StatusCode::BAD_GATEWAY,
-            Json(json!({"error": format!("Erreur parsing userinfo: {}", e)})),
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Réponse invalide du serveur d'authentification"})),
         )
     })
 }

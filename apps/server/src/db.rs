@@ -475,12 +475,19 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             state TEXT PRIMARY KEY,
             nonce TEXT NOT NULL,
             expires_at TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            code_verifier TEXT NOT NULL DEFAULT ''
         );
         "#,
     )
     .execute(pool)
     .await?;
+
+    let _ = sqlx::query(
+        "ALTER TABLE oidc_states ADD COLUMN code_verifier TEXT NOT NULL DEFAULT ''",
+    )
+    .execute(pool)
+    .await;
 
     sqlx::query(
         r#"
