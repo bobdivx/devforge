@@ -35,12 +35,12 @@ impl Tool for ListEnvVarsTool {
     }
 }
 
-pub struct UpsertEnvVarTool {
+pub struct UpsertEnvVarsTool {
     pub env: Arc<EnvFacade>,
 }
 
 #[async_trait]
-impl Tool for UpsertEnvVarTool {
+impl Tool for UpsertEnvVarsTool {
     fn name(&self) -> &str {
         "upsert_env_var"
     }

@@ -37,6 +37,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/agent/tools", get(agent_tools))
         .route("/api/v1/agent/chat", post(agent_chat))
         .route("/api/v1/agent/tools/{tool}", post(agent_execute_tool))
+        .route("/api/v1/projects/{uuid}/publish", post(publish_project))
         .route("/api/v1/databases", post(create_database))
         .route("/api/v1/databases/{uuid}", get(get_database))
         .route(
@@ -505,12 +506,12 @@ async fn scaffold_project(
     
     let seed_content = if template_applied {
         format!(
-            "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\n✅ Template {} déjà appliqué (Astro + Preact + Tailwind + DaisyUI + SQLite).\n\nTon rôle : customise l'app selon l'objectif utilisateur. NE réécris PAS toute la stack depuis zéro.\n\nWorkflow obligatoire :\n1. `create_github_repo` pour créer le repo GitHub\n2. `write_project_file` (mode github ou sync) pour TOUS les fichiers modifiés/ajoutés\n3. `trigger_deploy` pour déployer\n\nPas de README loop : le code doit être fonctionnel et pushé sur GitHub.",
+            "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\n✅ Template {} déjà appliqué (Astro + Preact + Tailwind + DaisyUI + SQLite).\n\n🎯 TON RÔLE : Prépare une PREVIEW LOCALE testable.\n\n🚨 WORKFLOW OBLIGATOIRE :\n1. Le template est déjà dans le workdir — NE réécris PAS les fichiers\n2. Si des customisations sont demandées : applique-les en local avec write_project_file mode='local'\n3. Lance le serveur dev local (npm run dev ou équivalent) pour que la Preview fonctionne\n\n❌ INTERDIT (l'utilisateur n'a PAS encore validé) :\n- create_github_repo (pas de repo GitHub avant validation utilisateur)\n- sync_workdir_to_github (pas de push avant validation)\n- trigger_deploy (pas de déploiement avant validation)\n\n✅ APRÈS validation utilisateur, il pourra cliquer « Publier » pour déclencher GitHub + deploy.\n\nPour l'instant : preview locale uniquement.",
             body.title, body.prompt, template_name
         )
     } else {
         format!(
-            "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\nScaffold ce projet, configure le build, et prépare le déploiement.",
+            "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\nScaffold ce projet en LOCAL. Prépare une preview testable. NE crée PAS de repo GitHub avant validation utilisateur.",
             body.title, body.prompt
         )
     };
@@ -542,18 +543,15 @@ async fn scaffold_project(
         "role": "deploy"
     });
 
-    // SLICE 3 FIX: Déclencher automatiquement le premier tour de l'agent après scaffold
-    // Cela lance immédiatement le workflow : create_github_repo → write_project_file → trigger_deploy
-    let state_clone = state.clone();
-    let uuid_clone = uuid.clone();
-    let agent_uuid_clone = agent_uuid.clone();
-    tokio::spawn(async move {
-        // Petit délai pour laisser la transaction de scaffold se terminer
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        if let Err(e) = trigger_agent_turn(&state_clone, &uuid_clone, &agent_uuid_clone).await {
-            eprintln!("[scaffold] Erreur lors du déclenchement automatique de l'agent : {}", e);
-        }
-    });
+    // CHANGEMENT : Ne plus auto-kick l'agent Deploy au scaffold.
+    // L'utilisateur teste la preview locale, puis clique explicitement « Publier »
+    // pour déclencher create_github_repo + sync + deploy.
+    //
+    // Workflow local-first :
+    // 1. Scaffold → template copié dans workdir
+    // 2. Preview locale (serveur dev dans le workdir)
+    // 3. Utilisateur valide → appelle publish_to_github tool (nouveau)
+    // 4. publish_to_github fait : create_github_repo + sync_workdir_to_github + trigger_deploy
 
     Ok((
         axum::http::StatusCode::CREATED,
@@ -1526,6 +1524,79 @@ async fn import_env(
         .await
         .map_err(|e| ApiError::message(e.to_string()))?;
     Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+pub struct PublishProjectBody {
+    pub repo_name: Option<String>,
+    pub description: Option<String>,
+    pub private: Option<bool>,
+}
+
+/// POST /api/v1/projects/{uuid}/publish
+/// Workflow complet validé par l'utilisateur : create repo GitHub + sync workdir + optionnel deploy.
+async fn publish_project(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+    Json(body): Json<PublishProjectBody>,
+) -> Result<(axum::http::StatusCode, Json<Value>), ApiError> {
+    let (_user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
+
+    // Dériver repo_name depuis le slug si non fourni
+    let repo_name = body.repo_name.unwrap_or_else(|| {
+        // Nettoyer le slug : retirer le suffixe -xxxx
+        let slug = &project.slug;
+        if let Some(idx) = slug.rfind('-') {
+            if slug[idx + 1..].len() == 4 && slug[idx + 1..].chars().all(|c| c.is_ascii_alphanumeric()) {
+                return slug[..idx].to_string();
+            }
+        }
+        slug.clone()
+    });
+
+    let description = body.description.unwrap_or_else(|| {
+        format!("Application {} générée par DevForge", project.name)
+    });
+    let private = body.private.unwrap_or(true);
+
+    // Vérifier si déjà publié
+    if let Some(ref repo_url) = project.git_repository {
+        if !repo_url.trim().is_empty() {
+            return Ok((
+                axum::http::StatusCode::OK,
+                Json(json!({
+                    "ok": true,
+                    "already_published": true,
+                    "git_repository": repo_url,
+                    "message": "Le projet est déjà publié sur GitHub."
+                })),
+            ));
+        }
+    }
+
+    // Appeler le tool publish_to_github via l'agent registry
+    let args = json!({
+        "project_uuid": uuid,
+        "repo_name": repo_name,
+        "description": description,
+        "private": private
+    });
+
+    let result = state
+        .registry
+        .execute("publish_to_github", args)
+        .await
+        .map_err(|e| ApiError::message(e.to_string()))?;
+
+    let ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+    let status_code = if ok {
+        axum::http::StatusCode::OK
+    } else {
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    };
+
+    Ok((status_code, Json(json!({ "data": result }))))
 }
 
 #[allow(dead_code)]
