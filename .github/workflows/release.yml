@@ -1,16 +1,81 @@
 name: Release
 
+# Un seul workflow : tag + images Docker + binaires + page GitHub Releases.
+# GitHub n'enchaîne PAS un second workflow quand un tag est poussé avec GITHUB_TOKEN,
+# donc on publie ici au lieu de dépendre de tag-version.yml → release.yml.
 on:
   push:
+    branches: [main]
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
   packages: write
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.meta.outputs.should_release }}
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      docker_tags: ${{ steps.meta.outputs.docker_tags }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - id: meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION=$(awk '/^\[workspace.package\]/{f=1} f && $1=="version"{gsub(/"/,"",$3); print $3; exit}' Cargo.toml)
+          fi
+          if [[ -z "$VERSION" ]]; then
+            echo "Impossible de lire la version"
+            exit 1
+          fi
+          TAG="v${VERSION}"
+
+          SHOULD=true
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release ${TAG} déjà publiée — skip"
+            SHOULD=false
+          fi
+
+          if [[ "$SHOULD" == "true" && "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            if ! git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+              git tag -a "${TAG}" -m "DevForge ${TAG}" "${GITHUB_SHA}"
+              git push origin "refs/tags/${TAG}" || true
+            fi
+          fi
+
+          OWNER_LC="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          HUB_USER="${{ secrets.DOCKERHUB_USERNAME }}"
+          DOCKER_TAGS="ghcr.io/${OWNER_LC}/devforge:${VERSION},ghcr.io/${OWNER_LC}/devforge:latest"
+          DOCKER_TAGS="${DOCKER_TAGS},${HUB_USER}/devforge:${VERSION},${HUB_USER}/devforge:latest"
+          if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+)\. ]]; then
+            MINOR="${BASH_REMATCH[1]}"
+            DOCKER_TAGS="${DOCKER_TAGS},ghcr.io/${OWNER_LC}/devforge:${MINOR},${HUB_USER}/devforge:${MINOR}"
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "should_release=${SHOULD}" >> "$GITHUB_OUTPUT"
+          echo "docker_tags=${DOCKER_TAGS}" >> "$GITHUB_OUTPUT"
+
   docker:
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,29 +94,15 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Meta
-        id: meta
-        run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          OWNER_LC="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          HUB_USER="${{ secrets.DOCKERHUB_USERNAME }}"
-          TAGS="ghcr.io/${OWNER_LC}/devforge:${TAG},ghcr.io/${OWNER_LC}/devforge:latest"
-          TAGS="${TAGS},${HUB_USER}/devforge:${TAG},${HUB_USER}/devforge:latest"
-          # Alias mineur 2.0 si tag 2.0.x
-          if [[ "$TAG" =~ ^([0-9]+\.[0-9]+)\. ]]; then
-            MINOR="${BASH_REMATCH[1]}"
-            TAGS="${TAGS},ghcr.io/${OWNER_LC}/devforge:${MINOR},${HUB_USER}/devforge:${MINOR}"
-          fi
-          echo "version=$TAG" >> "$GITHUB_OUTPUT"
-          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
-
       - uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ needs.prepare.outputs.docker_tags }}
 
   binaries:
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -89,6 +140,9 @@ jobs:
           )
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: DevForge ${{ needs.prepare.outputs.tag }}
+          generate_release_notes: true
           files: dist/devforge-server-${{ matrix.target }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
