@@ -42,12 +42,39 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
   const [logs, setLogs] = useState<string>('');
   const [logsLoading, setLogsLoading] = useState(false);
   const [showBuilder, setShowBuilder] = useState(builderMode && !project?.production_url);
+  const [previewNonce, setPreviewNonce] = useState(0);
+  const [localDirty, setLocalDirty] = useState(false);
+  const [previewHint, setPreviewHint] = useState<string | null>(null);
 
   // Détecter workflow local-first : template appliqué mais pas de git_repository
   const isLocalFirst = builderMode && !project?.git_repository?.trim();
 
   useEffect(() => {
     loadDeployments();
+  }, [projectUuid]);
+
+  useEffect(() => {
+    async function refreshGit() {
+      try {
+        const g = await api.projectGit(projectUuid);
+        setLocalDirty(Boolean(g.workdir?.dirty));
+      } catch {
+        /* ignore */
+      }
+    }
+    void refreshGit();
+    function onPreviewRefresh(ev: Event) {
+      const detail = (ev as CustomEvent<{ url?: string; reason?: string }>).detail;
+      setPreviewNonce((n) => n + 1);
+      setPreviewHint(
+        detail?.url
+          ? `Preview relancée (${detail.url})`
+          : 'Modifications locales — rafraîchis la preview.',
+      );
+      void refreshGit();
+    }
+    window.addEventListener('devforge:preview-refresh', onPreviewRefresh);
+    return () => window.removeEventListener('devforge:preview-refresh', onPreviewRefresh);
   }, [projectUuid]);
 
   async function loadDeployments() {
@@ -164,16 +191,34 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
                 )}
               </div>
               {productionUrl && (
-                <Button size="sm" variant="outline" href={productionUrl} target="_blank">
-                  Ouvrir
-                </Button>
+                <div class="flex shrink-0 gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setPreviewNonce((n) => n + 1)}
+                  >
+                    Rafraîchir
+                  </Button>
+                  <Button size="sm" variant="outline" href={productionUrl} target="_blank">
+                    Ouvrir
+                  </Button>
+                </div>
               )}
             </div>
+
+            {(previewHint || localDirty) && (
+              <div class="border-b border-[var(--color-line)] bg-[var(--color-accent-soft)] px-4 py-2 text-xs text-[var(--color-ink)]">
+                {localDirty
+                  ? 'Des fichiers ont été modifiés dans le dossier du projet. La preview production ne les montre qu’après PR + déploiement. Valide dans le chat pour ouvrir une PR.'
+                  : previewHint}
+              </div>
+            )}
 
             <div class="relative flex-1 bg-white/5" style={{ minHeight: '300px' }}>
               {productionUrl ? (
                 <iframe
-                  src={productionUrl}
+                  key={previewNonce}
+                  src={`${productionUrl}${productionUrl.includes('?') ? '&' : '?'}_df=${previewNonce}`}
                   class="h-full w-full border-0"
                   style={{ minHeight: '300px' }}
                   title="App preview"

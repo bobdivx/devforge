@@ -1,14 +1,29 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { api } from '../lib/api';
+import { streamAgentChat, type AgentToolCall } from '../lib/agent-stream';
 import { AppShell } from './AppShell';
-import { Badge, Button, Card, Input } from './ui';
+import {
+  AgentActionList,
+  AgentThinkingBlock,
+  toLiveActions,
+  type LiveAction,
+} from './agents/AgentActionCards';
+import { Badge, Button, Card, Input, Spinner } from './ui';
 
-type Msg = { role: 'user' | 'assistant'; content: string; meta?: string };
+type Msg = {
+  role: 'user' | 'assistant';
+  content: string;
+  provider?: string;
+  toolCalls?: AgentToolCall[];
+};
 
 export function AgentPage() {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Msg[]>([]);
   const [busy, setBusy] = useState(false);
+  const [thinking, setThinking] = useState<string | null>(null);
+  const [thinkStarted, setThinkStarted] = useState(0);
+  const [liveActions, setLiveActions] = useState<LiveAction[]>([]);
   const [llm, setLlm] = useState<string>('—');
   const [llmError, setLlmError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -19,7 +34,7 @@ export function AgentPage() {
         const h = await api.health();
         const mode = h.backends?.llm ?? 'stub';
         setLlm(mode);
-        
+
         if (mode === 'stub') {
           const providers = await api.llmProviders();
           const unhealthy = providers.data.filter((p) => p.enabled && p.healthy === false);
@@ -37,33 +52,59 @@ export function AgentPage() {
         setLlmError(null);
       }
     }
-    
+
     void checkLlm();
   }, []);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, thinking, liveActions]);
 
   async function send(e: Event) {
     e.preventDefault();
     const text = input.trim();
     if (!text || busy) return;
     setBusy(true);
+    setThinking('Analyse de la demande…');
+    setThinkStarted(Date.now());
+    setLiveActions([]);
     setMessages((m) => [...m, { role: 'user', content: text }]);
     setInput('');
     try {
-      const res = await api.agentChat(text);
-      const tools = (res.data.tool_calls as Array<{ name?: string }> | undefined) ?? [];
-      const toolHint =
-        tools.length > 0 ? `tools: ${tools.map((t) => t.name ?? '?').join(', ')}` : undefined;
-      const provider = res.data.provider ?? llm;
+      const res = await streamAgentChat(
+        text,
+        {},
+        {
+          onThinking: (label) => setThinking(label),
+          onToolStart: (call) => {
+            setThinking(call.name.replace(/_/g, ' '));
+            setLiveActions((prev) => [...prev, { ...call, status: 'running' }]);
+          },
+          onToolDone: (call, ok) => {
+            setLiveActions((prev) => {
+              const next = [...prev];
+              let idx = -1;
+              for (let i = next.length - 1; i >= 0; i--) {
+                if (next[i].name === call.name && next[i].status === 'running') {
+                  idx = i;
+                  break;
+                }
+              }
+              const done: LiveAction = { ...call, status: ok ? 'ok' : 'fail' };
+              if (idx >= 0) next[idx] = done;
+              else next.push(done);
+              return next;
+            });
+          },
+        },
+      );
       setMessages((m) => [
         ...m,
         {
           role: 'assistant',
-          content: res.data.reply,
-          meta: [provider, toolHint].filter(Boolean).join(' · ') || undefined,
+          content: res.reply,
+          provider: res.provider ?? llm,
+          toolCalls: res.tool_calls ?? [],
         },
       ]);
     } catch (err: unknown) {
@@ -73,6 +114,8 @@ export function AgentPage() {
       ]);
     } finally {
       setBusy(false);
+      setThinking(null);
+      setLiveActions([]);
     }
   }
 
@@ -91,31 +134,47 @@ export function AgentPage() {
                   LLM configuré mais erreur : <strong>{llmError}</strong> —{' '}
                   <a class="underline" href="/app/settings?tab=llm">
                     corrige dans Settings
-                  </a>.
+                  </a>
+                  .
                 </p>
               ) : (
                 <p class="text-sm text-[var(--color-ink-muted)]">
                   « liste les projets », « smoke », ou configure Ollama / Gemini dans{' '}
                   <a class="underline" href="/app/settings?tab=llm">
                     Settings
-                  </a>.
+                  </a>
+                  .
                 </p>
               )}
             </>
           )}
           {messages.map((m, i) => (
-            <div
-              key={i}
-              class={`max-w-[90%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${
-                m.role === 'user'
-                  ? 'ml-auto bg-[var(--color-accent)] text-white'
-                  : 'bg-[var(--color-surface)] text-[var(--color-ink)]'
-              }`}
-            >
-              {m.content}
-              {m.meta && <div class="mt-1 text-xs opacity-70">{m.meta}</div>}
+            <div key={i} class="space-y-2">
+              {m.role === 'user' ? (
+                <div class="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-[var(--color-accent)] px-3 py-2 text-sm text-white">
+                  {m.content}
+                </div>
+              ) : (
+                <>
+                  {m.toolCalls && m.toolCalls.length > 0 && (
+                    <AgentActionList actions={toLiveActions(m.toolCalls)} />
+                  )}
+                  {m.content.trim() && (
+                    <div class="max-w-[92%] whitespace-pre-wrap break-words text-sm text-[var(--color-ink)]">
+                      {m.content}
+                      {m.provider && (
+                        <div class="mt-1 text-[11px] text-[var(--color-ink-faint)]">{m.provider}</div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           ))}
+          {busy && liveActions.length > 0 && <AgentActionList actions={liveActions} />}
+          {busy && thinking && (
+            <AgentThinkingBlock label={thinking} startedAt={thinkStarted || Date.now()} />
+          )}
           <div ref={endRef} />
         </div>
         <form class="flex min-w-0 gap-2 border-t border-[var(--color-line)] p-3" onSubmit={send}>
@@ -128,7 +187,7 @@ export function AgentPage() {
             />
           </div>
           <Button type="submit" variant="secondary" disabled={busy} class="shrink-0">
-            Envoyer
+            {busy ? <Spinner /> : 'Envoyer'}
           </Button>
         </form>
       </Card>

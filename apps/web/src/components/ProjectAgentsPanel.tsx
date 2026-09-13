@@ -1,7 +1,21 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { api, type ProjectAgent } from '../lib/api';
+import {
+  planFromToolCalls,
+  streamAgentChat,
+  wroteLocalFiles,
+  type AgentPlan,
+  type AgentToolCall,
+} from '../lib/agent-stream';
 import { cn } from '../lib/cn';
-import { Alert, Badge, Button, Card, FadeIn, Input, useToast } from './ui';
+import {
+  AgentActionList,
+  AgentPlanActions,
+  AgentThinkingBlock,
+  toLiveActions,
+  type LiveAction,
+} from './agents/AgentActionCards';
+import { Alert, Badge, Button, Card, FadeIn, Input, Spinner, useToast } from './ui';
 
 const ROLE_META: Record<
   string,
@@ -9,8 +23,8 @@ const ROLE_META: Record<
 > = {
   ops: {
     label: 'Ops',
-    blurb: 'État, logs, smoke tests',
-    starters: ['Où en est le projet ?', 'Montre les derniers logs', 'Lance un smoke test'],
+    blurb: 'État, logs, corrections locales',
+    starters: ['Où en est le projet ?', 'Diagnostique et corrige en local', 'Lance un smoke test'],
   },
   deploy: {
     label: 'Deploy',
@@ -19,8 +33,8 @@ const ROLE_META: Record<
   },
   reviewer: {
     label: 'Reviewer',
-    blurb: 'Revue, qualité, suggestions',
-    starters: ['Review le dernier changement', 'Quels risques vois-tu ?'],
+    blurb: 'Plan, preview, PR sur validation',
+    starters: ['Propose un plan d’amélioration', 'Améliore le design en local', 'Quels risques vois-tu ?'],
   },
   custom: {
     label: 'Agent',
@@ -32,6 +46,21 @@ const ROLE_META: Record<
     blurb: 'Sous-tâche',
     starters: [],
   },
+};
+
+type ChatMessage = {
+  role: string;
+  content: string;
+  provider?: string;
+  toolCalls?: AgentToolCall[];
+  plan?: AgentPlan | null;
+  canOpenPr?: boolean;
+  needsUserAction?: {
+    kind: string;
+    message_fr: string;
+    settings_href?: string;
+    resume_hint?: string;
+  };
 };
 
 function metaFor(agent: ProjectAgent) {
@@ -53,21 +82,11 @@ export function ProjectAgentsPanel({
   const [selected, setSelected] = useState<string | null>(defaultAgentUuid || null);
   const [error, setError] = useState<string | null>(null);
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<
-    Array<{ 
-      role: string; 
-      content: string; 
-      provider?: string; 
-      tools?: string;
-      needsUserAction?: {
-        kind: string;
-        message_fr: string;
-        settings_href?: string;
-        resume_hint?: string;
-      };
-    }>
-  >([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
+  const [thinking, setThinking] = useState<string | null>(null);
+  const [thinkStarted, setThinkStarted] = useState(0);
+  const [liveActions, setLiveActions] = useState<LiveAction[]>([]);
   const [llmMode, setLlmMode] = useState<string>('—');
   const [llmError, setLlmError] = useState<string | null>(null);
   const [pollEnabled, setPollEnabled] = useState(builderMode || false);
@@ -141,11 +160,25 @@ export function ProjectAgentsPanel({
     try {
       const r = await api.agentMessages(projectUuid, agentUuid);
       setMessages(
-        (r.data ?? []).map((m) => ({
-          role: m.role,
-          content: m.content,
-          provider: m.provider || undefined,
-        })),
+        (r.data ?? []).map((m) => {
+          let tools: AgentToolCall[] = [];
+          if (m.tool_calls_json) {
+            try {
+              tools = JSON.parse(m.tool_calls_json) as AgentToolCall[];
+            } catch {
+              tools = [];
+            }
+          }
+          const plan = planFromToolCalls(tools);
+          return {
+            role: m.role,
+            content: m.content,
+            provider: m.provider || undefined,
+            toolCalls: tools,
+            plan,
+            canOpenPr: wroteLocalFiles(tools),
+          };
+        }),
       );
     } catch {
       setMessages([]);
@@ -188,6 +221,7 @@ export function ProjectAgentsPanel({
 
     let pollCount = 0;
     const interval = setInterval(async () => {
+      if (busy) return;
       try {
         await loadMessages(selected);
         
@@ -208,7 +242,7 @@ export function ProjectAgentsPanel({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [pollEnabled, selected, projectUuid]);
+  }, [pollEnabled, selected, projectUuid, busy]);
 
   useEffect(() => {
     if (selected) void loadMessages(selected);
@@ -217,7 +251,7 @@ export function ProjectAgentsPanel({
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, thinking, liveActions]);
 
   async function clearChat() {
     if (!selected) return;
@@ -229,17 +263,44 @@ export function ProjectAgentsPanel({
     const trimmed = text.trim();
     if (!trimmed || busy || !selected) return;
     setBusy(true);
+    setThinking('Analyse de la demande…');
+    setThinkStarted(Date.now());
+    setLiveActions([]);
     setMessages((m) => [...m, { role: 'user', content: trimmed }]);
     setInput('');
     try {
-      const res = await api.agentChat(trimmed, {
-        project_uuid: projectUuid,
-        agent_uuid: selected,
-      });
-      const tools = (res.data.tool_calls as Array<{ name?: string; result?: any }> | undefined) ?? [];
-      
-      // Détecter si un tool a retourné needs_user_action
-      let needsUserAction: any = undefined;
+      const res = await streamAgentChat(
+        trimmed,
+        {
+          project_uuid: projectUuid,
+          agent_uuid: selected,
+        },
+        {
+          onThinking: (label) => setThinking(label),
+          onToolStart: (call) => {
+            setThinking(call.name.replace(/_/g, ' '));
+            setLiveActions((prev) => [...prev, { ...call, status: 'running' }]);
+          },
+          onToolDone: (call, ok) => {
+            setLiveActions((prev) => {
+              const next = [...prev];
+              let idx = -1;
+              for (let i = next.length - 1; i >= 0; i--) {
+                if (next[i].name === call.name && next[i].status === 'running') {
+                  idx = i;
+                  break;
+                }
+              }
+              const done: LiveAction = { ...call, status: ok ? 'ok' : 'fail' };
+              if (idx >= 0) next[idx] = done;
+              else next.push(done);
+              return next;
+            });
+          },
+        },
+      );
+      const tools = res.tool_calls ?? [];
+      let needsUserAction: ChatMessage['needsUserAction'];
       for (const tool of tools) {
         if (tool.result?.needs_user_action === true) {
           needsUserAction = {
@@ -256,16 +317,14 @@ export function ProjectAgentsPanel({
         ...m,
         {
           role: 'assistant',
-          content: res.data.reply,
-          provider: res.data.provider || undefined,
-          tools:
-            tools.length > 0
-              ? tools.map((t) => t.name ?? '?').join(', ')
-              : undefined,
+          content: res.reply,
+          provider: res.provider || undefined,
+          toolCalls: tools,
+          plan: res.plan,
+          canOpenPr: wroteLocalFiles(tools),
           needsUserAction,
         },
       ]);
-      // Refresh LLM badge if chain just became available
       api
         .health()
         .then((h) => setLlmMode(h.backends?.llm ?? llmMode))
@@ -276,6 +335,8 @@ export function ProjectAgentsPanel({
       toast.push({ title: 'Agent KO', detail: msg, tone: 'danger' });
     } finally {
       setBusy(false);
+      setThinking(null);
+      setLiveActions([]);
     }
   }
 
@@ -374,7 +435,7 @@ export function ProjectAgentsPanel({
             {messages.length === 0 && currentMeta && (
               <div class="space-y-3">
                 <p class="text-sm text-[var(--color-ink-muted)]">
-                  Parle naturellement — l’agent utilise les outils du projet si besoin.
+                  L’agent planifie, travaille dans le dossier du projet, puis lance la preview. Une PR n’est ouverte que si tu valides.
                 </p>
                 <div class="flex flex-wrap gap-2">
                   {currentMeta.starters.map((s) => (
@@ -392,63 +453,89 @@ export function ProjectAgentsPanel({
               </div>
             )}
             {messages.map((m, i) => (
-              <div key={i}>
-                <div
-                  class={cn(
-                    'max-w-[90%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm',
-                    m.role === 'user'
-                      ? 'ml-auto bg-[var(--color-accent)] text-white'
-                      : 'bg-[var(--color-surface)]',
-                  )}
-                >
-                  {m.content}
-                  {(m.provider || m.tools) && (
-                    <div class="mt-1 text-[11px] opacity-60">
-                      {[m.provider, m.tools ? `tools: ${m.tools}` : null]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </div>
-                  )}
-                </div>
-                {m.needsUserAction && (
-                  <Card class="mt-2 max-w-[90%] border-l-4 border-l-[var(--color-warn)]">
-                    <div class="flex items-start gap-3">
-                      <span class="text-2xl">⚠️</span>
-                      <div class="flex-1">
-                        <p class="font-medium text-sm mb-2">Action requise</p>
-                        <p class="text-sm text-[var(--color-ink-muted)] mb-3">
-                          {m.needsUserAction.message_fr}
-                        </p>
-                        {m.needsUserAction.settings_href && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            href={m.needsUserAction.settings_href}
-                            class="mb-2"
-                          >
-                            Ouvrir les paramètres
-                          </Button>
+              <div key={i} class="space-y-2">
+                {m.role === 'user' ? (
+                  <div class="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-[var(--color-accent)] px-3 py-2 text-sm text-white">
+                    {m.content}
+                  </div>
+                ) : (
+                  <>
+                    {m.toolCalls && m.toolCalls.length > 0 && (
+                      <AgentActionList actions={toLiveActions(m.toolCalls)} />
+                    )}
+                    {m.content.trim() && (
+                      <div class="max-w-[92%] whitespace-pre-wrap break-words text-sm text-[var(--color-ink)]">
+                        {m.content}
+                        {m.provider && (
+                          <div class="mt-1 text-[11px] text-[var(--color-ink-faint)]">{m.provider}</div>
                         )}
-                        {m.needsUserAction.resume_hint && (
-                          <p class="text-xs text-[var(--color-ink-faint)] mt-2">
-                            {m.needsUserAction.resume_hint}
-                          </p>
-                        )}
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={busy}
-                          onClick={() => void sendText('Continuer')}
-                          class="mt-3"
-                        >
-                          Continuer
-                        </Button>
                       </div>
-                    </div>
-                  </Card>
+                    )}
+                    {m.plan && m.plan.steps.length > 0 && (
+                      <AgentPlanActions
+                        plan={m.plan}
+                        canOpenPr={m.canOpenPr}
+                        busy={busy}
+                        onApprovePlan={
+                          m.canOpenPr
+                            ? undefined
+                            : () =>
+                                void sendText(
+                                  'Go — exécute ce plan en local, puis lance la preview.',
+                                )
+                        }
+                        onOpenPr={() =>
+                          void sendText(
+                            'Valide les changements locaux et ouvre une pull request.',
+                          )
+                        }
+                      />
+                    )}
+                    {m.needsUserAction && (
+                      <Card class="max-w-[92%] border-l-4 border-l-[var(--color-warn)]">
+                        <div class="flex items-start gap-3">
+                          <span class="text-2xl">⚠️</span>
+                          <div class="flex-1">
+                            <p class="mb-2 text-sm font-medium">Action requise</p>
+                            <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
+                              {m.needsUserAction.message_fr}
+                            </p>
+                            {m.needsUserAction.settings_href && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                href={m.needsUserAction.settings_href}
+                                class="mb-2"
+                              >
+                                Ouvrir les paramètres
+                              </Button>
+                            )}
+                            {m.needsUserAction.resume_hint && (
+                              <p class="mt-2 text-xs text-[var(--color-ink-faint)]">
+                                {m.needsUserAction.resume_hint}
+                              </p>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={busy}
+                              onClick={() => void sendText('Continuer')}
+                              class="mt-3"
+                            >
+                              Continuer
+                            </Button>
+                          </div>
+                        </div>
+                      </Card>
+                    )}
+                  </>
                 )}
               </div>
             ))}
+            {busy && liveActions.length > 0 && <AgentActionList actions={liveActions} />}
+            {busy && thinking && (
+              <AgentThinkingBlock label={thinking} startedAt={thinkStarted || Date.now()} />
+            )}
             <div ref={endRef} />
           </div>
 
@@ -464,7 +551,7 @@ export function ProjectAgentsPanel({
               />
             </div>
             <Button type="submit" variant="secondary" disabled={busy || !selected || !input.trim()} class="shrink-0">
-              {busy ? '…' : 'Envoyer'}
+              {busy ? <Spinner /> : 'Envoyer'}
             </Button>
           </form>
         </Card>
