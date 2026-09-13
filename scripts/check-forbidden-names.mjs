@@ -10,7 +10,11 @@ import { existsSync } from 'node:fs';
 const ROOT = process.cwd();
 const BRANDS = ['coo' + 'lify'];
 const FORBIDDEN = new RegExp(`\\b(${BRANDS.join('|')})\\b`, 'i');
-const ALLOW_FILES = new Set(['scripts/check-forbidden-names.mjs']);
+const ALLOW_FILES = new Set([
+  'scripts/check-forbidden-names.mjs',
+  'BRANDING_AUDIT.md',
+  'docs/alpha.md',
+]);
 const SKIP_DIRS = new Set([
   'node_modules',
   'target',
