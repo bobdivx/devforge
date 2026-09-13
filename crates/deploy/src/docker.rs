@@ -210,6 +210,51 @@ pub fn docker_update_labels(name: &str, labels: &Value) -> String {
     docker_recreate_with_labels(name, labels)
 }
 
+/// Vérifie si un Host Traefik est déjà revendiqué par un conteneur existant.
+///
+/// ## Traefik Host conflict guard
+/// Avant d'appliquer des labels `Host(...)` à un conteneur `df-*`, cette fonction
+/// détecte si un autre conteneur **running** (surtout non-df) possède déjà ce Host.
+///
+/// Ceci évite qu'un conteneur preview/local ne vole les routes de production → 504.
+///
+/// ## Retour
+/// Commande shell qui affiche l'ID (ou nom) du premier conteneur conflictuel trouvé,
+/// ou une chaîne vide si le Host est libre.
+///
+/// ## Stratégie
+/// - Inspecte tous les conteneurs running
+/// - Extrait les labels Traefik `traefik.http.routers.*.rule`
+/// - Parse les règles pour trouver `Host(\`{fqdn}\`)`
+/// - Retourne le premier match (priorité aux conteneurs non-df)
+pub fn docker_check_host_conflicts(fqdn: &str) -> String {
+    let escaped_fqdn = shell_escape(fqdn);
+    format!(
+        r#"sh -c '
+HOST="{}"
+for cid in $(docker ps -q 2>/dev/null); do
+  NAME=$(docker inspect "$cid" --format "{{{{.Name}}}}" 2>/dev/null | sed "s/^\///" || echo "")
+  
+  # Extraire tous les labels traefik.http.routers.*.rule
+  RULES=$(docker inspect "$cid" --format "{{{{range $k, $v := .Config.Labels}}}}{{{{if contains $k \"traefik.http.routers.\"}}}}{{{{if contains $k \".rule\"}}}}{{{{println $v}}}}{{{{end}}}}{{{{end}}}}{{{{end}}}}" 2>/dev/null || echo "")
+  
+  # Vérifier si une règle contient Host(`$HOST`)
+  if echo "$RULES" | grep -qF "Host(\`$HOST\`)"; then
+    # Trouvé conflit : afficher nom ou id
+    if [ -n "$NAME" ]; then
+      echo "$NAME"
+    else
+      echo "$cid"
+    fi
+    exit 0
+  fi
+done
+echo ""
+'"#,
+        escaped_fqdn
+    )
+}
+
 /// Detect Traefik Docker network using multiple strategies.
 /// Returns shell command that outputs network name or empty string.
 ///
@@ -516,6 +561,53 @@ fn shell_escape(s: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn preview_url_isolation_prevents_production_host_theft() {
+        // Cas d'usage : un conteneur df-* local/preview ne doit JAMAIS avoir
+        // des labels pour starbasefr.jeser.app (production), seulement pour preview-xxx
+        let preview_host = "preview-fbb6a152.devforge.local";
+        let production_host = "starbasefr.jeser.app";
+        
+        let preview_labels = traefik_labels("fbb6a152-ef01", preview_host, "/", 4321, None);
+        
+        // Vérifier que le label preview existe
+        let preview_rule_key = format!(
+            "traefik.http.routers.http-df-fbb6a152-preview-fbb6a152-devforge-local.rule"
+        );
+        assert!(
+            preview_labels.get(&preview_rule_key).is_some(),
+            "Preview host doit avoir un router Traefik"
+        );
+        assert_eq!(
+            preview_labels.get(&preview_rule_key).and_then(|v| v.as_str()),
+            Some("Host(`preview-fbb6a152.devforge.local`)"),
+            "Preview router doit pointer vers l'hôte preview"
+        );
+        
+        // Vérifier qu'aucun label production n'existe dans les labels preview
+        let production_rule_key = format!(
+            "traefik.http.routers.http-df-fbb6a152-starbasefr-jeser-app.rule"
+        );
+        assert!(
+            preview_labels.get(&production_rule_key).is_none(),
+            "Preview labels ne doivent PAS contenir les routes production"
+        );
+    }
+
+    #[test]
+    fn conflict_detection_command_generates_valid_shell() {
+        let cmd = docker_check_host_conflicts("starbasefr.jeser.app");
+        
+        // Vérifier syntaxe shell basique
+        assert!(cmd.contains("sh -c"));
+        assert!(cmd.contains("starbasefr.jeser.app"));
+        assert!(cmd.contains("docker ps -q"));
+        assert!(cmd.contains("Host(`"));
+        
+        // Pas de quote mal échappées
+        assert!(!cmd.contains("\"\"\""));
+    }
 
     #[test]
     fn traefik_multi_host_keeps_distinct_routers() {

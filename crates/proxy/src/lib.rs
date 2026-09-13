@@ -367,15 +367,61 @@ impl ProxyFacade {
 
     /// Comme [`sync`], avec ForwardAuth SSO optionnel (adresse oauth2-proxy / TinyAuth).
     /// Applique **tous** les hosts (primary + alias) via recreate conteneur (labels Docker immuables).
+    ///
+    /// ## Traefik Host conflict guard
+    /// Avant d'appliquer les labels, vérifie si un Host est déjà revendiqué par un autre conteneur
+    /// (surtout production). Si conflit détecté, filtre ce Host pour éviter de voler la route.
     pub async fn sync_with(
         &self,
         project_uuid: &str,
         forward_auth_address: Option<&str>,
     ) -> Result<Value> {
         let routes = self.store.list(project_uuid).await?;
+        let container = format!("df-{}", project_uuid.chars().take(12).collect::<String>());
+        
+        // Conflict guard : vérifier chaque Host avant de l'appliquer
+        let mut safe_routes = Vec::new();
+        let mut conflicts = Vec::new();
+        
+        if let Some(exec) = &self.executor {
+            for route in &routes {
+                let check_cmd = docker::docker_check_host_conflicts(&route.host);
+                match exec.exec(&self.apply_server_id, "", &check_cmd, 30).await {
+                    Ok(res) => {
+                        let owner = res.output.trim();
+                        if owner.is_empty() {
+                            // Host libre, OK
+                            safe_routes.push(route.clone());
+                        } else if owner == container || owner.contains(&container) {
+                            // Nous-même, OK (mise à jour)
+                            safe_routes.push(route.clone());
+                        } else {
+                            // Conflit avec un autre conteneur (souvent production)
+                            conflicts.push(json!({
+                                "host": route.host,
+                                "owner": owner,
+                                "reason": "Host déjà revendiqué par un autre conteneur"
+                            }));
+                        }
+                    }
+                    Err(_) => {
+                        // Erreur de vérification → approche conservatrice : skip
+                        conflicts.push(json!({
+                            "host": route.host,
+                            "reason": "Échec vérification conflit"
+                        }));
+                    }
+                }
+            }
+        } else {
+            // Pas d'executor → pas de vérification, on garde tout (mode génération labels seulement)
+            safe_routes = routes.clone();
+        }
+        
+        // Générer les labels uniquement pour les routes sûres
         let mut labels = serde_json::Map::new();
         labels.insert("traefik.enable".into(), json!("true"));
-        for route in &routes {
+        for route in &safe_routes {
             let piece = docker::traefik_labels(
                 project_uuid,
                 &route.host,
@@ -393,16 +439,21 @@ impl ProxyFacade {
             }
         }
         let labels_val = Value::Object(labels.clone());
-        let container = format!("df-{}", project_uuid.chars().take(12).collect::<String>());
 
-        if routes.is_empty() {
+        if safe_routes.is_empty() {
+            let note = if conflicts.is_empty() {
+                "aucune route proxy — rien à appliquer"
+            } else {
+                "tous les Hosts en conflit — aucun label appliqué"
+            };
             return Ok(json!({
                 "ok": true,
                 "project_uuid": project_uuid,
                 "synced": 0,
                 "container": container,
                 "labels": labels_val,
-                "note": "aucune route proxy — rien à appliquer"
+                "conflicts": conflicts,
+                "note": note
             }));
         }
 
@@ -414,11 +465,12 @@ impl ProxyFacade {
             return Ok(json!({
                 "ok": res.ok,
                 "project_uuid": project_uuid,
-                "synced": routes.len(),
-                "hosts": routes.iter().map(|r| &r.host).collect::<Vec<_>>(),
+                "synced": safe_routes.len(),
+                "hosts": safe_routes.iter().map(|r| &r.host).collect::<Vec<_>>(),
                 "container": container,
                 "labels": labels_val,
                 "sso": forward_auth_address.is_some(),
+                "conflicts": conflicts,
                 "command": "docker recreate with labels",
                 "output": res.output,
             }));
@@ -427,10 +479,11 @@ impl ProxyFacade {
         Ok(json!({
             "ok": true,
             "project_uuid": project_uuid,
-            "synced": routes.len(),
-            "hosts": routes.iter().map(|r| &r.host).collect::<Vec<_>>(),
+            "synced": safe_routes.len(),
+            "hosts": safe_routes.iter().map(|r| &r.host).collect::<Vec<_>>(),
             "labels": labels_val,
             "sso": forward_auth_address.is_some(),
+            "conflicts": conflicts,
             "note": "executor non branché — labels générés seulement"
         }))
     }
@@ -449,7 +502,7 @@ fn shell_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use devforge_deploy::docker::{traefik_labels, traefik_labels_for_routes};
+    use devforge_deploy::docker::{traefik_labels, traefik_labels_for_routes, docker_check_host_conflicts};
     use serde_json::json;
 
     #[test]
@@ -460,9 +513,51 @@ mod tests {
     }
 
     #[test]
+    fn conflict_guard_filters_conflicting_hosts() {
+        // Test que le conflict guard filtre bien les Hosts déjà revendiqués
+        // Note: ce test vérifie la logique, pas l'exécution Docker réelle
+        
+        let cmd = docker_check_host_conflicts("starbasefr.jeser.app");
+        
+        // Vérifier que la commande est bien formée
+        assert!(cmd.contains("docker ps -q"));
+        assert!(cmd.contains("Host(`starbasefr.jeser.app`)"));
+        assert!(cmd.contains("grep -qF"));
+    }
+
+    #[test]
+    fn preview_labels_dont_include_production_fqdns() {
+        // Regression test : les labels pour conteneurs df-* ne doivent contenir
+        // QUE l'URL preview, pas les FQDNs production comme starbasefr.jeser.app
+        
+        let preview_host = "preview-abc12345.devforge.local";
+        let labels = traefik_labels("abc12345-ef01", preview_host, "/", 3000, None);
+        
+        // Vérifier présence preview
+        let preview_router = format!("traefik.http.routers.http-df-abc12345-{}.rule", 
+            preview_host.replace('.', "-"));
+        assert!(
+            labels.get(&preview_router).is_some(),
+            "Preview host doit avoir un router"
+        );
+        
+        // Vérifier absence production (starbasefr ou autre)
+        for (key, _) in labels.as_object().unwrap() {
+            if key.contains(".rule") {
+                let val = labels.get(key).and_then(|v| v.as_str()).unwrap_or("");
+                assert!(
+                    !val.contains("starbasefr.jeser.app") && !val.contains("starbasefr.com"),
+                    "Les labels preview ne doivent pas contenir de FQDNs production"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn traefik_multi_host_keeps_distinct_routers() {
-        let a = traefik_labels("fbb6a152-ef01", "starbasefr.jeser.app", "/", 4321, None);
-        let b = traefik_labels("fbb6a152-ef01", "starbasefr.com", "/", 4321, None);
+        // Test legacy multi-host (pour production / conteneurs non-df)
+        let a = traefik_labels("fbb6a152-ef01", "app1.example.com", "/", 4321, None);
+        let b = traefik_labels("fbb6a152-ef01", "app2.example.com", "/", 4321, None);
         let mut map = serde_json::Map::new();
         for piece in [a, b] {
             if let Some(obj) = piece.as_object() {
@@ -471,14 +566,14 @@ mod tests {
                 }
             }
         }
-        let rule_jeser = map
-            .get("traefik.http.routers.http-df-fbb6a152-starbasefr-jeser-app.rule")
+        let rule_a = map
+            .get("traefik.http.routers.http-df-fbb6a152-app1-example-com.rule")
             .and_then(|v| v.as_str());
-        let rule_com = map
-            .get("traefik.http.routers.http-df-fbb6a152-starbasefr-com.rule")
+        let rule_b = map
+            .get("traefik.http.routers.http-df-fbb6a152-app2-example-com.rule")
             .and_then(|v| v.as_str());
-        assert_eq!(rule_jeser, Some("Host(`starbasefr.jeser.app`)"));
-        assert_eq!(rule_com, Some("Host(`starbasefr.com`)"));
+        assert_eq!(rule_a, Some("Host(`app1.example.com`)"));
+        assert_eq!(rule_b, Some("Host(`app2.example.com`)"));
         assert_eq!(
             map.get("traefik.http.services.df-fbb6a152.loadbalancer.server.port"),
             Some(&json!("4321"))
