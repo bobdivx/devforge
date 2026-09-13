@@ -1,0 +1,170 @@
+import { useEffect, useState } from 'preact/hooks';
+import { api } from '../../lib/api';
+import { Badge, Button, Input, Spinner } from '../ui';
+import { cn } from '../../lib/cn';
+
+type Props = {
+  open: boolean;
+  onClose: () => void;
+  projectUuid: string;
+};
+
+type EnvRow = {
+  key: string;
+  value: string;
+  secret: boolean;
+};
+
+export function EnvSheet({ open, onClose, projectUuid }: Props) {
+  const [rows, setRows] = useState<EnvRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [key, setKey] = useState('');
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    if (open) load();
+  }, [open, projectUuid]);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const r = await api.envList(projectUuid);
+      setRows(r.data ?? []);
+    } catch {
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function add(e: Event) {
+    e.preventDefault();
+    if (!key.trim()) return;
+    setBusy(true);
+    try {
+      await api.envUpsert(projectUuid, { key: key.trim(), value, secret: true });
+      setKey('');
+      setValue('');
+      await load();
+    } catch {
+      // Ignorer l'erreur
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(k: string) {
+    setBusy(true);
+    try {
+      await api.envDelete(projectUuid, k);
+      await load();
+    } catch {
+      // Ignorer l'erreur
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) return null;
+
+  return (
+    <div class="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+      <button
+        type="button"
+        aria-label="Fermer"
+        class="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div
+        class={cn(
+          'relative z-10 flex w-full flex-col overflow-hidden border border-[var(--color-line)] bg-[var(--color-card)] shadow-2xl',
+          'max-h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom,0px))] sm:max-h-[80dvh]',
+          'rounded-t-2xl border-b-0 sm:rounded-2xl sm:border',
+          'max-w-2xl sm:max-w-3xl',
+        )}
+      >
+        <div class="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--color-line)] px-4 py-3 sm:px-5">
+          <h2 class="text-base font-medium tracking-tight">Variables d'environnement</h2>
+          <button
+            type="button"
+            class="rounded-lg px-2 py-1 text-sm text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]"
+            onClick={onClose}
+            aria-label="Fermer"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div class="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3 sm:px-5">
+          <form class="flex gap-2" onSubmit={add}>
+            <Input
+              placeholder="KEY"
+              value={key}
+              onInput={(e) => setKey((e.target as HTMLInputElement).value)}
+              class="flex-1"
+            />
+            <Input
+              placeholder="value"
+              value={value}
+              onInput={(e) => setValue((e.target as HTMLInputElement).value)}
+              class="flex-1"
+            />
+            <Button type="submit" variant="secondary" disabled={busy} class="shrink-0">
+              Ajouter
+            </Button>
+          </form>
+
+          {loading ? (
+            <div class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)]">
+              <Spinner /> Chargement…
+            </div>
+          ) : rows.length === 0 ? (
+            <p class="text-sm text-[var(--color-ink-muted)]">Aucune variable.</p>
+          ) : (
+            <ul class="space-y-2">
+              {rows.map((r) => (
+                <li
+                  key={r.key}
+                  class="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2"
+                >
+                  <div class="min-w-0 flex-1">
+                    <div class="font-mono text-sm">{r.key}</div>
+                    <div class="mt-0.5 truncate text-xs text-[var(--color-ink-muted)]">
+                      {r.secret ? '••••••••' : r.value}
+                    </div>
+                  </div>
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => remove(r.key)}>
+                    Supprimer
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div class="flex shrink-0 items-center justify-between gap-2 border-t border-[var(--color-line)] bg-[var(--color-card)] px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] sm:px-5">
+          <Button
+            variant="ghost"
+            size="sm"
+            href={`/app/projects/view?uuid=${encodeURIComponent(projectUuid)}&tab=env`}
+          >
+            Voir tous les détails
+          </Button>
+          <Button variant="ghost" onClick={onClose}>
+            Fermer
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
