@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 use crate::pocket_id;
-use crate::sso::{load_sso_settings, SsoSettings};
+use crate::sso::load_sso_settings;
 use crate::state::Project;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -50,22 +50,71 @@ pub fn derive_client_id(project_slug: &str) -> String {
 }
 
 /// Construit les callback URLs précis pour un projet donné.
+/// Inclut les variantes hostname (*.briseteia.me legacy, www.) pour couvrir les routes Traefik.
 pub fn project_callback_urls(project: &Project) -> Vec<String> {
     let mut urls = Vec::new();
     
     if let Some(prod_url) = project.production_url.as_deref() {
         let origin = normalize_origin(prod_url);
         if !origin.is_empty() {
-            urls.push(format!("{}/api/auth/callback/pocket-id", origin));
-            urls.push(format!("{}/api/auth/callback/pocket-id/", origin));
-            urls.push(format!("{}/api/auth/callback/oidc", origin));
-            urls.push(format!("{}/api/auth/callback/oidc/", origin));
-            urls.push(format!("{}/oauth2/callback", origin));
-            urls.push(format!("{}/oauth2/callback/", origin));
+            let origins = derive_callback_origins(&origin);
+            for base in &origins {
+                urls.push(format!("{}/api/auth/callback/pocket-id", base));
+                urls.push(format!("{}/api/auth/callback/pocket-id/", base));
+                urls.push(format!("{}/api/auth/callback/oidc", base));
+                urls.push(format!("{}/api/auth/callback/oidc/", base));
+                urls.push(format!("{}/oauth2/callback", base));
+                urls.push(format!("{}/oauth2/callback/", base));
+            }
         }
     }
     
     urls
+}
+
+/// Dérive les origines alternatives pour callbacks OIDC (legacy *.briseteia.me, www.).
+fn derive_callback_origins(origin: &str) -> Vec<String> {
+    let mut origins = vec![origin.to_string()];
+    
+    if let Some(host) = extract_host(origin) {
+        // Si *.jeser.app → ajouter *.briseteia.me legacy
+        if host.ends_with(".jeser.app") {
+            if let Some(prefix) = host.strip_suffix(".jeser.app") {
+                let legacy = format!("https://{}.briseteia.me", prefix);
+                origins.push(legacy);
+            }
+        }
+        
+        // Si domaine apex (pas de sous-domaine sauf www) → ajouter variante www.
+        if !host.starts_with("www.") && is_apex_domain(&host) {
+            let with_www = origin.replace(&format!("://{}", host), &format!("://www.{}", host));
+            if with_www != origin {
+                origins.push(with_www);
+            }
+        }
+        // Si commence par www. → ajouter variante sans www.
+        if let Some(without_www) = host.strip_prefix("www.") {
+            let no_www = origin.replace(&format!("://{}", host), &format!("://{}", without_www));
+            if no_www != origin {
+                origins.push(no_www);
+            }
+        }
+    }
+    
+    origins
+}
+
+fn extract_host(origin: &str) -> Option<&str> {
+    let after_scheme = origin
+        .strip_prefix("https://")
+        .or_else(|| origin.strip_prefix("http://"))?;
+    after_scheme.split('/').next()
+}
+
+fn is_apex_domain(host: &str) -> bool {
+    let parts: Vec<&str> = host.split('.').collect();
+    // Apex = exactement 2 segments (example.com) ou 3 si dernier est TLD composé (.co.uk)
+    parts.len() == 2 || (parts.len() == 3 && parts[1].len() <= 3)
 }
 
 fn normalize_origin(url: &str) -> String {
@@ -274,5 +323,45 @@ mod tests {
         let urls = project_callback_urls(&project);
         assert!(urls.contains(&"https://app.example.com/api/auth/callback/pocket-id".into()));
         assert!(urls.contains(&"https://app.example.com/oauth2/callback".into()));
+    }
+
+    #[test]
+    fn test_derive_callback_origins_jeser_app() {
+        let origins = derive_callback_origins("https://sonozz.jeser.app");
+        assert_eq!(origins.len(), 2);
+        assert!(origins.contains(&"https://sonozz.jeser.app".into()));
+        assert!(origins.contains(&"https://sonozz.briseteia.me".into()));
+    }
+
+    #[test]
+    fn test_derive_callback_origins_apex_domain() {
+        let origins = derive_callback_origins("https://example.com");
+        assert!(origins.len() >= 2);
+        assert!(origins.contains(&"https://example.com".into()));
+        assert!(origins.contains(&"https://www.example.com".into()));
+    }
+
+    #[test]
+    fn test_derive_callback_origins_with_www() {
+        let origins = derive_callback_origins("https://www.example.com");
+        assert!(origins.len() >= 2);
+        assert!(origins.contains(&"https://www.example.com".into()));
+        assert!(origins.contains(&"https://example.com".into()));
+    }
+
+    #[test]
+    fn test_extract_host() {
+        assert_eq!(extract_host("https://example.com"), Some("example.com"));
+        assert_eq!(extract_host("https://sub.example.com"), Some("sub.example.com"));
+        assert_eq!(extract_host("https://example.com/path"), Some("example.com"));
+        assert_eq!(extract_host("http://localhost:3000"), Some("localhost:3000"));
+    }
+
+    #[test]
+    fn test_is_apex_domain() {
+        assert!(is_apex_domain("example.com"));
+        assert!(is_apex_domain("example.co.uk"));
+        assert!(!is_apex_domain("sub.example.com"));
+        assert!(!is_apex_domain("www.example.com"));
     }
 }
