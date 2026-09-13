@@ -4,7 +4,24 @@ use devforge_mcp::McpFacade;
 use devforge_shared::{Result, Tool};
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+const SKIP_DIR_NAMES: &[&str] = &[
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    "target",
+    ".astro",
+    ".next",
+    ".vercel",
+    ".cache",
+    "vendor",
+    "__pycache__",
+];
+const MAX_LIST_FILES: usize = 200;
+const MAX_READ_BYTES: usize = 150_000;
 
 /// Tool pour écrire des fichiers dans le workdir du projet (local) ou sur GitHub.
 pub struct WriteProjectFileTool {
@@ -371,6 +388,263 @@ impl WriteProjectFileTool {
                 "error": format!("Échec écriture GitHub : {e}"),
                 "step": "create_or_update_file"
             })),
+        }
+    }
+}
+
+/// Lit un fichier du workdir local (pas GitHub).
+pub struct ReadProjectFileTool {
+    pub pool: Arc<SqlitePool>,
+}
+
+#[async_trait]
+impl Tool for ReadProjectFileTool {
+    fn name(&self) -> &str {
+        "read_project_file"
+    }
+
+    fn description(&self) -> &str {
+        "Lit un fichier dans le workdir LOCAL du projet (dossier de l'app).\n\
+         Préfère cet outil à read_github_file pour travailler sur les fichiers en cours.\n\
+         \n\
+         Paramètres : project_uuid (injecté), path (relatif, ex: src/pages/index.astro)."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "project_uuid": {
+                    "type": "string",
+                    "description": "UUID du projet (injecté automatiquement)"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Chemin relatif dans le workdir"
+                }
+            },
+            "required": ["project_uuid", "path"]
+        })
+    }
+
+    async fn execute(&self, arguments: Value) -> Result<Value> {
+        let project_uuid = arguments
+            .get("project_uuid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let path = arguments
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+
+        let resolved = match resolve_workdir_file(&self.pool, project_uuid, path).await {
+            Ok(v) => v,
+            Err(err) => return Ok(err),
+        };
+
+        if !resolved.file_path.is_file() {
+            return Ok(json!({
+                "ok": false,
+                "error": format!("Fichier introuvable : {path}"),
+                "workdir": resolved.workdir
+            }));
+        }
+
+        let bytes = std::fs::read(&resolved.file_path).map_err(|e| {
+            devforge_shared::DevForgeError::Message(format!("Lecture impossible : {e}"))
+        })?;
+
+        if bytes.contains(&0) {
+            return Ok(json!({
+                "ok": false,
+                "error": "Fichier binaire — lecture texte refusée",
+                "path": path,
+                "bytes": bytes.len()
+            }));
+        }
+
+        if bytes.len() > MAX_READ_BYTES {
+            let preview = String::from_utf8_lossy(&bytes[..MAX_READ_BYTES]).into_owned();
+            return Ok(json!({
+                "ok": true,
+                "path": path,
+                "truncated": true,
+                "bytes": bytes.len(),
+                "content": preview,
+                "message": format!("Fichier tronqué à {MAX_READ_BYTES} octets")
+            }));
+        }
+
+        let content = String::from_utf8_lossy(&bytes).into_owned();
+        Ok(json!({
+            "ok": true,
+            "path": path,
+            "bytes": bytes.len(),
+            "content": content
+        }))
+    }
+}
+
+/// Liste les fichiers du workdir local.
+pub struct ListProjectFilesTool {
+    pub pool: Arc<SqlitePool>,
+}
+
+#[async_trait]
+impl Tool for ListProjectFilesTool {
+    fn name(&self) -> &str {
+        "list_project_files"
+    }
+
+    fn description(&self) -> &str {
+        "Liste les fichiers du workdir LOCAL du projet (ignore node_modules, .git, dist…).\n\
+         Utile pour comprendre la structure avant de modifier.\n\
+         \n\
+         Paramètres : project_uuid (injecté), path optionnel (sous-dossier relatif)."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "project_uuid": {
+                    "type": "string",
+                    "description": "UUID du projet (injecté automatiquement)"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Sous-dossier relatif (défaut: racine du workdir)"
+                }
+            },
+            "required": ["project_uuid"]
+        })
+    }
+
+    async fn execute(&self, arguments: Value) -> Result<Value> {
+        let project_uuid = arguments
+            .get("project_uuid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let rel = arguments
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+
+        let resolved = match resolve_workdir_file(&self.pool, project_uuid, rel).await {
+            Ok(v) => v,
+            Err(err) => return Ok(err),
+        };
+
+        if !resolved.file_path.exists() {
+            return Ok(json!({
+                "ok": false,
+                "error": format!("Chemin introuvable : {}", if rel.is_empty() { resolved.workdir.clone() } else { rel.to_string() })
+            }));
+        }
+
+        let mut files = Vec::new();
+        collect_files(&resolved.file_path, &resolved.file_path, &mut files);
+        let truncated = files.len() > MAX_LIST_FILES;
+        files.truncate(MAX_LIST_FILES);
+
+        Ok(json!({
+            "ok": true,
+            "workdir": resolved.workdir,
+            "path": rel,
+            "count": files.len(),
+            "truncated": truncated,
+            "files": files
+        }))
+    }
+}
+
+struct ResolvedWorkdirFile {
+    workdir: String,
+    file_path: PathBuf,
+}
+
+async fn resolve_workdir_file(
+    pool: &SqlitePool,
+    project_uuid: &str,
+    rel: &str,
+) -> std::result::Result<ResolvedWorkdirFile, Value> {
+    if project_uuid.is_empty() {
+        return Err(json!({
+            "ok": false,
+            "error": "project_uuid requis"
+        }));
+    }
+    if rel.contains("..") || rel.starts_with('/') {
+        return Err(json!({
+            "ok": false,
+            "error": "Chemin invalide : pas de '..' ni chemins absolus"
+        }));
+    }
+
+    let project: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT uuid, workdir FROM projects WHERE uuid = ?")
+            .bind(project_uuid)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| json!({"ok": false, "error": e.to_string()}))?;
+
+    let Some((uuid, workdir_opt)) = project else {
+        return Err(json!({
+            "ok": false,
+            "error": format!("Projet introuvable : {project_uuid}")
+        }));
+    };
+
+    let workdir_raw = workdir_opt.as_deref().unwrap_or("").trim();
+    if workdir_raw.is_empty() {
+        return Err(json!({
+            "ok": false,
+            "error": "Le projet n'a pas de workdir configuré."
+        }));
+    }
+
+    let workdir = devforge_deploy::resolve_project_workdir(workdir_raw, &uuid);
+    let file_path = if rel.is_empty() {
+        PathBuf::from(&workdir)
+    } else {
+        Path::new(&workdir).join(rel)
+    };
+
+    Ok(ResolvedWorkdirFile { workdir, file_path })
+}
+
+fn collect_files(root: &Path, current: &Path, out: &mut Vec<String>) {
+    if out.len() >= MAX_LIST_FILES {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(current) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        if out.len() >= MAX_LIST_FILES {
+            break;
+        }
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if SKIP_DIR_NAMES.contains(&name_str.as_ref()) || name_str.starts_with('.') {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            collect_files(root, &path, out);
+        } else if path.is_file() {
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            out.push(rel);
         }
     }
 }
