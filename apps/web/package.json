@@ -21,5 +21,9 @@
   },
   "allowScripts": {
     "esbuild": true
+  },
+  "optionalDependencies": {
+    "@astrojs/compiler-binding-linux-x64-gnu": "0.4.0",
+    "@rolldown/binding-linux-x64-gnu": "1.2.8"
   }
 }

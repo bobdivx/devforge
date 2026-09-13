@@ -26,14 +26,11 @@ jobs:
         working-directory: apps/web
         run: |
           npm install --include=optional
-          set +e
-          npm run build > /tmp/web-build.log 2>&1
-          STATUS=$?
-          echo "build exit=$STATUS"
-          tail -n 40 /tmp/web-build.log | while IFS= read -r line; do
-            echo "::error::$line"
-          done
-          exit "$STATUS"
+          # npm#4828: optional native bindings sometimes skipped on linux CI
+          npm install --no-save --include=optional \
+            @astrojs/compiler-binding-linux-x64-gnu@0.4.0 \
+            @rolldown/binding-linux-x64-gnu@1.2.8
+          npm run build
 
   no-forbidden-brands:
     runs-on: ubuntu-latest
