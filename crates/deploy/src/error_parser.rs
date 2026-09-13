@@ -49,15 +49,14 @@ pub fn parse_deploy_error_fr(logs: &str) -> Option<DeployError> {
             || logs_lower.contains("the command") && logs_lower.contains("returned a non-zero code")
             || logs_lower.contains("exited with code"))
     {
-            return Some(DeployError {
-                summary: "Échec d'une commande RUN dans le Dockerfile".into(),
-                hint: Some(
-                    "Vérifiez les logs du build Docker ci-dessus pour identifier la commande \
-                     qui a échoué. Testez le build localement avec 'docker build .'."
-                        .into(),
-                ),
-            });
-        }
+        return Some(DeployError {
+            summary: "Échec d'une commande RUN dans le Dockerfile".into(),
+            hint: Some(
+                "Vérifiez les logs du build Docker ci-dessus pour identifier la commande \
+                 qui a échoué. Testez le build localement avec 'docker build .'."
+                    .into(),
+            ),
+        });
     }
 
     // OOM (out of memory)
@@ -83,15 +82,14 @@ pub fn parse_deploy_error_fr(logs: &str) -> Option<DeployError> {
             || logs_lower.contains("failed")
             || logs_lower.contains("unhealthy"))
     {
-            return Some(DeployError {
-                summary: "Healthcheck timeout : l'application ne démarre pas correctement".into(),
-                hint: Some(
-                    "L'application build correctement mais ne répond pas sur le port attendu. \
-                     Vérifiez les logs du conteneur (docker logs) pour voir pourquoi il ne démarre pas."
-                        .into(),
-                ),
-            });
-        }
+        return Some(DeployError {
+            summary: "Healthcheck timeout : l'application ne démarre pas correctement".into(),
+            hint: Some(
+                "L'application build correctement mais ne répond pas sur le port attendu. \
+                 Vérifiez les logs du conteneur (docker logs) pour voir pourquoi il ne démarre pas."
+                    .into(),
+            ),
+        });
     }
 
     // Port binding conflict
