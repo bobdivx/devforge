@@ -5,11 +5,6 @@ on:
     branches: [main]
   pull_request:
 
-permissions:
-  contents: read
-  pull-requests: write
-  checks: write
-
 jobs:
   rust:
     runs-on: ubuntu-latest
@@ -30,19 +25,15 @@ jobs:
       - name: Install and build
         working-directory: apps/web
         run: |
-          set +e
           npm install --include=optional
-          INST=$?
-          echo "npm install exit=$INST"
-          ls node_modules/.bin || true
-          node -e "try{console.log('astro', require.resolve('astro'))}catch(e){console.error('NO ASTRO', e.message)}"
-          npm run build
-          BUILD=$?
-          echo "npm run build exit=$BUILD"
-          if [ "$INST" -ne 0 ] || [ "$BUILD" -ne 0 ]; then
-            echo "::error::web CI failed install=$INST build=$BUILD"
-            exit 1
-          fi
+          set +e
+          npm run build > /tmp/web-build.log 2>&1
+          STATUS=$?
+          echo "build exit=$STATUS"
+          tail -n 40 /tmp/web-build.log | while IFS= read -r line; do
+            echo "::error::$line"
+          done
+          exit "$STATUS"
 
   no-forbidden-brands:
     runs-on: ubuntu-latest
