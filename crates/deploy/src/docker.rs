@@ -193,6 +193,32 @@ if [ -n \"$ids\" ]; then docker rm -f $ids >/dev/null 2>&1 || true; fi",
     }
 }
 
+/// Like docker_prepare_run but KEEPS the container named `except_name` alive (blue/green).
+/// Only removes other containers publishing the same port.
+pub fn docker_prepare_run_except(except_name: &str, host_port: u16) -> String {
+    if cfg!(windows) {
+        format!(
+            "$ids = @(docker ps -aq --filter publish={p} 2>$null | Where-Object {{ \
+                $n = (docker inspect $_ --format '{{{{.Name}}}}' 2>$null); \
+                $n -ne '/{except}' -and $n -ne '{except}' \
+            }}); if ($ids) {{ docker rm -f @($ids) 2>$null }}",
+            p = host_port,
+            except = shell_escape(except_name)
+        )
+    } else {
+        format!(
+            "for id in $(docker ps -aq --filter publish={p} 2>/dev/null || true); do \
+                n=$(docker inspect \"$id\" --format '{{{{.Name}}}}' 2>/dev/null || echo ''); \
+                if [ \"$n\" != '/{except}' ] && [ \"$n\" != '{except}' ]; then \
+                    docker rm -f \"$id\" >/dev/null 2>&1 || true; \
+                fi; \
+            done",
+            p = host_port,
+            except = shell_escape(except_name)
+        )
+    }
+}
+
 pub fn docker_restart(name: &str) -> String {
     format!("docker restart {}", shell_escape(name))
 }

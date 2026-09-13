@@ -70,6 +70,15 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    for (col, def) in [
+        ("error_summary", "TEXT"),
+        ("error_hint", "TEXT"),
+        ("live_revision_sha", "TEXT"),
+    ] {
+        let sql = format!("ALTER TABLE deployments ADD COLUMN {col} {def}");
+        let _ = sqlx::query(&sql).execute(pool).await;
+    }
+
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS project_env_vars (

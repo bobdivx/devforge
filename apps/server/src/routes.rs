@@ -34,6 +34,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/api/v1/deployments/{uuid}", get(get_deployment))
         .route("/api/v1/deployments/{uuid}/logs", get(deployment_logs))
+        .route("/api/v1/deployments/{uuid}/request-repair", post(request_repair))
         .route("/api/v1/agent/tools", get(agent_tools))
         .route("/api/v1/agent/chat", post(agent_chat))
         .route("/api/v1/agent/tools/{tool}", post(agent_execute_tool))
@@ -827,6 +828,17 @@ async fn create_deployment(
         .await
         .map_err(ApiError::from)?;
 
+    // Charger le SHA de la révision actuellement en production avant le deploy
+    let live_revision_sha: Option<String> = sqlx::query_as(
+        "SELECT git_sha FROM deployments WHERE project_id = ? AND status = 'success' ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(project.id)
+    .fetch_optional(&state.pool)
+    .await
+    .ok()
+    .flatten()
+    .map(|(sha,)| sha);
+
     let result = run_real_deploy(&state, &project).await;
     let finished = now_str();
     let status = if result.ok { "success" } else { "failed" };
@@ -835,13 +847,27 @@ async fn create_deployment(
         .or(body.git_sha)
         .unwrap_or_else(|| "unknown".into());
 
+    // Parse error if deploy failed
+    let (error_summary, error_hint) = if !result.ok {
+        let parsed = devforge_deploy::parse_deploy_error_fr(&result.logs);
+        match parsed {
+            Some(err) => (Some(err.summary), err.hint),
+            None => (Some("Échec du déploiement".into()), None),
+        }
+    } else {
+        (None, None)
+    };
+
     sqlx::query(
-        r#"UPDATE deployments SET status = ?, git_sha = ?, logs = ?, finished_at = ?, updated_at = ?
+        r#"UPDATE deployments SET status = ?, git_sha = ?, logs = ?, error_summary = ?, error_hint = ?, live_revision_sha = ?, finished_at = ?, updated_at = ?
            WHERE uuid = ?"#,
     )
     .bind(status)
     .bind(&sha)
     .bind(&result.logs)
+    .bind(&error_summary)
+    .bind(&error_hint)
+    .bind(&live_revision_sha)
     .bind(&finished)
     .bind(&finished)
     .bind(&dep_uuid)
@@ -863,6 +889,23 @@ async fn create_deployment(
         .fetch_one(&state.pool)
         .await
         .map_err(ApiError::from)?;
+
+    // Auto-repair on failure (default ON)
+    if !result.ok {
+        let auto_repair_enabled = std::env::var("DEVFORGE_AUTO_REPAIR")
+            .ok()
+            .and_then(|v| v.parse::<bool>().ok())
+            .unwrap_or(true); // Default ON
+        
+        if auto_repair_enabled {
+            // Trigger repair async (don't block response)
+            let state_clone = state.clone();
+            let dep_uuid_clone = dep_uuid.clone();
+            tokio::spawn(async move {
+                let _ = auto_trigger_repair(&state_clone, &dep_uuid_clone).await;
+            });
+        }
+    }
 
     Ok((
         if result.ok {
@@ -965,8 +1008,112 @@ async fn deployment_logs(
         "data": {
             "uuid": dep.uuid,
             "status": dep.status,
-            "logs": dep.logs.unwrap_or_default()
+            "logs": dep.logs.unwrap_or_default(),
+            "error_summary": dep.error_summary,
+            "error_hint": dep.error_hint,
+            "live_revision_sha": dep.live_revision_sha,
         }
+    })))
+}
+
+/// POST /api/v1/deployments/{uuid}/request-repair
+/// Déclenche un agent de réparation pour un déploiement échoué.
+async fn request_repair(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let (_user, _ws, dep) = auth_deployment(&state, &headers, &uuid).await?;
+    
+    if dep.status != "failed" {
+        return Err(ApiError::message(
+            "Seuls les déploiements 'failed' peuvent être réparés",
+        ));
+    }
+    
+    // Trouver le projet
+    let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE id = ?")
+        .bind(dep.project_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::not_found("project"))?;
+    
+    // Trouver l'agent deploy du projet
+    let agent_uuid: Option<(String,)> = sqlx::query_as(
+        "SELECT uuid FROM project_agents WHERE project_uuid = ? AND role = 'deploy' LIMIT 1",
+    )
+    .bind(&project.uuid)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+    
+    let Some((agent_uuid,)) = agent_uuid else {
+        return Err(ApiError::message("Aucun agent deploy trouvé pour ce projet"));
+    };
+    
+    // Créer un message de réparation pour l'agent
+    let summary = dep.error_summary.as_deref().unwrap_or("Échec du déploiement");
+    let hint = dep.error_hint.as_deref().unwrap_or("");
+    let logs_truncated: String = dep.logs.as_deref().unwrap_or("").chars().take(2000).collect();
+    
+    let repair_prompt = format!(
+        "🔧 AUTO-RÉPARATION DÉPLOIEMENT\n\n\
+        Le déploiement {} a échoué.\n\n\
+        **Erreur** : {}\n\
+        **Indice** : {}\n\n\
+        **Logs (tronqués)** :\n```\n{}\n```\n\n\
+        **Ton rôle** :\n\
+        1. Analyser l'erreur\n\
+        2. Identifier le problème dans le code\n\
+        3. Proposer ET appliquer un fix\n\
+        4. Expliquer à l'utilisateur ce qui a été corrigé\n\n\
+        Utilise les tools disponibles (read_project_file, write_project_file, read_github_file, create_github_fix, trigger_deploy).",
+        dep.uuid,
+        summary,
+        if hint.is_empty() { "Aucun" } else { hint },
+        logs_truncated
+    );
+    
+    let now = now_str();
+    let msg_uuid = new_uuid();
+    
+    sqlx::query(
+        r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
+           VALUES (?, ?, ?, 'user', ?, '[]', 'system', ?)"#,
+    )
+    .bind(&msg_uuid)
+    .bind(&project.uuid)
+    .bind(&agent_uuid)
+    .bind(&repair_prompt)
+    .bind(&now)
+    .execute(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+    
+    // Marquer l'agent comme working
+    sqlx::query(
+        "UPDATE project_agents SET status = 'working', updated_at = ? WHERE uuid = ?",
+    )
+    .bind(&now)
+    .bind(&agent_uuid)
+    .execute(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+    
+    // Kick the agent asynchronously
+    let state_clone = state.clone();
+    let project_uuid = project.uuid.clone();
+    let agent_uuid_clone = agent_uuid.clone();
+    tokio::spawn(async move {
+        let _ = trigger_agent_turn(&state_clone, &project_uuid, &agent_uuid_clone).await;
+    });
+    
+    Ok(Json(json!({
+        "ok": true,
+        "message": "Agent de réparation lancé",
+        "agent_uuid": agent_uuid,
+        "deployment_uuid": dep.uuid
     })))
 }
 
@@ -1067,6 +1214,105 @@ async fn build_project_agent_brief(
         git_repo,
         git_branch,
     })
+}
+
+/// Auto-trigger repair after failed deployment (max once per deployment uuid).
+async fn auto_trigger_repair(state: &AppState, dep_uuid: &str) -> Result<(), String> {
+    // Check if repair already attempted for this deployment
+    let already_attempted: Option<(i64,)> = sqlx::query_as(
+        "SELECT COUNT(*) FROM agent_messages WHERE content LIKE ? AND content LIKE ?",
+    )
+    .bind(format!("%AUTO-RÉPARATION%{}%", dep_uuid))
+    .bind("%AUTO-RÉPARATION DÉPLOIEMENT%")
+    .fetch_optional(&state.pool)
+    .await
+    .ok()
+    .flatten();
+    
+    if let Some((count,)) = already_attempted {
+        if count > 0 {
+            tracing::info!("Auto-repair déjà tenté pour {}, skip", dep_uuid);
+            return Ok(());
+        }
+    }
+    
+    let dep = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = ?")
+        .bind(dep_uuid)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Deployment not found".to_string())?;
+    
+    let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE id = ?")
+        .bind(dep.project_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Project not found".to_string())?;
+    
+    let agent_uuid: Option<(String,)> = sqlx::query_as(
+        "SELECT uuid FROM project_agents WHERE project_uuid = ? AND role = 'deploy' LIMIT 1",
+    )
+    .bind(&project.uuid)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    
+    let Some((agent_uuid,)) = agent_uuid else {
+        return Err("No deploy agent found".to_string());
+    };
+    
+    let summary = dep.error_summary.as_deref().unwrap_or("Échec du déploiement");
+    let hint = dep.error_hint.as_deref().unwrap_or("");
+    let logs_truncated: String = dep.logs.as_deref().unwrap_or("").chars().take(2000).collect();
+    
+    let repair_prompt = format!(
+        "🔧 AUTO-RÉPARATION DÉPLOIEMENT\n\n\
+        Le déploiement {} a échoué.\n\n\
+        **Erreur** : {}\n\
+        **Indice** : {}\n\n\
+        **Logs (tronqués)** :\n```\n{}\n```\n\n\
+        **Ton rôle** :\n\
+        1. Analyser l'erreur\n\
+        2. Identifier le problème dans le code\n\
+        3. Proposer ET appliquer un fix\n\
+        4. Expliquer à l'utilisateur ce qui a été corrigé\n\n\
+        Utilise les tools disponibles (read_project_file, write_project_file, read_github_file, create_github_fix, trigger_deploy).",
+        dep.uuid,
+        summary,
+        if hint.is_empty() { "Aucun" } else { hint },
+        logs_truncated
+    );
+    
+    let now = now_str();
+    let msg_uuid = new_uuid();
+    
+    sqlx::query(
+        r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
+           VALUES (?, ?, ?, 'user', ?, '[]', 'system', ?)"#,
+    )
+    .bind(&msg_uuid)
+    .bind(&project.uuid)
+    .bind(&agent_uuid)
+    .bind(&repair_prompt)
+    .bind(&now)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    
+    sqlx::query(
+        "UPDATE project_agents SET status = 'working', updated_at = ? WHERE uuid = ?",
+    )
+    .bind(&now)
+    .bind(&agent_uuid)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    
+    let _ = trigger_agent_turn(state, &project.uuid, &agent_uuid).await;
+    
+    tracing::info!("Auto-repair lancé pour déploiement {}", dep_uuid);
+    Ok(())
 }
 
 /// Déclenche un tour d'agent de manière interne (sans requête HTTP).
@@ -2052,4 +2298,86 @@ impl IntoResponse for ApiError {
         )
             .into_response()
     }
+}
+
+/// Auto-trigger repair agent after deployment failure.
+async fn auto_trigger_repair(state: &AppState, dep_uuid: &str) -> Result<(), String> {
+    let dep = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = ?")
+        .bind(dep_uuid)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Deployment not found".to_string())?;
+    
+    if dep.status != "failed" {
+        return Ok(());
+    }
+    
+    let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE id = ?")
+        .bind(dep.project_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Project not found".to_string())?;
+    
+    let agent_uuid: Option<(String,)> = sqlx::query_as(
+        "SELECT uuid FROM project_agents WHERE project_uuid = ? AND role = 'deploy' LIMIT 1",
+    )
+    .bind(&project.uuid)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    
+    let Some((agent_uuid,)) = agent_uuid else {
+        return Err("No deploy agent found".into());
+    };
+    
+    let summary = dep.error_summary.as_deref().unwrap_or("Échec du déploiement");
+    let hint = dep.error_hint.as_deref().unwrap_or("");
+    let logs_truncated: String = dep.logs.as_deref().unwrap_or("").chars().take(2000).collect();
+    
+    let repair_prompt = format!(
+        "🔧 AUTO-RÉPARATION DÉPLOIEMENT\n\n\
+        Le déploiement {} a échoué.\n\n\
+        **Erreur** : {}\n\
+        **Indice** : {}\n\n\
+        **Logs (tronqués)** :\n```\n{}\n```\n\n\
+        **Ton rôle** :\n\
+        1. Analyser l'erreur\n\
+        2. Identifier le problème dans le code\n\
+        3. Proposer ET appliquer un fix\n\
+        4. Expliquer à l'utilisateur ce qui a été corrigé\n\n\
+        Utilise les tools disponibles (read_project_file, write_project_file, read_github_file, create_github_fix, trigger_deploy).",
+        dep.uuid,
+        summary,
+        if hint.is_empty() { "Aucun" } else { hint },
+        logs_truncated
+    );
+    
+    let now = now_str();
+    let msg_uuid = new_uuid();
+    
+    sqlx::query(
+        r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
+           VALUES (?, ?, ?, 'user', ?, '[]', 'system-autorepair', ?)"#,
+    )
+    .bind(&msg_uuid)
+    .bind(&project.uuid)
+    .bind(&agent_uuid)
+    .bind(&repair_prompt)
+    .bind(&now)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    
+    sqlx::query(
+        "UPDATE project_agents SET status = 'working', updated_at = ? WHERE uuid = ?",
+    )
+    .bind(&now)
+    .bind(&agent_uuid)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    
+    trigger_agent_turn(state, &project.uuid, &agent_uuid).await
 }
