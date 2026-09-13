@@ -17,6 +17,8 @@ mod runner_routes;
 mod runner_store;
 mod security;
 mod pocket_id;
+mod project_oidc;
+mod project_oidc_routes;
 mod sso;
 mod sso_routes;
 mod state;
@@ -102,6 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(infra_routes::router())
         .merge(backup_routes::router())
         .merge(sso_routes::router())
+        .merge(project_oidc_routes::router())
         .merge(llm_routes::router())
         .merge(mcp_routes::router())
         .merge(runner_routes::router())

@@ -141,7 +141,13 @@ pub async fn sync_project_proxy(state: &AppState, project: &Project) {
         .await;
 }
 
-/// Injecte les variables OIDC manquantes (ne remplace jamais une clé déjà définie).
+/// Injecte les variables OIDC manquantes.
+/// 
+/// Priorise les credentials du client OIDC dédié du projet si disponibles,
+/// sinon utilise le client partagé de la plateforme.
+/// 
+/// **Migration** : Pour les projets existants, remplace les anciennes valeurs
+/// du client partagé par celles du client dédié si un provisionnement a été effectué.
 pub async fn ensure_oidc_env(pool: &sqlx::SqlitePool, project: &Project) -> usize {
     let settings = load_sso_settings(pool).await;
     if !settings.oidc_configured() {
@@ -151,8 +157,19 @@ pub async fn ensure_oidc_env(pool: &sqlx::SqlitePool, project: &Project) -> usiz
     if issuer.is_empty() {
         return 0;
     }
-    let client_id = settings.sso_apps_client_id.trim().to_string();
-    let client_secret = settings.sso_apps_client_secret.trim().to_string();
+    
+    let project_client = crate::project_oidc::load_project_oidc_client(pool, &project.uuid).await;
+    
+    let (client_id, client_secret, force_update) = if let Some(pc) = project_client {
+        (pc.client_id, pc.client_secret, true)
+    } else {
+        (
+            settings.sso_apps_client_id.trim().to_string(),
+            settings.sso_apps_client_secret.trim().to_string(),
+            false,
+        )
+    };
+    
     let discovery = format!("{issuer}/.well-known/openid-configuration");
 
     let mut pairs: Vec<(&str, String, bool)> = vec![
@@ -194,31 +211,66 @@ pub async fn ensure_oidc_env(pool: &sqlx::SqlitePool, project: &Project) -> usiz
     let now = Utc::now().to_rfc3339();
     let mut inserted = 0usize;
     for (key, value, secret) in pairs {
-        let exists: Option<(i64,)> = sqlx::query_as(
-            "SELECT 1 FROM project_env_vars WHERE project_uuid = ? AND key = ?",
-        )
-        .bind(&project.uuid)
-        .bind(key)
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten();
-        if exists.is_some() {
-            continue;
-        }
-        let res = sqlx::query(
-            r#"INSERT INTO project_env_vars (project_uuid, key, value, secret, updated_at)
-               VALUES (?, ?, ?, ?, ?)"#,
-        )
-        .bind(&project.uuid)
-        .bind(key)
-        .bind(&value)
-        .bind(if secret { 1i64 } else { 0 })
-        .bind(&now)
-        .execute(pool)
-        .await;
-        if res.is_ok() {
-            inserted += 1;
+        let should_update = if force_update {
+            matches!(
+                key,
+                "OIDC_CLIENT_ID"
+                    | "OIDC_CLIENT_SECRET"
+                    | "AUTH_POCKET_ID_ID"
+                    | "AUTH_POCKET_ID_SECRET"
+                    | "OIDC_REDIRECT_URI"
+                    | "AUTH_POCKET_ID_REDIRECT_URI"
+            )
+        } else {
+            false
+        };
+        
+        if should_update {
+            let res = sqlx::query(
+                r#"INSERT INTO project_env_vars (project_uuid, key, value, secret, updated_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(project_uuid, key) DO UPDATE SET
+                     value = excluded.value,
+                     secret = excluded.secret,
+                     updated_at = excluded.updated_at"#,
+            )
+            .bind(&project.uuid)
+            .bind(key)
+            .bind(&value)
+            .bind(if secret { 1i64 } else { 0 })
+            .bind(&now)
+            .execute(pool)
+            .await;
+            if res.is_ok() {
+                inserted += 1;
+            }
+        } else {
+            let exists: Option<(i64,)> = sqlx::query_as(
+                "SELECT 1 FROM project_env_vars WHERE project_uuid = ? AND key = ?",
+            )
+            .bind(&project.uuid)
+            .bind(key)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+            if exists.is_some() {
+                continue;
+            }
+            let res = sqlx::query(
+                r#"INSERT INTO project_env_vars (project_uuid, key, value, secret, updated_at)
+                   VALUES (?, ?, ?, ?, ?)"#,
+            )
+            .bind(&project.uuid)
+            .bind(key)
+            .bind(&value)
+            .bind(if secret { 1i64 } else { 0 })
+            .bind(&now)
+            .execute(pool)
+            .await;
+            if res.is_ok() {
+                inserted += 1;
+            }
         }
     }
     inserted
