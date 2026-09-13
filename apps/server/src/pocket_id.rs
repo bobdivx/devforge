@@ -175,6 +175,8 @@ async fn get_client(
 
 fn upsert_payload<'a>(
     client_id: &'a str,
+    client_name: &'a str,
+    client_description: &'a str,
     callbacks: &'a [String],
     launch_url: Option<&'a str>,
     logo_url: Option<&'a str>,
@@ -182,7 +184,7 @@ fn upsert_payload<'a>(
     include_id: bool,
 ) -> ClientUpsertBody<'a> {
     ClientUpsertBody {
-        name: "DevForge",
+        name: client_name,
         id: if include_id { Some(client_id) } else { None },
         callback_urls: callbacks,
         logout_callback_urls: &[],
@@ -190,7 +192,7 @@ fn upsert_payload<'a>(
         pkce_enabled: true,
         requires_reauthentication: false,
         launch_url,
-        description: "Client OIDC provisionné par DevForge",
+        description: client_description,
         logo_url,
         dark_logo_url,
     }
@@ -210,6 +212,8 @@ async fn create_client(
     base: &str,
     api_key: &str,
     client_id: &str,
+    client_name: &str,
+    client_description: &str,
     callbacks: &[String],
     launch_url: Option<&str>,
     logo_url: Option<&str>,
@@ -218,6 +222,8 @@ async fn create_client(
     let url = format!("{base}/api/oidc/clients");
     let body = serde_json::to_value(upsert_payload(
         client_id,
+        client_name,
+        client_description,
         callbacks,
         launch_url,
         logo_url,
@@ -237,6 +243,8 @@ async fn update_client(
     base: &str,
     api_key: &str,
     client_id: &str,
+    client_name: &str,
+    client_description: &str,
     callbacks: &[String],
     launch_url: Option<&str>,
     logo_url: Option<&str>,
@@ -245,6 +253,8 @@ async fn update_client(
     let url = format!("{base}/api/oidc/clients/{client_id}");
     let body = serde_json::to_value(upsert_payload(
         client_id,
+        client_name,
+        client_description,
         callbacks,
         launch_url,
         logo_url,
@@ -383,11 +393,13 @@ async fn create_secret(base: &str, api_key: &str, client_id: &str) -> Result<Str
     ))
 }
 
-/// Crée ou met à jour le client OIDC `devforge` et génère un secret si besoin.
+/// Crée ou met à jour un client OIDC et génère un secret si besoin.
 pub async fn provision_oidc_client(
     pocket_id_url: &str,
     api_key: &str,
     client_id: &str,
+    client_name: &str,
+    client_description: &str,
     callback_urls: &[String],
     launch_url: Option<&str>,
     need_secret: bool,
@@ -425,6 +437,8 @@ pub async fn provision_oidc_client(
             &base,
             key,
             &c.id,
+            client_name,
+            client_description,
             callback_urls,
             launch_url,
             logo,
@@ -437,6 +451,8 @@ pub async fn provision_oidc_client(
             &base,
             key,
             id,
+            client_name,
+            client_description,
             callback_urls,
             launch_url,
             logo,

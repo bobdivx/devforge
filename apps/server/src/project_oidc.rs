@@ -142,24 +142,33 @@ pub async fn provision_project_oidc_client(
     let existing_client = load_project_oidc_client(pool, &project.uuid).await;
     let need_secret = force_new_secret || existing_client.is_none();
     
-    let instance_url = load_instance_url(pool).await;
-    let launch_url = if !instance_url.is_empty() {
-        Some(instance_url.as_str())
+    let production_origin = normalize_origin(project.production_url.as_deref().unwrap_or(""));
+    let launch_url = if !production_origin.is_empty() {
+        Some(production_origin.as_str())
     } else {
         None
     };
     
-    let logo = pocket_id::default_logo_url(&instance_url);
+    let logo = if !production_origin.is_empty() {
+        Some(format!("{}/favicon.ico", production_origin))
+    } else {
+        None
+    };
     let branding = pocket_id::BrandingUrls {
         logo_url: logo.clone(),
         dark_logo_url: logo,
         background_url: None,
     };
     
+    let client_name = &project.name;
+    let client_description = format!("OIDC client for {}", project.name);
+    
     let result = pocket_id::provision_oidc_client(
         issuer,
         api_token,
         &client_id,
+        client_name,
+        &client_description,
         &callbacks,
         launch_url,
         need_secret,
@@ -209,17 +218,6 @@ pub async fn provision_project_oidc_client(
     })
 }
 
-async fn load_instance_url(pool: &sqlx::SqlitePool) -> String {
-    sqlx::query_as::<_, (String,)>(
-        "SELECT COALESCE(instance_url, '') FROM instance_settings WHERE id = 1",
-    )
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
-    .map(|(url,)| url)
-    .unwrap_or_default()
-}
 
 #[cfg(test)]
 mod tests {

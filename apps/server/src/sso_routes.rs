@@ -213,6 +213,8 @@ async fn put_sso(
             &issuer,
             &api_token,
             &target_id,
+            "DevForge",
+            "Client OIDC provisionné par DevForge",
             &callbacks,
             launch.as_deref(),
             need_secret,
