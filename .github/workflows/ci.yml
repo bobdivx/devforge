@@ -25,10 +25,11 @@ jobs:
       - name: Install and build
         working-directory: apps/web
         run: |
-          set -euxo pipefail
+          set -eu
           npm install --include=optional
-          ls -la node_modules/.bin | head -40
+          ls node_modules/.bin
           npm run build 2>&1 | tee /tmp/web-build.log
+          exit ${PIPESTATUS[0]}
       - name: Comment log on failure
         if: failure() && github.event_name == 'pull_request'
         env:
