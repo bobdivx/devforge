@@ -15,8 +15,10 @@ impl Tool for CreateGitHubFixTool {
         "create_github_fix"
     }
     fn description(&self) -> &str {
-        "Crée une branche de correction, applique des modifications de fichiers, et ouvre une PR. \
-         Tool de haut niveau qui simplifie le workflow complet : branche → commit → PR.\n\
+        "Crée une branche de correction, applique des fichiers, et ouvre une PR GitHub.\n\
+         ⚠️ UNIQUEMENT après validation explicite de l'utilisateur (après preview locale).\n\
+         Pour le travail courant : write_project_file mode=local + start_local_preview.\n\
+         Ne pas appeler sur « go » / « oui » / « améliore le site » — ce n'est PAS une validation PR.\n\
          \n\
          Paramètres :\n\
          - owner, repo : dépôt GitHub cible\n\

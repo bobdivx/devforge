@@ -16,9 +16,11 @@ impl Tool for StartLocalPreviewTool {
     }
 
     fn description(&self) -> &str {
-        "Démarre un serveur de développement local pour la preview du projet.\n\
+        "Démarre (ou relance) le serveur de développement local pour la preview du projet.\n\
          \n\
-         Utile après scaffold avec template pour permettre à l'utilisateur de tester localement.\n\
+         OBLIGATOIRE après des write_project_file locaux, avant de demander une PR.\n\
+         L'utilisateur voit le résultat dans le panneau Preview du workspace.\n\
+         Utile aussi après scaffold pour tester localement.\n\
          \n\
          Paramètres :\n\
          - project_uuid : UUID du projet DevForge (contexte par défaut)\n\
