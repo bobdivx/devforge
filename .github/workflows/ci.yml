@@ -25,12 +25,21 @@ jobs:
       - name: Install and build
         working-directory: apps/web
         run: |
+          echo "arch=$(uname -m) node=$(node -p process.arch)"
           npm install --include=optional
-          # npm#4828: optional native bindings sometimes skipped on linux CI
           npm install --no-save --include=optional \
             @astrojs/compiler-binding-linux-x64-gnu@0.4.0 \
-            @rolldown/binding-linux-x64-gnu@1.2.8
-          npm run build
+            @astrojs/compiler-binding-linux-arm64-gnu@0.4.0 \
+            @rolldown/binding-linux-x64-gnu@1.2.8 \
+            @rolldown/binding-linux-arm64-gnu@1.2.8
+          set +e
+          npm run build > /tmp/web-build.log 2>&1
+          STATUS=$?
+          echo "::notice::arch=$(uname -m) node=$(node -p process.arch) build=$STATUS"
+          tail -n 50 /tmp/web-build.log | while IFS= read -r line; do
+            echo "::error::$line"
+          done
+          exit "$STATUS"
 
   no-forbidden-brands:
     runs-on: ubuntu-latest
