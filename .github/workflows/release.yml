@@ -21,7 +21,6 @@ jobs:
       should_release: ${{ steps.meta.outputs.should_release }}
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
-      docker_tags: ${{ steps.meta.outputs.docker_tags }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,23 +58,9 @@ jobs:
             fi
           fi
 
-          OWNER_LC="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          HUB_USER="${{ secrets.DOCKERHUB_USERNAME }}"
-          DOCKER_TAGS="ghcr.io/${OWNER_LC}/devforge:${VERSION},ghcr.io/${OWNER_LC}/devforge:latest"
-          DOCKER_TAGS="${DOCKER_TAGS},${HUB_USER}/devforge:${VERSION},${HUB_USER}/devforge:latest"
-          if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+)\. ]]; then
-            MINOR="${BASH_REMATCH[1]}"
-            DOCKER_TAGS="${DOCKER_TAGS},ghcr.io/${OWNER_LC}/devforge:${MINOR},${HUB_USER}/devforge:${MINOR}"
-          fi
-
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "should_release=${SHOULD}" >> "$GITHUB_OUTPUT"
-          {
-            echo "docker_tags<<EOF"
-            echo "${DOCKER_TAGS}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
 
   docker:
     needs: prepare
@@ -98,11 +83,25 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Build Docker tags
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.prepare.outputs.version }}"
+          OWNER_LC="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          HUB_USER="${{ secrets.DOCKERHUB_USERNAME }}"
+          TAGS="ghcr.io/${OWNER_LC}/devforge:${VERSION},ghcr.io/${OWNER_LC}/devforge:latest"
+          TAGS="${TAGS},${HUB_USER}/devforge:${VERSION},${HUB_USER}/devforge:latest"
+          if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+)\. ]]; then
+            MINOR="${BASH_REMATCH[1]}"
+            TAGS="${TAGS},ghcr.io/${OWNER_LC}/devforge:${MINOR},${HUB_USER}/devforge:${MINOR}"
+          fi
+          echo "TAGS=${TAGS}" >> "$GITHUB_ENV"
+
       - uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ${{ needs.prepare.outputs.docker_tags }}
+          tags: ${{ env.TAGS }}
 
   binaries:
     needs: prepare
