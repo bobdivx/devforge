@@ -1919,13 +1919,103 @@ pub(crate) async fn ensure_all_domain_proxy_routes(
     }
 }
 
-/// Labels Traefik pour le deploy (`docker run`), couvrant tous les hosts proxy.
+/// Génère une URL preview isolée pour les conteneurs `df-*` locaux.
+/// Format: `preview-{short-uuid}.{wildcard_domain}`
+async fn generate_preview_url(state: &AppState, project_uuid: &str) -> Option<String> {
+    let domain = wildcard_domain(state).await.ok()?;
+    if domain.is_empty() {
+        return None;
+    }
+    let short = project_uuid.chars().take(8).collect::<String>();
+    Some(format!("https://preview-{}.{}", short, domain))
+}
+
+/// Extrait tous les FQDNs de production d'un projet (production_url + domaines attachés).
+async fn get_production_fqdns(state: &AppState, project: &Project) -> Vec<String> {
+    let mut fqdns = Vec::new();
+    
+    if let Some(url) = project.production_url.as_deref().and_then(fqdn_from_url) {
+        fqdns.push(url.to_lowercase());
+    }
+    
+    if let Ok(listed) = state.domains.list(&project.uuid).await {
+        if let Some(arr) = listed.get("domains").and_then(|d| d.as_array()) {
+            for d in arr {
+                if let Some(fqdn) = d.get("fqdn").and_then(|f| f.as_str()) {
+                    let normalized = fqdn.trim().to_lowercase();
+                    if !normalized.is_empty() && !fqdns.contains(&normalized) {
+                        fqdns.push(normalized);
+                    }
+                }
+            }
+        }
+    }
+    
+    fqdns
+}
+
+/// Détecte si un nom de conteneur suit le pattern `df-{uuid}` (conteneur local/preview).
+fn is_df_container(container_name: &str) -> bool {
+    container_name.starts_with("df-") && container_name.len() >= 7
+}
+
+/// Labels Traefik pour le deploy (`docker run`).
+///
+/// ## Sécurité : isolation preview vs production
+/// Les conteneurs `df-*` (local-executor / preview) reçoivent **uniquement** des labels
+/// pour un hôte preview isolé (`preview-{uuid}.{wildcard}`), **jamais** pour les FQDNs
+/// de production (production_url + domaines attachés).
+///
+/// Ceci évite qu'un conteneur `df-*` temporaire/cassé ne vole les routes Traefik des
+/// apps de production → 504 gateway timeout.
 pub(crate) async fn proxy_labels_for_project(
     state: &AppState,
     project: &Project,
 ) -> Option<serde_json::Value> {
     let uuid = &project.uuid;
     let port = project.port.clamp(1, 65535) as u16;
+    
+    // Identifier les FQDNs de production à protéger
+    let production_fqdns = get_production_fqdns(state, project).await;
+    
+    // Générer l'URL preview isolée
+    let preview_url = generate_preview_url(state, uuid).await;
+    
+    // Pour les conteneurs df-*, on expose SEULEMENT la preview URL
+    // (le nom du conteneur n'est pas connu ici, mais tous les appels via deploy
+    // concernent des df-* — voir DeployFacade::container_name)
+    if let Some(preview) = preview_url.as_ref().and_then(|u| fqdn_from_url(u)) {
+        let settings = crate::sso::load_sso_settings(&state.pool).await;
+        let fwd = if crate::sso::should_protect_project(&settings, project) {
+            settings.effective_forward_auth_address()
+        } else {
+            None
+        };
+        
+        let mut map = serde_json::Map::new();
+        map.insert("traefik.enable".into(), serde_json::json!("true"));
+        
+        let piece = devforge_deploy::docker::traefik_labels(
+            uuid,
+            &preview,
+            "/",
+            port,
+            fwd.as_deref(),
+        );
+        
+        if let Some(obj) = piece.as_object() {
+            for (k, v) in obj {
+                if k == "traefik.enable" {
+                    continue;
+                }
+                map.insert(k.clone(), v.clone());
+            }
+        }
+        
+        return Some(serde_json::Value::Object(map));
+    }
+    
+    // Fallback si pas de preview URL (backward compat ou wildcard_domain manquant)
     if let Some(url) = project.production_url.as_deref().and_then(fqdn_from_url) {
         ensure_all_domain_proxy_routes(state, uuid, &url, port).await;
     }
