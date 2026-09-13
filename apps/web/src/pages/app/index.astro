@@ -3,5 +3,5 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 import { HomePage } from '../../components/HomePage';
 ---
 <BaseLayout title="Applications · DevForge">
-  <HomePage client:load />
+  <HomePage client:only="preact" />
 </BaseLayout>

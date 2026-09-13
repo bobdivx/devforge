@@ -3,5 +3,5 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 import { TokensPage } from '../../components/TokensPage';
 ---
 <BaseLayout title="Tokens · DevForge">
-  <TokensPage client:load />
+  <TokensPage client:only="preact" />
 </BaseLayout>

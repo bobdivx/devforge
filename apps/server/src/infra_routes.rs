@@ -52,6 +52,10 @@ pub fn router() -> Router<AppState> {
             get(list_agents).post(create_agent),
         )
         .route(
+            "/api/v1/projects/{uuid}/agents/{agent_uuid}",
+            axum::routing::patch(rename_agent),
+        )
+        .route(
             "/api/v1/projects/{uuid}/agents/{agent_uuid}/messages",
             get(list_agent_messages).delete(clear_agent_messages),
         )
@@ -663,6 +667,7 @@ struct AgentRow {
     kind: String,
     parent_agent_uuid: Option<String>,
     status: String,
+    updated_at: String,
 }
 
 async fn list_agents(
@@ -680,7 +685,9 @@ async fn list_agents(
             )
         })?;
     let rows = sqlx::query_as::<_, AgentRow>(
-        "SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status FROM project_agents WHERE project_uuid = ? ORDER BY CASE role WHEN 'ops' THEN 0 WHEN 'deploy' THEN 1 WHEN 'reviewer' THEN 2 ELSE 9 END, name",
+        r#"SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status, updated_at
+           FROM project_agents WHERE project_uuid = ?
+           ORDER BY updated_at DESC, name"#,
     )
     .bind(&uuid)
     .fetch_all(&state.pool)
@@ -748,7 +755,7 @@ async fn create_agent(
         )
     })?;
     let row = sqlx::query_as::<_, AgentRow>(
-        "SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status FROM project_agents WHERE uuid = ?",
+        "SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status, updated_at FROM project_agents WHERE uuid = ?",
     )
     .bind(&agent_uuid)
     .fetch_one(&state.pool)
@@ -760,6 +767,63 @@ async fn create_agent(
         )
     })?;
     Ok((axum::http::StatusCode::CREATED, Json(json!({"data": row}))))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct RenameAgentBody {
+    pub name: String,
+}
+
+async fn rename_agent(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((uuid, agent_uuid)): Path<(String, String)>,
+    Json(body): Json<RenameAgentBody>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let _ = auth_project(&state, &headers, &uuid).await?;
+    let name = body.name.trim();
+    if name.is_empty() {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"ok": false, "error": "name requis"})),
+        ));
+    }
+    let name = name.chars().take(80).collect::<String>();
+    let now = chrono::Utc::now().to_rfc3339();
+    let res = sqlx::query(
+        "UPDATE project_agents SET name = ?, updated_at = ? WHERE uuid = ? AND project_uuid = ?",
+    )
+    .bind(&name)
+    .bind(&now)
+    .bind(&agent_uuid)
+    .bind(&uuid)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+    if res.rows_affected() == 0 {
+        return Err((
+            axum::http::StatusCode::NOT_FOUND,
+            Json(json!({"ok": false, "error": "agent introuvable"})),
+        ));
+    }
+    let row = sqlx::query_as::<_, AgentRow>(
+        "SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status, updated_at FROM project_agents WHERE uuid = ?",
+    )
+    .bind(&agent_uuid)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|e| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+    Ok(Json(json!({"data": row})))
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]

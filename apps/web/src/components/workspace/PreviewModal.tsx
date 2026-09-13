@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
+import { ArrowLeft, ExternalLink, RefreshCw } from 'lucide-preact';
 import { Button } from '../ui';
-import { cn } from '../../lib/cn';
 
 type Props = {
   open: boolean;
@@ -32,19 +32,24 @@ export function PreviewModal({ open, onClose, previewUrl, isProduction }: Props)
 
   return (
     <div class="fixed inset-0 z-50 flex flex-col bg-black">
-      {/* Barre d'outils en haut */}
       <div class="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-[var(--color-card)] px-4">
         <div class="flex min-w-0 items-center gap-3">
           <button
             type="button"
             onClick={onClose}
-            class="rounded-lg px-3 py-1.5 text-sm text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]"
+            class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]"
             aria-label="Fermer"
           >
-            ← Retour
+            <ArrowLeft size={16} strokeWidth={2} aria-hidden />
+            Retour
           </button>
           <div class="min-w-0 truncate text-sm text-[var(--color-ink-muted)]">
-            {isProduction && <span class="mr-2 text-[var(--color-warn)]">⚠️ Production</span>}
+            {isProduction && (
+              <span class="mr-2 font-medium text-[var(--color-warn)]">Production</span>
+            )}
+            {!isProduction && (
+              <span class="mr-2 font-medium text-[var(--color-ink-faint)]">Atelier</span>
+            )}
             {previewUrl.replace(/^https?:\/\//, '')}
           </div>
         </div>
@@ -55,7 +60,8 @@ export function PreviewModal({ open, onClose, previewUrl, isProduction }: Props)
             onClick={() => setNonce((n) => n + 1)}
             title="Rafraîchir la preview"
           >
-            ↻ Rafraîchir
+            <RefreshCw size={14} strokeWidth={2} aria-hidden />
+            Rafraîchir
           </Button>
           <Button
             size="sm"
@@ -64,12 +70,12 @@ export function PreviewModal({ open, onClose, previewUrl, isProduction }: Props)
             target="_blank"
             title="Ouvrir dans un nouvel onglet"
           >
+            <ExternalLink size={14} strokeWidth={2} aria-hidden />
             Nouvel onglet
           </Button>
         </div>
       </div>
 
-      {/* Iframe fullscreen */}
       <div class="relative flex-1 bg-white/5">
         <iframe
           key={nonce}

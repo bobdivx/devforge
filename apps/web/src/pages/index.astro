@@ -10,11 +10,11 @@ import { WorkflowStrip } from '../components/marketing/WorkflowStrip';
 
 <BaseLayout title="DevForge — Deploy with clarity">
   <div class="min-h-screen">
-    <SiteHeader client:load />
-    <Hero client:load />
-    <FeatureBento client:load />
-    <MetricsStrip client:load />
-    <WorkflowStrip client:load />
-    <SiteFooter client:load />
+    <SiteHeader client:only="preact" />
+    <Hero client:only="preact" />
+    <FeatureBento client:only="preact" />
+    <MetricsStrip client:only="preact" />
+    <WorkflowStrip client:only="preact" />
+    <SiteFooter client:only="preact" />
   </div>
 </BaseLayout>

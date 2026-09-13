@@ -469,8 +469,31 @@ pub fn traefik_labels(
     forward_auth_address: Option<&str>,
 ) -> Value {
     let short = project_uuid.chars().take(8).collect::<String>();
-    let service = format!("df-{short}");
-    let router = format!("df-{short}-{}", host_router_key(host));
+    traefik_labels_for_service(&format!("df-{short}"), host, path_prefix, port, forward_auth_address)
+}
+
+/// Labels atelier : service `dfdev-{8}` pour ne pas collisionner avec la prod `df-{8}`.
+pub fn traefik_dev_labels(project_uuid: &str, host: &str, port: u16) -> Value {
+    let short = project_uuid.chars().take(8).collect::<String>();
+    traefik_labels_for_service(&format!("dfdev-{short}"), host, "/", port, None)
+}
+
+/// Nom conteneur atelier : `df-dev-{12}` (distinct de la prod `df-{12}`).
+pub fn dev_container_name(project_uuid: &str) -> String {
+    format!(
+        "df-dev-{}",
+        project_uuid.chars().take(12).collect::<String>()
+    )
+}
+
+fn traefik_labels_for_service(
+    service: &str,
+    host: &str,
+    path_prefix: &str,
+    port: u16,
+    forward_auth_address: Option<&str>,
+) -> Value {
+    let router = format!("{service}-{}", host_router_key(host));
     let path = if path_prefix.trim().is_empty() {
         "/"
     } else {
@@ -509,11 +532,11 @@ pub fn traefik_labels(
     );
     map.insert(
         format!("traefik.http.routers.http-{router}.service"),
-        Value::String(service.clone()),
+        Value::String(service.to_string()),
     );
     map.insert(
         format!("traefik.http.routers.https-{router}.service"),
-        Value::String(service),
+        Value::String(service.to_string()),
     );
 
     if let Some(addr) = forward_auth_address.map(str::trim).filter(|a| !a.is_empty()) {
@@ -542,6 +565,82 @@ pub fn traefik_labels(
     }
 
     Value::Object(map)
+}
+
+/// `docker run` pour l’atelier : workdir monté + labels Traefik `dev-*` (pas de ports host).
+/// Retourne la ligne shell (RemoteExecutor) — préférer [`docker_run_dev_preview_args`] en process local.
+pub fn docker_run_dev_preview(
+    name: &str,
+    host_workdir: &str,
+    network: Option<&str>,
+    labels: &Value,
+    port: u16,
+    shell_command: &str,
+    image: &str,
+) -> String {
+    let mut parts = vec!["docker".to_string()];
+    for a in docker_run_dev_preview_args(
+        name,
+        host_workdir,
+        network,
+        labels,
+        port,
+        shell_command,
+        image,
+    ) {
+        parts.push(shell_escape(&a));
+    }
+    parts.join(" ")
+}
+
+/// Args argv pour `docker run` atelier (sans shell).
+pub fn docker_run_dev_preview_args(
+    name: &str,
+    host_workdir: &str,
+    network: Option<&str>,
+    labels: &Value,
+    port: u16,
+    shell_command: &str,
+    image: &str,
+) -> Vec<String> {
+    let mut args = vec![
+        "run".into(),
+        "-d".into(),
+        "--name".into(),
+        name.to_string(),
+        "--restart".into(),
+        "unless-stopped".into(),
+        "-v".into(),
+        format!("{host_workdir}:/app"),
+        "-w".into(),
+        "/app".into(),
+        "-e".into(),
+        "HOST=0.0.0.0".into(),
+        "-e".into(),
+        format!("PORT={port}"),
+        "-e".into(),
+        "BROWSER=none".into(),
+        "-e".into(),
+        "PUPPETEER_SKIP_DOWNLOAD=1".into(),
+        "-e".into(),
+        "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1".into(),
+    ];
+    if let Some(net) = network.filter(|n| !n.is_empty()) {
+        args.push("--network".into());
+        args.push(net.to_string());
+    }
+    if let Value::Object(map) = labels {
+        for (k, v) in map {
+            let val = v.as_str().unwrap_or("");
+            args.push("--label".into());
+            args.push(format!("{k}={val}"));
+        }
+    }
+    args.push(image.to_string());
+    args.push("sh".into());
+    args.push("-c".into());
+    args.push(shell_command.to_string());
+    args
 }
 
 /// Fusionne les labels Traefik pour tous les hosts d’un projet.
@@ -590,16 +689,16 @@ mod tests {
 
     #[test]
     fn preview_url_isolation_prevents_production_host_theft() {
-        // Cas d'usage : un conteneur df-* local/preview ne doit JAMAIS avoir
-        // des labels pour starbasefr.jeser.app (production), seulement pour preview-xxx
-        let preview_host = "preview-fbb6a152.devforge.local";
-        let production_host = "starbasefr.jeser.app";
+        // Cas d'usage : un conteneur df-* local/atelier ne doit JAMAIS avoir
+        // des labels pour starbasefr.jeser.app (production), seulement pour dev-xxx
+        let preview_host = "dev-fbb6a152.devforge.local";
+        let _production_host = "starbasefr.jeser.app";
         
         let preview_labels = traefik_labels("fbb6a152-ef01", preview_host, "/", 4321, None);
         
-        // Vérifier que le label preview existe
+        // Vérifier que le label atelier (dev-) existe
         let preview_rule_key = format!(
-            "traefik.http.routers.http-df-fbb6a152-preview-fbb6a152-devforge-local.rule"
+            "traefik.http.routers.http-df-fbb6a152-dev-fbb6a152-devforge-local.rule"
         );
         assert!(
             preview_labels.get(&preview_rule_key).is_some(),
@@ -607,8 +706,8 @@ mod tests {
         );
         assert_eq!(
             preview_labels.get(&preview_rule_key).and_then(|v| v.as_str()),
-            Some("Host(`preview-fbb6a152.devforge.local`)"),
-            "Preview router doit pointer vers l'hôte preview"
+            Some("Host(`dev-fbb6a152.devforge.local`)"),
+            "Preview router doit pointer vers l’hôte dev-"
         );
         
         // Vérifier qu'aucun label production n'existe dans les labels preview

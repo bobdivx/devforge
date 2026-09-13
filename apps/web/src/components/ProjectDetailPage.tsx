@@ -130,7 +130,7 @@ export function ProjectDetailPage(props: Props) {
     <AppShell
       active="projects"
       projectNav={projectNav(uuid)}
-      title={titles[tab]}
+      title={tab === 'workspace' ? undefined : titles[tab]}
       actions={
         tab === 'overview' && project ? (
           <div class="flex flex-wrap items-center gap-2">
@@ -195,7 +195,7 @@ export function ProjectDetailPage(props: Props) {
           gitRepository={project?.git_repository}
         />
       )}
-      {tab === 'agents' && <ProjectAgentsPanel projectUuid={uuid} />}
+      {tab === 'agents' && <ProjectAgentsPanel projectUuid={uuid} mode="threads" />}
       {tab === 'database' && <DatabasePanel uuid={uuid} />}
       {tab === 'env' && <EnvPanel uuid={uuid} />}
       {tab === 'backups' && <BackupsPanel projectUuid={uuid} />}

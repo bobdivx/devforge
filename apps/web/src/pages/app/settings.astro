@@ -3,5 +3,5 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 import { SettingsPage } from '../../components/SettingsPage';
 ---
 <BaseLayout title="Settings · DevForge">
-  <SettingsPage client:load />
+  <SettingsPage client:only="preact" />
 </BaseLayout>

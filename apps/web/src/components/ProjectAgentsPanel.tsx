@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { MessageSquare, Plus } from 'lucide-preact';
 import { api, type ProjectAgent } from '../lib/api';
 import {
   planFromToolCalls,
@@ -17,10 +18,7 @@ import {
 } from './agents/AgentActionCards';
 import { Alert, Badge, Button, Card, FadeIn, Input, Spinner, useToast } from './ui';
 
-const ROLE_META: Record<
-  string,
-  { label: string; blurb: string; starters: string[] }
-> = {
+const ROLE_META: Record<string, { label: string; blurb: string; starters: string[] }> = {
   ops: {
     label: 'Ops',
     blurb: 'État, logs, corrections locales',
@@ -39,7 +37,11 @@ const ROLE_META: Record<
   custom: {
     label: 'Agent',
     blurb: 'Assistant projet',
-    starters: ['Aide-moi sur ce projet'],
+    starters: [
+      'Où en est le projet ?',
+      'Améliore le design en local',
+      'Déploie la dernière version',
+    ],
   },
   worker: {
     label: 'Worker',
@@ -47,6 +49,12 @@ const ROLE_META: Record<
     starters: [],
   },
 };
+
+const THREAD_STARTERS = [
+  'Où en est le projet ?',
+  'Améliore le design en local',
+  'Déploie la dernière version',
+];
 
 type ChatMessage = {
   role: string;
@@ -67,23 +75,43 @@ function metaFor(agent: ProjectAgent) {
   return ROLE_META[agent.role] || ROLE_META.custom;
 }
 
-/** Agents projet — seed auto, chat prêt, zéro config manuelle. */
-export function ProjectAgentsPanel({ 
-  projectUuid, 
-  defaultAgentUuid, 
-  builderMode 
-}: { 
+function sortByRecent(a: ProjectAgent, b: ProjectAgent) {
+  const ta = a.updated_at || '';
+  const tb = b.updated_at || '';
+  return tb.localeCompare(ta);
+}
+
+function titleFromMessage(text: string) {
+  const oneLine = text.trim().replace(/\s+/g, ' ');
+  if (oneLine.length <= 48) return oneLine;
+  return `${oneLine.slice(0, 48)}…`;
+}
+
+type Props = {
   projectUuid: string;
   defaultAgentUuid?: string;
   builderMode?: boolean;
-}) {
+  /** `threads` = workspace style Cursor ; `team` = liste Ops/Deploy/Reviewer */
+  mode?: 'threads' | 'team';
+};
+
+/** Chat agents projet — mode équipe ou fils de conversation. */
+export function ProjectAgentsPanel({
+  projectUuid,
+  defaultAgentUuid,
+  builderMode,
+  mode = 'team',
+}: Props) {
+  const threadsMode = mode === 'threads';
   const toast = useToast();
   const [agents, setAgents] = useState<ProjectAgent[]>([]);
+  const [threads, setThreads] = useState<ProjectAgent[]>([]);
   const [selected, setSelected] = useState<string | null>(defaultAgentUuid || null);
   const [error, setError] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [thinking, setThinking] = useState<string | null>(null);
   const [thinkStarted, setThinkStarted] = useState(0);
   const [liveActions, setLiveActions] = useState<LiveAction[]>([]);
@@ -91,65 +119,98 @@ export function ProjectAgentsPanel({
   const [llmError, setLlmError] = useState<string | null>(null);
   const [pollEnabled, setPollEnabled] = useState(builderMode || false);
   const endRef = useRef<HTMLDivElement>(null);
+  const bootstrapped = useRef(false);
 
-  const current = agents.find((a) => a.uuid === selected) ?? null;
+  const list = threadsMode ? threads : agents;
+  const current = list.find((a) => a.uuid === selected) ?? agents.find((a) => a.uuid === selected) ?? null;
   const currentMeta = current ? metaFor(current) : null;
   const llmReady = llmMode !== 'stub' && llmMode !== '—' && llmMode !== 'offline';
+  const starters = threadsMode ? THREAD_STARTERS : currentMeta?.starters ?? [];
 
-  async function loadAgents() {
+  async function resolveThreads(main: ProjectAgent[]): Promise<ProjectAgent[]> {
+    // Workspace = fils utilisateur uniquement — jamais la « team » Ops/Deploy/Reviewer.
+    const customs = main.filter((a) => a.kind === 'custom');
+
+    // Exception : l’agent du scaffold builder (historique en cours), sans afficher les 2 autres.
+    if (defaultAgentUuid) {
+      const builder = main.find((a) => a.uuid === defaultAgentUuid);
+      if (builder && builder.kind !== 'custom' && !customs.some((c) => c.uuid === builder.uuid)) {
+        return [builder, ...customs].sort(sortByRecent);
+      }
+    }
+
+    return customs.sort(sortByRecent);
+  }
+
+  function threadLabel(a: ProjectAgent) {
+    if (a.kind === 'custom') return a.name;
+    // Ne jamais afficher Ops / Deploy / Reviewer comme noms de chat
+    if (a.role === 'deploy' || a.name === 'Deploy') return 'Construction';
+    if (a.name === 'Nouveau chat') return a.name;
+    return a.name.startsWith('Chat') ? a.name : 'Chat';
+  }
+
+  async function loadAgents(preferUuid?: string | null) {
     try {
       const r = await api.projectAgents(projectUuid);
-      // Masquer les sous-agents dans la liste principale (spawn auto plus tard).
       const main = (r.data ?? []).filter((a) => a.kind !== 'subagent');
       setAgents(main);
-      
-      // Sélection intelligente de l'agent par défaut
-      const selectDefault = async (prev: string | null) => {
-        if (prev && main.some((a) => a.uuid === prev)) return prev;
-        
-        // Priorité 1 : agent actuellement en cours de travail (status=working)
-        const working = main.find((a) => a.status === 'working');
-        if (working) return working.uuid;
-        
-        // Priorité 2 : agent Deploy (celui qui construit le projet après scaffold)
-        const deployAgent = main.find((a) => a.role === 'deploy');
-        
-        // Vérifier si Deploy a des messages (signe qu'il a été utilisé)
-        if (deployAgent) {
-          try {
-            const msgs = await api.agentMessages(projectUuid, deployAgent.uuid);
-            if (msgs.data && msgs.data.length > 0) {
-              return deployAgent.uuid;
-            }
-          } catch {
-            // Ignorer erreur
-          }
-          
-          // Si en mode builder, sélectionner Deploy même sans messages
-          if (builderMode || defaultAgentUuid) {
-            return deployAgent.uuid;
-          }
+
+      if (threadsMode) {
+        let nextThreads = await resolveThreads(main);
+
+        if (nextThreads.length === 0 && !bootstrapped.current) {
+          bootstrapped.current = true;
+          const created = await api.createProjectAgent(projectUuid, {
+            name: 'Nouveau chat',
+            role: 'custom',
+            kind: 'custom',
+          });
+          nextThreads = [created.data];
+          setAgents((prev) => [...prev, created.data]);
         }
-        
-        // Priorité 3 : vérifier les autres agents pour celui qui a des messages
-        for (const agent of main) {
-          if (agent.uuid === deployAgent?.uuid) continue; // Déjà vérifié
-          try {
-            const msgs = await api.agentMessages(projectUuid, agent.uuid);
-            if (msgs.data && msgs.data.length > 0) {
-              return agent.uuid;
+
+        setThreads(nextThreads);
+
+        const pick =
+          (preferUuid && nextThreads.some((a) => a.uuid === preferUuid) && preferUuid) ||
+          (selected && nextThreads.some((a) => a.uuid === selected) && selected) ||
+          nextThreads.find((a) => a.status === 'working')?.uuid ||
+          (defaultAgentUuid && nextThreads.some((a) => a.uuid === defaultAgentUuid)
+            ? defaultAgentUuid
+            : null) ||
+          nextThreads[0]?.uuid ||
+          null;
+        setSelected(pick);
+      } else {
+        const selectDefault = async (prev: string | null) => {
+          if (prev && main.some((a) => a.uuid === prev)) return prev;
+          const working = main.find((a) => a.status === 'working');
+          if (working) return working.uuid;
+          const deployAgent = main.find((a) => a.role === 'deploy');
+          if (deployAgent) {
+            try {
+              const msgs = await api.agentMessages(projectUuid, deployAgent.uuid);
+              if (msgs.data && msgs.data.length > 0) return deployAgent.uuid;
+            } catch {
+              // Ignorer
             }
-          } catch {
-            // Ignorer erreur, passer au suivant
+            if (builderMode || defaultAgentUuid) return deployAgent.uuid;
           }
-        }
-        
-        // Priorité 4 : fallback sur le premier agent
-        return main[0]?.uuid ?? null;
-      };
-      
-      const selected = await selectDefault(null);
-      setSelected(selected);
+          for (const agent of main) {
+            if (agent.uuid === deployAgent?.uuid) continue;
+            try {
+              const msgs = await api.agentMessages(projectUuid, agent.uuid);
+              if (msgs.data && msgs.data.length > 0) return agent.uuid;
+            } catch {
+              // Ignorer
+            }
+          }
+          return main[0]?.uuid ?? null;
+        };
+        setSelected(await selectDefault(preferUuid ?? selected));
+      }
+
       setError(null);
     } catch (e: unknown) {
       setError(String((e as Error).message || e));
@@ -185,21 +246,44 @@ export function ProjectAgentsPanel({
     }
   }
 
+  async function createThread() {
+    if (creating) return;
+    setCreating(true);
+    try {
+      const created = await api.createProjectAgent(projectUuid, {
+        name: 'Nouveau chat',
+        role: 'custom',
+        kind: 'custom',
+      });
+      setAgents((prev) => [created.data, ...prev]);
+      setThreads((prev) => [created.data, ...prev.filter((t) => t.uuid !== created.data.uuid)]);
+      setSelected(created.data.uuid);
+      setMessages([]);
+    } catch (e: unknown) {
+      toast.push({
+        title: 'Impossible de créer le chat',
+        detail: String((e as Error).message || e),
+        tone: 'danger',
+      });
+    } finally {
+      setCreating(false);
+    }
+  }
+
   useEffect(() => {
-    void loadAgents();
-    
+    bootstrapped.current = false;
+    void loadAgents(defaultAgentUuid || null);
+
     async function checkLlm() {
       try {
         const h = await api.health();
         const mode = h.backends?.llm ?? 'stub';
         setLlmMode(mode);
-        
         if (mode === 'stub') {
           const providers = await api.llmProviders();
           const unhealthy = providers.data.filter((p) => p.enabled && p.healthy === false);
           if (unhealthy.length > 0) {
-            const err = unhealthy[0];
-            setLlmError(err.last_probe_error || 'provider unhealthy');
+            setLlmError(unhealthy[0].last_probe_error || 'provider unhealthy');
           } else {
             setLlmError(null);
           }
@@ -211,27 +295,19 @@ export function ProjectAgentsPanel({
         setLlmError(null);
       }
     }
-    
     void checkLlm();
-  }, [projectUuid]);
+  }, [projectUuid, threadsMode]);
 
-  // Polling des messages en mode builder
   useEffect(() => {
     if (!pollEnabled || !selected) return;
-
     let pollCount = 0;
     const interval = setInterval(async () => {
       if (busy) return;
       try {
         await loadMessages(selected);
-        
-        // Vérifier le statut de l'agent
         const agentsRes = await api.projectAgents(projectUuid);
         const currentAgent = agentsRes.data.find((a) => a.uuid === selected);
-        
         pollCount++;
-        
-        // Arrêter le polling après 60 secondes ou si l'agent est idle
         if (pollCount > 60 || (currentAgent && currentAgent.status === 'idle')) {
           setPollEnabled(false);
           clearInterval(interval);
@@ -240,7 +316,6 @@ export function ProjectAgentsPanel({
         console.error('[ProjectAgentsPanel] Poll error:', err);
       }
     }, 1000);
-
     return () => clearInterval(interval);
   }, [pollEnabled, selected, projectUuid, busy]);
 
@@ -268,6 +343,22 @@ export function ProjectAgentsPanel({
     setLiveActions([]);
     setMessages((m) => [...m, { role: 'user', content: trimmed }]);
     setInput('');
+
+    if (threadsMode && current?.name === 'Nouveau chat' && messages.length === 0) {
+      const title = titleFromMessage(trimmed);
+      try {
+        const renamed = await api.renameProjectAgent(projectUuid, selected, title);
+        setThreads((prev) =>
+          prev
+            .map((t) => (t.uuid === selected ? renamed.data : t))
+            .sort(sortByRecent),
+        );
+        setAgents((prev) => prev.map((a) => (a.uuid === selected ? renamed.data : a)));
+      } catch {
+        // Titre non critique
+      }
+    }
+
     try {
       const res = await streamAgentChat(
         trimmed,
@@ -329,6 +420,14 @@ export function ProjectAgentsPanel({
         .health()
         .then((h) => setLlmMode(h.backends?.llm ?? llmMode))
         .catch(() => undefined);
+      if (threadsMode) {
+        setThreads((prev) => {
+          const now = new Date().toISOString();
+          return prev
+            .map((t) => (t.uuid === selected ? { ...t, updated_at: now } : t))
+            .sort(sortByRecent);
+        });
+      }
     } catch (err: unknown) {
       const msg = String((err as Error).message || err);
       setMessages((m) => [...m, { role: 'assistant', content: msg }]);
@@ -345,57 +444,167 @@ export function ProjectAgentsPanel({
     void sendText(input);
   }
 
+  const chatHeaderTitle = threadsMode
+    ? (current ? threadLabel(current) : 'Chat')
+    : currentMeta?.label || 'Agent';
+  const chatHeaderBlurb = threadsMode
+    ? 'Assistant projet — planifie, édite en local, preview'
+    : currentMeta?.blurb;
+
+  const sidebar = threadsMode ? (
+    <div class="flex flex-col gap-2">
+      <Button
+        type="button"
+        size="sm"
+        variant="secondary"
+        disabled={creating || busy}
+        onClick={() => void createThread()}
+        class="w-full justify-start"
+      >
+        {creating ? <Spinner /> : <Plus size={14} strokeWidth={2} aria-hidden />}
+        Nouveau chat
+      </Button>
+      {error && (
+        <Alert tone="warn" class="mb-1">
+          {error}
+        </Alert>
+      )}
+      <ul class="space-y-0.5">
+        {list.map((a) => {
+          const on = selected === a.uuid;
+          return (
+            <li key={a.uuid}>
+              <button
+                type="button"
+                class={cn(
+                  'flex w-full items-start gap-2 rounded-xl px-3 py-2.5 text-left transition',
+                  on ? 'bg-[var(--color-accent-soft)]' : 'hover:bg-[var(--color-surface)]',
+                )}
+                onClick={() => setSelected(a.uuid)}
+              >
+                <MessageSquare
+                  size={14}
+                  strokeWidth={2}
+                  class="mt-0.5 shrink-0 text-[var(--color-ink-faint)]"
+                  aria-hidden
+                />
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-sm font-medium tracking-tight">
+                    {threadLabel(a)}
+                  </span>
+                  {a.status === 'working' && (
+                    <span class="mt-0.5 block text-[10px] text-[var(--color-accent)]">En cours…</span>
+                  )}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {list.length === 0 && !error && (
+        <p class="px-1 text-sm text-[var(--color-ink-muted)]">Aucun chat…</p>
+      )}
+    </div>
+  ) : (
+    <Card>
+      <p class="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
+        Équipe
+      </p>
+      {error && (
+        <Alert tone="warn" class="mb-3">
+          {error}
+        </Alert>
+      )}
+      <ul class="space-y-1">
+        {agents.map((a) => {
+          const meta = metaFor(a);
+          const on = selected === a.uuid;
+          return (
+            <li key={a.uuid}>
+              <button
+                type="button"
+                class={cn(
+                  'flex w-full flex-col rounded-xl px-3 py-2.5 text-left transition',
+                  on ? 'bg-[var(--color-accent-soft)]' : 'hover:bg-[var(--color-surface)]',
+                )}
+                onClick={() => setSelected(a.uuid)}
+              >
+                <span class="font-medium tracking-tight">{meta.label}</span>
+                <span class="mt-0.5 text-xs text-[var(--color-ink-faint)]">{meta.blurb}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {agents.length === 0 && !error && (
+        <p class="text-sm text-[var(--color-ink-muted)]">Chargement des agents…</p>
+      )}
+    </Card>
+  );
+
+  const mobileThreadBar = threadsMode ? (
+    <div class="mb-3 flex items-center gap-2 lg:hidden">
+      <div class="min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div class="flex w-max gap-1">
+          {list.map((a) => (
+            <button
+              key={a.uuid}
+              type="button"
+              onClick={() => setSelected(a.uuid)}
+              class={cn(
+                'max-w-[10rem] shrink-0 truncate rounded-lg px-2.5 py-1.5 text-xs font-medium transition',
+                selected === a.uuid
+                  ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                  : 'bg-white/[0.03] text-[var(--color-ink-muted)] hover:bg-white/5',
+              )}
+            >
+              {threadLabel(a)}
+            </button>
+          ))}
+        </div>
+      </div>
+      <Button
+        type="button"
+        size="sm"
+        variant="secondary"
+        disabled={creating || busy}
+        onClick={() => void createThread()}
+        aria-label="Nouveau chat"
+        title="Nouveau chat"
+      >
+        {creating ? <Spinner /> : <Plus size={14} strokeWidth={2} aria-hidden />}
+      </Button>
+    </div>
+  ) : null;
+
   return (
     <FadeIn>
-      <div class="grid gap-4 lg:grid-cols-[240px_1fr]">
-        <Card>
-          <p class="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
-            Équipe
-          </p>
-          {error && (
-            <Alert tone="warn" class="mb-3">
-              {error}
-            </Alert>
-          )}
-          <ul class="space-y-1">
-            {agents.map((a) => {
-              const meta = metaFor(a);
-              const on = selected === a.uuid;
-              return (
-                <li key={a.uuid}>
-                  <button
-                    type="button"
-                    class={cn(
-                      'flex w-full flex-col rounded-xl px-3 py-2.5 text-left transition',
-                      on
-                        ? 'bg-[var(--color-accent-soft)]'
-                        : 'hover:bg-[var(--color-surface)]',
-                    )}
-                    onClick={() => setSelected(a.uuid)}
-                  >
-                    <span class="font-medium tracking-tight">{meta.label}</span>
-                    <span class="mt-0.5 text-xs text-[var(--color-ink-faint)]">{meta.blurb}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-          {agents.length === 0 && !error && (
-            <p class="text-sm text-[var(--color-ink-muted)]">Chargement des agents…</p>
-          )}
-        </Card>
+      {mobileThreadBar}
+      <div
+        class={cn(
+          'grid gap-4',
+          threadsMode ? 'lg:grid-cols-[200px_1fr]' : 'lg:grid-cols-[240px_1fr]',
+        )}
+      >
+        <div class={cn(threadsMode && 'hidden lg:block')}>{sidebar}</div>
 
-        <Card padding="none" class="flex h-[min(calc(100dvh-14rem),600px)] flex-col overflow-hidden lg:h-[min(64vh,600px)]">
+        <Card
+          padding="none"
+          class={cn(
+            'flex flex-col overflow-hidden',
+            threadsMode
+              ? 'h-[min(calc(100dvh-12rem),720px)] lg:h-[min(calc(100dvh-10rem),800px)]'
+              : 'h-[min(calc(100dvh-14rem),600px)] lg:h-[min(64vh,600px)]',
+          )}
+        >
           <div class="flex items-center justify-between gap-2 border-b border-[var(--color-line)] px-4 py-3">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
-                <span class="font-medium tracking-tight">
-                  {currentMeta?.label || 'Agent'}
-                </span>
+                <span class="truncate font-medium tracking-tight">{chatHeaderTitle}</span>
                 <Badge tone={llmReady ? 'ok' : 'warn'}>{llmMode}</Badge>
               </div>
-              {currentMeta && (
-                <p class="mt-0.5 text-xs text-[var(--color-ink-faint)]">{currentMeta.blurb}</p>
+              {chatHeaderBlurb && (
+                <p class="mt-0.5 truncate text-xs text-[var(--color-ink-faint)]">{chatHeaderBlurb}</p>
               )}
             </div>
             <Button
@@ -432,17 +641,19 @@ export function ProjectAgentsPanel({
           )}
 
           <div class="flex-1 space-y-3 overflow-y-auto p-4">
-            {messages.length === 0 && currentMeta && (
+            {messages.length === 0 && (
               <div class="space-y-3">
                 <p class="text-sm text-[var(--color-ink-muted)]">
-                  L’agent planifie, travaille dans le dossier du projet, puis lance la preview. Une PR n’est ouverte que si tu valides.
+                  {threadsMode
+                    ? 'Décris ce que tu veux. L’assistant travaille dans le projet, puis tu ouvres la preview.'
+                    : 'L’agent planifie, travaille dans le dossier du projet, puis lance la preview. Une PR n’est ouverte que si tu valides.'}
                 </p>
                 <div class="flex flex-wrap gap-2">
-                  {currentMeta.starters.map((s) => (
+                  {starters.map((s) => (
                     <button
                       key={s}
                       type="button"
-                      disabled={busy}
+                      disabled={busy || !selected}
                       class="rounded-full border border-[var(--color-line)] px-3 py-1.5 text-xs text-[var(--color-ink-muted)] transition hover:border-[var(--color-line-strong)] hover:text-[var(--color-ink)]"
                       onClick={() => void sendText(s)}
                     >
@@ -494,7 +705,9 @@ export function ProjectAgentsPanel({
                     {m.needsUserAction && (
                       <Card class="max-w-[92%] border-l-4 border-l-[var(--color-warn)]">
                         <div class="flex items-start gap-3">
-                          <span class="text-2xl">⚠️</span>
+                          <span class="text-2xl" aria-hidden>
+                            !
+                          </span>
                           <div class="flex-1">
                             <p class="mb-2 text-sm font-medium">Action requise</p>
                             <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
@@ -543,14 +756,17 @@ export function ProjectAgentsPanel({
             <div class="min-w-0 flex-1">
               <Input
                 value={input}
-                placeholder={
-                  current ? `Message pour ${currentMeta?.label || current.name}…` : 'Message…'
-                }
+                placeholder={threadsMode ? 'Message…' : current ? `Message pour ${chatHeaderTitle}…` : 'Message…'}
                 onInput={(ev) => setInput((ev.target as HTMLInputElement).value)}
                 disabled={busy || !selected}
               />
             </div>
-            <Button type="submit" variant="secondary" disabled={busy || !selected || !input.trim()} class="shrink-0">
+            <Button
+              type="submit"
+              variant="secondary"
+              disabled={busy || !selected || !input.trim()}
+              class="shrink-0"
+            >
               {busy ? <Spinner /> : 'Envoyer'}
             </Button>
           </form>

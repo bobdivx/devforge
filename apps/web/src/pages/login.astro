@@ -3,5 +3,5 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import { LoginPage } from '../components/LoginPage';
 ---
 <BaseLayout title="Connexion · DevForge">
-  <LoginPage client:load />
+  <LoginPage client:only="preact" />
 </BaseLayout>

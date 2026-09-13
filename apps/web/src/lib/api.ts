@@ -145,6 +145,7 @@ export type ProjectAgent = {
   kind: string;
   parent_agent_uuid?: string | null;
   status: string;
+  updated_at?: string;
 };
 
 export const api = {
@@ -425,6 +426,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  renameProjectAgent: (projectUuid: string, agentUuid: string, name: string) =>
+    request<{ data: ProjectAgent }>(`/projects/${projectUuid}/agents/${agentUuid}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    }),
   agentChat: (
     message: string,
     extra?: {
@@ -439,6 +445,11 @@ export const api = {
       body: JSON.stringify({ message, ...extra }),
     }),
   agentTools: () => request<{ data: Array<{ name: string; description: string }> }>('/agent/tools'),
+  executeAgentTool: (tool: string, args: Record<string, unknown> = {}) =>
+    request<{ data: Record<string, unknown> }>(`/agent/tools/${encodeURIComponent(tool)}`, {
+      method: 'POST',
+      body: JSON.stringify({ arguments: args }),
+    }),
   lifecycle: (projectUuid: string, action: string) =>
     request<{ ok?: boolean; phase?: string; output?: string; error?: string }>(
       `/projects/${projectUuid}/lifecycle/${action}`,

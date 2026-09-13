@@ -507,7 +507,7 @@ async fn scaffold_project(
     
     let seed_content = if template_applied {
         format!(
-            "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\n✅ Template {} déjà appliqué (Astro + Preact + Tailwind + DaisyUI + SQLite).\n\n🎯 TON RÔLE : Prépare une PREVIEW LOCALE testable.\n\n🚨 WORKFLOW OBLIGATOIRE :\n1. Le template est déjà dans le workdir — NE réécris PAS les fichiers\n2. Si des customisations sont demandées : applique-les en local avec write_project_file mode='local'\n3. Lance le serveur dev local (npm run dev ou équivalent) pour que la Preview fonctionne\n\n❌ INTERDIT (l'utilisateur n'a PAS encore validé) :\n- create_github_repo (pas de repo GitHub avant validation utilisateur)\n- sync_workdir_to_github (pas de push avant validation)\n- trigger_deploy (pas de déploiement avant validation)\n\n✅ APRÈS validation utilisateur, il pourra cliquer « Publier » pour déclencher GitHub + deploy.\n\nPour l'instant : preview locale uniquement.",
+            "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\n✅ Template {} déjà appliqué (Astro + Preact + Tailwind + DaisyUI + SQLite).\n\n🎯 TON RÔLE : Prépare une preview atelier testable.\n\n🚨 WORKFLOW OBLIGATOIRE :\n1. Le template est déjà dans le workdir — NE réécris PAS les fichiers de base\n2. Customisations : write_project_file mode='local'\n3. Appelle TOUJOURS start_local_preview (outil) pour exposer https://dev-…. Ne lance PAS npm à la main.\n\n❌ INTERDIT (l'utilisateur n'a PAS encore validé) :\n- create_github_repo / sync_workdir_to_github / trigger_deploy\n\n✅ APRÈS validation utilisateur : publication GitHub + deploy via le bouton Publier.",
             body.title, body.prompt, template_name
         )
     } else {
@@ -544,15 +544,20 @@ async fn scaffold_project(
         "role": "deploy"
     });
 
-    // CHANGEMENT : Ne plus auto-kick l'agent Deploy au scaffold.
-    // L'utilisateur teste la preview locale, puis clique explicitement « Publier »
-    // pour déclencher create_github_repo + sync + deploy.
-    //
-    // Workflow local-first :
-    // 1. Scaffold → template copié dans workdir
-    // 2. Preview locale (serveur dev dans le workdir)
-    // 3. Utilisateur valide → appelle publish_to_github tool (nouveau)
-    // 4. publish_to_github fait : create_github_repo + sync_workdir_to_github + trigger_deploy
+    // Preview atelier : démarre en arrière-plan (workdir déjà scaffoldé).
+    // L’utilisateur n’a pas à demander à l’agent de le faire.
+    {
+        let registry = state.registry.clone();
+        let project_uuid = uuid.clone();
+        tokio::spawn(async move {
+            let _ = registry
+                .execute(
+                    "start_local_preview",
+                    json!({ "project_uuid": project_uuid }),
+                )
+                .await;
+        });
+    }
 
     Ok((
         axum::http::StatusCode::CREATED,
@@ -2165,15 +2170,20 @@ pub(crate) async fn ensure_all_domain_proxy_routes(
     }
 }
 
-/// Génère une URL preview isolée pour les conteneurs `df-*` locaux.
-/// Format: `preview-{short-uuid}.{wildcard_domain}`
-async fn generate_preview_url(state: &AppState, project_uuid: &str) -> Option<String> {
+/// Génère une URL d’atelier isolée pour le workspace / conteneurs `df-dev-*`.
+/// Format: `https://dev-{short-uuid}.{wildcard_domain}`
+async fn generate_dev_url(state: &AppState, project_uuid: &str) -> Option<String> {
     let domain = wildcard_domain(state).await.ok()?;
     if domain.is_empty() {
         return None;
     }
     let short = project_uuid.chars().take(8).collect::<String>();
-    Some(format!("https://preview-{}.{}", short, domain))
+    Some(format!("https://dev-{}.{}", short, domain))
+}
+
+/// @deprecated alias — préférer [`generate_dev_url`]
+async fn generate_preview_url(state: &AppState, project_uuid: &str) -> Option<String> {
+    generate_dev_url(state, project_uuid).await
 }
 
 /// Extrait tous les FQDNs de production d'un projet (production_url + domaines attachés).
@@ -2207,9 +2217,9 @@ fn is_df_container(container_name: &str) -> bool {
 
 /// Labels Traefik pour le deploy (`docker run`).
 ///
-/// ## Sécurité : isolation preview vs production
-/// Les conteneurs `df-*` (local-executor / preview) reçoivent **uniquement** des labels
-/// pour un hôte preview isolé (`preview-{uuid}.{wildcard}`), **jamais** pour les FQDNs
+/// ## Sécurité : isolation atelier (dev) vs production
+/// Les conteneurs `df-*` (local-executor / atelier) reçoivent **uniquement** des labels
+/// pour un hôte isolé (`dev-{uuid}.{wildcard}`), **jamais** pour les FQDNs
 /// de production (production_url + domaines attachés).
 ///
 /// Ceci évite qu'un conteneur `df-*` temporaire/cassé ne vole les routes Traefik des
@@ -2224,8 +2234,8 @@ pub(crate) async fn proxy_labels_for_project(
     // Identifier les FQDNs de production à protéger
     let production_fqdns = get_production_fqdns(state, project).await;
     
-    // Générer l'URL preview isolée
-    let preview_url = generate_preview_url(state, uuid).await;
+    // URL atelier isolée (dev-…)
+    let preview_url = generate_dev_url(state, uuid).await;
     
     // Pour les conteneurs df-*, on expose SEULEMENT la preview URL
     // (le nom du conteneur n'est pas connu ici, mais tous les appels via deploy

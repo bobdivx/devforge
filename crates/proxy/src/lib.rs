@@ -531,15 +531,15 @@ mod tests {
         // Regression test : les labels pour conteneurs df-* ne doivent contenir
         // QUE l'URL preview, pas les FQDNs production comme starbasefr.jeser.app
         
-        let preview_host = "preview-abc12345.devforge.local";
+        let preview_host = "dev-abc12345.devforge.local";
         let labels = traefik_labels("abc12345-ef01", preview_host, "/", 3000, None);
         
-        // Vérifier présence preview
+        // Vérifier présence hôte atelier
         let preview_router = format!("traefik.http.routers.http-df-abc12345-{}.rule", 
             preview_host.replace('.', "-"));
         assert!(
             labels.get(&preview_router).is_some(),
-            "Preview host doit avoir un router"
+            "Host dev- doit avoir un router"
         );
         
         // Vérifier absence production (starbasefr ou autre)

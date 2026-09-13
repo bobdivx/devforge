@@ -15,5 +15,12 @@ export default defineConfig({
   },
   vite: {
     plugins: [tailwindcss()],
+    resolve: {
+      dedupe: ['preact', 'preact/hooks', 'preact/jsx-runtime'],
+    },
+    ssr: {
+      // Bundler lucide avec la même Preact (évite une 2ᵉ copie via peer dep)
+      noExternal: ['lucide-preact'],
+    },
   },
 });

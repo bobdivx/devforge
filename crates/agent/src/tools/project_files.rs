@@ -155,15 +155,15 @@ impl Tool for WriteProjectFileTool {
         }
 
         // Récupérer le projet
-        let project: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT uuid, workdir, git_repository FROM projects WHERE uuid = ?",
+        let project: Option<(String, Option<String>, Option<String>, String)> = sqlx::query_as(
+            "SELECT uuid, workdir, git_repository, name FROM projects WHERE uuid = ?",
         )
         .bind(project_uuid)
         .fetch_optional(self.pool.as_ref())
         .await
         .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
-        let Some((uuid, workdir_opt, git_repo_opt)) = project else {
+        let Some((uuid, workdir_opt, git_repo_opt, name)) = project else {
             return Ok(json!({
                 "ok": false,
                 "error": format!("Projet introuvable : {project_uuid}")
@@ -182,7 +182,7 @@ impl Tool for WriteProjectFileTool {
                 )
                 .await
             }
-            "local" | _ => self.write_local(&uuid, workdir_opt, path, content).await,
+            "local" | _ => self.write_local(&uuid, workdir_opt, &name, path, content).await,
         }
     }
 }
@@ -192,24 +192,31 @@ impl WriteProjectFileTool {
         &self,
         project_uuid: &str,
         workdir_opt: Option<String>,
+        project_name: &str,
         path: &str,
         content: &str,
     ) -> Result<Value> {
-        let workdir = workdir_opt
-            .as_deref()
-            .unwrap_or("")
-            .trim();
+        let mut workdir_raw = workdir_opt.as_deref().unwrap_or("").trim().to_string();
 
-        if workdir.is_empty() {
-            return Ok(json!({
-                "ok": false,
-                "error": "Le projet n'a pas de workdir configuré.",
-                "hint": "Configure le workdir du projet ou utilise mode='github' pour écrire via Git."
-            }));
+        if workdir_raw.is_empty() {
+            let slug = slugify_project_name(project_name);
+            let slug = if slug.is_empty() {
+                project_uuid.chars().take(12).collect::<String>()
+            } else {
+                slug
+            };
+            workdir_raw = format!("/data/devforge/applications/{slug}");
+            let _ = sqlx::query(
+                "UPDATE projects SET workdir = ?, updated_at = datetime('now') WHERE uuid = ?",
+            )
+            .bind(&workdir_raw)
+            .bind(project_uuid)
+            .execute(self.pool.as_ref())
+            .await;
         }
 
         // Résoudre le workdir (comme dans devforge_deploy::resolve_project_workdir)
-        let workdir = devforge_deploy::resolve_project_workdir(workdir, project_uuid);
+        let workdir = devforge_deploy::resolve_project_workdir(&workdir_raw, project_uuid);
         let workdir_path = std::path::Path::new(&workdir);
 
         // Créer le workdir s'il n'existe pas
@@ -647,4 +654,20 @@ fn collect_files(root: &Path, current: &Path, out: &mut Vec<String>) {
             out.push(rel);
         }
     }
+}
+
+fn slugify_project_name(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
 }

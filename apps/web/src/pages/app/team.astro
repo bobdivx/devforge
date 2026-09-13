@@ -3,5 +3,5 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 import { TeamPage } from '../../components/TeamPage';
 ---
 <BaseLayout title="Team · DevForge">
-  <TeamPage client:load />
+  <TeamPage client:only="preact" />
 </BaseLayout>

@@ -3,5 +3,5 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 import { AdminPage } from '../../components/AdminPage';
 ---
 <BaseLayout title="Admin · DevForge">
-  <AdminPage client:load />
+  <AdminPage client:only="preact" />
 </BaseLayout>
