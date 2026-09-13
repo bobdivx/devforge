@@ -17,16 +17,30 @@ jobs:
 
   web:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/web
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
-      - run: npm install --include=optional --force
-      - run: npx astro build
+          node-version: "22.12.0"
+      - name: Install and build
+        working-directory: apps/web
+        run: |
+          set -euxo pipefail
+          npm install --include=optional
+          ls -la node_modules/.bin | head -40
+          npm run build 2>&1 | tee /tmp/web-build.log
+      - name: Comment log on failure
+        if: failure() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo 'Web CI failed:'
+            echo '```'
+            tail -c 6000 /tmp/web-build.log || echo '(pas de log)'
+            echo '```'
+          } > /tmp/body.md
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file /tmp/body.md
 
   no-forbidden-brands:
     runs-on: ubuntu-latest
