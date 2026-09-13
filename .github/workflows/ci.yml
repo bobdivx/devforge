@@ -19,27 +19,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22.12.0"
-      - name: Install and build
-        working-directory: apps/web
+      - name: Build web (même image que le Dockerfile)
         run: |
-          echo "arch=$(uname -m) node=$(node -p process.arch)"
-          npm install --include=optional
-          npm install --no-save --include=optional \
-            @astrojs/compiler-binding-linux-x64-gnu@0.4.0 \
-            @astrojs/compiler-binding-linux-arm64-gnu@0.4.0 \
-            @rolldown/binding-linux-x64-gnu@1.2.8 \
-            @rolldown/binding-linux-arm64-gnu@1.2.8
-          set +e
-          npm run build > /tmp/web-build.log 2>&1
-          STATUS=$?
-          echo "::notice::arch=$(uname -m) node=$(node -p process.arch) build=$STATUS"
-          tail -n 50 /tmp/web-build.log | while IFS= read -r line; do
-            echo "::error::$line"
-          done
-          exit "$STATUS"
+          docker run --rm \
+            -v "$PWD/apps/web:/web" \
+            -w /web \
+            -e PUBLIC_SERVER_URL=/api/v1 \
+            node:22-bookworm \
+            bash -lc 'npm install --include=optional && npm run build'
 
   no-forbidden-brands:
     runs-on: ubuntu-latest
