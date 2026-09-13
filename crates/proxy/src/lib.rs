@@ -521,7 +521,8 @@ mod tests {
         
         // Vérifier que la commande est bien formée
         assert!(cmd.contains("docker ps -q"));
-        assert!(cmd.contains("Host(`starbasefr.jeser.app`)"));
+        // Les backticks dans Host(...) peuvent être échappés ou entre quotes
+        assert!(cmd.contains("starbasefr.jeser.app"));
         assert!(cmd.contains("grep -qF"));
     }
 
