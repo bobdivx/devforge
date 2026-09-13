@@ -7,8 +7,10 @@ use std::sync::Arc;
 
 pub mod builders;
 pub mod docker;
+pub mod error_parser;
 pub mod ssh;
 
+pub use error_parser::{parse_deploy_error_fr, DeployError};
 pub use ssh::{LocalShellExecutor, SshRemoteExecutor, SshTarget};
 
 #[derive(Debug, Clone, Serialize)]
@@ -1001,7 +1003,28 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         proxy_labels: Option<&serde_json::Value>,
         logs: &mut String,
     ) -> bool {
-        let prepare = docker::docker_prepare_run(name, host_port);
+        // BLUE/GREEN DEPLOY STRATEGY:
+        // 1. Check if old container exists and is healthy → keep as fallback
+        // 2. Start new container with temp name
+        // 3. Wait for healthcheck (HTTP probe or running state)
+        // 4. If new is healthy: stop old, rename new → production name
+        // 5. If new fails: stop new, keep old running
+        
+        let old_exists = self.container_exists(server, workdir, name).await;
+        let old_is_healthy = if old_exists {
+            self.container_is_healthy(server, workdir, name, logs).await
+        } else {
+            false
+        };
+        
+        if old_is_healthy {
+            logs.push_str(&format!("[blue-green] Ancien conteneur {} en production (healthy) — protection activée\n", name));
+        } else if old_exists {
+            logs.push_str(&format!("[blue-green] Ancien conteneur {} existe mais pas healthy\n", name));
+        }
+        
+        // Free the host port if needed (only kill containers publishing same port, not our production container yet)
+        let prepare = docker::docker_prepare_run_except(name, host_port);
         match self.executor.exec(server, workdir, &prepare, 60).await {
             Ok(r) => {
                 if !r.output.trim().is_empty() {
@@ -1010,6 +1033,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             }
             Err(e) => logs.push_str(&format!("[prepare] warn: {e}\n")),
         }
+        
         let env_file = if std::path::Path::new(&format!("{workdir}/.env")).exists() {
             Some(".env")
         } else {
@@ -1024,25 +1048,20 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         let has_traefik_labels = proxy_labels.is_some();
         
         if has_traefik_labels && network.is_none() {
-            // Auto-detect Traefik network using multiple strategies
             logs.push_str("[start] DEVFORGE_DOCKER_NETWORK not set, attempting auto-detection...\n");
-            logs.push_str("[start] Trying: name substrings, image scan, port 80/443, labels, host-network, df- apps...\n");
             let detect_cmd = docker::docker_detect_traefik_network();
             match self.executor.exec(server, workdir, &detect_cmd, 20).await {
                 Ok(r) if r.ok && !r.output.trim().is_empty() => {
                     let detected = r.output.trim().to_string();
                     if detected == "host-network-detected" {
-                        logs.push_str("[start] ✓ Detected host-network proxy (NetworkMode=host)\n");
-                        logs.push_str("[start] Will publish host port (proxy on host network can reach it)\n");
-                        // Leave network as None, ports will be published
+                        logs.push_str("[start] ✓ Detected host-network proxy\n");
                     } else {
                         logs.push_str(&format!("[start] ✓ Detected Traefik network: {}\n", detected));
                         network = Some(detected);
                     }
                 }
                 _ => {
-                    logs.push_str("[start] Auto-detection strategies failed. Trying fallback network names...\n");
-                    // Fallback: try common network names
+                    logs.push_str("[start] Auto-detection failed, trying fallback networks...\n");
                     for candidate in ["devforge-net", "traefik-public", "traefik"] {
                         let check = format!("docker network inspect {} >/dev/null 2>&1 && echo {}", candidate, candidate);
                         if let Ok(r) = self.executor.exec(server, workdir, &check, 5).await {
@@ -1057,77 +1076,140 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             }
         }
         
-        // When using Traefik routing, don't publish host ports IF we have a shared network.
-        // BUT: always publish if network detection failed (fallback for debugging).
         let ports = if has_traefik_labels && network.is_some() {
-            vec![] // No host port publish - Traefik routes via Docker network
+            vec![]
         } else {
             vec![(host_port, container_port)]
         };
         
-        let run = docker::docker_run_ex(
-            name,
+        // Start NEW container with temporary name (blue/green)
+        let new_name = format!("{}-new", name);
+        
+        // Remove any leftover -new container from previous failed deploy
+        let cleanup_new = format!("docker rm -f {} 2>/dev/null || true", new_name);
+        let _ = self.executor.exec(server, workdir, &cleanup_new, 10).await;
+        
+        if has_traefik_labels {
+            logs.push_str("[start] Traefik labels will be applied AFTER healthcheck (prevent Host theft #106)\n");
+            if network.is_some() {
+                logs.push_str("[start] Routing via Docker network (no host port)\n");
+            }
+        }
+        
+        logs.push_str(&format!("[blue-green] Starting new container: {} ...\n", new_name));
+        
+        // CRITICAL: Start new container WITHOUT Traefik labels first (prevent Host theft #106)
+        // Labels will be applied only after healthcheck passes
+        let run_no_labels = docker::docker_run_ex(
+            &new_name,
             image,
             &ports,
             env_file,
             network.as_deref(),
-            proxy_labels,
+            None, // NO proxy labels yet
         );
         
-        if has_traefik_labels {
-            logs.push_str("[start] traefik labels applied\n");
-            if let Some(net) = &network {
-                logs.push_str(&format!("[start] Traefik routing via Docker network: {}\n", net));
-                logs.push_str("[start] No host port published (Traefik routes internally)\n");
-            } else {
-                logs.push_str("[start] WARNING: Traefik labels set but no Docker network found.\n");
-                logs.push_str("[start] WARNING: Publishing host port as fallback (may conflict with other apps).\n");
-                logs.push_str("[start] WARNING: Set DEVFORGE_DOCKER_NETWORK or ensure proxy container is running.\n");
-            }
-        }
-        
-        // Log the actual docker run command for debugging
-        logs.push_str(&format!("[start] Executing: docker run -d --name {} ...\n", name));
-        
-        match self.executor.exec(server, workdir, &run, 120).await {
+        let new_started = match self.executor.exec(server, workdir, &run_no_labels, 120).await {
             Ok(r) => {
-                logs.push_str(&format!(
-                    "[start] exit={} {}\n",
-                    r.exit_code,
-                    trim_out(&r.output)
-                ));
-                
-                // Debug: inspect container after start
-                if r.ok {
-                    let inspect_net = format!(
-                        "docker inspect {} --format '{{{{range $k, $v := .NetworkSettings.Networks}}}}{{{{$k}}}} {{{{end}}}}'",
-                        name
-                    );
-                    if let Ok(net_r) = self.executor.exec(server, workdir, &inspect_net, 5).await {
-                        if !net_r.output.trim().is_empty() {
-                            logs.push_str(&format!("[start] Container networks: {}\n", net_r.output.trim()));
-                        }
-                    }
-                    
-                    let inspect_ports = format!(
-                        "docker inspect {} --format '{{{{json .HostConfig.PortBindings}}}}'",
-                        name
-                    );
-                    if let Ok(port_r) = self.executor.exec(server, workdir, &inspect_ports, 5).await {
-                        if !port_r.output.trim().is_empty() && port_r.output.trim() != "null" && port_r.output.trim() != "{}" {
-                            logs.push_str(&format!("[start] Port bindings: {}\n", port_r.output.trim()));
-                        } else {
-                            logs.push_str("[start] Port bindings: none (Traefik internal routing)\n");
-                        }
-                    }
-                }
-                
+                logs.push_str(&format!("[start] exit={} {}\n", r.exit_code, trim_out(&r.output)));
                 r.ok
             }
             Err(e) => {
                 logs.push_str(&format!("[start] error: {e}\n"));
                 false
             }
+        };
+        
+        if !new_started {
+            logs.push_str("[blue-green] ❌ Échec démarrage nouveau conteneur\n");
+            if old_is_healthy {
+                logs.push_str(&format!("[blue-green] ✅ Ancien conteneur {} reste en production (aucune interruption)\n", name));
+            }
+            return false;
+        }
+        
+        // Wait for new container healthcheck
+        logs.push_str("[blue-green] Attente healthcheck nouveau conteneur...\n");
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        
+        let new_is_healthy = self.container_is_healthy(server, workdir, &new_name, logs).await;
+        
+        if !new_is_healthy {
+            logs.push_str("[blue-green] ❌ Nouveau conteneur failed healthcheck\n");
+            let _ = self.executor.exec(server, workdir, &format!("docker rm -f {}", new_name), 30).await;
+            if old_is_healthy {
+                logs.push_str(&format!("[blue-green] ✅ Ancien conteneur {} reste en production (déploiement annulé, pas d'interruption)\n", name));
+            }
+            return false;
+        }
+        
+        logs.push_str("[blue-green] ✅ Nouveau conteneur healthy\n");
+        
+        // NOW apply Traefik labels (only after healthcheck passed) — prevents Host theft #106
+        if has_traefik_labels {
+            logs.push_str("[blue-green] Application des labels Traefik au nouveau conteneur (après healthcheck)...\n");
+            let update_labels = docker::docker_update_labels(&new_name, proxy_labels.unwrap());
+            match self.executor.exec(server, workdir, &update_labels, 60).await {
+                Ok(r) if r.ok => {
+                    logs.push_str("[blue-green] ✅ Labels Traefik appliqués\n");
+                }
+                Ok(r) => {
+                    logs.push_str(&format!("[blue-green] ⚠️ Erreur application labels: {}\n", trim_out(&r.output)));
+                }
+                Err(e) => {
+                    logs.push_str(&format!("[blue-green] ⚠️ Erreur application labels: {}\n", e));
+                }
+            }
+        }
+        
+        // Cutover: stop old, rename new → production
+        if old_exists {
+            logs.push_str(&format!("[blue-green] Arrêt ancien conteneur {} ...\n", name));
+            let stop_old = format!("docker stop {} && docker rm -f {}", name, name);
+            let _ = self.executor.exec(server, workdir, &stop_old, 30).await;
+        }
+        
+        logs.push_str(&format!("[blue-green] Renommage {} → {} (production)\n", new_name, name));
+        let rename = format!("docker rename {} {}", new_name, name);
+        match self.executor.exec(server, workdir, &rename, 10).await {
+            Ok(_) => {
+                logs.push_str("[blue-green] ✅ Basculement terminé (zero-downtime deploy)\n");
+                true
+            }
+            Err(e) => {
+                logs.push_str(&format!("[blue-green] ⚠️ Erreur renommage: {}\n", e));
+                logs.push_str(&format!("[blue-green] Conteneur {} actif mais nom temporaire\n", new_name));
+                true // Le conteneur tourne quand même
+            }
+        }
+    }
+    
+    async fn container_exists(&self, server: &str, workdir: &str, name: &str) -> bool {
+        let cmd = format!("docker ps -a --filter name=^{}$ --format '{{{{.ID}}}}'", name);
+        self.executor.exec(server, workdir, &cmd, 10)
+            .await
+            .ok()
+            .map(|r| r.ok && !r.output.trim().is_empty())
+            .unwrap_or(false)
+    }
+    
+    async fn container_is_healthy(&self, server: &str, workdir: &str, name: &str, logs: &mut String) -> bool {
+        let status_cmd = format!("docker inspect {} --format '{{{{.State.Status}}}}'", name);
+        let status = self.executor.exec(server, workdir, &status_cmd, 10).await;
+        
+        match status {
+            Ok(r) if r.ok => {
+                let state = r.output.trim();
+                logs.push_str(&format!("[healthcheck] {} state={}\n", name, state));
+                if state != "running" {
+                    return false;
+                }
+                
+                // Simple running check is enough for now
+                // Future: add HTTP probe on container_port if available
+                true
+            }
+            _ => false
         }
     }
 
