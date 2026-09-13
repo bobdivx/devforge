@@ -71,7 +71,11 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "should_release=${SHOULD}" >> "$GITHUB_OUTPUT"
-          echo "docker_tags=${DOCKER_TAGS}" >> "$GITHUB_OUTPUT"
+          {
+            echo "docker_tags<<EOF"
+            echo "${DOCKER_TAGS}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
   docker:
     needs: prepare
