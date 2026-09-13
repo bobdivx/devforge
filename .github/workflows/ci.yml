@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
 jobs:
   rust:
     runs-on: ubuntu-latest
@@ -25,23 +30,19 @@ jobs:
       - name: Install and build
         working-directory: apps/web
         run: |
-          set -eu
+          set +e
           npm install --include=optional
-          ls node_modules/.bin
-          npm run build 2>&1 | tee /tmp/web-build.log
-          exit ${PIPESTATUS[0]}
-      - name: Comment log on failure
-        if: failure() && github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          {
-            echo 'Web CI failed:'
-            echo '```'
-            tail -c 6000 /tmp/web-build.log || echo '(pas de log)'
-            echo '```'
-          } > /tmp/body.md
-          gh pr comment "${{ github.event.pull_request.number }}" --body-file /tmp/body.md
+          INST=$?
+          echo "npm install exit=$INST"
+          ls node_modules/.bin || true
+          node -e "try{console.log('astro', require.resolve('astro'))}catch(e){console.error('NO ASTRO', e.message)}"
+          npm run build
+          BUILD=$?
+          echo "npm run build exit=$BUILD"
+          if [ "$INST" -ne 0 ] || [ "$BUILD" -ne 0 ]; then
+            echo "::error::web CI failed install=$INST build=$BUILD"
+            exit 1
+          fi
 
   no-forbidden-brands:
     runs-on: ubuntu-latest
