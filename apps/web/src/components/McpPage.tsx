@@ -46,6 +46,9 @@ type McpServer = {
   meta: Record<string, string>;
   has_secrets: boolean;
   secret_keys: string[];
+  oauth_connected?: boolean;
+  oauth_expires_at?: string;
+  oauth_scopes?: string;
 };
 
 const ICON_DOMAIN: Record<string, string> = {
@@ -354,6 +357,63 @@ export function McpPage() {
       toolsError.includes('OAuth') ||
       toolsError.includes('could not parse jwt'));
 
+  const isOAuthConnected = manage?.oauth_connected;
+
+  async function startOAuth() {
+    if (!manage) return;
+    setBusy(true);
+    try {
+      const r = await api.post<{ auth_url: string; state: string }>(
+        `/api/v1/mcp/servers/${manage.id}/oauth/start`,
+        {},
+      );
+      const { auth_url } = r.data;
+      // Ouvrir popup OAuth
+      const popup = window.open(
+        auth_url,
+        'mcp_oauth',
+        'width=600,height=700,popup=yes,scrollbars=yes',
+      );
+      if (!popup) {
+        toast.push({
+          title: 'Popup bloquée',
+          detail: 'Autorise les popups pour ce site',
+          tone: 'warn',
+        });
+        return;
+      }
+      // Écouter message de succès depuis callback
+      const handleMessage = (event: MessageEvent) => {
+        if (event.data?.type === 'mcp_oauth_success') {
+          window.removeEventListener('message', handleMessage);
+          toast.push({ title: 'OAuth connecté', tone: 'ok' });
+          load();
+          if (manage) openManage(manage);
+        }
+      };
+      window.addEventListener('message', handleMessage);
+    } catch (err) {
+      toast.push({ title: 'OAuth KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnectOAuth() {
+    if (!manage) return;
+    setBusy(true);
+    try {
+      await api.post(`/api/v1/mcp/servers/${manage.id}/oauth/disconnect`, {});
+      toast.push({ title: 'OAuth déconnecté', tone: 'info' });
+      load();
+      if (manage) openManage(manage);
+    } catch (err) {
+      toast.push({ title: 'Disconnect KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <AppShell active="mcp" title="MCP" description="Intégrations connectées à ton instance">
       {error && (
@@ -573,17 +633,45 @@ export function McpPage() {
               </div>
             </div>
 
-            {isOAuthRequired && (
+            {isOAuthRequired && !isOAuthConnected && (
               <Alert tone="warn" class="text-xs">
                 <p class="font-medium">Authentification OAuth requise</p>
                 <p class="mt-1 text-[var(--color-ink-muted)]">
                   Le serveur MCP {manage.name} hébergé exige OAuth pour accéder aux tools. Le token Platform API
                   permet uniquement de gérer les ressources (lier des bases de données).
                 </p>
-                <p class="mt-2 text-[var(--color-ink-muted)]">
-                  <strong>Solution temporaire :</strong> Utilise les ressources (DBs) via le catalogue. L'accès
-                  aux tools MCP sera disponible une fois OAuth implémenté dans DevForge.
+                <Button
+                  type="button"
+                  variant="secondary"
+                  class="mt-3"
+                  disabled={busy}
+                  onClick={startOAuth}
+                >
+                  {busy ? 'Connexion…' : 'Se connecter avec OAuth'}
+                </Button>
+              </Alert>
+            )}
+
+            {isOAuthConnected && (
+              <Alert tone="ok" class="text-xs">
+                <p class="font-medium">✓ OAuth connecté</p>
+                <p class="mt-1 text-[var(--color-ink-muted)]">
+                  Authentification OAuth active. Les tools MCP sont accessibles.
                 </p>
+                {manage.oauth_expires_at && (
+                  <p class="mt-1 text-[10px] text-[var(--color-ink-faint)]">
+                    Expire : {new Date(manage.oauth_expires_at).toLocaleString('fr-FR')}
+                  </p>
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  class="mt-2"
+                  disabled={busy}
+                  onClick={disconnectOAuth}
+                >
+                  Déconnecter OAuth
+                </Button>
               </Alert>
             )}
 

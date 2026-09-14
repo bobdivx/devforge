@@ -1,7 +1,7 @@
 use crate::auth_routes::{bearer_from, current_workspace, resolve_auth, user_team};
 use crate::routes::ApiError;
 use crate::state::{AppState, Project};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
@@ -36,6 +36,13 @@ pub fn router() -> Router<AppState> {
             "/api/v1/projects/{uuid}/resources/{link_id}",
             delete(unlink_project_resource),
         )
+        // OAuth MCP routes
+        .route("/api/v1/mcp/servers/{id}/oauth/start", post(start_oauth_flow))
+        .route("/api/v1/mcp/oauth/callback", get(oauth_callback))
+        .route("/api/v1/mcp/servers/{id}/oauth/disconnect", post(disconnect_oauth))
+        // Client ID Metadata Document (CIMD)
+        .route("/.well-known/oauth-client", get(oauth_client_metadata))
+        .route("/api/v1/mcp/oauth/client-metadata.json", get(oauth_client_metadata))
 }
 
 async fn workspace_uuid(state: &AppState, headers: &HeaderMap) -> Result<String, ApiError> {
@@ -206,6 +213,10 @@ async fn upsert_mcp_server(
             meta,
             secrets,
             workspace_uuid: ws,
+            oauth_access_token: String::new(),
+            oauth_refresh_token: String::new(),
+            oauth_expires_at: String::new(),
+            oauth_scopes: String::new(),
         })
         .await;
 
@@ -620,6 +631,366 @@ async fn fetch_project_ws(
     Ok(p)
 }
 
+/// Démarrer le flux OAuth pour un serveur MCP
+async fn start_oauth_flow(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let ws = workspace_uuid(&state, &headers).await?;
+    let server = state
+        .mcp
+        .clients
+        .get(&id)
+        .await
+        .ok_or_else(|| ApiError::not_found("mcp server"))?;
+
+    if !server.workspace_uuid.is_empty() && server.workspace_uuid != ws {
+        return Err(ApiError::not_found("mcp server"));
+    }
+
+    let catalog = server.catalog_id.as_deref().unwrap_or("");
+    if catalog.is_empty() {
+        return Err(ApiError::message(
+            "catalog_id requis pour déterminer le flux OAuth",
+        ));
+    }
+
+    // Découverte OAuth
+    let base_url = if !server.url.is_empty() {
+        let url = server.url.trim_end_matches("/mcp");
+        url.to_string()
+    } else {
+        return Err(ApiError::message("URL MCP vide — configure le serveur"));
+    };
+
+    let doc = devforge_mcp::discover_oauth(&base_url, &server.url)
+        .await
+        .map_err(|e| ApiError::message(format!("Découverte OAuth échouée : {}", e)))?;
+
+    if doc.authorization_endpoint.is_none() || doc.token_endpoint.is_none() {
+        return Err(ApiError::message(
+            "Endpoints OAuth manquants dans le document de découverte",
+        ));
+    }
+
+    // Générer PKCE + state
+    let verifier = devforge_mcp::generate_code_verifier();
+    let challenge = devforge_mcp::code_challenge(&verifier);
+    let state_param = devforge_mcp::generate_state();
+
+    // APP_URL requis
+    let app_url = std::env::var("APP_URL").map_err(|_| ApiError {
+        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        message: "APP_URL manquant — configure la variable d'environnement avec l'URL publique HTTPS (ex. https://web.jeser.app)".into(),
+    })?;
+
+    let app_url = app_url.trim_end_matches('/');
+
+    // Valider APP_URL : doit être HTTPS en production
+    if !app_url.starts_with("https://") {
+        if !app_url.starts_with("http://localhost") && !app_url.starts_with("http://127.0.0.1") {
+            return Err(ApiError {
+                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                message: format!(
+                    "APP_URL doit être HTTPS en production (actuellement: {}). Configure APP_URL=https://ton-domaine.com",
+                    app_url
+                ),
+            });
+        }
+    }
+
+    let redirect_uri = format!("{}/api/v1/mcp/oauth/callback", app_url);
+
+    // Déterminer client_id : CIMD si supporté, sinon legacy devforge-{catalog}
+    let client_id = if doc.client_id_metadata_document_supported {
+        format!("{}/.well-known/oauth-client", app_url)
+    } else {
+        format!("devforge-{}", catalog)
+    };
+
+    // Scopes suggérés selon le preset
+    let scopes = if catalog == "turso" {
+        vec!["read", "write"]
+    } else {
+        vec![]
+    };
+
+    let auth_url = devforge_mcp::build_authorization_url(
+        &doc,
+        &client_id,
+        &redirect_uri,
+        &state_param,
+        &challenge,
+        &scopes,
+    )
+    .map_err(|e| ApiError::message(format!("Construction URL OAuth : {}", e)))?;
+
+    // Stocker l'état en attente (expire 10min)
+    let now = Utc::now();
+    let expires_at = (now + chrono::Duration::minutes(10)).to_rfc3339();
+    sqlx::query(
+        r#"
+        INSERT INTO mcp_oauth_pending (state, server_id, workspace_uuid, code_verifier, redirect_uri, auth_url, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(&state_param)
+    .bind(&server.id)
+    .bind(&ws)
+    .bind(&verifier)
+    .bind(&redirect_uri)
+    .bind(&auth_url)
+    .bind(now.to_rfc3339())
+    .bind(expires_at)
+    .execute(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+
+    Ok(Json(json!({
+        "auth_url": auth_url,
+        "state": state_param,
+    })))
+}
+
+#[derive(Deserialize)]
+struct OAuthCallbackQuery {
+    code: String,
+    state: String,
+}
+
+/// Callback OAuth : échanger code → access_token
+async fn oauth_callback(
+    State(state): State<AppState>,
+    Query(params): Query<OAuthCallbackQuery>,
+) -> Result<axum::response::Html<String>, ApiError> {
+    // Récupérer l'état pending
+    let row: Option<(String, String, String, String, String, String)> = sqlx::query_as(
+        "SELECT server_id, workspace_uuid, code_verifier, redirect_uri, auth_url, expires_at FROM mcp_oauth_pending WHERE state = ?",
+    )
+    .bind(&params.state)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+
+    let (server_id, ws_uuid, verifier, redirect_uri, _auth_url, expires_at) =
+        row.ok_or_else(|| ApiError::message("État OAuth invalide ou expiré"))?;
+
+    // Vérifier expiration
+    if let Ok(exp) = chrono::DateTime::parse_from_rfc3339(&expires_at) {
+        if exp.timestamp() < chrono::Utc::now().timestamp() {
+            let _ = sqlx::query("DELETE FROM mcp_oauth_pending WHERE state = ?")
+                .bind(&params.state)
+                .execute(&state.pool)
+                .await;
+            return Err(ApiError::message("État OAuth expiré"));
+        }
+    }
+
+    // Charger le serveur MCP
+    let mut server = state
+        .mcp
+        .clients
+        .get(&server_id)
+        .await
+        .ok_or_else(|| ApiError::not_found("mcp server"))?;
+
+    if !server.workspace_uuid.is_empty() && server.workspace_uuid != ws_uuid {
+        return Err(ApiError::message("Workspace mismatch"));
+    }
+
+    // Découverte OAuth pour token_endpoint
+    let base_url = if !server.url.is_empty() {
+        let url = server.url.trim_end_matches("/mcp");
+        url.to_string()
+    } else {
+        return Err(ApiError::message("URL MCP vide"));
+    };
+
+    let doc = devforge_mcp::discover_oauth(&base_url, &server.url)
+        .await
+        .map_err(|e| ApiError::message(format!("Découverte OAuth : {}", e)))?;
+
+    let token_endpoint = doc
+        .token_endpoint
+        .as_deref()
+        .ok_or_else(|| ApiError::message("token_endpoint manquant"))?;
+
+    let catalog = server.catalog_id.as_deref().unwrap_or("");
+    
+    // Déterminer client_id : CIMD si supporté
+    let app_url = std::env::var("APP_URL").unwrap_or_else(|_| "http://localhost:3000".into());
+    let app_url = app_url.trim_end_matches('/');
+    
+    let client_id = if doc.client_id_metadata_document_supported {
+        format!("{}/.well-known/oauth-client", app_url)
+    } else {
+        format!("devforge-{}", catalog)
+    };
+
+    // Échanger code → tokens
+    let token_resp = devforge_mcp::exchange_code(
+        token_endpoint,
+        &client_id,
+        &redirect_uri,
+        &params.code,
+        &verifier,
+    )
+    .await
+    .map_err(|e| ApiError::message(format!("Échange OAuth échoué : {}", e)))?;
+
+    // Calculer expiration
+    let expires_at = if let Some(exp) = token_resp.expires_in {
+        (Utc::now() + chrono::Duration::seconds(exp)).to_rfc3339()
+    } else {
+        String::new()
+    };
+
+    // Persister tokens
+    server.oauth_access_token = token_resp.access_token;
+    server.oauth_refresh_token = token_resp.refresh_token;
+    server.oauth_expires_at = expires_at;
+    server.oauth_scopes = token_resp.scope;
+
+    state.mcp.clients.upsert(server.clone()).await;
+    persist_mcp(&state, &server).await?;
+
+    // Supprimer l'état pending
+    let _ = sqlx::query("DELETE FROM mcp_oauth_pending WHERE state = ?")
+        .bind(&params.state)
+        .execute(&state.pool)
+        .await;
+
+    // Page HTML de confirmation (fermeture popup)
+    let html = r#"
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connexion OAuth réussie</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background: #1c1c1e;
+            color: #fff;
+        }
+        .card {
+            background: #2a2a2e;
+            border-radius: 16px;
+            padding: 2rem;
+            text-align: center;
+            max-width: 400px;
+        }
+        .success {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+        h1 {
+            font-size: 1.5rem;
+            margin: 0 0 0.5rem;
+        }
+        p {
+            color: #a0a0a8;
+            margin: 0;
+        }
+    </style>
+    <script>
+        // Fermer popup après 2s
+        setTimeout(() => {
+            if (window.opener) {
+                window.opener.postMessage({ type: 'mcp_oauth_success' }, '*');
+                window.close();
+            }
+        }, 2000);
+    </script>
+</head>
+<body>
+    <div class="card">
+        <div class="success">✓</div>
+        <h1>Connexion OAuth réussie</h1>
+        <p>Tu peux fermer cette fenêtre.</p>
+    </div>
+</body>
+</html>
+    "#;
+
+    Ok(axum::response::Html(html.to_string()))
+}
+
+/// Déconnecter OAuth (revoke + clear tokens)
+async fn disconnect_oauth(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let ws = workspace_uuid(&state, &headers).await?;
+    let mut server = state
+        .mcp
+        .clients
+        .get(&id)
+        .await
+        .ok_or_else(|| ApiError::not_found("mcp server"))?;
+
+    if !server.workspace_uuid.is_empty() && server.workspace_uuid != ws {
+        return Err(ApiError::not_found("mcp server"));
+    }
+
+    // Clear OAuth tokens
+    server.oauth_access_token.clear();
+    server.oauth_refresh_token.clear();
+    server.oauth_expires_at.clear();
+    server.oauth_scopes.clear();
+
+    state.mcp.clients.upsert(server.clone()).await;
+    persist_mcp(&state, &server).await?;
+
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// Servir Client ID Metadata Document (CIMD / SEP-991)
+/// Pour serveurs OAuth avec client_id_metadata_document_supported (ex. Turso)
+async fn oauth_client_metadata(State(_state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let app_url = std::env::var("APP_URL").map_err(|_| ApiError {
+        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        message: "APP_URL manquant — configure la variable d'environnement avec l'URL publique HTTPS (ex. https://web.jeser.app)".into(),
+    })?;
+
+    let app_url = app_url.trim_end_matches('/');
+
+    // Valider APP_URL : doit être HTTPS en production (sauf localhost pour dev)
+    if !app_url.starts_with("https://") {
+        if !app_url.starts_with("http://localhost") && !app_url.starts_with("http://127.0.0.1") {
+            return Err(ApiError {
+                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                message: format!(
+                    "APP_URL doit être HTTPS en production (actuellement: {}). Configure APP_URL=https://ton-domaine.com",
+                    app_url
+                ),
+            });
+        }
+    }
+
+    let redirect_uri = format!("{}/api/v1/mcp/oauth/callback", app_url);
+    let client_metadata_url = format!("{}/.well-known/oauth-client", app_url);
+
+    Ok(Json(json!({
+        "client_id": client_metadata_url,
+        "client_name": "DevForge",
+        "redirect_uris": [redirect_uri],
+        "token_endpoint_auth_method": "none",
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "client_uri": app_url,
+        "logo_uri": format!("{}/favicon.ico", app_url),
+    })))
+}
+
 async fn persist_mcp(
     state: &AppState,
     cfg: &devforge_mcp::McpServerConfig,
@@ -630,8 +1001,9 @@ async fn persist_mcp(
     let secrets = serde_json::to_string(&cfg.secrets).unwrap_or_else(|_| "{}".into());
     sqlx::query(
         r#"
-        INSERT INTO mcp_servers (id, workspace_uuid, name, url, enabled, catalog_id, headers_json, meta_json, secrets_json, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO mcp_servers (id, workspace_uuid, name, url, enabled, catalog_id, headers_json, meta_json, secrets_json, 
+                                  oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_scopes, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             workspace_uuid = excluded.workspace_uuid,
             name = excluded.name,
@@ -641,6 +1013,10 @@ async fn persist_mcp(
             headers_json = excluded.headers_json,
             meta_json = excluded.meta_json,
             secrets_json = excluded.secrets_json,
+            oauth_access_token = excluded.oauth_access_token,
+            oauth_refresh_token = excluded.oauth_refresh_token,
+            oauth_expires_at = excluded.oauth_expires_at,
+            oauth_scopes = excluded.oauth_scopes,
             updated_at = excluded.updated_at
         "#,
     )
@@ -653,6 +1029,10 @@ async fn persist_mcp(
     .bind(&headers)
     .bind(&meta)
     .bind(&secrets)
+    .bind(&cfg.oauth_access_token)
+    .bind(&cfg.oauth_refresh_token)
+    .bind(&cfg.oauth_expires_at)
+    .bind(&cfg.oauth_scopes)
     .bind(&now)
     .bind(&now)
     .execute(&state.pool)
@@ -672,12 +1052,21 @@ pub async fn load_mcp_from_db(state: &AppState) -> Result<(), sqlx::Error> {
         String,
         String,
         String,
+        String,
+        String,
+        String,
+        String,
     )> = sqlx::query_as(
-        "SELECT id, workspace_uuid, name, url, enabled, catalog_id, headers_json, meta_json, secrets_json FROM mcp_servers",
+        "SELECT id, workspace_uuid, name, url, enabled, catalog_id, headers_json, meta_json, secrets_json, 
+                COALESCE(oauth_access_token, '') as oauth_access_token,
+                COALESCE(oauth_refresh_token, '') as oauth_refresh_token,
+                COALESCE(oauth_expires_at, '') as oauth_expires_at,
+                COALESCE(oauth_scopes, '') as oauth_scopes
+         FROM mcp_servers",
     )
     .fetch_all(&state.pool)
     .await?;
-    for (id, ws, name, url, enabled, catalog_id, headers_json, meta_json, secrets_json) in rows {
+    for (id, ws, name, url, enabled, catalog_id, headers_json, meta_json, secrets_json, oauth_access, oauth_refresh, oauth_expires, oauth_scopes) in rows {
         let headers: HashMap<String, String> =
             serde_json::from_str(&headers_json).unwrap_or_default();
         let meta: HashMap<String, String> = serde_json::from_str(&meta_json).unwrap_or_default();
@@ -696,6 +1085,10 @@ pub async fn load_mcp_from_db(state: &AppState) -> Result<(), sqlx::Error> {
                 meta,
                 secrets,
                 workspace_uuid: ws,
+                oauth_access_token: oauth_access,
+                oauth_refresh_token: oauth_refresh,
+                oauth_expires_at: oauth_expires,
+                oauth_scopes,
             })
             .await;
     }
