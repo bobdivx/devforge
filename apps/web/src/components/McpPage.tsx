@@ -127,9 +127,17 @@ function McpIcon({
   );
 }
 
-function statusMeta(server: McpServer): { label: string; tone: 'ok' | 'warn' | 'neutral' } {
-  if (!server.enabled) return { label: 'Désactivé', tone: 'warn' };
-  return { label: 'Connecté', tone: 'ok' };
+function statusMeta(
+  server: McpServer,
+  toolsChecked?: boolean,
+  toolsOk?: boolean,
+): { label: string; tone: 'ok' | 'warn' | 'neutral' } {
+  if (!server.enabled) return { label: 'Désactivé', tone: 'neutral' };
+  if (toolsChecked === false || toolsOk === undefined) {
+    return { label: 'Connecté', tone: 'ok' };
+  }
+  if (toolsOk) return { label: 'Connecté', tone: 'ok' };
+  return { label: 'Limité', tone: 'warn' };
 }
 
 function statusDotClass(tone: 'ok' | 'warn' | 'neutral' | 'danger') {
@@ -143,12 +151,15 @@ function ServerCard({
   server,
   index,
   onOpen,
+  toolsOk,
 }: {
   server: McpServer;
   index: number;
   onOpen: () => void;
+  toolsOk?: boolean;
 }) {
-  const status = statusMeta(server);
+  const toolsChecked = toolsOk !== undefined;
+  const status = statusMeta(server, toolsChecked, toolsOk);
   const detail =
     server.meta?.org ||
     (server.url
@@ -241,6 +252,7 @@ export function McpPage() {
   const [tools, setTools] = useState<Array<{ name: string; description: string }>>([]);
   const [toolsError, setToolsError] = useState<string | null>(null);
   const [toolsLoading, setToolsLoading] = useState(false);
+  const [toolsStatusMap, setToolsStatusMap] = useState<Record<string, boolean>>({});
 
   async function load() {
     try {
@@ -318,8 +330,10 @@ export function McpPage() {
       if (!(r.data ?? []).length) {
         setToolsError('Aucun tool exposé par ce serveur.');
       }
+      setToolsStatusMap((prev) => ({ ...prev, [server.id]: true }));
     } catch (err) {
       setToolsError(String(err));
+      setToolsStatusMap((prev) => ({ ...prev, [server.id]: false }));
     } finally {
       setToolsLoading(false);
     }
@@ -331,7 +345,14 @@ export function McpPage() {
   const manageCatalog =
     manage?.catalog_id && catalog.find((c) => c.id === manage.catalog_id);
   const toolsHelp = manageCatalog?.tools_help || 'Liste distante JSON-RPC (tools/list).';
-  const manageStatus = manage ? statusMeta(manage) : null;
+  const manageToolsOk = manage ? toolsStatusMap[manage.id] : undefined;
+  const manageStatus = manage ? statusMeta(manage, manageToolsOk !== undefined, manageToolsOk) : null;
+  const isOAuthRequired =
+    manageCatalog?.auth_mode === 'oauth' &&
+    toolsError &&
+    (toolsError.includes('401') ||
+      toolsError.includes('OAuth') ||
+      toolsError.includes('could not parse jwt'));
 
   return (
     <AppShell active="mcp" title="MCP" description="Intégrations connectées à ton instance">
@@ -350,7 +371,13 @@ export function McpPage() {
       ) : (
         <HubGrid cols={5}>
           {servers.map((s, i) => (
-            <ServerCard key={s.id} server={s} index={i} onOpen={() => openManage(s)} />
+            <ServerCard
+              key={s.id}
+              server={s}
+              index={i}
+              onOpen={() => openManage(s)}
+              toolsOk={toolsStatusMap[s.id]}
+            />
           ))}
           <HubAddTile
             index={servers.length}
@@ -535,7 +562,7 @@ export function McpPage() {
               </div>
               <div class="min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
-                  <Badge tone={manageStatus?.tone === 'ok' ? 'ok' : 'warn'}>
+                  <Badge tone={manageStatus?.tone === 'ok' ? 'ok' : manageStatus?.tone === 'warn' ? 'warn' : 'neutral'}>
                     {manageStatus?.label}
                   </Badge>
                   {manage.meta?.org && <Badge tone="neutral">{manage.meta.org}</Badge>}
@@ -545,6 +572,20 @@ export function McpPage() {
                 </p>
               </div>
             </div>
+
+            {isOAuthRequired && (
+              <Alert tone="warn" class="text-xs">
+                <p class="font-medium">Authentification OAuth requise</p>
+                <p class="mt-1 text-[var(--color-ink-muted)]">
+                  Le serveur MCP {manage.name} hébergé exige OAuth pour accéder aux tools. Le token Platform API
+                  permet uniquement de gérer les ressources (lier des bases de données).
+                </p>
+                <p class="mt-2 text-[var(--color-ink-muted)]">
+                  <strong>Solution temporaire :</strong> Utilise les ressources (DBs) via le catalogue. L'accès
+                  aux tools MCP sera disponible une fois OAuth implémenté dans DevForge.
+                </p>
+              </Alert>
+            )}
 
             <section>
               <h3 class="mb-2 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
