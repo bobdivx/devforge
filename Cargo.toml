@@ -62,3 +62,6 @@ devforge-llm = { path = "crates/llm" }
 devforge-update = { path = "crates/update" }
 devforge-runner = { path = "crates/runner" }
 devforge-cron = { path = "crates/cron" }
+
+[workspace.metadata.cargo-machete]
+ignored = ["idna"]
