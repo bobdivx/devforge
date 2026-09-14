@@ -319,13 +319,15 @@ function ProjectOverview({
     {
       key: 'errors',
       icon: 'pulse',
-      label: latestFailed ? 'Échec actif' : 'Santé',
+      label: latestFailed ? 'Échec actif' : project.status === 'unhealthy' ? 'Site inaccessible' : 'Santé',
       detail: latestFailed
         ? `${latestFailed.git_message || latestFailed.status} · ${formatWhen(latestFailed.created_at)}`
-        : latest
-          ? 'Dernier déploiement OK'
-          : 'En attente du premier deploy',
-      tone: latestFailed ? 'danger' : latest ? 'ok' : 'neutral',
+        : project.status === 'unhealthy'
+          ? `URL inaccessible${latest ? ` · Deploy ${latest.status}` : ''}`
+          : latest
+            ? 'Dernier déploiement OK'
+            : 'En attente du premier deploy',
+      tone: latestFailed || project.status === 'unhealthy' ? 'danger' : latest ? 'ok' : 'neutral',
       href: latestFailed
         ? `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`
         : undefined,
@@ -546,11 +548,11 @@ function ProjectOverview({
             {health.map((h, i) => {
               const inner = (
                 <div
-                  class="df-step-in flex gap-3"
+                  class="df-step-in flex gap-3 min-w-0"
                   style={{ animationDelay: `${i * 45}ms` }}
                 >
                   <HealthIcon kind={h.icon} tone={h.tone} />
-                  <div class="min-w-0 flex-1">
+                  <div class="min-w-0 flex-1 overflow-hidden">
                     <div class="text-sm font-medium text-[var(--color-ink)]">{h.label}</div>
                     <p
                       class="mt-0.5 truncate text-xs text-[var(--color-ink-muted)]"
@@ -562,7 +564,7 @@ function ProjectOverview({
                 </div>
               );
               const cls =
-                'rounded-xl border border-[var(--color-line)] bg-[var(--color-card)]/60 px-3.5 py-3 transition hover:border-[var(--color-line-strong)] hover:bg-[var(--color-surface)]';
+                'rounded-xl border border-[var(--color-line)] bg-[var(--color-card)]/60 px-3.5 py-3 transition hover:border-[var(--color-line-strong)] hover:bg-[var(--color-surface)] min-w-0';
               return h.href ? (
                 <a key={h.key} href={h.href} class={cls}>
                   {inner}

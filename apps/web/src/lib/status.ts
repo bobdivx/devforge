@@ -10,6 +10,8 @@ export function projectStatusMeta(status: string): {
     case 'completed':
     case 'finished':
       return { label: status === 'live' || status === 'running' ? 'En ligne' : 'OK', tone: 'ok' };
+    case 'unhealthy':
+      return { label: 'Site inaccessible', tone: 'danger' };
     case 'deploying':
     case 'building':
     case 'queued':
