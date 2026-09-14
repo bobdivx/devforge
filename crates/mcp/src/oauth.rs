@@ -13,10 +13,21 @@ pub struct OAuthDiscoveryDocument {
     pub authorization_endpoint: Option<String>,
     pub token_endpoint: Option<String>,
     pub revocation_endpoint: Option<String>,
+    pub registration_endpoint: Option<String>,
     pub scopes_supported: Option<Vec<String>>,
     pub response_types_supported: Option<Vec<String>>,
     pub grant_types_supported: Option<Vec<String>>,
     pub code_challenge_methods_supported: Option<Vec<String>>,
+    #[serde(default)]
+    pub client_id_metadata_document_supported: bool,
+    pub token_endpoint_auth_methods_supported: Option<Vec<String>>,
+}
+
+/// OAuth Protected Resource Metadata (RFC 9728 MCP)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ProtectedResourceMetadata {
+    pub resource: Option<String>,
+    pub authorization_servers: Option<Vec<String>>,
 }
 
 /// Réponse OAuth token exchange
@@ -57,8 +68,9 @@ pub fn generate_state() -> String {
 
 /// Découverte OAuth depuis un endpoint MCP distant (RFC 9728 + protected resource)
 /// Essaie :
-/// 1. WWW-Authenticate challenge sur tools/list 401
-/// 2. /.well-known/oauth-authorization-server
+/// 1. WWW-Authenticate challenge sur tools/list 401 → resource_metadata
+/// 2. Protected Resource Metadata → authorization_servers
+/// 3. /.well-known/oauth-authorization-server fallback
 pub async fn discover_oauth(
     base_url: &str,
     mcp_url: &str,
@@ -68,7 +80,7 @@ pub async fn discover_oauth(
         .build()
         .map_err(|e| DevForgeError::Message(format!("Reqwest build: {e}")))?;
 
-    // Tenter protected resource metadata (MCP tools/list sans auth → 401 + WWW-Authenticate)
+    // 1. Tenter protected resource metadata (MCP tools/list sans auth → 401 + WWW-Authenticate)
     if !mcp_url.is_empty() {
         let res = client
             .post(mcp_url)
@@ -88,9 +100,27 @@ pub async fn discover_oauth(
             if r.status() == reqwest::StatusCode::UNAUTHORIZED {
                 if let Some(www_auth) = r.headers().get("www-authenticate") {
                     if let Ok(hdr) = www_auth.to_str() {
+                        // Parse resource_metadata="..." (Turso pattern)
+                        if let Some(resource_meta_url) = extract_resource_metadata(hdr) {
+                            // GET Protected Resource Metadata
+                            if let Ok(prm) = fetch_protected_resource_metadata(&client, &resource_meta_url).await {
+                                // Utiliser le premier authorization_server
+                                if let Some(servers) = prm.authorization_servers {
+                                    if let Some(as_url) = servers.first() {
+                                        let well_known = format!("{}/.well-known/oauth-authorization-server", as_url.trim_end_matches('/'));
+                                        if let Ok(doc) = fetch_as_metadata(&client, &well_known).await {
+                                            return Ok(doc);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Fallback: as_uri= (legacy)
                         if let Some(url) = extract_as_uri(hdr) {
-                            let doc = fetch_as_metadata(&client, &url).await?;
-                            return Ok(doc);
+                            if let Ok(doc) = fetch_as_metadata(&client, &url).await {
+                                return Ok(doc);
+                            }
                         }
                     }
                 }
@@ -98,14 +128,28 @@ pub async fn discover_oauth(
         }
     }
 
-    // Fallback : /.well-known/oauth-authorization-server
+    // 2. Fallback : /.well-known/oauth-authorization-server
     let base = base_url.trim_end_matches('/');
     let well_known = format!("{}/.well-known/oauth-authorization-server", base);
     fetch_as_metadata(&client, &well_known).await
 }
 
+fn extract_resource_metadata(www_authenticate: &str) -> Option<String> {
+    // Format Turso : Bearer resource_metadata="https://mcp.turso.ai/.well-known/oauth-protected-resource/mcp"
+    for part in www_authenticate.split(',') {
+        let part = part.trim();
+        if let Some(val) = part.strip_prefix("resource_metadata=") {
+            let url = val.trim_matches('"').trim();
+            if !url.is_empty() {
+                return Some(url.to_string());
+            }
+        }
+    }
+    None
+}
+
 fn extract_as_uri(www_authenticate: &str) -> Option<String> {
-    // Format : Bearer realm="...", as_uri="https://..."
+    // Format legacy : Bearer realm="...", as_uri="https://..."
     for part in www_authenticate.split(',') {
         let part = part.trim();
         if let Some(val) = part.strip_prefix("as_uri=") {
@@ -116,6 +160,32 @@ fn extract_as_uri(www_authenticate: &str) -> Option<String> {
         }
     }
     None
+}
+
+async fn fetch_protected_resource_metadata(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<ProtectedResourceMetadata> {
+    let res = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| DevForgeError::Message(format!("Protected Resource Metadata GET {url}: {e}")))?;
+
+    if !res.status().is_success() {
+        return Err(DevForgeError::Message(format!(
+            "Protected Resource Metadata {} → HTTP {}",
+            url,
+            res.status()
+        )));
+    }
+
+    let prm: ProtectedResourceMetadata = res
+        .json()
+        .await
+        .map_err(|e| DevForgeError::Message(format!("Protected Resource Metadata parse: {e}")))?;
+
+    Ok(prm)
 }
 
 async fn fetch_as_metadata(
@@ -287,9 +357,19 @@ mod tests {
     }
 
     #[test]
+    fn extract_resource_metadata_from_www_authenticate() {
+        let header = r#"Bearer resource_metadata="https://mcp.turso.ai/.well-known/oauth-protected-resource/mcp""#;
+        let uri = super::extract_resource_metadata(header);
+        assert_eq!(
+            uri,
+            Some("https://mcp.turso.ai/.well-known/oauth-protected-resource/mcp".into())
+        );
+    }
+
+    #[test]
     fn extract_as_uri_from_www_authenticate() {
         let header = r#"Bearer realm="mcp", as_uri="https://auth.example.com/.well-known/oauth-authorization-server""#;
-        let uri = extract_as_uri(header);
+        let uri = super::extract_as_uri(header);
         assert_eq!(
             uri,
             Some("https://auth.example.com/.well-known/oauth-authorization-server".into())
@@ -303,10 +383,13 @@ mod tests {
             authorization_endpoint: Some("https://auth.example.com/authorize".into()),
             token_endpoint: Some("https://auth.example.com/token".into()),
             revocation_endpoint: None,
+            registration_endpoint: None,
             scopes_supported: None,
             response_types_supported: None,
             grant_types_supported: None,
             code_challenge_methods_supported: None,
+            client_id_metadata_document_supported: false,
+            token_endpoint_auth_methods_supported: None,
         };
         let url = build_authorization_url(
             &doc,

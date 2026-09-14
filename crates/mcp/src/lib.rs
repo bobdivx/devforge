@@ -91,17 +91,6 @@ impl McpServerConfig {
             })
             .collect();
         
-        let oauth_hint = if !self.oauth_access_token.is_empty() {
-            let len = self.oauth_access_token.len();
-            if len > 16 {
-                format!("{}••••{}", &self.oauth_access_token[..8], &self.oauth_access_token[len - 8..])
-            } else {
-                "••••".into()
-            }
-        } else {
-            String::new()
-        };
-        
         json!({
             "id": self.id,
             "name": self.name,
@@ -115,7 +104,6 @@ impl McpServerConfig {
             "secrets_masked": masked_secrets,
             "headers": masked_headers,
             "oauth_connected": !self.oauth_access_token.is_empty(),
-            "oauth_access_token_hint": oauth_hint,
             "oauth_expires_at": self.oauth_expires_at,
             "oauth_scopes": self.oauth_scopes,
         })

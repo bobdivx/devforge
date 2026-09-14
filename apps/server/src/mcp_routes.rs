@@ -40,6 +40,9 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/mcp/servers/{id}/oauth/start", post(start_oauth_flow))
         .route("/api/v1/mcp/oauth/callback", get(oauth_callback))
         .route("/api/v1/mcp/servers/{id}/oauth/disconnect", post(disconnect_oauth))
+        // Client ID Metadata Document (CIMD)
+        .route("/.well-known/oauth-client", get(oauth_client_metadata))
+        .route("/api/v1/mcp/oauth/client-metadata.json", get(oauth_client_metadata))
 }
 
 async fn workspace_uuid(state: &AppState, headers: &HeaderMap) -> Result<String, ApiError> {
@@ -649,7 +652,7 @@ async fn start_oauth_flow(
     let catalog = server.catalog_id.as_deref().unwrap_or("");
     if catalog.is_empty() {
         return Err(ApiError::message(
-            "catalog_id requis pour déterminer le client_id OAuth",
+            "catalog_id requis pour déterminer le flux OAuth",
         ));
     }
 
@@ -676,14 +679,37 @@ async fn start_oauth_flow(
     let challenge = devforge_mcp::code_challenge(&verifier);
     let state_param = devforge_mcp::generate_state();
 
-    // Client ID : devforge-{catalog}
-    let client_id = format!("devforge-{}", catalog);
+    // APP_URL requis
+    let app_url = std::env::var("APP_URL").map_err(|_| ApiError {
+        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        message: "APP_URL manquant — configure la variable d'environnement avec l'URL publique HTTPS (ex. https://web.jeser.app)".into(),
+    })?;
 
-    // Redirect URI : APP_URL (base publique self-hosted)
-    let app_url = std::env::var("APP_URL").unwrap_or_else(|_| "http://localhost:3000".into());
-    let redirect_uri = format!("{}/api/v1/mcp/oauth/callback", app_url.trim_end_matches('/'));
+    let app_url = app_url.trim_end_matches('/');
 
-    // Scopes suggérés selon le preset (sinon par défaut vide)
+    // Valider APP_URL : doit être HTTPS en production
+    if !app_url.starts_with("https://") {
+        if !app_url.starts_with("http://localhost") && !app_url.starts_with("http://127.0.0.1") {
+            return Err(ApiError {
+                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                message: format!(
+                    "APP_URL doit être HTTPS en production (actuellement: {}). Configure APP_URL=https://ton-domaine.com",
+                    app_url
+                ),
+            });
+        }
+    }
+
+    let redirect_uri = format!("{}/api/v1/mcp/oauth/callback", app_url);
+
+    // Déterminer client_id : CIMD si supporté, sinon legacy devforge-{catalog}
+    let client_id = if doc.client_id_metadata_document_supported {
+        format!("{}/.well-known/oauth-client", app_url)
+    } else {
+        format!("devforge-{}", catalog)
+    };
+
+    // Scopes suggérés selon le preset
     let scopes = if catalog == "turso" {
         vec!["read", "write"]
     } else {
@@ -791,7 +817,16 @@ async fn oauth_callback(
         .ok_or_else(|| ApiError::message("token_endpoint manquant"))?;
 
     let catalog = server.catalog_id.as_deref().unwrap_or("");
-    let client_id = format!("devforge-{}", catalog);
+    
+    // Déterminer client_id : CIMD si supporté
+    let app_url = std::env::var("APP_URL").unwrap_or_else(|_| "http://localhost:3000".into());
+    let app_url = app_url.trim_end_matches('/');
+    
+    let client_id = if doc.client_id_metadata_document_supported {
+        format!("{}/.well-known/oauth-client", app_url)
+    } else {
+        format!("devforge-{}", catalog)
+    };
 
     // Échanger code → tokens
     let token_resp = devforge_mcp::exchange_code(
@@ -916,6 +951,44 @@ async fn disconnect_oauth(
     persist_mcp(&state, &server).await?;
 
     Ok(Json(json!({ "ok": true })))
+}
+
+/// Servir Client ID Metadata Document (CIMD / SEP-991)
+/// Pour serveurs OAuth avec client_id_metadata_document_supported (ex. Turso)
+async fn oauth_client_metadata(State(_state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let app_url = std::env::var("APP_URL").map_err(|_| ApiError {
+        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        message: "APP_URL manquant — configure la variable d'environnement avec l'URL publique HTTPS (ex. https://web.jeser.app)".into(),
+    })?;
+
+    let app_url = app_url.trim_end_matches('/');
+
+    // Valider APP_URL : doit être HTTPS en production (sauf localhost pour dev)
+    if !app_url.starts_with("https://") {
+        if !app_url.starts_with("http://localhost") && !app_url.starts_with("http://127.0.0.1") {
+            return Err(ApiError {
+                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                message: format!(
+                    "APP_URL doit être HTTPS en production (actuellement: {}). Configure APP_URL=https://ton-domaine.com",
+                    app_url
+                ),
+            });
+        }
+    }
+
+    let redirect_uri = format!("{}/api/v1/mcp/oauth/callback", app_url);
+    let client_metadata_url = format!("{}/.well-known/oauth-client", app_url);
+
+    Ok(Json(json!({
+        "client_id": client_metadata_url,
+        "client_name": "DevForge",
+        "redirect_uris": [redirect_uri],
+        "token_endpoint_auth_method": "none",
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "client_uri": app_url,
+        "logo_uri": format!("{}/favicon.ico", app_url),
+    })))
 }
 
 async fn persist_mcp(

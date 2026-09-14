@@ -267,6 +267,10 @@ mod tests {
             meta: Default::default(),
             secrets: Default::default(),
             workspace_uuid: String::new(),
+            oauth_access_token: String::new(),
+            oauth_refresh_token: String::new(),
+            oauth_expires_at: String::new(),
+            oauth_scopes: String::new(),
         };
         
         // Construire une requête et vérifier les headers (inspection manuelle dans les tests d'intégration)
