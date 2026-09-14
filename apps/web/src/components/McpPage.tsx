@@ -554,6 +554,76 @@ export function McpPage() {
                 </div>
               </Alert>
             )}
+            {preset.auth_mode === 'oauth' && (
+              <Alert tone="info" class="space-y-2 text-xs">
+                <p class="font-medium">✨ Connexion OAuth disponible</p>
+                <p class="text-[var(--color-ink-muted)]">
+                  Ce serveur MCP supporte OAuth. Tu peux te connecter directement sans saisir de tokens.
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  class="mt-2 w-full"
+                  disabled={busy}
+                  onClick={async () => {
+                    try {
+                      setBusy(true);
+                      const minimal: Record<string, string> = {};
+                      for (const f of preset.fields) {
+                        if (f.key === 'url' && preset.default_url) {
+                          minimal.url = preset.default_url;
+                        } else if (f.key === 'org' && fields[f.key]?.trim()) {
+                          minimal[f.key] = fields[f.key];
+                        } else {
+                          minimal[f.key] = '';
+                        }
+                      }
+                      const r = await api.mcpUpsert({
+                        catalog_id: preset.id,
+                        fields: minimal,
+                      });
+                      const serverId = r.data?.id;
+                      if (!serverId) throw new Error('Server ID manquant');
+                      const oauth = await api.post<{ auth_url: string }>(
+                        `/api/v1/mcp/servers/${serverId}/oauth/start`,
+                        {},
+                      );
+                      const popup = window.open(
+                        oauth.data.auth_url,
+                        'mcp_oauth',
+                        'width=600,height=700,popup=yes,scrollbars=yes',
+                      );
+                      if (!popup) {
+                        toast.push({
+                          title: 'Popup bloquée',
+                          detail: 'Autorise les popups pour ce site',
+                          tone: 'warn',
+                        });
+                        return;
+                      }
+                      const handleMessage = (event: MessageEvent) => {
+                        if (event.data?.type === 'mcp_oauth_success') {
+                          window.removeEventListener('message', handleMessage);
+                          toast.push({ title: `${preset.name} connecté via OAuth`, tone: 'ok' });
+                          setPreset(null);
+                          load();
+                        }
+                      };
+                      window.addEventListener('message', handleMessage);
+                    } catch (err) {
+                      toast.push({ title: 'OAuth KO', detail: String(err), tone: 'danger' });
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  {busy ? 'Connexion OAuth…' : 'Se connecter avec OAuth'}
+                </Button>
+                <p class="text-[10px] text-[var(--color-ink-faint)]">
+                  Ou remplis les champs ci-dessous pour une configuration manuelle (mode avancé).
+                </p>
+              </Alert>
+            )}
             {preset.fields.map((f) => (
               <div key={f.key}>
                 <Input
