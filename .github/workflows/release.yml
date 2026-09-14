@@ -1,14 +1,18 @@
 name: Release
 
-# Un seul workflow : tag + images Docker + binaires + page GitHub Releases.
-# GitHub n'enchaîne PAS un second workflow quand un tag est poussé avec GITHUB_TOKEN,
-# donc on publie ici au lieu de dépendre de tag-version.yml → release.yml.
+# Un seul workflow : auto-bump + tag + images Docker + binaires + page GitHub Releases.
+# Si la version Cargo.toml est déjà publiée, GitHub incrémente le patch automatiquement.
+# Les pushes faits avec GITHUB_TOKEN ne re-déclenchent pas de workflow (pas de boucle).
 on:
   push:
     branches: [main]
     tags:
       - "v*"
   workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -32,17 +36,51 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+
+          read_cargo_version() {
+            awk '/^\[workspace.package\]/{f=1} f && $1=="version"{gsub(/"/,"",$3); print $3; exit}' Cargo.toml
+          }
+
+          bump_patch() {
+            local v="$1" major minor patch
+            IFS=. read -r major minor patch <<< "$v"
+            echo "${major}.${minor}.$((patch + 1))"
+          }
+
+          apply_version() {
+            local old="$1" new="$2"
+            sed -i "s/^version = \"${old}\"/version = \"${new}\"/" Cargo.toml
+            sed -i "0,/\"version\": \"${old}\"/s//\"version\": \"${new}\"/" apps/web/package.json
+            sed -i "s/^version = \"${old}\"$/version = \"${new}\"/" Cargo.lock
+          }
+
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
-            VERSION=$(awk '/^\[workspace.package\]/{f=1} f && $1=="version"{gsub(/"/,"",$3); print $3; exit}' Cargo.toml)
-          fi
-          if [[ -z "$VERSION" ]]; then
-            echo "Impossible de lire la version"
-            exit 1
-          fi
-          TAG="v${VERSION}"
+            VERSION=$(read_cargo_version)
+            if [[ -z "$VERSION" ]]; then
+              echo "Impossible de lire la version"
+              exit 1
+            fi
 
+            # GitHub gère les versions : si déjà publiée → bump patch + commit
+            if gh release view "v${VERSION}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+              OLD="$VERSION"
+              VERSION=$(bump_patch "$OLD")
+              echo "Auto-bump GitHub: ${OLD} → ${VERSION}"
+              apply_version "$OLD" "$VERSION"
+
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add Cargo.toml Cargo.lock apps/web/package.json
+              git commit -m "chore: bump version ${OLD} → ${VERSION}"
+              git push origin "HEAD:${GITHUB_REF_NAME}"
+            else
+              echo "Version ${VERSION} pas encore publiée — release directe"
+            fi
+          fi
+
+          TAG="v${VERSION}"
           SHOULD=true
           if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             echo "Release ${TAG} déjà publiée — skip"
@@ -53,7 +91,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             if ! git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
-              git tag -a "${TAG}" -m "DevForge ${TAG}" "${GITHUB_SHA}"
+              git tag -a "${TAG}" -m "DevForge ${TAG}"
               git push origin "refs/tags/${TAG}" || true
             fi
           fi
@@ -68,6 +106,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
       - uses: docker/setup-buildx-action@v3
 
       - name: Login GHCR
@@ -119,6 +159,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
       - name: Build
         run: cargo build -p devforge-server --release
