@@ -22,6 +22,7 @@ type CatalogItem = {
   category: string;
   docs_url?: string | null;
   default_url?: string | null;
+  auth_mode?: string | null;
   fields: Array<{
     key: string;
     label: string;
@@ -402,7 +403,7 @@ export function McpPage() {
     if (!manage) return;
     setBusy(true);
     try {
-      await api.post(`/api/v1/mcp/servers/${manage.id}/oauth/disconnect`, {});
+      await api.mcpOAuthDisconnect(manage.id);
       toast.push({ title: 'OAuth déconnecté', tone: 'info' });
       load();
       if (manage) openManage(manage);
@@ -775,6 +776,26 @@ export function McpPage() {
               </div>
             </div>
 
+            {/* CTA proactif OAuth : info si auth_mode=oauth sans connexion */}
+            {manageCatalog?.auth_mode === 'oauth' && !isOAuthConnected && !isOAuthRequired && (
+              <Alert tone="info" class="text-xs">
+                <p class="font-medium">Connexion OAuth disponible</p>
+                <p class="mt-1 text-[var(--color-ink-muted)]">
+                  Ce serveur MCP supporte OAuth. Connecte-toi pour activer tous les tools.
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  class="mt-3"
+                  disabled={busy}
+                  onClick={startOAuth}
+                >
+                  {busy ? 'Connexion…' : 'Se connecter avec OAuth'}
+                </Button>
+              </Alert>
+            )}
+
+            {/* Warn si erreur 401/OAuth détectée */}
             {isOAuthRequired && !isOAuthConnected && (
               <Alert tone="warn" class="text-xs">
                 <p class="font-medium">Authentification OAuth requise</p>
