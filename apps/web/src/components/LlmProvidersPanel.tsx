@@ -7,11 +7,12 @@ import {
   Alert,
   Badge,
   Button,
-  Card,
-  CardHeader,
-  FadeIn,
+  HubAddTile,
+  HubGrid,
+  HubTile,
   Input,
   Modal,
+  Skeleton,
   useToast,
 } from './ui';
 
@@ -42,10 +43,16 @@ function LlmIcon({
 }: {
   domain?: string | null;
   name: string;
-  size?: 'sm' | 'md';
+  size?: 'sm' | 'md' | 'lg';
 }) {
   const [failed, setFailed] = useState(false);
-  const dim = size === 'sm' ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl';
+  const dim =
+    size === 'sm'
+      ? 'h-8 w-8 rounded-lg'
+      : size === 'lg'
+        ? 'h-full w-full'
+        : 'h-10 w-10 rounded-xl';
+  const bare = size === 'lg';
   const src =
     domain && !failed
       ? `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(domain)}`
@@ -54,7 +61,8 @@ function LlmIcon({
   return (
     <div
       class={cn(
-        'flex shrink-0 items-center justify-center overflow-hidden bg-[#2a2a2e] text-sm font-semibold text-[var(--color-ink-muted)]',
+        'flex shrink-0 items-center justify-center overflow-hidden text-sm font-semibold text-[var(--color-ink-muted)]',
+        bare ? 'bg-transparent' : 'bg-[#2a2a2e]',
         dim,
       )}
       aria-hidden
@@ -63,7 +71,7 @@ function LlmIcon({
         <img
           src={src}
           alt=""
-          class="h-full w-full object-contain p-1.5"
+          class={cn('h-full w-full object-contain', bare ? 'p-2.5' : 'p-1.5')}
           loading="lazy"
           onError={() => setFailed(true)}
         />
@@ -74,45 +82,120 @@ function LlmIcon({
   );
 }
 
-function CatalogCard({
-  item,
-  count,
-  onOpen,
-}: {
-  item: CatalogItem;
-  count: number;
-  onOpen: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      class={cn(
-        'group flex items-center gap-3 rounded-2xl border bg-[var(--color-card)] px-3.5 py-3 text-left transition',
-        'border-[var(--color-line)] hover:border-[var(--color-line-strong)] hover:bg-[#16161a]',
-      )}
-    >
-      <LlmIcon domain={item.icon_domain} name={item.name} />
-      <div class="min-w-0 flex-1">
-        <div class="truncate font-medium tracking-tight">{item.name}</div>
-      </div>
-      {count > 0 ? (
-        <Badge tone="ok" class="shrink-0">
-          {count}
-        </Badge>
-      ) : (
-        <span class="shrink-0 text-xs text-[var(--color-ink-faint)] opacity-0 transition group-hover:opacity-100">
-          Ajouter
-        </span>
-      )}
-    </button>
-  );
+function providerStatus(p: LlmProviderRow): {
+  label: string;
+  tone: 'ok' | 'warn' | 'danger' | 'neutral';
+} {
+  if (!p.enabled) return { label: 'Désactivé', tone: 'warn' };
+  if (p.healthy === false) return { label: 'KO', tone: 'danger' };
+  if (p.in_chain !== false) return { label: 'Actif', tone: 'ok' };
+  return { label: 'En attente', tone: 'neutral' };
+}
+
+function statusDotClass(tone: 'ok' | 'warn' | 'danger' | 'neutral') {
+  if (tone === 'ok') return 'bg-[var(--color-ok)]';
+  if (tone === 'warn') return 'bg-[var(--color-warn)]';
+  if (tone === 'danger') return 'bg-[var(--color-danger)]';
+  return 'bg-[var(--color-ink-faint)]';
 }
 
 function suggestInstanceName(catalogName: string, existing: LlmProviderRow[], catalogId: string): string {
   const same = existing.filter((p) => p.catalog_id === catalogId);
   if (same.length === 0) return catalogName;
   return `${catalogName} ${same.length + 1}`;
+}
+
+function ProviderCard({
+  provider,
+  catalog,
+  rank,
+  index,
+  onOpen,
+}: {
+  provider: LlmProviderRow;
+  catalog?: CatalogItem;
+  rank: number;
+  index: number;
+  onOpen: () => void;
+}) {
+  const status = providerStatus(provider);
+  const model = provider.resolved_model || provider.model || 'auto';
+
+  return (
+    <HubTile
+      index={index}
+      title={provider.name}
+      onClick={onOpen}
+      iconClass="!bg-[#2a2a2e]"
+      icon={<LlmIcon domain={catalog?.icon_domain} name={provider.name} size="lg" />}
+      badge={
+        <>
+          <span
+            class={cn(
+              'absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full ring-2 ring-[#1c1c1e]',
+              statusDotClass(status.tone),
+              status.tone === 'ok' ? 'animate-pulse' : '',
+            )}
+            title={status.label}
+            aria-hidden
+          />
+          {rank === 0 && (
+            <span class="absolute -bottom-1 -left-1 rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-zinc-950 ring-2 ring-[#1c1c1e]">
+              #1
+            </span>
+          )}
+        </>
+      }
+      subtitle={
+        <div class="mt-1 space-y-0.5">
+          <div
+            class={cn(
+              'text-[11px] font-medium',
+              status.tone === 'ok' && 'text-[var(--color-ok)]',
+              status.tone === 'warn' && 'text-[var(--color-warn)]',
+              status.tone === 'danger' && 'text-[var(--color-danger)]',
+              status.tone === 'neutral' && 'text-[var(--color-ink-faint)]',
+            )}
+          >
+            {status.label}
+          </div>
+          <div class="truncate text-[10px] text-[var(--color-ink-faint)]" title={model}>
+            {model}
+          </div>
+        </div>
+      }
+    />
+  );
+}
+
+function CatalogPickCard({
+  item,
+  count,
+  index,
+  onOpen,
+}: {
+  item: CatalogItem;
+  count: number;
+  index: number;
+  onOpen: () => void;
+}) {
+  return (
+    <HubTile
+      index={index}
+      title={item.name}
+      description={item.description || item.category}
+      onClick={onOpen}
+      iconClass="!bg-[#2a2a2e] !text-[var(--color-ink-muted)]"
+      icon={<LlmIcon domain={item.icon_domain} name={item.name} size="lg" />}
+      badge={
+        count > 0 ? (
+          <span class="absolute -right-1 -top-1 rounded-full bg-[var(--color-ok)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-zinc-950 ring-2 ring-[#1c1c1e]">
+            {count}
+          </span>
+        ) : null
+      }
+    />
+  );
 }
 
 export function LlmProvidersPanel({
@@ -129,6 +212,8 @@ export function LlmProvidersPanel({
   const [providers, setProviders] = useState<LlmProviderRow[]>([]);
   const [mode, setMode] = useState(activeMode || 'stub');
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [preset, setPreset] = useState<CatalogItem | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -137,8 +222,9 @@ export function LlmProvidersPanel({
   const [instanceName, setInstanceName] = useState('');
   const [makeActive, setMakeActive] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [testing, setTesting] = useState<Record<string, boolean>>({});
+  const [testing, setTesting] = useState(false);
   const [probing, setProbing] = useState(false);
+  const [manage, setManage] = useState<LlmProviderRow | null>(null);
 
   async function load() {
     try {
@@ -148,17 +234,25 @@ export function LlmProvidersPanel({
       setMode(p.active_mode || 'stub');
       onModeChange?.(p.active_mode || 'stub');
       setError(null);
+      if (manage) {
+        const fresh = (p.data ?? []).find((x) => x.id === manage.id);
+        setManage(fresh ?? null);
+      }
     } catch (e) {
       setError(String((e as Error).message || e));
+    } finally {
+      setLoading(false);
     }
   }
 
   useEffect(() => {
     if (isAdmin) void load();
+    else setLoading(false);
   }, [isAdmin]);
 
-  /** Carte catalogue = toujours une nouvelle instance. */
   function openCreate(item: CatalogItem) {
+    setPickerOpen(false);
+    setManage(null);
     setPreset(item);
     setEditingId(null);
     setInstanceName(suggestInstanceName(item.name, providers, item.id));
@@ -174,8 +268,8 @@ export function LlmProvidersPanel({
     setModels([]);
   }
 
-  /** Édition depuis la liste configurés. */
   function openEdit(item: CatalogItem, existing: LlmProviderRow) {
+    setManage(null);
     setPreset(item);
     setEditingId(existing.id);
     setInstanceName(existing.name);
@@ -216,7 +310,6 @@ export function LlmProvidersPanel({
     }
   }
 
-  // Auto-discover quand URL/clé prêts
   useEffect(() => {
     if (!preset) return;
     const needsKey = preset.fields.some((f) => f.key === 'api_key' && f.required);
@@ -276,6 +369,7 @@ export function LlmProvidersPanel({
     try {
       await api.llmDeleteProvider(id);
       toast.push({ title: 'Provider retiré', tone: 'info' });
+      setManage(null);
       await load();
     } catch (err) {
       toast.push({ title: 'Delete KO', detail: String(err), tone: 'danger' });
@@ -285,7 +379,7 @@ export function LlmProvidersPanel({
   }
 
   async function test(id: string) {
-    setTesting((t) => ({ ...t, [id]: true }));
+    setTesting(true);
     try {
       const r = await api.llmTestProvider(id);
       toast.push({
@@ -302,7 +396,7 @@ export function LlmProvidersPanel({
       toast.push({ title: 'Test KO', detail: String(err), tone: 'danger' });
       await load();
     } finally {
-      setTesting((t) => ({ ...t, [id]: false }));
+      setTesting(false);
     }
   }
 
@@ -354,6 +448,7 @@ export function LlmProvidersPanel({
     try {
       await api.llmDisconnect();
       toast.push({ title: 'Mode stub', tone: 'info' });
+      setManage(null);
       await load();
     } catch (err) {
       toast.push({ title: 'Erreur', detail: String(err), tone: 'danger' });
@@ -372,12 +467,22 @@ export function LlmProvidersPanel({
   const cloud = catalog.filter((c) => c.category === 'cloud');
   const countByCatalog = (id: string) =>
     providers.filter((p) => p.catalog_id === id).length;
+  const ordered = [...providers].sort(
+    (a, b) => (a.priority ?? 0) - (b.priority ?? 0) || a.name.localeCompare(b.name),
+  );
+  const manageRank = manage ? ordered.findIndex((p) => p.id === manage.id) : -1;
+  const manageCat =
+    manage &&
+    (catalog.find((c) => c.id === manage.catalog_id) ||
+      catalog.find((c) => c.provider === manage.provider) ||
+      catalog.find((c) => c.id === 'custom'));
+  const manageStatus = manage ? providerStatus(manage) : null;
 
   return (
     <div class="space-y-6">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <p class="text-sm text-[var(--color-ink-muted)]">
-          Seuls les LLM qui passent le health check (chat réel) entrent dans la chaîne.
+          Seuls les LLM qui passent le health check entrent dans la chaîne.
         </p>
         <div class="flex flex-wrap items-center gap-2">
           <Button
@@ -393,162 +498,90 @@ export function LlmProvidersPanel({
       </div>
 
       {error && (
-        <Alert tone="warn" class="mb-2">
-          {error}
-        </Alert>
+        <Alert tone="warn">{error}</Alert>
       )}
 
-      <FadeIn>
-        <section>
-          <h2 class="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
-            Local
-          </h2>
-          <div class="grid gap-2 sm:grid-cols-2">
-            {local.map((p) => (
-              <CatalogCard
-                key={p.id}
-                item={p}
-                count={countByCatalog(p.id)}
-                onOpen={() => openCreate(p)}
-              />
-            ))}
-          </div>
-        </section>
-      </FadeIn>
-
-      <FadeIn delay={40}>
-        <section>
-          <h2 class="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
-            Cloud
-          </h2>
-          <div class="grid gap-2 sm:grid-cols-2">
-            {cloud.map((p) => (
-              <CatalogCard
-                key={p.id}
-                item={p}
-                count={countByCatalog(p.id)}
-                onOpen={() => openCreate(p)}
-              />
-            ))}
-          </div>
-        </section>
-      </FadeIn>
-
-      <FadeIn delay={80}>
-        <Card>
-          <CardHeader
-            title="Configurés"
-            action={
-              <Button size="sm" variant="ghost" disabled={busy} onClick={goStub}>
-                Stub
-              </Button>
-            }
+      {loading ? (
+        <HubGrid cols={5}>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} class="aspect-square rounded-2xl" />
+          ))}
+        </HubGrid>
+      ) : (
+        <HubGrid cols={5}>
+          {ordered.map((p, i) => (
+            <ProviderCard
+              key={p.id}
+              provider={p}
+              catalog={catalog.find((c) => c.id === p.catalog_id)}
+              rank={i}
+              index={i}
+              onOpen={() => setManage(p)}
+            />
+          ))}
+          <HubAddTile
+            index={ordered.length}
+            label="Ajouter"
+            onClick={() => setPickerOpen(true)}
           />
-          {providers.length === 0 ? (
-            <p class="text-sm text-[var(--color-ink-muted)]">
-              Aucun provider — clique une carte ci-dessus.
-            </p>
-          ) : (
-            <ul class="divide-y divide-[var(--color-line)]">
-              {[...providers]
-                .sort(
-                  (a, b) =>
-                    (a.priority ?? 0) - (b.priority ?? 0) || a.name.localeCompare(b.name),
-                )
-                .map((p, rank) => {
-                const cat = catalog.find((c) => c.id === p.catalog_id);
-                const defaultUrl = (cat?.default_url || '').replace(/\/+$/, '');
-                const storedUrl = (p.base_url || '').replace(/\/+$/, '');
-                const showUrl =
-                  !!storedUrl &&
-                  storedUrl !== defaultUrl &&
-                  !/^https:\/\/(api\.openai\.com|openrouter\.ai|generativelanguage\.googleapis\.com|api\.anthropic\.com)/i.test(
-                    storedUrl,
-                  );
-                return (
-                  <li
-                    key={p.id}
-                    class="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
-                  >
-                    <div class="flex min-w-0 items-center gap-3">
-                      <LlmIcon domain={cat?.icon_domain} name={p.name} size="sm" />
-                      <div class="min-w-0">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <Badge tone={rank === 0 ? 'ok' : 'accent'} class="shrink-0">
-                            #{rank + 1}
-                          </Badge>
-                          <span class="truncate font-medium">{p.name}</span>
-                          {p.healthy === false ? (
-                            <Badge tone={getLlmErrorTone(p.last_probe_error)} title={formatLlmError(p.last_probe_error, false)}>
-                              KO
-                            </Badge>
-                          ) : p.in_chain !== false ? (
-                            <Badge tone="ok">actif</Badge>
-                          ) : null}
-                          {!p.enabled && <Badge tone="warn">off</Badge>}
-                        </div>
-                        <div class="mt-0.5 truncate font-mono text-xs text-[var(--color-ink-faint)]">
-                          {p.resolved_model || p.model || 'auto'}
-                          {showUrl ? ` · ${p.base_url}` : ''}
-                          {p.has_api_key ? ` · ${p.key_hint}` : ''}
-                          {p.healthy === false && p.last_probe_error
-                            ? ` · ${formatLlmError(p.last_probe_error)}`
-                            : ''}
-                        </div>
-                      </div>
-                    </div>
-                    <div class="flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={busy || rank === 0}
-                        onClick={() => move(p.id, -1)}
-                        title="Monter (priorité plus haute)"
-                      >
-                        ↑
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={busy || rank >= providers.length - 1}
-                        onClick={() => move(p.id, 1)}
-                        title="Descendre (fallback)"
-                      >
-                        ↓
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={testing[p.id]}
-                        onClick={() => test(p.id)}
-                      >
-                        {testing[p.id] ? '…' : 'Tester'}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          const item =
-                            cat ||
-                            catalog.find((c) => c.provider === p.provider) ||
-                            catalog.find((c) => c.id === 'custom');
-                          if (item) openEdit(item, p);
-                        }}
-                      >
-                        Éditer
-                      </Button>
-                      <Button size="sm" variant="ghost" disabled={busy} onClick={() => remove(p.id)}>
-                        Retirer
-                      </Button>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </Card>
-      </FadeIn>
+        </HubGrid>
+      )}
 
+      {!loading && !error && providers.length === 0 && (
+        <p class="text-center text-sm text-[var(--color-ink-muted)]">
+          Aucun provider. Ajoute-en un pour activer les agents.
+        </p>
+      )}
+
+      {/* Catalogue */}
+      <Modal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        title="Ajouter un LLM"
+        description="Local ou cloud — plusieurs instances possibles par provider"
+        size="xl"
+      >
+        <div class="space-y-6">
+          {local.length > 0 && (
+            <section>
+              <h3 class="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
+                Local
+              </h3>
+              <HubGrid>
+                {local.map((p, i) => (
+                  <CatalogPickCard
+                    key={p.id}
+                    item={p}
+                    index={i}
+                    count={countByCatalog(p.id)}
+                    onOpen={() => openCreate(p)}
+                  />
+                ))}
+              </HubGrid>
+            </section>
+          )}
+          {cloud.length > 0 && (
+            <section>
+              <h3 class="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
+                Cloud
+              </h3>
+              <HubGrid>
+                {cloud.map((p, i) => (
+                  <CatalogPickCard
+                    key={p.id}
+                    item={p}
+                    index={i}
+                    count={countByCatalog(p.id)}
+                    onOpen={() => openCreate(p)}
+                  />
+                ))}
+              </HubGrid>
+            </section>
+          )}
+        </div>
+      </Modal>
+
+      {/* Create / edit form */}
       <Modal
         open={!!preset}
         onClose={() => {
@@ -579,9 +612,10 @@ export function LlmProvidersPanel({
                 onClick={() => {
                   setPreset(null);
                   setEditingId(null);
+                  if (!editingId) setPickerOpen(true);
                 }}
               >
-                Annuler
+                {editingId ? 'Annuler' : 'Retour'}
               </Button>
               <Button type="submit" form="llm-provider-form" size="sm" disabled={busy}>
                 {busy ? '…' : editingId ? 'Enregistrer' : 'Ajouter'}
@@ -694,6 +728,121 @@ export function LlmProvidersPanel({
               Priorité haute (essayer en premier)
             </label>
           </form>
+        )}
+      </Modal>
+
+      {/* Manage configured provider */}
+      <Modal
+        open={!!manage}
+        onClose={() => setManage(null)}
+        title={manage?.name || 'LLM'}
+        description={
+          manage
+            ? `${manage.resolved_model || manage.model || 'auto'}${
+                manage.has_api_key ? ` · ${manage.key_hint}` : ''
+              }`
+            : undefined
+        }
+        size="lg"
+        footer={
+          manage ? (
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => void remove(manage.id)}
+              >
+                Retirer
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => setManage(null)}>
+                Fermer
+              </Button>
+            </>
+          ) : null
+        }
+      >
+        {manage && (
+          <div class="space-y-4">
+            <div class="flex items-center gap-3">
+              <div class="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-[#2a2a2e]">
+                <LlmIcon
+                  domain={manageCat?.icon_domain}
+                  name={manage.name}
+                  size="lg"
+                />
+              </div>
+              <div class="min-w-0 flex flex-wrap items-center gap-2">
+                {manageRank >= 0 && (
+                  <Badge tone={manageRank === 0 ? 'ok' : 'accent'}>#{manageRank + 1}</Badge>
+                )}
+                <Badge
+                  tone={
+                    manageStatus?.tone === 'danger'
+                      ? getLlmErrorTone(manage.last_probe_error)
+                      : manageStatus?.tone === 'ok'
+                        ? 'ok'
+                        : manageStatus?.tone === 'warn'
+                          ? 'warn'
+                          : 'neutral'
+                  }
+                  title={
+                    manage.healthy === false
+                      ? formatLlmError(manage.last_probe_error, false)
+                      : undefined
+                  }
+                >
+                  {manageStatus?.label}
+                </Badge>
+                {manage.healthy === false && manage.last_probe_error && (
+                  <span class="text-xs text-[var(--color-danger)]">
+                    {formatLlmError(manage.last_probe_error)}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div class="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || manageRank <= 0}
+                onClick={() => void move(manage.id, -1)}
+                title="Monter (priorité plus haute)"
+              >
+                ↑ Priorité
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || manageRank < 0 || manageRank >= ordered.length - 1}
+                onClick={() => void move(manage.id, 1)}
+                title="Descendre (fallback)"
+              >
+                ↓ Priorité
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={testing}
+                onClick={() => void test(manage.id)}
+              >
+                {testing ? '…' : 'Tester'}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  if (manageCat) openEdit(manageCat, manage);
+                }}
+              >
+                Éditer
+              </Button>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => void goStub()}>
+                Stub
+              </Button>
+            </div>
+          </div>
         )}
       </Modal>
     </div>

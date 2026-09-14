@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api } from '../lib/api';
-import { SETTINGS_NAV } from '../lib/nav';
 import { AppShell } from './AppShell';
 import { BackupSettingsPanel } from './BackupSettingsPanel';
 import { LlmProvidersPanel } from './LlmProvidersPanel';
@@ -12,6 +11,9 @@ import {
   Card,
   CardHeader,
   FadeIn,
+  HubGrid,
+  HubIcon,
+  HubTile,
   Input,
   LiveStatus,
   PulseDot,
@@ -128,74 +130,15 @@ const SECTION_TITLES: Record<SettingsSection, string> = {
   update: 'Mise à jour',
 };
 
-function SettingsIcon({ icon, class: className }: { icon: string; class?: string }) {
-  const icons: Record<string, JSX.Element> = {
-    settings: (
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="3" />
-        <path d="M12 1v6m0 6v6M5.6 5.6l4.2 4.2m4.2 4.2l4.2 4.2M1 12h6m6 0h6M5.6 18.4l4.2-4.2m4.2-4.2l4.2-4.2" />
-      </svg>
-    ),
-    globe: (
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="10" />
-        <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-      </svg>
-    ),
-    github: (
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
-      </svg>
-    ),
-    server: (
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <rect x="2" y="2" width="20" height="8" rx="2" />
-        <rect x="2" y="14" width="20" height="8" rx="2" />
-        <path d="M6 6h.01M6 18h.01" />
-      </svg>
-    ),
-    brain: (
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M9.5 2A2.5 2.5 0 0112 4.5v15a2.5 2.5 0 01-4.96.44 2.5 2.5 0 01-2.96-3.08 3 3 0 01-.34-5.58 2.5 2.5 0 011.32-4.24 2.5 2.5 0 011.98-3A2.5 2.5 0 019.5 2zM14.5 2A2.5 2.5 0 0112 4.5v15a2.5 2.5 0 004.96.44 2.5 2.5 0 002.96-3.08 3 3 0 00.34-5.58 2.5 2.5 0 00-1.32-4.24 2.5 2.5 0 00-1.98-3A2.5 2.5 0 0014.5 2z" />
-      </svg>
-    ),
-    shield: (
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-      </svg>
-    ),
-    archive: (
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4" />
-      </svg>
-    ),
-    refresh: (
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2" />
-      </svg>
-    ),
-  };
-  return <span class={className}>{icons[icon] || icons.settings}</span>;
-}
-
 function SettingCard({ card, index }: { card: SettingCardMeta; index: number }) {
   return (
-    <FadeIn delay={Math.min(index * 40, 200)}>
-      <a
-        href={`/app/settings?tab=${card.key}`}
-        class="group flex aspect-square flex-col items-center justify-center gap-3 rounded-2xl bg-[#1c1c1e] px-3 py-4 text-center transition duration-200 hover:-translate-y-0.5 hover:bg-[#252528] hover:ring-1 hover:ring-white/10"
-      >
-        <div class="flex h-16 w-16 items-center justify-center rounded-[1.15rem] bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition group-hover:scale-[1.03] sm:h-[4.5rem] sm:w-[4.5rem]">
-          <SettingsIcon icon={card.icon} />
-        </div>
-        <div class="w-full">
-          <div class="truncate text-sm font-medium text-white">{card.title}</div>
-          <div class="mt-1 line-clamp-2 text-[11px] leading-snug text-[var(--color-ink-muted)]">
-            {card.description}
-          </div>
-        </div>
-      </a>
-    </FadeIn>
+    <HubTile
+      index={index}
+      href={`/app/settings?tab=${card.key}`}
+      title={card.title}
+      description={card.description}
+      icon={<HubIcon name={card.icon} />}
+    />
   );
 }
 
@@ -321,11 +264,11 @@ export function SettingsPage() {
   if (!section) {
     return (
       <AppShell active="settings" title="Paramètres">
-        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4">
+        <HubGrid>
           {SETTINGS_CARDS.map((card, i) => (
             <SettingCard key={card.key} card={card} index={i} />
           ))}
-        </div>
+        </HubGrid>
       </AppShell>
     );
   }

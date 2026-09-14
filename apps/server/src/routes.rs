@@ -580,7 +580,19 @@ async fn get_project(
     .await
     .map_err(ApiError::from)?;
 
-    Ok(Json(json!({"data": {"project": project, "deployments": deployments}})))
+    // Enrichir avec sync (commits en retard) comme la liste projets.
+    let card = project_list_card(&state, &project).await;
+    let mut project_json = serde_json::to_value(&project).unwrap_or_else(|_| json!({}));
+    if let Some(obj) = project_json.as_object_mut() {
+        if let Some(sync) = card.get("sync") {
+            obj.insert("sync".into(), sync.clone());
+        }
+        if let Some(deploy) = card.get("deploy") {
+            obj.insert("deploy".into(), deploy.clone());
+        }
+    }
+
+    Ok(Json(json!({"data": {"project": project_json, "deployments": deployments}})))
 }
 
 #[derive(Deserialize)]

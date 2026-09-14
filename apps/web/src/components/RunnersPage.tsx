@@ -15,10 +15,15 @@ import {
   Card,
   CardHeader,
   FadeIn,
+  HubAddTile,
+  HubGrid,
+  HubIcon,
+  HubTile,
   Input,
   Modal,
   useToast,
 } from './ui';
+import { cn } from '../lib/cn';
 
 const IMAGE_PRESETS = [
   {
@@ -82,6 +87,34 @@ function opLabel(op: string): string | null {
     failed: 'Échec',
   };
   return map[op] || op;
+}
+
+function runnerStatus(r: ManagedRunner): {
+  label: string;
+  tone: 'ok' | 'warn' | 'danger' | 'neutral' | 'accent';
+} {
+  const op = opLabel(r.op_status);
+  if (op && r.op_status === 'failed') return { label: 'Échec', tone: 'danger' };
+  if (op) return { label: op, tone: 'warn' };
+  if ((r.github_status || '').toLowerCase() === 'busy') return { label: 'Occupé', tone: 'accent' };
+  if ((r.github_status || '').toLowerCase() === 'online') return { label: 'En ligne', tone: 'ok' };
+  if ((r.github_status || '').toLowerCase() === 'offline') return { label: 'Hors ligne', tone: 'danger' };
+  if (r.live_state === 'running') return { label: 'Running', tone: 'ok' };
+  if (r.live_state === 'exited' || r.live_state === 'dead' || r.live_state === 'missing') {
+    return { label: r.live_state, tone: 'danger' };
+  }
+  if (r.live_state === 'pending' || r.live_state === 'created' || r.live_state === 'restarting') {
+    return { label: r.live_state, tone: 'warn' };
+  }
+  return { label: r.live_state || '—', tone: 'neutral' };
+}
+
+function statusDotClass(tone: 'ok' | 'warn' | 'danger' | 'neutral' | 'accent') {
+  if (tone === 'ok') return 'bg-[var(--color-ok)]';
+  if (tone === 'warn') return 'bg-[var(--color-warn)]';
+  if (tone === 'danger') return 'bg-[var(--color-danger)]';
+  if (tone === 'accent') return 'bg-[var(--color-accent)]';
+  return 'bg-[var(--color-ink-faint)]';
 }
 
 export function RunnersPage() {
@@ -390,14 +423,9 @@ export function RunnersPage() {
       title="Runners"
       description="GitHub Actions self-hosted"
       actions={
-        <div class="flex gap-2">
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void syncNow()}>
-            Sync
-          </Button>
-          <Button size="sm" onClick={() => openWizard()}>
-            Nouveau runner
-          </Button>
-        </div>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => void syncNow()}>
+          Sync
+        </Button>
       }
     >
       {error && (
@@ -442,69 +470,103 @@ export function RunnersPage() {
       )}
 
       <FadeIn>
-        <Card>
-          {runners.length === 0 ? (
-            <p class="text-sm text-[var(--color-ink-muted)]">
-              Aucun runner. Crée-en un pour enregistrer un conteneur self-hosted sur le host Docker.
-            </p>
-          ) : (
-            <ul class="divide-y divide-[var(--color-line)]">
-              {runners.map((r) => {
-                const op = opLabel(r.op_status);
-                return (
-                  <li
-                    key={r.id}
-                    class="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
-                  >
-                    <button
-                      type="button"
-                      class="min-w-0 flex-1 text-left"
-                      onClick={() => setSelected(r.id === selected ? null : r.id)}
-                    >
-                      <div class="flex flex-wrap items-center gap-2">
-                        <span class="font-medium">{r.runner_name}</span>
-                        <Badge tone={stateTone(r.live_state)}>{r.live_state}</Badge>
-                        {r.github_status && (
-                          <Badge tone={ghTone(r.github_status)}>gh:{r.github_status}</Badge>
-                        )}
-                        {op && <Badge tone={r.op_status === 'failed' ? 'danger' : 'warn'}>{op}</Badge>}
-                      </div>
-                      <div class="mt-0.5 truncate font-mono text-xs text-[var(--color-ink-faint)]">
-                        {r.owner}/{r.repo} · {r.container_name} · {r.image}
-                      </div>
-                      {r.last_error && (
-                        <div class="mt-1 text-xs text-[var(--color-danger)]">{r.last_error}</div>
+        <HubGrid cols={5}>
+          {runners.map((r, i) => {
+            const status = runnerStatus(r);
+            const selectedCard = r.id === selected;
+            return (
+              <HubTile
+                key={r.id}
+                index={i}
+                title={r.runner_name}
+                onClick={() => setSelected(r.id === selected ? null : r.id)}
+                icon={<HubIcon name="server" />}
+                class={selectedCard ? 'ring-1 ring-white/20' : undefined}
+                badge={
+                  <span
+                    class={cn(
+                      'absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full ring-2 ring-[#1c1c1e]',
+                      statusDotClass(status.tone),
+                      status.tone === 'ok' || status.tone === 'warn' ? 'animate-pulse' : '',
+                    )}
+                    title={status.label}
+                    aria-hidden
+                  />
+                }
+                subtitle={
+                  <div class="mt-1 space-y-0.5">
+                    <div
+                      class={cn(
+                        'text-[11px] font-medium',
+                        status.tone === 'ok' && 'text-[var(--color-ok)]',
+                        status.tone === 'warn' && 'text-[var(--color-warn)]',
+                        status.tone === 'danger' && 'text-[var(--color-danger)]',
+                        status.tone === 'accent' && 'text-[var(--color-accent)]',
+                        status.tone === 'neutral' && 'text-[var(--color-ink-faint)]',
                       )}
-                    </button>
-                    <div class="flex flex-wrap gap-1.5">
-                      <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(r.id, 'start')}>
-                        Start
-                      </Button>
-                      <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(r.id, 'stop')}>
-                        Stop
-                      </Button>
-                      <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(r.id, 'restart')}>
-                        Restart
-                      </Button>
-                      <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(r.id, 'recreate')}>
-                        Recreate
-                      </Button>
-                      <Button size="sm" variant="ghost" disabled={busy} onClick={() => void remove(r.id)}>
-                        Delete
-                      </Button>
+                    >
+                      {status.label}
                     </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </Card>
+                    <div class="truncate text-[10px] text-[var(--color-ink-faint)]">
+                      {r.owner}/{r.repo}
+                    </div>
+                  </div>
+                }
+              />
+            );
+          })}
+          <HubAddTile index={runners.length} label="Ajouter" onClick={() => openWizard()} />
+        </HubGrid>
       </FadeIn>
+
+      {!error && runners.length === 0 && (
+        <p class="mt-6 text-center text-sm text-[var(--color-ink-muted)]">
+          Aucun runner. Ajoute-en un pour enregistrer un conteneur self-hosted.
+        </p>
+      )}
 
       {detail && (
         <FadeIn delay={40} class="mt-6 grid gap-4 lg:grid-cols-2">
           <Card>
-            <CardHeader title="Détail" description={detail.container_name} />
+            <CardHeader
+              title="Détail"
+              description={detail.container_name}
+              action={
+                <div class="flex flex-wrap gap-1.5">
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(detail.id, 'start')}>
+                    Start
+                  </Button>
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(detail.id, 'stop')}>
+                    Stop
+                  </Button>
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(detail.id, 'restart')}>
+                    Restart
+                  </Button>
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(detail.id, 'recreate')}>
+                    Recreate
+                  </Button>
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => void remove(detail.id)}>
+                    Delete
+                  </Button>
+                </div>
+              }
+            />
+            <div class="mb-4 flex flex-wrap gap-2">
+              <Badge tone={stateTone(detail.live_state)}>{detail.live_state}</Badge>
+              {detail.github_status && (
+                <Badge tone={ghTone(detail.github_status)}>gh:{detail.github_status}</Badge>
+              )}
+              {opLabel(detail.op_status) && (
+                <Badge tone={detail.op_status === 'failed' ? 'danger' : 'warn'}>
+                  {opLabel(detail.op_status)}
+                </Badge>
+              )}
+            </div>
+            {detail.last_error && (
+              <Alert tone="danger" class="mb-4">
+                {detail.last_error}
+              </Alert>
+            )}
             <dl class="space-y-2 text-sm">
               <div class="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-4">
                 <dt class="text-[var(--color-ink-muted)]">Repo</dt>

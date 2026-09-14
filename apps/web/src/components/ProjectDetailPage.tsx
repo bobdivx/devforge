@@ -3,7 +3,7 @@ import type { ComponentChildren } from 'preact';
 import { api, type Deployment, type Project } from '../lib/api';
 import { cn } from '../lib/cn';
 import { projectNav } from '../lib/nav';
-import { projectStatusMeta } from '../lib/status';
+import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { AppIcon, statusDotClass } from './AppIcon';
 import { AppShell } from './AppShell';
 import { ProjectAgentsPanel } from './ProjectAgentsPanel';
@@ -245,6 +245,7 @@ function ProjectOverview({
     Array<{ id: string; provider: string; resource_name: string }>
   >([]);
   const [domainCount, setDomainCount] = useState<number | null>(null);
+  const [gitSync, setGitSync] = useState<Project['sync'] | null>(project.sync ?? null);
   const [lifeBusy, setLifeBusy] = useState<string | null>(null);
   const [lifeDetail, setLifeDetail] = useState<string | null>(null);
   const [deployBusy, setDeployBusy] = useState(false);
@@ -256,25 +257,35 @@ function ProjectOverview({
     latest && (latest.status === 'failed' || latest.status === 'error') ? latest : null;
 
   useEffect(() => {
-    Promise.allSettled([api.envList(uuid), api.projectResources(uuid), api.domains(uuid)]).then(
-      ([envR, resR, domR]) => {
-        if (envR.status === 'fulfilled') {
-          const rows = envR.value.data ?? [];
-          setEnvCount(rows.length);
-          setEnvKeys(rows.map((r) => r.key));
-        } else {
-          setEnvCount(0);
-        }
-        if (resR.status === 'fulfilled') {
-          setDbLinks(resR.value.data ?? []);
-        }
-        if (domR.status === 'fulfilled') {
-          setDomainCount((domR.value.domains ?? domR.value.data ?? []).length);
-        } else {
-          setDomainCount(0);
-        }
-      },
-    );
+    setGitSync(project.sync ?? null);
+  }, [project.sync]);
+
+  useEffect(() => {
+    Promise.allSettled([
+      api.envList(uuid),
+      api.projectResources(uuid),
+      api.domains(uuid),
+      api.projectGit(uuid),
+    ]).then(([envR, resR, domR, gitR]) => {
+      if (envR.status === 'fulfilled') {
+        const rows = envR.value.data ?? [];
+        setEnvCount(rows.length);
+        setEnvKeys(rows.map((r) => r.key));
+      } else {
+        setEnvCount(0);
+      }
+      if (resR.status === 'fulfilled') {
+        setDbLinks(resR.value.data ?? []);
+      }
+      if (domR.status === 'fulfilled') {
+        setDomainCount((domR.value.domains ?? domR.value.data ?? []).length);
+      } else {
+        setDomainCount(0);
+      }
+      if (gitR.status === 'fulfilled' && gitR.value.sync) {
+        setGitSync(gitR.value.sync);
+      }
+    });
   }, [uuid]);
 
   const hasDbEnv =
@@ -345,18 +356,32 @@ function ProjectOverview({
       tone: envCount === null ? 'neutral' : envCount === 0 ? 'warn' : 'ok',
       href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=env`,
     },
-    {
-      key: 'git',
-      icon: 'git',
-      label: 'Git',
-      detail: project.git_repository
+    (() => {
+      const sync = projectSyncMeta(gitSync);
+      const repo = project.git_repository
         ? `${project.git_repository.replace(/^https?:\/\/(www\.)?github\.com\//, '')}${
             project.git_branch ? ` @ ${project.git_branch}` : ''
           }`
-        : 'Pas de dépôt',
-      tone: project.git_repository ? 'ok' : 'warn',
-      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=settings`,
-    },
+        : null;
+      return {
+        key: 'git',
+        icon: 'git' as const,
+        label: 'Git',
+        detail: !repo
+          ? 'Pas de dépôt'
+          : gitSync?.state
+            ? `${sync.label} · ${repo}`
+            : repo,
+        tone: !repo
+          ? ('warn' as const)
+          : sync.tone === 'warn' || sync.tone === 'danger'
+            ? sync.tone
+            : sync.tone === 'ok'
+              ? ('ok' as const)
+              : ('neutral' as const),
+        href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=git`,
+      };
+    })(),
     {
       key: 'domain',
       icon: 'globe',
@@ -403,6 +428,12 @@ function ProjectOverview({
       });
       const list = await api.deployments(uuid);
       onDeployments(list.data ?? []);
+      try {
+        const git = await api.projectGit(uuid);
+        if (git.sync) setGitSync(git.sync);
+      } catch {
+        /* ignore */
+      }
     } catch (e) {
       toast.push({ title: 'Deploy KO', detail: String(e), tone: 'danger' });
     } finally {

@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api } from '../lib/api';
-import { SETTINGS_NAV } from '../lib/nav';
 import { AppShell } from './AppShell';
 import {
   Alert,
@@ -126,7 +125,7 @@ function AdminBody() {
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
             { label: 'Workspaces', value: stats.workspaces },
-            { label: 'Projets', value: stats.projects },
+            { label: 'Utilisateurs', value: stats.users },
             { label: 'Free', value: stats.plan_free },
             { label: 'Pro', value: stats.plan_pro },
           ].map((s) => (
@@ -212,30 +211,6 @@ function AdminBody() {
           </Table>
         )}
       </Card>
-
-      <Card>
-        <CardHeader title="Config instance" />
-        <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
-          Domaine wildcard, GitHub, LLM et sauvegardes — partagés par tous les clients.
-        </p>
-        <div class="flex flex-wrap gap-2">
-          <Button href="/app/settings?tab=domaine" size="sm" variant="outline">
-            Domaine
-          </Button>
-          <Button href="/app/settings?tab=github" size="sm" variant="outline">
-            GitHub
-          </Button>
-          <Button href="/app/settings?tab=llm" size="sm" variant="outline">
-            Agents / LLM
-          </Button>
-          <Button href="/app/settings?tab=backup" size="sm" variant="outline">
-            Sauvegardes
-          </Button>
-          <Button href="/app/update" size="sm" variant="outline">
-            Mise à jour
-          </Button>
-        </div>
-      </Card>
     </div>
   );
 }
@@ -245,9 +220,7 @@ export function AdminPage() {
     <AppShell
       active="admin"
       title="Admin"
-      description="Clients, forfaits et config d’instance — comme le cockpit opérateur d’un PaaS."
-      sideNav={SETTINGS_NAV}
-      sideNavLabel="Instance"
+      description="Clients et forfaits — cockpit opérateur de l’instance."
     >
       <FadeIn>
         <AdminBody />

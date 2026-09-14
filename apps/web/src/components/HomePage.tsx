@@ -3,7 +3,7 @@ import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { cn } from '../lib/cn';
 import { AppShell } from './AppShell';
 import { AppIcon, statusDotClass } from './AppIcon';
-import { Alert, FadeIn, Skeleton } from './ui';
+import { Alert, FadeIn, HubAddTile, HubGrid, Skeleton } from './ui';
 import { useEffect, useState } from 'preact/hooks';
 import { NewGithubAppWizard } from './NewGithubAppWizard';
 import { NewBuilderWizard } from './NewBuilderWizard';
@@ -15,10 +15,10 @@ function AppCard({ project, index }: { project: Project; index: number }) {
   const showSyncWarn = sync.tone === 'warn' || sync.tone === 'danger';
 
   return (
-    <FadeIn delay={Math.min(index * 40, 280)}>
+    <FadeIn delay={Math.min(index * 40, 280)} class="h-full w-full">
       <a
         href={`/app/projects/view?uuid=${encodeURIComponent(project.uuid)}`}
-        class="group flex aspect-square flex-col items-center justify-center gap-3 rounded-2xl bg-[#1c1c1e] px-3 py-4 transition duration-200 hover:-translate-y-0.5 hover:bg-[#252528] hover:ring-1 hover:ring-white/10"
+        class="group flex aspect-square h-full w-full flex-col items-center justify-center gap-3 rounded-2xl bg-[#1c1c1e] px-3 py-4 transition duration-200 hover:-translate-y-0.5 hover:bg-[#252528] hover:ring-1 hover:ring-white/10"
       >
         <div class="relative">
           <AppIcon project={project} statusTone={status.tone} class="group-hover:scale-[1.03]" />
@@ -96,32 +96,19 @@ export function HomePage() {
       )}
 
       {loading ? (
-        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5">
+        <HubGrid cols={5}>
           {Array.from({ length: 8 }).map((_, i) => (
             <Skeleton key={i} class="aspect-square rounded-2xl" />
           ))}
-        </div>
+        </HubGrid>
       ) : (
-        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5">
+        <HubGrid cols={5}>
           {projects.map((p, i) => (
             <AppCard key={p.uuid} project={p} index={i} />
           ))}
 
-          <FadeIn delay={Math.min(projects.length * 40, 280)}>
-            <button
-              type="button"
-              onClick={openWizard}
-              class="group flex aspect-square flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/15 bg-[#1c1c1e] px-3 py-4 transition duration-200 hover:-translate-y-0.5 hover:border-white/25 hover:bg-[#252528] hover:ring-1 hover:ring-white/10"
-            >
-              <div class="flex h-16 w-16 items-center justify-center rounded-[1.15rem] border border-dashed border-white/20 text-[var(--color-ink-muted)] transition group-hover:scale-[1.03] group-hover:border-white/30 group-hover:text-white sm:h-[4.5rem] sm:w-[4.5rem]">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden>
-                  <path d="M12 5v14M5 12h14" stroke-linecap="round" />
-                </svg>
-              </div>
-              <span class="text-sm font-medium text-[var(--color-ink-muted)] group-hover:text-white">Ajouter</span>
-            </button>
-          </FadeIn>
-        </div>
+          <HubAddTile index={projects.length} label="Ajouter" onClick={openWizard} />
+        </HubGrid>
       )}
 
       {!loading && !error && projects.length === 0 && (

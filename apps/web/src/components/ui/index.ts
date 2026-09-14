@@ -1,5 +1,6 @@
 export { Button } from './Button';
 export { Card, CardHeader } from './Card';
+export { HubGrid, HubTile, HubIcon, HubAddTile } from './HubTile';
 export { Input } from './Input';
 export { Badge } from './Badge';
 export { Alert } from './Alert';
