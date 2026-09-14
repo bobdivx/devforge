@@ -1,8 +1,4 @@
 ---
-import BaseLayout from '../../layouts/BaseLayout.astro';
-import { ProxyAdminPanel } from '../../components/ProxyAdminPanel';
+// Redirect to Admin > Proxy tab
+return Astro.redirect('/app/admin?tab=proxy', 302);
 ---
-
-<BaseLayout title="Proxy / Infrastructure">
-  <ProxyAdminPanel client:load />
-</BaseLayout>
