@@ -554,6 +554,122 @@ impl UpdateFacade {
             self.set_step(job_id, "apply", StepStatus::Done, &detail)
                 .await?;
         }
+
+        // CRITICAL FIX: Ensure Traefik container exists and is running after DevForge update.
+        // Root cause of outage 2026-09-14: docker compose recreate / helper-container stopped Traefik
+        // without restarting it, leaving all apps unreachable (502) until manual restore.
+        self.ensure_traefik_after_update(job_id).await?;
+
+        Ok(())
+    }
+
+    /// Ensure Traefik reverse proxy is running after DevForge container update.
+    ///
+    /// ## Root cause of 2026-09-14 outage:
+    /// - Docker compose recreate or helper-container workflow removed `devforge-traefik`
+    /// - All apps behind Traefik (popcornn, starbasefr, etc.) returned 502 until manual restore
+    /// - web.jeser.app stayed up (publishes host port 8000 directly)
+    ///
+    /// ## Fix strategy:
+    /// - Always call ensure_traefik() after successful DevForge container update
+    /// - If Traefik is missing or stopped, recreate/start it
+    /// - Log success/failure to update job detail
+    async fn ensure_traefik_after_update(&self, job_id: &str) -> Result<()> {
+        tracing::info!("Ensuring Traefik proxy after DevForge update…");
+
+        // Check if Traefik container exists
+        let check_cmd = r#"docker inspect devforge-traefik --format '{{.State.Status}}' 2>/dev/null || echo 'missing'"#;
+        let check_res = self.executor.exec(&self.config.server_id, ".", check_cmd, 30).await?;
+        let status = check_res.output.trim();
+
+        match status {
+            "running" => {
+                tracing::info!("Traefik proxy is already running");
+                return Ok(());
+            }
+            "missing" => {
+                tracing::warn!("Traefik proxy is MISSING — recreating (critical fix for 2026-09-14 outage)");
+            }
+            _ => {
+                tracing::warn!(status = %status, "Traefik proxy is not running — restarting");
+            }
+        }
+
+        // Ensure devforge network exists
+        let network_cmd = r#"docker network inspect devforge >/dev/null 2>&1 || docker network create devforge"#;
+        let _ = self.executor.exec(&self.config.server_id, ".", network_cmd, 30).await;
+
+        // Resolve Traefik data path (host or container)
+        let data_path = std::env::var("DEVFORGE_DATA_DIR")
+            .unwrap_or_else(|_| "/var/lib/devforge".into());
+        let traefik_dir = format!("{}/proxy", data_path);
+
+        // Prepare data directory (acme.json + dynamic/)
+        let prep_cmd = format!(
+            r#"mkdir -p {}/dynamic && touch {}/acme.json && chmod 600 {}/acme.json"#,
+            shell_escape(&traefik_dir),
+            shell_escape(&traefik_dir),
+            shell_escape(&traefik_dir)
+        );
+        let _ = self.executor.exec(&self.config.server_id, ".", &prep_cmd, 30).await;
+
+        // Create or start Traefik
+        if status == "missing" {
+            let create_cmd = format!(
+                r#"docker run -d \
+  --name devforge-traefik \
+  --restart unless-stopped \
+  --network devforge \
+  -p 80:80 \
+  -p 443:443 \
+  -p 443:443/udp \
+  --add-host host.docker.internal:host-gateway \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  -v {}:/traefik \
+  --label devforge.managed=true \
+  --label devforge.proxy=true \
+  --label traefik.enable=true \
+  --label 'traefik.http.routers.api.rule=Host(`traefik.local`)' \
+  --label traefik.http.routers.api.service=api@internal \
+  --label traefik.http.services.dummy.loadbalancer.server.port=9999 \
+  traefik:v3.6 \
+  --api.dashboard=true \
+  --log.level=INFO \
+  --accesslog=false \
+  --entrypoints.http.address=:80 \
+  --entrypoints.https.address=:443 \
+  --providers.docker=true \
+  --providers.docker.exposedbydefault=false \
+  --providers.docker.network=devforge \
+  --providers.file.directory=/traefik/dynamic \
+  --providers.file.watch=true \
+  --certificatesresolvers.letsencrypt.acme.httpchallenge=true \
+  --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=http \
+  --certificatesresolvers.letsencrypt.acme.email=admin@devforge.local \
+  --certificatesresolvers.letsencrypt.acme.storage=/traefik/acme.json \
+  --ping=true \
+  --ping.entrypoint=http"#,
+                shell_escape(&traefik_dir)
+            );
+            let create_res = self.executor.exec(&self.config.server_id, ".", &create_cmd, 60).await?;
+            if !create_res.ok {
+                let err_msg = format!("Failed to create Traefik: {}", truncate(&create_res.output, 300));
+                tracing::error!("{}", err_msg);
+                return Err(DevForgeError::Message(err_msg));
+            }
+            tracing::info!("Traefik proxy recreated successfully");
+        } else {
+            // Container exists but stopped, start it
+            let start_cmd = "docker start devforge-traefik";
+            let start_res = self.executor.exec(&self.config.server_id, ".", start_cmd, 30).await?;
+            if !start_res.ok {
+                let err_msg = format!("Failed to start Traefik: {}", truncate(&start_res.output, 300));
+                tracing::error!("{}", err_msg);
+                return Err(DevForgeError::Message(err_msg));
+            }
+            tracing::info!("Traefik proxy started successfully");
+        }
+
         Ok(())
     }
 
