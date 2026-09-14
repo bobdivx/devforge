@@ -205,8 +205,10 @@ pub async fn provision_project_oidc_client(
     };
     let branding = pocket_id::BrandingUrls {
         logo_url: logo.clone(),
-        dark_logo_url: logo,
+        dark_logo_url: logo.clone(),
         background_url: None,
+        email_logo_url: logo.clone(),
+        default_profile_picture_url: logo,
     };
     
     let client_name = &project.name;
