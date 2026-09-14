@@ -624,26 +624,35 @@ export function McpPage() {
                 </p>
               </Alert>
             )}
-            {preset.fields.map((f) => (
-              <div key={f.key}>
-                <Input
-                  label={f.label}
-                  type={f.secret ? 'password' : 'text'}
-                  placeholder={f.placeholder || ''}
-                  value={fields[f.key] || ''}
-                  onInput={(e) =>
-                    setFields((prev) => ({
-                      ...prev,
-                      [f.key]: (e.target as HTMLInputElement).value,
-                    }))
-                  }
-                  required={f.required}
-                />
-                {f.help && (
-                  <p class="mt-1 text-xs text-[var(--color-ink-faint)]">{f.help}</p>
-                )}
-              </div>
-            ))}
+            {preset.fields
+              .filter((f) => {
+                // Si OAuth disponible, cacher les champs secrets requis (tokens)
+                // Garder les champs non-secrets (org, url, etc) et les champs secrets optionnels (mode avancé)
+                if (preset.auth_mode === 'oauth' && f.secret && f.required) {
+                  return false;
+                }
+                return true;
+              })
+              .map((f) => (
+                <div key={f.key}>
+                  <Input
+                    label={f.label}
+                    type={f.secret ? 'password' : 'text'}
+                    placeholder={f.placeholder || ''}
+                    value={fields[f.key] || ''}
+                    onInput={(e) =>
+                      setFields((prev) => ({
+                        ...prev,
+                        [f.key]: (e.target as HTMLInputElement).value,
+                      }))
+                    }
+                    required={f.required}
+                  />
+                  {f.help && (
+                    <p class="mt-1 text-xs text-[var(--color-ink-faint)]">{f.help}</p>
+                  )}
+                </div>
+              ))}
             {preset.docs_url && (
               <a
                 class="block text-xs text-[var(--color-accent)] underline"
