@@ -121,7 +121,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
             id: "cloudflare".into(),
             name: "Cloudflare".into(),
             description:
-                "DNS, Tunnel, Workers, R2 — MCP officiel. Pour publier les apps DevForge : jeton à droits minimaux (Tunnel + DNS)."
+                "DNS, Tunnel, Workers, R2 — MCP officiel. OAuth recommandé, API token pour CI/CD."
                     .into(),
             category: "infrastructure".into(),
             docs_url: Some(
@@ -132,22 +132,22 @@ pub fn catalog() -> Vec<CatalogPreset> {
             fields: vec![
                 field(
                     "api_token",
-                    "API Token",
+                    "API Token (optionnel)",
                     true,
-                    true,
+                    false,
                     Some("cfat_…"),
                     Some(
-                        "Mon profil → Jetons API → Créer un jeton → Créer un jeton personnalisé. Copie-le une seule fois.",
+                        "Optionnel. Pour CI/CD ou automation. Mon profil → Jetons API → Créer un jeton personnalisé. OAuth recommandé pour usage interactif.",
                     ),
                 ),
                 field(
                     "account_id",
-                    "Account ID",
+                    "Account ID (optionnel)",
                     false,
                     false,
                     Some("32 hex chars"),
                     Some(
-                        "Dashboard Cloudflare → barre latérale droite / aperçu du compte. Affiché aussi après création du jeton.",
+                        "Optionnel avec OAuth. Dashboard Cloudflare → barre latérale droite / aperçu du compte.",
                     ),
                 ),
                 field(
@@ -162,49 +162,15 @@ pub fn catalog() -> Vec<CatalogPreset> {
             resource_kind: None,
             popular: true,
             setup_intro: Some(
-                "Cloudflare → Mon profil → Jetons API → Créer un jeton → Créer un jeton personnalisé"
+                "✨ OAuth disponible : Connecte-toi directement avec ton compte Cloudflare. Le token API est optionnel (seulement pour CI/CD)."
                     .into(),
             ),
-            setup_sections: Some(vec![
-                section("Nom du jeton", "devforge"),
-                section(
-                    "Autorisations",
-                    "Utilisateur  ·  Détails de l'utilisateur  ·  Lu\n\
-  ↑ obligatoire (jeton « Mon profil ») — sinon tools/list → 403\n\
-Compte  ·  Paramètres du compte  ·  Lu\n\
-Compte  ·  Cloudflare Tunnel  ·  Modifier\n\
-Zone    ·  DNS                  ·  Modifier",
-                ),
-                section(
-                    "Ressources du compte",
-                    "Inclure  ·  un seul compte (pas « Tous les comptes »)\n\
-Les jetons compte (cfat_) doivent résoudre exactement 1 compte",
-                ),
-                section(
-                    "Ressources de la zone",
-                    "Inclure  ·  ta zone app (ex. jeser.app)\nÉviter « Toutes les zones » si possible",
-                ),
-                section(
-                    "Filtrage d'adresse IP client",
-                    "Laisser vide\n(sinon le NAS / MCP hébergé sera bloqué)",
-                ),
-                section("TTL", "Laisser vide"),
-                section(
-                    "Ensuite",
-                    "Continuer vers le résumé → Créer le jeton\nNe jamais coller le jeton dans un chat / ticket / commit",
-                ),
-                section(
-                    "Dans ce formulaire DevForge",
-                    "API Token = le secret affiché une seule fois\n\
-Account ID = id du compte (pas secret)\n\
-Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
-                ),
-            ]),
+            setup_sections: None,
             tools_help: Some(
-                "Liste distante JSON-RPC (tools/list) via Streamable HTTP. Jeton Mon profil : Utilisateur → Détails de l'utilisateur → Lu + Paramètres du compte → Lu."
+                "OAuth supporté. Le MCP hébergé Cloudflare utilise principalement OAuth. API Token en fallback pour CI/CD."
                     .into(),
             ),
-                    auth_mode: Some("token".into()),
+                    auth_mode: Some("oauth".into()),
         },
         CatalogPreset {
             id: "vercel".into(),
@@ -253,26 +219,26 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
         CatalogPreset {
             id: "supabase".into(),
             name: "Supabase".into(),
-            description: "Postgres, Auth et Storage — MCP officiel Supabase.".into(),
+            description: "Postgres, Auth et Storage — MCP officiel Supabase (OAuth).".into(),
             category: "database".into(),
             docs_url: Some("https://supabase.com/docs/guides/getting-started/mcp".into()),
             default_url: Some("https://mcp.supabase.com/mcp".into()),
             fields: vec![
-                field(
-                    "access_token",
-                    "Personal Access Token",
-                    true,
-                    true,
-                    Some("sbp_…"),
-                    Some("Supabase → Account → Access Tokens. OAuth possible via le dashboard MCP."),
-                ),
                 field(
                     "project_ref",
                     "Project ref (optionnel)",
                     false,
                     false,
                     Some("abcdefghijklmnop"),
-                    None,
+                    Some("Optionnel. Pour CI, ajoute ?project_ref= à l'URL"),
+                ),
+                field(
+                    "access_token",
+                    "Personal Access Token (optionnel)",
+                    true,
+                    false,
+                    Some("sbp_…"),
+                    Some("Optionnel. Pour CI uniquement. Supabase → Account → Access Tokens. OAuth recommandé pour usage interactif."),
                 ),
                 field(
                     "url",
@@ -285,29 +251,32 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             ],
             resource_kind: Some("database".into()),
             popular: true,
-        setup_intro: None,
-            setup_sections: None,
-            tools_help: Some(
-                "Personal Access Token (Bearer) fonctionne pour tools/list. OAuth aussi disponible via le dashboard MCP."
+            setup_intro: Some(
+                "✨ OAuth disponible : Connecte-toi directement avec ton compte Supabase. Le PAT est optionnel (seulement pour CI)."
                     .into(),
             ),
-                    auth_mode: Some("token".into()),
+            setup_sections: None,
+            tools_help: Some(
+                "OAuth supporté. Le MCP hébergé Supabase utilise OAuth 2.1 avec Dynamic Client Registration. PAT en fallback pour CI."
+                    .into(),
+            ),
+                    auth_mode: Some("oauth".into()),
         },
         CatalogPreset {
             id: "neon".into(),
             name: "Neon".into(),
-            description: "Postgres serverless — MCP officiel Neon (OAuth / API key).".into(),
+            description: "Postgres serverless — MCP officiel Neon (OAuth).".into(),
             category: "database".into(),
             docs_url: Some("https://neon.tech/docs/ai/neon-mcp-server".into()),
             default_url: Some("https://mcp.neon.tech/mcp".into()),
             fields: vec![
                 field(
                     "api_key",
-                    "API Key",
+                    "API Key (optionnel)",
                     true,
-                    true,
+                    false,
                     Some("napi_…"),
-                    Some("Neon Console → Account → API Keys (Bearer). OAuth aussi supporté."),
+                    Some("Optionnel. Pour CI uniquement. Neon Console → Account → API Keys. OAuth recommandé pour usage interactif."),
                 ),
                 field(
                     "url",
@@ -320,13 +289,16 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             ],
             resource_kind: Some("database".into()),
             popular: true,
-        setup_intro: None,
-            setup_sections: None,
-            tools_help: Some(
-                "API Key (Bearer napi_…) fonctionne pour tools/list. OAuth également supporté."
+            setup_intro: Some(
+                "✨ OAuth disponible : Connecte-toi directement avec ton compte Neon. L'API Key est optionnelle (seulement pour CI)."
                     .into(),
             ),
-                    auth_mode: Some("token".into()),
+            setup_sections: None,
+            tools_help: Some(
+                "OAuth supporté. Le MCP hébergé Neon utilise OAuth 2.1 avec découverte automatique. API Key en fallback pour CI."
+                    .into(),
+            ),
+                    auth_mode: Some("oauth".into()),
         },
         CatalogPreset {
             id: "upstash".into(),
@@ -374,37 +346,40 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
         CatalogPreset {
             id: "slack".into(),
             name: "Slack".into(),
-            description: "Notifications, canaux et tools Slack via MCP.".into(),
+            description: "Notifications, canaux et tools Slack — MCP officiel hébergé ou self-host.".into(),
             category: "messaging".into(),
             docs_url: Some("https://api.slack.com/apps".into()),
-            default_url: None,
+            default_url: Some("https://mcp.slack.com/mcp".into()),
             fields: vec![
                 field(
                     "bot_token",
-                    "Bot User OAuth Token",
+                    "Bot User OAuth Token (optionnel)",
                     true,
-                    true,
+                    false,
                     Some("xoxb-…"),
-                    Some("Slack App → OAuth & Permissions"),
+                    Some("Optionnel. Pour self-host uniquement. Slack App → OAuth & Permissions. Le MCP officiel hébergé utilise OAuth utilisateur."),
                 ),
                 field(
                     "url",
-                    "URL MCP (optionnel)",
+                    "URL MCP",
                     false,
                     false,
-                    Some("http://127.0.0.1:3100/mcp"),
-                    Some("Si tu exposes un serveur MCP Slack local ou distant"),
+                    Some("https://mcp.slack.com/mcp"),
+                    Some("MCP officiel hébergé (OAuth) ou ton serveur self-host"),
                 ),
             ],
             resource_kind: None,
             popular: true,
-        setup_intro: None,
-            setup_sections: None,
-            tools_help: Some(
-                "Serveur MCP self-hosted requis. Bot User OAuth Token (xoxb-…) dans le header Authorization."
+            setup_intro: Some(
+                "✨ OAuth disponible : Le MCP Slack officiel hébergé utilise OAuth. Pour self-host, configure un Bot Token Slack."
                     .into(),
             ),
-                    auth_mode: Some("self_hosted".into()),
+            setup_sections: None,
+            tools_help: Some(
+                "Le MCP Slack officiel hébergé (https://mcp.slack.com/mcp) utilise OAuth utilisateur. Pour self-host, utilise Bot Token (xoxb-…)."
+                    .into(),
+            ),
+                    auth_mode: Some("oauth".into()),
         },
         CatalogPreset {
             id: "linear".into(),
@@ -515,26 +490,26 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
         CatalogPreset {
             id: "posthog".into(),
             name: "PostHog".into(),
-            description: "Product analytics — MCP officiel PostHog.".into(),
+            description: "Product analytics — MCP officiel PostHog (OAuth).".into(),
             category: "observability".into(),
             docs_url: Some("https://posthog.com/docs/model-context-protocol".into()),
             default_url: Some("https://mcp.posthog.com/mcp".into()),
             fields: vec![
                 field(
                     "api_key",
-                    "Personal API Key",
+                    "Personal API Key (optionnel)",
                     true,
-                    true,
+                    false,
                     Some("phx_…"),
-                    Some("PostHog → Settings → Personal API Keys"),
+                    Some("Optionnel. Pour CI uniquement. PostHog → Settings → Personal API Keys (preset MCP Server). OAuth recommandé."),
                 ),
                 field(
                     "host",
-                    "Host",
+                    "Host (optionnel)",
                     false,
                     false,
                     Some("https://eu.posthog.com"),
-                    Some("US ou EU selon ton projet"),
+                    Some("Optionnel. OAuth détecte automatiquement US/EU selon ton compte."),
                 ),
                 field(
                     "url",
@@ -547,13 +522,16 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
             ],
             resource_kind: None,
             popular: false,
-        setup_intro: None,
-            setup_sections: None,
-            tools_help: Some(
-                "Personal API Key (Bearer phx_…) fonctionne pour tools/list."
+            setup_intro: Some(
+                "✨ OAuth disponible : Connecte-toi directement avec ton compte PostHog. L'API Key est optionnelle (seulement pour CI)."
                     .into(),
             ),
-                    auth_mode: Some("token".into()),
+            setup_sections: None,
+            tools_help: Some(
+                "OAuth supporté. Le MCP hébergé PostHog utilise OAuth avec découverte automatique de région (US/EU). API Key en fallback pour CI."
+                    .into(),
+            ),
+                    auth_mode: Some("oauth".into()),
         },
         CatalogPreset {
             id: "discord".into(),
@@ -698,18 +676,18 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
         CatalogPreset {
             id: "github".into(),
             name: "GitHub MCP".into(),
-            description: "Tools GitHub hébergés (Copilot MCP) ou self-host.".into(),
+            description: "Tools GitHub hébergés (Copilot MCP avec OAuth).".into(),
             category: "devops".into(),
             docs_url: Some("https://github.com/github/github-mcp-server".into()),
             default_url: Some("https://api.githubcopilot.com/mcp/".into()),
             fields: vec![
                 field(
                     "token",
-                    "Personal Access Token",
+                    "Personal Access Token (optionnel)",
                     true,
-                    true,
+                    false,
                     Some("ghp_… / github_pat_…"),
-                    Some("Bearer requis. Le MCP Copilot hébergé attend un token GitHub valide."),
+                    Some("Optionnel. Pour CI uniquement. GitHub → Settings → Developer settings → Personal access tokens. OAuth recommandé pour usage interactif."),
                 ),
                 field(
                     "url",
@@ -717,18 +695,21 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
                     false,
                     false,
                     Some("https://api.githubcopilot.com/mcp/"),
-                    Some("Hébergé GitHub ; ou ton github-mcp-server self-host"),
+                    Some("Hébergé GitHub Copilot (OAuth supporté)"),
                 ),
             ],
             resource_kind: None,
             popular: false,
-        setup_intro: None,
-            setup_sections: None,
-            tools_help: Some(
-                "Personal Access Token (Bearer ghp_… / github_pat_…) fonctionne pour tools/list. MCP Copilot hébergé strict sur Content-Type."
+            setup_intro: Some(
+                "✨ OAuth disponible : Connecte-toi directement avec ton compte GitHub. Le PAT est optionnel (seulement pour CI ou GitHub Apps custom)."
                     .into(),
             ),
-                    auth_mode: Some("token".into()),
+            setup_sections: None,
+            tools_help: Some(
+                "OAuth supporté. Le MCP Copilot hébergé utilise OAuth (clients compatibles). PAT en fallback pour CI ou GitHub Apps pré-enregistrées."
+                    .into(),
+            ),
+                    auth_mode: Some("oauth".into()),
         },
         CatalogPreset {
             id: "custom".into(),
