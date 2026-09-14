@@ -136,13 +136,24 @@ pub async fn discover_oauth(
 
 fn extract_resource_metadata(www_authenticate: &str) -> Option<String> {
     // Format Turso : Bearer resource_metadata="https://mcp.turso.ai/.well-known/oauth-protected-resource/mcp"
-    for part in www_authenticate.split(',') {
-        let part = part.trim();
-        if let Some(val) = part.strip_prefix("resource_metadata=") {
-            let url = val.trim_matches('"').trim();
-            if !url.is_empty() {
-                return Some(url.to_string());
-            }
+    // Peut aussi avoir : Bearer realm="...", resource_metadata="..."
+    let trimmed = www_authenticate.trim();
+    
+    // Chercher resource_metadata= dans toute la chaîne
+    if let Some(start_idx) = trimmed.find("resource_metadata=") {
+        let after_key = &trimmed[start_idx + "resource_metadata=".len()..];
+        let value = after_key.trim_start_matches('"');
+        
+        // Trouver la fin : soit " soit espace soit virgule soit fin
+        let end_idx = value
+            .find('"')
+            .or_else(|| value.find(' '))
+            .or_else(|| value.find(','))
+            .unwrap_or(value.len());
+        
+        let url = &value[..end_idx];
+        if !url.is_empty() {
+            return Some(url.to_string());
         }
     }
     None
