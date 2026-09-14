@@ -22,6 +22,8 @@ pub struct ProvisionResult {
     pub created_client: bool,
     pub created_secret: bool,
     pub logo_set: bool,
+    pub logo_uploaded: bool,
+    pub favicon_uploaded: bool,
     pub background_set: bool,
     pub branding_warnings: Vec<String>,
 }
@@ -301,19 +303,29 @@ async fn upload_background_from_url(
     api_key: &str,
     image_url: &str,
 ) -> Result<(), PocketIdError> {
+    upload_application_image_from_url(base, api_key, image_url, "background").await
+}
+
+/// Télécharge une image puis l'upload vers Pocket ID (multipart).
+async fn upload_application_image_from_url(
+    base: &str,
+    api_key: &str,
+    image_url: &str,
+    image_type: &str,
+) -> Result<(), PocketIdError> {
     let url = image_url.trim();
     if url.is_empty() {
-        return Err(PocketIdError::msg("URL fond manquante"));
+        return Err(PocketIdError::msg(format!("URL {image_type} manquante")));
     }
     let client = http();
     let res = client
         .get(url)
         .send()
         .await
-        .map_err(|e| PocketIdError::msg(format!("Téléchargement fond KO: {e}")))?;
+        .map_err(|e| PocketIdError::msg(format!("Téléchargement {image_type} KO: {e}")))?;
     if !res.status().is_success() {
         return Err(PocketIdError::msg(format!(
-            "Téléchargement fond HTTP {}",
+            "Téléchargement {image_type} HTTP {}",
             res.status().as_u16()
         )));
     }
@@ -326,12 +338,14 @@ async fn upload_background_from_url(
     let bytes = res
         .bytes()
         .await
-        .map_err(|e| PocketIdError::msg(format!("Lecture fond KO: {e}")))?;
+        .map_err(|e| PocketIdError::msg(format!("Lecture {image_type} KO: {e}")))?;
     if bytes.is_empty() {
-        return Err(PocketIdError::msg("Image de fond vide"));
+        return Err(PocketIdError::msg(format!("Image {image_type} vide")));
     }
     if bytes.len() > 8 * 1024 * 1024 {
-        return Err(PocketIdError::msg("Image de fond trop volumineuse (>8 Mo)"));
+        return Err(PocketIdError::msg(format!(
+            "Image {image_type} trop volumineuse (>8 Mo)"
+        )));
     }
     let filename = filename_from_url_and_ctype(url, &ctype);
     let data = bytes.to_vec();
@@ -343,20 +357,38 @@ async fn upload_background_from_url(
         Err(_) => reqwest::multipart::Part::bytes(data).file_name(filename),
     };
     let form = reqwest::multipart::Form::new().part("file", part);
-    let put_url = format!("{base}/api/application-images/background");
+    let put_url = format!("{base}/api/application-images/{image_type}");
     let put = client
         .put(&put_url)
         .header("X-API-Key", api_key)
         .multipart(form)
         .send()
         .await
-        .map_err(|e| PocketIdError::msg(format!("Upload fond Pocket ID KO: {e}")))?;
+        .map_err(|e| PocketIdError::msg(format!("Upload {image_type} Pocket ID KO: {e}")))?;
     let status = put.status().as_u16();
     if !(200..300).contains(&status) {
         let body = put.text().await.unwrap_or_default();
         return Err(PocketIdError::http(status, &body));
     }
     Ok(())
+}
+
+/// Télécharge une image puis l'upload en logo Pocket ID (multipart).
+async fn upload_logo_from_url(
+    base: &str,
+    api_key: &str,
+    image_url: &str,
+) -> Result<(), PocketIdError> {
+    upload_application_image_from_url(base, api_key, image_url, "logo").await
+}
+
+/// Télécharge une image puis l'upload en favicon Pocket ID (multipart).
+async fn upload_favicon_from_url(
+    base: &str,
+    api_key: &str,
+    image_url: &str,
+) -> Result<(), PocketIdError> {
+    upload_application_image_from_url(base, api_key, image_url, "favicon").await
 }
 
 async fn create_secret(base: &str, api_key: &str, client_id: &str) -> Result<String, PocketIdError> {
@@ -472,6 +504,22 @@ pub async fn provision_oidc_client(
         (None, false)
     };
 
+    let mut logo_uploaded = false;
+    if let Some(lg) = logo {
+        match upload_logo_from_url(&base, key, lg).await {
+            Ok(()) => logo_uploaded = true,
+            Err(e) => branding_warnings.push(format!("Logo: {e}")),
+        }
+    }
+
+    let mut favicon_uploaded = false;
+    if let Some(fav) = logo {
+        match upload_favicon_from_url(&base, key, fav).await {
+            Ok(()) => favicon_uploaded = true,
+            Err(e) => branding_warnings.push(format!("Favicon: {e}")),
+        }
+    }
+
     let mut background_set = false;
     if let Some(bg) = branding
         .background_url
@@ -491,6 +539,8 @@ pub async fn provision_oidc_client(
         created_client,
         created_secret,
         logo_set,
+        logo_uploaded,
+        favicon_uploaded,
         background_set,
         branding_warnings,
     })
@@ -522,5 +572,38 @@ mod tests {
             Some("https://forge.example.com/favicon.svg".into())
         );
         assert_eq!(default_logo_url(""), None);
+    }
+
+    #[test]
+    fn provision_result_includes_upload_flags() {
+        let result = ProvisionResult {
+            client_id: "test".into(),
+            client_secret: None,
+            created_client: false,
+            created_secret: false,
+            logo_set: true,
+            logo_uploaded: true,
+            favicon_uploaded: true,
+            background_set: true,
+            branding_warnings: vec![],
+        };
+        assert!(result.logo_uploaded);
+        assert!(result.favicon_uploaded);
+        assert_eq!(result.branding_warnings.len(), 0);
+    }
+
+    #[test]
+    fn filename_extraction_from_url() {
+        let fname = filename_from_url_and_ctype(
+            "https://example.com/logo.png",
+            "image/png"
+        );
+        assert_eq!(fname, "logo.png");
+
+        let fname2 = filename_from_url_and_ctype(
+            "https://example.com/path/image",
+            "image/svg+xml"
+        );
+        assert_eq!(fname2, "background.svg");
     }
 }
