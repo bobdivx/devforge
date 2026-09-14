@@ -763,6 +763,16 @@ export const api = {
         regions: string[];
       }>;
     }>(`/mcp/servers/${encodeURIComponent(id)}/resources`),
+  mcpOAuthStart: (id: string) =>
+    request<{ auth_url: string; state: string }>(
+      `/mcp/servers/${encodeURIComponent(id)}/oauth/start`,
+      { method: 'POST', body: '{}' },
+    ),
+  mcpOAuthDisconnect: (id: string) =>
+    request<{ ok: boolean }>(
+      `/mcp/servers/${encodeURIComponent(id)}/oauth/disconnect`,
+      { method: 'POST', body: '{}' },
+    ),
   projectResources: (projectUuid: string) =>
     request<{
       data: Array<{

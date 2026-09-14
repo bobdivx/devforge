@@ -92,7 +92,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
                     true,
                     Some("eyJ…"),
                     Some(
-                        "Turso → Account → API Tokens. IMPORTANT : sert uniquement à lister/lier les DBs (resources). Pour appeler les tools MCP, le serveur Turso hébergé exige OAuth (non supporté actuellement). Les tools retourneront 401.",
+                        "Turso → Account → API Tokens. Sert uniquement à lister/lier les DBs (resources). Pour appeler les tools MCP, utilise le bouton « Se connecter avec OAuth » dans l'onglet Tools.",
                     ),
                 ),
                 field(
@@ -107,12 +107,12 @@ pub fn catalog() -> Vec<CatalogPreset> {
             resource_kind: Some("database".into()),
             popular: true,
             setup_intro: Some(
-                "⚠️ Limitation : Le serveur MCP Turso hébergé (mcp.turso.ai) exige OAuth pour les tools/list et tools/call. Le token Platform permet uniquement de gérer les ressources (lier des DBs aux projets). Les appels MCP tools retourneront 401 jusqu'à l'implémentation OAuth."
+                "Le serveur MCP Turso hébergé (mcp.turso.ai) exige OAuth pour accéder aux tools MCP. Le token Platform permet de gérer les ressources (lier des DBs). Après configuration, utilise le bouton OAuth dans l'onglet Tools."
                     .into(),
             ),
             setup_sections: None,
             tools_help: Some(
-                "⚠️ Liste MCP tools distante requiert OAuth (non supporté). Le token Platform configure uniquement les ressources (DBs). Les tools retourneront 401."
+                "Le serveur Turso hébergé exige OAuth. Clique sur « Se connecter avec OAuth » ci-dessous pour autoriser l'accès aux tools MCP."
                     .into(),
             ),
                     auth_mode: Some("oauth".into()),
@@ -245,7 +245,7 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
         setup_intro: None,
             setup_sections: None,
             tools_help: Some(
-                "Le MCP hébergé Vercel utilise OAuth. Un Access Token API seul peut ne pas suffire pour tools/list."
+                "Le serveur Vercel hébergé exige OAuth. Clique sur « Se connecter avec OAuth » ci-dessous pour autoriser l'accès aux tools MCP."
                     .into(),
             ),
                     auth_mode: Some("oauth".into()),
@@ -436,7 +436,7 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
         setup_intro: None,
             setup_sections: None,
             tools_help: Some(
-                "Le MCP hébergé Linear peut exiger OAuth. Un API Key seul peut ne pas suffire."
+                "Le serveur Linear hébergé exige OAuth. Clique sur « Se connecter avec OAuth » ci-dessous pour autoriser l'accès aux tools MCP."
                     .into(),
             ),
                     auth_mode: Some("oauth".into()),
@@ -472,7 +472,7 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
         setup_intro: None,
             setup_sections: None,
             tools_help: Some(
-                "Le MCP hébergé Sentry utilise principalement OAuth. Auth Token seul peut ne pas suffire."
+                "Le serveur Sentry hébergé exige OAuth. Clique sur « Se connecter avec OAuth » ci-dessous pour autoriser l'accès aux tools MCP."
                     .into(),
             ),
                     auth_mode: Some("oauth".into()),
@@ -655,7 +655,7 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
         setup_intro: None,
             setup_sections: None,
             tools_help: Some(
-                "Le MCP hébergé Notion utilise principalement OAuth. Integration Token seul peut ne pas suffire."
+                "Le serveur Notion hébergé exige OAuth. Clique sur « Se connecter avec OAuth » ci-dessous pour autoriser l'accès aux tools MCP."
                     .into(),
             ),
                     auth_mode: Some("oauth".into()),
@@ -690,7 +690,7 @@ Les clés S3/R2 éventuellement affichées ne sont pas nécessaires ici",
         setup_intro: None,
             setup_sections: None,
             tools_help: Some(
-                "Le MCP hébergé Stripe recommande OAuth. Secret Key seul peut ne pas suffire. Voir docs.stripe.com/mcp."
+                "Le serveur Stripe hébergé exige OAuth. Clique sur « Se connecter avec OAuth » ci-dessous pour autoriser l'accès aux tools MCP."
                     .into(),
             ),
                     auth_mode: Some("oauth".into()),

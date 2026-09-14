@@ -35,6 +35,7 @@ type CatalogItem = {
   setup_intro?: string | null;
   setup_sections?: Array<{ title: string; body: string }> | null;
   tools_help?: string | null;
+  auth_mode?: string | null;
 };
 
 type McpServer = {
@@ -350,39 +351,40 @@ export function McpPage() {
   const toolsHelp = manageCatalog?.tools_help || 'Liste distante JSON-RPC (tools/list).';
   const manageToolsOk = manage ? toolsStatusMap[manage.id] : undefined;
   const manageStatus = manage ? statusMeta(manage, manageToolsOk !== undefined, manageToolsOk) : null;
+  const isOAuthMode = manageCatalog?.auth_mode === 'oauth';
   const isOAuthRequired =
-    manageCatalog?.auth_mode === 'oauth' &&
-    toolsError &&
-    (toolsError.includes('401') ||
-      toolsError.includes('OAuth') ||
-      toolsError.includes('could not parse jwt'));
+    isOAuthMode &&
+    (toolsError &&
+      (toolsError.includes('401') ||
+        toolsError.includes('OAuth') ||
+        toolsError.includes('could not parse jwt')));
 
   const isOAuthConnected = manage?.oauth_connected;
+  const shouldShowOAuthButton = isOAuthMode && !isOAuthConnected;
 
   async function startOAuth() {
     if (!manage) return;
     setBusy(true);
     try {
-      const r = await api.post<{ auth_url: string; state: string }>(
-        `/api/v1/mcp/servers/${manage.id}/oauth/start`,
-        {},
-      );
-      const { auth_url } = r.data;
-      // Ouvrir popup OAuth
+      const r = await api.mcpOAuthStart(manage.id);
+      const { auth_url } = r;
+      
       const popup = window.open(
         auth_url,
         'mcp_oauth',
         'width=600,height=700,popup=yes,scrollbars=yes',
       );
-      if (!popup) {
+      
+      if (!popup || popup.closed || typeof popup.closed === 'undefined') {
         toast.push({
           title: 'Popup bloquée',
-          detail: 'Autorise les popups pour ce site',
+          detail: 'Redirection vers la page OAuth...',
           tone: 'warn',
         });
+        window.location.assign(auth_url);
         return;
       }
-      // Écouter message de succès depuis callback
+      
       const handleMessage = (event: MessageEvent) => {
         if (event.data?.type === 'mcp_oauth_success') {
           window.removeEventListener('message', handleMessage);
@@ -403,7 +405,7 @@ export function McpPage() {
     if (!manage) return;
     setBusy(true);
     try {
-      await api.post(`/api/v1/mcp/servers/${manage.id}/oauth/disconnect`, {});
+      await api.mcpOAuthDisconnect(manage.id);
       toast.push({ title: 'OAuth déconnecté', tone: 'info' });
       load();
       if (manage) openManage(manage);
@@ -633,12 +635,15 @@ export function McpPage() {
               </div>
             </div>
 
-            {isOAuthRequired && !isOAuthConnected && (
-              <Alert tone="warn" class="text-xs">
-                <p class="font-medium">Authentification OAuth requise</p>
+            {shouldShowOAuthButton && (
+              <Alert tone={isOAuthRequired ? 'warn' : 'info'} class="text-xs">
+                <p class="font-medium">
+                  {isOAuthRequired ? 'Authentification OAuth requise' : 'Authentification OAuth disponible'}
+                </p>
                 <p class="mt-1 text-[var(--color-ink-muted)]">
-                  Le serveur MCP {manage.name} hébergé exige OAuth pour accéder aux tools. Le token Platform API
-                  permet uniquement de gérer les ressources (lier des bases de données).
+                  {isOAuthRequired 
+                    ? `Le serveur MCP ${manage.name} exige OAuth pour accéder aux tools.`
+                    : `Connecte-toi avec OAuth pour accéder aux tools MCP de ${manage.name}.`}
                 </p>
                 <Button
                   type="button"
