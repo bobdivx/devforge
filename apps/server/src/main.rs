@@ -61,6 +61,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("Traefik reverse proxy ready");
     }
 
+    // Watchdog: periodic health check for Traefik (fix for 2026-09-14 outage).
+    // Every 5 minutes, ensure Traefik exists and is running.
+    {
+        let proxy = state.proxy.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+            interval.tick().await; // Skip first tick (already checked above)
+            loop {
+                interval.tick().await;
+                if let Err(e) = proxy.ensure_traefik().await {
+                    tracing::error!(error = %e, "Traefik watchdog: failed to ensure proxy");
+                }
+            }
+        });
+    }
+
     // Background sync for GitHub runners (Docker + Actions status → SQLite snapshot).
     {
         let worker = state.runners.sync_worker();

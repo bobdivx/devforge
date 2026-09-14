@@ -379,6 +379,10 @@ echo ""
 /// the recreated container **must** rejoin it, otherwise Traefik routing will match but hang
 /// (Traefik cannot reach containers on different networks).
 ///
+/// ## DevForge container fix (2026-09-14 incident C)
+/// App containers (df-*) **must** be connected to the Traefik network (`devforge`) even if
+/// they were previously only on `bridge`. Without this, Traefik 502s despite labels being correct.
+///
 /// ## Label safety
 /// Labels are passed via heredoc → tempfile → POSIX positional parameters (`set -- "$@" --label "$line"`).
 /// Each label becomes its own argv element, preventing shell command substitution of backticks
@@ -431,9 +435,26 @@ set -- "$@" "$IMG"
 
 docker stop "$N" >/dev/null
 docker rm -f "$N" >/dev/null
-docker run "$@"
+CID=$(docker run "$@")
 rm -f "$ENV_FILE" "$LABEL_FILE"
-echo "recreated $N with traefik labels"
+
+# CRITICAL FIX (2026-09-14 incident C): Ensure df-* containers are connected to devforge network
+# If container name starts with df-, always connect it to devforge network for Traefik routing
+if echo "$N" | grep -q "^df-"; then
+  if ! echo "$NET" | grep -q "devforge"; then
+    # Not on devforge network, connect it now (handles bridge-only deployments)
+    if docker network inspect devforge >/dev/null 2>&1; then
+      docker network connect devforge "$CID" 2>/dev/null || true
+      echo "recreated $N with traefik labels + connected to devforge network"
+    else
+      echo "recreated $N with traefik labels (devforge network missing)"
+    fi
+  else
+    echo "recreated $N with traefik labels"
+  fi
+else
+  echo "recreated $N with traefik labels"
+fi
 '"#
     )
 }
