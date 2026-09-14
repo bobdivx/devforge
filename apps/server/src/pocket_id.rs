@@ -310,7 +310,7 @@ async fn upload_background_from_url(
     api_key: &str,
     image_url: &str,
 ) -> Result<(), PocketIdError> {
-    upload_application_image_from_url(base, api_key, image_url, "background").await
+    upload_application_image_from_url(base, api_key, image_url, "background", None).await
 }
 
 /// Télécharge une image puis l'upload vers Pocket ID (multipart).
