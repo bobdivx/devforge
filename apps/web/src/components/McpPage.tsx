@@ -35,7 +35,6 @@ type CatalogItem = {
   setup_intro?: string | null;
   setup_sections?: Array<{ title: string; body: string }> | null;
   tools_help?: string | null;
-  auth_mode?: string | null;
 };
 
 type McpServer = {
@@ -257,6 +256,7 @@ export function McpPage() {
   const [toolsError, setToolsError] = useState<string | null>(null);
   const [toolsLoading, setToolsLoading] = useState(false);
   const [toolsStatusMap, setToolsStatusMap] = useState<Record<string, boolean>>({});
+  const [showAdvancedToken, setShowAdvancedToken] = useState(false);
 
   async function load() {
     try {
@@ -278,6 +278,7 @@ export function McpPage() {
   function openPreset(p: CatalogItem) {
     setPickerOpen(false);
     setPreset(p);
+    setShowAdvancedToken(false); // Reset toggle
     const init: Record<string, string> = {};
     for (const f of p.fields) {
       if (f.key === 'url' && p.default_url) init.url = p.default_url;
@@ -351,40 +352,36 @@ export function McpPage() {
   const toolsHelp = manageCatalog?.tools_help || 'Liste distante JSON-RPC (tools/list).';
   const manageToolsOk = manage ? toolsStatusMap[manage.id] : undefined;
   const manageStatus = manage ? statusMeta(manage, manageToolsOk !== undefined, manageToolsOk) : null;
-  const isOAuthMode = manageCatalog?.auth_mode === 'oauth';
   const isOAuthRequired =
-    isOAuthMode &&
-    (toolsError &&
-      (toolsError.includes('401') ||
-        toolsError.includes('OAuth') ||
-        toolsError.includes('could not parse jwt')));
+    manageCatalog?.auth_mode === 'oauth' &&
+    toolsError &&
+    (toolsError.includes('401') ||
+      toolsError.includes('OAuth') ||
+      toolsError.includes('could not parse jwt'));
 
   const isOAuthConnected = manage?.oauth_connected;
-  const shouldShowOAuthButton = isOAuthMode && !isOAuthConnected;
 
   async function startOAuth() {
     if (!manage) return;
     setBusy(true);
     try {
-      const r = await api.mcpOAuthStart(manage.id);
-      const { auth_url } = r;
-      
+      const { auth_url } = await api.mcpOAuthStart(manage.id);
+      // Ouvrir popup OAuth
       const popup = window.open(
         auth_url,
         'mcp_oauth',
         'width=600,height=700,popup=yes,scrollbars=yes',
       );
-      
-      if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+      if (!popup) {
+        // Fallback: redirect en plein écran si popup bloquée
         toast.push({
-          title: 'Popup bloquée',
-          detail: 'Redirection vers la page OAuth...',
-          tone: 'warn',
+          title: 'Popup bloquée, redirection…',
+          tone: 'info',
         });
         window.location.assign(auth_url);
         return;
       }
-      
+      // Écouter message de succès depuis callback
       const handleMessage = (event: MessageEvent) => {
         if (event.data?.type === 'mcp_oauth_success') {
           window.removeEventListener('message', handleMessage);
@@ -405,7 +402,7 @@ export function McpPage() {
     if (!manage) return;
     setBusy(true);
     try {
-      await api.mcpOAuthDisconnect(manage.id);
+      await api.post(`/api/v1/mcp/servers/${manage.id}/oauth/disconnect`, {});
       toast.push({ title: 'OAuth déconnecté', tone: 'info' });
       load();
       if (manage) openManage(manage);
@@ -572,7 +569,8 @@ export function McpPage() {
                       for (const f of preset.fields) {
                         if (f.key === 'url' && preset.default_url) {
                           minimal.url = preset.default_url;
-                        } else if (f.key === 'org' && fields[f.key]?.trim()) {
+                        } else if (!f.secret && fields[f.key]?.trim()) {
+                          // Garder champs non-secrets remplis (org, project_ref, etc)
                           minimal[f.key] = fields[f.key];
                         } else {
                           minimal[f.key] = '';
@@ -584,21 +582,19 @@ export function McpPage() {
                       });
                       const serverId = r.data?.id;
                       if (!serverId) throw new Error('Server ID manquant');
-                      const oauth = await api.post<{ auth_url: string }>(
-                        `/api/v1/mcp/servers/${serverId}/oauth/start`,
-                        {},
-                      );
+                      const { auth_url } = await api.mcpOAuthStart(serverId);
                       const popup = window.open(
-                        oauth.data.auth_url,
+                        auth_url,
                         'mcp_oauth',
                         'width=600,height=700,popup=yes,scrollbars=yes',
                       );
                       if (!popup) {
+                        // Fallback: redirect en plein écran si popup bloquée
                         toast.push({
-                          title: 'Popup bloquée',
-                          detail: 'Autorise les popups pour ce site',
-                          tone: 'warn',
+                          title: 'Popup bloquée, redirection…',
+                          tone: 'info',
                         });
+                        window.location.assign(auth_url);
                         return;
                       }
                       const handleMessage = (event: MessageEvent) => {
@@ -624,35 +620,100 @@ export function McpPage() {
                 </p>
               </Alert>
             )}
-            {preset.fields
-              .filter((f) => {
-                // Si OAuth disponible, cacher les champs secrets requis (tokens)
-                // Garder les champs non-secrets (org, url, etc) et les champs secrets optionnels (mode avancé)
-                if (preset.auth_mode === 'oauth' && f.secret && f.required) {
-                  return false;
-                }
-                return true;
-              })
-              .map((f) => (
-                <div key={f.key}>
-                  <Input
-                    label={f.label}
-                    type={f.secret ? 'password' : 'text'}
-                    placeholder={f.placeholder || ''}
-                    value={fields[f.key] || ''}
-                    onInput={(e) =>
-                      setFields((prev) => ({
-                        ...prev,
-                        [f.key]: (e.target as HTMLInputElement).value,
-                      }))
-                    }
-                    required={f.required}
-                  />
-                  {f.help && (
-                    <p class="mt-1 text-xs text-[var(--color-ink-faint)]">{f.help}</p>
+            {(() => {
+              const nonSecretFields = preset.fields.filter((f) => !f.secret);
+              const secretFields = preset.fields.filter((f) => f.secret);
+              const hasSecretFields = secretFields.length > 0;
+
+              return (
+                <>
+                  {/* Champs non-secrets toujours visibles */}
+                  {nonSecretFields.map((f) => (
+                    <div key={f.key}>
+                      <Input
+                        label={f.label}
+                        type="text"
+                        placeholder={f.placeholder || ''}
+                        value={fields[f.key] || ''}
+                        onInput={(e) =>
+                          setFields((prev) => ({
+                            ...prev,
+                            [f.key]: (e.target as HTMLInputElement).value,
+                          }))
+                        }
+                        required={f.required}
+                      />
+                      {f.help && (
+                        <p class="mt-1 text-xs text-[var(--color-ink-faint)]">{f.help}</p>
+                      )}
+                    </div>
+                  ))}
+
+                  {/* Toggle Mode avancé pour OAuth presets avec secrets */}
+                  {preset.auth_mode === 'oauth' && hasSecretFields && (
+                    <div class="space-y-2">
+                      <button
+                        type="button"
+                        class="text-xs text-[var(--color-accent)] underline"
+                        onClick={() => setShowAdvancedToken(!showAdvancedToken)}
+                      >
+                        {showAdvancedToken ? '▼' : '▶'} Mode avancé (token API / CI)
+                      </button>
+                      {showAdvancedToken && (
+                        <Alert tone="neutral" class="space-y-2 text-xs">
+                          <p class="text-[var(--color-ink-muted)]">
+                            Pour CI/CD ou usage sans OAuth. Non requis pour usage interactif.
+                          </p>
+                          {secretFields.map((f) => (
+                            <div key={f.key}>
+                              <Input
+                                label={f.label}
+                                type="password"
+                                placeholder={f.placeholder || ''}
+                                value={fields[f.key] || ''}
+                                onInput={(e) =>
+                                  setFields((prev) => ({
+                                    ...prev,
+                                    [f.key]: (e.target as HTMLInputElement).value,
+                                  }))
+                                }
+                                required={false}
+                              />
+                              {f.help && (
+                                <p class="mt-1 text-[10px] text-[var(--color-ink-faint)]">{f.help}</p>
+                              )}
+                            </div>
+                          ))}
+                        </Alert>
+                      )}
+                    </div>
                   )}
-                </div>
-              ))}
+
+                  {/* Pour non-OAuth : montrer tous les champs normalement */}
+                  {preset.auth_mode !== 'oauth' &&
+                    secretFields.map((f) => (
+                      <div key={f.key}>
+                        <Input
+                          label={f.label}
+                          type="password"
+                          placeholder={f.placeholder || ''}
+                          value={fields[f.key] || ''}
+                          onInput={(e) =>
+                            setFields((prev) => ({
+                              ...prev,
+                              [f.key]: (e.target as HTMLInputElement).value,
+                            }))
+                          }
+                          required={f.required}
+                        />
+                        {f.help && (
+                          <p class="mt-1 text-xs text-[var(--color-ink-faint)]">{f.help}</p>
+                        )}
+                      </div>
+                    ))}
+                </>
+              );
+            })()}
             {preset.docs_url && (
               <a
                 class="block text-xs text-[var(--color-accent)] underline"
@@ -714,15 +775,12 @@ export function McpPage() {
               </div>
             </div>
 
-            {shouldShowOAuthButton && (
-              <Alert tone={isOAuthRequired ? 'warn' : 'info'} class="text-xs">
-                <p class="font-medium">
-                  {isOAuthRequired ? 'Authentification OAuth requise' : 'Authentification OAuth disponible'}
-                </p>
+            {isOAuthRequired && !isOAuthConnected && (
+              <Alert tone="warn" class="text-xs">
+                <p class="font-medium">Authentification OAuth requise</p>
                 <p class="mt-1 text-[var(--color-ink-muted)]">
-                  {isOAuthRequired 
-                    ? `Le serveur MCP ${manage.name} exige OAuth pour accéder aux tools.`
-                    : `Connecte-toi avec OAuth pour accéder aux tools MCP de ${manage.name}.`}
+                  Le serveur MCP {manage.name} hébergé exige OAuth pour accéder aux tools. Le token Platform API
+                  permet uniquement de gérer les ressources (lier des bases de données).
                 </p>
                 <Button
                   type="button"

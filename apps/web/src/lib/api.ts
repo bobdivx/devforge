@@ -751,6 +751,11 @@ export const api = {
     request<{ data: Array<{ name: string; description: string }> }>(
       `/mcp/servers/${encodeURIComponent(id)}/tools`,
     ),
+  mcpOAuthStart: (id: string) =>
+    request<{ auth_url: string; state: string }>(
+      `/mcp/servers/${encodeURIComponent(id)}/oauth/start`,
+      { method: 'POST', body: '{}' },
+    ),
   mcpResources: (id: string) =>
     request<{
       ok: boolean;
