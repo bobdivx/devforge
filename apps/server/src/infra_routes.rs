@@ -1634,12 +1634,7 @@ async fn proxy_status(
     State(state): State<AppState>,
     _headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    let executor = state.backends.executor.as_ref().ok_or_else(|| {
-        (
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": "executor unavailable"})),
-        )
-    })?;
+    let executor = state.deploy.executor();
 
     let check_cmd = r#"docker inspect devforge-traefik --format '{{.State.Status}}|{{.Config.Image}}|{{.State.StartedAt}}' 2>/dev/null || echo 'missing'"#;
     let result = executor.exec("default", "", check_cmd, 30).await.map_err(|e| {
@@ -1678,12 +1673,7 @@ async fn proxy_restart(
     State(state): State<AppState>,
     _headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    let executor = state.backends.executor.as_ref().ok_or_else(|| {
-        (
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": "executor unavailable"})),
-        )
-    })?;
+    let executor = state.deploy.executor();
 
     let restart_cmd = "docker restart devforge-traefik 2>&1";
     let result = executor.exec("default", "", restart_cmd, 60).await.map_err(|e| {
@@ -1726,7 +1716,7 @@ async fn system_health(
     State(state): State<AppState>,
     _headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    let executor = state.backends.executor.as_ref();
+    let executor = state.deploy.executor();
     
     let mut health = json!({
         "ok": true,
@@ -1734,26 +1724,24 @@ async fn system_health(
         "components": {}
     });
 
-    if let Some(exec) = executor {
-        let traefik_check = exec.exec("default", "", 
-            r#"docker inspect devforge-traefik --format '{{.State.Status}}' 2>/dev/null || echo 'missing'"#, 
-            30).await;
-        
-        let traefik_status = traefik_check
-            .map(|r| r.output.trim().to_string())
-            .unwrap_or_else(|_| "error".to_string());
-        
-        let traefik_ok = traefik_status == "running";
-        if !traefik_ok {
-            health["ok"] = json!(false);
-        }
-
-        health["components"]["traefik"] = json!({
-            "status": traefik_status,
-            "healthy": traefik_ok,
-            "message": if traefik_ok { "Traefik opérationnel" } else { "Traefik absent ou arrêté" }
-        });
+    let traefik_check = executor.exec("default", "", 
+        r#"docker inspect devforge-traefik --format '{{.State.Status}}' 2>/dev/null || echo 'missing'"#, 
+        30).await;
+    
+    let traefik_status = traefik_check
+        .map(|r| r.output.trim().to_string())
+        .unwrap_or_else(|_| "error".to_string());
+    
+    let traefik_ok = traefik_status == "running";
+    if !traefik_ok {
+        health["ok"] = json!(false);
     }
+
+    health["components"]["traefik"] = json!({
+        "status": traefik_status,
+        "healthy": traefik_ok,
+        "message": if traefik_ok { "Traefik opérationnel" } else { "Traefik absent ou arrêté" }
+    });
 
     Ok(Json(health))
 }
