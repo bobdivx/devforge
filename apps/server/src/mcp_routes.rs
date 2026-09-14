@@ -12,6 +12,70 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+/// Résout l'URL publique de l'instance dans cet ordre :
+/// 1. `instance_url` depuis DB (settings)
+/// 2. Dérivé depuis request headers (Host + X-Forwarded-Proto/Forwarded)
+/// 3. APP_URL env (fallback optionnel)
+/// 
+/// Retourne une erreur seulement si aucune source ne fournit une URL HTTPS valide
+/// (ou localhost pour dev).
+async fn resolve_public_base_url(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<String, ApiError> {
+    // 1. Essayer instance_url depuis DB
+    if let Ok(row) = sqlx::query_as::<_, (String,)>(
+        "SELECT instance_url FROM instance_settings WHERE id = 1"
+    )
+    .fetch_one(&state.pool)
+    .await
+    {
+        let url = row.0.trim().trim_end_matches('/');
+        if !url.is_empty() && (url.starts_with("https://") || url.starts_with("http://localhost") || url.starts_with("http://127.0.0.1")) {
+            return Ok(url.to_string());
+        }
+    }
+
+    // 2. Dériver depuis Host + X-Forwarded-Proto/Forwarded
+    if let Some(host) = headers.get("host").and_then(|h| h.to_str().ok()) {
+        let scheme = if let Some(proto) = headers.get("x-forwarded-proto").and_then(|p| p.to_str().ok()) {
+            proto
+        } else if let Some(fwd) = headers.get("forwarded").and_then(|f| f.to_str().ok()) {
+            // Parser "Forwarded: proto=https;host=..."
+            if fwd.contains("proto=https") {
+                "https"
+            } else if fwd.contains("proto=http") {
+                "http"
+            } else {
+                "http"
+            }
+        } else {
+            "http"
+        };
+
+        let derived = format!("{}://{}", scheme, host);
+        let trimmed = derived.trim_end_matches('/');
+        
+        if trimmed.starts_with("https://") || trimmed.starts_with("http://localhost") || trimmed.starts_with("http://127.0.0.1") {
+            return Ok(trimmed.to_string());
+        }
+    }
+
+    // 3. Fallback APP_URL (optionnel)
+    if let Ok(app_url) = std::env::var("APP_URL") {
+        let url = app_url.trim().trim_end_matches('/');
+        if !url.is_empty() && (url.starts_with("https://") || url.starts_with("http://localhost") || url.starts_with("http://127.0.0.1")) {
+            return Ok(url.to_string());
+        }
+    }
+
+    // Échec : aucune source valide
+    Err(ApiError {
+        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+        message: "Impossible de déterminer l'URL publique de l'instance. Configure le domaine public dans Settings → Domaine (instance_url), ou assure-toi que les headers Host/X-Forwarded-Proto sont corrects, ou définis APP_URL en variable d'environnement.".into(),
+    })
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/mcp/catalog", get(list_catalog))
@@ -679,26 +743,8 @@ async fn start_oauth_flow(
     let challenge = devforge_mcp::code_challenge(&verifier);
     let state_param = devforge_mcp::generate_state();
 
-    // APP_URL requis
-    let app_url = std::env::var("APP_URL").map_err(|_| ApiError {
-        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        message: "APP_URL manquant — configure la variable d'environnement avec l'URL publique HTTPS (ex. https://web.jeser.app)".into(),
-    })?;
-
-    let app_url = app_url.trim_end_matches('/');
-
-    // Valider APP_URL : doit être HTTPS en production
-    if !app_url.starts_with("https://") {
-        if !app_url.starts_with("http://localhost") && !app_url.starts_with("http://127.0.0.1") {
-            return Err(ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: format!(
-                    "APP_URL doit être HTTPS en production (actuellement: {}). Configure APP_URL=https://ton-domaine.com",
-                    app_url
-                ),
-            });
-        }
-    }
+    // Résoudre URL publique (DB settings, headers, ou APP_URL fallback)
+    let app_url = resolve_public_base_url(&state, &headers).await?;
 
     let redirect_uri = format!("{}/api/v1/mcp/oauth/callback", app_url);
 
@@ -763,6 +809,7 @@ struct OAuthCallbackQuery {
 async fn oauth_callback(
     State(state): State<AppState>,
     Query(params): Query<OAuthCallbackQuery>,
+    headers: HeaderMap,
 ) -> Result<axum::response::Html<String>, ApiError> {
     // Récupérer l'état pending
     let row: Option<(String, String, String, String, String, String)> = sqlx::query_as(
@@ -818,9 +865,8 @@ async fn oauth_callback(
 
     let catalog = server.catalog_id.as_deref().unwrap_or("");
     
-    // Déterminer client_id : CIMD si supporté
-    let app_url = std::env::var("APP_URL").unwrap_or_else(|_| "http://localhost:3000".into());
-    let app_url = app_url.trim_end_matches('/');
+    // Résoudre URL publique (DB settings, headers, ou APP_URL fallback)
+    let app_url = resolve_public_base_url(&state, &headers).await?;
     
     let client_id = if doc.client_id_metadata_document_supported {
         format!("{}/.well-known/oauth-client", app_url)
@@ -955,26 +1001,12 @@ async fn disconnect_oauth(
 
 /// Servir Client ID Metadata Document (CIMD / SEP-991)
 /// Pour serveurs OAuth avec client_id_metadata_document_supported (ex. Turso)
-async fn oauth_client_metadata(State(_state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    let app_url = std::env::var("APP_URL").map_err(|_| ApiError {
-        status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-        message: "APP_URL manquant — configure la variable d'environnement avec l'URL publique HTTPS (ex. https://web.jeser.app)".into(),
-    })?;
-
-    let app_url = app_url.trim_end_matches('/');
-
-    // Valider APP_URL : doit être HTTPS en production (sauf localhost pour dev)
-    if !app_url.starts_with("https://") {
-        if !app_url.starts_with("http://localhost") && !app_url.starts_with("http://127.0.0.1") {
-            return Err(ApiError {
-                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                message: format!(
-                    "APP_URL doit être HTTPS en production (actuellement: {}). Configure APP_URL=https://ton-domaine.com",
-                    app_url
-                ),
-            });
-        }
-    }
+async fn oauth_client_metadata(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    // Résoudre URL publique (DB settings, headers, ou APP_URL fallback)
+    let app_url = resolve_public_base_url(&state, &headers).await?;
 
     let redirect_uri = format!("{}/api/v1/mcp/oauth/callback", app_url);
     let client_metadata_url = format!("{}/.well-known/oauth-client", app_url);
