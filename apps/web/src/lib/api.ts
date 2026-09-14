@@ -1283,6 +1283,11 @@ export const api = {
     }),
   cronRuns: (projectUuid: string, cronId: string, limit = 50) =>
     request<{ data: CronRun[] }>(`/projects/${projectUuid}/crons/${cronId}/runs?limit=${limit}`),
+  
+  proxyStatus: () => request<ProxyStatus>('/system/proxy/status'),
+  proxyRestart: () => request<{ ok: boolean; container: string; message: string; output: string }>('/system/proxy/restart', { method: 'POST', body: '{}' }),
+  proxyEnsure: () => request<{ ok: boolean; status: string; container: string; message: string }>('/system/proxy/ensure', { method: 'POST', body: '{}' }),
+  systemHealth: () => request<SystemHealth>('/system/health'),
 };
 
 export type ManagedRunner = {
@@ -1367,3 +1372,24 @@ export function runnersEventsUrl(): string {
   // Fall back: open with fetch stream is harder — we pass token as `access_token` query.
   return token ? `${url}?access_token=${encodeURIComponent(token)}` : url;
 }
+
+export type ProxyStatus = {
+  status: string;
+  container: string;
+  image?: string;
+  started_at?: string;
+  running: boolean;
+  network?: string;
+};
+
+export type SystemHealth = {
+  ok: boolean;
+  timestamp: string;
+  components: {
+    traefik?: {
+      status: string;
+      healthy: boolean;
+      message: string;
+    };
+  };
+};
