@@ -232,6 +232,8 @@ async fn put_sso(
                     "created_client": r.created_client,
                     "created_secret": r.created_secret,
                     "logo_set": r.logo_set,
+                    "logo_uploaded": r.logo_uploaded,
+                    "favicon_uploaded": r.favicon_uploaded,
                     "background_set": r.background_set,
                     "branding_warnings": r.branding_warnings,
                     "callback_urls": callbacks,
