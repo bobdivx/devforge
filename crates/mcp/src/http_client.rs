@@ -27,11 +27,28 @@ impl HttpMcpRemoteClient {
             .header("Accept", "application/json, text/event-stream")
             .header("Content-Type", "application/json")
             .header("MCP-Protocol-Version", "2025-03-26");
+        
+        // Préférer OAuth access token si présent et valide
+        let auth_added = if let Some(oauth_token) = server.best_auth_token() {
+            let bearer = if oauth_token.starts_with("Bearer ") {
+                oauth_token
+            } else {
+                format!("Bearer {}", oauth_token)
+            };
+            req = req.header("Authorization", bearer);
+            true
+        } else {
+            false
+        };
+        
         for (k, v) in &server.headers {
-            // Ne pas écraser Accept / Content-Type posés ci-dessus.
+            // Ne pas écraser Accept / Content-Type / Authorization posés ci-dessus.
             let key = k.to_ascii_lowercase();
             if key == "accept" || key == "content-type" {
                 continue;
+            }
+            if key == "authorization" && auth_added {
+                continue; // OAuth token déjà posé
             }
             req = req.header(k.as_str(), v.as_str());
         }

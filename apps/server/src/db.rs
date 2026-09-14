@@ -336,6 +336,34 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // Colonnes OAuth pour authentification distante
+    for (col, def) in [
+        ("oauth_access_token", "TEXT NOT NULL DEFAULT ''"),
+        ("oauth_refresh_token", "TEXT NOT NULL DEFAULT ''"),
+        ("oauth_expires_at", "TEXT NOT NULL DEFAULT ''"),
+        ("oauth_scopes", "TEXT NOT NULL DEFAULT ''"),
+    ] {
+        let sql = format!("ALTER TABLE mcp_servers ADD COLUMN {col} {def}");
+        let _ = sqlx::query(&sql).execute(pool).await;
+    }
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS mcp_oauth_pending (
+            state TEXT PRIMARY KEY,
+            server_id TEXT NOT NULL,
+            workspace_uuid TEXT NOT NULL,
+            code_verifier TEXT NOT NULL,
+            redirect_uri TEXT NOT NULL,
+            auth_url TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS llm_providers (

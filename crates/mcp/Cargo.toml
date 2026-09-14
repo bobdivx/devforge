@@ -12,3 +12,8 @@ tokio = { workspace = true }
 reqwest = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
+base64 = "0.22"
+sha2 = "0.10"
+rand = "0.8"
+urlencoding = "2.1"
+chrono = { workspace = true }

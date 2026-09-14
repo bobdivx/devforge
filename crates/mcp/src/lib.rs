@@ -1,6 +1,7 @@
 mod catalog;
 mod http_client;
 mod turso;
+mod oauth;
 #[cfg(test)]
 mod smoke_test;
 
@@ -9,6 +10,11 @@ pub use catalog::{
 };
 pub use http_client::HttpMcpRemoteClient;
 pub use turso::{create_db_token, libsql_url, list_databases, TursoDatabase};
+pub use oauth::{
+    build_authorization_url, code_challenge, discover_oauth, exchange_code,
+    generate_code_verifier, generate_state, refresh_access_token, OAuthDiscoveryDocument,
+    TokenResponse,
+};
 
 use async_trait::async_trait;
 use devforge_shared::{DevForgeError, Result, ToolDefinition};
@@ -40,6 +46,18 @@ pub struct McpServerConfig {
     pub secrets: HashMap<String, String>,
     #[serde(default)]
     pub workspace_uuid: String,
+    /// OAuth 2.1 access token (si authentifié via OAuth plutôt qu'API key)
+    #[serde(default)]
+    pub oauth_access_token: String,
+    /// OAuth refresh token
+    #[serde(default)]
+    pub oauth_refresh_token: String,
+    /// Expiration ISO8601 du access token
+    #[serde(default)]
+    pub oauth_expires_at: String,
+    /// Scopes OAuth accordés
+    #[serde(default)]
+    pub oauth_scopes: String,
 }
 
 impl McpServerConfig {
@@ -73,6 +91,17 @@ impl McpServerConfig {
             })
             .collect();
         
+        let oauth_hint = if !self.oauth_access_token.is_empty() {
+            let len = self.oauth_access_token.len();
+            if len > 16 {
+                format!("{}••••{}", &self.oauth_access_token[..8], &self.oauth_access_token[len - 8..])
+            } else {
+                "••••".into()
+            }
+        } else {
+            String::new()
+        };
+        
         json!({
             "id": self.id,
             "name": self.name,
@@ -85,6 +114,10 @@ impl McpServerConfig {
             "secret_keys": self.secrets.keys().cloned().collect::<Vec<_>>(),
             "secrets_masked": masked_secrets,
             "headers": masked_headers,
+            "oauth_connected": !self.oauth_access_token.is_empty(),
+            "oauth_access_token_hint": oauth_hint,
+            "oauth_expires_at": self.oauth_expires_at,
+            "oauth_scopes": self.oauth_scopes,
         })
     }
 
@@ -99,6 +132,22 @@ impl McpServerConfig {
             .or_else(|| self.secrets.get("secret_key"))
             .or_else(|| self.secrets.get("integration_token"))
             .map(String::as_str)
+    }
+
+    /// Préférer OAuth access token si présent et non expiré
+    pub fn best_auth_token(&self) -> Option<String> {
+        if !self.oauth_access_token.is_empty() {
+            if !self.oauth_expires_at.is_empty() {
+                if let Ok(expires) = chrono::DateTime::parse_from_rfc3339(&self.oauth_expires_at) {
+                    if expires.timestamp() > chrono::Utc::now().timestamp() + 60 {
+                        return Some(self.oauth_access_token.clone());
+                    }
+                }
+            } else {
+                return Some(self.oauth_access_token.clone());
+            }
+        }
+        self.api_token().map(str::to_string)
     }
 }
 
@@ -237,10 +286,10 @@ impl McpClientRegistry {
                 "MCP server désactivé: {server_id}"
             )));
         }
-        // Toujours dériver Authorization du secret (évite un header stale).
-        if let Some(tok) = server.api_token() {
+        // Préférer OAuth access token si présent
+        if let Some(tok) = server.best_auth_token() {
             let bearer = if tok.starts_with("Bearer ") {
-                tok.to_string()
+                tok
             } else {
                 format!("Bearer {tok}")
             };
@@ -258,7 +307,7 @@ impl McpClientRegistry {
                 && (msg.contains("401") || msg.contains("could not parse jwt") || msg.contains("unauthorized"))
             {
                 DevForgeError::Message(format!(
-                    "{msg}\n→ Le serveur MCP Turso hébergé (mcp.turso.ai) exige une connexion OAuth, pas un Platform API Token.\n→ Le token Platform sert uniquement à lister et lier les bases de données (resources), pas à appeler les tools MCP.\n→ Pour utiliser les tools MCP Turso, configure l'authentification OAuth (non supporté actuellement dans DevForge)."
+                    "{msg}\n→ Le serveur MCP Turso hébergé (mcp.turso.ai) exige une connexion OAuth, pas un Platform API Token.\n→ Le token Platform sert uniquement à lister et lier les bases de données (resources), pas à appeler les tools MCP.\n→ Pour utiliser les tools MCP Turso : utilise l'authentification OAuth (bouton « Se connecter avec OAuth » dans l'UI)."
                 ))
             } else {
                 e
