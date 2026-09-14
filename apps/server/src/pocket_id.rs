@@ -13,6 +13,10 @@ pub struct BrandingUrls {
     pub dark_logo_url: Option<String>,
     /// Fond d’écran login Pocket ID (application-images/background).
     pub background_url: Option<String>,
+    /// Logo pour les emails (PNG/JPEG uniquement).
+    pub email_logo_url: Option<String>,
+    /// Image de profil par défaut.
+    pub default_profile_picture_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -22,9 +26,12 @@ pub struct ProvisionResult {
     pub created_client: bool,
     pub created_secret: bool,
     pub logo_set: bool,
-    pub logo_uploaded: bool,
+    pub logo_light_uploaded: bool,
+    pub logo_dark_uploaded: bool,
     pub favicon_uploaded: bool,
-    pub background_set: bool,
+    pub background_uploaded: bool,
+    pub email_logo_uploaded: bool,
+    pub profile_picture_uploaded: bool,
     pub branding_warnings: Vec<String>,
 }
 
@@ -312,6 +319,7 @@ async fn upload_application_image_from_url(
     api_key: &str,
     image_url: &str,
     image_type: &str,
+    query_params: Option<&[(&str, &str)]>,
 ) -> Result<(), PocketIdError> {
     let url = image_url.trim();
     if url.is_empty() {
@@ -357,7 +365,17 @@ async fn upload_application_image_from_url(
         Err(_) => reqwest::multipart::Part::bytes(data).file_name(filename),
     };
     let form = reqwest::multipart::Form::new().part("file", part);
-    let put_url = format!("{base}/api/application-images/{image_type}");
+    let mut put_url = format!("{base}/api/application-images/{image_type}");
+    if let Some(params) = query_params {
+        let query_str = params
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<_>>()
+            .join("&");
+        if !query_str.is_empty() {
+            put_url = format!("{put_url}?{query_str}");
+        }
+    }
     let put = client
         .put(&put_url)
         .header("X-API-Key", api_key)
@@ -373,13 +391,22 @@ async fn upload_application_image_from_url(
     Ok(())
 }
 
-/// Télécharge une image puis l'upload en logo Pocket ID (multipart).
-async fn upload_logo_from_url(
+/// Télécharge une image puis l'upload en logo light Pocket ID (multipart).
+async fn upload_logo_light_from_url(
     base: &str,
     api_key: &str,
     image_url: &str,
 ) -> Result<(), PocketIdError> {
-    upload_application_image_from_url(base, api_key, image_url, "logo").await
+    upload_application_image_from_url(base, api_key, image_url, "logo", Some(&[("light", "true")])).await
+}
+
+/// Télécharge une image puis l'upload en logo dark Pocket ID (multipart).
+async fn upload_logo_dark_from_url(
+    base: &str,
+    api_key: &str,
+    image_url: &str,
+) -> Result<(), PocketIdError> {
+    upload_application_image_from_url(base, api_key, image_url, "logo", Some(&[("light", "false")])).await
 }
 
 /// Télécharge une image puis l'upload en favicon Pocket ID (multipart).
@@ -388,7 +415,25 @@ async fn upload_favicon_from_url(
     api_key: &str,
     image_url: &str,
 ) -> Result<(), PocketIdError> {
-    upload_application_image_from_url(base, api_key, image_url, "favicon").await
+    upload_application_image_from_url(base, api_key, image_url, "favicon", None).await
+}
+
+/// Télécharge une image puis l'upload en logo email Pocket ID (PNG/JPEG uniquement).
+async fn upload_email_logo_from_url(
+    base: &str,
+    api_key: &str,
+    image_url: &str,
+) -> Result<(), PocketIdError> {
+    upload_application_image_from_url(base, api_key, image_url, "email", None).await
+}
+
+/// Télécharge une image puis l'upload en image de profil par défaut Pocket ID.
+async fn upload_default_profile_picture_from_url(
+    base: &str,
+    api_key: &str,
+    image_url: &str,
+) -> Result<(), PocketIdError> {
+    upload_application_image_from_url(base, api_key, image_url, "default-profile-picture", None).await
 }
 
 async fn create_secret(base: &str, api_key: &str, client_id: &str) -> Result<String, PocketIdError> {
@@ -504,11 +549,24 @@ pub async fn provision_oidc_client(
         (None, false)
     };
 
-    let mut logo_uploaded = false;
+    let mut logo_light_uploaded = false;
     if let Some(lg) = logo {
-        match upload_logo_from_url(&base, key, lg).await {
-            Ok(()) => logo_uploaded = true,
-            Err(e) => branding_warnings.push(format!("Logo: {e}")),
+        match upload_logo_light_from_url(&base, key, lg).await {
+            Ok(()) => logo_light_uploaded = true,
+            Err(e) => branding_warnings.push(format!("Logo light: {e}")),
+        }
+    }
+
+    let mut logo_dark_uploaded = false;
+    if let Some(dark_lg) = branding
+        .dark_logo_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        match upload_logo_dark_from_url(&base, key, dark_lg).await {
+            Ok(()) => logo_dark_uploaded = true,
+            Err(e) => branding_warnings.push(format!("Logo dark: {e}")),
         }
     }
 
@@ -520,7 +578,7 @@ pub async fn provision_oidc_client(
         }
     }
 
-    let mut background_set = false;
+    let mut background_uploaded = false;
     if let Some(bg) = branding
         .background_url
         .as_deref()
@@ -528,8 +586,34 @@ pub async fn provision_oidc_client(
         .filter(|s| !s.is_empty())
     {
         match upload_background_from_url(&base, key, bg).await {
-            Ok(()) => background_set = true,
+            Ok(()) => background_uploaded = true,
             Err(e) => branding_warnings.push(format!("Fond: {e}")),
+        }
+    }
+
+    let mut email_logo_uploaded = false;
+    if let Some(email_lg) = branding
+        .email_logo_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        match upload_email_logo_from_url(&base, key, email_lg).await {
+            Ok(()) => email_logo_uploaded = true,
+            Err(e) => branding_warnings.push(format!("Logo email: {e}")),
+        }
+    }
+
+    let mut profile_picture_uploaded = false;
+    if let Some(profile_pic) = branding
+        .default_profile_picture_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        match upload_default_profile_picture_from_url(&base, key, profile_pic).await {
+            Ok(()) => profile_picture_uploaded = true,
+            Err(e) => branding_warnings.push(format!("Photo de profil: {e}")),
         }
     }
 
@@ -539,9 +623,12 @@ pub async fn provision_oidc_client(
         created_client,
         created_secret,
         logo_set,
-        logo_uploaded,
+        logo_light_uploaded,
+        logo_dark_uploaded,
         favicon_uploaded,
-        background_set,
+        background_uploaded,
+        email_logo_uploaded,
+        profile_picture_uploaded,
         branding_warnings,
     })
 }
@@ -582,13 +669,20 @@ mod tests {
             created_client: false,
             created_secret: false,
             logo_set: true,
-            logo_uploaded: true,
+            logo_light_uploaded: true,
+            logo_dark_uploaded: true,
             favicon_uploaded: true,
-            background_set: true,
+            background_uploaded: true,
+            email_logo_uploaded: true,
+            profile_picture_uploaded: true,
             branding_warnings: vec![],
         };
-        assert!(result.logo_uploaded);
+        assert!(result.logo_light_uploaded);
+        assert!(result.logo_dark_uploaded);
         assert!(result.favicon_uploaded);
+        assert!(result.background_uploaded);
+        assert!(result.email_logo_uploaded);
+        assert!(result.profile_picture_uploaded);
         assert_eq!(result.branding_warnings.len(), 0);
     }
 
@@ -605,5 +699,22 @@ mod tests {
             "image/svg+xml"
         );
         assert_eq!(fname2, "background.svg");
+    }
+
+    #[test]
+    fn application_image_endpoint_construction() {
+        let base = "https://id.example.com";
+        
+        let logo_light_url = format!("{}/api/application-images/logo?light=true", base);
+        assert_eq!(logo_light_url, "https://id.example.com/api/application-images/logo?light=true");
+        
+        let logo_dark_url = format!("{}/api/application-images/logo?light=false", base);
+        assert_eq!(logo_dark_url, "https://id.example.com/api/application-images/logo?light=false");
+        
+        let email_url = format!("{}/api/application-images/email", base);
+        assert_eq!(email_url, "https://id.example.com/api/application-images/email");
+        
+        let profile_url = format!("{}/api/application-images/default-profile-picture", base);
+        assert_eq!(profile_url, "https://id.example.com/api/application-images/default-profile-picture");
     }
 }

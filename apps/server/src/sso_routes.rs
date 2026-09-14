@@ -199,8 +199,10 @@ async fn put_sso(
             .map(|s| s.to_string());
         let branding = pocket_id::BrandingUrls {
             logo_url: logo.clone(),
-            dark_logo_url: logo,
-            background_url: background,
+            dark_logo_url: logo.clone(),
+            background_url: background.clone(),
+            email_logo_url: logo.clone(),
+            default_profile_picture_url: logo,
         };
         let target_id = if client_id.trim().is_empty() {
             pocket_id::DEFAULT_CLIENT_ID.to_string()
@@ -232,9 +234,12 @@ async fn put_sso(
                     "created_client": r.created_client,
                     "created_secret": r.created_secret,
                     "logo_set": r.logo_set,
-                    "logo_uploaded": r.logo_uploaded,
+                    "logo_light_uploaded": r.logo_light_uploaded,
+                    "logo_dark_uploaded": r.logo_dark_uploaded,
                     "favicon_uploaded": r.favicon_uploaded,
-                    "background_set": r.background_set,
+                    "background_uploaded": r.background_uploaded,
+                    "email_logo_uploaded": r.email_logo_uploaded,
+                    "profile_picture_uploaded": r.profile_picture_uploaded,
                     "branding_warnings": r.branding_warnings,
                     "callback_urls": callbacks,
                 });
