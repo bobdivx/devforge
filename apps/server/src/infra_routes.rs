@@ -47,6 +47,10 @@ pub fn router() -> Router<AppState> {
             post(lifecycle),
         )
         .route("/api/v1/projects/{uuid}/status", get(project_status))
+        .route("/api/v1/system/proxy/status", get(proxy_status))
+        .route("/api/v1/system/proxy/restart", post(proxy_restart))
+        .route("/api/v1/system/proxy/ensure", post(proxy_ensure))
+        .route("/api/v1/system/health", get(system_health))
         .route(
             "/api/v1/projects/{uuid}/agents",
             get(list_agents).post(create_agent),
@@ -1624,4 +1628,120 @@ fn insecure_webhooks_allowed() -> bool {
             .as_str(),
         "1" | "true" | "yes"
     )
+}
+
+async fn proxy_status(
+    State(state): State<AppState>,
+    _headers: HeaderMap,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let executor = state.deploy.executor();
+
+    let check_cmd = r#"docker inspect devforge-traefik --format '{{.State.Status}}|{{.Config.Image}}|{{.State.StartedAt}}' 2>/dev/null || echo 'missing'"#;
+    let result = executor.exec("default", "", check_cmd, 30).await.map_err(|e| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+
+    let output = result.output.trim();
+    if output == "missing" {
+        return Ok(Json(json!({
+            "status": "missing",
+            "container": "devforge-traefik",
+            "running": false,
+            "message": "Container Traefik absent"
+        })));
+    }
+
+    let parts: Vec<&str> = output.split('|').collect();
+    let status = parts.first().unwrap_or(&"unknown");
+    let image = parts.get(1).unwrap_or(&"");
+    let started = parts.get(2).unwrap_or(&"");
+
+    Ok(Json(json!({
+        "status": *status,
+        "container": "devforge-traefik",
+        "image": *image,
+        "started_at": *started,
+        "running": *status == "running",
+        "network": "devforge"
+    })))
+}
+
+async fn proxy_restart(
+    State(state): State<AppState>,
+    _headers: HeaderMap,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let executor = state.deploy.executor();
+
+    let restart_cmd = "docker restart devforge-traefik 2>&1";
+    let result = executor.exec("default", "", restart_cmd, 60).await.map_err(|e| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+
+    if result.ok {
+        Ok(Json(json!({
+            "ok": true,
+            "container": "devforge-traefik",
+            "message": "Traefik redémarré",
+            "output": result.output
+        })))
+    } else {
+        Err((
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "restart failed", "output": result.output})),
+        ))
+    }
+}
+
+async fn proxy_ensure(
+    State(state): State<AppState>,
+    _headers: HeaderMap,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let result = state.proxy.ensure_traefik().await.map_err(|e| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+
+    Ok(Json(result))
+}
+
+async fn system_health(
+    State(state): State<AppState>,
+    _headers: HeaderMap,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let executor = state.deploy.executor();
+    
+    let mut health = json!({
+        "ok": true,
+        "timestamp": crate::state::now_str(),
+        "components": {}
+    });
+
+    let traefik_check = executor.exec("default", "", 
+        r#"docker inspect devforge-traefik --format '{{.State.Status}}' 2>/dev/null || echo 'missing'"#, 
+        30).await;
+    
+    let traefik_status = traefik_check
+        .map(|r| r.output.trim().to_string())
+        .unwrap_or_else(|_| "error".to_string());
+    
+    let traefik_ok = traefik_status == "running";
+    if !traefik_ok {
+        health["ok"] = json!(false);
+    }
+
+    health["components"]["traefik"] = json!({
+        "status": traefik_status,
+        "healthy": traefik_ok,
+        "message": if traefik_ok { "Traefik opérationnel" } else { "Traefik absent ou arrêté" }
+    });
+
+    Ok(Json(health))
 }

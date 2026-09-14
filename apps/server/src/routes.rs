@@ -1922,6 +1922,40 @@ async fn auth_deployment(
     Ok((user, workspace, dep))
 }
 
+async fn check_production_url_health(url: &str) -> Result<bool, String> {
+    if url.is_empty() {
+        return Ok(true);
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| format!("client: {}", e))?;
+    
+    match client.get(url).send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            Ok(status.is_success() || status.is_redirection())
+        }
+        Err(e) => {
+            if e.is_timeout() {
+                Err("timeout".to_string())
+            } else if e.is_connect() {
+                Err("connection".to_string())
+            } else if e.status().is_some() {
+                let code = e.status().unwrap().as_u16();
+                if code >= 500 {
+                    Err(format!("{}", code))
+                } else {
+                    Ok(false)
+                }
+            } else {
+                Err("unreachable".to_string())
+            }
+        }
+    }
+}
+
 /// Statut réel : basé sur le dernier déploiement, pas sur le flag « ready » à la création.
 async fn resolve_project_status(state: &AppState, project: &Project) -> Result<String, ApiError> {
     let latest: Option<(String,)> = sqlx::query_as(
@@ -1935,7 +1969,20 @@ async fn resolve_project_status(state: &AppState, project: &Project) -> Result<S
     let derived = match latest.as_ref().map(|(s,)| s.as_str()) {
         Some("running") | Some("queued") | Some("building") => "deploying",
         Some("failed") | Some("error") => "failed",
-        Some("ready") | Some("success") | Some("completed") | Some("live") => "live",
+        Some("ready") | Some("success") | Some("completed") | Some("live") => {
+            if let Some(url) = project.production_url.as_deref() {
+                if !url.is_empty() {
+                    match check_production_url_health(url).await {
+                        Ok(true) => "live",
+                        Ok(false) | Err(_) => "unhealthy",
+                    }
+                } else {
+                    "live"
+                }
+            } else {
+                "live"
+            }
+        }
         None => {
             if project.status == "ready" || project.status == "live" {
                 "draft"
@@ -1952,7 +1999,7 @@ async fn resolve_project_status(state: &AppState, project: &Project) -> Result<S
     if derived != project.status
         && matches!(
             derived.as_str(),
-            "draft" | "live" | "failed" | "deploying" | "stopped"
+            "draft" | "live" | "failed" | "deploying" | "stopped" | "unhealthy"
         )
     {
         let _ = sqlx::query("UPDATE projects SET status = ? WHERE id = ?")
