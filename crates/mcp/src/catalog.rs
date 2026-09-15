@@ -87,12 +87,12 @@ pub fn catalog() -> Vec<CatalogPreset> {
             fields: vec![
                 field(
                     "api_token",
-                    "Platform API Token",
+                    "Platform API Token (optionnel)",
                     true,
-                    true,
+                    false,
                     Some("eyJ…"),
                     Some(
-                        "Turso → Account → API Tokens. Sert uniquement à lister/lier les DBs (resources). Pour appeler les tools MCP, utilise le bouton « Se connecter avec OAuth » dans l'onglet Tools.",
+                        "Turso → Account → API Tokens. Sert uniquement à lister/lier les DBs (resources). OAuth recommandé pour usage interactif.",
                     ),
                 ),
                 field(
@@ -107,7 +107,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
             resource_kind: Some("database".into()),
             popular: true,
             setup_intro: Some(
-                "Le serveur MCP Turso hébergé (mcp.turso.ai) exige OAuth pour accéder aux tools MCP. Le token Platform permet de gérer les ressources (lier des DBs). Après configuration, utilise le bouton OAuth dans l'onglet Tools."
+                "OAuth recommandé — connexion directe avec ton compte Turso."
                     .into(),
             ),
             setup_sections: None,
@@ -391,11 +391,11 @@ pub fn catalog() -> Vec<CatalogPreset> {
             fields: vec![
                 field(
                     "api_key",
-                    "API Key",
+                    "API Key (optionnel)",
                     true,
-                    true,
+                    false,
                     Some("lin_api_…"),
-                    Some("Linear → Settings → API. Le MCP hébergé peut exiger OAuth."),
+                    Some("Linear → Settings → API. OAuth recommandé pour le MCP hébergé."),
                 ),
                 field(
                     "url",
