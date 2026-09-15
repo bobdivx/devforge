@@ -995,7 +995,7 @@ function DatabaseManager({ uuid }: { uuid: string }) {
       .finally(() => setBusy(false));
   }, [open, serverId]);
 
-  async function linkDb(db: { name: string; db_id?: string | null; hostname: string }) {
+  async function linkDb(db: { name: string; db_id?: string | null; hostname: string; organization?: string }) {
     if (!serverId) return;
     setBusy(true);
     try {
@@ -1004,6 +1004,7 @@ function DatabaseManager({ uuid }: { uuid: string }) {
         resource_id: db.db_id || db.name,
         resource_name: db.name,
         hostname: db.hostname,
+        org: db.organization,
       });
       toast.push({
         title: `DB ${r.database} liée`,
