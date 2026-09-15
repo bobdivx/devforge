@@ -1397,24 +1397,44 @@ async fn link_turso_via_mcp(
             .await
             .map_err(|e| format!("list_databases MCP failed: {}", e))?;
         
-        let databases = list_result.get("databases")
-            .or_else(|| list_result.get("content").and_then(|c| {
-                if c.is_array() { Some(c) }
-                else if let Some(s) = c.as_str() {
-                    serde_json::from_str::<Value>(s).ok().and_then(|v| v.get("databases").or(Some(&v)))
-                } else { None }
-            }))
-            .and_then(|c| c.as_array())
-            .or_else(|| list_result.as_array())
-            .ok_or_else(|| "list_databases response invalid".to_string())?;
+        // Extraire databases en gérant différents formats de réponse
+        let databases = if let Some(dbs) = list_result.get("databases").and_then(|d| d.as_array()) {
+            dbs.clone()
+        } else if let Some(content) = list_result.get("content") {
+            if let Some(arr) = content.as_array() {
+                arr.clone()
+            } else if let Some(s) = content.as_str() {
+                if let Ok(parsed) = serde_json::from_str::<Value>(s) {
+                    if let Some(dbs) = parsed.get("databases").and_then(|d| d.as_array()) {
+                        dbs.clone()
+                    } else if let Some(arr) = parsed.as_array() {
+                        arr.clone()
+                    } else {
+                        return Err("list_databases content parse failed".to_string());
+                    }
+                } else {
+                    return Err("list_databases content not JSON".to_string());
+                }
+            } else {
+                return Err("list_databases content invalid".to_string());
+            }
+        } else if let Some(arr) = list_result.as_array() {
+            arr.clone()
+        } else {
+            return Err("list_databases response invalid".to_string());
+        };
         
         databases.iter()
             .find(|db| {
                 db.get("name").or_else(|| db.get("Name")).and_then(|n| n.as_str()) == Some(db_name)
             })
-            .and_then(|db| db.get("hostname").or_else(|| db.get("Hostname")).and_then(|h| h.as_str()))
+            .and_then(|db| {
+                db.get("hostname")
+                    .or_else(|| db.get("Hostname"))
+                    .and_then(|h| h.as_str())
+                    .map(|s| s.to_string())
+            })
             .ok_or_else(|| format!("DB {} not found in list_databases", db_name))?
-            .to_string()
     };
     
     // 2. Générer un token d'accès DB via MCP tool generate_database_token
@@ -1428,23 +1448,32 @@ async fn link_turso_via_mcp(
         .map_err(|e| format!("generate_database_token MCP failed: {}", e))?;
     
     // Le résultat peut être { "jwt": "...", ... } ou { "token": "...", ... } ou dans content
-    let jwt = token_result.get("jwt")
-        .or_else(|| token_result.get("token"))
-        .and_then(|t| t.as_str())
-        .or_else(|| {
-            token_result.get("content").and_then(|c| {
-                if let Some(s) = c.as_str() {
-                    serde_json::from_str::<Value>(s).ok().and_then(|v| {
-                        v.get("jwt").or_else(|| v.get("token")).and_then(|t| t.as_str())
-                    }).or(Some(s))
-                } else {
-                    c.get("jwt").or_else(|| c.get("token")).and_then(|t| t.as_str())
-                }
-            })
-        })
-        .or_else(|| token_result.as_str())
-        .ok_or_else(|| "generate_database_token response missing jwt/token".to_string())?
-        .to_string();
+    let jwt = if let Some(token_str) = token_result.get("jwt").or_else(|| token_result.get("token")).and_then(|t| t.as_str()) {
+        token_str.to_string()
+    } else if let Some(content) = token_result.get("content") {
+        if let Some(s) = content.as_str() {
+            // Essayer de parser comme JSON
+            if let Ok(parsed) = serde_json::from_str::<Value>(s) {
+                parsed.get("jwt")
+                    .or_else(|| parsed.get("token"))
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| s.to_string())
+            } else {
+                s.to_string()
+            }
+        } else {
+            content.get("jwt")
+                .or_else(|| content.get("token"))
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_string())
+                .ok_or_else(|| "generate_database_token content missing jwt/token".to_string())?
+        }
+    } else if let Some(s) = token_result.as_str() {
+        s.to_string()
+    } else {
+        return Err("generate_database_token response missing jwt/token".to_string());
+    };
     
     Ok((hostname, jwt))
 }
