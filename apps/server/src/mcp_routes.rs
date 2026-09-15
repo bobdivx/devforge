@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
+use base64::{Engine as _, engine::general_purpose};
 
 /// Résout l'URL publique de l'instance dans cet ordre :
 /// 1. `instance_url` depuis DB (settings)
@@ -483,12 +484,101 @@ async fn list_mcp_resources(
     }
     let catalog = server.catalog_id.as_deref().unwrap_or("");
     if catalog == "turso" {
-        let token = server
-            .secrets
-            .get("api_token")
-            .map(String::as_str)
-            .unwrap_or("");
+        // Essayer d'abord via MCP tools OAuth (préféré)
+        if !server.oauth_access_token.is_empty() {
+            match state.mcp.clients.call_remote_tool(&id, "list_databases", json!({})).await {
+                Ok(result) => {
+                    // Le tool list_databases retourne { "databases": [...] }
+                    let databases = result.get("databases")
+                        .or_else(|| result.get("content"))
+                        .and_then(|c| {
+                            if c.is_array() {
+                                Some(c.clone())
+                            } else if let Some(arr) = c.as_array() {
+                                Some(json!(arr))
+                            } else if let Some(s) = c.as_str() {
+                                // Peut-être du JSON stringifié
+                                serde_json::from_str::<Value>(s).ok().and_then(|v| {
+                                    v.get("databases").or(Some(&v)).and_then(|d| {
+                                        if d.is_array() { Some(d.clone()) } else { None }
+                                    })
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .or_else(|| {
+                            // Si result est directement un array
+                            if result.is_array() { Some(result.clone()) } else { None }
+                        })
+                        .unwrap_or_else(|| json!([]));
+                    
+                    // Extraire org si présent (top-level ou dans chaque db)
+                    let org_from_response = result.get("organization")
+                        .or_else(|| result.get("org"))
+                        .or_else(|| result.get("organizationSlug"))
+                        .and_then(|o| o.as_str())
+                        .map(|s| s.to_string());
+                    
+                    // Convertir en format attendu par le frontend
+                    let dbs: Vec<Value> = databases
+                        .as_array()
+                        .unwrap_or(&vec![])
+                        .iter()
+                        .filter_map(|db| {
+                            let name = db.get("name").or_else(|| db.get("Name")).and_then(|n| n.as_str())?.to_string();
+                            let hostname = db.get("hostname").or_else(|| db.get("Hostname")).and_then(|h| h.as_str()).unwrap_or("").to_string();
+                            if hostname.is_empty() { return None; }
+                            let db_id = db.get("dbId").or_else(|| db.get("DbId")).or_else(|| db.get("id")).and_then(|i| i.as_str()).map(str::to_string);
+                            let regions = db.get("regions").and_then(|r| r.as_array()).map(|arr| {
+                                arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()
+                            }).unwrap_or_else(|| Vec::new());
+                            
+                            // Extraire org de chaque db si pas au top-level
+                            let org = db.get("organization")
+                                .or_else(|| db.get("org"))
+                                .or_else(|| db.get("organizationSlug"))
+                                .and_then(|o| o.as_str())
+                                .map(|s| s.to_string())
+                                .or_else(|| org_from_response.clone());
+                            
+                            let mut obj = json!({
+                                "name": name,
+                                "hostname": hostname,
+                                "regions": regions,
+                            });
+                            if let Some(id) = db_id {
+                                obj["db_id"] = json!(id);
+                            }
+                            if let Some(o) = org {
+                                obj["organization"] = json!(o);
+                            }
+                            Some(obj)
+                        })
+                        .collect();
+                    
+                    return Ok(Json(json!({
+                        "ok": true,
+                        "kind": "database",
+                        "provider": "turso",
+                        "data": dbs,
+                    })));
+                },
+                Err(e) => {
+                    // Si erreur OAuth, fallback vers Platform API si disponible
+                    tracing::warn!("MCP OAuth list_databases failed, trying Platform API fallback: {}", e);
+                }
+            }
+        }
+        
+        // Fallback: Platform API (ancien mode)
+        let token = server.secrets.get("api_token").map(String::as_str).unwrap_or("");
         let org = server.meta.get("org").map(String::as_str).unwrap_or("");
+        if token.is_empty() || org.is_empty() {
+            return Err(ApiError::message(
+                "Turso: Connecte-toi via OAuth (bouton « Se connecter avec OAuth » dans MCP → Turso) OU configure Platform API Token + org dans la section Avancé.".to_string()
+            ));
+        }
         let dbs = devforge_mcp::list_databases(token, org)
             .await
             .map_err(|e| ApiError::message(e.to_string()))?;
@@ -510,6 +600,7 @@ pub struct LinkResourceBody {
     pub resource_id: String,
     pub resource_name: Option<String>,
     pub hostname: Option<String>,
+    pub org: Option<String>,
 }
 
 async fn link_project_resource(
@@ -531,32 +622,22 @@ async fn link_project_resource(
             "Lien ressources supporté pour Turso pour l’instant",
         ));
     }
-    let token = server
-        .secrets
-        .get("api_token")
-        .ok_or_else(|| ApiError::message("Turso api_token manquant"))?;
-    let org = server
-        .meta
-        .get("org")
-        .ok_or_else(|| ApiError::message("Turso org manquant"))?;
-    let db_name = body
-        .resource_name
-        .clone()
-        .unwrap_or_else(|| body.resource_id.clone());
-    let hostname = if let Some(h) = body.hostname.filter(|h| !h.is_empty()) {
-        h
+    
+    let db_name = body.resource_name.clone().unwrap_or_else(|| body.resource_id.clone());
+    
+    // Essayer d'abord via MCP tools OAuth (préféré)
+    let (hostname, jwt, org_for_meta) = if !server.oauth_access_token.is_empty() {
+        match link_turso_via_mcp(&state, &body.server_id, &db_name, body.hostname.as_deref(), body.org.as_deref()).await {
+            Ok((h, j)) => (h, j, String::new()),
+            Err(e) => {
+                tracing::warn!("MCP OAuth link failed, trying Platform API fallback: {}", e);
+                link_turso_via_platform_api(&state, &server, &db_name, &body).await?
+            }
+        }
     } else {
-        let dbs = devforge_mcp::list_databases(token, org)
-            .await
-            .map_err(|e| ApiError::message(e.to_string()))?;
-        dbs.into_iter()
-            .find(|d| d.name == db_name || d.db_id.as_deref() == Some(body.resource_id.as_str()))
-            .map(|d| d.hostname)
-            .ok_or_else(|| ApiError::message(format!("DB Turso introuvable: {db_name}")))?
+        link_turso_via_platform_api(&state, &server, &db_name, &body).await?
     };
-    let jwt = devforge_mcp::create_db_token(token, org, &db_name)
-        .await
-        .map_err(|e| ApiError::message(e.to_string()))?;
+    
     let libsql = devforge_mcp::libsql_url(&hostname);
 
     let env_pairs = [
@@ -595,11 +676,13 @@ async fn link_project_resource(
 
     let link_id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
-    let meta = json!({
-        "hostname": hostname,
-        "org": org,
-        "libsql_url": libsql,
-    });
+    let mut meta_map = serde_json::Map::new();
+    meta_map.insert("hostname".to_string(), json!(hostname));
+    meta_map.insert("libsql_url".to_string(), json!(libsql));
+    if !org_for_meta.is_empty() {
+        meta_map.insert("org".to_string(), json!(org_for_meta));
+    }
+    let meta = Value::Object(meta_map);
     sqlx::query(
         r#"
         INSERT INTO project_resource_links (id, project_uuid, provider, server_id, resource_id, resource_name, meta_json, created_at)
@@ -1324,4 +1407,222 @@ pub async fn load_mcp_from_db(state: &AppState) -> Result<(), sqlx::Error> {
             .await;
     }
     Ok(())
+}
+
+/// Extrait org claim du JWT OAuth (décodage base64 non-vérifié, lecture seule)
+fn extract_org_from_jwt(token: &str) -> Option<String> {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    
+    // Décoder le payload (segment du milieu) - essayer URL_SAFE_NO_PAD puis STANDARD
+    let payload_b64 = parts[1];
+    let decoded = general_purpose::URL_SAFE_NO_PAD.decode(payload_b64)
+        .or_else(|_| general_purpose::STANDARD.decode(payload_b64))
+        .ok()?;
+    
+    let payload: Value = serde_json::from_slice(&decoded).ok()?;
+    
+    // Chercher org claim (différents champs possibles)
+    payload.get("org")
+        .or_else(|| payload.get("organization"))
+        .or_else(|| payload.get("org_slug"))
+        .and_then(|o| o.as_str())
+        .map(|s| s.to_string())
+}
+
+/// Lie une base Turso via MCP tools OAuth + Platform API (préféré)
+async fn link_turso_via_mcp(
+    state: &AppState,
+    server_id: &str,
+    db_name: &str,
+    hostname_hint: Option<&str>,
+    org_hint: Option<&str>,
+) -> Result<(String, String), String> {
+    // 1. Récupérer le serveur pour avoir oauth_access_token
+    let server = state.mcp.clients.get(server_id).await
+        .ok_or_else(|| "Server not found for OAuth token".to_string())?;
+    
+    let oauth_token = server.oauth_access_token.clone();
+    if oauth_token.is_empty() {
+        return Err("OAuth access token missing".to_string());
+    }
+    
+    // 2. TOUJOURS lister pour découvrir hostname + org (même si hostname fourni)
+    let list_result = state.mcp.clients
+        .call_remote_tool(server_id, "list_databases", json!({}))
+        .await
+        .map_err(|e| format!("list_databases MCP failed: {}", e))?;
+    
+    // Extraire databases en gérant différents formats de réponse
+    let databases = if let Some(dbs) = list_result.get("databases").and_then(|d| d.as_array()) {
+        dbs.clone()
+    } else if let Some(content) = list_result.get("content") {
+        if let Some(arr) = content.as_array() {
+            arr.clone()
+        } else if let Some(s) = content.as_str() {
+            if let Ok(parsed) = serde_json::from_str::<Value>(s) {
+                if let Some(dbs) = parsed.get("databases").and_then(|d| d.as_array()) {
+                    dbs.clone()
+                } else if let Some(arr) = parsed.as_array() {
+                    arr.clone()
+                } else {
+                    return Err("list_databases content parse failed".to_string());
+                }
+            } else {
+                return Err("list_databases content not JSON".to_string());
+            }
+        } else {
+            return Err("list_databases content invalid".to_string());
+        }
+    } else if let Some(arr) = list_result.as_array() {
+        arr.clone()
+    } else {
+        return Err("list_databases response invalid".to_string());
+    };
+    
+    // 3. Extraire hostname (préférer hint si fourni, sinon chercher dans list)
+    let hostname = if let Some(h) = hostname_hint.filter(|h| !h.is_empty()) {
+        h.to_string()
+    } else {
+        databases.iter()
+            .find(|db| {
+                db.get("name").or_else(|| db.get("Name")).and_then(|n| n.as_str()) == Some(db_name)
+            })
+            .and_then(|db| {
+                db.get("hostname")
+                    .or_else(|| db.get("Hostname"))
+                    .and_then(|h| h.as_str())
+                    .map(|s| s.to_string())
+            })
+            .ok_or_else(|| format!("DB {} not found in list_databases", db_name))?
+    };
+    
+    // 4. Résoudre org avec fallbacks multiples
+    let mut org = String::new();
+    
+    // Fallback 0: org_hint from frontend
+    if let Some(hint) = org_hint.filter(|h| !h.is_empty()) {
+        org = hint.to_string();
+    }
+    
+    // Fallback 1: Top-level dans list_result
+    if org.is_empty() {
+        org = list_result.get("organization")
+            .or_else(|| list_result.get("org"))
+            .or_else(|| list_result.get("organizationSlug"))
+            .and_then(|o| o.as_str())
+            .unwrap_or("")
+            .to_string();
+    }
+    
+    // Fallback 2: Dans chaque objet database
+    if org.is_empty() {
+        org = databases.iter()
+            .find_map(|db| {
+                db.get("organization")
+                    .or_else(|| db.get("org"))
+                    .or_else(|| db.get("organizationSlug"))
+                    .and_then(|o| o.as_str())
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_default();
+    }
+    
+    // Fallback 3: server.meta.org
+    if org.is_empty() {
+        org = server.meta.get("org").cloned().unwrap_or_default();
+    }
+    
+    // Fallback 4: Décoder JWT OAuth pour extraire org claim
+    if org.is_empty() {
+        org = extract_org_from_jwt(&oauth_token).unwrap_or_default();
+    }
+    
+    if org.is_empty() {
+        return Err("Organization slug missing (tried list_databases response, server.meta, JWT decode)".to_string());
+    }
+    
+    // 5. Persister org dans server.meta si découvert et pas déjà là
+    if !org.is_empty() && server.meta.get("org").map(|s| s.as_str()) != Some(org.as_str()) {
+        let mut updated_server = server.clone();
+        updated_server.meta.insert("org".to_string(), org.clone());
+        state.mcp.clients.upsert(updated_server.clone()).await;
+        
+        // Persister en DB
+        let meta_json = serde_json::to_string(&updated_server.meta).unwrap_or_default();
+        let _ = sqlx::query("UPDATE mcp_servers SET meta_json = ? WHERE id = ?")
+            .bind(&meta_json)
+            .bind(server_id)
+            .execute(&state.pool)
+            .await;
+    }
+    
+    // 3. Générer JWT via Platform REST API en utilisant OAuth token comme Bearer
+    let url = format!(
+        "https://api.turso.tech/v1/organizations/{}/databases/{}/auth/tokens",
+        org, db_name
+    );
+    
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(25))
+        .build()
+        .map_err(|e| format!("HTTP client failed: {}", e))?;
+    
+    let res = http_client
+        .post(&url)
+        .bearer_auth(&oauth_token)
+        .json(&json!({}))
+        .send()
+        .await
+        .map_err(|e| format!("Platform API token request failed: {}", e))?;
+    
+    let status = res.status();
+    if !status.is_success() {
+        let text = res.text().await.unwrap_or_default();
+        return Err(format!("Platform API HTTP {}: {}", status, text.chars().take(280).collect::<String>()));
+    }
+    
+    let response: Value = res.json().await
+        .map_err(|e| format!("Platform API response parse failed: {}", e))?;
+    
+    let jwt = response.get("jwt")
+        .or_else(|| response.get("token"))
+        .and_then(|t| t.as_str())
+        .ok_or_else(|| "Platform API response missing jwt".to_string())?
+        .to_string();
+    
+    Ok((hostname, jwt))
+}
+
+/// Fallback: lie une base Turso via Platform REST API (nécessite api_token + org)
+async fn link_turso_via_platform_api(
+    state: &AppState,
+    server: &devforge_mcp::McpServerConfig,
+    db_name: &str,
+    body: &LinkResourceBody,
+) -> Result<(String, String, String), ApiError> {
+    let token = server.secrets.get("api_token")
+        .ok_or_else(|| ApiError::message("Turso: Connecte-toi via OAuth (MCP → Turso → Se connecter) OU configure Platform API Token + org dans Avancé."))?;
+    let org = server.meta.get("org")
+        .ok_or_else(|| ApiError::message("Turso: org slug requis. Configure-le dans MCP → Turso → Avancé."))?;
+    
+    let hostname = if let Some(h) = body.hostname.as_ref().filter(|h| !h.is_empty()) {
+        h.clone()
+    } else {
+        let dbs = devforge_mcp::list_databases(token, org)
+            .await
+            .map_err(|e| ApiError::message(e.to_string()))?;
+        dbs.into_iter()
+            .find(|d| d.name == *db_name || d.db_id.as_deref() == Some(body.resource_id.as_str()))
+            .map(|d| d.hostname)
+            .ok_or_else(|| ApiError::message(format!("DB Turso introuvable: {db_name}")))?
+    };
+    
+    let jwt = devforge_mcp::create_db_token(token, org, db_name)
+        .await
+        .map_err(|e| ApiError::message(e.to_string()))?;
+    
+    Ok((hostname, jwt, org.clone()))
 }

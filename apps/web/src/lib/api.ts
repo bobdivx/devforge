@@ -772,6 +772,7 @@ export const api = {
         db_id?: string | null;
         hostname: string;
         regions: string[];
+        organization?: string;
       }>;
     }>(`/mcp/servers/${encodeURIComponent(id)}/resources`),
   projectResources: (projectUuid: string) =>
@@ -793,6 +794,7 @@ export const api = {
       resource_id: string;
       resource_name?: string;
       hostname?: string;
+      org?: string;
     },
   ) =>
     request<{
