@@ -720,6 +720,25 @@ async fn start_oauth_flow(
         ));
     }
 
+    // === CAS SPÉCIAL SLACK : Vérifier config AVANT toute tentative OAuth ===
+    // Slack MCP ne supporte PAS Dynamic Client Registration (DCR/CIMD).
+    // Docs: https://docs.slack.dev/ai/slack-mcp-server/
+    // Exige un client_id + client_secret pré-enregistré d'une Slack App.
+    if catalog == "slack" {
+        let client_id_opt = server
+            .secrets
+            .get("client_id")
+            .or_else(|| server.meta.get("client_id"));
+        
+        let client_secret_opt = server.secrets.get("client_secret");
+
+        if client_id_opt.is_none() || client_secret_opt.is_none() {
+            return Err(ApiError::message(
+                "OAuth Slack requiert une Slack App pré-enregistrée. Crée une app sur https://api.slack.com/apps, configure les Redirect URLs (https://web.jeser.app/api/v1/mcp/oauth/callback) et les scopes user OAuth (search:read.public, chat:write, channels:history), puis renseigne le Client ID et Client Secret dans les champs ci-dessus avant de cliquer sur « Se connecter avec OAuth »."
+            ));
+        }
+    }
+
     // Générer PKCE + state
     let verifier = devforge_mcp::generate_code_verifier();
     let challenge = devforge_mcp::code_challenge(&verifier);
@@ -736,17 +755,13 @@ async fn start_oauth_flow(
             .secrets
             .get("client_id")
             .or_else(|| server.meta.get("client_id"))
-            .ok_or_else(|| ApiError::message(
-                "Slack OAuth : client_id manquant. Configure ta Slack App sur api.slack.com/apps, puis ajoute le Client ID dans les champs avancés."
-            ))?
+            .expect("client_id vérifié ci-dessus")
             .clone();
 
         let _client_secret = server
             .secrets
             .get("client_secret")
-            .ok_or_else(|| ApiError::message(
-                "Slack OAuth : client_secret manquant. Configure ta Slack App sur api.slack.com/apps, puis ajoute le Client Secret dans les champs avancés."
-            ))?
+            .expect("client_secret vérifié ci-dessus")
             .clone();
 
         // Endpoints OAuth Slack (user tokens)
@@ -821,11 +836,15 @@ async fn start_oauth_flow(
         ));
     }
 
-    // Déterminer client_id : CIMD si supporté, sinon legacy devforge-{catalog}
+    // Déterminer client_id : CIMD si supporté, sinon erreur claire
     let client_id = if doc.client_id_metadata_document_supported {
         format!("{}/.well-known/oauth-client", app_url)
     } else {
-        format!("devforge-{}", catalog)
+        // Provider ne supporte pas DCR — doit avoir client_id pré-enregistré en config
+        return Err(ApiError::message(format!(
+            "Le serveur OAuth de {} ne supporte pas Dynamic Client Registration (CIMD). Configure un client_id pré-enregistré dans les champs avancés, ou contacte le support si ce provider devrait supporter DCR.",
+            catalog
+        )));
     };
 
     // Scopes suggérés selon le preset
