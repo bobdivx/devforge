@@ -17,6 +17,8 @@ import {
   Card,
   CardHeader,
   FadeIn,
+  HubGrid,
+  HubTile,
   Input,
   LiveStatus,
   Modal,
@@ -446,138 +448,94 @@ function ProjectOverview({
 
   return (
     <FadeIn>
-      <div class="space-y-8">
-        <section class="relative overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] px-5 py-6">
-          <div
-            class="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full opacity-40 blur-3xl"
-            style={{
-              background:
-                statusMeta.tone === 'ok'
-                  ? 'rgb(74 222 128 / 0.25)'
-                  : statusMeta.tone === 'danger'
-                    ? 'rgb(248 113 113 / 0.25)'
-                    : statusMeta.tone === 'warn'
-                      ? 'rgb(251 191 36 / 0.2)'
-                      : 'rgb(167 139 250 / 0.15)',
-            }}
-          />
-          <div class="relative flex flex-wrap items-start justify-between gap-5">
-            <div class="flex min-w-0 items-start gap-4">
-              <StatusGlyph
-                project={project}
-                tone={statusMeta.tone}
-                busy={deployBusy || !!lifeBusy}
-                label={statusMeta.label}
-              />
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <h2 class="text-lg font-medium tracking-tight">{statusMeta.label}</h2>
-                  {project.port != null && (
-                    <span class="font-mono text-xs text-[var(--color-ink-faint)]">:{project.port}</span>
-                  )}
-                </div>
-                {project.production_url ? (
-                  <a
-                    href={project.production_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    class="mt-1.5 block break-all text-sm text-[var(--color-accent)] hover:underline"
-                  >
-                    {project.production_url.replace(/^https?:\/\//, '')}
-                  </a>
-                ) : (
-                  <p class="mt-1.5 text-sm text-[var(--color-ink-muted)]">
-                    {latest ? 'Prêt' : 'Pas encore déployé'}
-                  </p>
-                )}
-              </div>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={deployBusy || !!lifeBusy || !project.git_repository}
-                onClick={deployNow}
-              >
-                {deployBusy ? <Spinner /> : null}
-                Déployer
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={!!lifeBusy || deployBusy}
-                onClick={() => runLifecycle('restart')}
-              >
-                {lifeBusy === 'restart' ? <Spinner /> : null}
-                Redémarrer
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={!!lifeBusy || deployBusy}
-                onClick={() => runLifecycle('stop')}
-              >
-                {lifeBusy === 'stop' ? <Spinner /> : null}
-                Arrêter
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={deployments.length === 0}
-                onClick={() => setHistoryOpen(true)}
-              >
-                Historique
-              </Button>
-            </div>
-          </div>
-          {(lifeBusy || lifeDetail) && (
-            <div class="relative mt-5">
-              <LiveStatus
-                busy={!!lifeBusy}
-                label={lifeBusy ? labelAction(lifeBusy) : 'Dernière action'}
-                detail={lifeDetail ?? undefined}
-              />
-            </div>
-          )}
-        </section>
-
-        <section>
-          <h2 class="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-[var(--color-ink-faint)]">
-            Santé
-          </h2>
-          <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {health.map((h, i) => {
-              const inner = (
-                <div
-                  class="df-step-in flex gap-3 min-w-0"
-                  style={{ animationDelay: `${i * 45}ms` }}
+      <div class="space-y-6">
+        {/* En-tête compact avec statut et actions rapides */}
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <div class="flex items-center gap-3">
+            <StatusGlyph
+              project={project}
+              tone={statusMeta.tone}
+              busy={deployBusy || !!lifeBusy}
+              label={statusMeta.label}
+            />
+            <div>
+              <h2 class="text-lg font-medium">{statusMeta.label}</h2>
+              {project.production_url && (
+                <a
+                  href={project.production_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  class="mt-0.5 block text-sm text-[var(--color-accent)] hover:underline"
                 >
-                  <HealthIcon kind={h.icon} tone={h.tone} />
-                  <div class="min-w-0 flex-1 overflow-hidden">
-                    <div class="text-sm font-medium text-[var(--color-ink)]">{h.label}</div>
-                    <p
-                      class="mt-0.5 truncate text-xs text-[var(--color-ink-muted)]"
-                      title={h.detail}
-                    >
-                      {h.detail}
-                    </p>
-                  </div>
-                </div>
-              );
-              const cls =
-                'rounded-xl border border-[var(--color-line)] bg-[var(--color-card)]/60 px-3.5 py-3 transition hover:border-[var(--color-line-strong)] hover:bg-[var(--color-surface)] min-w-0';
-              return h.href ? (
-                <a key={h.key} href={h.href} class={cls}>
-                  {inner}
+                  {project.production_url.replace(/^https?:\/\//, '')}
                 </a>
-              ) : (
-                <div key={h.key} class={cls}>
-                  {inner}
-                </div>
-              );
-            })}
+              )}
+            </div>
           </div>
-        </section>
+          <div class="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={deployBusy || !!lifeBusy || !project.git_repository}
+              onClick={deployNow}
+            >
+              {deployBusy ? <Spinner /> : null}
+              Déployer
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!!lifeBusy || deployBusy}
+              onClick={() => runLifecycle('restart')}
+            >
+              {lifeBusy === 'restart' ? <Spinner /> : null}
+              Redémarrer
+            </Button>
+          </div>
+        </div>
+
+        {(lifeBusy || lifeDetail) && (
+          <LiveStatus
+            busy={!!lifeBusy}
+            label={lifeBusy ? labelAction(lifeBusy) : 'Dernière action'}
+            detail={lifeDetail ?? undefined}
+          />
+        )}
+
+        {/* Grid de cartes HubTile (style MCP/Home) */}
+        <HubGrid cols={4}>
+          {health.map((h, i) => (
+            <HubTile
+              key={h.key}
+              index={i}
+              title={h.label}
+              description={h.detail}
+              href={h.href}
+              icon={<HealthIcon kind={h.icon} tone={h.tone} />}
+              iconClass="!bg-transparent"
+              badge={
+                h.tone !== 'neutral' && (
+                  <span
+                    class={cn(
+                      'absolute -right-1 -top-1 h-3 w-3 rounded-full ring-2 ring-[#1c1c1e]',
+                      h.tone === 'ok' && 'bg-[var(--color-ok)]',
+                      h.tone === 'warn' && 'bg-[var(--color-warn)]',
+                      h.tone === 'danger' && 'bg-[var(--color-danger)]',
+                    )}
+                  />
+                )
+              }
+            />
+          ))}
+          <HubTile
+            index={health.length}
+            title="Historique"
+            description={`${deployments.length} déploiement${deployments.length > 1 ? 's' : ''}`}
+            icon={<HealthIcon kind="deploy" tone="neutral" />}
+            iconClass="!bg-transparent"
+            onClick={() => setHistoryOpen(true)}
+          />
+        </HubGrid>
       </div>
 
       <Modal
@@ -979,15 +937,11 @@ function BackupsPanel({ projectUuid }: { projectUuid: string }) {
 function DatabasePanel({ uuid }: { uuid: string }) {
   return (
     <FadeIn>
-      <div class="space-y-4">
-        <Card>
-          <CardHeader
-            title="Bases de données"
-            description="Lie une base au projet (Turso via MCP). Les variables d’env associées sont injectées automatiquement."
-          />
-          <DatabaseManager uuid={uuid} />
-        </Card>
-      </div>
+      <DatabaseManager uuid={uuid} />
+    </FadeIn>
+  );
+  return (
+    <FadeIn>
     </FadeIn>
   );
 }
