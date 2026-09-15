@@ -1380,7 +1380,7 @@ pub async fn load_mcp_from_db(state: &AppState) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-/// Lie une base Turso via MCP tools OAuth (préféré)
+/// Lie une base Turso via MCP tools OAuth + Platform API (préféré)
 async fn link_turso_via_mcp(
     state: &AppState,
     server_id: &str,
@@ -1388,8 +1388,8 @@ async fn link_turso_via_mcp(
     hostname_hint: Option<&str>,
 ) -> Result<(String, String), String> {
     // 1. Si hostname fourni, l'utiliser; sinon lister pour le trouver
-    let hostname = if let Some(h) = hostname_hint.filter(|h| !h.is_empty()) {
-        h.to_string()
+    let (hostname, org_slug) = if let Some(h) = hostname_hint.filter(|h| !h.is_empty()) {
+        (h.to_string(), String::new())
     } else {
         // Lister les bases via MCP tool
         let list_result = state.mcp.clients
@@ -1397,7 +1397,7 @@ async fn link_turso_via_mcp(
             .await
             .map_err(|e| format!("list_databases MCP failed: {}", e))?;
         
-        // Extraire databases en gérant différents formats de réponse
+        // Extraire databases + org en gérant différents formats de réponse
         let databases = if let Some(dbs) = list_result.get("databases").and_then(|d| d.as_array()) {
             dbs.clone()
         } else if let Some(content) = list_result.get("content") {
@@ -1424,7 +1424,14 @@ async fn link_turso_via_mcp(
             return Err("list_databases response invalid".to_string());
         };
         
-        databases.iter()
+        // Extraire org de la réponse si présent
+        let org = list_result.get("organization")
+            .or_else(|| list_result.get("org"))
+            .and_then(|o| o.as_str())
+            .unwrap_or("")
+            .to_string();
+        
+        let host = databases.iter()
             .find(|db| {
                 db.get("name").or_else(|| db.get("Name")).and_then(|n| n.as_str()) == Some(db_name)
             })
@@ -1434,46 +1441,64 @@ async fn link_turso_via_mcp(
                     .and_then(|h| h.as_str())
                     .map(|s| s.to_string())
             })
-            .ok_or_else(|| format!("DB {} not found in list_databases", db_name))?
+            .ok_or_else(|| format!("DB {} not found in list_databases", db_name))?;
+        
+        (host, org)
     };
     
-    // 2. Générer un token d'accès DB via MCP tool generate_database_token
-    let token_result = state.mcp.clients
-        .call_remote_tool(
-            server_id,
-            "generate_database_token",
-            json!({ "database": db_name })
-        )
-        .await
-        .map_err(|e| format!("generate_database_token MCP failed: {}", e))?;
+    // 2. Récupérer le serveur pour avoir oauth_access_token + org
+    let server = state.mcp.clients.get(server_id).await
+        .ok_or_else(|| "Server not found for OAuth token".to_string())?;
     
-    // Le résultat peut être { "jwt": "...", ... } ou { "token": "...", ... } ou dans content
-    let jwt = if let Some(token_str) = token_result.get("jwt").or_else(|| token_result.get("token")).and_then(|t| t.as_str()) {
-        token_str.to_string()
-    } else if let Some(content) = token_result.get("content") {
-        if let Some(s) = content.as_str() {
-            // Essayer de parser comme JSON
-            if let Ok(parsed) = serde_json::from_str::<Value>(s) {
-                parsed.get("jwt")
-                    .or_else(|| parsed.get("token"))
-                    .and_then(|t| t.as_str())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| s.to_string())
-            } else {
-                s.to_string()
-            }
-        } else {
-            content.get("jwt")
-                .or_else(|| content.get("token"))
-                .and_then(|t| t.as_str())
-                .map(|s| s.to_string())
-                .ok_or_else(|| "generate_database_token content missing jwt/token".to_string())?
-        }
-    } else if let Some(s) = token_result.as_str() {
-        s.to_string()
+    let oauth_token = server.oauth_access_token.clone();
+    if oauth_token.is_empty() {
+        return Err("OAuth access token missing".to_string());
+    }
+    
+    // Déterminer l'org: priorité à org_slug de list_databases, sinon server.meta
+    let org = if !org_slug.is_empty() {
+        org_slug
     } else {
-        return Err("generate_database_token response missing jwt/token".to_string());
+        server.meta.get("org").cloned().unwrap_or_default()
     };
+    
+    if org.is_empty() {
+        return Err("Organization slug missing (not in list_databases or server meta)".to_string());
+    }
+    
+    // 3. Générer JWT via Platform REST API en utilisant OAuth token comme Bearer
+    let url = format!(
+        "https://api.turso.tech/v1/organizations/{}/databases/{}/auth/tokens",
+        org, db_name
+    );
+    
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(25))
+        .build()
+        .map_err(|e| format!("HTTP client failed: {}", e))?;
+    
+    let res = http_client
+        .post(&url)
+        .bearer_auth(&oauth_token)
+        .json(&json!({}))
+        .send()
+        .await
+        .map_err(|e| format!("Platform API token request failed: {}", e))?;
+    
+    let status = res.status();
+    if !status.is_success() {
+        let text = res.text().await.unwrap_or_default();
+        return Err(format!("Platform API HTTP {}: {}", status, text.chars().take(280).collect::<String>()));
+    }
+    
+    let response: Value = res.json().await
+        .map_err(|e| format!("Platform API response parse failed: {}", e))?;
+    
+    let jwt = response.get("jwt")
+        .or_else(|| response.get("token"))
+        .and_then(|t| t.as_str())
+        .ok_or_else(|| "Platform API response missing jwt".to_string())?
+        .to_string();
     
     Ok((hostname, jwt))
 }

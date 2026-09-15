@@ -940,10 +940,6 @@ function DatabasePanel({ uuid }: { uuid: string }) {
       <DatabaseManager uuid={uuid} />
     </FadeIn>
   );
-  return (
-    <FadeIn>
-    </FadeIn>
-  );
 }
 
 function DatabaseManager({ uuid }: { uuid: string }) {

@@ -23,7 +23,7 @@ pub async fn list_databases(api_token: &str, org: &str) -> Result<Vec<TursoDatab
     let org = org.trim();
     if token.is_empty() || org.is_empty() {
         return Err(DevForgeError::Message(
-            "Turso: Platform API Token (api_token) et organization slug (org) requis pour lier des bases de données.\n→ OAuth seul ne suffit pas pour cette opération.\n→ Va dans MCP → Turso → Avancé pour configurer api_token et org.".into(),
+            "Turso: Platform API Token (api_token) et organization slug (org) requis pour ce fallback.\n→ Préfère connecter Turso via OAuth (MCP → Turso → Se connecter avec OAuth).\n→ Ou configure api_token + org dans MCP → Turso → Avancé.".into(),
         ));
     }
     let url = format!("https://api.turso.tech/v1/organizations/{org}/databases");
