@@ -351,16 +351,32 @@ pub fn catalog() -> Vec<CatalogPreset> {
             name: "Slack".into(),
             description: "Notifications, canaux et tools Slack — MCP officiel hébergé ou self-host.".into(),
             category: "messaging".into(),
-            docs_url: Some("https://api.slack.com/apps".into()),
+            docs_url: Some("https://docs.slack.dev/ai/slack-mcp-server/".into()),
             default_url: Some("https://mcp.slack.com/mcp".into()),
             fields: vec![
                 field(
+                    "client_id",
+                    "Client ID (OAuth Slack App)",
+                    false,
+                    true,
+                    Some("1601185624273.8899143856786"),
+                    Some("Requis pour OAuth. Crée une Slack App sur api.slack.com/apps, puis récupère le Client ID dans Basic Information."),
+                ),
+                field(
+                    "client_secret",
+                    "Client Secret (OAuth Slack App)",
+                    true,
+                    true,
+                    Some("…"),
+                    Some("Requis pour OAuth. Slack App → Basic Information → Client Secret. Garde-le secret !"),
+                ),
+                field(
                     "bot_token",
-                    "Bot User OAuth Token (optionnel)",
+                    "Bot User OAuth Token (optionnel, self-host)",
                     true,
                     false,
                     Some("xoxb-…"),
-                    Some("Optionnel. Pour self-host uniquement. Slack App → OAuth & Permissions. Le MCP officiel hébergé utilise OAuth utilisateur."),
+                    Some("Optionnel. Pour self-host uniquement (sans OAuth). Slack App → OAuth & Permissions."),
                 ),
                 field(
                     "url",
@@ -374,12 +390,25 @@ pub fn catalog() -> Vec<CatalogPreset> {
             resource_kind: None,
             popular: true,
             setup_intro: Some(
-                "OAuth recommandé — connexion directe avec ton compte Slack."
+                "⚠️ OAuth requis : Le MCP Slack exige une Slack App avec Client ID + Secret pré-enregistrés. Pas de Dynamic Client Registration supporté. Crée une app sur api.slack.com/apps avec les scopes user OAuth, puis renseigne Client ID et Client Secret ci-dessous."
                     .into(),
             ),
-            setup_sections: None,
+            setup_sections: Some(vec![
+                section(
+                    "1. Créer une Slack App",
+                    "Visite api.slack.com/apps → Create New App → From scratch.\nNomme ton app (ex. « DevForge MCP »), choisis ton workspace.",
+                ),
+                section(
+                    "2. Configurer OAuth & Permissions",
+                    "Dans OAuth & Permissions → Redirect URLs, ajoute :\nhttps://web.jeser.app/api/v1/mcp/oauth/callback\n(remplace par ton domaine DevForge public).\n\nDans User Token Scopes, ajoute minimum :\nsearch:read.public, chat:write, channels:history",
+                ),
+                section(
+                    "3. Récupérer Client ID et Secret",
+                    "Dans Basic Information → App Credentials :\n• Client ID (ressemble à 1601185624273.8899143856786)\n• Client Secret (clique « Show » pour le révéler)\n\nColle-les dans les champs ci-dessous.",
+                ),
+            ]),
             tools_help: Some(
-                "Le MCP Slack officiel hébergé (https://mcp.slack.com/mcp) utilise OAuth utilisateur. Pour self-host, utilise Bot Token (xoxb-…)."
+                "Le MCP Slack officiel hébergé (https://mcp.slack.com/mcp) exige OAuth avec un client_id + client_secret pré-enregistré d'une Slack App. Clique « Se connecter avec OAuth » ci-dessous après avoir configuré ta Slack App."
                     .into(),
             ),
                     auth_mode: Some("oauth".into()),

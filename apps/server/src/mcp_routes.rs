@@ -720,7 +720,105 @@ async fn start_oauth_flow(
         ));
     }
 
-    // Découverte OAuth
+    // === CAS SPÉCIAL SLACK : Vérifier config AVANT toute tentative OAuth ===
+    // Slack MCP ne supporte PAS Dynamic Client Registration (DCR/CIMD).
+    // Docs: https://docs.slack.dev/ai/slack-mcp-server/
+    // Exige un client_id + client_secret pré-enregistré d'une Slack App.
+    if catalog == "slack" {
+        let client_id_opt = server
+            .secrets
+            .get("client_id")
+            .or_else(|| server.meta.get("client_id"));
+        
+        let client_secret_opt = server.secrets.get("client_secret");
+
+        if client_id_opt.is_none() || client_secret_opt.is_none() {
+            return Err(ApiError::message(
+                "OAuth Slack requiert une Slack App pré-enregistrée. Crée une app sur https://api.slack.com/apps, configure les Redirect URLs (https://web.jeser.app/api/v1/mcp/oauth/callback) et les scopes user OAuth (search:read.public, chat:write, channels:history), puis renseigne le Client ID et Client Secret dans les champs ci-dessus avant de cliquer sur « Se connecter avec OAuth »."
+            ));
+        }
+    }
+
+    // Générer PKCE + state
+    let verifier = devforge_mcp::generate_code_verifier();
+    let challenge = devforge_mcp::code_challenge(&verifier);
+    let state_param = devforge_mcp::generate_state();
+
+    // Résoudre URL publique (DB settings, headers, ou APP_URL fallback)
+    let app_url = resolve_public_base_url(&state, &headers).await?;
+    let redirect_uri = format!("{}/api/v1/mcp/oauth/callback", app_url);
+
+    // === CAS SPÉCIAL SLACK : OAuth pré-enregistré (pas de DCR) ===
+    if catalog == "slack" {
+        // Slack exige client_id + client_secret pré-enregistrés (pas de CIMD/DCR)
+        let client_id = server
+            .secrets
+            .get("client_id")
+            .or_else(|| server.meta.get("client_id"))
+            .expect("client_id vérifié ci-dessus")
+            .clone();
+
+        let _client_secret = server
+            .secrets
+            .get("client_secret")
+            .expect("client_secret vérifié ci-dessus")
+            .clone();
+
+        // Endpoints OAuth Slack (user tokens)
+        let auth_endpoint = "https://slack.com/oauth/v2_user/authorize";
+        let token_endpoint = "https://slack.com/api/oauth.v2.user.access";
+
+        // Scopes Slack minimum pour MCP
+        let scopes = vec!["search:read.public", "chat:write", "channels:history"];
+
+        // Construire URL authorization manuellement (pas de build_authorization_url car on skip discovery)
+        let mut params = vec![
+            ("response_type", "code"),
+            ("client_id", client_id.as_str()),
+            ("redirect_uri", redirect_uri.as_str()),
+            ("state", state_param.as_str()),
+            ("code_challenge", challenge.as_str()),
+            ("code_challenge_method", "S256"),
+        ];
+        let scope_str = scopes.join(" ");
+        params.push(("scope", &scope_str));
+
+        let query = params
+            .into_iter()
+            .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+            .collect::<Vec<_>>()
+            .join("&");
+        let auth_url = format!("{}?{}", auth_endpoint, query);
+
+        // Stocker état + token_endpoint pour callback
+        let now = Utc::now();
+        let expires_at = (now + chrono::Duration::minutes(10)).to_rfc3339();
+        sqlx::query(
+            r#"
+            INSERT INTO mcp_oauth_pending (state, server_id, workspace_uuid, code_verifier, redirect_uri, auth_url, created_at, expires_at, token_endpoint)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&state_param)
+        .bind(&server.id)
+        .bind(&ws)
+        .bind(&verifier)
+        .bind(&redirect_uri)
+        .bind(&auth_url)
+        .bind(now.to_rfc3339())
+        .bind(expires_at)
+        .bind(token_endpoint)
+        .execute(&state.pool)
+        .await
+        .map_err(ApiError::from)?;
+
+        return Ok(Json(json!({
+            "auth_url": auth_url,
+            "state": state_param,
+        })));
+    }
+
+    // === FLUX GÉNÉRIQUE (Turso, Cloudflare, etc.) avec découverte OAuth ===
     let base_url = if !server.url.is_empty() {
         let url = server.url.trim_end_matches("/mcp");
         url.to_string()
@@ -738,21 +836,15 @@ async fn start_oauth_flow(
         ));
     }
 
-    // Générer PKCE + state
-    let verifier = devforge_mcp::generate_code_verifier();
-    let challenge = devforge_mcp::code_challenge(&verifier);
-    let state_param = devforge_mcp::generate_state();
-
-    // Résoudre URL publique (DB settings, headers, ou APP_URL fallback)
-    let app_url = resolve_public_base_url(&state, &headers).await?;
-
-    let redirect_uri = format!("{}/api/v1/mcp/oauth/callback", app_url);
-
-    // Déterminer client_id : CIMD si supporté, sinon legacy devforge-{catalog}
+    // Déterminer client_id : CIMD si supporté, sinon erreur claire
     let client_id = if doc.client_id_metadata_document_supported {
         format!("{}/.well-known/oauth-client", app_url)
     } else {
-        format!("devforge-{}", catalog)
+        // Provider ne supporte pas DCR — doit avoir client_id pré-enregistré en config
+        return Err(ApiError::message(format!(
+            "Le serveur OAuth de {} ne supporte pas Dynamic Client Registration (CIMD). Configure un client_id pré-enregistré dans les champs avancés, ou contacte le support si ce provider devrait supporter DCR.",
+            catalog
+        )));
     };
 
     // Scopes suggérés selon le preset
@@ -812,15 +904,15 @@ async fn oauth_callback(
     headers: HeaderMap,
 ) -> Result<axum::response::Html<String>, ApiError> {
     // Récupérer l'état pending
-    let row: Option<(String, String, String, String, String, String)> = sqlx::query_as(
-        "SELECT server_id, workspace_uuid, code_verifier, redirect_uri, auth_url, expires_at FROM mcp_oauth_pending WHERE state = ?",
+    let row: Option<(String, String, String, String, String, String, String)> = sqlx::query_as(
+        "SELECT server_id, workspace_uuid, code_verifier, redirect_uri, auth_url, expires_at, token_endpoint FROM mcp_oauth_pending WHERE state = ?",
     )
     .bind(&params.state)
     .fetch_optional(&state.pool)
     .await
     .map_err(ApiError::from)?;
 
-    let (server_id, ws_uuid, verifier, redirect_uri, _auth_url, expires_at) =
+    let (server_id, ws_uuid, verifier, redirect_uri, _auth_url, expires_at, stored_token_endpoint) =
         row.ok_or_else(|| ApiError::message("État OAuth invalide ou expiré"))?;
 
     // Vérifier expiration
@@ -846,7 +938,68 @@ async fn oauth_callback(
         return Err(ApiError::message("Workspace mismatch"));
     }
 
-    // Découverte OAuth pour token_endpoint
+    let catalog = server.catalog_id.as_deref().unwrap_or("");
+    
+    // === CAS SPÉCIAL SLACK : OAuth avec client_secret ===
+    if catalog == "slack" {
+        let client_id = server
+            .secrets
+            .get("client_id")
+            .or_else(|| server.meta.get("client_id"))
+            .ok_or_else(|| ApiError::message("Slack OAuth : client_id manquant"))?
+            .clone();
+
+        let client_secret = server
+            .secrets
+            .get("client_secret")
+            .ok_or_else(|| ApiError::message("Slack OAuth : client_secret manquant"))?
+            .clone();
+
+        // Utiliser token_endpoint stocké (Slack user token endpoint)
+        let token_endpoint = if !stored_token_endpoint.is_empty() {
+            stored_token_endpoint
+        } else {
+            "https://slack.com/api/oauth.v2.user.access".to_string()
+        };
+
+        // Échanger code → tokens avec client_secret (Slack exige client_secret en POST body)
+        let token_resp = exchange_code_with_secret(
+            &token_endpoint,
+            &client_id,
+            &client_secret,
+            &redirect_uri,
+            &params.code,
+            &verifier,
+        )
+        .await
+        .map_err(|e| ApiError::message(format!("Échange OAuth Slack échoué : {}", e.message)))?;
+
+        // Calculer expiration
+        let expires_at = if let Some(exp) = token_resp.expires_in {
+            (Utc::now() + chrono::Duration::seconds(exp)).to_rfc3339()
+        } else {
+            String::new()
+        };
+
+        // Persister tokens
+        server.oauth_access_token = token_resp.access_token;
+        server.oauth_refresh_token = token_resp.refresh_token;
+        server.oauth_expires_at = expires_at;
+        server.oauth_scopes = token_resp.scope;
+
+        state.mcp.clients.upsert(server.clone()).await;
+        persist_mcp(&state, &server).await?;
+
+        // Supprimer l'état pending
+        let _ = sqlx::query("DELETE FROM mcp_oauth_pending WHERE state = ?")
+            .bind(&params.state)
+            .execute(&state.pool)
+            .await;
+
+        return Ok(axum::response::Html(success_html().to_string()));
+    }
+
+    // === FLUX GÉNÉRIQUE (Turso, Cloudflare, etc.) ===
     let base_url = if !server.url.is_empty() {
         let url = server.url.trim_end_matches("/mcp");
         url.to_string()
@@ -862,8 +1015,6 @@ async fn oauth_callback(
         .token_endpoint
         .as_deref()
         .ok_or_else(|| ApiError::message("token_endpoint manquant"))?;
-
-    let catalog = server.catalog_id.as_deref().unwrap_or("");
     
     // Résoudre URL publique (DB settings, headers, ou APP_URL fallback)
     let app_url = resolve_public_base_url(&state, &headers).await?;
@@ -874,7 +1025,7 @@ async fn oauth_callback(
         format!("devforge-{}", catalog)
     };
 
-    // Échanger code → tokens
+    // Échanger code → tokens (PKCE sans client_secret)
     let token_resp = devforge_mcp::exchange_code(
         token_endpoint,
         &client_id,
@@ -907,8 +1058,12 @@ async fn oauth_callback(
         .execute(&state.pool)
         .await;
 
-    // Page HTML de confirmation (fermeture popup)
-    let html = r#"
+    Ok(axum::response::Html(success_html().to_string()))
+}
+
+/// HTML de succès OAuth (factorisation)
+fn success_html() -> &'static str {
+    r#"
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -964,9 +1119,53 @@ async fn oauth_callback(
     </div>
 </body>
 </html>
-    "#;
+    "#
+}
 
-    Ok(axum::response::Html(html.to_string()))
+/// Échange code OAuth → tokens avec client_secret (Slack, providers confidentiels)
+async fn exchange_code_with_secret(
+    token_endpoint: &str,
+    client_id: &str,
+    client_secret: &str,
+    redirect_uri: &str,
+    code: &str,
+    code_verifier: &str,
+) -> Result<devforge_mcp::TokenResponse, ApiError> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| ApiError::message(format!("Reqwest build: {e}")))?;
+
+    let params = [
+        ("grant_type", "authorization_code"),
+        ("code", code),
+        ("redirect_uri", redirect_uri),
+        ("client_id", client_id),
+        ("client_secret", client_secret),
+        ("code_verifier", code_verifier),
+    ];
+
+    let res = client
+        .post(token_endpoint)
+        .form(&params)
+        .send()
+        .await
+        .map_err(|e| ApiError::message(format!("Token exchange POST: {e}")))?;
+
+    let status = res.status();
+    let text = res.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        return Err(ApiError::message(format!(
+            "Token exchange → HTTP {status}: {}",
+            text.chars().take(300).collect::<String>()
+        )));
+    }
+
+    let token: devforge_mcp::TokenResponse = serde_json::from_str(&text)
+        .map_err(|e| ApiError::message(format!("Token parse: {e}")))?;
+
+    Ok(token)
 }
 
 /// Déconnecter OAuth (revoke + clear tokens)
