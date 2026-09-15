@@ -483,12 +483,74 @@ async fn list_mcp_resources(
     }
     let catalog = server.catalog_id.as_deref().unwrap_or("");
     if catalog == "turso" {
-        let token = server
-            .secrets
-            .get("api_token")
-            .map(String::as_str)
-            .unwrap_or("");
+        // Essayer d'abord via MCP tools OAuth (préféré)
+        if !server.oauth_access_token.is_empty() {
+            match state.mcp.clients.call_remote_tool(&id, "list_databases", json!({})).await {
+                Ok(result) => {
+                    // Le tool list_databases retourne { "databases": [...] }
+                    let databases = result.get("databases")
+                        .or_else(|| result.get("content"))
+                        .and_then(|c| {
+                            if c.is_array() {
+                                Some(c.clone())
+                            } else if let Some(arr) = c.as_array() {
+                                Some(json!(arr))
+                            } else if let Some(s) = c.as_str() {
+                                // Peut-être du JSON stringifié
+                                serde_json::from_str::<Value>(s).ok().and_then(|v| {
+                                    v.get("databases").or(Some(&v)).and_then(|d| {
+                                        if d.is_array() { Some(d.clone()) } else { None }
+                                    })
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .or_else(|| {
+                            // Si result est directement un array
+                            if result.is_array() { Some(result.clone()) } else { None }
+                        })
+                        .unwrap_or_else(|| json!([]));
+                    
+                    // Convertir en format attendu par le frontend
+                    let dbs: Vec<devforge_mcp::TursoDatabase> = databases
+                        .as_array()
+                        .unwrap_or(&vec![])
+                        .iter()
+                        .filter_map(|db| {
+                            let name = db.get("name").or_else(|| db.get("Name")).and_then(|n| n.as_str())?.to_string();
+                            let hostname = db.get("hostname").or_else(|| db.get("Hostname")).and_then(|h| h.as_str()).unwrap_or("").to_string();
+                            if hostname.is_empty() { return None; }
+                            let db_id = db.get("dbId").or_else(|| db.get("DbId")).or_else(|| db.get("id")).and_then(|i| i.as_str()).map(str::to_string);
+                            let regions = db.get("regions").and_then(|r| r.as_array()).map(|arr| {
+                                arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()
+                            }).unwrap_or_default();
+                            Some(devforge_mcp::TursoDatabase { name, db_id, hostname, regions })
+                        })
+                        .collect();
+                    
+                    return Ok(Json(json!({
+                        "ok": true,
+                        "kind": "database",
+                        "provider": "turso",
+                        "data": dbs,
+                    })));
+                },
+                Err(e) => {
+                    // Si erreur OAuth, fallback vers Platform API si disponible
+                    tracing::warn!("MCP OAuth list_databases failed, trying Platform API fallback: {}", e);
+                }
+            }
+        }
+        
+        // Fallback: Platform API (ancien mode)
+        let token = server.secrets.get("api_token").map(String::as_str).unwrap_or("");
         let org = server.meta.get("org").map(String::as_str).unwrap_or("");
+        if token.is_empty() || org.is_empty() {
+            return Err(ApiError::message(
+                "Turso: Connecte-toi via OAuth (bouton « Se connecter avec OAuth » dans MCP → Turso) OU configure Platform API Token + org dans la section Avancé.".to_string()
+            ));
+        }
         let dbs = devforge_mcp::list_databases(token, org)
             .await
             .map_err(|e| ApiError::message(e.to_string()))?;
@@ -531,32 +593,22 @@ async fn link_project_resource(
             "Lien ressources supporté pour Turso pour l’instant",
         ));
     }
-    let token = server
-        .secrets
-        .get("api_token")
-        .ok_or_else(|| ApiError::message("Turso: Platform API Token (api_token) requis pour lier des bases de données.\n→ OAuth seul ne suffit pas pour cette opération.\n→ Va dans MCP → Turso → Avancé pour configurer api_token et org."))?;
-    let org = server
-        .meta
-        .get("org")
-        .ok_or_else(|| ApiError::message("Turso: Organization slug (org) requis pour lier des bases de données.\n→ Va dans MCP → Turso → Avancé pour configurer api_token et org."))?;
-    let db_name = body
-        .resource_name
-        .clone()
-        .unwrap_or_else(|| body.resource_id.clone());
-    let hostname = if let Some(h) = body.hostname.filter(|h| !h.is_empty()) {
-        h
+    
+    let db_name = body.resource_name.clone().unwrap_or_else(|| body.resource_id.clone());
+    
+    // Essayer d'abord via MCP tools OAuth (préféré)
+    let (hostname, jwt, org_for_meta) = if !server.oauth_access_token.is_empty() {
+        match link_turso_via_mcp(&state, &body.server_id, &db_name, body.hostname.as_deref()).await {
+            Ok((h, j)) => (h, j, String::new()),
+            Err(e) => {
+                tracing::warn!("MCP OAuth link failed, trying Platform API fallback: {}", e);
+                link_turso_via_platform_api(&state, &server, &db_name, &body).await?
+            }
+        }
     } else {
-        let dbs = devforge_mcp::list_databases(token, org)
-            .await
-            .map_err(|e| ApiError::message(e.to_string()))?;
-        dbs.into_iter()
-            .find(|d| d.name == db_name || d.db_id.as_deref() == Some(body.resource_id.as_str()))
-            .map(|d| d.hostname)
-            .ok_or_else(|| ApiError::message(format!("DB Turso introuvable: {db_name}")))?
+        link_turso_via_platform_api(&state, &server, &db_name, &body).await?
     };
-    let jwt = devforge_mcp::create_db_token(token, org, &db_name)
-        .await
-        .map_err(|e| ApiError::message(e.to_string()))?;
+    
     let libsql = devforge_mcp::libsql_url(&hostname);
 
     let env_pairs = [
@@ -595,11 +647,13 @@ async fn link_project_resource(
 
     let link_id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
-    let meta = json!({
-        "hostname": hostname,
-        "org": org,
-        "libsql_url": libsql,
-    });
+    let mut meta_map = serde_json::Map::new();
+    meta_map.insert("hostname".to_string(), json!(hostname));
+    meta_map.insert("libsql_url".to_string(), json!(libsql));
+    if !org_for_meta.is_empty() {
+        meta_map.insert("org".to_string(), json!(org_for_meta));
+    }
+    let meta = Value::Object(meta_map);
     sqlx::query(
         r#"
         INSERT INTO project_resource_links (id, project_uuid, provider, server_id, resource_id, resource_name, meta_json, created_at)
@@ -1324,4 +1378,104 @@ pub async fn load_mcp_from_db(state: &AppState) -> Result<(), sqlx::Error> {
             .await;
     }
     Ok(())
+}
+
+/// Lie une base Turso via MCP tools OAuth (préféré)
+async fn link_turso_via_mcp(
+    state: &AppState,
+    server_id: &str,
+    db_name: &str,
+    hostname_hint: Option<&str>,
+) -> Result<(String, String), String> {
+    // 1. Si hostname fourni, l'utiliser; sinon lister pour le trouver
+    let hostname = if let Some(h) = hostname_hint.filter(|h| !h.is_empty()) {
+        h.to_string()
+    } else {
+        // Lister les bases via MCP tool
+        let list_result = state.mcp.clients
+            .call_remote_tool(server_id, "list_databases", json!({}))
+            .await
+            .map_err(|e| format!("list_databases MCP failed: {}", e))?;
+        
+        let databases = list_result.get("databases")
+            .or_else(|| list_result.get("content").and_then(|c| {
+                if c.is_array() { Some(c) }
+                else if let Some(s) = c.as_str() {
+                    serde_json::from_str::<Value>(s).ok().and_then(|v| v.get("databases").or(Some(&v)))
+                } else { None }
+            }))
+            .and_then(|c| c.as_array())
+            .or_else(|| list_result.as_array())
+            .ok_or_else(|| "list_databases response invalid".to_string())?;
+        
+        databases.iter()
+            .find(|db| {
+                db.get("name").or_else(|| db.get("Name")).and_then(|n| n.as_str()) == Some(db_name)
+            })
+            .and_then(|db| db.get("hostname").or_else(|| db.get("Hostname")).and_then(|h| h.as_str()))
+            .ok_or_else(|| format!("DB {} not found in list_databases", db_name))?
+            .to_string()
+    };
+    
+    // 2. Générer un token d'accès DB via MCP tool generate_database_token
+    let token_result = state.mcp.clients
+        .call_remote_tool(
+            server_id,
+            "generate_database_token",
+            json!({ "database": db_name })
+        )
+        .await
+        .map_err(|e| format!("generate_database_token MCP failed: {}", e))?;
+    
+    // Le résultat peut être { "jwt": "...", ... } ou { "token": "...", ... } ou dans content
+    let jwt = token_result.get("jwt")
+        .or_else(|| token_result.get("token"))
+        .and_then(|t| t.as_str())
+        .or_else(|| {
+            token_result.get("content").and_then(|c| {
+                if let Some(s) = c.as_str() {
+                    serde_json::from_str::<Value>(s).ok().and_then(|v| {
+                        v.get("jwt").or_else(|| v.get("token")).and_then(|t| t.as_str())
+                    }).or(Some(s))
+                } else {
+                    c.get("jwt").or_else(|| c.get("token")).and_then(|t| t.as_str())
+                }
+            })
+        })
+        .or_else(|| token_result.as_str())
+        .ok_or_else(|| "generate_database_token response missing jwt/token".to_string())?
+        .to_string();
+    
+    Ok((hostname, jwt))
+}
+
+/// Fallback: lie une base Turso via Platform REST API (nécessite api_token + org)
+async fn link_turso_via_platform_api(
+    state: &AppState,
+    server: &devforge_mcp::McpServerConfig,
+    db_name: &str,
+    body: &LinkResourceBody,
+) -> Result<(String, String, String), ApiError> {
+    let token = server.secrets.get("api_token")
+        .ok_or_else(|| ApiError::message("Turso: Connecte-toi via OAuth (MCP → Turso → Se connecter) OU configure Platform API Token + org dans Avancé."))?;
+    let org = server.meta.get("org")
+        .ok_or_else(|| ApiError::message("Turso: org slug requis. Configure-le dans MCP → Turso → Avancé."))?;
+    
+    let hostname = if let Some(h) = body.hostname.as_ref().filter(|h| !h.is_empty()) {
+        h.clone()
+    } else {
+        let dbs = devforge_mcp::list_databases(token, org)
+            .await
+            .map_err(|e| ApiError::message(e.to_string()))?;
+        dbs.into_iter()
+            .find(|d| d.name == *db_name || d.db_id.as_deref() == Some(body.resource_id.as_str()))
+            .map(|d| d.hostname)
+            .ok_or_else(|| ApiError::message(format!("DB Turso introuvable: {db_name}")))?
+    };
+    
+    let jwt = devforge_mcp::create_db_token(token, org, db_name)
+        .await
+        .map_err(|e| ApiError::message(e.to_string()))?;
+    
+    Ok((hostname, jwt, org.clone()))
 }
