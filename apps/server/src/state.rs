@@ -120,6 +120,8 @@ pub struct Project {
     pub publish_directory: Option<String>,
     pub base_directory: String,
     pub docker_compose_location: Option<String>,
+    /// 1 (default) = auto-deploy on push ; 0 = manual only.
+    pub auto_deploy: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -163,6 +165,7 @@ impl ProjectStore for SqliteProjectStore {
                     "git_repository": p.git_repository,
                     "git_branch": p.git_branch,
                     "production_url": p.production_url,
+                    "auto_deploy": p.auto_deploy != 0,
                 })
             })
             .collect())
@@ -211,6 +214,7 @@ impl ProjectStore for SqliteProjectStore {
             "port": p.port,
             "workdir": p.workdir,
             "test_command": p.test_command,
+            "auto_deploy": p.auto_deploy != 0,
             "recent_deployments": deployments,
         })))
     }

@@ -184,6 +184,7 @@ export function ProjectDetailPage(props: Props) {
       {tab === 'git' && (
         <ProjectGitPanel
           projectUuid={uuid}
+          project={project}
           onDeployed={() => {
             void api.deployments(uuid).then((r) => setDeployments(r.data ?? []));
           }}

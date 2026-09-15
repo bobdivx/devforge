@@ -46,6 +46,7 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ("docker_compose_location", "TEXT"),
         ("is_sso_protected", "INTEGER"),
         ("has_own_user_system", "INTEGER"),
+        ("auto_deploy", "INTEGER NOT NULL DEFAULT 1"),
     ] {
         let sql = format!("ALTER TABLE projects ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;

@@ -70,6 +70,7 @@ export type Project = {
   /** null/undefined = auto ; 0/false = off ; 1/true = on */
   is_sso_protected?: number | boolean | null;
   has_own_user_system?: number | boolean | null;
+  auto_deploy?: boolean;
   publish_directory?: string | null;
   base_directory?: string | null;
   docker_compose_location?: string | null;

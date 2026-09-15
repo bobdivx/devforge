@@ -229,6 +229,7 @@ async fn project_list_card(state: &AppState, project: &Project) -> Value {
         "build_pack": project.build_pack,
         "port": project.port,
         "production_url": project.production_url,
+        "auto_deploy": project.auto_deploy != 0,
         "updated_at": project.updated_at,
         "deploy": {
             "status": if dep_status.is_empty() { Value::Null } else { json!(dep_status) },
@@ -614,6 +615,7 @@ pub struct UpdateProject {
     pub publish_directory: Option<String>,
     pub base_directory: Option<String>,
     pub docker_compose_location: Option<String>,
+    pub auto_deploy: Option<bool>,
 }
 
 async fn update_project(
@@ -655,6 +657,11 @@ async fn update_project(
     } else {
         is_sso_protected
     };
+    
+    let auto_deploy = body
+        .auto_deploy
+        .map(|v| if v { 1i64 } else { 0 })
+        .unwrap_or(existing.auto_deploy);
 
     sqlx::query(
         r#"UPDATE projects SET
@@ -662,7 +669,7 @@ async fn update_project(
             server_id = ?, workdir = ?, test_command = ?, production_url = ?,
             build_pack = ?, port = ?, is_static = ?, publish_directory = ?,
             base_directory = ?, docker_compose_location = ?,
-            is_sso_protected = ?, has_own_user_system = ?, updated_at = ?
+            is_sso_protected = ?, has_own_user_system = ?, auto_deploy = ?, updated_at = ?
         WHERE uuid = ?"#,
     )
     .bind(body.name.unwrap_or(existing.name))
@@ -681,6 +688,7 @@ async fn update_project(
     .bind(body.docker_compose_location.or(existing.docker_compose_location))
     .bind(is_sso_protected)
     .bind(has_own_user_system)
+    .bind(auto_deploy)
     .bind(&now)
     .bind(&uuid)
     .execute(&state.pool)
@@ -906,6 +914,15 @@ async fn create_deployment(
         .fetch_one(&state.pool)
         .await
         .map_err(ApiError::from)?;
+
+    // CRITICAL: Ensure Traefik is running after every successful deploy (fix for recurring disappearance)
+    if result.ok {
+        if let Err(e) = state.proxy.ensure_traefik().await {
+            tracing::error!(error = %e, project_uuid = %project.uuid, "Failed to ensure Traefik after deploy");
+        } else {
+            tracing::info!(project_uuid = %project.uuid, "Traefik verified after successful deploy");
+        }
+    }
 
     // Auto-repair on failure (default ON)
     if !result.ok {

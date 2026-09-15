@@ -1502,6 +1502,16 @@ async fn github_webhook(
 
     let mut deployed = Vec::new();
     for project in projects {
+        // Filter: only auto-deploy if enabled for this project (default=1)
+        if project.auto_deploy == 0 {
+            tracing::info!(
+                project_uuid = %project.uuid,
+                project_name = %project.name,
+                "Webhook push ignored: auto_deploy=0 (manual deploy only)"
+            );
+            continue;
+        }
+        
         let proj_branch = project.git_branch.as_deref().unwrap_or("main");
         if proj_branch != branch {
             continue;
@@ -1581,6 +1591,14 @@ async fn github_webhook(
         .bind(&dep_uuid)
         .execute(&state.pool)
         .await;
+        
+        // CRITICAL: Ensure Traefik after webhook deploy (same fix as manual deploy)
+        if result.ok {
+            if let Err(e) = state.proxy.ensure_traefik().await {
+                tracing::error!(error = %e, project_uuid = %project.uuid, "Webhook deploy: failed to ensure Traefik");
+            }
+        }
+        
         deployed.push(json!({
             "project": project.uuid,
             "deployment": dep_uuid,
