@@ -7,6 +7,7 @@ import { ToastProvider } from './ui';
 import { AuthGate } from './AuthGate';
 import { AppHeader } from './AppHeader';
 import { MobileMenuSheet } from './MobileMenuSheet';
+import { UpdateRecoveryOverlay } from './UpdateRecoveryOverlay';
 
 type Props = {
   active?: string;
@@ -61,6 +62,7 @@ function ShellInner({
   const [navItems, setNavItems] = useState(() => globalNavForRole(null));
   const [userRole, setUserRole] = useState<string | null>(null);
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
+  const [showRecovery, setShowRecovery] = useState(false);
   const nav = sideNav ?? projectNav;
   const navLabel = sideNav ? sideNavLabel : projectNav ? 'Projet' : sideNavLabel;
 
@@ -82,8 +84,48 @@ function ShellInner({
     };
   }, []);
 
+  useEffect(() => {
+    let failureCount = 0;
+    let recoveryShown = false;
+    const isUpdatePage = typeof window !== 'undefined' && window.location.pathname.startsWith('/app/update');
+
+    const originalFetch = window.fetch;
+    const wrappedFetch: typeof fetch = async (...args) => {
+      try {
+        const response = await originalFetch(...args);
+        if (response.ok) {
+          failureCount = 0;
+        } else if (response.status === 502 || response.status === 503) {
+          failureCount += 1;
+          if (failureCount >= 2 && !recoveryShown && !isUpdatePage) {
+            recoveryShown = true;
+            setShowRecovery(true);
+          }
+        }
+        return response;
+      } catch (error) {
+        failureCount += 1;
+        if (failureCount >= 2 && !recoveryShown && !isUpdatePage) {
+          recoveryShown = true;
+          setShowRecovery(true);
+        }
+        throw error;
+      }
+    };
+
+    window.fetch = wrappedFetch;
+
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, []);
+
   return (
     <ToastProvider>
+      <UpdateRecoveryOverlay
+        show={showRecovery}
+        onRecovered={() => setShowRecovery(false)}
+      />
       <MobileMenuSheet
         open={mobileSheetOpen}
         onClose={() => setMobileSheetOpen(false)}
