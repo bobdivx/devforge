@@ -358,12 +358,18 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             redirect_uri TEXT NOT NULL,
             auth_url TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            expires_at TEXT NOT NULL
+            expires_at TEXT NOT NULL,
+            token_endpoint TEXT NOT NULL DEFAULT ''
         );
         "#,
     )
     .execute(pool)
     .await?;
+    
+    // Migration : ajouter token_endpoint si manquant
+    let _ = sqlx::query("ALTER TABLE mcp_oauth_pending ADD COLUMN token_endpoint TEXT NOT NULL DEFAULT ''")
+        .execute(pool)
+        .await;
 
     sqlx::query(
         r#"
