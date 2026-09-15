@@ -164,13 +164,14 @@ function ServerCard({
 }) {
   const toolsChecked = toolsOk !== undefined;
   const status = statusMeta(server, toolsChecked, toolsOk);
+  
+  // Afficher meta utiles (org, project_ref, team_id, host, etc.) mais jamais l'URL hostname
   const detail =
     server.meta?.org ||
-    (server.url
-      ? server.url.replace(/^https?:\/\//, '').split('/')[0]
-      : server.has_secrets
-        ? 'Secrets configurés'
-        : 'API');
+    server.meta?.project_ref ||
+    server.meta?.team_id ||
+    server.meta?.host ||
+    (server.has_secrets ? 'Secrets configurés' : undefined);
 
   return (
     <HubTile
@@ -202,9 +203,11 @@ function ServerCard({
           >
             {status.label}
           </div>
-          <div class="truncate text-[10px] text-[var(--color-ink-faint)]" title={detail}>
-            {detail}
-          </div>
+          {detail && (
+            <div class="truncate text-[10px] text-[var(--color-ink-faint)]" title={detail}>
+              {detail}
+            </div>
+          )}
         </div>
       }
     />
