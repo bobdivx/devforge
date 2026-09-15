@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
-use base64;
+use base64::{Engine as _, engine::general_purpose};
 
 /// Résout l'URL publique de l'instance dans cet ordre :
 /// 1. `instance_url` depuis DB (settings)
@@ -1416,10 +1416,10 @@ fn extract_org_from_jwt(token: &str) -> Option<String> {
         return None;
     }
     
-    // Décoder le payload (segment du milieu)
+    // Décoder le payload (segment du milieu) - essayer URL_SAFE_NO_PAD puis STANDARD
     let payload_b64 = parts[1];
-    let decoded = base64::decode_config(payload_b64, base64::URL_SAFE_NO_PAD)
-        .or_else(|_| base64::decode_config(payload_b64, base64::STANDARD))
+    let decoded = general_purpose::URL_SAFE_NO_PAD.decode(payload_b64)
+        .or_else(|_| general_purpose::STANDARD.decode(payload_b64))
         .ok()?;
     
     let payload: Value = serde_json::from_slice(&decoded).ok()?;
@@ -1546,7 +1546,7 @@ async fn link_turso_via_mcp(
     
     // 5. Persister org dans server.meta si découvert et pas déjà là
     if !org.is_empty() && server.meta.get("org").map(|s| s.as_str()) != Some(org.as_str()) {
-        let mut updated_server = (*server).clone();
+        let mut updated_server = server.clone();
         updated_server.meta.insert("org".to_string(), org.clone());
         state.mcp.clients.upsert(updated_server.clone()).await;
         
