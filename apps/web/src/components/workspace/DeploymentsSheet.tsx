@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'preact/hooks';
-import { X } from 'lucide-preact';
+import { X, ListFilter, AlignLeft } from 'lucide-preact';
 import { api, type Deployment } from '../../lib/api';
 import { Badge, Button, Spinner } from '../ui';
 import { cn } from '../../lib/cn';
+import { DeployTimeline } from './DeployTimeline';
 
 type Props = {
   open: boolean;
@@ -36,6 +37,7 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'timeline' | 'raw'>('timeline');
   const isPanel = variant === 'panel';
 
   useEffect(() => {
@@ -51,16 +53,29 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
     if (open) loadDeployments();
   }, [open, projectUuid]);
 
-  async function loadDeployments() {
-    setLoading(true);
+  // Polling automatique si un déploiement est en cours
+  useEffect(() => {
+    if (!open) return;
+    const selected = deployments.find((d) => d.uuid === selectedUuid);
+    const isRunning = selected && (selected.status === 'deploying' || selected.status === 'building' || selected.status === 'pending');
+    if (!isRunning) return;
+
+    const interval = setInterval(() => {
+      loadDeployments(false);
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [open, selectedUuid, deployments]);
+
+  async function loadDeployments(showSpinner = true) {
+    if (showSpinner) setLoading(true);
     try {
       const r = await api.deployments(projectUuid);
       setDeployments(r.data ?? []);
-      if (r.data?.[0]) setSelectedUuid(r.data[0].uuid);
+      if (!selectedUuid && r.data?.[0]) setSelectedUuid(r.data[0].uuid);
     } catch {
       setDeployments([]);
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   }
 
@@ -148,16 +163,52 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
                   )}
                 </div>
 
-                <div class="rounded-xl border border-[var(--color-line)] bg-black/40 p-3">
-                  <pre
-                    class={cn(
-                      'overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-[var(--color-ink-muted)]',
-                      isPanel ? 'max-h-none' : 'max-h-[40vh]',
-                    )}
-                  >
-                    {selected.logs || 'Aucun log disponible.'}
-                  </pre>
+                <div class="flex items-center justify-between gap-2 px-1">
+                  <span class="text-xs font-medium text-[var(--color-ink-muted)]">Progression & Événements</span>
+                  <div class="flex items-center gap-1 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] p-0.5 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('timeline')}
+                      class={cn(
+                        'flex items-center gap-1.5 rounded-md px-2.5 py-1 transition',
+                        viewMode === 'timeline'
+                          ? 'bg-[var(--color-accent)] text-white font-medium'
+                          : 'text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]'
+                      )}
+                    >
+                      <ListFilter size={13} />
+                      <span>Timeline</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('raw')}
+                      class={cn(
+                        'flex items-center gap-1.5 rounded-md px-2.5 py-1 transition',
+                        viewMode === 'raw'
+                          ? 'bg-[var(--color-accent)] text-white font-medium'
+                          : 'text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]'
+                      )}
+                    >
+                      <AlignLeft size={13} />
+                      <span>Logs bruts</span>
+                    </button>
+                  </div>
                 </div>
+
+                {viewMode === 'timeline' ? (
+                  <DeployTimeline logs={selected.logs} status={selected.status} />
+                ) : (
+                  <div class="rounded-xl border border-[var(--color-line)] bg-black/40 p-3">
+                    <pre
+                      class={cn(
+                        'overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-[var(--color-ink-muted)]',
+                        isPanel ? 'max-h-none' : 'max-h-[40vh]',
+                      )}
+                    >
+                      {selected.logs || 'Aucun log disponible.'}
+                    </pre>
+                  </div>
+                )}
               </div>
             )}
           </>

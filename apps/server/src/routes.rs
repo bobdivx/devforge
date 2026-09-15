@@ -1050,6 +1050,44 @@ async fn deployment_logs(
     })))
 }
 
+fn extract_meaningful_error_logs(raw_logs: &str, max_lines: usize, max_chars: usize) -> String {
+    let lines: Vec<&str> = raw_logs.lines().collect();
+    if lines.len() <= max_lines {
+        let joined = lines.join("\n");
+        if joined.len() > max_chars {
+            joined.chars().rev().take(max_chars).collect::<String>().chars().rev().collect()
+        } else {
+            joined
+        }
+    } else {
+        let tail_lines = &lines[lines.len() - max_lines..];
+        let joined = tail_lines.join("\n");
+        if joined.len() > max_chars {
+            joined.chars().rev().take(max_chars).collect::<String>().chars().rev().collect()
+        } else {
+            joined
+        }
+    }
+}
+
+fn build_repair_prompt(dep_uuid: &str, summary: &str, hint: &str, raw_logs: &str) -> String {
+    let logs_tail = extract_meaningful_error_logs(raw_logs, 100, 6000);
+    format!(
+        "🔧 AUTO-RÉPARATION DÉPLOIEMENT (PLAYBOOK)\n\n\
+        Le déploiement {dep_uuid} a échoué.\n\n\
+        **Diagnostic rapide** : {summary}\n\
+        **Indice de remédiation** : {}\n\n\
+        **Dernières lignes de logs & Stack Trace (tail extract)** :\n```\n{logs_tail}\n```\n\n\
+        📋 **PLAYBOOK D'AUTO-RÉPARATION DÉTERMINISTE** :\n\
+        Suis rigoureusement ces 4 étapes dans cet ordre précis :\n\
+        1. **Diagnostiquer** : Identifie la cause racine exacte dans la stack trace ou le message d'erreur.\n\
+        2. **Inspecter** : Utilise `read_project_file` pour examiner le code source ou la configuration défaillante.\n\
+        3. **Corriger** : Utilise `write_project_file` pour appliquer la correction minimale nécessaire (ou `create_github_fix` / git tools si repo distant).\n\
+        4. **Relancer & Valider** : Appelle le tool `trigger_deploy` pour relancer immédiatement le déploiement et confirmer la résolution, puis résume tes actions à l'utilisateur.",
+        if hint.is_empty() { "Aucun indice spécifique" } else { hint }
+    )
+}
+
 /// POST /api/v1/deployments/{uuid}/request-repair
 /// Déclenche un agent de réparation pour un déploiement échoué.
 async fn request_repair(
@@ -1086,27 +1124,13 @@ async fn request_repair(
         return Err(ApiError::message("Aucun agent deploy trouvé pour ce projet"));
     };
     
-    // Créer un message de réparation pour l'agent
     let summary = dep.error_summary.as_deref().unwrap_or("Échec du déploiement");
     let hint = dep.error_hint.as_deref().unwrap_or("");
-    let logs_truncated: String = dep.logs.as_deref().unwrap_or("").chars().take(2000).collect();
-    
-    let repair_prompt = format!(
-        "🔧 AUTO-RÉPARATION DÉPLOIEMENT\n\n\
-        Le déploiement {} a échoué.\n\n\
-        **Erreur** : {}\n\
-        **Indice** : {}\n\n\
-        **Logs (tronqués)** :\n```\n{}\n```\n\n\
-        **Ton rôle** :\n\
-        1. Analyser l'erreur\n\
-        2. Identifier le problème dans le code\n\
-        3. Proposer ET appliquer un fix\n\
-        4. Expliquer à l'utilisateur ce qui a été corrigé\n\n\
-        Utilise les tools disponibles (read_project_file, write_project_file, read_github_file, create_github_fix, trigger_deploy).",
-        dep.uuid,
+    let repair_prompt = build_repair_prompt(
+        &dep.uuid,
         summary,
-        if hint.is_empty() { "Aucun" } else { hint },
-        logs_truncated
+        hint,
+        dep.logs.as_deref().unwrap_or(""),
     );
     
     let now = now_str();
@@ -1298,24 +1322,11 @@ async fn auto_trigger_repair(state: &AppState, dep_uuid: &str) -> Result<(), Str
     
     let summary = dep.error_summary.as_deref().unwrap_or("Échec du déploiement");
     let hint = dep.error_hint.as_deref().unwrap_or("");
-    let logs_truncated: String = dep.logs.as_deref().unwrap_or("").chars().take(2000).collect();
-    
-    let repair_prompt = format!(
-        "🔧 AUTO-RÉPARATION DÉPLOIEMENT\n\n\
-        Le déploiement {} a échoué.\n\n\
-        **Erreur** : {}\n\
-        **Indice** : {}\n\n\
-        **Logs (tronqués)** :\n```\n{}\n```\n\n\
-        **Ton rôle** :\n\
-        1. Analyser l'erreur\n\
-        2. Identifier le problème dans le code\n\
-        3. Proposer ET appliquer un fix\n\
-        4. Expliquer à l'utilisateur ce qui a été corrigé\n\n\
-        Utilise les tools disponibles (read_project_file, write_project_file, read_github_file, create_github_fix, trigger_deploy).",
-        dep.uuid,
+    let repair_prompt = build_repair_prompt(
+        &dep.uuid,
         summary,
-        if hint.is_empty() { "Aucun" } else { hint },
-        logs_truncated
+        hint,
+        dep.logs.as_deref().unwrap_or(""),
     );
     
     let now = now_str();

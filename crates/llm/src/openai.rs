@@ -157,6 +157,8 @@ impl OpenAiCompatibleProvider {
                 req = req
                     .header("HTTP-Referer", "https://github.com/bobdivx/devforge")
                     .header("X-Title", "DevForge");
+            } else if provider == "gemini" || url.contains("generativelanguage.googleapis.com") {
+                req = req.header("x-goog-api-key", key);
             }
             match req.send().await {
                 Ok(res) => {
@@ -211,16 +213,22 @@ impl OpenAiCompatibleProvider {
         let mut ids: Vec<String> = raw
             .iter()
             .filter_map(|m| {
-                if let Some(s) = m.as_str() {
-                    let t = s.trim();
-                    return (!t.is_empty()).then(|| t.to_string());
+                let val = if let Some(s) = m.as_str() {
+                    s.trim()
+                } else {
+                    m.get("id")
+                        .or_else(|| m.get("name"))
+                        .or_else(|| m.get("model"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim())
+                        .unwrap_or("")
+                };
+                if val.is_empty() {
+                    return None;
                 }
-                m.get("id")
-                    .or_else(|| m.get("name"))
-                    .or_else(|| m.get("model"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
+                // Nettoyer prefixe 'models/' retourné par certaines versions de l'API Google
+                let clean = val.strip_prefix("models/").unwrap_or(val);
+                Some(clean.to_string())
             })
             .collect();
         ids.sort();
@@ -299,6 +307,9 @@ impl LlmProvider for OpenAiCompatibleProvider {
             .json(&body);
         if !self.api_key.is_empty() {
             builder = builder.bearer_auth(&self.api_key);
+            if self.base_url.contains("generativelanguage.googleapis.com") {
+                builder = builder.header("x-goog-api-key", &self.api_key);
+            }
         }
 
         let res = builder
