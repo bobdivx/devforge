@@ -270,6 +270,18 @@ export const api = {
     }
     return { data: data as Project };
   },
+  projectRules: (projectUuid: string) =>
+    request<{ data: { project_uuid: string; rules: string; exists: boolean; file: string } }>(
+      `/projects/${projectUuid}/rules`,
+    ),
+  updateProjectRules: (projectUuid: string, rules: string) =>
+    request<{ ok: boolean; message: string; data: { project_uuid: string; rules: string; exists: boolean; file: string } }>(
+      `/projects/${projectUuid}/rules`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ rules }),
+      },
+    ),
   createProject: (body: Partial<Project> & { name: string; is_static?: boolean; port?: number }) =>
     request<{ data: Project }>('/projects', { method: 'POST', body: JSON.stringify(body) }),
   scaffoldProject: (body: { title: string; prompt: string; template?: string }) =>

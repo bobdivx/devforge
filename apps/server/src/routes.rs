@@ -29,6 +29,10 @@ pub fn router() -> Router<AppState> {
             get(get_project).patch(update_project).delete(delete_project),
         )
         .route(
+            "/api/v1/projects/{uuid}/rules",
+            get(get_project_rules).put(update_project_rules),
+        )
+        .route(
             "/api/v1/projects/{uuid}/deployments",
             get(list_deployments).post(create_deployment),
         )
@@ -769,6 +773,133 @@ async fn delete_project(
     })))
 }
 
+fn default_project_rules_template(project_name: &str) -> String {
+    format!(
+r#"# Directives Projet & Agent — {project_name}
+
+## Development
+
+When starting the dev server, use background mode:
+
+```bash
+astro dev --background
+```
+
+Manage the background server with `astro dev stop`, `astro dev status`, and `astro dev logs`.
+
+## Architecture & Framework
+- Front : Astro + Preact
+- Styles : Tailwind CSS
+- Always test changes locally via local preview before committing or opening a PR.
+
+## Documentation & References
+Full documentation: https://docs.astro.build
+
+Consult these guides before working on related tasks:
+- [Adding pages, dynamic routes, or middleware](https://docs.astro.build/en/guides/routing/)
+- [Working with Astro components](https://docs.astro.build/en/basics/astro-components/)
+- [Using React, Vue, Svelte, or other framework components](https://docs.astro.build/en/guides/framework-components/)
+- [Adding or managing content](https://docs.astro.build/en/guides/content-collections/)
+- [Adding styles or using Tailwind](https://docs.astro.build/en/guides/styling/)
+- [Supporting multiple languages](https://docs.astro.build/en/guides/internationalization/)
+"#
+    )
+}
+
+fn resolve_project_agents_md_path(project: &Project) -> Option<std::path::PathBuf> {
+    let raw_workdir = project.workdir.as_deref().unwrap_or("").trim();
+    if raw_workdir.is_empty() {
+        return None;
+    }
+    let workdir = devforge_deploy::resolve_project_workdir(raw_workdir, &project.uuid);
+    let path = std::path::Path::new(&workdir).join("AGENTS.md");
+    Some(path)
+}
+
+/// GET /api/v1/projects/{uuid}/rules
+/// Retourne le contenu de AGENTS.md du projet ou le template par défaut s'il n'existe pas encore.
+async fn get_project_rules(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let (_user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
+
+    let path_opt = resolve_project_agents_md_path(&project);
+    let (content, exists) = match path_opt {
+        Some(ref p) if p.is_file() => {
+            let s = fs::read_to_string(p).unwrap_or_else(|_| default_project_rules_template(&project.name));
+            (s, true)
+        }
+        _ => (default_project_rules_template(&project.name), false),
+    };
+
+    Ok(Json(json!({
+        "data": {
+            "project_uuid": project.uuid,
+            "rules": content,
+            "exists": exists,
+            "file": "AGENTS.md"
+        }
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct UpdateRulesBody {
+    pub rules: String,
+}
+
+/// PUT /api/v1/projects/{uuid}/rules
+/// Enregistre le contenu de AGENTS.md directement dans le workdir du projet.
+async fn update_project_rules(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+    Json(body): Json<UpdateRulesBody>,
+) -> Result<Json<Value>, ApiError> {
+    let (_user, _ws, mut project) = auth_project(&state, &headers, &uuid).await?;
+
+    let mut raw_workdir = project.workdir.as_deref().unwrap_or("").trim().to_string();
+    if raw_workdir.is_empty() {
+        let slug = if project.slug.is_empty() {
+            project.uuid.chars().take(12).collect::<String>()
+        } else {
+            project.slug.clone()
+        };
+        raw_workdir = format!("/data/devforge/applications/{slug}");
+        let _ = sqlx::query("UPDATE projects SET workdir = ?, updated_at = datetime('now') WHERE uuid = ?")
+            .bind(&raw_workdir)
+            .bind(&project.uuid)
+            .execute(&state.pool)
+            .await;
+        project.workdir = Some(raw_workdir.clone());
+    }
+
+    let workdir = devforge_deploy::resolve_project_workdir(&raw_workdir, &project.uuid);
+    let workdir_path = std::path::Path::new(&workdir);
+    if !workdir_path.exists() {
+        fs::create_dir_all(workdir_path).map_err(|e| {
+            ApiError::message(format!("Impossible de créer le workdir {workdir} : {e}"))
+        })?;
+    }
+
+    let file_path = workdir_path.join("AGENTS.md");
+    fs::write(&file_path, &body.rules).map_err(|e| {
+        ApiError::message(format!("Impossible d'écrire AGENTS.md : {e}"))
+    })?;
+
+    Ok(Json(json!({
+        "ok": true,
+        "message": "Directives AGENTS.md mises à jour avec succès",
+        "data": {
+            "project_uuid": project.uuid,
+            "rules": body.rules,
+            "exists": true,
+            "file": "AGENTS.md"
+        }
+    })))
+}
+
 async fn list_deployments(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1260,9 +1391,24 @@ async fn build_project_agent_brief(
             ));
         }
     }
+    // Charger les règles AGENTS.md (fichier à la racine ou fallback)
+    let agents_md_path = resolve_project_agents_md_path(&p);
+    let rules_content = match agents_md_path {
+        Some(ref path) if path.is_file() => fs::read_to_string(path).ok(),
+        _ => None,
+    };
+
+    if let Some(rules) = rules_content {
+        lines.push("\n--- RÈGLES & DIRECTIVES DU PROJET (AGENTS.md) ---".into());
+        lines.push(rules);
+        lines.push("--- FIN DES RÈGLES PROJET ---\n".into());
+    } else {
+        lines.push(format!("\n--- DIRECTIVES PAR DÉFAUT ---\n{}\n--- FIN DIRECTIVES ---\n", default_project_rules_template(&p.name)));
+    }
+
     lines.push(
-        "Utilise ces infos comme base. Pour approfondir : get_project, github_list_prs, \
-         github_workflow_runs, get_deployment_logs, list_env_vars."
+        "Utilise ces infos comme base. Respecte impérativement les règles du projet énoncées ci-dessus. \
+         Pour approfondir : get_project, github_list_prs, github_workflow_runs, get_deployment_logs, list_env_vars."
             .into(),
     );
 

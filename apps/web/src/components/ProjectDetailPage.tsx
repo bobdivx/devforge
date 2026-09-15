@@ -10,6 +10,8 @@ import { ProjectAgentsPanel } from './ProjectAgentsPanel';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
 import { ProjectGitPanel } from './ProjectGitPanel';
 import { ProjectWorkspace } from './ProjectWorkspace';
+import { ProjectRulesModal } from './workspace/ProjectRulesModal';
+import { FileCode } from 'lucide-preact';
 import {
   Alert,
   Badge,
@@ -101,6 +103,7 @@ export function ProjectDetailPage(props: Props) {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [rulesModalOpen, setRulesModalOpen] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -136,6 +139,15 @@ export function ProjectDetailPage(props: Props) {
       actions={
         tab === 'overview' && project ? (
           <div class="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setRulesModalOpen(true)}
+              class="gap-1.5"
+            >
+              <FileCode size={14} />
+              <span>Directives AGENTS.md</span>
+            </Button>
             {project.production_url && (
               <Button size="sm" variant="outline" href={project.production_url} target="_blank">
                 Ouvrir l’app
@@ -218,6 +230,12 @@ export function ProjectDetailPage(props: Props) {
           <p class="text-sm text-[var(--color-ink-muted)]">Chargement…</p>
         </Card>
       )}
+      <ProjectRulesModal
+        open={rulesModalOpen}
+        onClose={() => setRulesModalOpen(false)}
+        projectUuid={uuid}
+        projectName={project?.name}
+      />
     </AppShell>
   );
 }
