@@ -128,11 +128,13 @@ export function UpdatePage() {
         check?.latest ? { target_version: check.latest } : undefined,
       );
       setJob(r.data);
-      toast.push({ title: 'Mise à jour lancée', detail: `→ ${r.data.target_version}`, tone: 'info' });
+      const path =
+        r.data.wait_path ||
+        `/app/update/wait?job=${encodeURIComponent(r.data.id)}&to=${encodeURIComponent(r.data.target_version)}`;
+      window.location.href = path;
     } catch (e: unknown) {
       setError(String((e as Error).message || e));
       toast.push({ title: 'Impossible de démarrer', detail: String(e), tone: 'danger' });
-    } finally {
       setBusy(false);
     }
   }
