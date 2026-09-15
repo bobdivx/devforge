@@ -321,6 +321,7 @@ mod tests {
             publish_directory: None,
             base_directory: "/".into(),
             docker_compose_location: None,
+            auto_deploy: 1,
             created_at: "".into(),
             updated_at: "".into(),
         }

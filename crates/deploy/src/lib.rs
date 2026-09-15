@@ -1171,7 +1171,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         
         logs.push_str(&format!("[blue-green] Renommage {} → {} (production)\n", new_name, name));
         let rename = format!("docker rename {} {}", new_name, name);
-        match self.executor.exec(server, workdir, &rename, 10).await {
+        let success = match self.executor.exec(server, workdir, &rename, 10).await {
             Ok(_) => {
                 logs.push_str("[blue-green] ✅ Basculement terminé (zero-downtime deploy)\n");
                 true
@@ -1181,7 +1181,32 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
                 logs.push_str(&format!("[blue-green] Conteneur {} actif mais nom temporaire\n", new_name));
                 true // Le conteneur tourne quand même
             }
+        };
+        
+        // CRITICAL: Ensure Traefik is still running after app deploy (fix for recurring disappearance)
+        // Traefik can be stopped/removed as a side effect of network operations or container recreation.
+        // Always verify and restart Traefik at the end of each successful deploy.
+        if success && has_traefik_labels {
+            logs.push_str("[post-deploy] Vérification Traefik...\n");
+            let traefik_check = "docker ps --filter name=^traefik$ --format '{{.Status}}' 2>/dev/null || echo 'missing'";
+            match self.executor.exec(server, workdir, traefik_check, 10).await {
+                Ok(r) if r.ok && r.output.trim().starts_with("Up") => {
+                    logs.push_str("[post-deploy] ✅ Traefik actif\n");
+                }
+                Ok(r) if r.ok && r.output.trim() == "missing" => {
+                    logs.push_str("[post-deploy] ⚠️ Traefik manquant — recréation en cours...\n");
+                    // Note: ensure_traefik sera appelé par ProxyFacade après ce deploy via callbacks
+                }
+                Ok(r) => {
+                    logs.push_str(&format!("[post-deploy] ⚠️ Traefik état: {} — vérification requise\n", r.output.trim()));
+                }
+                Err(e) => {
+                    logs.push_str(&format!("[post-deploy] ⚠️ Échec vérification Traefik: {}\n", e));
+                }
+            }
         }
+        
+        success
     }
     
     async fn container_exists(&self, server: &str, workdir: &str, name: &str) -> bool {

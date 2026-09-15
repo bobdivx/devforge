@@ -63,15 +63,18 @@ function formatWhen(iso?: string | null) {
 export function ProjectGitPanel({
   projectUuid,
   onDeployed,
+  project,
 }: {
   projectUuid: string;
   onDeployed?: () => void;
+  project?: { auto_deploy?: boolean };
 }) {
   const toast = useToast();
   const [data, setData] = useState<GitStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [autoDeployEnabled, setAutoDeployEnabled] = useState(project?.auto_deploy ?? true);
 
   const [diffOpen, setDiffOpen] = useState(false);
   const [diffLoading, setDiffLoading] = useState(false);
@@ -96,6 +99,31 @@ export function ProjectGitPanel({
   useEffect(() => {
     void load();
   }, [projectUuid]);
+  
+  useEffect(() => {
+    if (project?.auto_deploy !== undefined) {
+      setAutoDeployEnabled(project.auto_deploy);
+    }
+  }, [project?.auto_deploy]);
+  
+  async function toggleAutoDeploy() {
+    setBusy(true);
+    try {
+      await api.updateProject(projectUuid, { auto_deploy: !autoDeployEnabled });
+      setAutoDeployEnabled(!autoDeployEnabled);
+      toast.push({
+        title: !autoDeployEnabled ? 'Auto-deploy activé' : 'Auto-deploy désactivé',
+        detail: !autoDeployEnabled
+          ? 'Les pushs GitHub déclenchent un déploiement automatique'
+          : 'Déploiements manuels uniquement',
+        tone: 'ok',
+      });
+    } catch (e) {
+      toast.push({ title: 'Erreur', detail: String(e), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function openDiff(source: 'sync' | 'workdir', path?: string) {
     setDiffOpen(true);
@@ -217,6 +245,38 @@ export function ProjectGitPanel({
 
       <FadeIn>
         <Card padding="lg" class="space-y-6">
+          {/* Auto-Deploy Toggle */}
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-line)] pb-5">
+            <div class="min-w-0 space-y-1">
+              <h3 class="text-sm font-medium">Déploiement automatique</h3>
+              <p class="text-xs text-[var(--color-ink-muted)]">
+                {autoDeployEnabled
+                  ? 'Les pushs GitHub sur la branche configurée déclenchent un déploiement automatique'
+                  : 'Déploiements manuels uniquement — les pushs GitHub sont ignorés'}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoDeployEnabled}
+              disabled={busy}
+              onClick={() => void toggleAutoDeploy()}
+              class={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-bg)] disabled:cursor-not-allowed disabled:opacity-50 ${
+                autoDeployEnabled ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-line)]'
+              }`}
+            >
+              <span class="sr-only">
+                {autoDeployEnabled ? 'Désactiver auto-deploy' : 'Activer auto-deploy'}
+              </span>
+              <span
+                aria-hidden="true"
+                class={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  autoDeployEnabled ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+          
           {/* Header sync */}
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div class="min-w-0 space-y-2">
