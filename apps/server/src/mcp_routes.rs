@@ -534,11 +534,11 @@ async fn link_project_resource(
     let token = server
         .secrets
         .get("api_token")
-        .ok_or_else(|| ApiError::message("Turso api_token manquant"))?;
+        .ok_or_else(|| ApiError::message("Turso: Platform API Token (api_token) requis pour lier des bases de données.\n→ OAuth seul ne suffit pas pour cette opération.\n→ Va dans MCP → Turso → Avancé pour configurer api_token et org."))?;
     let org = server
         .meta
         .get("org")
-        .ok_or_else(|| ApiError::message("Turso org manquant"))?;
+        .ok_or_else(|| ApiError::message("Turso: Organization slug (org) requis pour lier des bases de données.\n→ Va dans MCP → Turso → Avancé pour configurer api_token et org."))?;
     let db_name = body
         .resource_name
         .clone()

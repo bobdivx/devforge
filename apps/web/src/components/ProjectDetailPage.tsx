@@ -1115,6 +1115,25 @@ function DatabaseManager({ uuid }: { uuid: string }) {
         </p>
       )}
 
+      {servers.length > 0 && servers.every(s => !s.has_secrets || !s.meta?.org) && (
+        <Alert tone="info" class="mb-4 text-xs">
+          <p class="font-medium">Configuration requise pour lier des bases</p>
+          <p class="mt-1 text-[var(--color-ink-muted)]">
+            Pour lier une base Turso, tu dois configurer le <strong>Platform API Token</strong> (api_token) 
+            et l'<strong>organization slug</strong> (org) dans la section Avancé de ta connexion MCP Turso.
+            OAuth seul ne suffit pas pour cette opération.
+          </p>
+          <Button
+            size="sm"
+            variant="secondary"
+            href="/app/mcp"
+            class="mt-2"
+          >
+            Configurer dans MCP
+          </Button>
+        </Alert>
+      )}
+
       <div class="flex flex-wrap gap-2">
         {servers.length > 0 ? (
           <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
@@ -1160,7 +1179,19 @@ function DatabaseManager({ uuid }: { uuid: string }) {
         <div>
           {listError && (
             <Alert tone="warn" class="mb-3">
-              {listError}
+              <div class="space-y-2">
+                <div class="whitespace-pre-wrap text-sm">{listError}</div>
+                {(listError.includes('api_token') || listError.includes('org requis') || listError.includes('Platform API')) && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    href="/app/mcp"
+                    class="mt-2"
+                  >
+                    Configurer Turso MCP
+                  </Button>
+                )}
+              </div>
             </Alert>
           )}
           {busy && dbs.length === 0 && !listError ? (
