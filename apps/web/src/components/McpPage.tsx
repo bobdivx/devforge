@@ -164,13 +164,14 @@ function ServerCard({
 }) {
   const toolsChecked = toolsOk !== undefined;
   const status = statusMeta(server, toolsChecked, toolsOk);
+  
+  // Afficher meta utiles (org, project_ref, team_id, host, etc.) mais jamais l'URL hostname
   const detail =
     server.meta?.org ||
-    (server.url
-      ? server.url.replace(/^https?:\/\//, '').split('/')[0]
-      : server.has_secrets
-        ? 'Secrets configurés'
-        : 'API');
+    server.meta?.project_ref ||
+    server.meta?.team_id ||
+    server.meta?.host ||
+    (server.has_secrets ? 'Secrets configurés' : undefined);
 
   return (
     <HubTile
@@ -202,9 +203,11 @@ function ServerCard({
           >
             {status.label}
           </div>
-          <div class="truncate text-[10px] text-[var(--color-ink-faint)]" title={detail}>
-            {detail}
-          </div>
+          {detail && (
+            <div class="truncate text-[10px] text-[var(--color-ink-faint)]" title={detail}>
+              {detail}
+            </div>
+          )}
         </div>
       }
     />
@@ -257,7 +260,6 @@ export function McpPage() {
   const [toolsError, setToolsError] = useState<string | null>(null);
   const [toolsLoading, setToolsLoading] = useState(false);
   const [toolsStatusMap, setToolsStatusMap] = useState<Record<string, boolean>>({});
-  const [showAdvancedToken, setShowAdvancedToken] = useState(false);
 
   async function load() {
     try {
@@ -279,7 +281,6 @@ export function McpPage() {
   function openPreset(p: CatalogItem) {
     setPickerOpen(false);
     setPreset(p);
-    setShowAdvancedToken(false); // Reset toggle
     const init: Record<string, string> = {};
     for (const f of p.fields) {
       if (f.key === 'url' && p.default_url) init.url = p.default_url;
@@ -521,209 +522,227 @@ export function McpPage() {
               >
                 Retour
               </Button>
-              <Button type="submit" form="mcp-preset-form" variant="secondary" disabled={busy}>
-                {busy ? 'Enregistrement…' : 'Connecter'}
-              </Button>
+              {/* Pour OAuth, on cache le bouton Connecter standard */}
+              {preset.auth_mode !== 'oauth' && (
+                <Button type="submit" form="mcp-preset-form" variant="secondary" disabled={busy}>
+                  {busy ? 'Enregistrement…' : 'Connecter'}
+                </Button>
+              )}
             </>
           ) : null
         }
       >
         {preset && (
-          <form id="mcp-preset-form" class="space-y-3" onSubmit={submit}>
-            <div class="mb-1 flex items-center gap-3">
+          <form id="mcp-preset-form" class="space-y-4" onSubmit={submit}>
+            {/* Icône + catégorie */}
+            <div class="mb-3 flex items-center gap-3">
               <McpIcon id={preset.id} name={preset.name} />
               <span class="text-sm text-[var(--color-ink-muted)]">{preset.category}</span>
             </div>
-            {(preset.setup_intro ||
-              (preset.setup_sections && preset.setup_sections.length > 0)) && (
-              <Alert tone="info" class="space-y-0 text-xs leading-relaxed">
-                {preset.setup_intro && (
-                  <p class="pb-2.5 text-[var(--color-ink-muted)]">{preset.setup_intro}</p>
-                )}
-                <div class="divide-y divide-[var(--color-border)]/60">
-                  {preset.setup_sections?.map((sec) => (
-                    <div key={sec.title} class="py-2.5 first:pt-0 last:pb-0">
-                      <p class="font-medium text-[var(--color-ink)]">{sec.title}</p>
-                      <p class="mt-0.5 whitespace-pre-wrap font-mono text-[11px] text-[var(--color-ink-muted)]">
-                        {sec.body}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </Alert>
+
+            {/* Intro courte si OAuth */}
+            {preset.auth_mode === 'oauth' && preset.setup_intro && (
+              <p class="text-xs text-[var(--color-ink-muted)]">{preset.setup_intro}</p>
             )}
+
+            {/* CTA OAuth principal — uniquement pour auth_mode=oauth */}
             {preset.auth_mode === 'oauth' && (
-              <Alert tone="info" class="space-y-2 text-xs">
-                <p class="font-medium">✨ Connexion OAuth disponible</p>
-                <p class="text-[var(--color-ink-muted)]">
-                  Ce serveur MCP supporte OAuth. Tu peux te connecter directement sans saisir de tokens.
-                </p>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  class="mt-2 w-full"
-                  disabled={busy}
-                  onClick={async () => {
-                    try {
-                      setBusy(true);
-                      const minimal: Record<string, string> = {};
-                      for (const f of preset.fields) {
-                        if (f.key === 'url' && preset.default_url) {
-                          minimal.url = preset.default_url;
-                        } else if (!f.secret && fields[f.key]?.trim()) {
-                          // Garder champs non-secrets remplis (org, project_ref, etc)
-                          minimal[f.key] = fields[f.key];
-                        } else {
-                          minimal[f.key] = '';
-                        }
+              <Button
+                type="button"
+                variant="primary"
+                class="w-full"
+                disabled={busy}
+                onClick={async () => {
+                  try {
+                    setBusy(true);
+                    const minimal: Record<string, string> = {};
+                    for (const f of preset.fields) {
+                      if (f.key === 'url' && preset.default_url) {
+                        minimal.url = preset.default_url;
+                      } else if (!f.secret && fields[f.key]?.trim()) {
+                        minimal[f.key] = fields[f.key];
+                      } else {
+                        minimal[f.key] = '';
                       }
-                      const r = await api.mcpUpsert({
-                        catalog_id: preset.id,
-                        fields: minimal,
-                      });
-                      const serverId = r.data?.id;
-                      if (!serverId) throw new Error('Server ID manquant');
-                      const { auth_url } = await api.mcpOAuthStart(serverId);
-                      const popup = window.open(
-                        auth_url,
-                        'mcp_oauth',
-                        'width=600,height=700,popup=yes,scrollbars=yes',
-                      );
-                      if (!popup) {
-                        // Fallback: redirect en plein écran si popup bloquée
-                        toast.push({
-                          title: 'Popup bloquée, redirection…',
-                          tone: 'info',
-                        });
-                        window.location.assign(auth_url);
-                        return;
-                      }
-                      const handleMessage = (event: MessageEvent) => {
-                        if (event.data?.type === 'mcp_oauth_success') {
-                          window.removeEventListener('message', handleMessage);
-                          toast.push({ title: `${preset.name} connecté via OAuth`, tone: 'ok' });
-                          setPreset(null);
-                          load();
-                        }
-                      };
-                      window.addEventListener('message', handleMessage);
-                    } catch (err) {
-                      toast.push({ title: 'OAuth KO', detail: String(err), tone: 'danger' });
-                    } finally {
-                      setBusy(false);
                     }
-                  }}
-                >
-                  {busy ? 'Connexion OAuth…' : 'Se connecter avec OAuth'}
-                </Button>
-                <p class="text-[10px] text-[var(--color-ink-faint)]">
-                  Ou remplis les champs ci-dessous pour une configuration manuelle (mode avancé).
-                </p>
-              </Alert>
-            )}
-            {(() => {
-              const nonSecretFields = preset.fields.filter((f) => !f.secret);
-              const secretFields = preset.fields.filter((f) => f.secret);
-              const hasSecretFields = secretFields.length > 0;
-
-              return (
-                <>
-                  {/* Champs non-secrets toujours visibles */}
-                  {nonSecretFields.map((f) => (
-                    <div key={f.key}>
-                      <Input
-                        label={f.label}
-                        type="text"
-                        placeholder={f.placeholder || ''}
-                        value={fields[f.key] || ''}
-                        onInput={(e) =>
-                          setFields((prev) => ({
-                            ...prev,
-                            [f.key]: (e.target as HTMLInputElement).value,
-                          }))
-                        }
-                        required={f.required}
-                      />
-                      {f.help && (
-                        <p class="mt-1 text-xs text-[var(--color-ink-faint)]">{f.help}</p>
-                      )}
-                    </div>
-                  ))}
-
-                  {/* Toggle Mode avancé pour OAuth presets avec secrets */}
-                  {preset.auth_mode === 'oauth' && hasSecretFields && (
-                    <div class="space-y-2">
-                      <button
-                        type="button"
-                        class="text-xs text-[var(--color-accent)] underline"
-                        onClick={() => setShowAdvancedToken(!showAdvancedToken)}
-                      >
-                        {showAdvancedToken ? '▼' : '▶'} Mode avancé (token API / CI)
-                      </button>
-                      {showAdvancedToken && (
-                        <Alert tone="neutral" class="space-y-2 text-xs">
-                          <p class="text-[var(--color-ink-muted)]">
-                            Pour CI/CD ou usage sans OAuth. Non requis pour usage interactif.
-                          </p>
-                          {secretFields.map((f) => (
-                            <div key={f.key}>
-                              <Input
-                                label={f.label}
-                                type="password"
-                                placeholder={f.placeholder || ''}
-                                value={fields[f.key] || ''}
-                                onInput={(e) =>
-                                  setFields((prev) => ({
-                                    ...prev,
-                                    [f.key]: (e.target as HTMLInputElement).value,
-                                  }))
-                                }
-                                required={false}
-                              />
-                              {f.help && (
-                                <p class="mt-1 text-[10px] text-[var(--color-ink-faint)]">{f.help}</p>
-                              )}
-                            </div>
-                          ))}
-                        </Alert>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Pour non-OAuth : montrer tous les champs normalement */}
-                  {preset.auth_mode !== 'oauth' &&
-                    secretFields.map((f) => (
-                      <div key={f.key}>
-                        <Input
-                          label={f.label}
-                          type="password"
-                          placeholder={f.placeholder || ''}
-                          value={fields[f.key] || ''}
-                          onInput={(e) =>
-                            setFields((prev) => ({
-                              ...prev,
-                              [f.key]: (e.target as HTMLInputElement).value,
-                            }))
-                          }
-                          required={f.required}
-                        />
-                        {f.help && (
-                          <p class="mt-1 text-xs text-[var(--color-ink-faint)]">{f.help}</p>
-                        )}
-                      </div>
-                    ))}
-                </>
-              );
-            })()}
-            {preset.docs_url && (
-              <a
-                class="block text-xs text-[var(--color-accent)] underline"
-                href={preset.docs_url}
-                target="_blank"
-                rel="noreferrer"
+                    const r = await api.mcpUpsert({
+                      catalog_id: preset.id,
+                      fields: minimal,
+                    });
+                    const serverId = r.data?.id;
+                    if (!serverId) throw new Error('Server ID manquant');
+                    const { auth_url } = await api.mcpOAuthStart(serverId);
+                    const popup = window.open(
+                      auth_url,
+                      'mcp_oauth',
+                      'width=600,height=700,popup=yes,scrollbars=yes',
+                    );
+                    if (!popup) {
+                      toast.push({
+                        title: 'Popup bloquée, redirection…',
+                        tone: 'info',
+                      });
+                      window.location.assign(auth_url);
+                      return;
+                    }
+                    const handleMessage = (event: MessageEvent) => {
+                      if (event.data?.type === 'mcp_oauth_success') {
+                        window.removeEventListener('message', handleMessage);
+                        toast.push({ title: `${preset.name} connecté via OAuth`, tone: 'ok' });
+                        setPreset(null);
+                        load();
+                      }
+                    };
+                    window.addEventListener('message', handleMessage);
+                  } catch (err) {
+                    toast.push({ title: 'OAuth KO', detail: String(err), tone: 'danger' });
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
               >
-                Documentation
-              </a>
+                {busy ? 'Connexion OAuth…' : 'Se connecter avec OAuth'}
+              </Button>
+            )}
+
+            {/* Accordéon « Avancé » pour OAuth presets */}
+            {preset.auth_mode === 'oauth' && (
+              <details class="group rounded-xl border border-[var(--color-line)] overflow-hidden">
+                <summary class="cursor-pointer select-none bg-[var(--color-surface-raised)] px-4 py-3 text-sm font-medium text-[var(--color-ink)] flex items-center justify-between hover:bg-[var(--color-surface-hovered)] transition-colors">
+                  <span>Avancé</span>
+                  <svg
+                    class="h-4 w-4 transition-transform group-open:rotate-180"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M19 9l-7 7-7-7"
+                    />
+                  </svg>
+                </summary>
+                <div class="space-y-3 p-4">
+                  <p class="text-xs text-[var(--color-ink-muted)]">
+                    Configuration manuelle pour CI/CD ou personnalisation.
+                  </p>
+                  {(() => {
+                    const nonSecretFields = preset.fields.filter((f) => !f.secret);
+                    const secretFields = preset.fields.filter((f) => f.secret);
+                    return (
+                      <>
+                        {nonSecretFields.map((f) => (
+                          <div key={f.key}>
+                            <Input
+                              label={f.label}
+                              type="text"
+                              placeholder={f.placeholder || ''}
+                              value={fields[f.key] || ''}
+                              onInput={(e) =>
+                                setFields((prev) => ({
+                                  ...prev,
+                                  [f.key]: (e.target as HTMLInputElement).value,
+                                }))
+                              }
+                              required={f.required}
+                            />
+                            {f.help && (
+                              <p class="mt-1 text-xs text-[var(--color-ink-faint)]">{f.help}</p>
+                            )}
+                          </div>
+                        ))}
+                        {secretFields.map((f) => (
+                          <div key={f.key}>
+                            <Input
+                              label={f.label}
+                              type="password"
+                              placeholder={f.placeholder || ''}
+                              value={fields[f.key] || ''}
+                              onInput={(e) =>
+                                setFields((prev) => ({
+                                  ...prev,
+                                  [f.key]: (e.target as HTMLInputElement).value,
+                                }))
+                              }
+                              required={false}
+                            />
+                            {f.help && (
+                              <p class="mt-1 text-xs text-[var(--color-ink-faint)]">{f.help}</p>
+                            )}
+                          </div>
+                        ))}
+                        <Button type="submit" variant="secondary" class="w-full" disabled={busy}>
+                          {busy ? 'Enregistrement…' : 'Enregistrer sans OAuth'}
+                        </Button>
+                      </>
+                    );
+                  })()}
+                  {preset.docs_url && (
+                    <a
+                      class="block text-xs text-[var(--color-accent)] underline"
+                      href={preset.docs_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Documentation
+                    </a>
+                  )}
+                </div>
+              </details>
+            )}
+
+            {/* Pour non-OAuth : afficher tout normalement avec setup_intro/sections */}
+            {preset.auth_mode !== 'oauth' && (
+              <>
+                {(preset.setup_intro ||
+                  (preset.setup_sections && preset.setup_sections.length > 0)) && (
+                  <Alert tone="info" class="space-y-0 text-xs leading-relaxed">
+                    {preset.setup_intro && (
+                      <p class="pb-2.5 text-[var(--color-ink-muted)]">{preset.setup_intro}</p>
+                    )}
+                    <div class="divide-y divide-[var(--color-border)]/60">
+                      {preset.setup_sections?.map((sec) => (
+                        <div key={sec.title} class="py-2.5 first:pt-0 last:pb-0">
+                          <p class="font-medium text-[var(--color-ink)]">{sec.title}</p>
+                          <p class="mt-0.5 whitespace-pre-wrap font-mono text-[11px] text-[var(--color-ink-muted)]">
+                            {sec.body}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </Alert>
+                )}
+                {preset.fields.map((f) => (
+                  <div key={f.key}>
+                    <Input
+                      label={f.label}
+                      type={f.secret ? 'password' : 'text'}
+                      placeholder={f.placeholder || ''}
+                      value={fields[f.key] || ''}
+                      onInput={(e) =>
+                        setFields((prev) => ({
+                          ...prev,
+                          [f.key]: (e.target as HTMLInputElement).value,
+                        }))
+                      }
+                      required={f.required}
+                    />
+                    {f.help && <p class="mt-1 text-xs text-[var(--color-ink-faint)]">{f.help}</p>}
+                  </div>
+                ))}
+                {preset.docs_url && (
+                  <a
+                    class="block text-xs text-[var(--color-accent)] underline"
+                    href={preset.docs_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Documentation
+                  </a>
+                )}
+              </>
             )}
           </form>
         )}

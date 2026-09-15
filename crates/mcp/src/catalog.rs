@@ -87,12 +87,12 @@ pub fn catalog() -> Vec<CatalogPreset> {
             fields: vec![
                 field(
                     "api_token",
-                    "Platform API Token",
+                    "Platform API Token (optionnel)",
                     true,
-                    true,
+                    false,
                     Some("eyJ…"),
                     Some(
-                        "Turso → Account → API Tokens. Sert uniquement à lister/lier les DBs (resources). Pour appeler les tools MCP, utilise le bouton « Se connecter avec OAuth » dans l'onglet Tools.",
+                        "Turso → Account → API Tokens. Sert uniquement à lister/lier les DBs (resources). OAuth recommandé pour usage interactif.",
                     ),
                 ),
                 field(
@@ -107,7 +107,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
             resource_kind: Some("database".into()),
             popular: true,
             setup_intro: Some(
-                "Le serveur MCP Turso hébergé (mcp.turso.ai) exige OAuth pour accéder aux tools MCP. Le token Platform permet de gérer les ressources (lier des DBs). Après configuration, utilise le bouton OAuth dans l'onglet Tools."
+                "OAuth recommandé — connexion directe avec ton compte Turso."
                     .into(),
             ),
             setup_sections: None,
@@ -162,7 +162,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
             resource_kind: None,
             popular: true,
             setup_intro: Some(
-                "✨ OAuth disponible : Connecte-toi directement avec ton compte Cloudflare. Le token API est optionnel (seulement pour CI/CD)."
+                "OAuth recommandé — connexion directe avec ton compte Cloudflare."
                     .into(),
             ),
             setup_sections: None,
@@ -208,7 +208,10 @@ pub fn catalog() -> Vec<CatalogPreset> {
             ],
             resource_kind: None,
             popular: true,
-        setup_intro: None,
+            setup_intro: Some(
+                "OAuth recommandé — connexion directe avec ton compte Vercel."
+                    .into(),
+            ),
             setup_sections: None,
             tools_help: Some(
                 "Le serveur Vercel hébergé exige OAuth. Clique sur « Se connecter avec OAuth » ci-dessous pour autoriser l'accès aux tools MCP."
@@ -252,7 +255,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
             resource_kind: Some("database".into()),
             popular: true,
             setup_intro: Some(
-                "✨ OAuth disponible : Connecte-toi directement avec ton compte Supabase. Le PAT est optionnel (seulement pour CI)."
+                "OAuth recommandé — connexion directe avec ton compte Supabase."
                     .into(),
             ),
             setup_sections: None,
@@ -290,7 +293,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
             resource_kind: Some("database".into()),
             popular: true,
             setup_intro: Some(
-                "✨ OAuth disponible : Connecte-toi directement avec ton compte Neon. L'API Key est optionnelle (seulement pour CI)."
+                "OAuth recommandé — connexion directe avec ton compte Neon."
                     .into(),
             ),
             setup_sections: None,
@@ -371,7 +374,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
             resource_kind: None,
             popular: true,
             setup_intro: Some(
-                "✨ OAuth disponible : Le MCP Slack officiel hébergé utilise OAuth. Pour self-host, configure un Bot Token Slack."
+                "OAuth recommandé — connexion directe avec ton compte Slack."
                     .into(),
             ),
             setup_sections: None,
@@ -391,11 +394,11 @@ pub fn catalog() -> Vec<CatalogPreset> {
             fields: vec![
                 field(
                     "api_key",
-                    "API Key",
+                    "API Key (optionnel)",
                     true,
-                    true,
+                    false,
                     Some("lin_api_…"),
-                    Some("Linear → Settings → API. Le MCP hébergé peut exiger OAuth."),
+                    Some("Linear → Settings → API. OAuth recommandé pour le MCP hébergé."),
                 ),
                 field(
                     "url",
@@ -408,7 +411,10 @@ pub fn catalog() -> Vec<CatalogPreset> {
             ],
             resource_kind: None,
             popular: true,
-        setup_intro: None,
+            setup_intro: Some(
+                "OAuth recommandé — connexion directe avec ton compte Linear."
+                    .into(),
+            ),
             setup_sections: None,
             tools_help: Some(
                 "Le serveur Linear hébergé exige OAuth. Clique sur « Se connecter avec OAuth » ci-dessous pour autoriser l'accès aux tools MCP."
@@ -444,7 +450,10 @@ pub fn catalog() -> Vec<CatalogPreset> {
             ],
             resource_kind: None,
             popular: true,
-        setup_intro: None,
+            setup_intro: Some(
+                "OAuth recommandé — connexion directe avec ton compte Sentry."
+                    .into(),
+            ),
             setup_sections: None,
             tools_help: Some(
                 "Le serveur Sentry hébergé exige OAuth. Clique sur « Se connecter avec OAuth » ci-dessous pour autoriser l'accès aux tools MCP."
@@ -523,7 +532,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
             resource_kind: None,
             popular: false,
             setup_intro: Some(
-                "✨ OAuth disponible : Connecte-toi directement avec ton compte PostHog. L'API Key est optionnelle (seulement pour CI)."
+                "OAuth recommandé — connexion directe avec ton compte PostHog."
                     .into(),
             ),
             setup_sections: None,
@@ -630,7 +639,10 @@ pub fn catalog() -> Vec<CatalogPreset> {
             ],
             resource_kind: None,
             popular: false,
-        setup_intro: None,
+            setup_intro: Some(
+                "OAuth recommandé — connexion directe avec ton compte Notion."
+                    .into(),
+            ),
             setup_sections: None,
             tools_help: Some(
                 "Le serveur Notion hébergé exige OAuth. Clique sur « Se connecter avec OAuth » ci-dessous pour autoriser l'accès aux tools MCP."
@@ -665,7 +677,10 @@ pub fn catalog() -> Vec<CatalogPreset> {
             ],
             resource_kind: None,
             popular: true,
-        setup_intro: None,
+            setup_intro: Some(
+                "OAuth recommandé — connexion directe avec ton compte Stripe."
+                    .into(),
+            ),
             setup_sections: None,
             tools_help: Some(
                 "Le serveur Stripe hébergé exige OAuth. Clique sur « Se connecter avec OAuth » ci-dessous pour autoriser l'accès aux tools MCP."
@@ -701,7 +716,7 @@ pub fn catalog() -> Vec<CatalogPreset> {
             resource_kind: None,
             popular: false,
             setup_intro: Some(
-                "✨ OAuth disponible : Connecte-toi directement avec ton compte GitHub. Le PAT est optionnel (seulement pour CI ou GitHub Apps custom)."
+                "OAuth recommandé — connexion directe avec ton compte GitHub."
                     .into(),
             ),
             setup_sections: None,
