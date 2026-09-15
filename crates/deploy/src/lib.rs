@@ -259,7 +259,19 @@ fn shell_single_quote(s: &str) -> String {
 }
 
 fn trim_out(s: &str) -> String {
-    s.chars().take(2000).collect()
+    const MAX_TOTAL: usize = 8000;
+    const HEAD_CHARS: usize = 2000;
+    const TAIL_CHARS: usize = 6000;
+    
+    if s.chars().count() <= MAX_TOTAL {
+        return s.to_string();
+    }
+    
+    let head: String = s.chars().take(HEAD_CHARS).collect();
+    let tail: String = s.chars().rev().take(TAIL_CHARS).collect::<Vec<_>>()
+        .into_iter().rev().collect();
+    
+    format!("{}\n…[truncated {} chars]…\n{}", head, s.chars().count() - HEAD_CHARS - TAIL_CHARS, tail)
 }
 
 fn pid_path(build_dir: &str) -> std::path::PathBuf {
@@ -1327,6 +1339,40 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trim_out_keeps_short_output() {
+        let short = "a".repeat(1000);
+        let result = trim_out(&short);
+        assert_eq!(result, short);
+        assert_eq!(result.len(), 1000);
+    }
+
+    #[test]
+    fn trim_out_preserves_head_and_tail() {
+        let long = format!("{}MIDDLE{}", "A".repeat(2000), "Z".repeat(6000));
+        let result = trim_out(&long);
+        
+        assert!(result.starts_with("AAAA"));
+        assert!(result.ends_with("ZZZZ"));
+        assert!(result.contains("…[truncated"));
+        assert!(result.contains("chars]…"));
+        
+        let truncated_msg_count = result.matches("…[truncated").count();
+        assert_eq!(truncated_msg_count, 1);
+    }
+
+    #[test]
+    fn trim_out_shows_accurate_truncation_count() {
+        let head = "A".repeat(2000);
+        let middle = "M".repeat(5000);
+        let tail = "Z".repeat(6000);
+        let full = format!("{}{}{}", head, middle, tail);
+        
+        let result = trim_out(&full);
+        
+        assert!(result.contains("5000 chars"));
+    }
 
     #[tokio::test]
     async fn requires_workdir() {
