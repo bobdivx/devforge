@@ -29,6 +29,7 @@ export function ProjectsListPage() {
   const [busy, setBusy] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [mode, setMode] = useState<Mode>('github');
+  const [loading, setLoading] = useState(true);
   const toast = useToast();
 
   async function load() {
@@ -37,13 +38,76 @@ export function ProjectsListPage() {
       setProjects(r.data);
       setError(null);
     } catch (e: unknown) {
-      setError(String((e as Error).message || e));
+      // Soft-fail: ne pas écraser les projets existants en cas d'erreur pendant le polling
+      if (projects.length === 0) {
+        setError(String((e as Error).message || e));
+      }
+    } finally {
+      if (loading) {
+        setLoading(false);
+      }
     }
   }
 
+  // Chargement initial
   useEffect(() => {
     load();
   }, []);
+
+  // Polling automatique avec gestion de la visibilité
+  useEffect(() => {
+    // Même logique de polling adaptative que HomePage
+    const shouldPollFast = projects.some(
+      (p) =>
+        ['deploying', 'building', 'queued'].includes(p.status) ||
+        ['behind', 'deploying', 'error'].includes(p.sync?.state || ''),
+    );
+    const interval = shouldPollFast ? 7000 : 17000;
+
+    if (loading) return;
+
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let isVisible = !document.hidden;
+
+    const handleVisibilityChange = () => {
+      const wasVisible = isVisible;
+      isVisible = !document.hidden;
+
+      if (!wasVisible && isVisible) {
+        load();
+        startPolling();
+      } else if (wasVisible && !isVisible) {
+        stopPolling();
+      }
+    };
+
+    const startPolling = () => {
+      stopPolling();
+      if (isVisible) {
+        timer = setInterval(() => {
+          load();
+        }, interval);
+      }
+    };
+
+    const stopPolling = () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    if (isVisible) {
+      startPolling();
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [loading, projects]);
 
   function openModal(next: Mode = 'github') {
     setMode(next);

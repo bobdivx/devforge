@@ -69,13 +69,90 @@ export function HomePage() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardMode, setWizardMode] = useState<'choice' | 'github' | 'builder'>('choice');
 
+  // Fonction pour charger les projets
+  async function loadProjects() {
+    try {
+      const r = await api.projects();
+      setProjects(r.data);
+      setError(null);
+    } catch (e: unknown) {
+      // Soft-fail: ne pas écraser les projets existants en cas d'erreur pendant le polling
+      if (projects.length === 0) {
+        setError(String((e as Error).message || e));
+      }
+    } finally {
+      if (loading) {
+        setLoading(false);
+      }
+    }
+  }
+
+  // Chargement initial
   useEffect(() => {
-    api
-      .projects()
-      .then((r) => setProjects(r.data))
-      .catch((e) => setError(String(e.message || e)))
-      .finally(() => setLoading(false));
+    loadProjects();
   }, []);
+
+  // Polling automatique avec gestion de la visibilité
+  useEffect(() => {
+    // Détermine l'intervalle de polling en fonction de l'état des projets
+    // 5-8s si un projet est en déploiement/building/queued ou sync behind/deploying/error
+    // 15-20s sinon
+    const shouldPollFast = projects.some(
+      (p) =>
+        ['deploying', 'building', 'queued'].includes(p.status) ||
+        ['behind', 'deploying', 'error'].includes(p.sync?.state || ''),
+    );
+    const interval = shouldPollFast ? 7000 : 17000; // 7s ou 17s (milieux des plages demandées)
+
+    // Ne démarre pas le polling immédiatement si on est en loading initial
+    if (loading) return;
+
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let isVisible = !document.hidden;
+
+    const handleVisibilityChange = () => {
+      const wasVisible = isVisible;
+      isVisible = !document.hidden;
+
+      if (!wasVisible && isVisible) {
+        // On redevient visible : charge immédiatement et redémarre le timer
+        loadProjects();
+        startPolling();
+      } else if (wasVisible && !isVisible) {
+        // On devient caché : arrête le polling
+        stopPolling();
+      }
+    };
+
+    const startPolling = () => {
+      stopPolling();
+      if (isVisible) {
+        timer = setInterval(() => {
+          loadProjects();
+        }, interval);
+      }
+    };
+
+    const stopPolling = () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    // Démarre le polling si visible
+    if (isVisible) {
+      startPolling();
+    }
+
+    // Écoute les changements de visibilité
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [loading, projects]);
 
   function openWizard() {
     setWizardMode('choice');
