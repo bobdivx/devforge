@@ -112,7 +112,6 @@ function ClusterInner() {
   const [addOpen, setAddOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [ttlHours, setTtlHours] = useState('24');
 
   const [name, setName] = useState('');
   const [host, setHost] = useState('');
@@ -198,8 +197,7 @@ function ClusterInner() {
     try {
       const b = await api.bootstrap();
       const leaderUrl = (b.settings.instance_url || '').trim() || window.location.origin;
-      const ttl = Number(ttlHours) || 24;
-      const r = await api.clusterCreateInvite({ leader_url: leaderUrl, ttl_hours: ttl });
+      const r = await api.clusterCreateInvite({ leader_url: leaderUrl });
       setInvite(r.invite);
       setInviteOpen(true);
       await load();
@@ -403,24 +401,15 @@ function ClusterInner() {
       )}
 
       <div class="mt-8">
-        <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h2 class="text-sm font-medium">Invitations</h2>
-          <div class="flex items-end gap-2">
-            <div class="w-24">
-              <Input
-                label="TTL (h)"
-                type="number"
-                min="1"
-                value={ttlHours}
-                onInput={(e) => setTtlHours((e.target as HTMLInputElement).value)}
-              />
-            </div>
+          <div class="flex items-center gap-3">
             <Button size="sm" variant="secondary" disabled={busy} onClick={createInvite}>
               Nouvelle
             </Button>
             <button
               type="button"
-              class="mb-1 text-xs text-[var(--color-ink-muted)] hover:underline"
+              class="text-xs text-[var(--color-ink-muted)] hover:underline"
               onClick={() => setAddOpen(true)}
             >
               SSH
