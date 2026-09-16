@@ -255,6 +255,7 @@ async fn create_invite(
             "id": invite.id,
             "token": invite.token,
             "leader_url": invite.leader_url,
+            "code": devforge_cluster::format_join_code(&invite.leader_url, &invite.token),
             "expires_at": invite.expires_at,
         }
     })))
@@ -341,6 +342,7 @@ async fn local_state(State(state): State<AppState>) -> Result<Json<Value>, (Stat
 
 #[derive(Deserialize)]
 struct LocalJoinBody {
+    #[serde(default)]
     leader_url: String,
     token: String,
     #[serde(default)]
@@ -392,10 +394,18 @@ async fn local_join(
         instance_url(&state).await
     };
 
-    let client = LeaderClient::new(&body.leader_url);
+    let (leader_url, token) =
+        devforge_cluster::parse_join_invite(&body.token, &body.leader_url).map_err(|msg| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": msg})),
+            )
+        })?;
+
+    let client = LeaderClient::new(&leader_url);
     let joined = client
         .join(&JoinRequest {
-            token: body.token,
+            token,
             name: name.clone(),
             advertise_url: advertise_url.clone(),
             os: std::env::consts::OS.into(),

@@ -17,8 +17,8 @@ Le leader s’enregistre tout seul (`id = default`).
 
 Page **Cluster** (`/app/cluster`, admin d’instance) :
 
-1. **Invitation** — génère URL + token (TTL par défaut en heures, minimum 1 h). À coller sur l’autre machine (login setup ou onboarding).
-2. **Ajouter via SSH** — host, user (`root`), port. DevForge pousse un script de bootstrap (image Docker + fichier pending-join). La clé SSH de **Settings → Serveur** est utilisée. Docker doit exister sur la cible.
+1. **Inviter un nœud** — génère **un code** (`dfjoin_…@https://ton-leader`). TTL 24 h. Colle-le sur l’autre machine (premier écran → Rejoindre). Nom du nœud, URL, heartbeat : automatiques.
+2. **Via SSH** (avancé) — host, user, port. DevForge pousse le bootstrap. Clé SSH de Settings → Serveur.
 
 Les nœuds en cours d’enrôlement apparaissent en statut **joining**. Un second join avec le même nom / URL / SSH **réutilise** le placeholder (pas de doublon).
 
@@ -34,9 +34,9 @@ Si le **leader** tombe : pas d’élection v1. L’UI/API disparaissent. Les app
 
 ## Rejoindre depuis une machine neuve
 
-Voir [[Premier-demarrage]]. Formulaire : URL du leader, token, nom optionnel.
+Voir [[Premier-demarrage]]. Un seul champ : le code d’invitation.
 
-Côté API locale : `POST /api/v1/cluster/local` `{ leader_url, token, name? }`.
+Côté API locale : `POST /api/v1/cluster/local` `{ token }` (le token peut être le code complet `dfjoin_…@https://leader`).
 
 Après succès : rôle persisté dans SQLite (`cluster_local`), heartbeat démarré, UI worker.
 

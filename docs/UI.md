@@ -22,7 +22,7 @@ Référence : [Plasma](https://tailkits.com/templates/plasma/) — dark épuré,
 | `/app` | Accueil + charts |
 | `/app/projects` | Liste + **wizard GitHub** (repo → branch → **detect** → build → runtime) |
 | `/app/runners` | Runners GitHub self-hosted |
-| `/app/cluster` | Nœuds DevForge (admin) : invitations, drain, métriques, apps, diagnostic, sauvegarde leader |
+| `/app/cluster` | Nœuds DevForge (admin) : code d’invitation, drain, métriques, apps, diagnostic, sauvegarde leader |
 | `/app/node` | Statut worker (instance enrôlée) |
 | `/app/projects/view` | Détail : env (**lien Turso**), domaines, settings, deploy |
 | `/app/projects/view` | Overview, deployments, agents, env (**import .env**), domains, **settings**, backups |

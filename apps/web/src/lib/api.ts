@@ -1401,7 +1401,7 @@ export const api = {
   clusterCreateInvite: (body?: { leader_url?: string; ttl_hours?: number }) =>
     request<{
       ok: boolean;
-      invite: { id: string; token: string; leader_url: string; expires_at: string };
+      invite: { id: string; token: string; leader_url: string; code?: string; expires_at: string };
     }>('/cluster/invites', {
       method: 'POST',
       body: JSON.stringify(body ?? {}),
@@ -1418,8 +1418,8 @@ export const api = {
       metrics?: ClusterNodeMetrics;
     }>('/cluster/local'),
   clusterJoinLocal: (body: {
-    leader_url: string;
     token: string;
+    leader_url?: string;
     name?: string;
     advertise_url?: string;
   }) =>

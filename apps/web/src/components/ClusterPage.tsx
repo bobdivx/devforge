@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, type ClusterInvite, type ClusterNode } from '../lib/api';
+import { formatJoinCode } from '../lib/cluster-invite';
 import { AppShell } from './AppShell';
 import {
   Alert,
@@ -130,6 +131,7 @@ function ClusterInner() {
   const [invite, setInvite] = useState<{
     token: string;
     leader_url: string;
+    code?: string;
     expires_at: string;
   } | null>(null);
 
@@ -334,10 +336,10 @@ function ClusterInner() {
     <AppShell
       active="cluster"
       title="Cluster"
-      description="Nœuds, invitations, drain, apps et diagnostic."
+      description="Inviter un nœud = un code à coller. SSH reste en option."
       actions={
         <Button size="sm" variant="secondary" disabled={busy} onClick={createInvite}>
-          Invitation
+          Inviter
         </Button>
       }
     >
@@ -346,15 +348,6 @@ function ClusterInner() {
           {error}
         </Alert>
       )}
-
-      <Alert tone="warn" class="mb-4">
-        Le leader porte SQLite et l’UI. S’il tombe, pas d’élection : relance la même machine avec{' '}
-        <code>/data</code>.{' '}
-        <a class="underline" href="/app/settings?tab=backup">
-          Sauvegarder l’instance
-        </a>
-        .
-      </Alert>
 
       <div class="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card padding="sm">
@@ -405,7 +398,7 @@ function ClusterInner() {
               />
             );
           })}
-          <HubAddTile index={nodes.length} label="Ajouter un nœud" onClick={() => setAddOpen(true)} />
+          <HubAddTile index={nodes.length} label="Inviter un nœud" onClick={createInvite} />
         </HubGrid>
       )}
 
@@ -425,10 +418,20 @@ function ClusterInner() {
             <Button size="sm" variant="secondary" disabled={busy} onClick={createInvite}>
               Nouvelle
             </Button>
+            <button
+              type="button"
+              class="mb-1 text-xs text-[var(--color-ink-muted)] hover:underline"
+              onClick={() => setAddOpen(true)}
+            >
+              SSH
+            </button>
           </div>
         </div>
         {invites.length === 0 ? (
-          <p class="text-sm text-[var(--color-ink-muted)]">Aucune invitation. Génère-en une pour enrôler une machine.</p>
+          <p class="text-sm text-[var(--color-ink-muted)]">
+            Aucune invitation. Clique <strong>Inviter un nœud</strong> : tu copies un code, tu le colles
+            sur l’autre machine.
+          </p>
         ) : (
           <Table headers={['ID', 'Créée', 'Expire', 'État', 'Actions']}>
             {invites.map((inv) => {
@@ -458,8 +461,8 @@ function ClusterInner() {
       <Modal
         open={addOpen}
         onClose={() => setAddOpen(false)}
-        title="Ajouter un nœud"
-        description="DevForge se connecte en SSH, installe le worker et l’enrôle. Pas de variables d’environnement à coller."
+        title="Enrôler via SSH"
+        description="Optionnel. Le chemin simple, c’est une invitation (code unique) collée sur l’autre machine."
         size="md"
       >
         <form class="space-y-3" onSubmit={submitAdd}>
@@ -503,25 +506,39 @@ function ClusterInner() {
       <Modal
         open={inviteOpen}
         onClose={() => setInviteOpen(false)}
-        title="Invitation cluster"
-        description="À coller dans l’onboarding de l’autre machine (Créer une instance / Rejoindre un cluster)."
+        title="Invitation"
+        description="Colle ce code sur l’autre machine (premier écran → Rejoindre un cluster). L’URL et le token sont dedans."
         size="md"
       >
         {invite ? (
           <div class="space-y-3">
-            <Input label="URL du leader" value={invite.leader_url} readOnly />
-            <Input label="Token" value={invite.token} readOnly />
+            <Input
+              label="Code d’invitation"
+              value={invite.code || formatJoinCode(invite.leader_url, invite.token)}
+              readOnly
+            />
             <p class="text-xs text-[var(--color-ink-muted)]">
               Expire le {new Date(invite.expires_at).toLocaleString()}
             </p>
-            <div class="flex flex-wrap gap-2">
-              <Button type="button" variant="secondary" onClick={() => copyText('URL', invite.leader_url)}>
-                Copier l’URL
-              </Button>
-              <Button type="button" onClick={() => copyText('Token', invite.token)}>
-                Copier le token
-              </Button>
-            </div>
+            <Button
+              type="button"
+              class="w-full"
+              onClick={() =>
+                copyText('Code', invite.code || formatJoinCode(invite.leader_url, invite.token))
+              }
+            >
+              Copier le code
+            </Button>
+            <button
+              type="button"
+              class="w-full text-center text-sm text-[var(--color-ink-muted)] hover:underline"
+              onClick={() => {
+                setInviteOpen(false);
+                setAddOpen(true);
+              }}
+            >
+              Avancé : enrôler via SSH
+            </button>
           </div>
         ) : (
           <FadeIn>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api } from '../lib/api';
 import type { Bootstrap } from '../lib/auth';
+import { parseJoinCode } from '../lib/cluster-invite';
 import { AuthGate } from './AuthGate';
 import { DockerEngineAlert, type DockerEngineInfo } from './DockerEngineAlert';
 import {
@@ -49,8 +50,7 @@ function OnboardingWizard() {
   const [domain, setDomain] = useState('');
   const [githubToken, setGithubToken] = useState('');
   const [joinMode, setJoinMode] = useState(false);
-  const [leaderUrl, setLeaderUrl] = useState('');
-  const [joinToken, setJoinToken] = useState('');
+  const [joinCode, setJoinCode] = useState('');
   const [docker, setDocker] = useState<DockerEngineInfo | null>(null);
 
   const idx = STEPS.findIndex((s) => s.id === step);
@@ -182,24 +182,14 @@ function OnboardingWizard() {
             <div class="space-y-4">
               <h1 class="text-2xl font-semibold tracking-tight">Rejoindre un cluster</h1>
               <p class="text-sm text-[var(--color-ink-muted)]">
-                Colle l’URL et le token générés sur le leader (page Cluster → Invitation).
+                Colle le code copié sur le leader (Cluster → Inviter un nœud). URL et token sont
+                dedans ; le nom du nœud est pris tout seul.
               </p>
               <Input
-                label="URL du leader"
-                value={leaderUrl}
-                placeholder="http://10.1.0.88:8000"
-                onInput={(e) => setLeaderUrl((e.target as HTMLInputElement).value)}
-              />
-              <Input
-                label="Token"
-                value={joinToken}
-                onInput={(e) => setJoinToken((e.target as HTMLInputElement).value)}
-              />
-              <Input
-                label="Nom de ce nœud"
-                value={nodeName}
-                placeholder="optionnel"
-                onInput={(e) => setNodeName((e.target as HTMLInputElement).value)}
+                label="Code d’invitation"
+                value={joinCode}
+                placeholder="dfjoin_…@https://web.jeser.app"
+                onInput={(e) => setJoinCode((e.target as HTMLInputElement).value)}
               />
               <div class="flex gap-2">
                 <Button variant="ghost" onClick={() => setJoinMode(false)}>
@@ -207,15 +197,19 @@ function OnboardingWizard() {
                 </Button>
                 <Button
                   class="flex-1"
-                  disabled={busy || !leaderUrl.trim() || !joinToken.trim()}
+                  disabled={busy || !joinCode.trim()}
                   onClick={async () => {
+                    const parsed = parseJoinCode(joinCode);
+                    if (!parsed) {
+                      setError('Code invalide — copie-le depuis le leader.');
+                      return;
+                    }
                     setBusy(true);
                     setError(null);
                     try {
                       await api.clusterJoinLocal({
-                        leader_url: leaderUrl.trim(),
-                        token: joinToken.trim(),
-                        name: nodeName.trim() || undefined,
+                        token: joinCode.trim(),
+                        advertise_url: window.location.origin,
                       });
                       toast.push({ title: 'Nœud enrôlé', tone: 'ok' });
                       window.location.href = '/app/node';

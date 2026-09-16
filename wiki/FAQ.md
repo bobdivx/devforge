@@ -10,7 +10,7 @@ Non. v1 = un leader SQLite + workers DevForge (process / Docker). Pas de k8s.
 
 ## Comment ajouter une deuxième machine ?
 
-Leader : Cluster → **Invitation**. Nouvelle install DevForge → **Rejoindre un cluster** (URL + token). Ou **ajouter via SSH** depuis le leader. [[Cluster]]
+Leader : Cluster → **Inviter un nœud** → copier le code. Nouvelle install DevForge → **Rejoindre un cluster** → coller le code. SSH reste une option avancée. [[Cluster]]
 
 ## Les workers ont-ils l’UI complète ?
 
