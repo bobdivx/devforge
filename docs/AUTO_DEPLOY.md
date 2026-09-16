@@ -241,36 +241,14 @@ printenv DEVFORGE_DOCKER_NETWORK
 2. **Polling alternatif** : cron qui check `git ls-remote` toutes les 5min
 3. **Webhooks autres providers** (GitLab, Gitea, etc.)
 
-## Pas de polling actuellement
+## Polling + webhook ensure (corrigé)
 
-**Recherche effectuée** : aucun système de polling/cron pour auto-deploy.
+Depuis le fix auto-deploy :
 
-DevForge s'appuie **uniquement sur webhooks push** pour le déploiement automatique.
-
-Pour ajouter du polling :
-
-```rust
-// crates/deploy/src/sync.rs (nouveau fichier)
-pub struct ProjectSyncWorker {
-    interval: Duration,  // ex: 5 minutes
-}
-
-impl ProjectSyncWorker {
-    pub async fn check_updates(&self, project: &Project) {
-        // git ls-remote origin branch
-        // Compare avec deployed_sha
-        // Si ahead_by > 0 → trigger deploy
-    }
-}
-```
+1. **Poller** (`apps/server/src/auto_deploy.rs`) : toutes les ~90s (`DEVFORGE_AUTO_DEPLOY_POLL_SECS`), compare SHA déployé vs branche GitHub pour les projets `auto_deploy=1`, et déclenche un deploy s'il y a du retard.
+2. **Webhook ensure** : au démarrage / périodiquement / à l'activation du toggle, tente `POST /repos/{owner}/{repo}/hooks` vers `{instance_url}/api/v1/webhooks/github` (nécessite scope `admin:repo_hook` sur le PAT + `instance_url` renseigné).
+3. Les webhooks push restent le chemin temps réel ; le poller est le filet.
 
 ## Conclusion
 
-L'auto-deploy **existe et fonctionne**, mais souffre d'un problème de découvrabilité :
-
-- ✅ **Code backend** : complet et robuste
-- ❌ **Documentation** : absente
-- ❌ **UI** : aucun indicateur ni guide
-- ❌ **Onboarding** : utilisateurs ne savent pas comment l'activer
-
-**Action immédiate** : Ajouter UI de configuration webhook + documentation.
+Cause historique : le toggle `auto_deploy` filtrait seulement les webhooks, sans webhook GitHub ni polling — l'UI montrait des commits « à déployer » sans jamais déployer.

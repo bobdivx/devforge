@@ -1,5 +1,6 @@
 mod db;
 mod actions_routes;
+mod auto_deploy;
 mod auth_routes;
 mod backup_routes;
 mod cron_routes;
@@ -105,6 +106,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let scheduler = state.cron_scheduler.clone();
         tokio::spawn(async move {
             scheduler.run_loop().await;
+        });
+    }
+
+    // Auto-deploy poller: filet si webhook GitHub non configuré sur le repo.
+    {
+        let state_ad = state.clone();
+        tokio::spawn(async move {
+            auto_deploy::run_loop(state_ad).await;
         });
     }
 

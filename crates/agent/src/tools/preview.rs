@@ -128,7 +128,8 @@ impl Tool for StartLocalPreviewTool {
 
         let _ = stop_preview(workdir_path, ctx.port);
 
-        let pid = match spawn_preview(workdir_path, ctx.port, &command) {
+        let pid = match spawn_preview(workdir_path, ctx.port, &command, Some(preview_url.as_str()))
+        {
             Ok(pid) => pid,
             Err(e) => {
                 return Ok(json!({
@@ -674,7 +675,12 @@ fn stop_preview(workdir: &Path, port: u16) -> std::result::Result<(), String> {
     Ok(())
 }
 
-fn spawn_preview(workdir: &Path, port: u16, command: &str) -> std::result::Result<u32, String> {
+fn spawn_preview(
+    workdir: &Path,
+    port: u16,
+    command: &str,
+    preview_url: Option<&str>,
+) -> std::result::Result<u32, String> {
     let out = std::fs::File::create(preview_out_path(workdir)).map_err(|e| e.to_string())?;
     let err = std::fs::File::create(preview_err_path(workdir)).map_err(|e| e.to_string())?;
 
@@ -688,10 +694,15 @@ fn spawn_preview(workdir: &Path, port: u16, command: &str) -> std::result::Resul
         c
     };
 
+    // Vite/Astro bloquent les Host inconnus (DNS rebinding). Autoriser le
+    // sous-domaine atelier Traefik via l’env officielle Vite.
+    let allowed_hosts = vite_allowed_hosts_from_preview_url(preview_url);
+
     cmd.current_dir(workdir)
         .env("HOST", "0.0.0.0")
         .env("PORT", port.to_string())
         .env("BROWSER", "none")
+        .env("__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS", &allowed_hosts)
         .stdin(Stdio::null())
         .stdout(Stdio::from(out))
         .stderr(Stdio::from(err));
@@ -709,6 +720,24 @@ fn spawn_preview(workdir: &Path, port: u16, command: &str) -> std::result::Resul
     std::fs::write(preview_pid_path(workdir), pid.to_string()).map_err(|e| e.to_string())?;
     std::mem::forget(child);
     Ok(pid)
+}
+
+/// Construit la liste d’hôtes Vite : host exact + `.wildcard` (tous les sous-domaines).
+fn vite_allowed_hosts_from_preview_url(preview_url: Option<&str>) -> String {
+    let Some(url) = preview_url else {
+        return String::new();
+    };
+    let Some(host) = host_from_preview_url(url) else {
+        return String::new();
+    };
+    let mut hosts = vec![host.clone()];
+    // `dev-xxxx.jeser.app` → aussi `.jeser.app` (tous les sous-domaines atelier)
+    if let Some((_, base)) = host.split_once('.') {
+        if base.contains('.') {
+            hosts.push(format!(".{base}"));
+        }
+    }
+    hosts.join(",")
 }
 
 async fn port_is_open(port: u16) -> bool {

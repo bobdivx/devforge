@@ -152,6 +152,14 @@ pub struct RepoFile {
     pub html_url: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoWebhook {
+    pub id: u64,
+    pub active: bool,
+    pub events: Vec<String>,
+    pub config_url: Option<String>,
+}
+
 #[async_trait]
 pub trait GitHubClient: Send + Sync {
     async fn current_user(&self) -> Result<GitUser>;
@@ -264,6 +272,18 @@ pub trait GitHubClient: Send + Sync {
         private: bool,
         auto_init: bool,
     ) -> Result<GitRepo>;
+
+    /// Liste les webhooks du dépôt (nécessite `admin:repo_hook` / `write:repo_hook`).
+    async fn list_webhooks(&self, owner: &str, repo: &str) -> Result<Vec<RepoWebhook>>;
+
+    /// Crée un webhook `push` pointant vers `callback_url`.
+    async fn create_push_webhook(
+        &self,
+        owner: &str,
+        repo: &str,
+        callback_url: &str,
+        secret: Option<&str>,
+    ) -> Result<RepoWebhook>;
 }
 
 pub struct StubGitHubClient;
@@ -443,6 +463,24 @@ impl GitHubClient for StubGitHubClient {
         _private: bool,
         _auto_init: bool,
     ) -> Result<GitRepo> {
+        Err(DevForgeError::Message(
+            "GitHub non configuré — connecte un token dans Settings".into(),
+        ))
+    }
+
+    async fn list_webhooks(&self, _owner: &str, _repo: &str) -> Result<Vec<RepoWebhook>> {
+        Err(DevForgeError::Message(
+            "GitHub non configuré — connecte un token dans Settings".into(),
+        ))
+    }
+
+    async fn create_push_webhook(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _callback_url: &str,
+        _secret: Option<&str>,
+    ) -> Result<RepoWebhook> {
         Err(DevForgeError::Message(
             "GitHub non configuré — connecte un token dans Settings".into(),
         ))
@@ -662,6 +700,48 @@ impl GitHubFacade {
         self.client()
             .create_repository(name, description, private, auto_init)
             .await
+    }
+
+    pub async fn list_webhooks(&self, owner: &str, repo: &str) -> Result<Vec<RepoWebhook>> {
+        self.client().list_webhooks(owner, repo).await
+    }
+
+    pub async fn create_push_webhook(
+        &self,
+        owner: &str,
+        repo: &str,
+        callback_url: &str,
+        secret: Option<&str>,
+    ) -> Result<RepoWebhook> {
+        self.client()
+            .create_push_webhook(owner, repo, callback_url, secret)
+            .await
+    }
+
+    /// Assure qu'un webhook `push` existe pour `callback_url`. Retourne `(hook, created)`.
+    pub async fn ensure_push_webhook(
+        &self,
+        owner: &str,
+        repo: &str,
+        callback_url: &str,
+        secret: Option<&str>,
+    ) -> Result<(RepoWebhook, bool)> {
+        let hooks = self.list_webhooks(owner, repo).await?;
+        let normalized = callback_url.trim_end_matches('/');
+        if let Some(existing) = hooks.into_iter().find(|h| {
+            h.config_url
+                .as_deref()
+                .map(|u| u.trim_end_matches('/') == normalized)
+                .unwrap_or(false)
+                && (h.events.is_empty()
+                    || h.events.iter().any(|e| e == "push" || e == "*"))
+        }) {
+            return Ok((existing, false));
+        }
+        let created = self
+            .create_push_webhook(owner, repo, callback_url, secret)
+            .await?;
+        Ok((created, true))
     }
 }
 

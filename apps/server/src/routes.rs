@@ -711,6 +711,16 @@ async fn update_project(
         crate::sso::sync_project_proxy(&state, &project).await;
     }
     let _ = crate::sso::ensure_oidc_env(&state.pool, &project).await;
+
+    // Quand auto-deploy s'active (ou reste on), tenter d'enregistrer le webhook GitHub.
+    if project.auto_deploy != 0 {
+        let state_wh = state.clone();
+        let project_wh = project.clone();
+        tokio::spawn(async move {
+            let _ = crate::auto_deploy::ensure_project_webhook(&state_wh, &project_wh).await;
+        });
+    }
+
     Ok(Json(json!({"data": project})))
 }
 
@@ -1082,7 +1092,10 @@ async fn create_deployment(
     ))
 }
 
-async fn run_real_deploy(state: &AppState, project: &Project) -> devforge_deploy::DeployResult {
+pub(crate) async fn run_real_deploy(
+    state: &AppState,
+    project: &Project,
+) -> devforge_deploy::DeployResult {
     let token: Option<String> =
         sqlx::query_as::<_, (String,)>("SELECT github_token FROM instance_settings WHERE id = 1")
             .fetch_optional(&state.pool)

@@ -1,7 +1,7 @@
 use crate::{
     map_http_err, parse_json_array, require_ok, GitBranch, GitCommit, GitHubClient, GitRelease,
-    GitRepo, GitTag, GitUser, PullRequest, RegistrationToken, RepoFile, RepoRunner, WorkflowJob,
-    WorkflowRun,
+    GitRepo, GitTag, GitUser, PullRequest, RegistrationToken, RepoFile, RepoRunner, RepoWebhook,
+    WorkflowJob, WorkflowRun,
 };
 use async_trait::async_trait;
 use devforge_shared::Result;
@@ -831,6 +831,91 @@ impl GitHubClient for HttpGitHubClient {
                 .get("description")
                 .and_then(|d| d.as_str())
                 .map(str::to_string),
+        })
+    }
+
+    async fn list_webhooks(&self, owner: &str, repo: &str) -> Result<Vec<RepoWebhook>> {
+        let data = self
+            .get(&format!("/repos/{owner}/{repo}/hooks?per_page=100"))
+            .await?;
+        let arr = data.as_array().cloned().unwrap_or_default();
+        Ok(arr
+            .into_iter()
+            .filter_map(|h| {
+                let id = h.get("id")?.as_u64()?;
+                let active = h.get("active").and_then(|v| v.as_bool()).unwrap_or(true);
+                let events = h
+                    .get("events")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|e| e.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let config_url = h
+                    .pointer("/config/url")
+                    .and_then(|u| u.as_str())
+                    .map(str::to_string);
+                Some(RepoWebhook {
+                    id,
+                    active,
+                    events,
+                    config_url,
+                })
+            })
+            .collect())
+    }
+
+    async fn create_push_webhook(
+        &self,
+        owner: &str,
+        repo: &str,
+        callback_url: &str,
+        secret: Option<&str>,
+    ) -> Result<RepoWebhook> {
+        let mut config = serde_json::json!({
+            "url": callback_url,
+            "content_type": "json",
+            "insecure_ssl": "0"
+        });
+        if let Some(s) = secret.filter(|s| !s.trim().is_empty()) {
+            config["secret"] = serde_json::Value::String(s.to_string());
+        }
+        let body = serde_json::json!({
+            "name": "web",
+            "active": true,
+            "events": ["push"],
+            "config": config
+        });
+        let data = self
+            .post_json(&format!("/repos/{owner}/{repo}/hooks"), &body)
+            .await?;
+        let id = data
+            .get("id")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| {
+                devforge_shared::DevForgeError::Message(
+                    "GitHub webhook: réponse sans id".into(),
+                )
+            })?;
+        Ok(RepoWebhook {
+            id,
+            active: data.get("active").and_then(|v| v.as_bool()).unwrap_or(true),
+            events: data
+                .get("events")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|e| e.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_else(|| vec!["push".into()]),
+            config_url: data
+                .pointer("/config/url")
+                .and_then(|u| u.as_str())
+                .map(str::to_string)
+                .or_else(|| Some(callback_url.to_string())),
         })
     }
 }

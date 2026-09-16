@@ -1582,7 +1582,7 @@ async fn github_webhook(
         .bind(project.id)
         .bind(sha.as_deref().unwrap_or("pending"))
         .bind(&message)
-        .bind("[devforge] webhook pushâ€¦\n")
+        .bind("[devforge] webhook push…\n")
         .bind(&now)
         .bind(&now)
         .execute(&state.pool)
@@ -1633,7 +1633,8 @@ async fn github_webhook(
         };
         let result = state.deploy.deploy(&req).await;
         let finished = crate::state::now_str();
-        let status = if result.ok { "ready" } else { "failed" };
+        // Align with manual deploy status so sync/UI treat webhook deploys as success.
+        let status = if result.ok { "success" } else { "failed" };
         let _ = sqlx::query(
             r#"UPDATE deployments SET status = ?, git_sha = ?, logs = ?, finished_at = ?, updated_at = ?
                WHERE uuid = ?"#,

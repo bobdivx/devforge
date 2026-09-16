@@ -251,7 +251,7 @@ export function ProjectGitPanel({
               <h3 class="text-sm font-medium">Déploiement automatique</h3>
               <p class="text-xs text-[var(--color-ink-muted)]">
                 {autoDeployEnabled
-                  ? 'Les pushs GitHub sur la branche configurée déclenchent un déploiement automatique'
+                  ? 'Les nouveaux commits sur la branche configurée déclenchent un déploiement (webhook GitHub + contrôle périodique)'
                   : 'Déploiements manuels uniquement — les pushs GitHub sont ignorés'}
               </p>
             </div>
