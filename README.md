@@ -4,6 +4,8 @@ Plateforme de déploiement moderne, avec agents IA, GitHub et GitHub Actions.
 
 > **Greenfield v2** — monorepo Rust + Astro. Legacy archivé : [`bobdivx/devforge-alpha`](https://github.com/bobdivx/devforge-alpha).
 
+**Wiki** : [manuel produit](https://github.com/bobdivx/devforge/wiki) (source dans [`wiki/`](wiki/)).
+
 ## Structure
 
 ```
@@ -12,7 +14,7 @@ apps/
   server/       # Axum — HTTP /api/v1 + SSE
 crates/
   shared/ agent/ deploy/ github/ database/ mcp/ env/
-  ports/ domain/ proxy/ wireguard/
+  ports/ domain/ proxy/ wireguard/ cluster/
 ```
 
 ## Quick start

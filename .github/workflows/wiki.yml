@@ -1,0 +1,52 @@
+# Publie wiki/ vers le GitHub Wiki du dépôt.
+name: Publish wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "wiki/**"
+      - ".github/workflows/wiki.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wiki-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync wiki/ → GitHub Wiki
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TMP="$(mktemp -d)"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          WIKI_URL="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git"
+
+          if git clone --depth 1 "$WIKI_URL" "$TMP"; then
+            echo "Wiki clone OK"
+          else
+            echo "Wiki vide ou inexistant — premier commit"
+            git -C "$TMP" init
+            git -C "$TMP" checkout -B master
+            git -C "$TMP" remote add origin "$WIKI_URL"
+          fi
+
+          find "$TMP" -maxdepth 1 -type f -name '*.md' -delete
+          find wiki -maxdepth 1 -type f -name '*.md' ! -name 'README.md' -exec cp {} "$TMP"/ \;
+
+          git -C "$TMP" add -A
+          if git -C "$TMP" diff --cached --quiet; then
+            echo "Aucune modification wiki"
+            exit 0
+          fi
+          git -C "$TMP" commit -m "docs(wiki): sync from ${GITHUB_SHA:0:7}"
+          git -C "$TMP" push -u origin HEAD:master
