@@ -55,6 +55,7 @@ type Health = {
     storage?: string;
     database?: string;
     llm?: string;
+    docker?: { ok?: boolean; version?: string | null };
   };
 };
 
@@ -580,6 +581,13 @@ function AdminSante() {
     { key: 'github', label: 'GitHub', value: health?.backends?.github ?? '—' },
     { key: 'storage', label: 'Storage', value: health?.backends?.storage ?? '—' },
     { key: 'llm', label: 'LLM', value: health?.backends?.llm ?? '—' },
+    {
+      key: 'docker',
+      label: 'Docker',
+      value: health?.backends?.docker?.ok
+        ? health.backends.docker.version || 'ok'
+        : 'absent',
+    },
   ];
 
   return (

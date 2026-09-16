@@ -167,17 +167,14 @@ pub async fn internal_exec(
 }
 
 pub fn with_static_fallback(mut app: Router) -> Router {
-    if let Ok(dir) = std::env::var("DEVFORGE_STATIC_DIR") {
-        let root = std::path::PathBuf::from(&dir);
-        if root.is_dir() {
-            let index = root.join("index.html");
-            if index.is_file() {
-                app = app.fallback_service(
-                    ServeDir::new(&root).not_found_service(ServeFile::new(index)),
-                );
-            } else {
-                app = app.fallback_service(ServeDir::new(&root));
-            }
+    if let Some(root) = crate::paths::web_dir() {
+        let index = root.join("index.html");
+        if index.is_file() {
+            app = app.fallback_service(
+                ServeDir::new(&root).not_found_service(ServeFile::new(index)),
+            );
+        } else {
+            app = app.fallback_service(ServeDir::new(&root));
         }
     }
     app

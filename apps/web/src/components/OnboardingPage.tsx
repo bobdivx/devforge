@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { api } from '../lib/api';
 import type { Bootstrap } from '../lib/auth';
 import { AuthGate } from './AuthGate';
+import { DockerEngineAlert, type DockerEngineInfo } from './DockerEngineAlert';
 import {
   Alert,
   Badge,
@@ -50,7 +51,7 @@ function OnboardingWizard() {
   const [joinMode, setJoinMode] = useState(false);
   const [leaderUrl, setLeaderUrl] = useState('');
   const [joinToken, setJoinToken] = useState('');
-  const [nodeName, setNodeName] = useState('');
+  const [docker, setDocker] = useState<DockerEngineInfo | null>(null);
 
   const idx = STEPS.findIndex((s) => s.id === step);
   const progress = Math.round(((idx + 1) / STEPS.length) * 100);
@@ -62,6 +63,10 @@ function OnboardingWizard() {
       setInstanceUrl(b.settings.instance_url || 'http://localhost:8000');
       setDomain(b.settings.wildcard_domain || '');
     });
+    api
+      .health()
+      .then((h) => setDocker(h.backends?.docker ?? null))
+      .catch(() => setDocker(null));
   }, []);
 
   async function savePartial(body: Record<string, string | undefined>) {
@@ -153,9 +158,10 @@ function OnboardingWizard() {
                 Salut{boot?.user ? `, ${boot.user.name}` : ''}
               </h1>
               <p class="text-sm leading-relaxed text-[var(--color-ink-muted)]">
-                Instance, domaine apps, GitHub. Les déploiements locaux passent par Docker (déjà
-                monté) — pas de SSH à configurer ici.
+                Instance, domaine apps, GitHub. Les déploiements PaaS utilisent Docker installé sur
+                cette machine — pas embarqué dans l’exécutable.
               </p>
+              <DockerEngineAlert docker={docker} />
               <Button onClick={next} class="w-full">
                 Créer une instance
               </Button>

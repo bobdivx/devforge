@@ -2,8 +2,12 @@
 
 ## 1. Lancer une instance
 
+**Zip Linux / Windows** (logiciel) : dézippe, lance `devforge-server` / `devforge-server.exe`, ouvre `http://127.0.0.1:8000`. Voir [[Installation]].
+
+**Docker :**
+
 ```bash
-export DEVFORGE_VERSION=2.0.65   # ou la dernière release
+export DEVFORGE_VERSION=2.0.68   # ou la dernière release
 docker compose up -d
 ```
 

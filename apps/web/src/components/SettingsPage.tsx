@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { api } from '../lib/api';
 import { AppShell } from './AppShell';
 import { BackupSettingsPanel } from './BackupSettingsPanel';
+import { DockerEngineAlert } from './DockerEngineAlert';
 import { LlmProvidersPanel } from './LlmProvidersPanel';
 import { SsoSettingsPanel } from './SsoSettingsPanel';
 import {
@@ -31,6 +32,7 @@ type Health = {
     database?: string;
     llm?: string;
     update?: string;
+    docker?: { ok?: boolean; version?: string | null; hint?: string };
   };
 };
 
@@ -258,6 +260,13 @@ export function SettingsPage() {
     { key: 'github', label: 'GitHub', value: health?.backends?.github ?? ghMode },
     { key: 'storage', label: 'Storage', value: health?.backends?.storage ?? '—' },
     { key: 'llm', label: 'LLM', value: health?.backends?.llm ?? '—' },
+    {
+      key: 'docker',
+      label: 'Docker',
+      value: health?.backends?.docker?.ok
+        ? health.backends.docker.version || 'ok'
+        : 'absent',
+    },
   ];
 
   // Grid vue si pas de section sélectionnée
@@ -537,9 +546,12 @@ export function SettingsPage() {
               }
             />
             <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
-              Sur ce NAS, les apps se déploient via le socket Docker — aucun SSH requis. Configure
-              un host seulement pour un serveur distant.
+              Les apps se déploient via Docker sur cette machine, ou via SSH vers un hôte distant
+              qui a Docker. L’exécutable DevForge ne l’embarque pas.
             </p>
+            <div class="mb-4">
+              <DockerEngineAlert docker={health?.backends?.docker} />
+            </div>
             {!isAdmin ? (
               <Alert tone="warn">Réservé à l’admin instance.</Alert>
             ) : (

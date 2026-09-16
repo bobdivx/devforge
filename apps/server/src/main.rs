@@ -1,6 +1,7 @@
 mod cluster_routes;
 mod cluster_store;
 mod db;
+mod paths;
 mod worker;
 mod actions_routes;
 mod auto_deploy;
@@ -33,7 +34,6 @@ use axum::{middleware, routing::get, Json, Router};
 use serde_json::{json, Value};
 use state::AppState;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -52,6 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .with(tracing_subscriber::fmt::layer())
         .init();
+    paths::apply_install_layout();
 
     let database_url =
         std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:devforge.db?mode=rwc".into());
@@ -83,6 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], port)));
         tracing::info!("DevForge worker listening on http://{addr}");
         let listener = tokio::net::TcpListener::bind(addr).await?;
+        paths::maybe_open_browser(&format!("http://127.0.0.1:{port}"));
         axum::serve(listener, app).await?;
         return Ok(());
     }
@@ -183,23 +185,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
-    // Front Astro : DEVFORGE_STATIC_DIR=/app/web (ne pas enregistrer "/" API sinon le SPA est masqué)
+    // Front Astro : dossier `web/` à côté du binaire, ou DEVFORGE_STATIC_DIR (Docker).
     let mut serving_web = false;
-    if let Ok(dir) = std::env::var("DEVFORGE_STATIC_DIR") {
-        let root = PathBuf::from(&dir);
-        if root.is_dir() {
-            let index = root.join("index.html");
-            tracing::info!(path = %dir, "serving static web assets");
-            serving_web = true;
-            if index.is_file() {
-                app = app.fallback_service(
-                    ServeDir::new(&root).not_found_service(ServeFile::new(index)),
-                );
-            } else {
-                app = app.fallback_service(ServeDir::new(&root));
-            }
+    if let Some(root) = paths::web_dir() {
+        let index = root.join("index.html");
+        tracing::info!(path = %root.display(), "serving static web assets");
+        serving_web = true;
+        if index.is_file() {
+            app = app.fallback_service(
+                ServeDir::new(&root).not_found_service(ServeFile::new(index)),
+            );
         } else {
-            tracing::warn!(path = %dir, "DEVFORGE_STATIC_DIR introuvable — API seule");
+            app = app.fallback_service(ServeDir::new(&root));
         }
     }
     if !serving_web {
@@ -216,6 +213,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], port)));
     tracing::info!("DevForge server listening on http://{addr}");
     let listener = tokio::net::TcpListener::bind(addr).await?;
+    let public = format!("http://127.0.0.1:{port}");
+    paths::maybe_open_browser(&public);
     axum::serve(listener, app).await?;
     Ok(())
 }

@@ -77,6 +77,7 @@ async fn health(State(state): State<AppState>) -> Json<Value> {
                 "nodes": cluster.as_ref().map(|s| s.nodes).unwrap_or(0),
                 "online": cluster.as_ref().map(|s| s.online).unwrap_or(0),
             },
+            "docker": devforge_deploy::docker::probe_engine(),
         }
     }))
 }
@@ -2219,15 +2220,9 @@ async fn list_templates() -> Json<Value> {
 }
 
 fn apply_template(template_id: &str, dest_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
-    // Résolution runtime du répertoire templates
-    let templates_root = if let Ok(env_dir) = std::env::var("DEVFORGE_TEMPLATES_DIR") {
-        // Production: env var définie dans Dockerfile
-        FsPath::new(&env_dir).to_path_buf()
-    } else {
-        // Dev local: fallback relatif au CARGO_MANIFEST_DIR
-        FsPath::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../crates/templates")
-    };
+    let templates_root = crate::paths::templates_dir().unwrap_or_else(|| {
+        FsPath::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/templates")
+    });
     
     let template_base = templates_root.join(template_id);
     

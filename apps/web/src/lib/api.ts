@@ -257,6 +257,11 @@ export const api = {
         database?: string;
         llm?: string;
         update?: string;
+        docker?: {
+          ok?: boolean;
+          version?: string | null;
+          hint?: string;
+        };
       };
     }>('/health'),
   projects: () => request<{ data: Project[] }>('/projects'),

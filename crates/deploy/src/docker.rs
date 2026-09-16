@@ -693,6 +693,82 @@ pub fn traefik_labels_for_routes(
     Value::Object(map)
 }
 
+/// État du moteur Docker **local** (CLI + daemon), pour le zip Windows/Linux.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DockerEngineStatus {
+    pub ok: bool,
+    pub version: Option<String>,
+    pub hint: String,
+}
+
+fn docker_bin_candidates() -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let unix = dir.join("docker");
+            if unix.is_file() {
+                out.push(unix);
+            }
+            let win = dir.join("docker.exe");
+            if win.is_file() {
+                out.push(win);
+            }
+        }
+    }
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        out.push(
+            std::path::PathBuf::from(local)
+                .join(r"Programs\DockerDesktop\resources\bin\docker.exe"),
+        );
+    }
+    out.push(std::path::PathBuf::from(
+        r"C:\Program Files\Docker\Docker\resources\bin\docker.exe",
+    ));
+    out.into_iter()
+        .filter(|p| p.is_file())
+        .collect()
+}
+
+/// `docker version` avec timeout court. N’embarque pas Docker : on détecte seulement.
+pub fn probe_engine() -> DockerEngineStatus {
+    let bins = docker_bin_candidates();
+    if bins.is_empty() {
+        return DockerEngineStatus {
+            ok: false,
+            version: None,
+            hint: "Docker n’est pas installé. Installe Docker Desktop (Windows / macOS) ou le moteur Docker (Linux) pour déployer des apps en conteneurs.".into(),
+        };
+    }
+    let bin = bins[0].clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let r = std::process::Command::new(&bin)
+            .args(["version", "--format", "{{.Server.Version}}"])
+            .output();
+        let _ = tx.send(r);
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(4)) {
+        Ok(Ok(out)) if out.status.success() => {
+            let ver = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            DockerEngineStatus {
+                ok: true,
+                version: if ver.is_empty() { None } else { Some(ver) },
+                hint: "Docker prêt — les apps se déploient en conteneurs.".into(),
+            }
+        }
+        Ok(Ok(_)) => DockerEngineStatus {
+            ok: false,
+            version: None,
+            hint: "Docker CLI trouvé, mais le moteur ne répond pas. Démarre Docker Desktop ou le service docker.".into(),
+        },
+        Ok(Err(_)) | Err(_) => DockerEngineStatus {
+            ok: false,
+            version: None,
+            hint: "Impossible d’interroger Docker. Vérifie que le moteur est démarré.".into(),
+        },
+    }
+}
+
 fn shell_escape(s: &str) -> String {
     if s.chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '='))
@@ -964,5 +1040,14 @@ mod tests {
         assert!(shell_escape("Host(`example.com`)").contains('\''));
         assert!(shell_escape("value with spaces").contains('\''));
         assert!(shell_escape("a && b").contains('\''));
+    }
+
+    #[test]
+    fn probe_engine_returns_status() {
+        let s = probe_engine();
+        assert!(!s.hint.is_empty());
+        if s.ok {
+            assert!(s.version.is_some());
+        }
     }
 }

@@ -36,16 +36,24 @@ Importer `deploy/zimaos/install.yaml` (Custom App). Laisse les **Variables** vid
 
 Données : `/DATA/AppData/devforge`. Socket Docker monté pour déployer les apps sur la même machine.
 
-## Binaire
+## Binaire (Linux / Windows)
 
-Les releases GitHub embarquent :
+Les zips GitHub sont un **logiciel complet** : exécutable + interface + templates.
 
 - `devforge-server-x86_64-unknown-linux-gnu.zip`
 - `devforge-server-x86_64-pc-windows-msvc.zip`
 
-Lance le binaire **depuis un répertoire de données** (ou définis `DEVFORGE_DATA_DIR` / `DATABASE_URL`). Le front est servi si `DEVFORGE_STATIC_DIR` pointe vers le build web, ou tu proxies le front Astro séparément.
+```bash
+unzip devforge-server-x86_64-unknown-linux-gnu.zip
+cd x86_64-unknown-linux-gnu
+./devforge-server
+```
 
-Variables minimales : voir [[Configuration]].
+Le navigateur s’ouvre sur `http://127.0.0.1:8000`. Les données vont dans le sous-dossier `data/` à côté du programme. **Pas de Docker dans le zip, pas de variables à coller.**
+
+**Docker** est une dépendance du *moteur* (déploiements, Traefik) : Docker Desktop sur Windows/macOS, ou `docker` + service sur Linux. Sans Docker, l’UI tourne ; les apps PaaS ne se déploient pas (sauf fallback Node pour certains projets JS). L’onboarding et Settings → Serveur affichent si le moteur est détecté.
+
+Pour ne pas ouvrir le navigateur : `DEVFORGE_NO_BROWSER=1`.
 
 ## Réseau Docker / Traefik
 

@@ -144,7 +144,7 @@ jobs:
           tags: ${{ env.TAGS }}
 
   binaries:
-    needs: prepare
+    needs: [prepare, web]
     if: needs.prepare.outputs.should_release == 'true'
     strategy:
       fail-fast: false
@@ -162,11 +162,16 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web-dist
       - name: Build
         run: cargo build -p devforge-server --release
       - name: Package
         shell: bash
         run: |
+          set -euo pipefail
           STAGE="dist/${{ matrix.target }}"
           mkdir -p "$STAGE"
           if [[ "${{ matrix.os }}" == windows-latest ]]; then
@@ -175,10 +180,24 @@ jobs:
             cp "target/release/${{ matrix.bin }}" "$STAGE/devforge-server"
             chmod +x "$STAGE/devforge-server"
           fi
+          mkdir -p "$STAGE/web" "$STAGE/templates"
+          cp -R web-dist/. "$STAGE/web/"
+          cp -R crates/templates/. "$STAGE/templates/"
+          cat > "$STAGE/LIREMOI.txt" <<'EOF'
+          DevForge — logiciel autonome
+          ============================
+
+          1. Dézippe ce dossier où tu veux.
+          2. Lance devforge-server (Linux) ou devforge-server.exe (Windows).
+          3. Le navigateur s’ouvre sur http://127.0.0.1:8000
+
+          L’interface, les templates et tes données (sous-dossier data/)
+          restent à côté du programme. Pas de Docker ni de variables à coller.
+          EOF
           (
             cd dist
             if [[ "${{ matrix.os }}" == windows-latest ]]; then
-              7z a -tzip "devforge-server-${{ matrix.target }}.zip" "${{ matrix.target }}/"*
+              7z a -tzip "devforge-server-${{ matrix.target }}.zip" "${{ matrix.target }}"
             else
               zip -r "devforge-server-${{ matrix.target }}.zip" "${{ matrix.target }}"
             fi
@@ -191,3 +210,26 @@ jobs:
           files: dist/devforge-server-${{ matrix.target }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  web:
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build UI
+        working-directory: apps/web
+        env:
+          PUBLIC_SERVER_URL: /api/v1
+        run: |
+          npm install --include=optional
+          npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
