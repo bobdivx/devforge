@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { api, type Deployment, type Project } from '../lib/api';
+import { api, type ClusterNode, type Deployment, type Project } from '../lib/api';
+import { nodeShortLabel, resolveNode } from '../lib/cluster-display';
 import { cn } from '../lib/cn';
 import { projectNav } from '../lib/nav';
 import { projectStatusMeta, projectSyncMeta } from '../lib/status';
@@ -11,6 +12,7 @@ import { ProjectActionsPanel } from './ProjectActionsPanel';
 import { ProjectGitPanel } from './ProjectGitPanel';
 import { ProjectWorkspace } from './ProjectWorkspace';
 import { ProjectRulesModal } from './workspace/ProjectRulesModal';
+import { NodeSelect } from './NodeSelect';
 import { FileCode } from 'lucide-preact';
 import {
   Alert,
@@ -271,6 +273,7 @@ function ProjectOverview({
   const [lifeDetail, setLifeDetail] = useState<string | null>(null);
   const [deployBusy, setDeployBusy] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [nodes, setNodes] = useState<ClusterNode[]>([]);
 
   const latest = deployments[0] ?? null;
   // Ne remonter une erreur que si le *dernier* déploiement a échoué (pas un vieux fail).
@@ -287,7 +290,8 @@ function ProjectOverview({
       api.projectResources(uuid),
       api.domains(uuid),
       api.projectGit(uuid),
-    ]).then(([envR, resR, domR, gitR]) => {
+      api.clusterNodes(),
+    ]).then(([envR, resR, domR, gitR, nodesR]) => {
       if (envR.status === 'fulfilled') {
         const rows = envR.value.data ?? [];
         setEnvCount(rows.length);
@@ -306,6 +310,9 @@ function ProjectOverview({
       if (gitR.status === 'fulfilled' && gitR.value.sync) {
         setGitSync(gitR.value.sync);
       }
+      if (nodesR.status === 'fulfilled') {
+        setNodes(nodesR.value.nodes ?? []);
+      }
     });
   }, [uuid]);
 
@@ -316,7 +323,10 @@ function ProjectOverview({
 
   const statusMeta = projectStatusMeta(project.status);
 
-  const health: Array<HealthItem & { icon: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' }> = [
+  const host = resolveNode(nodes, project.server_id);
+  const hostOffline = host.status === 'offline';
+
+  const health: Array<HealthItem & { icon: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' }> = [
     {
       key: 'deploy',
       icon: 'deploy',
@@ -326,6 +336,18 @@ function ProjectOverview({
         : 'Aucun déploiement',
       tone: latest ? deployTone(latest.status) : 'warn',
       href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`,
+    },
+    {
+      key: 'node',
+      icon: 'node',
+      label: 'Nœud',
+      detail: hostOffline
+        ? `${nodeShortLabel(nodes, project.server_id)} · hors ligne`
+        : host.drained
+          ? `${nodeShortLabel(nodes, project.server_id)} · drain`
+          : `${nodeShortLabel(nodes, project.server_id)} · un seul nœud, pas de réplica`,
+      tone: hostOffline ? 'danger' : host.drained ? 'warn' : 'ok',
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=settings`,
     },
     {
       key: 'actions',
@@ -691,7 +713,7 @@ function HealthIcon({
   kind,
   tone,
 }: {
-  kind: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions';
+  kind: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node';
   tone: 'ok' | 'warn' | 'danger' | 'neutral';
 }) {
   const color =
@@ -738,6 +760,13 @@ function HealthIcon({
     actions: (
       <>
         <path d="M13 2 4 14h7l-1 8 10-14h-7l1-6z" />
+      </>
+    ),
+    node: (
+      <>
+        <rect x="3" y="4" width="18" height="6" rx="1.5" />
+        <rect x="3" y="14" width="18" height="6" rx="1.5" />
+        <path d="M7 7h.01M7 17h.01" />
       </>
     ),
   };
@@ -1061,6 +1090,26 @@ function DatabaseManager({ uuid }: { uuid: string }) {
 
   return (
     <>
+      <Alert tone="info" class="mb-4">
+        <p class="font-medium text-[var(--color-ink)]">La DB ne se réplique pas sur le cluster</p>
+        <ul class="mt-2 list-disc space-y-1 pl-4 text-[var(--color-ink-muted)]">
+          <li>
+            <strong class="text-[var(--color-ink)]">Turso</strong> (recommandé) — base cloud. Les
+            workers et le leader y accèdent via les variables d’env. Déplacer la forge sur un autre
+            nœud <em>garde</em> les données.
+          </li>
+          <li>
+            <strong class="text-[var(--color-ink)]">SQLite dans le conteneur</strong> — fichier local
+            sur <em>ce</em> nœud. Un redéploiement (blue/green) recrée le conteneur : les données
+            locales sont perdues. Un worker down = cette DB inaccessible.
+          </li>
+          <li>
+            La SQLite de DevForge (projets, users, cluster) vit sur le <strong class="text-[var(--color-ink)]">leader</strong>{' '}
+            (<code>/data</code>). Les workers en gardent une copie (~30–60 s) pour reprendre le panel
+            si le leader tombe. Sauvegarde : Paramètres → Sauvegardes.
+          </li>
+        </ul>
+      </Alert>
       {links.length > 0 ? (
         <ul class="mb-4 divide-y divide-[var(--color-line)] rounded-xl border border-[var(--color-line)]">
           {links.map((l) => (
@@ -1080,7 +1129,8 @@ function DatabaseManager({ uuid }: { uuid: string }) {
         </ul>
       ) : (
         <p class="mb-4 rounded-xl border border-dashed border-[var(--color-line)] px-4 py-6 text-sm text-[var(--color-ink-muted)]">
-          Aucune base liée. Connecte Turso via MCP puis lie une database ici.
+          Aucune base liée. Connecte Turso via MCP puis lie une database ici — c’est le seul moyen
+          d’avoir une DB partagée entre nœuds, indépendante du worker.
         </p>
       )}
 
@@ -1751,9 +1801,7 @@ function ProjectSettingsPanel({
   const [composePath, setComposePath] = useState(project.docker_compose_location || '');
   const [workdir, setWorkdir] = useState(project.workdir || '');
   const [serverId, setServerId] = useState(project.server_id || 'default');
-  const [clusterNodes, setClusterNodes] = useState<
-    Array<{ id: string; name: string; status: string; drained?: boolean; role?: string }>
-  >([]);
+  const [clusterNodes, setClusterNodes] = useState<ClusterNode[]>([]);
   const [prodUrl, setProdUrl] = useState(project.production_url || '');
   const [testCmd, setTestCmd] = useState(project.test_command || '');
   const [busy, setBusy] = useState(false);
@@ -1950,31 +1998,14 @@ function ProjectSettingsPanel({
               onInput={(e) => setRepo((e.target as HTMLInputElement).value)}
             />
           </div>
-          <label class="flex flex-col gap-1.5 text-sm md:col-span-2">
-            <span class="font-medium">Nœud de déploiement</span>
-            <select
-              class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
+          <div class="md:col-span-2">
+            <NodeSelect
+              nodes={clusterNodes}
               value={serverId}
-              onChange={(e) => setServerId((e.target as HTMLSelectElement).value)}
-            >
-              {(clusterNodes.length
-                ? [...clusterNodes].sort((a, b) => {
-                    const al = a.role === 'leader' || a.id === 'default' ? 0 : 1;
-                    const bl = b.role === 'leader' || b.id === 'default' ? 0 : 1;
-                    return al - bl;
-                  })
-                : [{ id: 'default', name: 'Leader (local)', status: 'online', role: 'leader' }]
-              ).map((n) => {
-                const leader = n.role === 'leader' || n.id === 'default';
-                return (
-                <option key={n.id} value={n.id} disabled={Boolean(n.drained) && n.id !== serverId}>
-                  {leader ? 'Leader' : 'Worker'} · {n.name}
-                  {n.drained ? ' (drain)' : n.status === 'online' ? '' : ` (${n.status})`}
-                </option>
-                );
-              })}
-            </select>
-          </label>
+              onChange={setServerId}
+              hint="Un seul nœud par forge. Changer ici n’applique qu’au prochain déploiement — les conteneurs déjà lancés restent où ils sont."
+            />
+          </div>
           <label class="flex flex-col gap-1.5 text-sm">
             <span class="font-medium">Build pack</span>
             <select

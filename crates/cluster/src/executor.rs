@@ -44,6 +44,16 @@ impl RemoteExecutor for ClusterAwareExecutor {
         command: &str,
         timeout_secs: u64,
     ) -> Result<ExecResult> {
+        let local = self.store.get_local().await.ok();
+        if local
+            .as_ref()
+            .is_some_and(|l| l.node_id == server_id.trim() && !l.node_id.is_empty())
+        {
+            return self
+                .inner
+                .exec(server_id, workdir, command, timeout_secs)
+                .await;
+        }
         let node = self.store.get_node(server_id).await?;
         if Self::is_local(server_id, node.as_ref()) {
             return self

@@ -29,10 +29,10 @@ Le front utilise `PUBLIC_SERVER_URL` en dev. En image Docker, UI et API sont le 
 - **LLM** `/llm/catalog` · providers · connect
 - **Runners** `/runners`
 - **Tokens** `/tokens`
-- **Update** `/update/check` · start
+- **Update** `/update/check` · start · Cluster `/cluster/nodes/{id}/update` · `/cluster/update-workers`
 - **Storage / backups** voir [[Stockage-et-sauvegardes]]
 - **SSO** `/auth/sso/authorize` · `/callback` · `GET/PUT /settings/sso`
 
 Admin : `/admin/overview` · patch workspace.
 
-Worker : surface réduite (`/health`, `/bootstrap`, `/cluster/local`, `/internal/exec`).
+Worker : surface réduite (`/health`, `/bootstrap`, `/cluster/local`, `/internal/exec`, `/internal/update/*`).

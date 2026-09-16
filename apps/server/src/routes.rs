@@ -425,6 +425,7 @@ pub struct ScaffoldProject {
     pub title: String,
     pub prompt: String,
     pub template: Option<String>,
+    pub server_id: Option<String>,
 }
 
 async fn scaffold_project(
@@ -451,6 +452,13 @@ async fn scaffold_project(
     );
     let now = now_str();
 
+    let server_id = body
+        .server_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("default");
+
     // Create minimal project
     sqlx::query(
         r#"INSERT INTO projects (
@@ -458,11 +466,12 @@ async fn scaffold_project(
             server_id, workdir, test_command, production_url, workspace_uuid,
             build_pack, port, is_static, publish_directory, base_directory, docker_compose_location,
             created_at, updated_at
-        ) VALUES (?, ?, ?, 'draft', '', 'main', 'default', ?, '', '', ?, 'nixpacks', 3000, 0, '', '/', '', ?, ?)"#,
+        ) VALUES (?, ?, ?, 'draft', '', 'main', ?, ?, '', '', ?, 'nixpacks', 3000, 0, '', '/', '', ?, ?)"#,
     )
     .bind(&uuid)
     .bind(&body.title)
     .bind(&slug)
+    .bind(server_id)
     .bind(&format!("/data/devforge/applications/{slug}"))
     .bind(&workspace.uuid)
     .bind(&now)

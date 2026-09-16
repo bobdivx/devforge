@@ -29,7 +29,7 @@ Les agents ne sont **pas** une app globale : ils vivent dans le projet.
 
 ## Hors v1 cluster
 
-- Haute dispo du control plane (Turso / libSQL)
+- Réplication synchrone du control plane (Turso / libSQL)
 - Overlay WireGuard entre nœuds
 
 Ces sujets restent documentés comme **suite**, pas comme prérequis.

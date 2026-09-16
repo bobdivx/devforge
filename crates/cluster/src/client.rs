@@ -1,4 +1,6 @@
-use crate::models::{HeartbeatPayload, JoinRequest, JoinResponse, PendingJoin};
+use crate::models::{
+    FailoverStatus, HeartbeatAck, HeartbeatPayload, JoinRequest, JoinResponse, PendingJoin,
+};
 use devforge_shared::{DevForgeError, Result};
 use std::path::{Path, PathBuf};
 
@@ -10,6 +12,39 @@ pub fn data_dir() -> PathBuf {
 
 pub fn pending_join_path() -> PathBuf {
     data_dir().join("cluster-pending-join.json")
+}
+
+pub fn roster_path() -> PathBuf {
+    data_dir().join("cluster-roster.json")
+}
+
+pub fn snapshot_path() -> PathBuf {
+    data_dir().join("cluster-snapshot.db")
+}
+
+pub fn failover_identity_path() -> PathBuf {
+    data_dir().join("cluster-identity.json")
+}
+
+pub fn promote_flag_path() -> PathBuf {
+    data_dir().join("cluster-promote.flag")
+}
+
+pub fn reclaim_flag_path() -> PathBuf {
+    data_dir().join("cluster-reclaim.json")
+}
+
+pub fn restart_current_process() -> ! {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        if let Ok(exe) = std::env::current_exe() {
+            let args: Vec<_> = std::env::args_os().skip(1).collect();
+            let err = std::process::Command::new(exe).args(args).exec();
+            tracing::error!(error = %err, "échec exec redémarrage");
+        }
+    }
+    std::process::exit(0);
 }
 
 pub async fn load_pending_join() -> Result<Option<PendingJoin>> {
@@ -48,10 +83,12 @@ pub fn write_pending_join_sync(path: &Path, join: &PendingJoin) -> Result<()> {
 pub struct LeaderClient {
     http: reqwest::Client,
     api_base: String,
+    origin: String,
 }
 
 impl LeaderClient {
     pub fn new(leader_url: &str) -> Self {
+        let origin = leader_url.trim().trim_end_matches('/').to_string();
         let base = normalize_api_base(leader_url);
         Self {
             http: reqwest::Client::builder()
@@ -59,6 +96,7 @@ impl LeaderClient {
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new()),
             api_base: base,
+            origin,
         }
     }
 
@@ -80,7 +118,7 @@ impl LeaderClient {
             .map_err(|e| DevForgeError::Message(format!("join JSON: {e} — {text}")))
     }
 
-    pub async fn heartbeat(&self, secret: &str, payload: &HeartbeatPayload) -> Result<()> {
+    pub async fn heartbeat(&self, secret: &str, payload: &HeartbeatPayload) -> Result<HeartbeatAck> {
         let url = format!("{}/cluster/heartbeat", self.api_base);
         let res = self
             .http
@@ -90,12 +128,133 @@ impl LeaderClient {
             .send()
             .await
             .map_err(|e| DevForgeError::Message(format!("heartbeat HTTP: {e}")))?;
+        let status = res.status();
+        let text = res.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(DevForgeError::Message(parse_error(&text, status.as_u16())));
+        }
+        Ok(serde_json::from_str(&text).unwrap_or(HeartbeatAck {
+            ok: true,
+            ..Default::default()
+        }))
+    }
+
+    pub async fn ping_health(&self) -> bool {
+        let url = format!("{}/api/v1/health", self.origin);
+        self.http
+            .get(&url)
+            .send()
+            .await
+            .map(|r| r.status().is_success())
+            .unwrap_or(false)
+    }
+
+    pub async fn fetch_snapshot(&self, secret: &str) -> Result<Vec<u8>> {
+        let url = format!("{}/internal/cluster-snapshot", self.origin);
+        let res = self
+            .http
+            .get(&url)
+            .bearer_auth(secret)
+            .timeout(std::time::Duration::from_secs(120))
+            .send()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("snapshot HTTP: {e}")))?;
+        if !res.status().is_success() {
+            let status = res.status();
+            let text = res.text().await.unwrap_or_default();
+            return Err(DevForgeError::Message(parse_error(&text, status.as_u16())));
+        }
+        let bytes = res
+            .bytes()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("snapshot body: {e}")))?;
+        if bytes.len() < 100 || !bytes.starts_with(b"SQLite format 3\0") {
+            return Err(DevForgeError::Message("snapshot SQLite invalide".into()));
+        }
+        Ok(bytes.to_vec())
+    }
+
+    pub async fn failover_status(&self, failover_secret: &str) -> Result<FailoverStatus> {
+        let url = format!("{}/internal/failover/status", self.origin);
+        let res = self
+            .http
+            .get(&url)
+            .bearer_auth(failover_secret)
+            .timeout(std::time::Duration::from_secs(8))
+            .send()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("failover status: {e}")))?;
+        let status = res.status();
+        let text = res.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(DevForgeError::Message(parse_error(&text, status.as_u16())));
+        }
+        serde_json::from_str(&text)
+            .map_err(|e| DevForgeError::Message(format!("failover JSON: {e}")))
+    }
+
+    pub async fn failover_demote(&self, failover_secret: &str, preferred_url: &str) -> Result<()> {
+        let url = format!("{}/internal/failover/demote", self.origin);
+        let res = self
+            .http
+            .post(&url)
+            .bearer_auth(failover_secret)
+            .json(&serde_json::json!({ "preferred_leader_url": preferred_url }))
+            .send()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("failover demote: {e}")))?;
         if !res.status().is_success() {
             let status = res.status();
             let text = res.text().await.unwrap_or_default();
             return Err(DevForgeError::Message(parse_error(&text, status.as_u16())));
         }
         Ok(())
+    }
+
+    pub async fn node_update_start(
+        &self,
+        secret: &str,
+        target_version: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        let url = format!("{}/internal/update/start", self.origin);
+        let mut req = self
+            .http
+            .post(&url)
+            .bearer_auth(secret)
+            .timeout(std::time::Duration::from_secs(45));
+        if let Some(v) = target_version.filter(|s| !s.trim().is_empty()) {
+            req = req.json(&serde_json::json!({ "target_version": v }));
+        } else {
+            req = req.json(&serde_json::json!({}));
+        }
+        let res = req
+            .send()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("update start: {e}")))?;
+        let status = res.status();
+        let text = res.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(DevForgeError::Message(parse_error(&text, status.as_u16())));
+        }
+        serde_json::from_str(&text).map_err(|e| DevForgeError::Message(format!("update JSON: {e}")))
+    }
+
+    pub async fn node_update_status(&self, secret: &str) -> Result<serde_json::Value> {
+        let url = format!("{}/internal/update/status", self.origin);
+        let res = self
+            .http
+            .get(&url)
+            .bearer_auth(secret)
+            .timeout(std::time::Duration::from_secs(8))
+            .send()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("update status: {e}")))?;
+        let status = res.status();
+        let text = res.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(DevForgeError::Message(parse_error(&text, status.as_u16())));
+        }
+        serde_json::from_str(&text).map_err(|e| DevForgeError::Message(format!("update JSON: {e}")))
     }
 }
 

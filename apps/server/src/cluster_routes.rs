@@ -32,11 +32,23 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/cluster/nodes/{id}/projects", get(node_projects))
         .route("/api/v1/cluster/nodes/{id}/reassign", post(reassign_projects))
         .route("/api/v1/cluster/nodes/{id}/logs", get(node_logs))
+        .route(
+            "/api/v1/cluster/nodes/{id}/update",
+            get(node_update_status).post(node_update_start),
+        )
+        .route("/api/v1/cluster/update-workers", post(update_workers))
         .route("/api/v1/cluster/invites", get(list_invites).post(create_invite))
         .route("/api/v1/cluster/invites/{id}", delete(revoke_invite))
         .route("/api/v1/cluster/join", post(join_node))
         .route("/api/v1/cluster/heartbeat", post(heartbeat))
         .route("/api/v1/cluster/local", get(local_state).post(local_join).patch(local_patch))
+}
+
+pub fn internal_cluster_routes() -> Router<AppState> {
+    Router::new()
+        .route("/internal/cluster-snapshot", get(cluster_snapshot))
+        .route("/internal/failover/status", get(failover_status))
+        .route("/internal/failover/demote", post(failover_demote))
 }
 
 async fn require_admin(
@@ -109,16 +121,22 @@ async fn list_nodes(
     headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     require_admin(&state, &headers).await?;
+    let local = state.cluster.local().await.map_err(map_err)?;
     let mut nodes = state.cluster.list_nodes().await.map_err(map_err)?;
     let counts = project_counts_by_node(&state).await;
     let leader_metrics = collect_node_metrics();
     for n in &mut nodes {
-        if n.role == NodeRole::Leader {
+        if n.role == NodeRole::Leader || n.id == local.node_id {
             n.metrics = leader_metrics.clone();
         }
     }
     Ok(Json(json!({
         "ok": true,
+        "preferred_leader_id": local.preferred_leader_id,
+        "preferred_leader_url": local.preferred_leader_url,
+        "acting_leader": local.acting_leader,
+        "acting_node_id": local.node_id,
+        "leader_version": state.updater.current_version(),
         "nodes": nodes.iter().map(|n| {
             let mut v = devforge_cluster::ClusterFacade::node_json(n);
             let key = normalize_server_id(&n.id);
@@ -319,15 +337,12 @@ async fn heartbeat(
             Json(json!({"error": "secret nœud requis"})),
         )
     })?;
-    let node = state
+    let ack = state
         .cluster
-        .heartbeat(&secret, body)
+        .heartbeat_ack(&secret, body)
         .await
         .map_err(map_err)?;
-    Ok(Json(json!({
-        "ok": true,
-        "node": devforge_cluster::ClusterFacade::node_json(&node),
-    })))
+    Ok(Json(serde_json::to_value(&ack).unwrap_or_else(|_| json!({"ok": true}))))
 }
 
 async fn local_state(State(state): State<AppState>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
@@ -459,6 +474,9 @@ async fn local_join(
         node_secret: joined.secret.clone(),
         node_name: name,
         advertise_url: advertise_url.clone(),
+        preferred_leader_id: devforge_cluster::LEADER_NODE_ID.into(),
+        preferred_leader_url: joined.leader_url.clone(),
+        ..Default::default()
     };
     state.cluster.set_local(&next).await.map_err(map_err)?;
     spawn_heartbeat(state.cluster.clone());
@@ -743,4 +761,380 @@ async fn node_logs(
         "exit_code": res.exit_code,
         "output": res.output,
     })))
+}
+
+#[derive(Deserialize)]
+struct NodeUpdateBody {
+    #[serde(default)]
+    target_version: Option<String>,
+}
+
+async fn worker_remote(
+    state: &AppState,
+    id: &str,
+) -> Result<(devforge_cluster::ClusterNode, LeaderClient, String), (StatusCode, Json<Value>)> {
+    let node = ensure_node_exists(state, id).await?;
+    if node.role == NodeRole::Leader || node.id == "default" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "Le leader se met à jour depuis Paramètres → Mise à jour."
+            })),
+        ));
+    }
+    let url = node.advertise_url.trim().to_string();
+    if url.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "URL du nœud manquante — renseigne-la dans Infos."})),
+        ));
+    }
+    let secret = state
+        .cluster
+        .store()
+        .get_node_secret(&node.id)
+        .await
+        .map_err(map_err)?
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Secret du nœud manquant (nœud jamais enrôlé ?)"})),
+            )
+        })?;
+    Ok((node, LeaderClient::new(&url), secret))
+}
+
+async fn resolve_update_target(
+    state: &AppState,
+    requested: Option<String>,
+) -> Result<String, (StatusCode, Json<Value>)> {
+    if let Some(t) = requested.filter(|s| !s.trim().is_empty()) {
+        return Ok(t.trim().trim_start_matches('v').to_string());
+    }
+    let check = state.updater.check().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+    check
+        .latest
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().trim_start_matches('v').to_string())
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"error": "Impossible de déterminer la version cible."})),
+            )
+        })
+}
+
+async fn node_update_start(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<NodeUpdateBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    let target = resolve_update_target(&state, body.target_version).await?;
+    let (node, client, secret) = worker_remote(&state, &id).await?;
+    let current = node
+        .metrics
+        .software_version
+        .clone()
+        .unwrap_or_default();
+    if !current.is_empty() && !devforge_update::version_gt(&target, &current) {
+        return Ok(Json(json!({
+            "ok": true,
+            "skipped": true,
+            "node_id": node.id,
+            "version": current,
+            "target_version": target,
+            "message": format!("{} est déjà en {}", node.name, current),
+        })));
+    }
+    match client.node_update_start(&secret, Some(&target)).await {
+        Ok(data) => Ok(Json(json!({
+            "ok": true,
+            "node_id": node.id,
+            "target_version": target,
+            "data": data.get("data").cloned().unwrap_or(data),
+        }))),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("Déjà à jour") {
+                return Ok(Json(json!({
+                    "ok": true,
+                    "skipped": true,
+                    "node_id": node.id,
+                    "target_version": target,
+                    "message": msg,
+                })));
+            }
+            let msg = if msg.contains("404") {
+                format!(
+                    "{} : ce nœud n’a pas encore l’API de MAJ distante (version trop ancienne). Fais une première mise à jour locale sur le worker, ensuite le leader pourra piloter les suivantes.",
+                    node.name
+                )
+            } else {
+                format!("{} : {msg}", node.name)
+            };
+            Err((StatusCode::BAD_GATEWAY, Json(json!({"error": msg}))))
+        }
+    }
+}
+
+async fn node_update_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    let (node, client, secret) = worker_remote(&state, &id).await?;
+    match client.node_update_status(&secret).await {
+        Ok(data) => Ok(Json(json!({
+            "ok": true,
+            "reachable": true,
+            "node_id": node.id,
+            "version": data.get("version").cloned().unwrap_or(Value::Null),
+            "data": data.get("data").cloned().unwrap_or(Value::Null),
+        }))),
+        Err(_) => Ok(Json(json!({
+            "ok": true,
+            "reachable": false,
+            "node_id": node.id,
+            "version": node.metrics.software_version,
+            "data": {
+                "status": "restarting",
+                "message": "Nœud injoignable — redémarrage probable."
+            },
+        }))),
+    }
+}
+
+async fn update_workers(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<NodeUpdateBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    let target = resolve_update_target(&state, body.target_version).await?;
+    let nodes = state.cluster.list_nodes().await.map_err(map_err)?;
+    let mut results = Vec::new();
+    for node in nodes {
+        if node.role == NodeRole::Leader || node.id == "default" {
+            continue;
+        }
+        if node.status != devforge_cluster::NodeStatus::Online {
+            results.push(json!({
+                "id": node.id,
+                "name": node.name,
+                "ok": false,
+                "skipped": true,
+                "error": "hors ligne",
+            }));
+            continue;
+        }
+        let current = node.metrics.software_version.clone().unwrap_or_default();
+        if !current.is_empty() && !devforge_update::version_gt(&target, &current) {
+            results.push(json!({
+                "id": node.id,
+                "name": node.name,
+                "ok": true,
+                "skipped": true,
+                "version": current,
+            }));
+            continue;
+        }
+        match worker_remote(&state, &node.id).await {
+            Ok((_, client, secret)) => match client.node_update_start(&secret, Some(&target)).await
+            {
+                Ok(data) => results.push(json!({
+                    "id": node.id,
+                    "name": node.name,
+                    "ok": true,
+                    "data": data.get("data").cloned().unwrap_or(data),
+                })),
+                Err(e) => {
+                    let msg = e.to_string();
+                    if msg.contains("Déjà à jour") {
+                        results.push(json!({
+                            "id": node.id,
+                            "name": node.name,
+                            "ok": true,
+                            "skipped": true,
+                            "message": msg,
+                        }));
+                    } else {
+                        results.push(json!({
+                            "id": node.id,
+                            "name": node.name,
+                            "ok": false,
+                            "error": msg,
+                        }));
+                    }
+                }
+            },
+            Err((_, Json(err))) => results.push(json!({
+                "id": node.id,
+                "name": node.name,
+                "ok": false,
+                "error": err.get("error").and_then(|v| v.as_str()).unwrap_or("erreur"),
+            })),
+        }
+    }
+    Ok(Json(json!({
+        "ok": true,
+        "target_version": target,
+        "results": results,
+    })))
+}
+
+fn cluster_auth_ok(local: &LocalClusterState, provided: &str) -> bool {
+    if provided.is_empty() {
+        return false;
+    }
+    if !local.node_secret.is_empty() && provided == local.node_secret {
+        return true;
+    }
+    if !local.failover_secret.is_empty() && provided == local.failover_secret {
+        return true;
+    }
+    false
+}
+
+async fn cluster_snapshot(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Vec<u8>, (StatusCode, Json<Value>)> {
+    let local = state.cluster.local().await.map_err(map_err)?;
+    let secret = bearer(&headers).unwrap_or_default();
+    if !cluster_auth_ok(&local, &secret) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "secret invalide"})),
+        ));
+    }
+    let path = devforge_cluster::snapshot_path();
+    if !path.is_file() {
+        let _ = refresh_cluster_snapshot(&state).await;
+    }
+    let bytes = tokio::fs::read(&path).await.map_err(|e| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": format!("snapshot: {e}")})),
+        )
+    })?;
+    if bytes.len() < 100 || !bytes.starts_with(b"SQLite format 3\0") {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "snapshot indisponible"})),
+        ));
+    }
+    Ok(bytes)
+}
+
+pub async fn refresh_cluster_snapshot(
+    state: &AppState,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    let bytes = devforge_backup::snapshot_sqlite_pool(&state.pool)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+    let dest = devforge_cluster::snapshot_path();
+    if let Some(parent) = dest.parent() {
+        let _ = tokio::fs::create_dir_all(parent).await;
+    }
+    tokio::fs::write(&dest, &bytes).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("écriture snapshot: {e}")})),
+        )
+    })?;
+    let mut local = state.cluster.local().await.map_err(map_err)?;
+    local.snapshot_generation = local.snapshot_generation.saturating_add(1);
+    state.cluster.set_local(&local).await.map_err(map_err)?;
+    Ok(())
+}
+
+pub fn spawn_snapshot_loop(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            if let Err((_, Json(err))) = refresh_cluster_snapshot(&state).await {
+                tracing::warn!(
+                    error = %err.get("error").and_then(|v| v.as_str()).unwrap_or("snapshot"),
+                    "rafraîchissement snapshot cluster"
+                );
+            }
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        }
+    });
+}
+
+async fn failover_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let local = state.cluster.local().await.map_err(map_err)?;
+    let secret = bearer(&headers).unwrap_or_default();
+    if !cluster_auth_ok(&local, &secret) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "secret invalide"})),
+        ));
+    }
+    Ok(Json(json!({
+        "ok": true,
+        "role": local.role,
+        "acting_leader": local.acting_leader,
+        "node_id": local.node_id,
+        "advertise_url": local.advertise_url,
+        "preferred_leader_id": local.preferred_leader_id,
+        "preferred_leader_url": local.preferred_leader_url,
+        "generation": local.snapshot_generation,
+    })))
+}
+
+#[derive(Deserialize)]
+struct DemoteBody {
+    #[serde(default)]
+    preferred_leader_url: String,
+}
+
+async fn failover_demote(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<DemoteBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let mut local = state.cluster.local().await.map_err(map_err)?;
+    let secret = bearer(&headers).unwrap_or_default();
+    if !cluster_auth_ok(&local, &secret) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "secret invalide"})),
+        ));
+    }
+    if !local.acting_leader {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "pas un leader intérimaire"})),
+        ));
+    }
+    let url = body.preferred_leader_url.trim().trim_end_matches('/');
+    if !url.is_empty() {
+        local.leader_url = url.into();
+        local.preferred_leader_url = url.into();
+    }
+    local.role = NodeRole::Worker;
+    local.acting_leader = false;
+    state.cluster.set_local(&local).await.map_err(map_err)?;
+    tokio::spawn(async {
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        devforge_cluster::restart_current_process();
+    });
+    Ok(Json(json!({"ok": true, "role": "worker"})))
 }

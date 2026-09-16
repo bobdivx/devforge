@@ -16,7 +16,7 @@ Détection (`crates/detect`) : Laravel, Next, Astro, Compose, Dockerfile, static
 |-------|------|
 | `workdir` | Racine locale / nœud pour tests et atelier |
 | `test_command` | Commande de tests (pas de scan magique de chemins) |
-| `server_id` | Nœud cluster (`default` = leader). Réglable dans Settings projet |
+| `server_id` | Nœud cluster (`default` = leader). Visible partout (accueil, liste, overview, Cluster). **Un nœud par forge**, pas de réplica. Réglable à la création et dans Settings.
 | `build_pack` | `nixpacks` (défaut), `dockerfile`, `dockercompose`, `static` |
 | `git_repository` · `git_branch` | Source de deploy |
 | `auto_deploy` | Push / poll → deploy. Voir [[Auto-deploy]] |
@@ -27,14 +27,14 @@ Projets, env, agents, backups sont scopés `workspace_uuid`. Un user ne voit pas
 
 ## Onglets
 
-- **Overview** — statut, URLs, santé
+- **Overview** — statut, URLs, santé, **nœud d’hébergement**
 - **Workspace** — chat + preview atelier / prod
 - **Deployments** — historique, logs, repair
 - **Git** — statut, diff, discard local
 - **Actions** — GitHub Actions du repo
 - **Agents** — Ops / Deploy / Reviewer / custom
 - **Domains** — FQDN + ACME
-- **Database** — provision (crate encore partiel)
+- **Database** — lien Turso (cloud, indépendant du nœud). Pas de Postgres provisionné. SQLite dans le conteneur = locale au nœud, perdue au redéploy.
 - **Env** — secrets, import `.env`
 - **Backups** — snapshots projet
 - **Settings** — nœud, pack, commandes, danger zone

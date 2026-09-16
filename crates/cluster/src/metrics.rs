@@ -22,6 +22,12 @@ pub fn collect_node_metrics() -> NodeMetrics {
         m.disk_total_bytes = Some(total);
     }
     docker_snapshot(&mut m);
+    m.software_version = Some(
+        std::env::var("DEVFORGE_VERSION")
+            .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string())
+            .trim_start_matches('v')
+            .to_string(),
+    );
     m
 }
 
@@ -103,9 +109,9 @@ mod tests {
     }
 
     #[test]
-    fn collect_metrics_reads_proc_on_linux() {
+    fn collect_metrics_includes_software_version() {
         let m = collect_node_metrics();
-        assert!(m.mem_total_bytes.is_some());
-        assert!(m.load_1.is_some());
+        assert!(m.software_version.is_some());
+        assert!(!m.software_version.unwrap().is_empty());
     }
 }

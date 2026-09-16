@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api } from '../lib/api';
+import type { ClusterNode } from '../lib/api';
+import { NodeSelect } from './NodeSelect';
 import {
   Alert,
   Badge,
@@ -97,6 +99,8 @@ export function NewGithubAppWizard({
   const [wildcardDomain, setWildcardDomain] = useState('');
   const [domainMode, setDomainMode] = useState<DomainMode>('auto');
   const [customFqdn, setCustomFqdn] = useState('');
+  const [nodes, setNodes] = useState<ClusterNode[]>([]);
+  const [serverId, setServerId] = useState('default');
 
   const idx = STEPS.indexOf(step);
   const projectNamePreview = name.trim() || (selected ? selected.name : 'app');
@@ -121,9 +125,16 @@ export function NewGithubAppWizard({
   useEffect(() => {
     (async () => {
       try {
-        const [s, boot] = await Promise.all([api.githubStatus(), api.bootstrap()]);
+        const [s, boot, cluster] = await Promise.all([
+          api.githubStatus(),
+          api.bootstrap(),
+          api.clusterNodes().catch(() => null),
+        ]);
         setWildcardDomain(boot.settings?.wildcard_domain || '');
         setConnected(s.connected);
+        if (cluster?.nodes?.length) {
+          setNodes(cluster.nodes);
+        }
         if (s.connected) {
           const r = await api.githubRepos();
           setRepos(r.data);
@@ -223,7 +234,7 @@ export function NewGithubAppWizard({
         base_directory: baseDir.trim() || '/',
         docker_compose_location:
           buildPack === 'dockercompose' ? composePath.trim() || '/docker-compose.yaml' : null,
-        server_id: 'default',
+        server_id: serverId || 'default',
         workdir: `/data/devforge/applications/${selected.name}`,
         test_command: testCommand || 'npm test --if-present',
         production_url: productionUrl,
@@ -443,6 +454,12 @@ export function NewGithubAppWizard({
             placeholder="/"
             onInput={(e) => setBaseDir((e.target as HTMLInputElement).value)}
           />
+          <NodeSelect
+            nodes={nodes}
+            value={serverId}
+            onChange={setServerId}
+            hint="La forge tourne uniquement sur ce nœud. Pas de copie automatique sur les autres."
+          />
           {buildPack === 'dockercompose' && (
             <Input
               label="Chemin docker-compose"
@@ -623,6 +640,10 @@ export function NewGithubAppWizard({
               <span class="text-[var(--color-warn)]">non défini</span>
             )}
             {domainMode === 'custom' ? ' · custom' : ' · auto'}
+          </li>
+          <li>
+            <span class="text-[var(--color-ink-muted)]">Nœud </span>
+            {nodes.find((n) => n.id === serverId)?.name || serverId}
           </li>
           <li>
             <span class="text-[var(--color-ink-muted)]">Env </span>

@@ -289,7 +289,12 @@ export const api = {
     ),
   createProject: (body: Partial<Project> & { name: string; is_static?: boolean; port?: number }) =>
     request<{ data: Project }>('/projects', { method: 'POST', body: JSON.stringify(body) }),
-  scaffoldProject: (body: { title: string; prompt: string; template?: string }) =>
+  scaffoldProject: (body: {
+    title: string;
+    prompt: string;
+    template?: string;
+    server_id?: string;
+  }) =>
     request<{ data: { project: Project; agent: ProjectAgent } }>('/projects/scaffold', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -1352,7 +1357,15 @@ export const api = {
   cronRuns: (projectUuid: string, cronId: string, limit = 50) =>
     request<{ data: CronRun[] }>(`/projects/${projectUuid}/crons/${cronId}/runs?limit=${limit}`),
 
-  clusterNodes: () => request<{ ok: boolean; nodes: ClusterNode[] }>('/cluster/nodes'),
+  clusterNodes: () =>
+    request<{
+      ok: boolean;
+      leader_version?: string;
+      acting_leader?: boolean;
+      acting_node_id?: string;
+      preferred_leader_id?: string;
+      nodes: ClusterNode[];
+    }>('/cluster/nodes'),
   clusterAddNode: (body: {
     name: string;
     host: string;
@@ -1393,6 +1406,47 @@ export const api = {
     request<{ ok: boolean; exit_code: number; output: string }>(
       `/cluster/nodes/${encodeURIComponent(id)}/logs`,
     ),
+  clusterNodeUpdateStart: (id: string, body?: { target_version?: string }) =>
+    request<{
+      ok: boolean;
+      skipped?: boolean;
+      node_id: string;
+      target_version?: string;
+      message?: string;
+      data?: {
+        id?: string;
+        target_version?: string;
+        status?: string;
+        message?: string;
+      };
+    }>(`/cluster/nodes/${encodeURIComponent(id)}/update`, {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    }),
+  clusterNodeUpdateStatus: (id: string) =>
+    request<{
+      ok: boolean;
+      reachable: boolean;
+      node_id: string;
+      version?: string | null;
+      data?: { status?: string; message?: string; target_version?: string } | null;
+    }>(`/cluster/nodes/${encodeURIComponent(id)}/update`),
+  clusterUpdateWorkers: (body?: { target_version?: string }) =>
+    request<{
+      ok: boolean;
+      target_version: string;
+      results: Array<{
+        id: string;
+        name: string;
+        ok: boolean;
+        skipped?: boolean;
+        error?: string;
+        version?: string;
+      }>;
+    }>('/cluster/update-workers', {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    }),
   clusterInvites: () =>
     request<{
       ok: boolean;
@@ -1482,6 +1536,7 @@ export type ClusterNodeMetrics = {
   load_1?: number | null;
   docker_ok?: boolean | null;
   containers?: number | null;
+  software_version?: string | null;
 };
 
 export type ClusterInvite = {

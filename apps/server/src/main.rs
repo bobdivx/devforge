@@ -57,6 +57,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database_url =
         std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:devforge.db?mode=rwc".into());
     let state = AppState::new(&database_url).await?;
+    worker::apply_promote_flag(&state).await;
+    worker::apply_reclaim_flag(&state).await;
 
     if let Err(e) = worker::consume_pending_join(&state).await {
         tracing::error!(error = %e, "échec join cluster (fichier pending)");
@@ -88,6 +90,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         axum::serve(listener, app).await?;
         return Ok(());
     }
+
+    worker::maybe_reclaim_preferred(&state).await;
+    cluster_routes::spawn_snapshot_loop(state.clone());
 
     // Ensure Traefik reverse proxy is running (durable fix for outage 2026-09-11).
     // If the container was deleted/stopped, recreate/start it before accepting requests.

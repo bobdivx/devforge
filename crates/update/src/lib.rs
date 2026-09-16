@@ -350,23 +350,23 @@ impl UpdateFacade {
             let guard = self.job.read().await;
             if let Some(j) = guard.as_ref() {
                 if j.status == "running" || j.status == "restarting" {
-                    return Err(DevForgeError::Message(
-                        "Une mise à jour est déjà en cours.".into(),
-                    ));
+                    return Ok(j.clone());
                 }
             }
         }
 
-        let check = self.check().await?;
-        let target = match target
-            .filter(|s| !s.trim().is_empty())
-            .or(check.latest.clone())
-        {
+        let target = match target.filter(|s| !s.trim().is_empty()) {
             Some(t) => t.trim_start_matches('v').to_string(),
             None => {
-                return Err(DevForgeError::Message(
-                    "Aucune version cible (releases introuvables).".into(),
-                ));
+                let check = self.check().await?;
+                match check.latest.clone() {
+                    Some(t) => t.trim_start_matches('v').to_string(),
+                    None => {
+                        return Err(DevForgeError::Message(
+                            "Aucune version cible (releases introuvables).".into(),
+                        ));
+                    }
+                }
             }
         };
 

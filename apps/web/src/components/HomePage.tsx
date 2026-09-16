@@ -1,4 +1,5 @@
-import { api, type Project } from '../lib/api';
+import { api, type ClusterNode, type Project } from '../lib/api';
+import { nodeShortLabel } from '../lib/cluster-display';
 import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { cn } from '../lib/cn';
 import { AppShell } from './AppShell';
@@ -8,11 +9,20 @@ import { useEffect, useState } from 'preact/hooks';
 import { NewGithubAppWizard } from './NewGithubAppWizard';
 import { NewBuilderWizard } from './NewBuilderWizard';
 
-function AppCard({ project, index }: { project: Project; index: number }) {
+function AppCard({
+  project,
+  index,
+  nodes,
+}: {
+  project: Project;
+  index: number;
+  nodes: ClusterNode[];
+}) {
   const status = projectStatusMeta(project.status);
   const sync = projectSyncMeta(project.sync);
   const badgeTone = status.tone === 'ok' ? 'ok' : status.tone;
   const showSyncWarn = sync.tone === 'warn' || sync.tone === 'danger';
+  const node = nodeShortLabel(nodes, project.server_id);
 
   return (
     <FadeIn delay={Math.min(index * 40, 280)} class="h-full w-full">
@@ -56,6 +66,7 @@ function AppCard({ project, index }: { project: Project; index: number }) {
           >
             {status.label}
           </div>
+          <div class="mt-0.5 truncate text-[10px] text-[var(--color-ink-faint)]">{node}</div>
         </div>
       </a>
     </FadeIn>
@@ -64,6 +75,7 @@ function AppCard({ project, index }: { project: Project; index: number }) {
 
 export function HomePage() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [nodes, setNodes] = useState<ClusterNode[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -72,8 +84,12 @@ export function HomePage() {
   // Fonction pour charger les projets
   async function loadProjects() {
     try {
-      const r = await api.projects();
+      const [r, n] = await Promise.all([
+        api.projects(),
+        api.clusterNodes().catch(() => null),
+      ]);
       setProjects(r.data);
+      if (n?.nodes) setNodes(n.nodes);
       setError(null);
     } catch (e: unknown) {
       // Soft-fail: ne pas écraser les projets existants en cas d'erreur pendant le polling
@@ -181,7 +197,7 @@ export function HomePage() {
       ) : (
         <HubGrid cols={5}>
           {projects.map((p, i) => (
-            <AppCard key={p.uuid} project={p} index={i} />
+            <AppCard key={p.uuid} project={p} index={i} nodes={nodes} />
           ))}
 
           <HubAddTile index={projects.length} label="Ajouter" onClick={openWizard} />

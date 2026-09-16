@@ -17,4 +17,6 @@ OIDC par app : le provisionnement écrit aussi des clés dans cet env. Voir [[SS
 
 ## Lien base
 
-Un MCP / ressource DB peut être lié au projet ; les clés apparaissent dans Overview / Env selon le provider.
+Un MCP Turso peut être lié au projet. Les clés (`DATABASE_URL`, `TURSO_*`) apparaissent dans Env et sont injectées au deploy.
+
+Turso est **hors cluster** : leader et workers parlent à la même base cloud. Une SQLite dans le conteneur, elle, reste collée au nœud (et disparaît au redéploy). Voir [[Cluster]].

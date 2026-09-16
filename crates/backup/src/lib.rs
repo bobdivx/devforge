@@ -556,40 +556,57 @@ impl InstanceBackupService {
     }
 }
 
-async fn snapshot_sqlite(db_path: &Path) -> Result<Vec<u8>> {
+/// Copie cohérente via le pool ouvert (WAL inclus).
+pub async fn snapshot_sqlite_pool(pool: &sqlx::SqlitePool) -> Result<Vec<u8>> {
+    let tmp = std::env::temp_dir().join(format!(
+        "devforge-snap-{}.db",
+        &Uuid::new_v4().to_string()[..8]
+    ));
+    if tmp.exists() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    let dest = tmp.to_string_lossy().replace('\'', "''");
+    sqlx::query(&format!("VACUUM INTO '{dest}'"))
+        .execute(pool)
+        .await
+        .map_err(|e| DevForgeError::Message(format!("VACUUM INTO: {e}")))?;
+    let bytes = tokio::fs::read(&tmp)
+        .await
+        .map_err(|e| DevForgeError::Message(format!("lecture snapshot: {e}")))?;
+    let _ = tokio::fs::remove_file(&tmp).await;
+    if bytes.len() < 100 || !looks_like_sqlite(&bytes) {
+        return Err(DevForgeError::Message("snapshot SQLite invalide".into()));
+    }
+    Ok(bytes)
+}
+
+pub async fn snapshot_sqlite(db_path: &Path) -> Result<Vec<u8>> {
     if !db_path.exists() {
         return Err(DevForgeError::Message(format!(
             "fichier DB introuvable: {}",
             db_path.display()
         )));
     }
-    // Prefer online consistent copy via SQLite VACUUM INTO when possible;
-    // fallback: raw file copy (good enough if WAL checkpointed).
-    let tmp = PathBuf::from(format!(
-        "{}.snap-{}",
-        db_path.display(),
-        &Uuid::new_v4().to_string()[..8]
-    ));
-
-    let url = format!("sqlite:{}?mode=ro", db_path.display());
-    // Use CLI-less approach: copy main + attempt to include WAL by reading bytes.
-    // Simple reliable path: copy the db file after truncating WAL via best-effort.
-    let _ = std::fs::copy(db_path, &tmp);
-    // Also try copying -wal if present into a sidecar (ignored on restore of main file).
-    match tokio::fs::read(&tmp).await {
-        Ok(bytes) => {
-            let _ = tokio::fs::remove_file(&tmp).await;
-            if bytes.is_empty() {
-                return Err(DevForgeError::Message("snapshot vide".into()));
-            }
-            let _ = url; // keep for future sqlx VACUUM INTO
-            Ok(bytes)
+    let url = format!("sqlite:{}?mode=rwc", db_path.display());
+    if let Ok(pool) = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+    {
+        let r = snapshot_sqlite_pool(&pool).await;
+        pool.close().await;
+        if r.is_ok() {
+            return r;
         }
-        Err(e) => {
-            let _ = tokio::fs::remove_file(&tmp).await;
-            Err(DevForgeError::Message(format!("lecture snapshot: {e}")))
-        }
+        tracing::warn!("VACUUM INTO indisponible, copie brute");
     }
+    let bytes = tokio::fs::read(db_path)
+        .await
+        .map_err(|e| DevForgeError::Message(format!("lecture snapshot: {e}")))?;
+    if bytes.is_empty() || !looks_like_sqlite(&bytes) {
+        return Err(DevForgeError::Message("snapshot SQLite invalide".into()));
+    }
+    Ok(bytes)
 }
 
 fn looks_like_sqlite(bytes: &[u8]) -> bool {
@@ -608,3 +625,32 @@ pub fn sqlite_path_from_url(database_url: &str) -> PathBuf {
 
 /// Re-export for callers listing remote objects.
 pub type RemoteObject = StorageObject;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn vacuum_into_snapshot_is_sqlite() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("t.db");
+        let url = format!("sqlite:{}?mode=rwc", db.display());
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO t (v) VALUES ('hello')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let bytes = snapshot_sqlite_pool(&pool).await.unwrap();
+        pool.close().await;
+        assert!(looks_like_sqlite(&bytes));
+        assert!(bytes.len() > 100);
+    }
+}

@@ -93,6 +93,8 @@ pub struct NodeMetrics {
     pub docker_ok: Option<bool>,
     #[serde(default)]
     pub containers: Option<u32>,
+    #[serde(default)]
+    pub software_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,6 +124,20 @@ pub struct LocalClusterState {
     pub node_name: String,
     #[serde(default)]
     pub advertise_url: String,
+    #[serde(default = "default_preferred_leader_id")]
+    pub preferred_leader_id: String,
+    #[serde(default)]
+    pub preferred_leader_url: String,
+    #[serde(default)]
+    pub failover_secret: String,
+    #[serde(default)]
+    pub snapshot_generation: i64,
+    #[serde(default)]
+    pub acting_leader: bool,
+}
+
+fn default_preferred_leader_id() -> String {
+    LEADER_NODE_ID.into()
 }
 
 impl Default for LocalClusterState {
@@ -133,6 +149,11 @@ impl Default for LocalClusterState {
             node_secret: String::new(),
             node_name: "Leader".into(),
             advertise_url: String::new(),
+            preferred_leader_id: LEADER_NODE_ID.into(),
+            preferred_leader_url: String::new(),
+            failover_secret: String::new(),
+            snapshot_generation: 0,
+            acting_leader: false,
         }
     }
 }
@@ -178,6 +199,56 @@ pub struct HeartbeatPayload {
     pub capabilities: Option<Vec<String>>,
     #[serde(default)]
     pub metrics: Option<NodeMetrics>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RosterEntry {
+    pub id: String,
+    pub name: String,
+    pub role: NodeRole,
+    pub advertise_url: String,
+    #[serde(default)]
+    pub drained: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct HeartbeatAck {
+    #[serde(default)]
+    pub ok: bool,
+    #[serde(default)]
+    pub generation: i64,
+    #[serde(default = "default_preferred_leader_id")]
+    pub preferred_leader_id: String,
+    #[serde(default)]
+    pub preferred_leader_url: String,
+    #[serde(default)]
+    pub failover_secret: String,
+    #[serde(default)]
+    pub acting_leader: bool,
+    #[serde(default)]
+    pub acting_node_id: String,
+    #[serde(default)]
+    pub roster: Vec<RosterEntry>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FailoverStatus {
+    #[serde(default)]
+    pub ok: bool,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub acting_leader: bool,
+    #[serde(default)]
+    pub node_id: String,
+    #[serde(default)]
+    pub advertise_url: String,
+    #[serde(default = "default_preferred_leader_id")]
+    pub preferred_leader_id: String,
+    #[serde(default)]
+    pub preferred_leader_url: String,
+    #[serde(default)]
+    pub generation: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

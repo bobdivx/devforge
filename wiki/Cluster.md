@@ -1,6 +1,8 @@
 # Cluster
 
-Un **leader** (control plane + SQLite) et des **workers** (compute). L’identifiant de nœud `id` est le `server_id` des projets : tu choisis sur quelle machine tourne une app.
+Un **leader** (control plane + SQLite) et des **workers** (compute). L’identifiant de nœud `id` est le `server_id` des projets : tu choisis sur quelle machine tourne une forge. **Une forge = un nœud**, pas de copie automatique.
+
+La page Cluster liste **toutes les forges** (nœud, rôle, statut app, statut nœud). Accueil et liste projets affichent aussi le nœud.
 
 Enrôlement **100 % UX**. Pas de variables d’environnement pour le rôle ou le join.
 
@@ -24,15 +26,27 @@ Les nœuds en cours d’enrôlement apparaissent en statut **joining**. Un secon
 
 Tu ne peux pas supprimer le leader. Le drain ne s’applique qu’aux workers (plus de nouveaux jobs via `ClusterAwareExecutor`).
 
-Les tuiles affichent CPU, nombre d’apps, last_seen. Fiche nœud :
+Les tuiles affichent CPU, version DevForge, nombre d’apps, last_seen. Fiche nœud :
 
-- **Infos** — rename, **URL du nœud / leader** (modifiable après ajout), métriques (CPU / RAM / disque / Docker), drain worker, CTA sauvegarde leader (`/app/settings?tab=backup`)
+- **Infos** — rename, **URL du nœud / leader** (modifiable après ajout), métriques (CPU / RAM / disque / Docker), **mise à jour DevForge** (workers depuis le leader ; leader via Paramètres → Mise à jour), drain worker, CTA sauvegarde leader (`/app/settings?tab=backup`)
 - **Apps** — liste des projets (`server_id`) + réassignation (le prochain deploy va sur la cible ; les conteneurs déjà lancés restent)
 - **Diagnostic** — `uptime` / `free` / `df` / `docker ps` via exec
 
-Si le **leader** tombe : pas d’élection. L’UI/API disparaissent. Les apps Docker déjà lancées sur les workers **continuent**. Relance la **même** machine avec `/data`.
+Si le **leader** tombe : après ~1 min sans heartbeat, le worker au plus petit `id` (non drainé, URL connue) **est élu** et restaure la dernière copie SQLite. L’UI/API reviennent sur cet intérim (perte max ~30–60 s). Les apps Docker déjà lancées **continuent**. Quand le leader d’origine revient, il reprend la base de l’intérim puis redevient le control plane.
 
 Si un **worker** tombe : seules les apps de ce nœud s’arrêtent. Réassigne + redéploie vers un nœud en ligne. Les autres workers et le leader restent.
+
+## Bases de données
+
+Trois couches distinctes :
+
+| Quoi | Où | Si le nœud change / tombe |
+|------|----|---------------------------|
+| SQLite DevForge (control plane) | Fichier `/data` **sur le leader**, copie récente sur chaque worker | Leader down → élection + restauration de la copie (~30–60 s). Relancer la machine d’origine pour reprendre. Sauvegarde instance. |
+| **Turso** liée au projet | Cloud (libSQL) | Les env `DATABASE_URL` / `TURSO_*` suivent le projet. La forge peut bouger de nœud, les données restent. |
+| SQLite **dans le conteneur** de l’app | Disque du nœud qui run le container | Perdue au redéploy (nouveau conteneur). Inaccessible si ce worker est down. |
+
+L’onglet projet **Database** ne provisionne pas de Postgres. Il lie une base Turso (MCP) et injecte les secrets dans Env, donc dans le conteneur au prochain deploy.
 
 ## Rejoindre depuis une machine neuve
 
@@ -64,7 +78,7 @@ Rate-limit join : 20 tentatives / IP / minute.
 
 ## Hors v1
 
-- Réplicas HA du control plane (Turso)
+- Réplication synchrone du control plane (Turso / libSQL)
 - Mesh WireGuard entre nœuds
 
 Le crate `crates/cluster` + tables SQLite `cluster_*` portent le v1.
@@ -79,6 +93,8 @@ Le crate `crates/cluster` + tables SQLite `cluster_*` portent le v1.
 | GET | `/api/v1/cluster/nodes/{id}/projects` | admin |
 | POST | `/api/v1/cluster/nodes/{id}/reassign` | admin — `{ target_node_id, project_uuid? \| all }` |
 | GET | `/api/v1/cluster/nodes/{id}/logs` | admin |
+| GET/POST | `/api/v1/cluster/nodes/{id}/update` | admin — lance / suit la self-update du worker |
+| POST | `/api/v1/cluster/update-workers` | admin — `{ target_version? }` tous les workers en ligne |
 | GET/POST | `/api/v1/cluster/invites` | admin |
 | DELETE | `/api/v1/cluster/invites/{id}` | admin |
 | POST | `/api/v1/cluster/join` | token d’invitation |

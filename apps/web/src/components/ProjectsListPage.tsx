@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api, type Project } from '../lib/api';
+import { api, type ClusterNode, type Project } from '../lib/api';
+import { nodeShortLabel } from '../lib/cluster-display';
 import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { AppShell } from './AppShell';
 import { NewGithubAppWizard } from './NewGithubAppWizard';
+import { NodeSelect } from './NodeSelect';
 import { Alert, Badge, Button, Input, Modal, Table, Td, Tr, useToast } from './ui';
 
 type Mode = 'github' | 'empty';
@@ -30,12 +32,18 @@ export function ProjectsListPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [mode, setMode] = useState<Mode>('github');
   const [loading, setLoading] = useState(true);
+  const [nodes, setNodes] = useState<ClusterNode[]>([]);
+  const [serverId, setServerId] = useState('default');
   const toast = useToast();
 
   async function load() {
     try {
-      const r = await api.projects();
+      const [r, n] = await Promise.all([
+        api.projects(),
+        api.clusterNodes().catch(() => null),
+      ]);
       setProjects(r.data);
+      if (n?.nodes) setNodes(n.nodes);
       setError(null);
     } catch (e: unknown) {
       // Soft-fail: ne pas écraser les projets existants en cas d'erreur pendant le polling
@@ -130,7 +138,7 @@ export function ProjectsListPage() {
         .replace(/[^a-z0-9-_]+/g, '-');
       await api.createProject({
         name: name.trim(),
-        server_id: 'default',
+        server_id: serverId || 'default',
         workdir: `/data/devforge/applications/${slug}`,
         test_command: 'npm test --if-present',
         build_pack: 'nixpacks',
@@ -193,14 +201,18 @@ export function ProjectsListPage() {
         {mode === 'github' ? (
           <NewGithubAppWizard bare />
         ) : (
-          <form class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end" onSubmit={createEmpty}>
-            <div class="min-w-0 w-full flex-1">
-              <Input
-                placeholder="Nom du projet…"
-                value={name}
-                onInput={(e) => setName((e.target as HTMLInputElement).value)}
-              />
-            </div>
+          <form class="flex flex-col gap-3" onSubmit={createEmpty}>
+            <Input
+              placeholder="Nom du projet…"
+              value={name}
+              onInput={(e) => setName((e.target as HTMLInputElement).value)}
+            />
+            <NodeSelect
+              nodes={nodes}
+              value={serverId}
+              onChange={setServerId}
+              hint="La forge tourne uniquement sur ce nœud — pas de copie sur les autres."
+            />
             <Button type="submit" variant="outline" disabled={busy} class="w-full sm:w-auto">
               Créer
             </Button>
@@ -208,7 +220,7 @@ export function ProjectsListPage() {
         )}
       </Modal>
 
-      <Table headers={['Nom', 'Status', 'Dernière update', 'Sync GitHub']}>
+      <Table headers={['Nom', 'Nœud', 'Status', 'Dernière update', 'Sync GitHub']}>
         {projects.map((p) => {
           const st = projectStatusMeta(p.status);
           const sync = projectSyncMeta(p.sync);
@@ -225,6 +237,7 @@ export function ProjectsListPage() {
                 <div class="mt-0.5 text-xs text-[var(--color-ink-muted)]">{p.git_branch}</div>
               ) : null}
             </Td>
+            <Td class="text-[var(--color-ink-muted)]">{nodeShortLabel(nodes, p.server_id)}</Td>
             <Td>
               <Badge tone={st.tone}>{st.label}</Badge>
             </Td>

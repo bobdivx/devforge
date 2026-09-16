@@ -635,6 +635,31 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await;
     let _ = sqlx::query(
+        "ALTER TABLE cluster_local ADD COLUMN acting_leader INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE cluster_local ADD COLUMN preferred_leader_id TEXT NOT NULL DEFAULT 'default'",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE cluster_local ADD COLUMN preferred_leader_url TEXT NOT NULL DEFAULT ''",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE cluster_local ADD COLUMN failover_secret TEXT NOT NULL DEFAULT ''",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE cluster_local ADD COLUMN snapshot_generation INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
         "ALTER TABLE cluster_nodes ADD COLUMN drained INTEGER NOT NULL DEFAULT 0",
     )
     .execute(pool)

@@ -29,9 +29,27 @@ impl ClusterFacade {
     pub async fn ensure_leader(&self, name: &str, advertise_url: &str) -> Result<ClusterNode> {
         if let Some(existing) = self.store.get_node(LEADER_NODE_ID).await? {
             let mut local = self.store.get_local().await?;
-            if local.role == NodeRole::Leader && local.node_id.is_empty() {
-                local.node_id = LEADER_NODE_ID.into();
-                self.store.set_local(&local).await?;
+            if local.role == NodeRole::Leader {
+                let mut dirty = false;
+                if local.node_id.is_empty() {
+                    local.node_id = LEADER_NODE_ID.into();
+                    dirty = true;
+                }
+                if local.failover_secret.is_empty() {
+                    local.failover_secret = new_node_secret();
+                    dirty = true;
+                }
+                if local.preferred_leader_id.is_empty() {
+                    local.preferred_leader_id = LEADER_NODE_ID.into();
+                    dirty = true;
+                }
+                if local.preferred_leader_url.is_empty() && !advertise_url.is_empty() {
+                    local.preferred_leader_url = advertise_url.into();
+                    dirty = true;
+                }
+                if dirty {
+                    self.store.set_local(&local).await?;
+                }
             }
             return Ok(existing);
         }
@@ -65,9 +83,20 @@ impl ClusterFacade {
             local.role = NodeRole::Leader;
             local.node_id = LEADER_NODE_ID.into();
             local.node_name = node.name.clone();
+            local.preferred_leader_id = LEADER_NODE_ID.into();
             if local.leader_url.is_empty() {
                 local.leader_url = advertise_url.into();
             }
+            if local.preferred_leader_url.is_empty() {
+                local.preferred_leader_url = advertise_url.into();
+            }
+            if local.advertise_url.is_empty() {
+                local.advertise_url = advertise_url.into();
+            }
+            if local.failover_secret.is_empty() {
+                local.failover_secret = new_node_secret();
+            }
+            local.acting_leader = false;
             self.store.set_local(&local).await?;
         }
         Ok(node)
@@ -97,11 +126,20 @@ impl ClusterFacade {
 
     pub async fn list_nodes(&self) -> Result<Vec<ClusterNode>> {
         let mut nodes = self.store.list_nodes().await?;
+        let local = self.store.get_local().await?;
         let now = Utc::now();
         for node in &mut nodes {
-            if node.role == NodeRole::Leader {
-                node.status = NodeStatus::Online;
-                continue;
+            if node.id == LEADER_NODE_ID || node.role == NodeRole::Leader {
+                if local.acting_leader && node.id == local.preferred_leader_id {
+                    node.status = NodeStatus::Offline;
+                    continue;
+                }
+                if !local.acting_leader
+                    && (local.node_id == node.id || node.id == LEADER_NODE_ID)
+                {
+                    node.status = NodeStatus::Online;
+                    continue;
+                }
             }
             if node.status == NodeStatus::Joining {
                 continue;
@@ -296,6 +334,45 @@ impl ClusterFacade {
         }
         self.store.upsert_node(&updated).await?;
         Ok(updated)
+    }
+
+    pub async fn heartbeat_ack(
+        &self,
+        secret: &str,
+        payload: HeartbeatPayload,
+    ) -> Result<crate::models::HeartbeatAck> {
+        let _node = self.heartbeat(secret, payload).await?;
+        let local = self.store.get_local().await?;
+        let nodes = self.list_nodes().await?;
+        let preferred_url = if local.preferred_leader_url.trim().is_empty() {
+            local.leader_url.clone()
+        } else {
+            local.preferred_leader_url.clone()
+        };
+        let preferred_id = if local.preferred_leader_id.trim().is_empty() {
+            LEADER_NODE_ID.into()
+        } else {
+            local.preferred_leader_id.clone()
+        };
+        Ok(crate::models::HeartbeatAck {
+            ok: true,
+            generation: local.snapshot_generation,
+            preferred_leader_id: preferred_id,
+            preferred_leader_url: preferred_url,
+            failover_secret: local.failover_secret,
+            acting_leader: local.acting_leader,
+            acting_node_id: local.node_id.clone(),
+            roster: nodes
+                .into_iter()
+                .map(|n| crate::models::RosterEntry {
+                    id: n.id,
+                    name: n.name,
+                    role: n.role,
+                    advertise_url: n.advertise_url,
+                    drained: n.drained,
+                })
+                .collect(),
+        })
     }
 
     pub async fn patch_node(

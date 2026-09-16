@@ -42,11 +42,14 @@ pub async fn consume_pending_join(state: &AppState) -> Result<(), Box<dyn std::e
         .cluster
         .set_local(&LocalClusterState {
             role: NodeRole::Worker,
-            leader_url: joined.leader_url,
+            leader_url: joined.leader_url.clone(),
             node_id: joined.node.id,
             node_secret: joined.secret,
             node_name: pending.name,
             advertise_url: pending.advertise_url,
+            preferred_leader_id: devforge_cluster::LEADER_NODE_ID.into(),
+            preferred_leader_url: joined.leader_url,
+            ..Default::default()
         })
         .await?;
     let _ = clear_pending_join().await;
@@ -57,7 +60,7 @@ pub async fn consume_pending_join(state: &AppState) -> Result<(), Box<dyn std::e
 pub async fn maybe_start_heartbeat(state: &AppState) {
     if let Ok(local) = state.cluster.local().await {
         if local.role == NodeRole::Worker && !local.node_secret.is_empty() {
-            crate::cluster_routes::spawn_heartbeat(state.cluster.clone());
+            spawn_worker_loop(state.clone());
         }
     }
 }
@@ -71,11 +74,18 @@ pub fn worker_router(state: AppState) -> Router {
             get(worker_local).patch(worker_local_patch),
         )
         .route("/internal/exec", post(internal_exec))
+        .route("/internal/update/status", get(internal_update_status))
+        .route("/internal/update/start", post(internal_update_start))
+        .merge(crate::cluster_routes::internal_cluster_routes())
         .with_state(state)
 }
 
 pub fn exec_route() -> Router<AppState> {
-    Router::new().route("/internal/exec", post(internal_exec))
+    Router::new()
+        .route("/internal/exec", post(internal_exec))
+        .route("/internal/update/status", get(internal_update_status))
+        .route("/internal/update/start", post(internal_update_start))
+        .merge(crate::cluster_routes::internal_cluster_routes())
 }
 
 async fn worker_health(State(state): State<AppState>) -> Json<Value> {
@@ -83,6 +93,7 @@ async fn worker_health(State(state): State<AppState>) -> Json<Value> {
     Json(json!({
         "ok": true,
         "service": "devforge-worker",
+        "version": state.updater.current_version(),
         "role": local.as_ref().map(|l| l.role).unwrap_or(NodeRole::Worker),
         "node_id": local.as_ref().map(|l| l.node_id.clone()),
         "leader_url": local.as_ref().map(|l| l.leader_url.clone()),
@@ -222,6 +233,73 @@ pub async fn internal_exec(
     Ok(Json(result))
 }
 
+async fn require_node_secret(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<LocalClusterState, (StatusCode, Json<Value>)> {
+    let local = state.cluster.local().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+    if local.node_secret.is_empty() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "secret nœud absent"})),
+        ));
+    }
+    let provided = crate::auth_routes::bearer_from(headers).unwrap_or_default();
+    if provided != local.node_secret {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "secret nœud invalide"})),
+        ));
+    }
+    Ok(local)
+}
+
+async fn internal_update_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let _ = require_node_secret(&state, &headers).await?;
+    Ok(Json(json!({
+        "ok": true,
+        "data": state.updater.current_job().await,
+        "version": state.updater.current_version(),
+        "mode": state.updater.config().mode.as_str(),
+    })))
+}
+
+#[derive(Deserialize)]
+struct InternalUpdateStart {
+    #[serde(default)]
+    target_version: Option<String>,
+}
+
+async fn internal_update_start(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<InternalUpdateStart>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let _ = require_node_secret(&state, &headers).await?;
+    let job = state
+        .updater
+        .start(body.target_version)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+    Ok(Json(json!({
+        "ok": true,
+        "data": job,
+    })))
+}
+
 pub fn with_static_fallback(mut app: Router) -> Router {
     if let Some(root) = crate::paths::web_dir() {
         let index = root.join("index.html");
@@ -238,4 +316,269 @@ pub fn with_static_fallback(mut app: Router) -> Router {
 
 pub fn is_worker_role(local: &LocalClusterState) -> bool {
     local.role == NodeRole::Worker && !local.node_secret.is_empty()
+}
+
+pub async fn apply_promote_flag(state: &AppState) {
+    let flag = devforge_cluster::promote_flag_path();
+    if !flag.is_file() {
+        return;
+    }
+    let ident = tokio::fs::read_to_string(devforge_cluster::failover_identity_path())
+        .await
+        .ok()
+        .and_then(|s| serde_json::from_str::<LocalClusterState>(&s).ok());
+    let Some(ident) = ident else {
+        let _ = tokio::fs::remove_file(&flag).await;
+        return;
+    };
+    let mut local = ident;
+    local.role = NodeRole::Leader;
+    local.acting_leader = true;
+    local.leader_url = local.advertise_url.clone();
+    if let Err(e) = state.cluster.set_local(&local).await {
+        tracing::error!(error = %e, "échec promotion intérim");
+        return;
+    }
+    let _ = tokio::fs::remove_file(&flag).await;
+    tracing::warn!(node = %local.node_id, "leader intérimaire — en attendant le leader d’origine");
+}
+
+pub async fn apply_reclaim_flag(state: &AppState) {
+    let flag = devforge_cluster::reclaim_flag_path();
+    if !flag.is_file() {
+        return;
+    }
+    let ident = tokio::fs::read_to_string(&flag)
+        .await
+        .ok()
+        .and_then(|s| serde_json::from_str::<LocalClusterState>(&s).ok());
+    let Some(mut ident) = ident else {
+        tracing::error!("cluster-reclaim.json illisible — identity non restaurée");
+        return;
+    };
+    ident.role = NodeRole::Leader;
+    ident.acting_leader = false;
+    if !ident.advertise_url.trim().is_empty() {
+        ident.leader_url = ident.advertise_url.clone();
+    }
+    if let Err(e) = state.cluster.set_local(&ident).await {
+        tracing::error!(error = %e, "échec restauration identité leader d’origine");
+        return;
+    }
+    let _ = tokio::fs::remove_file(&flag).await;
+    tracing::info!(node = %ident.node_id, "leader d’origine repris après intérim");
+}
+
+fn spawn_worker_loop(state: AppState) {
+    tokio::spawn(async move {
+        let mut fail = 0u32;
+        let mut last_snap = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(90))
+            .unwrap_or_else(std::time::Instant::now);
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            let local = match state.cluster.local().await {
+                Ok(l) => l,
+                Err(_) => continue,
+            };
+            if local.role != NodeRole::Worker || local.node_secret.is_empty() {
+                continue;
+            }
+            let client = LeaderClient::new(&local.leader_url);
+            match client
+                .heartbeat(
+                    &local.node_secret,
+                    &devforge_cluster::HeartbeatPayload {
+                        node_id: local.node_id.clone(),
+                        metrics: Some(collect_node_metrics()),
+                        ..Default::default()
+                    },
+                )
+                .await
+            {
+                Ok(ack) => {
+                    fail = 0;
+                    let need_snap = ack.generation > local.snapshot_generation
+                        || last_snap.elapsed() > std::time::Duration::from_secs(60);
+                    persist_ack(&state, &local, &ack).await;
+                    if need_snap {
+                        let secret = if ack.failover_secret.is_empty() {
+                            local.node_secret.clone()
+                        } else {
+                            ack.failover_secret.clone()
+                        };
+                        if let Ok(bytes) = client.fetch_snapshot(&secret).await {
+                            if bytes.len() >= 100 && bytes.starts_with(b"SQLite format 3\0") {
+                                let dest = devforge_cluster::snapshot_path();
+                                if let Some(parent) = dest.parent() {
+                                    let _ = tokio::fs::create_dir_all(parent).await;
+                                }
+                                let _ = tokio::fs::write(&dest, bytes).await;
+                                last_snap = std::time::Instant::now();
+                            }
+                        }
+                    }
+                }
+                Err(_) => {
+                    fail += 1;
+                    let preferred = if local.preferred_leader_url.trim().is_empty() {
+                        local.leader_url.clone()
+                    } else {
+                        local.preferred_leader_url.clone()
+                    };
+                    let pref = LeaderClient::new(&preferred);
+                    if preferred != local.leader_url && pref.ping_health().await {
+                        tracing::info!(url = %preferred, "leader d’origine de retour");
+                        let mut n = local.clone();
+                        n.leader_url = preferred;
+                        n.acting_leader = false;
+                        let _ = state.cluster.set_local(&n).await;
+                        fail = 0;
+                        continue;
+                    }
+                    if fail >= devforge_cluster::FAILOVER_FAIL_STREAK {
+                        try_elect(&state, &local).await;
+                        fail = 0;
+                    }
+                }
+            }
+        }
+    });
+}
+
+async fn persist_ack(state: &AppState, local: &LocalClusterState, ack: &devforge_cluster::HeartbeatAck) {
+    let mut n = local.clone();
+    if !ack.preferred_leader_id.is_empty() {
+        n.preferred_leader_id = ack.preferred_leader_id.clone();
+    }
+    if !ack.preferred_leader_url.is_empty() {
+        n.preferred_leader_url = ack.preferred_leader_url.clone();
+    }
+    if !ack.failover_secret.is_empty() {
+        n.failover_secret = ack.failover_secret.clone();
+    }
+    n.snapshot_generation = ack.generation;
+    let _ = state.cluster.set_local(&n).await;
+    if !ack.roster.is_empty() {
+        if let Ok(json) = serde_json::to_string_pretty(&ack.roster) {
+            let _ = tokio::fs::write(devforge_cluster::roster_path(), json).await;
+        }
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&n) {
+        let _ = tokio::fs::write(devforge_cluster::failover_identity_path(), json).await;
+    }
+}
+
+async fn try_elect(state: &AppState, local: &LocalClusterState) {
+    let roster: Vec<devforge_cluster::RosterEntry> =
+        tokio::fs::read_to_string(devforge_cluster::roster_path())
+            .await
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+    if roster.is_empty() {
+        return;
+    }
+    if !local.failover_secret.is_empty() {
+        for peer in devforge_cluster::earlier_candidates(&local.node_id, &roster) {
+            let c = LeaderClient::new(&peer.advertise_url);
+            if let Ok(st) = c.failover_status(&local.failover_secret).await {
+                if st.acting_leader {
+                    tracing::info!(peer = %peer.id, "suivi du leader intérimaire");
+                    let mut n = local.clone();
+                    n.leader_url = peer.advertise_url.clone();
+                    let _ = state.cluster.set_local(&n).await;
+                    return;
+                }
+            }
+        }
+    }
+    if !devforge_cluster::i_am_failover_winner(&local.node_id, &roster) {
+        return;
+    }
+    let snap = devforge_cluster::snapshot_path();
+    if !snap.is_file() {
+        tracing::warn!("élection gagnée mais pas de snapshot SQLite — impossible de promouvoir");
+        return;
+    }
+    if let Ok(json) = serde_json::to_string_pretty(local) {
+        if let Err(e) = tokio::fs::write(devforge_cluster::failover_identity_path(), json).await {
+            tracing::error!(error = %e, "écriture identité failover");
+            return;
+        }
+    } else {
+        return;
+    }
+    let pending = format!("{}.pending-restore", state.db_path.display());
+    if let Err(e) = tokio::fs::copy(&snap, &pending).await {
+        tracing::error!(error = %e, "copie snapshot failover");
+        return;
+    }
+    if let Err(e) = tokio::fs::write(devforge_cluster::promote_flag_path(), "1").await {
+        tracing::error!(error = %e, "écriture flag promotion");
+        return;
+    }
+    tracing::warn!(node = %local.node_id, "promotion leader intérimaire, redémarrage");
+    devforge_cluster::restart_current_process();
+}
+
+pub async fn maybe_reclaim_preferred(state: &AppState) {
+    let local = match state.cluster.local().await {
+        Ok(l) => l,
+        Err(_) => return,
+    };
+    if local.role != NodeRole::Leader || local.acting_leader {
+        return;
+    }
+    if local.node_id != local.preferred_leader_id
+        && local.node_id != devforge_cluster::LEADER_NODE_ID
+    {
+        return;
+    }
+    let nodes = match state.cluster.list_nodes().await {
+        Ok(n) => n,
+        Err(_) => return,
+    };
+    for n in nodes {
+        if n.advertise_url.trim().is_empty() || n.id == local.node_id {
+            continue;
+        }
+        let c = LeaderClient::new(&n.advertise_url);
+        let Ok(st) = c.failover_status(&local.failover_secret).await else {
+            continue;
+        };
+        if !st.acting_leader {
+            continue;
+        }
+        tracing::warn!(interim = %n.id, "récupération du control plane auprès de l’intérim");
+        let secret = if local.failover_secret.is_empty() {
+            local.node_secret.clone()
+        } else {
+            local.failover_secret.clone()
+        };
+        let Ok(bytes) = c.fetch_snapshot(&secret).await else {
+            tracing::error!(interim = %n.id, "snapshot intérim injoignable — pas de démotion");
+            continue;
+        };
+        if bytes.len() < 100 || !bytes.starts_with(b"SQLite format 3\0") {
+            tracing::error!(interim = %n.id, "snapshot intérim invalide — pas de démotion");
+            continue;
+        }
+        let pending = format!("{}.pending-restore", state.db_path.display());
+        if let Err(e) = tokio::fs::write(&pending, &bytes).await {
+            tracing::error!(error = %e, "écriture pending-restore");
+            continue;
+        }
+        if let Ok(json) = serde_json::to_string_pretty(&local) {
+            let _ = tokio::fs::write(devforge_cluster::reclaim_flag_path(), json).await;
+        }
+        let pref_url = if local.advertise_url.is_empty() {
+            local.leader_url.clone()
+        } else {
+            local.advertise_url.clone()
+        };
+        let _ = c.failover_demote(&secret, &pref_url).await;
+        tracing::info!("restauration snapshot intérim, redémarrage");
+        devforge_cluster::restart_current_process();
+    }
 }

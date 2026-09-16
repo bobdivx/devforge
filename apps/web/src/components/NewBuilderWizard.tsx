@@ -1,6 +1,7 @@
-import { useState } from 'preact/hooks';
-import { api, type ProjectTemplate } from '../lib/api';
+import { useEffect, useState } from 'preact/hooks';
+import { api, type ClusterNode, type ProjectTemplate } from '../lib/api';
 import { Alert, Button, FadeIn, Input, useToast } from './ui';
+import { NodeSelect } from './NodeSelect';
 
 /**
  * Builder wizard — création d'app depuis un prompt naturel.
@@ -21,6 +22,17 @@ export function NewBuilderWizard({
   const [error, setError] = useState<string | null>(null);
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
   const [templatesLoaded, setTemplatesLoaded] = useState(false);
+  const [nodes, setNodes] = useState<ClusterNode[]>([]);
+  const [serverId, setServerId] = useState('default');
+
+  useEffect(() => {
+    api
+      .clusterNodes()
+      .then((r) => {
+        setNodes(r.nodes ?? []);
+      })
+      .catch(() => {});
+  }, []);
 
   async function loadTemplates() {
     if (templatesLoaded) return;
@@ -59,6 +71,7 @@ export function NewBuilderWizard({
         title: cleanTitle,
         prompt: cleanPrompt,
         template,
+        server_id: serverId || 'default',
       });
 
       toast.push({
@@ -136,6 +149,14 @@ export function NewBuilderWizard({
           )}
         </label>
       )}
+
+      <NodeSelect
+        nodes={nodes}
+        value={serverId}
+        onChange={setServerId}
+        disabled={busy}
+        hint="La forge tourne uniquement sur ce nœud."
+      />
 
       <div class="flex flex-wrap justify-between gap-2">
         {onClose && (

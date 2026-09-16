@@ -12,7 +12,7 @@ Front : **Astro + Preact** uniquement (`apps/web`). Design sombre type Plasma / 
 | `/app` | Accueil apps |
 | `/app/projects` · `/app/projects/view` | Liste + détail projet |
 | `/app/runners` | Runners GitHub self-hosted |
-| `/app/cluster` | Nœuds (admin) |
+| `/app/cluster` | Nœuds (admin) — y compris MAJ DevForge des workers |
 | `/app/node` | Statut worker |
 | `/app/mcp` | Serveurs MCP |
 | `/app/tokens` | Tokens API |

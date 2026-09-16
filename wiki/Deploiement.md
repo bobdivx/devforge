@@ -27,7 +27,7 @@ Chrome **runtime** (Puppeteer / Playwright) : fournis un `Dockerfile` ou `nixpac
 
 ## Nœud
 
-`server_id` choisit le worker. Leader / `default` = executor local (Docker socket) ou SSH Settings. Autres ids = HTTP exec vers le worker. Voir [[Cluster]].
+`server_id` choisit **un** nœud. Leader / `default` = executor local (Docker socket) ou SSH Settings. Autres ids = HTTP exec vers le worker. **Pas de réplica** : la forge ne tourne pas en double. Voir [[Cluster]].
 
 ## Logs et repair
 
