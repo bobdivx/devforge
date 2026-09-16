@@ -415,6 +415,7 @@ async fn attach_domain(
         .await;
         crate::sso::sync_project_proxy(&state, &project).await;
     }
+    crate::dns::sync_project(&state, &uuid).await;
     Ok(Json(out))
 }
 
@@ -494,6 +495,9 @@ async fn detach_domain(
         )
         .await;
         crate::sso::sync_project_proxy(&state, &project).await;
+    }
+    if let Some(ref fqdn) = detached_fqdn {
+        crate::dns::remove_fqdn(&state, fqdn).await;
     }
     Ok(Json(out))
 }

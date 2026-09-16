@@ -50,6 +50,8 @@ struct NodeRow {
     last_seen_at: Option<String>,
     last_error: Option<String>,
     drained: i64,
+    #[sqlx(default)]
+    ingress_host: String,
     metrics_json: String,
     created_at: String,
     updated_at: String,
@@ -96,6 +98,7 @@ impl From<NodeRow> for ClusterNode {
             last_seen_at: r.last_seen_at,
             last_error: r.last_error,
             drained: r.drained != 0,
+            ingress_host: r.ingress_host,
             metrics: serde_json::from_str(&r.metrics_json).unwrap_or_default(),
             created_at: r.created_at,
             updated_at: r.updated_at,
@@ -117,7 +120,7 @@ impl From<TokenRow> for JoinTokenRow {
 }
 
 const NODE_COLS: &str = r#"id, name, role, advertise_url, status, os, arch, capabilities_json,
-            ssh_host, ssh_user, ssh_port, last_seen_at, last_error, drained, metrics_json, created_at, updated_at"#;
+            ssh_host, ssh_user, ssh_port, last_seen_at, last_error, drained, ingress_host, metrics_json, created_at, updated_at"#;
 
 #[async_trait]
 impl ClusterStore for SqliteClusterStore {
@@ -216,8 +219,8 @@ impl ClusterStore for SqliteClusterStore {
         sqlx::query(
             r#"INSERT INTO cluster_nodes (
                 id, name, role, advertise_url, status, os, arch, capabilities_json,
-                ssh_host, ssh_user, ssh_port, last_seen_at, last_error, drained, metrics_json, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ssh_host, ssh_user, ssh_port, last_seen_at, last_error, drained, ingress_host, metrics_json, created_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name,
                 role=excluded.role,
@@ -232,6 +235,7 @@ impl ClusterStore for SqliteClusterStore {
                 last_seen_at=excluded.last_seen_at,
                 last_error=excluded.last_error,
                 drained=excluded.drained,
+                ingress_host=excluded.ingress_host,
                 metrics_json=excluded.metrics_json,
                 updated_at=excluded.updated_at"#,
         )
@@ -249,6 +253,7 @@ impl ClusterStore for SqliteClusterStore {
         .bind(&node.last_seen_at)
         .bind(&node.last_error)
         .bind(if node.drained { 1i64 } else { 0 })
+        .bind(&node.ingress_host)
         .bind(&metrics)
         .bind(&node.created_at)
         .bind(&node.updated_at)

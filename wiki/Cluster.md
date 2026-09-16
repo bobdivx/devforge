@@ -34,6 +34,13 @@ Les tuiles affichent CPU, version DevForge, nombre d’apps, last_seen. Fiche n�
 
 Si le **leader** tombe : après ~1 min sans heartbeat, le worker au plus petit `id` (non drainé, URL connue) **est élu** et restaure la dernière copie SQLite. L’UI/API reviennent sur cet intérim (perte max ~30–60 s). Les apps Docker déjà lancées **continuent**. Quand le leader d’origine revient, il reprend la base de l’intérim puis redevient le control plane.
 
+Un tunnel Cloudflare **uniquement sur le leader** est un point unique : les domaines publics meurent avec lui. Settings → Domaine → **Entrée publique** : un token (et le domaine si besoin).
+
+- **Cloudflare** — un tunnel `devforge-{nœud}` par machine, CNAME proxied vers `{tunnel_id}.cfargotunnel.com`. Pas de 80/443 à ouvrir.
+- **Porkbun** — record A vers l’IP publique du nœud. Ports 80/443 + HTTP-01.
+
+Traefik écoute sur **chaque nœud**. Cluster → Infos montre la cible auto (surcharge possible).
+
 Si un **worker** tombe : seules les apps de ce nœud s’arrêtent. Réassigne + redéploie vers un nœud en ligne. Les autres workers et le leader restent.
 
 ## Bases de données
@@ -88,7 +95,7 @@ Le crate `crates/cluster` + tables SQLite `cluster_*` portent le v1.
 | Méthode | Route | Auth |
 |---------|--------|------|
 | GET/POST | `/api/v1/cluster/nodes` | admin |
-| PATCH | `/api/v1/cluster/nodes/{id}` | admin — `{ name?, drained?, advertise_url? }` |
+| PATCH | `/api/v1/cluster/nodes/{id}` | admin — `{ name?, drained?, advertise_url?, ingress_host? }` |
 | DELETE | `/api/v1/cluster/nodes/{id}?reassign_to=` | admin |
 | GET | `/api/v1/cluster/nodes/{id}/projects` | admin |
 | POST | `/api/v1/cluster/nodes/{id}/reassign` | admin — `{ target_node_id, project_uuid? \| all }` |
@@ -100,3 +107,5 @@ Le crate `crates/cluster` + tables SQLite `cluster_*` portent le v1.
 | POST | `/api/v1/cluster/join` | token d’invitation |
 | POST | `/api/v1/cluster/heartbeat` | secret nœud (+ métriques) |
 | GET/POST/PATCH | `/api/v1/cluster/local` | ouvert si 0 users, sinon admin — PATCH `{ leader_url?, advertise_url? }` (aussi sur un worker) |
+| GET/POST | `/api/v1/settings/dns` | admin — `{ provider: cloudflare\|porkbun\|'', zone?, token? }` puis provision auto |
+| POST | `/api/v1/settings/dns/test` | admin — ping Cloudflare ou Porkbun |

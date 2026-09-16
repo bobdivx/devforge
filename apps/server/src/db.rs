@@ -295,6 +295,10 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ("sso_pocket_id_api_token", "TEXT NOT NULL DEFAULT ''"),
         ("sso_oidc_provider", "TEXT NOT NULL DEFAULT 'generic'"),
         ("sso_enable_platform_login", "INTEGER NOT NULL DEFAULT 0"),
+        ("dns_provider", "TEXT NOT NULL DEFAULT ''"),
+        ("porkbun_api_key", "TEXT NOT NULL DEFAULT ''"),
+        ("porkbun_secret", "TEXT NOT NULL DEFAULT ''"),
+        ("porkbun_zone", "TEXT NOT NULL DEFAULT ''"),
     ] {
         let sql = format!("ALTER TABLE instance_settings ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;
@@ -666,6 +670,11 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await;
     let _ = sqlx::query(
         "ALTER TABLE cluster_nodes ADD COLUMN metrics_json TEXT NOT NULL DEFAULT '{}'",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE cluster_nodes ADD COLUMN ingress_host TEXT NOT NULL DEFAULT ''",
     )
     .execute(pool)
     .await;

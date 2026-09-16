@@ -9,7 +9,19 @@ Settings → Domaine : `apps.example.com`.
 
 Sans wildcard, l’atelier ne publie pas d’URL HTTPS.
 
-Certificats : crate `domain` + **certbot ACME** via l’executor (pas seulement un enregistrement DNS).
+## Entrée publique (auto)
+
+Settings → Domaine → **Entrée publique**. Token + domaine optionnel (sinon déduit du wildcard). Traefik sur **chaque nœud**. Une forge = un nœud : le DNS vise la machine qui l’héberge.
+
+| Fournisseur | Ce que DevForge fait | Si le leader tombe |
+|-------------|----------------------|--------------------|
+| **Cloudflare** | Tunnel `devforge-{nœud}` (catch-all → Traefik :80) + CNAME proxied `{fqdn}` → `{tunnel_id}.cfargotunnel.com` | Les apps workers restent joignables via *leur* tunnel |
+| **Porkbun** | Record A (ou AAAA/CNAME) vers l’IP publique du nœud | Idem, le record pointe vers le nœud d’hébergement |
+| Tunnel Cloudflare **manuel, leader seul** | — | Tous les hostnames de ce tunnel meurent |
+
+Cloudflare : token Account Tunnel Edit + Zone DNS Edit + Account Read. Porkbun : `APIKEY:SECRET`. Ports **80/443** seulement pour Porkbun (Let’s Encrypt HTTP-01). Cloudflare tunnel n’a pas besoin de ports publics.
+
+Certificats : crate `domain` + **certbot ACME** via l’executor. Traefik gère aussi l’HTTP challenge.
 
 ## Labels Traefik
 

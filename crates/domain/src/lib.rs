@@ -1,3 +1,12 @@
+mod porkbun;
+mod cloudflare;
+
+pub use porkbun::{delete_record, ping as porkbun_ping, split_host, upsert_record, PorkbunCreds};
+pub use cloudflare::{
+    connect as cloudflare_connect, infer_zone, parse_porkbun_token, ping as cloudflare_ping,
+    CloudflareClient,
+};
+
 use async_trait::async_trait;
 use devforge_deploy::RemoteExecutor;
 use devforge_shared::{DevForgeError, Result};

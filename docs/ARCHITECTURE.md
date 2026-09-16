@@ -20,6 +20,7 @@ Un **leader** (cette instance) + des **workers**. `node.id` = `server_id` des pr
 - Page `/app/cluster` (admin) : nœuds, invitations (jeton `dfjoin_…` + URL du leader renseignée sur le worker), drain, métriques, diagnostic, réassignation d’apps, **mise à jour DevForge des workers**. SSH optionnel. Failover control plane : snapshot SQLite sur les workers (~30 s) ; si le leader tombe, élection d’un intérim jusqu’au retour.
 - Rôle persisté dans SQLite (`cluster_local`) — pas de variables d’environnement pour joindre.
 - Worker : heartbeat (~15 s, stale 45 s) + métriques + `POST /internal/exec`. Drain = plus de nouveaux jobs. UI worker `/app/node`.
+- DNS public auto (Settings → Domaine) : **Cloudflare** (un tunnel par nœud + CNAME) ou **Porkbun** (A vers l’IP du nœud). Token + domaine optionnel.
 - Turso synchrone / mesh WireGuard : plus tard (HA stricte, overlay).
 
 ## Modèle agents

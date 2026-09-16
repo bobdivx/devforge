@@ -221,6 +221,7 @@ function ClusterInner() {
   const [tab, setTab] = useState<Tab>('info');
   const [rename, setRename] = useState('');
   const [nodeUrl, setNodeUrl] = useState('');
+  const [ingressHost, setIngressHost] = useState('');
   const [projects, setProjects] = useState<
     Array<{ uuid: string; name: string; status: string; server_id: string }>
   >([]);
@@ -292,6 +293,7 @@ function ClusterInner() {
     if (!selected) return;
     setRename(selected.name);
     setNodeUrl(selected.advertise_url || '');
+    setIngressHost(selected.ingress_host || '');
     setTab('info');
     setLogs(null);
     setTargetId(nodes.find((n) => n.id !== selected.id && !n.drained)?.id || 'default');
@@ -366,6 +368,7 @@ function ClusterInner() {
     if (!selected) return;
     const name = rename.trim();
     const url = nodeUrl.trim().replace(/\/+$/, '');
+    const host = ingressHost.trim().replace(/\/+$/, '');
     if (!name) return;
     if (url && !/^https?:\/\//i.test(url)) {
       toast.push({ title: 'URL invalide', detail: 'http:// ou https://', tone: 'danger' });
@@ -373,10 +376,11 @@ function ClusterInner() {
     }
     setBusy(true);
     try {
-      const body: { name?: string; advertise_url?: string } = {};
+      const body: { name?: string; advertise_url?: string; ingress_host?: string } = {};
       if (name !== selected.name) body.name = name;
       if (url && url !== (selected.advertise_url || '')) body.advertise_url = url;
-      if (!body.name && !body.advertise_url) {
+      if (host !== (selected.ingress_host || '')) body.ingress_host = host;
+      if (!body.name && !body.advertise_url && body.ingress_host === undefined) {
         toast.push({ title: 'Rien à enregistrer', tone: 'info' });
         return;
       }
@@ -574,7 +578,9 @@ function ClusterInner() {
           <li>
             <strong class="text-[var(--color-ink)]">Leader</strong> — UI, API, SQLite. Les workers
             gardent une copie récente. S’il tombe : un worker est élu jusqu’au retour (perte max
-            ~1 min). Les conteneurs déjà lancés continuent.
+            ~1 min). Les conteneurs déjà lancés continuent. Un tunnel Cloudflare seulement sur le
+            leader coupe quand même tous les domaines publics — utilise Porkbun (Settings → Domaine)
+            + IP publique par nœud.
           </li>
           <li>
             <strong class="text-[var(--color-ink)]">Worker</strong> — compute. S’il tombe : seules
@@ -915,13 +921,21 @@ function ClusterInner() {
                         : 'Adresse que le leader utilise pour joindre ce nœud.'
                     }
                   />
+                  <Input
+                    label="Cible publique (auto)"
+                    value={ingressHost}
+                    placeholder="rempli par DevForge"
+                    onInput={(e) => setIngressHost((e.target as HTMLInputElement).value)}
+                    hint="Cloudflare : *.cfargotunnel.com. Porkbun : IP publique. Surcharge manuelle possible."
+                  />
                 </div>
                 <Button
                   disabled={
                     busy ||
                     (!rename.trim() ||
                       (rename.trim() === selected.name &&
-                        nodeUrl.trim().replace(/\/+$/, '') === (selected.advertise_url || '')))
+                        nodeUrl.trim().replace(/\/+$/, '') === (selected.advertise_url || '') &&
+                        ingressHost.trim() === (selected.ingress_host || '')))
                   }
                   onClick={saveInfo}
                 >

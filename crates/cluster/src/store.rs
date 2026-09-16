@@ -68,6 +68,7 @@ impl MemoryClusterStore {
             last_seen_at: Some(now.clone()),
             last_error: None,
             drained: false,
+            ingress_host: String::new(),
             metrics: crate::models::NodeMetrics::default(),
             created_at: now.clone(),
             updated_at: now,

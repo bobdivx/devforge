@@ -73,6 +73,7 @@ impl ClusterFacade {
             last_seen_at: Some(now.clone()),
             last_error: None,
             drained: false,
+            ingress_host: String::new(),
             metrics: NodeMetrics::default(),
             created_at: now.clone(),
             updated_at: now,
@@ -267,6 +268,10 @@ impl ClusterFacade {
             last_seen_at: Some(now.clone()),
             last_error: None,
             drained: reuse.as_ref().map(|n| n.drained).unwrap_or(false),
+            ingress_host: reuse
+                .as_ref()
+                .map(|n| n.ingress_host.clone())
+                .unwrap_or_default(),
             metrics: reuse
                 .as_ref()
                 .map(|n| n.metrics.clone())
@@ -381,6 +386,7 @@ impl ClusterFacade {
         name: Option<String>,
         drained: Option<bool>,
         advertise_url: Option<String>,
+        ingress_host: Option<String>,
     ) -> Result<ClusterNode> {
         let mut node = self
             .store
@@ -415,6 +421,9 @@ impl ClusterFacade {
                 local.advertise_url = node.advertise_url.clone();
                 self.store.set_local(&local).await?;
             }
+        }
+        if let Some(host) = ingress_host {
+            node.ingress_host = host.trim().trim_end_matches('.').to_string();
         }
         node.updated_at = Utc::now().to_rfc3339();
         self.store.upsert_node(&node).await?;
@@ -519,6 +528,7 @@ impl ClusterFacade {
                     last_seen_at: None,
                     last_error: None,
                     drained: false,
+                    ingress_host: String::new(),
                     metrics: NodeMetrics::default(),
                     created_at: now.clone(),
                     updated_at: now,
@@ -551,6 +561,7 @@ impl ClusterFacade {
             "last_seen_at": node.last_seen_at,
             "last_error": node.last_error,
             "drained": node.drained,
+            "ingress_host": node.ingress_host,
             "metrics": node.metrics,
             "created_at": node.created_at,
             "updated_at": node.updated_at,
@@ -849,6 +860,7 @@ mod tests {
                 last_seen_at: None,
                 last_error: None,
                 drained: false,
+                ingress_host: String::new(),
                 metrics: NodeMetrics::default(),
                 created_at: now.clone(),
                 updated_at: now,
@@ -899,7 +911,7 @@ mod tests {
         store.seed_leader("L", "http://127.0.0.1:8000").await;
         let facade = ClusterFacade::new(store);
         let renamed = facade
-            .patch_node(LEADER_NODE_ID, Some("Forge".into()), None, None)
+            .patch_node(LEADER_NODE_ID, Some("Forge".into()), None, None, None)
             .await
             .unwrap();
         assert_eq!(renamed.name, "Forge");
@@ -912,6 +924,7 @@ mod tests {
                 None,
                 None,
                 Some("https://forge.example.com".into()),
+                None,
             )
             .await
             .unwrap();
@@ -920,7 +933,7 @@ mod tests {
         assert_eq!(local.leader_url, "https://forge.example.com");
 
         let err = facade
-            .patch_node(LEADER_NODE_ID, None, Some(true), None)
+            .patch_node(LEADER_NODE_ID, None, Some(true), None, None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("leader"));
@@ -945,7 +958,7 @@ mod tests {
             .await
             .unwrap();
         let n = facade
-            .patch_node(&joined.node.id, None, Some(true), None)
+            .patch_node(&joined.node.id, None, Some(true), None, None)
             .await
             .unwrap();
         assert!(n.drained);
@@ -956,6 +969,7 @@ mod tests {
                 None,
                 None,
                 Some("http://10.1.0.59:8000".into()),
+                None,
             )
             .await
             .unwrap();

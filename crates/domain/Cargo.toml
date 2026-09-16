@@ -11,3 +11,4 @@ serde_json = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
+reqwest = { workspace = true }

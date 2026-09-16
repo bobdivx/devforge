@@ -32,6 +32,7 @@ Le front utilise `PUBLIC_SERVER_URL` en dev. En image Docker, UI et API sont le 
 - **Update** `/update/check` · start · Cluster `/cluster/nodes/{id}/update` · `/cluster/update-workers`
 - **Storage / backups** voir [[Stockage-et-sauvegardes]]
 - **SSO** `/auth/sso/authorize` · `/callback` · `GET/PUT /settings/sso`
+- **DNS** `GET/POST /settings/dns` · `POST /settings/dns/test` (Cloudflare ou Porkbun)
 
 Admin : `/admin/overview` · patch workspace.
 

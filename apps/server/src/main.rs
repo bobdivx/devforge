@@ -1,3 +1,4 @@
+mod dns;
 mod cluster_routes;
 mod cluster_store;
 mod db;
@@ -72,6 +73,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(false)
     {
         tracing::info!("mode worker — pas d’UI produit");
+        if let Err(e) = state.proxy.ensure_traefik().await {
+            tracing::error!(error = %e, "Traefik worker — les domaines de ce nœud peuvent être injoignables");
+        } else {
+            tracing::info!("Traefik worker ready");
+        }
+        {
+            let proxy = state.proxy.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(120));
+                interval.tick().await;
+                loop {
+                    interval.tick().await;
+                    if let Err(e) = proxy.ensure_traefik().await {
+                        tracing::error!(error = %e, "Traefik worker watchdog");
+                    }
+                }
+            });
+        }
         let mut app = worker::worker_router(state.clone())
             .layer(security::cors_layer())
             .layer(TraceLayer::new_for_http());
@@ -120,6 +139,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
     }
+
+    crate::dns::spawn_dns_loop(state.clone());
 
     // Background sync for GitHub runners (Docker + Actions status → SQLite snapshot).
     {

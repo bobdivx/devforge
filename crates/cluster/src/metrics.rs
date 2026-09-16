@@ -28,7 +28,34 @@ pub fn collect_node_metrics() -> NodeMetrics {
             .trim_start_matches('v')
             .to_string(),
     );
+    m.public_ip = public_ipv4();
     m
+}
+
+fn public_ipv4() -> Option<String> {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static CACHE: Mutex<Option<(Instant, String)>> = Mutex::new(None);
+    if let Ok(guard) = CACHE.lock() {
+        if let Some((at, ip)) = guard.as_ref() {
+            if at.elapsed() < Duration::from_secs(600) {
+                return Some(ip.clone());
+            }
+        }
+    }
+    let out = Command::new("curl")
+        .args(["-4", "-fsS", "--max-time", "3", "https://api.ipify.org"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let ip = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    ip.parse::<std::net::Ipv4Addr>().ok()?;
+    if let Ok(mut guard) = CACHE.lock() {
+        *guard = Some((Instant::now(), ip.clone()));
+    }
+    Some(ip)
 }
 
 fn load_1() -> Option<f64> {

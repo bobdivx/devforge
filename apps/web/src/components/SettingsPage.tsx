@@ -74,7 +74,7 @@ const SETTINGS_CARDS: SettingCardMeta[] = [
   {
     key: 'domaine',
     title: 'Domaine',
-    description: 'Wildcard domain pour les sous-domaines apps',
+    description: 'Wildcard apps et DNS auto (Cloudflare ou Porkbun)',
     icon: 'globe',
   },
   {
@@ -160,6 +160,11 @@ export function SettingsPage() {
   const [wildcard, setWildcard] = useState('');
   const [instanceName, setInstanceName] = useState('');
   const [domainBusy, setDomainBusy] = useState(false);
+  const [dnsProvider, setDnsProvider] = useState('');
+  const [dnsZone, setDnsZone] = useState('');
+  const [dnsToken, setDnsToken] = useState('');
+  const [dnsTokenSet, setDnsTokenSet] = useState(false);
+  const [dnsBusy, setDnsBusy] = useState(false);
   const [sshHost, setSshHost] = useState('');
   const [sshUser, setSshUser] = useState('root');
   const [sshLocal, setSshLocal] = useState(true);
@@ -208,6 +213,14 @@ export function SettingsPage() {
       }),
       loadGh(),
       loadSsh(),
+      api
+        .dnsSettings()
+        .then((r) => {
+          setDnsProvider(r.dns.provider || '');
+          setDnsZone(r.dns.zone || '');
+          setDnsTokenSet(!!(r.dns.token_set || r.dns.api_key_set));
+        })
+        .catch(() => null),
     ]).finally(() => setLoading(false));
   }, []);
 
@@ -429,6 +442,160 @@ export function SettingsPage() {
                 <Button type="submit" size="sm" disabled={domainBusy}>
                   Enregistrer
                 </Button>
+              </form>
+            ) : (
+              <Alert tone="warn">Réservé à l’admin instance.</Alert>
+            )}
+          </Card>
+          <Card class="mt-4">
+            <CardHeader
+              title="Entrée publique"
+              action={
+                dnsProvider === 'cloudflare' || dnsProvider === 'porkbun' ? (
+                  <Badge tone="ok">
+                    {dnsProvider === 'cloudflare' ? 'Cloudflare' : 'Porkbun'}
+                  </Badge>
+                ) : (
+                  <Badge tone="neutral">off</Badge>
+                )
+              }
+            />
+            <Alert tone="info" class="mb-3">
+              DevForge crée Traefik, les records DNS et — avec Cloudflare — un tunnel par nœud.
+              Tu n’as qu’un token à coller. Le domaine est optionnel s’il se déduit du wildcard.
+            </Alert>
+            {isAdmin ? (
+              <form
+                class="flex flex-col gap-3"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  setDnsBusy(true);
+                  try {
+                    const r = await api.saveDnsSettings({
+                      provider: dnsProvider,
+                      zone: dnsZone,
+                      token: dnsToken.trim() || undefined,
+                    });
+                    setDnsProvider(r.dns.provider);
+                    setDnsZone(r.dns.zone);
+                    setDnsTokenSet(!!(r.dns.token_set || r.dns.api_key_set));
+                    setDnsToken('');
+                    if (r.provision_error) {
+                      toast.push({
+                        title: 'Enregistré, provision incomplet',
+                        detail: r.provision_error,
+                        tone: 'danger',
+                      });
+                    } else {
+                      const n = r.provision?.nodes;
+                      toast.push({
+                        title: 'DNS automatique',
+                        detail: n ? `${n} nœud${n > 1 ? 's' : ''} provisionné${n > 1 ? 's' : ''}` : undefined,
+                        tone: 'ok',
+                      });
+                    }
+                  } catch (err) {
+                    toast.push({
+                      title: 'DNS KO',
+                      detail: String((err as Error).message || err),
+                      tone: 'danger',
+                    });
+                  } finally {
+                    setDnsBusy(false);
+                  }
+                }}
+              >
+                <div class="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={dnsProvider === 'cloudflare' ? 'secondary' : 'ghost'}
+                    onClick={() => setDnsProvider('cloudflare')}
+                  >
+                    Cloudflare
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={dnsProvider === 'porkbun' ? 'secondary' : 'ghost'}
+                    onClick={() => setDnsProvider('porkbun')}
+                  >
+                    Porkbun
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={!dnsProvider ? 'secondary' : 'ghost'}
+                    onClick={() => setDnsProvider('')}
+                  >
+                    Désactivé
+                  </Button>
+                </div>
+                {dnsProvider === 'cloudflare' && (
+                  <p class="text-xs text-[var(--color-ink-muted)]">
+                    Token API avec Account Tunnel Edit, Zone DNS Edit et Account Read. Un tunnel
+                    par machine (`devforge-` + id du nœud), CNAME vers cfargotunnel.com (pas de
+                    ports 80/443 à ouvrir).
+                  </p>
+                )}
+                {dnsProvider === 'porkbun' && (
+                  <p class="text-xs text-[var(--color-ink-muted)]">
+                    Colle <code>APIKEY:SECRET</code>. DevForge pousse un A vers l’IP publique de
+                    chaque nœud. Ports 80/443 ouverts (Let’s Encrypt HTTP-01).
+                  </p>
+                )}
+                <Input
+                  label="Domaine (optionnel)"
+                  placeholder="jeser.app"
+                  value={dnsZone}
+                  onInput={(e) => setDnsZone((e.target as HTMLInputElement).value)}
+                  hint="Vide = déduit du wildcard ci-dessus (apps.jeser.app → jeser.app)."
+                />
+                <Input
+                  label="Token"
+                  type="password"
+                  placeholder={
+                    dnsTokenSet
+                      ? '•••• déjà enregistré'
+                      : dnsProvider === 'porkbun'
+                        ? 'APIKEY:SECRET'
+                        : 'Token Cloudflare'
+                  }
+                  value={dnsToken}
+                  onInput={(e) => setDnsToken((e.target as HTMLInputElement).value)}
+                  disabled={!dnsProvider}
+                />
+                <div class="flex flex-wrap gap-2">
+                  <Button type="submit" size="sm" disabled={dnsBusy}>
+                    Enregistrer
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={dnsBusy || !dnsProvider}
+                    onClick={async () => {
+                      setDnsBusy(true);
+                      try {
+                        await api.testDnsSettings();
+                        toast.push({
+                          title: dnsProvider === 'porkbun' ? 'Porkbun OK' : 'Cloudflare OK',
+                          tone: 'ok',
+                        });
+                      } catch (err) {
+                        toast.push({
+                          title: 'Ping DNS KO',
+                          detail: String((err as Error).message || err),
+                          tone: 'danger',
+                        });
+                      } finally {
+                        setDnsBusy(false);
+                      }
+                    }}
+                  >
+                    Tester
+                  </Button>
+                </div>
               </form>
             ) : (
               <Alert tone="warn">Réservé à l’admin instance.</Alert>

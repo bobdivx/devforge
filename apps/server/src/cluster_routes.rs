@@ -125,6 +125,9 @@ async fn list_nodes(
     let mut nodes = state.cluster.list_nodes().await.map_err(map_err)?;
     let counts = project_counts_by_node(&state).await;
     let leader_metrics = collect_node_metrics();
+    if let Some(ip) = leader_metrics.public_ip.as_deref() {
+        crate::dns::note_public_ip(&state, "default", ip).await;
+    }
     for n in &mut nodes {
         if n.role == NodeRole::Leader || n.id == local.node_id {
             n.metrics = leader_metrics.clone();
@@ -181,6 +184,8 @@ struct PatchNodeBody {
     drained: Option<bool>,
     #[serde(default)]
     advertise_url: Option<String>,
+    #[serde(default)]
+    ingress_host: Option<String>,
 }
 
 async fn patch_node(
@@ -190,17 +195,40 @@ async fn patch_node(
     Json(body): Json<PatchNodeBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     require_admin(&state, &headers).await?;
-    if body.name.is_none() && body.drained.is_none() && body.advertise_url.is_none() {
+    if body.name.is_none()
+        && body.drained.is_none()
+        && body.advertise_url.is_none()
+        && body.ingress_host.is_none()
+    {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Rien à modifier (name / drained / advertise_url)"})),
+            Json(json!({"error": "Rien à modifier (name / drained / advertise_url / ingress_host)"})),
         ));
     }
     let node = state
         .cluster
-        .patch_node(&id, body.name, body.drained, body.advertise_url)
+        .patch_node(
+            &id,
+            body.name,
+            body.drained,
+            body.advertise_url,
+            body.ingress_host.clone(),
+        )
         .await
         .map_err(map_err)?;
+    if body.ingress_host.is_some() {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            r#"SELECT uuid FROM projects
+               WHERE COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = ?"#,
+        )
+        .bind(normalize_server_id(&id))
+        .fetch_all(&state.pool)
+        .await
+        .unwrap_or_default();
+        for (uuid,) in rows {
+            crate::dns::sync_project(&state, &uuid).await;
+        }
+    }
     Ok(Json(json!({
         "ok": true,
         "node": devforge_cluster::ClusterFacade::node_json(&node),
@@ -323,6 +351,11 @@ async fn join_node(
     }
     let leader_url = instance_url(&state).await;
     let joined = state.cluster.join(body, &leader_url).await.map_err(map_err)?;
+    let sid = joined.node.id.clone();
+    let st = state.clone();
+    tokio::spawn(async move {
+        crate::dns::provision_node(&st, &sid).await;
+    });
     Ok(Json(json!(joined)))
 }
 
@@ -339,9 +372,32 @@ async fn heartbeat(
     })?;
     let ack = state
         .cluster
-        .heartbeat_ack(&secret, body)
+        .heartbeat_ack(&secret, body.clone())
         .await
         .map_err(map_err)?;
+    if let Some(ip) = body
+        .metrics
+        .as_ref()
+        .and_then(|m| m.public_ip.clone())
+    {
+        crate::dns::note_public_ip(&state, &body.node_id, &ip).await;
+    }
+    let need = state
+        .cluster
+        .store()
+        .get_node(&body.node_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|n| n.ingress_host.trim().is_empty())
+        .unwrap_or(false);
+    if need {
+        let sid = body.node_id.clone();
+        let st = state.clone();
+        tokio::spawn(async move {
+            crate::dns::provision_node(&st, &sid).await;
+        });
+    }
     Ok(Json(serde_json::to_value(&ack).unwrap_or_else(|_| json!({"ok": true}))))
 }
 
@@ -544,7 +600,7 @@ pub async fn send_heartbeat(
     true
 }
 
-fn normalize_server_id(id: &str) -> String {
+pub(crate) fn normalize_server_id(id: &str) -> String {
     let t = id.trim();
     if t.is_empty() {
         "default".into()
@@ -727,6 +783,21 @@ async fn reassign_projects(
         }
         1
     };
+    if body.all {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT uuid FROM projects WHERE updated_at = ? AND COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = ?",
+        )
+        .bind(&now)
+        .bind(&target)
+        .fetch_all(&state.pool)
+        .await
+        .unwrap_or_default();
+        for (uuid,) in rows {
+            crate::dns::sync_project(&state, &uuid).await;
+        }
+    } else if let Some(uuid) = body.project_uuid.as_deref() {
+        crate::dns::sync_project(&state, uuid).await;
+    }
     Ok(Json(json!({
         "ok": true,
         "moved": n,

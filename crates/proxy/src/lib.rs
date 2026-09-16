@@ -147,16 +147,25 @@ impl ProxyFacade {
     /// - API dashboard: enabled with self-router
     /// - Ping healthcheck: enabled on http entrypoint
     pub async fn ensure_traefik(&self) -> Result<Value> {
+        self.ensure_traefik_on(&self.apply_server_id).await
+    }
+
+    pub async fn ensure_traefik_on(&self, server_id: &str) -> Result<Value> {
         let executor = self.executor.as_ref().ok_or_else(|| {
             DevForgeError::Message("executor required for ensure_traefik".into())
         })?;
+        let server_id = if server_id.trim().is_empty() {
+            "default"
+        } else {
+            server_id
+        };
 
         // Check if Traefik container exists and its status
         let check_cmd = format!(
             r#"docker inspect {} --format '{{{{.State.Status}}}}' 2>/dev/null || echo 'missing'"#,
             TRAEFIK_CONTAINER_NAME
         );
-        let check_res = executor.exec(&self.apply_server_id, "", &check_cmd, 30).await?;
+        let check_res = executor.exec(server_id, "", &check_cmd, 30).await?;
         let status = check_res.output.trim();
 
         match status {
@@ -171,7 +180,7 @@ impl ProxyFacade {
             "exited" | "created" | "paused" => {
                 // Container exists but is not running, start it
                 let start_cmd = format!("docker start {}", TRAEFIK_CONTAINER_NAME);
-                let start_res = executor.exec(&self.apply_server_id, "", &start_cmd, 30).await?;
+                let start_res = executor.exec(server_id, "", &start_cmd, 30).await?;
                 if start_res.ok {
                     return Ok(json!({
                         "ok": true,
@@ -197,7 +206,7 @@ impl ProxyFacade {
             r#"docker network inspect {} >/dev/null 2>&1 || docker network create {}"#,
             TRAEFIK_NETWORK, TRAEFIK_NETWORK
         );
-        executor.exec(&self.apply_server_id, "", &network_cmd, 30).await?;
+        executor.exec(server_id, "", &network_cmd, 30).await?;
 
         // Resolve host path for Traefik data volume
         // When DevForge runs in Docker with /data bind, we need the HOST path
@@ -208,7 +217,7 @@ impl ProxyFacade {
             r#"docker run --rm -v {}:/mnt alpine sh -c 'mkdir -p /mnt/dynamic && touch /mnt/acme.json && chmod 600 /mnt/acme.json'"#,
             shell_escape(&host_data_path)
         );
-        executor.exec(&self.apply_server_id, "", &prep_cmd, 60).await?;
+        executor.exec(server_id, "", &prep_cmd, 60).await?;
 
         // Create Traefik container with full production config
         let create_cmd = format!(
@@ -252,7 +261,7 @@ impl ProxyFacade {
             TRAEFIK_NETWORK
         );
 
-        let create_res = executor.exec(&self.apply_server_id, "", &create_cmd, 60).await?;
+        let create_res = executor.exec(server_id, "", &create_cmd, 60).await?;
         
         if create_res.ok {
             Ok(json!({
@@ -271,6 +280,55 @@ impl ProxyFacade {
                 create_res.output
             )))
         }
+    }
+
+    /// cloudflared en host network → Traefik :80. Recréé si le token change.
+    pub async fn ensure_cloudflared(&self, server_id: &str, tunnel_token: &str) -> Result<Value> {
+        let executor = self.executor.as_ref().ok_or_else(|| {
+            DevForgeError::Message("executor required for cloudflared".into())
+        })?;
+        let server_id = if server_id.trim().is_empty() {
+            "default"
+        } else {
+            server_id
+        };
+        let token = tunnel_token.trim();
+        if token.is_empty() {
+            return Err(DevForgeError::Message("token tunnel Cloudflare vide".into()));
+        }
+        let mark: String = token.chars().rev().take(12).collect();
+        let name = "devforge-cloudflared";
+        let check = format!(
+            r#"docker inspect {name} --format '{{{{index .Config.Labels "devforge.cf_mark"}}}} {{{{.State.Status}}}}' 2>/dev/null || echo 'missing'"#
+        );
+        let cur = executor.exec(server_id, "", &check, 20).await?;
+        let line = cur.output.trim();
+        if line.starts_with(&mark) && line.contains("running") {
+            return Ok(json!({"ok": true, "status": "already_running", "container": name}));
+        }
+        let _ = executor
+            .exec(server_id, "", &format!("docker rm -f {name} 2>/dev/null || true"), 20)
+            .await;
+        let run = format!(
+            r#"docker run -d --name {name} --restart unless-stopped --network host \
+  --label devforge.managed=true --label devforge.cf_mark={} \
+  cloudflare/cloudflared:latest tunnel --no-autoupdate run --token {}"#,
+            shell_escape(&mark),
+            shell_escape(token)
+        );
+        let created = executor.exec(server_id, "", &run, 60).await?;
+        if !created.ok {
+            return Err(DevForgeError::Message(format!(
+                "cloudflared: {}",
+                created.output
+            )));
+        }
+        Ok(json!({
+            "ok": true,
+            "status": "created",
+            "container": name,
+            "id": created.output.trim()
+        }))
     }
 
     /// Resolve the host filesystem path for Traefik data volume.

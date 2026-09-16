@@ -197,6 +197,41 @@ export const api = {
       method: 'POST',
       body: '{}',
     }),
+  dnsSettings: () =>
+    request<{
+      ok: boolean;
+      dns: {
+        provider: string;
+        zone: string;
+        configured: boolean;
+        token_set: boolean;
+        api_key_set: boolean;
+        secret_set: boolean;
+      };
+    }>('/settings/dns'),
+  saveDnsSettings: (body: {
+    provider?: string;
+    zone?: string;
+    token?: string;
+  }) =>
+    request<{
+      ok: boolean;
+      dns: {
+        provider: string;
+        zone: string;
+        configured: boolean;
+        token_set: boolean;
+        api_key_set: boolean;
+        secret_set: boolean;
+      };
+      provision?: { ok?: boolean; nodes?: number; skipped?: boolean };
+      provision_error?: string;
+    }>('/settings/dns', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  testDnsSettings: () =>
+    request<{ ok: boolean }>('/settings/dns/test', { method: 'POST', body: '{}' }),
   sshStatus: () =>
     request<{
       ok: boolean;
@@ -1377,7 +1412,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  clusterPatchNode: (id: string, body: { name?: string; drained?: boolean; advertise_url?: string }) =>
+  clusterPatchNode: (
+    id: string,
+    body: { name?: string; drained?: boolean; advertise_url?: string; ingress_host?: string },
+  ) =>
     request<{ ok: boolean; node: ClusterNode }>(`/cluster/nodes/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
@@ -1521,6 +1559,7 @@ export type ClusterNode = {
   last_seen_at?: string | null;
   last_error?: string | null;
   drained?: boolean;
+  ingress_host?: string;
   metrics?: ClusterNodeMetrics;
   project_count?: number;
   created_at: string;

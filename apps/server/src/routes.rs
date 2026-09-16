@@ -2284,7 +2284,7 @@ fn slugify(s: &str) -> String {
         .join("-")
 }
 
-fn fqdn_from_url(url: &str) -> Option<String> {
+pub(crate) fn fqdn_from_url(url: &str) -> Option<String> {
     url.strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))
         .map(|s| s.split('/').next().unwrap_or(s).trim().to_lowercase())
@@ -2343,6 +2343,7 @@ pub(crate) async fn ensure_project_primary_domain(
     } else {
         let _ = state.proxy.sync(project_uuid).await;
     }
+    crate::dns::sync_project(state, project_uuid).await;
     Ok(())
 }
 

@@ -55,6 +55,8 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/me", get(me))
         .route("/api/v1/onboarding", get(onboarding_status).post(save_onboarding))
         .route("/api/v1/onboarding/complete", post(complete_onboarding))
+        .route("/api/v1/settings/dns", get(get_dns).post(save_dns))
+        .route("/api/v1/settings/dns/test", post(test_dns))
         .route("/api/v1/settings/ssh", get(ssh_status).post(save_ssh))
         .route("/api/v1/settings/ssh/generate-key", post(generate_ssh_key))
         .route("/api/v1/admin/overview", get(admin_overview))
@@ -319,6 +321,7 @@ async fn bootstrap(
             "github_connected": !settings.github_token.is_empty(),
             "ssh_host": settings.ssh_host,
             "ssh_user": settings.ssh_user,
+            "dns": crate::dns::public_json(&crate::dns::load(&state).await),
         },
         "sso": {
             "enabled": sso_settings.enable_platform_login(),
@@ -690,6 +693,140 @@ async fn save_onboarding(
         "ok": true,
         "steps": steps_json(&steps),
     })))
+}
+
+#[derive(Deserialize)]
+struct DnsSaveBody {
+    pub provider: Option<String>,
+    pub zone: Option<String>,
+    pub token: Option<String>,
+    pub api_key: Option<String>,
+    pub secret: Option<String>,
+}
+
+async fn get_dns(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_instance_admin(&state, &headers).await?;
+    let dns = crate::dns::load(&state).await;
+    Ok(Json(json!({ "ok": true, "dns": crate::dns::public_json(&dns) })))
+}
+
+async fn save_dns(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<DnsSaveBody>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_instance_admin(&state, &headers).await?;
+    let mut dns = crate::dns::load(&state).await;
+    if let Some(p) = body.provider {
+        dns.provider = match p.trim().to_lowercase().as_str() {
+            "cloudflare" | "porkbun" => p.trim().to_lowercase(),
+            _ => String::new(),
+        };
+    }
+    if let Some(z) = body.zone {
+        dns.zone = z.trim().trim_start_matches('.').to_lowercase();
+    }
+    let token = body
+        .token
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    if let Some(t) = token {
+        match dns.provider.as_str() {
+            "porkbun" => {
+                let (k, s) = devforge_domain::parse_porkbun_token(&t);
+                if k.is_empty() {
+                    return Err((
+                        axum::http::StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "Token Porkbun vide"})),
+                    ));
+                }
+                dns.api_key = k;
+                if s.is_empty() {
+                    return Err((
+                        axum::http::StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "Porkbun : colle APIKEY:SECRET dans le champ token"})),
+                    ));
+                }
+                dns.secret = s;
+            }
+            "cloudflare" => {
+                dns.api_key = t;
+                dns.secret.clear();
+            }
+            _ => {
+                dns.api_key = t;
+            }
+        }
+    } else {
+        if let Some(k) = body.api_key {
+            let t = k.trim().to_string();
+            if !t.is_empty() {
+                dns.api_key = t;
+            }
+        }
+        if let Some(s) = body.secret {
+            let t = s.trim().to_string();
+            if !t.is_empty() {
+                dns.secret = t;
+            }
+        }
+    }
+    if dns.provider == "porkbun" && (dns.api_key.is_empty() || dns.secret.is_empty()) {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Porkbun : token APIKEY:SECRET requis"})),
+        ));
+    }
+    if dns.provider == "cloudflare" && dns.api_key.is_empty() {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Token Cloudflare requis"})),
+        ));
+    }
+    let now = now_str();
+    sqlx::query(
+        r#"UPDATE instance_settings SET
+            dns_provider = ?, porkbun_zone = ?, porkbun_api_key = ?, porkbun_secret = ?, updated_at = ?
+           WHERE id = 1"#,
+    )
+    .bind(&dns.provider)
+    .bind(&dns.zone)
+    .bind(&dns.api_key)
+    .bind(&dns.secret)
+    .bind(&now)
+    .execute(&state.pool)
+    .await
+    .map_err(internal)?;
+    let provision = crate::dns::provision_all(&state).await;
+    let dns = crate::dns::load(&state).await;
+    match provision {
+        Ok(v) => Ok(Json(json!({
+            "ok": true,
+            "dns": crate::dns::public_json(&dns),
+            "provision": v,
+        }))),
+        Err(e) => Ok(Json(json!({
+            "ok": true,
+            "dns": crate::dns::public_json(&dns),
+            "provision_error": e,
+        }))),
+    }
+}
+
+async fn test_dns(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_instance_admin(&state, &headers).await?;
+    crate::dns::ping_configured(&state)
+        .await
+        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e}))))?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn complete_onboarding(

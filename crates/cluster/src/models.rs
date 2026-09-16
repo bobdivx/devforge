@@ -70,6 +70,8 @@ pub struct ClusterNode {
     #[serde(default)]
     pub drained: bool,
     #[serde(default)]
+    pub ingress_host: String,
+    #[serde(default)]
     pub metrics: NodeMetrics,
     pub created_at: String,
     pub updated_at: String,
@@ -95,6 +97,8 @@ pub struct NodeMetrics {
     pub containers: Option<u32>,
     #[serde(default)]
     pub software_version: Option<String>,
+    #[serde(default)]
+    pub public_ip: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

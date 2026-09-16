@@ -36,7 +36,7 @@ Le workspace est le poste de travail builder : chat + preview. Voir [[Atelier]].
 
 ## Settings instance
 
-Général · Domaine · GitHub · Serveur · Agents / LLM · SSO / OIDC · Sauvegardes · Mise à jour.
+Général · Domaine (wildcard + DNS auto Cloudflare/Porkbun) · GitHub · Serveur · Agents / LLM · SSO / OIDC · Sauvegardes · Mise à jour.
 
 ## Feedback
 
