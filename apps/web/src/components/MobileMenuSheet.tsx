@@ -35,7 +35,10 @@ function buildSections(role?: string | null): MenuSection[] {
         { href: '/app/settings', label: 'Paramètres', key: 'settings' },
         { href: '/app/update', label: 'Mise à jour', key: 'update' },
         ...(isAdmin
-          ? [{ href: '/app/admin', label: 'Admin', key: 'admin', adminOnly: true }]
+          ? [
+              { href: '/app/cluster', label: 'Cluster', key: 'cluster', adminOnly: true },
+              { href: '/app/admin', label: 'Admin', key: 'admin', adminOnly: true },
+            ]
           : []),
       ],
     },

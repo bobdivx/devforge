@@ -60,6 +60,7 @@ pub fn router() -> Router<AppState> {
 }
 
 async fn health(State(state): State<AppState>) -> Json<Value> {
+    let cluster = state.cluster.summary().await.ok();
     Json(json!({
         "ok": true,
         "service": "devforge-server",
@@ -71,6 +72,11 @@ async fn health(State(state): State<AppState>) -> Json<Value> {
             "database": state.backends.database,
             "llm": state.backends.llm_mode(),
             "update": state.updater.config().mode.as_str(),
+            "cluster": {
+                "role": cluster.as_ref().map(|s| s.role),
+                "nodes": cluster.as_ref().map(|s| s.nodes).unwrap_or(0),
+                "online": cluster.as_ref().map(|s| s.online).unwrap_or(0),
+            },
         }
     }))
 }

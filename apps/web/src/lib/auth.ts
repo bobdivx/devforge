@@ -49,11 +49,17 @@ export type Bootstrap = {
     ssh_host: string;
     ssh_user: string;
   };
-  sso?: {
+    sso?: {
     enabled: boolean;
     oidc_configured: boolean;
     hide_local_login: boolean;
     provider: string;
     issuer_url: string;
+  };
+  cluster?: {
+    role: 'leader' | 'worker';
+    leader_url?: string;
+    node_id?: string;
+    node_name?: string;
   };
 };

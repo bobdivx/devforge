@@ -287,6 +287,9 @@ fn scan_dir_recursive(
 }
 
 fn should_exclude(name: &str) -> bool {
+    if name.starts_with(".devforge-") {
+        return true;
+    }
     matches!(
         name,
         ".git"

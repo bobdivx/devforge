@@ -22,7 +22,15 @@ Page **Cluster** (`/app/cluster`, admin d’instance) :
 
 Les nœuds en cours d’enrôlement apparaissent en statut **joining**. Un second join avec le même nom / URL / SSH **réutilise** le placeholder (pas de doublon).
 
-Tu ne peux pas supprimer le leader.
+Tu ne peux pas supprimer le leader. Le drain ne s’applique qu’aux workers (plus de nouveaux jobs via `ClusterAwareExecutor`).
+
+Les tuiles affichent CPU, nombre d’apps, last_seen. Fiche nœud :
+
+- **Infos** — rename, métriques (CPU / RAM / disque / Docker), drain worker, CTA sauvegarde leader (`/app/settings?tab=backup`)
+- **Apps** — liste des projets (`server_id`) + réassignation (le prochain deploy va sur la cible ; les conteneurs déjà lancés restent)
+- **Diagnostic** — `uptime` / `free` / `df` / `docker ps` via exec
+
+Si le **leader** tombe : pas d’élection v1. L’UI/API disparaissent. Les apps Docker déjà lancées sur les workers continuent. Relance la **même** machine avec `/data`.
 
 ## Rejoindre depuis une machine neuve
 
@@ -59,9 +67,13 @@ Le crate `crates/cluster` + tables SQLite `cluster_*` portent le v1.
 | Méthode | Route | Auth |
 |---------|--------|------|
 | GET/POST | `/api/v1/cluster/nodes` | admin |
-| DELETE | `/api/v1/cluster/nodes/{id}` | admin |
+| PATCH | `/api/v1/cluster/nodes/{id}` | admin — `{ name?, drained? }` |
+| DELETE | `/api/v1/cluster/nodes/{id}?reassign_to=` | admin |
+| GET | `/api/v1/cluster/nodes/{id}/projects` | admin |
+| POST | `/api/v1/cluster/nodes/{id}/reassign` | admin — `{ target_node_id, project_uuid? \| all }` |
+| GET | `/api/v1/cluster/nodes/{id}/logs` | admin |
 | GET/POST | `/api/v1/cluster/invites` | admin |
 | DELETE | `/api/v1/cluster/invites/{id}` | admin |
 | POST | `/api/v1/cluster/join` | token d’invitation |
-| POST | `/api/v1/cluster/heartbeat` | secret nœud |
+| POST | `/api/v1/cluster/heartbeat` | secret nœud (+ métriques) |
 | GET/POST | `/api/v1/cluster/local` | ouvert si 0 users, sinon admin |

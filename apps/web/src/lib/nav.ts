@@ -4,6 +4,7 @@ export type NavItem = { href: string; label: string; key: string };
 export const GLOBAL_NAV: NavItem[] = [
   { href: '/app', label: 'Apps', key: 'home' },
   { href: '/app/runners', label: 'Runners', key: 'runners' },
+  { href: '/app/cluster', label: 'Cluster', key: 'cluster' },
   { href: '/app/mcp', label: 'MCP', key: 'mcp' },
   { href: '/app/tokens', label: 'Tokens', key: 'tokens' },
   { href: '/app/team', label: 'Compte', key: 'team' },
@@ -18,7 +19,8 @@ export const ADMIN_NAV_ITEM: NavItem = {
 };
 
 export function globalNavForRole(role?: string | null): NavItem[] {
-  return GLOBAL_NAV;
+  if (role === 'instance_admin') return GLOBAL_NAV;
+  return GLOBAL_NAV.filter((item) => item.key !== 'cluster');
 }
 
 /**

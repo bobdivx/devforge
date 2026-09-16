@@ -488,6 +488,14 @@ export const api = {
         preview_url?: string;
         error?: string;
         message?: string;
+        command?: string;
+        port?: number;
+        production_port?: number;
+        logs_tail?: string;
+        hint?: string;
+        npm_install?: boolean;
+        env_count?: number;
+        env_keys?: string[];
       };
     }>(`/projects/${projectUuid}/preview/start`, {
       method: 'POST',
@@ -1338,11 +1346,131 @@ export const api = {
     }),
   cronRuns: (projectUuid: string, cronId: string, limit = 50) =>
     request<{ data: CronRun[] }>(`/projects/${projectUuid}/crons/${cronId}/runs?limit=${limit}`),
+
+  clusterNodes: () => request<{ ok: boolean; nodes: ClusterNode[] }>('/cluster/nodes'),
+  clusterAddNode: (body: {
+    name: string;
+    host: string;
+    user?: string;
+    port?: number;
+    advertise_url?: string;
+  }) =>
+    request<{ ok: boolean; node: ClusterNode }>('/cluster/nodes', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  clusterPatchNode: (id: string, body: { name?: string; drained?: boolean }) =>
+    request<{ ok: boolean; node: ClusterNode }>(`/cluster/nodes/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  clusterRemoveNode: (id: string, reassignTo?: string) => {
+    const q = reassignTo ? `?reassign_to=${encodeURIComponent(reassignTo)}` : '';
+    return request<{ ok: boolean; deleted: string }>(
+      `/cluster/nodes/${encodeURIComponent(id)}${q}`,
+      { method: 'DELETE' },
+    );
+  },
+  clusterNodeProjects: (id: string) =>
+    request<{
+      ok: boolean;
+      projects: Array<{ uuid: string; name: string; status: string; server_id: string }>;
+    }>(`/cluster/nodes/${encodeURIComponent(id)}/projects`),
+  clusterReassign: (
+    id: string,
+    body: { target_node_id: string; project_uuid?: string; all?: boolean },
+  ) =>
+    request<{ ok: boolean; moved?: number; hint?: string }>(
+      `/cluster/nodes/${encodeURIComponent(id)}/reassign`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  clusterNodeLogs: (id: string) =>
+    request<{ ok: boolean; exit_code: number; output: string }>(
+      `/cluster/nodes/${encodeURIComponent(id)}/logs`,
+    ),
+  clusterInvites: () =>
+    request<{
+      ok: boolean;
+      invites: ClusterInvite[];
+    }>('/cluster/invites'),
+  clusterCreateInvite: (body?: { leader_url?: string; ttl_hours?: number }) =>
+    request<{
+      ok: boolean;
+      invite: { id: string; token: string; leader_url: string; expires_at: string };
+    }>('/cluster/invites', {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    }),
+  clusterRevokeInvite: (id: string) =>
+    request<{ ok: boolean }>(`/cluster/invites/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  clusterLocal: () =>
+    request<{
+      ok: boolean;
+      role: 'leader' | 'worker';
+      leader_url: string;
+      node_id: string;
+      node_name: string;
+      metrics?: ClusterNodeMetrics;
+    }>('/cluster/local'),
+  clusterJoinLocal: (body: {
+    leader_url: string;
+    token: string;
+    name?: string;
+    advertise_url?: string;
+  }) =>
+    request<{
+      ok: boolean;
+      role: string;
+      node: ClusterNode;
+      leader_url: string;
+    }>('/cluster/local', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   
   proxyStatus: () => request<ProxyStatus>('/system/proxy/status'),
   proxyRestart: () => request<{ ok: boolean; container: string; message: string; output: string }>('/system/proxy/restart', { method: 'POST', body: '{}' }),
   proxyEnsure: () => request<{ ok: boolean; status: string; container: string; message: string }>('/system/proxy/ensure', { method: 'POST', body: '{}' }),
   systemHealth: () => request<SystemHealth>('/system/health'),
+};
+
+export type ClusterNode = {
+  id: string;
+  name: string;
+  role: 'leader' | 'worker';
+  advertise_url: string;
+  status: 'online' | 'offline' | 'joining';
+  os: string;
+  arch: string;
+  capabilities: string[];
+  ssh_host?: string | null;
+  ssh_user?: string | null;
+  ssh_port?: number | null;
+  last_seen_at?: string | null;
+  last_error?: string | null;
+  drained?: boolean;
+  metrics?: ClusterNodeMetrics;
+  project_count?: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ClusterNodeMetrics = {
+  cpu_percent?: number | null;
+  mem_used_bytes?: number | null;
+  mem_total_bytes?: number | null;
+  disk_used_bytes?: number | null;
+  disk_total_bytes?: number | null;
+  load_1?: number | null;
+  docker_ok?: boolean | null;
+  containers?: number | null;
+};
+
+export type ClusterInvite = {
+  id: string;
+  expires_at: string;
+  revoked_at: string | null;
+  created_at: string;
 };
 
 export type ManagedRunner = {

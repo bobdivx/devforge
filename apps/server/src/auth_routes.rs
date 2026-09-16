@@ -294,6 +294,12 @@ async fn bootstrap(
         sso_settings.hide_local_login()
     };
 
+    let cluster_local = state
+        .cluster
+        .local()
+        .await
+        .unwrap_or_default();
+
     Ok(Json(json!({
         "ok": true,
         "needs_setup": count == 0,
@@ -320,6 +326,12 @@ async fn bootstrap(
             "hide_local_login": hide_local_login,
             "provider": sso_settings.provider(),
             "issuer_url": sso_settings.issuer(),
+        },
+        "cluster": {
+            "role": cluster_local.role,
+            "leader_url": cluster_local.leader_url,
+            "node_id": cluster_local.node_id,
+            "node_name": cluster_local.node_name,
         }
     })))
 }
@@ -732,7 +744,7 @@ async fn complete_onboarding(
     })))
 }
 
-fn ssh_key_paths() -> (std::path::PathBuf, std::path::PathBuf) {
+pub(crate) fn ssh_key_paths() -> (std::path::PathBuf, std::path::PathBuf) {
     let data = std::env::var("DEVFORGE_DATA_DIR").unwrap_or_else(|_| "/data".into());
     let private = std::env::var("DEVFORGE_SSH_KEY")
         .map(std::path::PathBuf::from)

@@ -17,7 +17,8 @@ RUN cargo build -p devforge-server --release
 
 FROM docker:27-cli AS dockercli
 
-FROM debian:bookworm-slim AS runtime
+# Node 22 : atelier `npm i` + `npm run dev` dans le même conteneur que l’API.
+FROM node:22-bookworm-slim AS runtime
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl git libssl3 openssh-client \
   && rm -rf /var/lib/apt/lists/*

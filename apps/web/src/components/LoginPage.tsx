@@ -3,7 +3,7 @@ import { api } from '../lib/api';
 import { setToken, type Bootstrap } from '../lib/auth';
 import { Alert, Button, Card, FadeIn, Input, Spinner } from './ui';
 
-type Mode = 'setup' | 'login' | 'register';
+type Mode = 'setup' | 'login' | 'register' | 'join';
 
 export function LoginPage() {
   const [mode, setMode] = useState<Mode>('login');
@@ -11,6 +11,9 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [workspace, setWorkspace] = useState('');
+  const [leaderUrl, setLeaderUrl] = useState('');
+  const [joinToken, setJoinToken] = useState('');
+  const [nodeName, setNodeName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(true);
@@ -32,6 +35,10 @@ export function LoginPage() {
       .bootstrap()
       .then((b) => {
         setBootstrap(b);
+        if (b.cluster?.role === 'worker') {
+          window.location.replace('/app/node');
+          return;
+        }
         if (b.authenticated && b.onboarding.required) {
           window.location.replace('/app/onboarding');
           return;
@@ -60,6 +67,15 @@ export function LoginPage() {
     setBusy(true);
     setError(null);
     try {
+      if (mode === 'join') {
+        await api.clusterJoinLocal({
+          leader_url: leaderUrl.trim(),
+          token: joinToken.trim(),
+          name: nodeName.trim() || undefined,
+        });
+        window.location.href = '/app/node';
+        return;
+      }
       if (mode === 'setup' || mode === 'register') {
         const r = await api.register({
           name,
@@ -97,13 +113,17 @@ export function LoginPage() {
   const title =
     mode === 'setup'
       ? 'Bienvenue sur DevForge'
-      : mode === 'register'
+      : mode === 'join'
+        ? 'Rejoindre un cluster'
+        : mode === 'register'
         ? 'Créer un compte'
         : 'Connexion';
   const subtitle =
     mode === 'setup'
       ? "Compte admin — tu configures l'instance."
-      : mode === 'register'
+      : mode === 'join'
+        ? 'Colle l’URL et le token affichés sur le leader (page Cluster).'
+        : mode === 'register'
         ? 'Ton workspace isolé, forfait free.'
         : 'Heureux de te revoir.';
 
@@ -146,7 +166,63 @@ export function LoginPage() {
             </div>
           )}
 
-          {!hideLocalLogin && (
+          {mode === 'setup' && (
+            <div class="mb-4 grid grid-cols-2 gap-2">
+              <Button type="button" variant="secondary" class="w-full" disabled>
+                Créer une instance
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                class="w-full"
+                onClick={() => {
+                  setMode('join');
+                  setError(null);
+                }}
+              >
+                Rejoindre
+              </Button>
+            </div>
+          )}
+
+          {mode === 'join' ? (
+            <form class="space-y-3" onSubmit={submit}>
+              <Input
+                label="URL du leader"
+                value={leaderUrl}
+                placeholder="http://10.1.0.88:8000"
+                required
+                onInput={(e) => setLeaderUrl((e.target as HTMLInputElement).value)}
+              />
+              <Input
+                label="Token d’invitation"
+                value={joinToken}
+                required
+                onInput={(e) => setJoinToken((e.target as HTMLInputElement).value)}
+              />
+              <Input
+                label="Nom de ce nœud"
+                value={nodeName}
+                placeholder="optionnel"
+                onInput={(e) => setNodeName((e.target as HTMLInputElement).value)}
+              />
+              <Button type="submit" class="w-full" disabled={busy}>
+                {busy ? <Spinner /> : null}
+                Rejoindre le cluster
+              </Button>
+              <button
+                type="button"
+                class="w-full text-center text-sm text-[var(--color-accent)] hover:underline"
+                onClick={() => {
+                  setMode('setup');
+                  setError(null);
+                }}
+              >
+                Créer une instance à la place
+              </button>
+            </form>
+          ) : (
+            !hideLocalLogin && (
             <form class="space-y-3" onSubmit={submit}>
               {(mode === 'setup' || mode === 'register') && (
                 <>
@@ -186,9 +262,10 @@ export function LoginPage() {
                 {mode === 'login' ? 'Se connecter' : 'Créer mon compte'}
               </Button>
             </form>
+            )
           )}
 
-          {mode !== 'setup' && !hideLocalLogin && (
+          {mode !== 'setup' && mode !== 'join' && !hideLocalLogin && (
             <div class="mt-4 text-center text-sm text-[var(--color-ink-muted)]">
               {mode === 'login' ? (
                 bootstrap?.allow_register && (

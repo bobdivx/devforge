@@ -63,7 +63,7 @@ export function WorkspaceTopBar({
             variant="secondary"
             onClick={onStartServer}
             disabled={previewBusy}
-            title="Démarrer npm run dev dans le workdir"
+            title="Démarrer npm run dev (npm i au premier démarrage)"
             aria-label="Démarrer le serveur de dev"
           >
             <Play size={14} strokeWidth={2} aria-hidden />

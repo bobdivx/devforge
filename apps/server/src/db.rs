@@ -586,6 +586,100 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS cluster_local (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            role TEXT NOT NULL DEFAULT 'leader',
+            leader_url TEXT NOT NULL DEFAULT '',
+            node_id TEXT NOT NULL DEFAULT 'default',
+            node_secret TEXT NOT NULL DEFAULT '',
+            node_name TEXT NOT NULL DEFAULT 'Leader',
+            updated_at TEXT NOT NULL
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS cluster_nodes (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'worker',
+            advertise_url TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'offline',
+            os TEXT NOT NULL DEFAULT '',
+            arch TEXT NOT NULL DEFAULT '',
+            capabilities_json TEXT NOT NULL DEFAULT '[]',
+            ssh_host TEXT,
+            ssh_user TEXT,
+            ssh_port INTEGER,
+            last_seen_at TEXT,
+            last_error TEXT,
+            drained INTEGER NOT NULL DEFAULT 0,
+            metrics_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    let _ = sqlx::query(
+        "ALTER TABLE cluster_nodes ADD COLUMN drained INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE cluster_nodes ADD COLUMN metrics_json TEXT NOT NULL DEFAULT '{}'",
+    )
+    .execute(pool)
+    .await;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS cluster_join_tokens (
+            id TEXT PRIMARY KEY,
+            token_hash TEXT NOT NULL UNIQUE,
+            expires_at TEXT NOT NULL,
+            revoked_at TEXT,
+            created_by TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS cluster_node_secrets (
+            node_id TEXT PRIMARY KEY,
+            secret TEXT NOT NULL,
+            secret_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    let local: Option<(i64,)> = sqlx::query_as("SELECT id FROM cluster_local WHERE id = 1")
+        .fetch_optional(pool)
+        .await?;
+    if local.is_none() {
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO cluster_local (id, role, leader_url, node_id, node_secret, node_name, updated_at) VALUES (1, 'leader', '', 'default', '', 'Leader', ?)",
+        )
+        .bind(&now)
+        .execute(pool)
+        .await?;
+    }
+
     Ok(())
 }
 

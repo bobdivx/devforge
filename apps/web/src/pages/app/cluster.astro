@@ -1,0 +1,7 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { ClusterPage } from '../../components/ClusterPage';
+---
+<BaseLayout title="Cluster · DevForge">
+  <ClusterPage client:only="preact" />
+</BaseLayout>

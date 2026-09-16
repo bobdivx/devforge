@@ -45,6 +45,7 @@ function shortLabel(label: string): string {
     Apps: 'Apps',
     MCP: 'MCP',
     Tokens: 'Tokens',
+    Cluster: 'Cluster',
   };
   return map[label] ?? label;
 }

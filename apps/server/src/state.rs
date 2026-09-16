@@ -10,6 +10,7 @@ use devforge_mcp::McpFacade;
 use devforge_ports::PortsFacade;
 use devforge_proxy::ProxyFacade;
 use devforge_runner::RunnerFacade;
+use devforge_cluster::{ClusterAwareExecutor, ClusterFacade, ClusterStore};
 use devforge_shared::{ProjectTestContext, Result as DfResult};
 use devforge_wireguard::{MemoryWireguardStore, WireguardFacade};
 use devforge_storage::StorageFacade;
@@ -41,6 +42,7 @@ pub struct AppState {
     pub backup: Arc<BackupFacade>,
     pub updater: Arc<UpdateFacade>,
     pub runners: Arc<RunnerFacade>,
+    pub cluster: Arc<ClusterFacade>,
     pub cron_scheduler: Arc<devforge_cron::CronScheduler>,
     /// Active backends: executor / github / storage / llm.
     pub backends: Arc<BackendModes>,
@@ -505,7 +507,35 @@ impl AppState {
 
         crate::db::migrate(&pool).await?;
 
-        let (executor, executor_mode) = executor_from_env();
+        let cluster_store: Arc<dyn ClusterStore> =
+            Arc::new(crate::cluster_store::SqliteClusterStore {
+                pool: pool.clone(),
+            });
+        let cluster = Arc::new(ClusterFacade::new(cluster_store.clone()));
+        {
+            let instance_url: String = sqlx::query_as::<_, (String,)>(
+                "SELECT instance_url FROM instance_settings WHERE id = 1",
+            )
+            .fetch_optional(&pool)
+            .await?
+            .map(|r| r.0)
+            .unwrap_or_default();
+            let instance_name: String = sqlx::query_as::<_, (String,)>(
+                "SELECT instance_name FROM instance_settings WHERE id = 1",
+            )
+            .fetch_optional(&pool)
+            .await?
+            .map(|r| r.0)
+            .unwrap_or_default();
+            if let Err(e) = cluster.ensure_leader(&instance_name, &instance_url).await {
+                tracing::warn!(error = %e, "cluster seed leader");
+            }
+        }
+
+        let (inner_executor, executor_mode) = executor_from_env();
+        let executor: Arc<dyn devforge_deploy::RemoteExecutor> = Arc::new(
+            ClusterAwareExecutor::new(inner_executor, cluster_store),
+        );
         let (gh_client, github_mode, github_token) = resolve_github_client(&pool).await;
         let storage = Arc::new(StorageFacade::memory());
         let s3_cfg = crate::backup_routes::load_s3_config(&pool).await;
@@ -618,6 +648,7 @@ impl AppState {
             backup,
             updater,
             runners,
+            cluster,
             cron_scheduler,
             backends,
         };

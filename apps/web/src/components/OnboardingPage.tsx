@@ -47,6 +47,10 @@ function OnboardingWizard() {
   const [instanceUrl, setInstanceUrl] = useState('http://localhost:8000');
   const [domain, setDomain] = useState('');
   const [githubToken, setGithubToken] = useState('');
+  const [joinMode, setJoinMode] = useState(false);
+  const [leaderUrl, setLeaderUrl] = useState('');
+  const [joinToken, setJoinToken] = useState('');
+  const [nodeName, setNodeName] = useState('');
 
   const idx = STEPS.findIndex((s) => s.id === step);
   const progress = Math.round(((idx + 1) / STEPS.length) * 100);
@@ -143,7 +147,7 @@ function OnboardingWizard() {
             </Alert>
           )}
 
-          {step === 'welcome' && (
+          {step === 'welcome' && !joinMode && (
             <div class="space-y-4">
               <h1 class="text-2xl font-semibold tracking-tight">
                 Salut{boot?.user ? `, ${boot.user.name}` : ''}
@@ -153,8 +157,72 @@ function OnboardingWizard() {
                 monté) — pas de SSH à configurer ici.
               </p>
               <Button onClick={next} class="w-full">
-                C’est parti
+                Créer une instance
               </Button>
+              <Button
+                variant="outline"
+                class="w-full"
+                onClick={() => {
+                  setJoinMode(true);
+                  setError(null);
+                }}
+              >
+                Rejoindre un cluster
+              </Button>
+            </div>
+          )}
+
+          {step === 'welcome' && joinMode && (
+            <div class="space-y-4">
+              <h1 class="text-2xl font-semibold tracking-tight">Rejoindre un cluster</h1>
+              <p class="text-sm text-[var(--color-ink-muted)]">
+                Colle l’URL et le token générés sur le leader (page Cluster → Invitation).
+              </p>
+              <Input
+                label="URL du leader"
+                value={leaderUrl}
+                placeholder="http://10.1.0.88:8000"
+                onInput={(e) => setLeaderUrl((e.target as HTMLInputElement).value)}
+              />
+              <Input
+                label="Token"
+                value={joinToken}
+                onInput={(e) => setJoinToken((e.target as HTMLInputElement).value)}
+              />
+              <Input
+                label="Nom de ce nœud"
+                value={nodeName}
+                placeholder="optionnel"
+                onInput={(e) => setNodeName((e.target as HTMLInputElement).value)}
+              />
+              <div class="flex gap-2">
+                <Button variant="ghost" onClick={() => setJoinMode(false)}>
+                  Retour
+                </Button>
+                <Button
+                  class="flex-1"
+                  disabled={busy || !leaderUrl.trim() || !joinToken.trim()}
+                  onClick={async () => {
+                    setBusy(true);
+                    setError(null);
+                    try {
+                      await api.clusterJoinLocal({
+                        leader_url: leaderUrl.trim(),
+                        token: joinToken.trim(),
+                        name: nodeName.trim() || undefined,
+                      });
+                      toast.push({ title: 'Nœud enrôlé', tone: 'ok' });
+                      window.location.href = '/app/node';
+                    } catch (e) {
+                      setError(String((e as Error).message || e));
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  {busy ? <Spinner /> : null}
+                  Rejoindre
+                </Button>
+              </div>
             </div>
           )}
 

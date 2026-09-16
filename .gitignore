@@ -18,6 +18,7 @@ apps/web/.astro/
 # Runtime data (deploys locaux)
 data/
 apps/server/data/
+backups/
 
 # IDE / OS
 .idea/

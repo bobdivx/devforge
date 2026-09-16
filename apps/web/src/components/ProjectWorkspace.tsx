@@ -28,6 +28,7 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
   const [previewStatus, setPreviewStatus] = useState<PreviewServerStatus>('stopped');
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewErrorDetail, setPreviewErrorDetail] = useState<string | null>(null);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -49,6 +50,7 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
       if (detail?.url) {
         setLocalPreviewUrl(detail.url);
         setPreviewError(null);
+        setPreviewErrorDetail(null);
         setPreviewStatus('running');
       }
     }
@@ -101,6 +103,7 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
 
   async function handleStartServer(force = false) {
     setPreviewError(null);
+    setPreviewErrorDetail(null);
     setPreviewBusy(true);
     setPreviewStatus('starting');
     try {
@@ -121,6 +124,28 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
             ? data.error
             : 'Impossible de démarrer le serveur de dev.',
         );
+        const bits: string[] = [];
+        if (typeof data.command === 'string' && data.command) {
+          bits.push(`Commande : ${data.command}`);
+        }
+        if (typeof data.port === 'number') {
+          const prod =
+            typeof data.production_port === 'number' && data.production_port !== data.port
+              ? ` (production : ${data.production_port})`
+              : '';
+          bits.push(`Port dev : ${data.port}${prod}`);
+        }
+        if (typeof data.hint === 'string' && data.hint) bits.push(data.hint);
+        if (Array.isArray(data.env_keys) && data.env_keys.length > 0) {
+          bits.push(`Variables DevForge : ${data.env_keys.join(', ')}`);
+        }
+        if (data.npm_install === false) {
+          bits.push('npm i n’a pas pu installer les dépendances.');
+        }
+        if (typeof data.logs_tail === 'string' && data.logs_tail.trim()) {
+          bits.push(data.logs_tail.trim());
+        }
+        setPreviewErrorDetail(bits.length ? bits.join('\n') : null);
       }
     } catch (e) {
       setPreviewStatus('stopped');
@@ -132,6 +157,7 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
 
   async function handleStopServer() {
     setPreviewError(null);
+    setPreviewErrorDetail(null);
     setPreviewBusy(true);
     try {
       await api.previewStop(projectUuid);
@@ -175,7 +201,12 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
 
         {previewError && (
           <div class="border-b border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-danger)] sm:px-4 sm:text-sm">
-            {previewError}
+            <p>{previewError}</p>
+            {previewErrorDetail && (
+              <pre class="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] text-[var(--color-ink-muted)]">
+                {previewErrorDetail}
+              </pre>
+            )}
           </div>
         )}
 

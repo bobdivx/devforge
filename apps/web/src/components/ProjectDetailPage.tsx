@@ -1750,6 +1750,10 @@ function ProjectSettingsPanel({
   const [baseDir, setBaseDir] = useState(project.base_directory || '/');
   const [composePath, setComposePath] = useState(project.docker_compose_location || '');
   const [workdir, setWorkdir] = useState(project.workdir || '');
+  const [serverId, setServerId] = useState(project.server_id || 'default');
+  const [clusterNodes, setClusterNodes] = useState<
+    Array<{ id: string; name: string; status: string; drained?: boolean }>
+  >([]);
   const [prodUrl, setProdUrl] = useState(project.production_url || '');
   const [testCmd, setTestCmd] = useState(project.test_command || '');
   const [busy, setBusy] = useState(false);
@@ -1770,6 +1774,7 @@ function ProjectSettingsPanel({
     setBaseDir(project.base_directory || '/');
     setComposePath(project.docker_compose_location || '');
     setWorkdir(project.workdir || '');
+    setServerId(project.server_id || 'default');
     setProdUrl(project.production_url || '');
     setTestCmd(project.test_command || '');
     setConfirmDelete(false);
@@ -1806,6 +1811,21 @@ function ProjectSettingsPanel({
     };
   }, [repo]);
 
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .clusterNodes()
+      .then((r) => {
+        if (!cancelled) setClusterNodes(r.nodes ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setClusterNodes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function save(e: Event) {
     e.preventDefault();
     setBusy(true);
@@ -1823,6 +1843,7 @@ function ProjectSettingsPanel({
         base_directory: baseDir.trim() || '/',
         docker_compose_location: composePath.trim() || null,
         workdir: workdir.trim() || null,
+        server_id: serverId.trim() || 'default',
         production_url: prodUrl.trim() || null,
         test_command: testCmd.trim() || null,
       });
@@ -1929,6 +1950,24 @@ function ProjectSettingsPanel({
               onInput={(e) => setRepo((e.target as HTMLInputElement).value)}
             />
           </div>
+          <label class="flex flex-col gap-1.5 text-sm md:col-span-2">
+            <span class="font-medium">Nœud de déploiement</span>
+            <select
+              class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
+              value={serverId}
+              onChange={(e) => setServerId((e.target as HTMLSelectElement).value)}
+            >
+              {(clusterNodes.length
+                ? clusterNodes
+                : [{ id: 'default', name: 'Leader (local)', status: 'online' }]
+              ).map((n) => (
+                <option key={n.id} value={n.id} disabled={Boolean(n.drained) && n.id !== serverId}>
+                  {n.name}
+                  {n.drained ? ' (drain)' : n.status === 'online' ? '' : ` (${n.status})`}
+                </option>
+              ))}
+            </select>
+          </label>
           <label class="flex flex-col gap-1.5 text-sm">
             <span class="font-medium">Build pack</span>
             <select

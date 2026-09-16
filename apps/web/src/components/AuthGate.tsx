@@ -19,6 +19,10 @@ export function AuthGate({ children, allowOnboarding = false }: Props) {
       try {
         const b: Bootstrap = await api.bootstrap();
         if (cancelled) return;
+        if (b.cluster?.role === 'worker') {
+          window.location.replace('/app/node');
+          return;
+        }
         if (b.needs_setup) {
           window.location.replace('/login');
           return;

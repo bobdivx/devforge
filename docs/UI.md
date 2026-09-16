@@ -21,7 +21,9 @@ Référence : [Plasma](https://tailkits.com/templates/plasma/) — dark épuré,
 | `/` | Landing marketing |
 | `/app` | Accueil + charts |
 | `/app/projects` | Liste + **wizard GitHub** (repo → branch → **detect** → build → runtime) |
-| `/app/mcp` | Catalogue MCP (Turso, Slack…) + serveurs connectés |
+| `/app/runners` | Runners GitHub self-hosted |
+| `/app/cluster` | Nœuds DevForge (admin) : invitations, drain, métriques, apps, diagnostic, sauvegarde leader |
+| `/app/node` | Statut worker (instance enrôlée) |
 | `/app/projects/view` | Détail : env (**lien Turso**), domaines, settings, deploy |
 | `/app/projects/view` | Overview, deployments, agents, env (**import .env**), domains, **settings**, backups |
 | `/app/team` | Membres + invite toast |

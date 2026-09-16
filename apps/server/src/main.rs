@@ -1,4 +1,7 @@
+mod cluster_routes;
+mod cluster_store;
 mod db;
+mod worker;
 mod actions_routes;
 mod auto_deploy;
 mod auth_routes;
@@ -53,6 +56,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database_url =
         std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:devforge.db?mode=rwc".into());
     let state = AppState::new(&database_url).await?;
+
+    if let Err(e) = worker::consume_pending_join(&state).await {
+        tracing::error!(error = %e, "échec join cluster (fichier pending)");
+    }
+    worker::maybe_start_heartbeat(&state).await;
+
+    let local_role = state.cluster.local().await.ok();
+    if local_role
+        .as_ref()
+        .map(worker::is_worker_role)
+        .unwrap_or(false)
+    {
+        tracing::info!("mode worker — pas d’UI produit");
+        let mut app = worker::worker_router(state.clone())
+            .layer(security::cors_layer())
+            .layer(TraceLayer::new_for_http());
+        app = worker::with_static_fallback(app);
+        let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
+        let port: u16 = std::env::var("PORT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(8000);
+        let addr: SocketAddr = format!("{host}:{port}")
+            .parse()
+            .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], port)));
+        tracing::info!("DevForge worker listening on http://{addr}");
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        axum::serve(listener, app).await?;
+        return Ok(());
+    }
 
     // Ensure Traefik reverse proxy is running (durable fix for outage 2026-09-11).
     // If the container was deleted/stopped, recreate/start it before accepting requests.
@@ -140,6 +173,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(git_routes::router())
         .merge(update_routes::router())
         .merge(cron_routes::router())
+        .merge(cluster_routes::router())
+        .merge(worker::exec_route())
         .layer(middleware::from_fn_with_state(
             state.clone(),
             token_routes::enforce_api_token_write,

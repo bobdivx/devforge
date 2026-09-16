@@ -11,7 +11,16 @@
 
 - `apps/web` — Astro + Preact + Tailwind 4
 - `apps/server` — Axum + Tokio + SQLx (**SQLite local** par défaut ; Turso/libSQL optionnel plus tard)
-- Crates : `shared`, `agent`, `deploy`, `github`, `database`, `mcp`, `env`, `ports`, `domain`, `proxy`, `wireguard`, `storage`, `backup`
+- Crates : `shared`, `agent`, `deploy`, `github`, `database`, `mcp`, `env`, `ports`, `domain`, `proxy`, `wireguard`, `storage`, `backup`, `cluster`
+
+## Cluster
+
+Un **leader** (cette instance) + des **workers**. `node.id` = `server_id` des projets.
+
+- Page `/app/cluster` (admin) : nœuds, invitations (liste + révocation), drain, métriques, diagnostic, réassignation d’apps. Pas de promotion HA : si le leader tombe, relancer la même machine avec `/data` (CTA sauvegarde).
+- Rôle persisté dans SQLite (`cluster_local`) — pas de variables d’environnement pour joindre.
+- Worker : heartbeat (~15 s, stale 45 s) + métriques + `POST /internal/exec`. Drain = plus de nouveaux jobs. UI worker `/app/node`.
+- Turso / mesh WireGuard : plus tard (HA control plane, overlay).
 
 ## Modèle agents
 

@@ -20,13 +20,16 @@ Facades derrière traits ; runtime réel activé via env (sinon stubs).
 | `update` | Self-update versions + compose/docker/binary | **OK** |
 | `database` | Provision DB app (Postgres etc.) | **Non implémenté** (erreur explicite) |
 | `mcp` | Serveur MCP + client HTTP + catalogue (Turso, Slack…) + lien DB→projet | **OK** |
+| `cluster` | Nœuds leader/worker, invitations UX, exec HTTP | **OK** |
 
 ## Base de données DevForge (métadonnées)
 
 **Défaut : SQLite local** (`DATABASE_URL=sqlite:devforge.db?mode=rwc`).
 
 - Simple en solo / CI / laptop.
-- **Turso** (libSQL) : option plus tard pour multi-instance / edge — même schéma SQL, driver `libsql`. Pas obligatoire maintenant.
+- **Turso** (libSQL) : option plus tard pour replicas HA du control plane — même schéma SQL, driver `libsql`. Pas obligatoire maintenant.
+
+Le **cluster v1** n’utilise pas Turso : un leader SQLite + des workers. Enrôlement 100 % UX (`/app/cluster` et onboarding « Rejoindre un cluster ») — aucune variable `DEVFORGE_CLUSTER_*` / `DEVFORGE_ROLE`.
 
 ## Activation runtime
 
@@ -39,7 +42,7 @@ export DEVFORGE_GITHUB_TOKEN=…
 
 Pas de fallback stub silencieux : sans config, GitHub = `off` (erreur API), executor = `local`.
 
-`GET /api/v1/health` → `backends.{executor,github,storage,database,llm,update}` + `version`.
+`GET /api/v1/health` → `backends.{executor,github,storage,database,llm,update,cluster}` + `version`.
 
 ## Routes HTTP
 
@@ -47,4 +50,5 @@ Pas de fallback stub silencieux : sans config, GitHub = `off` (erreur API), exec
 - Backups projets : `/api/v1/projects/{uuid}/backups` + `…/restore-preview`
 - Backups instance : `/api/v1/settings/backup-s3` + `/api/v1/instance/backups` (+ restore)
 - Update : `/api/v1/update/check|status|start` (+ UI `/app/update`, wait `/app/update/wait`)
+- Cluster : `/api/v1/cluster/nodes` · `PATCH/DELETE /nodes/{id}` · `/nodes/{id}/projects|reassign|logs` · `/invites` · `/join` · `/heartbeat` · `/local` (+ UI `/app/cluster`)
 - (+ ports, domains, proxy, lifecycle, wireguard, github)

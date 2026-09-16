@@ -235,6 +235,16 @@ export function AppHeader() {
             {isAdmin && (
               <a
                 role="menuitem"
+                href="/app/cluster"
+                class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
+                onClick={() => setMenuOpen(false)}
+              >
+                Cluster
+              </a>
+            )}
+            {isAdmin && (
+              <a
+                role="menuitem"
                 href="/app/admin"
                 class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
                 onClick={() => setMenuOpen(false)}

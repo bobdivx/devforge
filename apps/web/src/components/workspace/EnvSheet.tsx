@@ -87,7 +87,7 @@ export function EnvSheet({ open, onClose, projectUuid, variant = 'sheet' }: Prop
           <div class="min-w-0">
             <h2 class="text-base font-medium tracking-tight">Variables d'environnement</h2>
             <p class="mt-0.5 text-xs text-[var(--color-ink-muted)]">
-              Secrets et config injectés au prochain déploiement
+              Injectées par défaut dans le serveur de dev et au prochain déploiement
             </p>
           </div>
           <button

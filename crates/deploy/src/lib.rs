@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use devforge_shared::{DevForgeError, ProjectTestContext, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,7 +13,7 @@ pub mod ssh;
 pub use error_parser::{parse_deploy_error_fr, DeployError};
 pub use ssh::{LocalShellExecutor, SshRemoteExecutor, SshTarget};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecResult {
     pub ok: bool,
     pub exit_code: i32,
