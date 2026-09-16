@@ -15,7 +15,7 @@ Deux chemins :
 ### Rejoindre un cluster (worker)
 
 1. Clique **Rejoindre**.
-2. Colle le **code d’invitation** copié sur le leader (Cluster → Inviter un nœud). Format : `dfjoin_…@https://web.jeser.app`. URL, token et nom du nœud (hostname) sont automatiques.
+2. Colle le **jeton** `dfjoin_…` et l’**URL du leader** joignable depuis cette machine (pas dans le jeton).
 3. Redirection vers `/app/node` — UI réduite : cette machine n’est plus le control plane.
 
 Tant qu’il n’y a aucun utilisateur, le join **ne demande pas** de compte admin. Dès qu’un admin existe, le join local exige d’être `instance_admin`.

@@ -1,6 +1,6 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
-import { globalNavForRole, mobileBottomNav, type NavItem } from '../lib/nav';
+import { globalNavForRole, mobileBottomNav, WORKER_NAV, type NavItem } from '../lib/nav';
 import { api } from '../lib/api';
 import { cn } from '../lib/cn';
 import { ToastProvider } from './ui';
@@ -60,7 +60,12 @@ function ShellInner({
   description,
   actions,
 }: Props) {
-  const [navItems, setNavItems] = useState(() => globalNavForRole(null));
+  const onNodePage =
+    typeof window !== 'undefined' && window.location.pathname.startsWith('/app/node');
+  const [isWorker, setIsWorker] = useState(onNodePage);
+  const [navItems, setNavItems] = useState(() =>
+    onNodePage ? WORKER_NAV : globalNavForRole(null),
+  );
   const [userRole, setUserRole] = useState<string | null>(null);
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
@@ -73,7 +78,9 @@ function ShellInner({
       .bootstrap()
       .then((b) => {
         if (!cancelled) {
-          setNavItems(globalNavForRole(b.user?.role));
+          const worker = b.cluster?.role === 'worker';
+          setIsWorker(worker);
+          setNavItems(worker ? WORKER_NAV : globalNavForRole(b.user?.role));
           setUserRole(b.user?.role ?? null);
         }
       })
@@ -127,16 +134,18 @@ function ShellInner({
         show={showRecovery}
         onRecovered={() => setShowRecovery(false)}
       />
-      <MobileMenuSheet
-        open={mobileSheetOpen}
-        onClose={() => setMobileSheetOpen(false)}
-        active={active}
-        userRole={userRole}
-      />
+      {!isWorker && (
+        <MobileMenuSheet
+          open={mobileSheetOpen}
+          onClose={() => setMobileSheetOpen(false)}
+          active={active}
+          userRole={userRole}
+        />
+      )}
       <div class="min-h-screen pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-8">
         <div class="mx-auto flex min-h-screen max-w-6xl gap-8 px-4 pt-4 lg:px-6">
           <aside class="hidden w-52 shrink-0 lg:block">
-            <a href="/app" class="mb-8 flex items-center gap-2.5">
+            <a href={isWorker ? '/app/node' : '/app'} class="mb-8 flex items-center gap-2.5">
               <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                   <path d="M13 2 4 14h7l-1 8 10-14h-7l1-6z" />
@@ -189,7 +198,7 @@ function ShellInner({
           </aside>
 
           <main class="min-w-0 flex-1 py-2">
-            <AppHeader />
+            <AppHeader worker={isWorker} />
             {(title || actions) && (
               <div class="mb-4 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-end sm:justify-between">
                 <div class="min-w-0">
@@ -246,7 +255,7 @@ function ShellInner({
           aria-label="Navigation principale"
         >
           <div class="mx-auto flex max-w-lg justify-around gap-0.5 px-1 py-1.5">
-            {mobileBottomNav().map((item) => {
+            {(isWorker ? WORKER_NAV : mobileBottomNav()).map((item) => {
               const isPlusButton = item.key === 'plus';
               if (isPlusButton) {
                 return (

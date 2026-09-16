@@ -18,6 +18,9 @@ export const ADMIN_NAV_ITEM: NavItem = {
   key: 'admin',
 };
 
+/** Nav du worker : pas d’UI produit, uniquement la fiche nœud. */
+export const WORKER_NAV: NavItem[] = [{ href: '/app/node', label: 'Nœud', key: 'node' }];
+
 export function globalNavForRole(role?: string | null): NavItem[] {
   if (role === 'instance_admin') return GLOBAL_NAV;
   return GLOBAL_NAV.filter((item) => item.key !== 'cluster');

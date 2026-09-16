@@ -7,10 +7,11 @@ use axum::{
     Json, Router,
 };
 use devforge_cluster::{
-    clear_pending_join, load_pending_join, ExecBody, JoinRequest, LeaderClient, LocalClusterState,
-    NodeRole,
+    clear_pending_join, collect_node_metrics, load_pending_join, ExecBody, JoinRequest,
+    LeaderClient, LocalClusterState, NodeRole,
 };
 use devforge_deploy::{LocalShellExecutor, RemoteExecutor};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -45,6 +46,7 @@ pub async fn consume_pending_join(state: &AppState) -> Result<(), Box<dyn std::e
             node_id: joined.node.id,
             node_secret: joined.secret,
             node_name: pending.name,
+            advertise_url: pending.advertise_url,
         })
         .await?;
     let _ = clear_pending_join().await;
@@ -64,7 +66,10 @@ pub fn worker_router(state: AppState) -> Router {
     Router::new()
         .route("/api/v1/health", get(worker_health))
         .route("/api/v1/bootstrap", get(worker_bootstrap))
-        .route("/api/v1/cluster/local", get(worker_local))
+        .route(
+            "/api/v1/cluster/local",
+            get(worker_local).patch(worker_local_patch),
+        )
         .route("/internal/exec", post(internal_exec))
         .with_state(state)
 }
@@ -114,9 +119,60 @@ async fn worker_local(State(state): State<AppState>) -> Json<Value> {
         "ok": true,
         "role": local.as_ref().map(|l| l.role),
         "leader_url": local.as_ref().map(|l| l.leader_url.clone()).unwrap_or_default(),
+        "advertise_url": local.as_ref().map(|l| l.advertise_url.clone()).unwrap_or_default(),
         "node_id": local.as_ref().map(|l| l.node_id.clone()).unwrap_or_default(),
         "node_name": local.as_ref().map(|l| l.node_name.clone()).unwrap_or_default(),
+        "metrics": collect_node_metrics(),
     }))
+}
+
+#[derive(Deserialize)]
+struct WorkerLocalPatch {
+    #[serde(default)]
+    leader_url: Option<String>,
+    #[serde(default)]
+    advertise_url: Option<String>,
+}
+
+async fn worker_local_patch(
+    State(state): State<AppState>,
+    Json(body): Json<WorkerLocalPatch>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if body.leader_url.is_none() && body.advertise_url.is_none() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Rien à modifier (leader_url / advertise_url)"})),
+        ));
+    }
+    let local = state
+        .cluster
+        .patch_local(body.leader_url, body.advertise_url)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+    let cluster = state.cluster.clone();
+    tokio::spawn(async move {
+        for attempt in 0..6u32 {
+            if crate::cluster_routes::send_heartbeat(&cluster, true).await {
+                break;
+            }
+            if attempt + 1 < 6 {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        }
+    });
+    Ok(Json(json!({
+        "ok": true,
+        "role": local.role,
+        "leader_url": local.leader_url,
+        "advertise_url": local.advertise_url,
+        "node_id": local.node_id,
+        "node_name": local.node_name,
+    })))
 }
 
 pub async fn internal_exec(

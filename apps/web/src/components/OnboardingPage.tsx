@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api } from '../lib/api';
 import type { Bootstrap } from '../lib/auth';
-import { parseJoinCode } from '../lib/cluster-invite';
 import { AuthGate } from './AuthGate';
 import { DockerEngineAlert, type DockerEngineInfo } from './DockerEngineAlert';
+import { JoinClusterForm } from './JoinClusterForm';
 import {
   Alert,
   Badge,
@@ -50,7 +50,6 @@ function OnboardingWizard() {
   const [domain, setDomain] = useState('');
   const [githubToken, setGithubToken] = useState('');
   const [joinMode, setJoinMode] = useState(false);
-  const [joinCode, setJoinCode] = useState('');
   const [docker, setDocker] = useState<DockerEngineInfo | null>(null);
 
   const idx = STEPS.findIndex((s) => s.id === step);
@@ -182,47 +181,31 @@ function OnboardingWizard() {
             <div class="space-y-4">
               <h1 class="text-2xl font-semibold tracking-tight">Rejoindre un cluster</h1>
               <p class="text-sm text-[var(--color-ink-muted)]">
-                Colle le code copié sur le leader (Cluster → Inviter un nœud). URL et token sont
-                dedans ; le nom du nœud est pris tout seul.
+                Colle le jeton copié sur le leader, puis l’URL à laquelle ce nœud peut le joindre.
+                L’URL n’est pas dans le jeton — tu peux mettre le DNS public ou une IP LAN.
               </p>
-              <Input
-                label="Code d’invitation"
-                value={joinCode}
-                placeholder="dfjoin_…@https://web.jeser.app"
-                onInput={(e) => setJoinCode((e.target as HTMLInputElement).value)}
+              <JoinClusterForm
+                busy={busy}
+                onCancel={() => {
+                  setJoinMode(false);
+                  setError(null);
+                }}
+                onSubmit={async (body) => {
+                  setBusy(true);
+                  setError(null);
+                  try {
+                    await api.clusterJoinLocal({
+                      ...body,
+                      advertise_url: window.location.origin,
+                    });
+                    toast.push({ title: 'Nœud enrôlé', tone: 'ok' });
+                    window.location.href = '/app/node';
+                  } catch (e) {
+                    setError(String((e as Error).message || e));
+                    setBusy(false);
+                  }
+                }}
               />
-              <div class="flex gap-2">
-                <Button variant="ghost" onClick={() => setJoinMode(false)}>
-                  Retour
-                </Button>
-                <Button
-                  class="flex-1"
-                  disabled={busy || !joinCode.trim()}
-                  onClick={async () => {
-                    const parsed = parseJoinCode(joinCode);
-                    if (!parsed) {
-                      setError('Code invalide — copie-le depuis le leader.');
-                      return;
-                    }
-                    setBusy(true);
-                    setError(null);
-                    try {
-                      await api.clusterJoinLocal({
-                        token: joinCode.trim(),
-                        advertise_url: window.location.origin,
-                      });
-                      toast.push({ title: 'Nœud enrôlé', tone: 'ok' });
-                      window.location.href = '/app/node';
-                    } catch (e) {
-                      setError(String((e as Error).message || e));
-                      setBusy(false);
-                    }
-                  }}
-                >
-                  {busy ? <Spinner /> : null}
-                  Rejoindre
-                </Button>
-              </div>
             </div>
           )}
 

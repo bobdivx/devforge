@@ -1752,7 +1752,7 @@ function ProjectSettingsPanel({
   const [workdir, setWorkdir] = useState(project.workdir || '');
   const [serverId, setServerId] = useState(project.server_id || 'default');
   const [clusterNodes, setClusterNodes] = useState<
-    Array<{ id: string; name: string; status: string; drained?: boolean }>
+    Array<{ id: string; name: string; status: string; drained?: boolean; role?: string }>
   >([]);
   const [prodUrl, setProdUrl] = useState(project.production_url || '');
   const [testCmd, setTestCmd] = useState(project.test_command || '');
@@ -1958,14 +1958,21 @@ function ProjectSettingsPanel({
               onChange={(e) => setServerId((e.target as HTMLSelectElement).value)}
             >
               {(clusterNodes.length
-                ? clusterNodes
-                : [{ id: 'default', name: 'Leader (local)', status: 'online' }]
-              ).map((n) => (
+                ? [...clusterNodes].sort((a, b) => {
+                    const al = a.role === 'leader' || a.id === 'default' ? 0 : 1;
+                    const bl = b.role === 'leader' || b.id === 'default' ? 0 : 1;
+                    return al - bl;
+                  })
+                : [{ id: 'default', name: 'Leader (local)', status: 'online', role: 'leader' }]
+              ).map((n) => {
+                const leader = n.role === 'leader' || n.id === 'default';
+                return (
                 <option key={n.id} value={n.id} disabled={Boolean(n.drained) && n.id !== serverId}>
-                  {n.name}
+                  {leader ? 'Leader' : 'Worker'} · {n.name}
                   {n.drained ? ' (drain)' : n.status === 'online' ? '' : ` (${n.status})`}
                 </option>
-              ))}
+                );
+              })}
             </select>
           </label>
           <label class="flex flex-col gap-1.5 text-sm">

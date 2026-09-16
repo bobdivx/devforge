@@ -595,6 +595,7 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             node_id TEXT NOT NULL DEFAULT 'default',
             node_secret TEXT NOT NULL DEFAULT '',
             node_name TEXT NOT NULL DEFAULT 'Leader',
+            advertise_url TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL
         );
         "#,
@@ -628,6 +629,11 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    let _ = sqlx::query(
+        "ALTER TABLE cluster_local ADD COLUMN advertise_url TEXT NOT NULL DEFAULT ''",
+    )
+    .execute(pool)
+    .await;
     let _ = sqlx::query(
         "ALTER TABLE cluster_nodes ADD COLUMN drained INTEGER NOT NULL DEFAULT 0",
     )

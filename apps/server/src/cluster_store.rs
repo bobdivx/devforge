@@ -20,6 +20,8 @@ struct LocalRow {
     node_id: String,
     node_secret: String,
     node_name: String,
+    #[sqlx(default)]
+    advertise_url: String,
 }
 
 #[derive(FromRow)]
@@ -111,7 +113,7 @@ const NODE_COLS: &str = r#"id, name, role, advertise_url, status, os, arch, capa
 impl ClusterStore for SqliteClusterStore {
     async fn get_local(&self) -> DfResult<LocalClusterState> {
         let row: Option<LocalRow> = sqlx::query_as(
-            "SELECT role, leader_url, node_id, node_secret, node_name FROM cluster_local WHERE id = 1",
+            "SELECT role, leader_url, node_id, node_secret, node_name, advertise_url FROM cluster_local WHERE id = 1",
         )
         .fetch_optional(&self.pool)
         .await
@@ -123,6 +125,7 @@ impl ClusterStore for SqliteClusterStore {
                 node_id: r.node_id,
                 node_secret: r.node_secret,
                 node_name: r.node_name,
+                advertise_url: r.advertise_url,
             })
             .unwrap_or_default())
     }
@@ -130,14 +133,15 @@ impl ClusterStore for SqliteClusterStore {
     async fn set_local(&self, state: &LocalClusterState) -> DfResult<()> {
         let now = Utc::now().to_rfc3339();
         sqlx::query(
-            r#"INSERT INTO cluster_local (id, role, leader_url, node_id, node_secret, node_name, updated_at)
-               VALUES (1, ?, ?, ?, ?, ?, ?)
+            r#"INSERT INTO cluster_local (id, role, leader_url, node_id, node_secret, node_name, advertise_url, updated_at)
+               VALUES (1, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                  role=excluded.role,
                  leader_url=excluded.leader_url,
                  node_id=excluded.node_id,
                  node_secret=excluded.node_secret,
                  node_name=excluded.node_name,
+                 advertise_url=excluded.advertise_url,
                  updated_at=excluded.updated_at"#,
         )
         .bind(state.role.as_str())
@@ -145,6 +149,7 @@ impl ClusterStore for SqliteClusterStore {
         .bind(&state.node_id)
         .bind(&state.node_secret)
         .bind(&state.node_name)
+        .bind(&state.advertise_url)
         .bind(&now)
         .execute(&self.pool)
         .await

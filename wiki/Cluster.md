@@ -17,7 +17,7 @@ Le leader s’enregistre tout seul (`id = default`).
 
 Page **Cluster** (`/app/cluster`, admin d’instance) :
 
-1. **Inviter un nœud** — génère **un code** (`dfjoin_…@https://ton-leader`). TTL 24 h. Colle-le sur l’autre machine (premier écran → Rejoindre). Nom du nœud, URL, heartbeat : automatiques.
+1. **Inviter un nœud** — génère un **jeton** `dfjoin_…` (TTL 24 h). Sur l’autre machine : jeton + **URL du leader joignable depuis ce nœud** (pas collée dans le jeton). Nom optionnel.
 2. **Via SSH** (avancé) — host, user, port. DevForge pousse le bootstrap. Clé SSH de Settings → Serveur.
 
 Les nœuds en cours d’enrôlement apparaissent en statut **joining**. Un second join avec le même nom / URL / SSH **réutilise** le placeholder (pas de doublon).
@@ -26,19 +26,26 @@ Tu ne peux pas supprimer le leader. Le drain ne s’applique qu’aux workers (p
 
 Les tuiles affichent CPU, nombre d’apps, last_seen. Fiche nœud :
 
-- **Infos** — rename, métriques (CPU / RAM / disque / Docker), drain worker, CTA sauvegarde leader (`/app/settings?tab=backup`)
+- **Infos** — rename, **URL du nœud / leader** (modifiable après ajout), métriques (CPU / RAM / disque / Docker), drain worker, CTA sauvegarde leader (`/app/settings?tab=backup`)
 - **Apps** — liste des projets (`server_id`) + réassignation (le prochain deploy va sur la cible ; les conteneurs déjà lancés restent)
 - **Diagnostic** — `uptime` / `free` / `df` / `docker ps` via exec
 
-Si le **leader** tombe : pas d’élection v1. L’UI/API disparaissent. Les apps Docker déjà lancées sur les workers continuent. Relance la **même** machine avec `/data`.
+Si le **leader** tombe : pas d’élection. L’UI/API disparaissent. Les apps Docker déjà lancées sur les workers **continuent**. Relance la **même** machine avec `/data`.
+
+Si un **worker** tombe : seules les apps de ce nœud s’arrêtent. Réassigne + redéploie vers un nœud en ligne. Les autres workers et le leader restent.
 
 ## Rejoindre depuis une machine neuve
 
-Voir [[Premier-demarrage]]. Un seul champ : le code d’invitation.
+Premier écran → **Rejoindre un cluster**. Colle le **jeton** `dfjoin_…`, puis l’**URL du leader** que cette machine peut joindre (DNS, IP LAN…). L’URL n’est pas dans le jeton.
 
-Côté API locale : `POST /api/v1/cluster/local` `{ token }` (le token peut être le code complet `dfjoin_…@https://leader`).
+Côté API locale : `POST /api/v1/cluster/local` `{ token, leader_url, name? }`. Un ancien collage `dfjoin_…@https://…` est encore accepté.
 
 Après succès : rôle persisté dans SQLite (`cluster_local`), heartbeat démarré, UI worker.
+
+Les adresses restent modifiables ensuite :
+
+- **Leader** — fiche nœud → Infos : URL du leader ou de chaque worker
+- **Worker** — page `/app/node` : URL du leader (heartbeat) et URL de ce nœud (propagée au leader)
 
 ## Dispatch
 
@@ -67,7 +74,7 @@ Le crate `crates/cluster` + tables SQLite `cluster_*` portent le v1.
 | Méthode | Route | Auth |
 |---------|--------|------|
 | GET/POST | `/api/v1/cluster/nodes` | admin |
-| PATCH | `/api/v1/cluster/nodes/{id}` | admin — `{ name?, drained? }` |
+| PATCH | `/api/v1/cluster/nodes/{id}` | admin — `{ name?, drained?, advertise_url? }` |
 | DELETE | `/api/v1/cluster/nodes/{id}?reassign_to=` | admin |
 | GET | `/api/v1/cluster/nodes/{id}/projects` | admin |
 | POST | `/api/v1/cluster/nodes/{id}/reassign` | admin — `{ target_node_id, project_uuid? \| all }` |
@@ -76,4 +83,4 @@ Le crate `crates/cluster` + tables SQLite `cluster_*` portent le v1.
 | DELETE | `/api/v1/cluster/invites/{id}` | admin |
 | POST | `/api/v1/cluster/join` | token d’invitation |
 | POST | `/api/v1/cluster/heartbeat` | secret nœud (+ métriques) |
-| GET/POST | `/api/v1/cluster/local` | ouvert si 0 users, sinon admin |
+| GET/POST/PATCH | `/api/v1/cluster/local` | ouvert si 0 users, sinon admin — PATCH `{ leader_url?, advertise_url? }` (aussi sur un worker) |

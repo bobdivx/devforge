@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api } from '../lib/api';
-import { parseJoinCode } from '../lib/cluster-invite';
 import { setToken, type Bootstrap } from '../lib/auth';
+import { JoinClusterForm } from './JoinClusterForm';
 import { Alert, Button, Card, FadeIn, Input, Spinner } from './ui';
 
 type Mode = 'setup' | 'login' | 'register' | 'join';
@@ -12,7 +12,6 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [workspace, setWorkspace] = useState('');
-  const [joinCode, setJoinCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(true);
@@ -66,20 +65,6 @@ export function LoginPage() {
     setBusy(true);
     setError(null);
     try {
-      if (mode === 'join') {
-        const parsed = parseJoinCode(joinCode);
-        if (!parsed) {
-          setError('Colle le code copié sur le leader (page Cluster → Inviter un nœud).');
-          setBusy(false);
-          return;
-        }
-        await api.clusterJoinLocal({
-          token: joinCode.trim(),
-          advertise_url: window.location.origin,
-        });
-        window.location.href = '/app/node';
-        return;
-      }
       if (mode === 'setup' || mode === 'register') {
         const r = await api.register({
           name,
@@ -126,7 +111,7 @@ export function LoginPage() {
     mode === 'setup'
       ? "Compte admin — tu configures l'instance."
       : mode === 'join'
-        ? 'Colle le code d’invitation du leader. Le reste est automatique.'
+        ? 'Jeton d’invitation, puis l’URL du leader joignable depuis cette machine.'
         : mode === 'register'
         ? 'Ton workspace isolé, forfait free.'
         : 'Heureux de te revoir.';
@@ -190,29 +175,29 @@ export function LoginPage() {
           )}
 
           {mode === 'join' ? (
-            <form class="space-y-3" onSubmit={submit}>
-              <Input
-                label="Code d’invitation"
-                value={joinCode}
-                placeholder="dfjoin_…@https://web.jeser.app"
-                required
-                onInput={(e) => setJoinCode((e.target as HTMLInputElement).value)}
-              />
-              <Button type="submit" class="w-full" disabled={busy || !joinCode.trim()}>
-                {busy ? <Spinner /> : null}
-                Rejoindre le cluster
-              </Button>
-              <button
-                type="button"
-                class="w-full text-center text-sm text-[var(--color-accent)] hover:underline"
-                onClick={() => {
-                  setMode('setup');
-                  setError(null);
-                }}
-              >
-                Créer une instance à la place
-              </button>
-            </form>
+            <JoinClusterForm
+              busy={busy}
+              submitLabel="Rejoindre le cluster"
+              cancelLabel="Créer une instance à la place"
+              onCancel={() => {
+                setMode('setup');
+                setError(null);
+              }}
+              onSubmit={async (body) => {
+                setBusy(true);
+                setError(null);
+                try {
+                  await api.clusterJoinLocal({
+                    ...body,
+                    advertise_url: window.location.origin,
+                  });
+                  window.location.href = '/app/node';
+                } catch (err) {
+                  setError(String((err as Error).message || err));
+                  setBusy(false);
+                }
+              }}
+            />
           ) : (
             !hideLocalLogin && (
             <form class="space-y-3" onSubmit={submit}>

@@ -17,7 +17,7 @@
 
 Un **leader** (cette instance) + des **workers**. `node.id` = `server_id` des projets.
 
-- Page `/app/cluster` (admin) : nœuds, invitations (un code `dfjoin_…@https://leader` à coller), drain, métriques, diagnostic, réassignation d’apps. SSH optionnel. Pas de promotion HA : si le leader tombe, relancer la même machine avec `/data`.
+- Page `/app/cluster` (admin) : nœuds, invitations (jeton `dfjoin_…` + URL du leader renseignée sur le worker), drain, métriques, diagnostic, réassignation d’apps. SSH optionnel. Pas de promotion HA : si le leader tombe, relancer la même machine avec `/data`.
 - Rôle persisté dans SQLite (`cluster_local`) — pas de variables d’environnement pour joindre.
 - Worker : heartbeat (~15 s, stale 45 s) + métriques + `POST /internal/exec`. Drain = plus de nouveaux jobs. UI worker `/app/node`.
 - Turso / mesh WireGuard : plus tard (HA control plane, overlay).

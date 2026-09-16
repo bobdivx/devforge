@@ -81,6 +81,7 @@ impl MemoryClusterStore {
         local.node_id = LEADER_NODE_ID.into();
         local.node_name = name.into();
         local.leader_url = advertise_url.into();
+        local.advertise_url = advertise_url.into();
     }
 }
 

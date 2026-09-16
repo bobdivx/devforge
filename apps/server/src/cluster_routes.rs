@@ -36,7 +36,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/cluster/invites/{id}", delete(revoke_invite))
         .route("/api/v1/cluster/join", post(join_node))
         .route("/api/v1/cluster/heartbeat", post(heartbeat))
-        .route("/api/v1/cluster/local", get(local_state).post(local_join))
+        .route("/api/v1/cluster/local", get(local_state).post(local_join).patch(local_patch))
 }
 
 async fn require_admin(
@@ -161,6 +161,8 @@ struct PatchNodeBody {
     name: Option<String>,
     #[serde(default)]
     drained: Option<bool>,
+    #[serde(default)]
+    advertise_url: Option<String>,
 }
 
 async fn patch_node(
@@ -170,15 +172,15 @@ async fn patch_node(
     Json(body): Json<PatchNodeBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     require_admin(&state, &headers).await?;
-    if body.name.is_none() && body.drained.is_none() {
+    if body.name.is_none() && body.drained.is_none() && body.advertise_url.is_none() {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Rien à modifier (name / drained)"})),
+            Json(json!({"error": "Rien à modifier (name / drained / advertise_url)"})),
         ));
     }
     let node = state
         .cluster
-        .patch_node(&id, body.name, body.drained)
+        .patch_node(&id, body.name, body.drained, body.advertise_url)
         .await
         .map_err(map_err)?;
     Ok(Json(json!({
@@ -255,7 +257,7 @@ async fn create_invite(
             "id": invite.id,
             "token": invite.token,
             "leader_url": invite.leader_url,
-            "code": devforge_cluster::format_join_code(&invite.leader_url, &invite.token),
+            "code": invite.token,
             "expires_at": invite.expires_at,
         }
     })))
@@ -334,9 +336,43 @@ async fn local_state(State(state): State<AppState>) -> Result<Json<Value>, (Stat
         "ok": true,
         "role": local.role,
         "leader_url": local.leader_url,
+        "advertise_url": local.advertise_url,
         "node_id": local.node_id,
         "node_name": local.node_name,
         "metrics": collect_node_metrics(),
+    })))
+}
+
+#[derive(Deserialize)]
+struct LocalPatchBody {
+    #[serde(default)]
+    leader_url: Option<String>,
+    #[serde(default)]
+    advertise_url: Option<String>,
+}
+
+async fn local_patch(
+    State(state): State<AppState>,
+    Json(body): Json<LocalPatchBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if body.leader_url.is_none() && body.advertise_url.is_none() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Rien à modifier (leader_url / advertise_url)"})),
+        ));
+    }
+    let local = state
+        .cluster
+        .patch_local(body.leader_url, body.advertise_url)
+        .await
+        .map_err(map_err)?;
+    Ok(Json(json!({
+        "ok": true,
+        "role": local.role,
+        "leader_url": local.leader_url,
+        "advertise_url": local.advertise_url,
+        "node_id": local.node_id,
+        "node_name": local.node_name,
     })))
 }
 
@@ -422,6 +458,7 @@ async fn local_join(
         node_id: joined.node.id.clone(),
         node_secret: joined.secret.clone(),
         node_name: name,
+        advertise_url: advertise_url.clone(),
     };
     state.cluster.set_local(&next).await.map_err(map_err)?;
     spawn_heartbeat(state.cluster.clone());
@@ -445,32 +482,48 @@ pub fn spawn_heartbeat(cluster: Arc<devforge_cluster::ClusterFacade>) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(15)).await;
-            let local = match cluster.local().await {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
-            if local.role != NodeRole::Worker || local.node_secret.is_empty() {
-                continue;
-            }
-            let client = LeaderClient::new(&local.leader_url);
-            if let Err(e) = client
-                .heartbeat(
-                    &local.node_secret,
-                    &HeartbeatPayload {
-                        node_id: local.node_id.clone(),
-                        advertise_url: None,
-                        os: Some(std::env::consts::OS.into()),
-                        arch: Some(std::env::consts::ARCH.into()),
-                        capabilities: Some(vec!["docker".into()]),
-                        metrics: Some(collect_node_metrics()),
-                    },
-                )
-                .await
-            {
-                tracing::warn!(error = %e, "cluster heartbeat");
-            }
+            let _ = send_heartbeat(&cluster, false).await;
         }
     });
+}
+
+/// `include_advertise` : n’envoyer l’URL du nœud que lors d’un PATCH local,
+/// pour ne pas écraser une adresse corrigée depuis le leader.
+pub async fn send_heartbeat(
+    cluster: &devforge_cluster::ClusterFacade,
+    include_advertise: bool,
+) -> bool {
+    let local = match cluster.local().await {
+        Ok(l) => l,
+        Err(_) => return false,
+    };
+    if local.role != NodeRole::Worker || local.node_secret.is_empty() {
+        return false;
+    }
+    let client = LeaderClient::new(&local.leader_url);
+    let advertise_url = if include_advertise && !local.advertise_url.trim().is_empty() {
+        Some(local.advertise_url.clone())
+    } else {
+        None
+    };
+    if let Err(e) = client
+        .heartbeat(
+            &local.node_secret,
+            &HeartbeatPayload {
+                node_id: local.node_id.clone(),
+                advertise_url,
+                os: Some(std::env::consts::OS.into()),
+                arch: Some(std::env::consts::ARCH.into()),
+                capabilities: Some(vec!["docker".into()]),
+                metrics: Some(collect_node_metrics()),
+            },
+        )
+        .await
+    {
+        tracing::warn!(error = %e, "cluster heartbeat");
+        return false;
+    }
+    true
 }
 
 fn normalize_server_id(id: &str) -> String {

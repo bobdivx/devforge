@@ -26,6 +26,22 @@ pub fn format_join_code(leader_url: &str, token: &str) -> String {
     format!("{}@{}", token.trim(), url)
 }
 
+/// Token `dfjoin_…` seul, même si on a collé le code `dfjoin_…@https://leader`.
+pub fn extract_join_token(raw: &str) -> Option<String> {
+    let compact: String = raw.split_whitespace().collect();
+    if let Some((tok, url)) = compact.split_once('@') {
+        if tok.starts_with("dfjoin_")
+            && (url.starts_with("http://") || url.starts_with("https://"))
+        {
+            return Some(tok.to_string());
+        }
+    }
+    compact
+        .split(|c: char| c == '@' || c.is_whitespace())
+        .find(|s| s.starts_with("dfjoin_"))
+        .map(|s| s.to_string())
+}
+
 /// Extrait (leader_url, token) d’un code, d’une URL `/join?token=`, ou du couple séparé.
 pub fn parse_join_invite(token: &str, leader_url: &str) -> Result<(String, String), String> {
     let raw = token.trim();
@@ -150,6 +166,11 @@ mod tests {
         let (url, tok) = parse_join_invite(&code, "").unwrap();
         assert_eq!(url, "https://web.jeser.app");
         assert_eq!(tok, "dfjoin_abc");
+        assert_eq!(extract_join_token(&code).as_deref(), Some("dfjoin_abc"));
+        // Ancien formulaire : code collé dans token + mauvaise URL locale
+        let (url2, tok2) = parse_join_invite(&code, "http://10.1.0.58:8000").unwrap();
+        assert_eq!(url2, "https://web.jeser.app");
+        assert_eq!(tok2, "dfjoin_abc");
     }
 
     #[test]

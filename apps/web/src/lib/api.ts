@@ -1364,7 +1364,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  clusterPatchNode: (id: string, body: { name?: string; drained?: boolean }) =>
+  clusterPatchNode: (id: string, body: { name?: string; drained?: boolean; advertise_url?: string }) =>
     request<{ ok: boolean; node: ClusterNode }>(`/cluster/nodes/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
@@ -1413,6 +1413,7 @@ export const api = {
       ok: boolean;
       role: 'leader' | 'worker';
       leader_url: string;
+      advertise_url?: string;
       node_id: string;
       node_name: string;
       metrics?: ClusterNodeMetrics;
@@ -1430,6 +1431,18 @@ export const api = {
       leader_url: string;
     }>('/cluster/local', {
       method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  clusterPatchLocal: (body: { leader_url?: string; advertise_url?: string }) =>
+    request<{
+      ok: boolean;
+      role: string;
+      leader_url: string;
+      advertise_url?: string;
+      node_id: string;
+      node_name: string;
+    }>('/cluster/local', {
+      method: 'PATCH',
       body: JSON.stringify(body),
     }),
   

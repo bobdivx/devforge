@@ -162,11 +162,10 @@ impl ClusterFacade {
     }
 
     pub async fn join(&self, req: JoinRequest, leader_url: &str) -> Result<JoinResponse> {
-        let token = req.token.trim();
-        if token.is_empty() {
-            return Err(DevForgeError::Message("token requis".into()));
-        }
-        let hash = hash_secret(token);
+        let token = crate::crypto::extract_join_token(&req.token).ok_or_else(|| {
+            DevForgeError::Message("invitation invalide".into())
+        })?;
+        let hash = hash_secret(&token);
         let row = self
             .store
             .get_token_by_hash(&hash)
@@ -304,6 +303,7 @@ impl ClusterFacade {
         id: &str,
         name: Option<String>,
         drained: Option<bool>,
+        advertise_url: Option<String>,
     ) -> Result<ClusterNode> {
         let mut node = self
             .store
@@ -330,9 +330,42 @@ impl ClusterFacade {
             }
             node.drained = d;
         }
+        if let Some(url) = advertise_url {
+            node.advertise_url = normalize_http_url(&url)?;
+            if node.role == NodeRole::Leader {
+                let mut local = self.store.get_local().await?;
+                local.leader_url = node.advertise_url.clone();
+                local.advertise_url = node.advertise_url.clone();
+                self.store.set_local(&local).await?;
+            }
+        }
         node.updated_at = Utc::now().to_rfc3339();
         self.store.upsert_node(&node).await?;
         Ok(node)
+    }
+
+    pub async fn patch_local(
+        &self,
+        leader_url: Option<String>,
+        advertise_url: Option<String>,
+    ) -> Result<LocalClusterState> {
+        let mut local = self.store.get_local().await?;
+        if let Some(u) = leader_url {
+            local.leader_url = normalize_http_url(&u)?;
+            if local.role == NodeRole::Leader {
+                if let Some(mut node) = self.store.get_node(LEADER_NODE_ID).await? {
+                    node.advertise_url = local.leader_url.clone();
+                    node.updated_at = Utc::now().to_rfc3339();
+                    self.store.upsert_node(&node).await?;
+                }
+                local.advertise_url = local.leader_url.clone();
+            }
+        }
+        if let Some(u) = advertise_url {
+            local.advertise_url = normalize_http_url(&u)?;
+        }
+        self.store.set_local(&local).await?;
+        Ok(local)
     }
 
     pub async fn remove_node(&self, id: &str) -> Result<bool> {
@@ -497,6 +530,19 @@ echo BOOTSTRAP_OK
     )
 }
 
+fn normalize_http_url(raw: &str) -> Result<String> {
+    let u = raw.trim().trim_end_matches('/');
+    if u.is_empty() {
+        return Err(DevForgeError::Message("URL requise".into()));
+    }
+    if !(u.starts_with("http://") || u.starts_with("https://")) {
+        return Err(DevForgeError::Message(
+            "URL invalide — http:// ou https://".into(),
+        ));
+    }
+    Ok(u.into())
+}
+
 fn base64_encode(bytes: &[u8]) -> String {
     const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
@@ -526,6 +572,7 @@ fn base64_encode(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto::format_join_code;
     use crate::store::MemoryClusterStore;
 
     #[tokio::test]
@@ -551,6 +598,36 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("invalide"));
+    }
+
+    #[tokio::test]
+    async fn join_accepts_full_invite_code() {
+        let store = Arc::new(MemoryClusterStore::new());
+        store.seed_leader("L", "http://127.0.0.1:8000").await;
+        let facade = ClusterFacade::new(store);
+        let inv = facade
+            .create_invite("admin", "https://web.jeser.app", 2)
+            .await
+            .unwrap();
+        let code = format_join_code(&inv.leader_url, &inv.token);
+        let joined = facade
+            .join(
+                JoinRequest {
+                    token: code,
+                    name: "Demeter".into(),
+                    advertise_url: "http://10.1.0.58:8000".into(),
+                    os: "linux".into(),
+                    arch: "x86_64".into(),
+                    capabilities: vec!["docker".into()],
+                    ssh_host: None,
+                    ssh_user: None,
+                    ssh_port: None,
+                },
+                "https://web.jeser.app",
+            )
+            .await
+            .unwrap();
+        assert_eq!(joined.node.name, "Demeter");
     }
 
     #[tokio::test]
@@ -745,15 +822,28 @@ mod tests {
         store.seed_leader("L", "http://127.0.0.1:8000").await;
         let facade = ClusterFacade::new(store);
         let renamed = facade
-            .patch_node(LEADER_NODE_ID, Some("Forge".into()), None)
+            .patch_node(LEADER_NODE_ID, Some("Forge".into()), None, None)
             .await
             .unwrap();
         assert_eq!(renamed.name, "Forge");
         let local = facade.local().await.unwrap();
         assert_eq!(local.node_name, "Forge");
 
+        let moved = facade
+            .patch_node(
+                LEADER_NODE_ID,
+                None,
+                None,
+                Some("https://forge.example.com".into()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(moved.advertise_url, "https://forge.example.com");
+        let local = facade.local().await.unwrap();
+        assert_eq!(local.leader_url, "https://forge.example.com");
+
         let err = facade
-            .patch_node(LEADER_NODE_ID, None, Some(true))
+            .patch_node(LEADER_NODE_ID, None, Some(true), None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("leader"));
@@ -778,10 +868,57 @@ mod tests {
             .await
             .unwrap();
         let n = facade
-            .patch_node(&joined.node.id, None, Some(true))
+            .patch_node(&joined.node.id, None, Some(true), None)
             .await
             .unwrap();
         assert!(n.drained);
+
+        let moved_worker = facade
+            .patch_node(
+                &joined.node.id,
+                None,
+                None,
+                Some("http://10.1.0.59:8000".into()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(moved_worker.advertise_url, "http://10.1.0.59:8000");
+    }
+
+    #[tokio::test]
+    async fn patch_local_updates_leader_and_worker_urls() {
+        let store = Arc::new(MemoryClusterStore::new());
+        store.seed_leader("L", "http://127.0.0.1:8000").await;
+        let facade = ClusterFacade::new(store.clone());
+        let local = facade
+            .patch_local(Some("https://web.example.com".into()), None)
+            .await
+            .unwrap();
+        assert_eq!(local.leader_url, "https://web.example.com");
+        assert_eq!(local.advertise_url, "https://web.example.com");
+        let leader = facade
+            .store()
+            .get_node(LEADER_NODE_ID)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(leader.advertise_url, "https://web.example.com");
+
+        let mut worker = facade.local().await.unwrap();
+        worker.role = NodeRole::Worker;
+        worker.node_id = "node_1".into();
+        worker.leader_url = "http://old-leader:8000".into();
+        worker.advertise_url = "http://old-node:8000".into();
+        facade.store().set_local(&worker).await.unwrap();
+        let patched = facade
+            .patch_local(
+                Some("https://leader.example.com".into()),
+                Some("http://10.1.0.58:8000".into()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(patched.leader_url, "https://leader.example.com");
+        assert_eq!(patched.advertise_url, "http://10.1.0.58:8000");
     }
 
     #[test]

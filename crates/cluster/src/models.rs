@@ -120,6 +120,8 @@ pub struct LocalClusterState {
     pub node_id: String,
     pub node_secret: String,
     pub node_name: String,
+    #[serde(default)]
+    pub advertise_url: String,
 }
 
 impl Default for LocalClusterState {
@@ -130,6 +132,7 @@ impl Default for LocalClusterState {
             node_id: LEADER_NODE_ID.into(),
             node_secret: String::new(),
             node_name: "Leader".into(),
+            advertise_url: String::new(),
         }
     }
 }

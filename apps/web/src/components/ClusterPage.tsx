@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, type ClusterInvite, type ClusterNode } from '../lib/api';
-import { formatJoinCode } from '../lib/cluster-invite';
 import { AppShell } from './AppShell';
 import {
   Alert,
@@ -39,8 +38,16 @@ function statusLabel(s: string, drained?: boolean): string {
   return s;
 }
 
+function isLeader(n: ClusterNode) {
+  return n.role === 'leader' || n.id === 'default';
+}
+
+function roleLabel(n: ClusterNode) {
+  return isLeader(n) ? 'Leader' : 'Worker';
+}
+
 function nodeIcon(n: ClusterNode) {
-  if (n.role === 'leader') {
+  if (isLeader(n)) {
     return (
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden>
         <path d="M12 3 4 8v8l8 5 8-5V8l-8-5z" stroke-linejoin="round" />
@@ -54,6 +61,59 @@ function nodeIcon(n: ClusterNode) {
       <rect x="3" y="14" width="18" height="6" rx="1.5" />
       <path d="M7 7h.01M7 17h.01" stroke-linecap="round" />
     </svg>
+  );
+}
+
+function NodeHubCard({
+  n,
+  index,
+  onOpen,
+}: {
+  n: ClusterNode;
+  index: number;
+  onOpen: (n: ClusterNode) => void;
+}) {
+  const leader = isLeader(n);
+  const cpu = n.metrics?.cpu_percent;
+  return (
+    <HubTile
+      index={index}
+      title={n.name}
+      icon={nodeIcon(n)}
+      class={leader ? 'ring-1 ring-[var(--color-accent)]/45' : undefined}
+      iconClass={leader ? undefined : 'bg-white/10 text-[var(--color-ink)]'}
+      badge={
+        <span
+          class={
+            leader
+              ? 'absolute -bottom-1 rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-black'
+              : 'absolute -bottom-1 rounded-full bg-white/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white'
+          }
+        >
+          {leader ? 'Leader' : 'Worker'}
+        </span>
+      }
+      subtitle={
+        <span class="mt-1 flex flex-col items-center gap-1">
+          <Badge tone={statusTone(n.status, n.drained)}>
+            {statusLabel(n.status, n.drained)}
+          </Badge>
+          <span class="text-[11px] text-[var(--color-ink-muted)]">
+            {leader ? 'Control plane' : 'Compute'}
+            {typeof cpu === 'number' ? ` · CPU ${Math.round(cpu)}%` : ''}
+            {n.project_count
+              ? ` · ${n.project_count} app${n.project_count > 1 ? 's' : ''}`
+              : ''}
+          </span>
+          {n.advertise_url ? (
+            <span class="max-w-full truncate font-mono text-[10px] text-[var(--color-ink-muted)]">
+              {n.advertise_url.replace(/^https?:\/\//, '')}
+            </span>
+          ) : null}
+        </span>
+      }
+      onClick={() => onOpen(n)}
+    />
   );
 }
 
@@ -121,6 +181,7 @@ function ClusterInner() {
   const [selected, setSelected] = useState<ClusterNode | null>(null);
   const [tab, setTab] = useState<Tab>('info');
   const [rename, setRename] = useState('');
+  const [nodeUrl, setNodeUrl] = useState('');
   const [projects, setProjects] = useState<
     Array<{ uuid: string; name: string; status: string; server_id: string }>
   >([]);
@@ -160,6 +221,7 @@ function ClusterInner() {
   useEffect(() => {
     if (!selected) return;
     setRename(selected.name);
+    setNodeUrl(selected.advertise_url || '');
     setTab('info');
     setLogs(null);
     setTargetId(nodes.find((n) => n.id !== selected.id && !n.drained)?.id || 'default');
@@ -230,16 +292,30 @@ function ClusterInner() {
     }
   }
 
-  async function saveName() {
-    if (!selected || !rename.trim()) return;
+  async function saveInfo() {
+    if (!selected) return;
+    const name = rename.trim();
+    const url = nodeUrl.trim().replace(/\/+$/, '');
+    if (!name) return;
+    if (url && !/^https?:\/\//i.test(url)) {
+      toast.push({ title: 'URL invalide', detail: 'http:// ou https://', tone: 'danger' });
+      return;
+    }
     setBusy(true);
     try {
-      const r = await api.clusterPatchNode(selected.id, { name: rename.trim() });
-      toast.push({ title: 'Nom enregistré', tone: 'ok' });
+      const body: { name?: string; advertise_url?: string } = {};
+      if (name !== selected.name) body.name = name;
+      if (url && url !== (selected.advertise_url || '')) body.advertise_url = url;
+      if (!body.name && !body.advertise_url) {
+        toast.push({ title: 'Rien à enregistrer', tone: 'info' });
+        return;
+      }
+      const r = await api.clusterPatchNode(selected.id, body);
+      toast.push({ title: 'Enregistré', tone: 'ok' });
       setSelected(r.node);
       await load();
     } catch (err) {
-      toast.push({ title: 'Rename KO', detail: String(err), tone: 'danger' });
+      toast.push({ title: 'Enregistrement KO', detail: String(err), tone: 'danger' });
     } finally {
       setBusy(false);
     }
@@ -326,15 +402,16 @@ function ClusterInner() {
     }
   }
 
+  const leaderNode = nodes.find(isLeader) ?? null;
+  const workers = nodes.filter((n) => !isLeader(n));
   const online = nodes.filter((n) => n.status === 'online' && !n.drained).length;
-  const drainedN = nodes.filter((n) => n.drained).length;
   const others = nodes.filter((n) => n.id !== selected?.id);
 
   return (
     <AppShell
       active="cluster"
       title="Cluster"
-      description="Inviter un nœud = un code à coller. SSH reste en option."
+      description="Un leader (control plane) et des workers (compute). Les apps Docker restent sur leur machine."
       actions={
         <Button size="sm" variant="secondary" disabled={busy} onClick={createInvite}>
           Inviter
@@ -347,18 +424,35 @@ function ClusterInner() {
         </Alert>
       )}
 
+      <Alert tone="info" class="mb-5">
+        <p class="font-medium text-[var(--color-ink)]">Si un nœud plante</p>
+        <ul class="mt-2 list-disc space-y-1 pl-4 text-[var(--color-ink-muted)]">
+          <li>
+            <strong class="text-[var(--color-ink)]">Leader</strong> — UI, API, SQLite, nouveaux
+            déploiements. S’il tombe : plus de panel. Les conteneurs déjà lancés sur les workers
+            continuent. Relance <em>cette</em> machine avec <code>/data</code>. Pas d’élection
+            automatique.
+          </li>
+          <li>
+            <strong class="text-[var(--color-ink)]">Worker</strong> — compute. S’il tombe : seules
+            les apps de <em>ce</em> nœud s’arrêtent. Réassigne-les puis redéploie sur un nœud en
+            ligne.
+          </li>
+        </ul>
+      </Alert>
+
       <div class="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card padding="sm">
-          <p class="text-xs text-[var(--color-ink-muted)]">Nœuds</p>
-          <p class="text-lg font-semibold">{nodes.length}</p>
+          <p class="text-xs text-[var(--color-ink-muted)]">Leader</p>
+          <p class="text-lg font-semibold">{leaderNode ? 1 : 0}</p>
+        </Card>
+        <Card padding="sm">
+          <p class="text-xs text-[var(--color-ink-muted)]">Workers</p>
+          <p class="text-lg font-semibold">{workers.length}</p>
         </Card>
         <Card padding="sm">
           <p class="text-xs text-[var(--color-ink-muted)]">En ligne</p>
           <p class="text-lg font-semibold">{online}</p>
-        </Card>
-        <Card padding="sm">
-          <p class="text-xs text-[var(--color-ink-muted)]">Drain</p>
-          <p class="text-lg font-semibold">{drainedN}</p>
         </Card>
         <Card padding="sm">
           <p class="text-xs text-[var(--color-ink-muted)]">Apps</p>
@@ -371,33 +465,38 @@ function ClusterInner() {
           <Spinner /> Chargement des nœuds…
         </p>
       ) : (
-        <HubGrid cols={4}>
-          {nodes.map((n, i) => {
-            const cpu = n.metrics?.cpu_percent;
-            return (
-              <HubTile
-                key={n.id}
-                index={i}
-                title={n.name}
-                icon={nodeIcon(n)}
-                subtitle={
-                  <span class="flex flex-col items-center gap-1">
-                    <Badge tone={statusTone(n.status, n.drained)}>
-                      {statusLabel(n.status, n.drained)}
-                    </Badge>
-                    <span class="text-[11px] text-[var(--color-ink-muted)]">
-                      {n.role === 'leader' ? 'Leader' : n.os || 'Worker'}
-                      {typeof cpu === 'number' ? ` · CPU ${Math.round(cpu)}%` : ''}
-                      {n.project_count ? ` · ${n.project_count} app${n.project_count > 1 ? 's' : ''}` : ''}
-                    </span>
-                  </span>
-                }
-                onClick={() => setSelected(n)}
+        <div class="space-y-8">
+          <section>
+            <h2 class="mb-3 text-sm font-medium">Control plane</h2>
+            <HubGrid cols={4}>
+              {leaderNode ? (
+                <NodeHubCard n={leaderNode} index={0} onOpen={setSelected} />
+              ) : (
+                <p class="col-span-full text-sm text-[var(--color-ink-muted)]">
+                  Aucun leader enregistré.
+                </p>
+              )}
+            </HubGrid>
+          </section>
+          <section>
+            <h2 class="mb-3 text-sm font-medium">Workers</h2>
+            <HubGrid cols={4}>
+              {workers.map((n, i) => (
+                <NodeHubCard key={n.id} n={n} index={i + 1} onOpen={setSelected} />
+              ))}
+              <HubAddTile
+                index={workers.length + 1}
+                label="Inviter un worker"
+                onClick={createInvite}
               />
-            );
-          })}
-          <HubAddTile index={nodes.length} label="Inviter un nœud" onClick={createInvite} />
-        </HubGrid>
+            </HubGrid>
+            {workers.length === 0 && (
+              <p class="mt-3 text-sm text-[var(--color-ink-muted)]">
+                Aucun worker. Les apps tournent sur le leader jusqu’à ce que tu enrôles une machine.
+              </p>
+            )}
+          </section>
+        </div>
       )}
 
       <div class="mt-8">
@@ -496,15 +595,21 @@ function ClusterInner() {
         open={inviteOpen}
         onClose={() => setInviteOpen(false)}
         title="Invitation"
-        description="Colle ce code sur l’autre machine (premier écran → Rejoindre un cluster). L’URL et le token sont dedans."
+        description="Copie le jeton sur l’autre machine. L’URL du leader se renseigne à part (celle que le nœud peut joindre)."
         size="md"
       >
         {invite ? (
           <div class="space-y-3">
             <Input
-              label="Code d’invitation"
-              value={invite.code || formatJoinCode(invite.leader_url, invite.token)}
+              label="Jeton"
+              value={invite.token}
               readOnly
+            />
+            <Input
+              label="URL de cette instance"
+              value={invite.leader_url}
+              readOnly
+              hint="À coller comme URL du leader si le nœud l’atteint ainsi. Modifiable de l’autre côté."
             />
             <p class="text-xs text-[var(--color-ink-muted)]">
               Expire le {new Date(invite.expires_at).toLocaleString()}
@@ -512,11 +617,9 @@ function ClusterInner() {
             <Button
               type="button"
               class="w-full"
-              onClick={() =>
-                copyText('Code', invite.code || formatJoinCode(invite.leader_url, invite.token))
-              }
+              onClick={() => copyText('Jeton', invite.token)}
             >
-              Copier le code
+              Copier le jeton
             </Button>
             <button
               type="button"
@@ -542,7 +645,7 @@ function ClusterInner() {
         title={selected?.name ?? 'Nœud'}
         description={
           selected
-            ? `${selected.role} · ${statusLabel(selected.status, selected.drained)} · vu ${ago(selected.last_seen_at)}`
+            ? `${roleLabel(selected)} · ${isLeader(selected) ? 'control plane' : 'compute'} · ${statusLabel(selected.status, selected.drained)} · vu ${ago(selected.last_seen_at)}`
             : undefined
         }
         size="xl"
@@ -564,6 +667,11 @@ function ClusterInner() {
 
             {tab === 'info' && (
               <div class="space-y-3 text-sm">
+                <Alert tone={isLeader(selected) ? 'info' : 'ok'}>
+                  {isLeader(selected)
+                    ? 'Control plane unique : UI, API, base SQLite et orchestration des déplois. Pas d’élection si ce nœud tombe — relance la même machine avec /data. Les apps déjà lancées sur les workers continuent.'
+                    : 'Worker (compute) : les déplois ciblés ici s’exécutent sur cette machine. S’il plante, seules ces apps s’arrêtent. Réassigne puis redéploie vers un nœud en ligne.'}
+                </Alert>
                 <p class="font-mono text-xs text-[var(--color-ink-muted)]">{selected.id}</p>
                 <div class="grid gap-3 sm:grid-cols-2">
                   <Input
@@ -571,13 +679,29 @@ function ClusterInner() {
                     value={rename}
                     onInput={(e) => setRename((e.target as HTMLInputElement).value)}
                   />
-                  <div class="flex items-end">
-                    <Button disabled={busy || rename.trim() === selected.name} onClick={saveName}>
-                      Enregistrer
-                    </Button>
-                  </div>
+                  <Input
+                    label={isLeader(selected) ? 'URL du leader' : 'URL du nœud'}
+                    value={nodeUrl}
+                    placeholder="https://"
+                    onInput={(e) => setNodeUrl((e.target as HTMLInputElement).value)}
+                    hint={
+                      isLeader(selected)
+                        ? 'Adresse que les workers utilisent pour joindre ce leader.'
+                        : 'Adresse que le leader utilise pour joindre ce nœud.'
+                    }
+                  />
                 </div>
-                {selected.advertise_url && <p>URL : {selected.advertise_url}</p>}
+                <Button
+                  disabled={
+                    busy ||
+                    (!rename.trim() ||
+                      (rename.trim() === selected.name &&
+                        nodeUrl.trim().replace(/\/+$/, '') === (selected.advertise_url || '')))
+                  }
+                  onClick={saveInfo}
+                >
+                  Enregistrer
+                </Button>
                 {selected.ssh_host && (
                   <p>
                     SSH : {selected.ssh_user}@{selected.ssh_host}:{selected.ssh_port || 22}
@@ -623,12 +747,12 @@ function ClusterInner() {
                 </div>
                 {selected.last_error && <Alert tone="danger">{selected.last_error}</Alert>}
                 <div class="flex flex-wrap gap-2">
-                  {selected.role !== 'leader' && (
+                  {!isLeader(selected) && (
                     <Button variant="secondary" disabled={busy} onClick={toggleDrain}>
                       {selected.drained ? 'Retirer le drain' : 'Drainer (plus de nouveaux jobs)'}
                     </Button>
                   )}
-                  {selected.role === 'leader' && (
+                  {isLeader(selected) && (
                     <Button variant="outline" onClick={() => (window.location.href = '/app/settings?tab=backup')}>
                       Sauvegarde leader
                     </Button>
@@ -653,7 +777,7 @@ function ClusterInner() {
                     >
                       {others.map((n) => (
                         <option key={n.id} value={n.id} disabled={n.drained}>
-                          {n.name}
+                          {roleLabel(n)} · {n.name}
                           {n.drained ? ' (drain)' : ''}
                         </option>
                       ))}
@@ -708,7 +832,7 @@ function ClusterInner() {
               </div>
             )}
 
-            {selected.role !== 'leader' && (
+            {!isLeader(selected) && (
               <Button
                 variant="danger"
                 class="w-full"

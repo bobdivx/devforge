@@ -13,7 +13,8 @@ pub use client::{
     write_pending_join_sync, LeaderClient,
 };
 pub use crypto::{
-    format_join_code, hash_secret, new_join_token, new_node_id, new_node_secret, parse_join_invite,
+    extract_join_token, format_join_code, hash_secret, new_join_token, new_node_id, new_node_secret,
+    parse_join_invite,
 };
 pub use executor::ClusterAwareExecutor;
 pub use facade::{bootstrap_script, ClusterFacade};

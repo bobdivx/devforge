@@ -20,7 +20,12 @@ export function AuthGate({ children, allowOnboarding = false }: Props) {
         const b: Bootstrap = await api.bootstrap();
         if (cancelled) return;
         if (b.cluster?.role === 'worker') {
-          window.location.replace('/app/node');
+          const onNode = window.location.pathname.startsWith('/app/node');
+          if (!onNode) {
+            window.location.replace('/app/node');
+            return;
+          }
+          setReady(true);
           return;
         }
         if (b.needs_setup) {

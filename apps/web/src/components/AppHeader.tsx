@@ -60,7 +60,7 @@ function StatChip({
   );
 }
 
-export function AppHeader() {
+export function AppHeader({ worker = false }: { worker?: boolean }) {
   const [boot, setBoot] = useState<Bootstrap | null>(null);
   const [ghLogin, setGhLogin] = useState<string | null>(null);
   const [ghAvatar, setGhAvatar] = useState<string | null>(null);
@@ -74,6 +74,12 @@ export function AppHeader() {
     let cancelled = false;
     (async () => {
       try {
+        if (worker) {
+          const b = await api.bootstrap();
+          if (cancelled) return;
+          setBoot(b);
+          return;
+        }
         const [b, gh, projects] = await Promise.all([
           api.bootstrap(),
           api.githubStatus().catch(() => null),
@@ -94,7 +100,7 @@ export function AppHeader() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [worker]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -122,17 +128,29 @@ export function AppHeader() {
   }
 
   const isAdmin = boot?.user?.role === 'instance_admin';
-  const displayName = ghLogin
-    ? `@${ghLogin}`
-    : boot?.user?.name || boot?.user?.email || 'Compte';
-  const subtitle = ghLogin
-    ? boot?.user?.email || boot?.user?.name || 'GitHub'
-    : boot?.user?.email || boot?.team?.name || boot?.workspace?.name || '';
+  const nodeName = boot?.cluster?.node_name || boot?.settings?.instance_name || 'Nœud';
+  const displayName = worker
+    ? nodeName
+    : ghLogin
+      ? `@${ghLogin}`
+      : boot?.user?.name || boot?.user?.email || 'Compte';
+  const subtitle = worker
+    ? boot?.cluster?.leader_url?.replace(/^https?:\/\//, '') || 'Worker'
+    : ghLogin
+      ? boot?.user?.email || boot?.user?.name || 'GitHub'
+      : boot?.user?.email || boot?.team?.name || boot?.workspace?.name || '';
 
   return (
     <header class="mb-6 flex flex-col gap-3 border-b border-[var(--color-line)] pb-4 sm:flex-row sm:items-center sm:justify-between">
       <div class="-mx-1 flex min-w-0 flex-1 items-center gap-2 overflow-x-auto px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {stats ? (
+        {worker ? (
+          <div
+            class="flex shrink-0 items-center gap-2 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1"
+          >
+            <span class="h-1.5 w-1.5 rounded-full bg-[var(--color-ok)]" aria-hidden />
+            <span class="text-[11px] text-[var(--color-ink-muted)]">Worker</span>
+          </div>
+        ) : stats ? (
           <>
             <StatChip label="En ligne" value={stats.live} tone="ok" />
             <StatChip label="Déploiement" value={stats.deploying} tone="warn" />
@@ -143,6 +161,21 @@ export function AppHeader() {
         )}
       </div>
 
+      {worker ? (
+        <div class="flex min-h-[44px] w-full items-center gap-2.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] py-1 pl-1 pr-3 sm:w-auto">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-xs font-semibold text-[var(--color-accent)]">
+            {initials(nodeName)}
+          </span>
+          <span class="min-w-0 flex-1 truncate text-left sm:max-w-[10rem]">
+            <span class="block truncate text-sm font-medium leading-tight text-[var(--color-ink)]">
+              {displayName}
+            </span>
+            {subtitle && (
+              <span class="block truncate text-[11px] text-[var(--color-ink-muted)]">{subtitle}</span>
+            )}
+          </span>
+        </div>
+      ) : (
       <div class="relative" ref={menuRef}>
         <button
           type="button"
@@ -287,6 +320,7 @@ export function AppHeader() {
           </div>
         )}
       </div>
+      )}
     </header>
   );
 }
