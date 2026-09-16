@@ -61,7 +61,7 @@ export const SETTINGS_NAV: NavItem[] = [
   { href: '/app/settings?tab=llm', label: 'Agents / LLM', key: 'llm' },
   { href: '/app/settings?tab=sso', label: 'SSO / OIDC', key: 'sso' },
   { href: '/app/settings?tab=backup', label: 'Sauvegardes', key: 'backup' },
-  { href: '/app/update', label: 'Mise à jour', key: 'update' },
+  { href: '/app/settings?tab=update', label: 'Mise à jour', key: 'update' },
 ];
 
 export function projectAgentsHref(uuid: string): string {

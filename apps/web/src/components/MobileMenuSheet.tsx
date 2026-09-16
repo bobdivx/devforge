@@ -33,7 +33,7 @@ function buildSections(role?: string | null): MenuSection[] {
       title: 'Instance',
       items: [
         { href: '/app/settings', label: 'Paramètres', key: 'settings' },
-        { href: '/app/update', label: 'Mise à jour', key: 'update' },
+        { href: '/app/settings?tab=update', label: 'Mise à jour', key: 'update' },
         ...(isAdmin
           ? [
               { href: '/app/cluster', label: 'Cluster', key: 'cluster', adminOnly: true },

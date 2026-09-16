@@ -5,6 +5,7 @@ import { BackupSettingsPanel } from './BackupSettingsPanel';
 import { DockerEngineAlert } from './DockerEngineAlert';
 import { LlmProvidersPanel } from './LlmProvidersPanel';
 import { SsoSettingsPanel } from './SsoSettingsPanel';
+import { UpdateSettingsPanel } from './UpdateSettingsPanel';
 import {
   Alert,
   Badge,
@@ -690,44 +691,7 @@ export function SettingsPage() {
 
       {section === 'sso' && <SsoSettingsPanel isAdmin={isAdmin} />}
       {section === 'backup' && <BackupSettingsPanel isAdmin={isAdmin} />}
-
-      {section === 'update' && (
-        <FadeIn>
-          <Card>
-            <CardHeader title="Mise à jour DevForge" />
-            <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
-              Vérifier et installer la dernière version de DevForge. La mise à jour se fait via le
-              système de gestion du NAS ou manuellement.
-            </p>
-            {!isAdmin ? (
-              <Alert tone="warn">Réservé à l'admin instance.</Alert>
-            ) : (
-              <div class="space-y-3">
-                <div class="rounded-xl border border-[var(--color-line)] p-3">
-                  <div class="flex items-center justify-between gap-2">
-                    <p class="text-sm font-medium">Version actuelle</p>
-                    <Badge tone="accent">{health?.version || 'inconnue'}</Badge>
-                  </div>
-                </div>
-                <Alert tone="info" class="text-xs">
-                  Les mises à jour DevForge se font généralement via Docker Compose ou l'UI du NAS.
-                  Consulte la documentation pour les instructions détaillées.
-                </Alert>
-                <div class="flex flex-wrap gap-2">
-                  <Button
-                    href="https://github.com/bobdivx/devforge/releases"
-                    size="sm"
-                    variant="outline"
-                    target="_blank"
-                  >
-                    Voir releases GitHub
-                  </Button>
-                </div>
-              </div>
-            )}
-          </Card>
-        </FadeIn>
-      )}
+      {section === 'update' && <UpdateSettingsPanel isAdmin={isAdmin} />}
     </AppShell>
   );
 }
