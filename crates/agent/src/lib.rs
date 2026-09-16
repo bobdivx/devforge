@@ -18,7 +18,8 @@ use tools::{
     GitHubListPrsTool, GitHubWorkflowRunsTool, HttpSmokeTool, ListEnvVarsTool, ListProjectFilesTool,
     ListProjectsTool, McpCallTool, McpListRemoteToolsTool, McpListServersTool, ProposePlanTool,
     PublishToGitHubTool, ReadGitHubFileTool, ReadProjectFileTool, RunApplicationTestsTool,
-    StartLocalPreviewTool, SyncWorkdirToGitHubTool, TriggerDeployTool, UpsertEnvVarsTool,
+    LocalPreviewStatusTool, StartLocalPreviewTool, StopLocalPreviewTool, SyncWorkdirToGitHubTool,
+    TriggerDeployTool, UpsertEnvVarsTool,
     WriteProjectFileTool,
 };
 
@@ -141,7 +142,13 @@ pub fn build_core_registry(
         deploy,
         pool: pool.clone(),
     }));
-    registry.register(Arc::new(StartLocalPreviewTool { pool }));
+    registry.register(Arc::new(StartLocalPreviewTool {
+        pool: pool.clone(),
+    }));
+    registry.register(Arc::new(StopLocalPreviewTool {
+        pool: pool.clone(),
+    }));
+    registry.register(Arc::new(LocalPreviewStatusTool { pool }));
     registry
 }
 

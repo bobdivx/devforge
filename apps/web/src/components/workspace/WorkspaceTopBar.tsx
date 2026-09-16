@@ -1,26 +1,42 @@
 import type { Project } from '../../lib/api';
 import { Badge, Button } from '../ui';
 import { projectStatusMeta } from '../../lib/status';
-import { ExternalLink, Eye } from 'lucide-preact';
+import { ExternalLink, Eye, Play, RotateCw, Square } from 'lucide-preact';
+
+export type PreviewServerStatus = 'stopped' | 'running' | 'starting';
 
 type Props = {
   project: Project | null;
-  /** Preview atelier disponible (URL dev- déjà connue) */
-  previewAvailable: boolean;
-  previewStarting?: boolean;
+  previewStatus: PreviewServerStatus;
+  previewUrl: string | null;
+  previewBusy?: boolean;
   onOpenPreview: () => void;
+  onStartServer: () => void;
+  onStopServer: () => void;
+  onRestartServer: () => void;
 };
 
 export function WorkspaceTopBar({
   project,
-  previewAvailable,
-  previewStarting,
+  previewStatus,
+  previewUrl,
+  previewBusy,
   onOpenPreview,
+  onStartServer,
+  onStopServer,
+  onRestartServer,
 }: Props) {
   const statusMeta = project ? projectStatusMeta(project.status) : null;
   const deploymentsHref = project
     ? `/app/projects/view?uuid=${encodeURIComponent(project.uuid)}&tab=deployments`
     : null;
+
+  const serverBadge =
+    previewStatus === 'running'
+      ? { tone: 'ok' as const, label: 'Dev actif' }
+      : previewStatus === 'starting'
+        ? { tone: 'warn' as const, label: 'Démarrage…' }
+        : { tone: 'neutral' as const, label: 'Dev arrêté' };
 
   return (
     <div class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[var(--color-line)] bg-[var(--color-card)] px-3 sm:gap-3 sm:px-4">
@@ -33,30 +49,67 @@ export function WorkspaceTopBar({
                 {statusMeta.label}
               </Badge>
             )}
-            <Badge tone="neutral" class="hidden shrink-0 sm:inline-flex" title="Éditions dans le workdir local">
-              Atelier
+            <Badge tone={serverBadge.tone} class="hidden shrink-0 sm:inline-flex" title="Serveur npm run dev (atelier)">
+              {serverBadge.label}
             </Badge>
           </>
         )}
       </div>
 
       <div class="flex shrink-0 items-center gap-1">
+        {previewStatus === 'stopped' ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={onStartServer}
+            disabled={previewBusy}
+            title="Démarrer npm run dev dans le workdir"
+            aria-label="Démarrer le serveur de dev"
+          >
+            <Play size={14} strokeWidth={2} aria-hidden />
+            <span class="hidden sm:inline">{previewBusy ? '…' : 'Démarrer'}</span>
+          </Button>
+        ) : (
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onStopServer}
+              disabled={previewBusy || previewStatus === 'starting'}
+              title="Arrêter le serveur de dev"
+              aria-label="Arrêter le serveur de dev"
+            >
+              <Square size={14} strokeWidth={2} aria-hidden />
+              <span class="hidden sm:inline">Arrêter</span>
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onRestartServer}
+              disabled={previewBusy}
+              title="Redémarrer npm run dev"
+              aria-label="Redémarrer le serveur de dev"
+            >
+              <RotateCw size={14} strokeWidth={2} aria-hidden />
+              <span class="hidden md:inline">Redémarrer</span>
+            </Button>
+          </>
+        )}
+
         <Button
           size="sm"
           variant="secondary"
           onClick={onOpenPreview}
-          disabled={previewStarting}
+          disabled={previewBusy || !previewUrl || previewStatus !== 'running'}
           title={
-            previewStarting
-              ? 'Démarrage de la preview…'
-              : previewAvailable
-                ? 'Ouvrir la preview atelier (dev-…)'
-                : 'Démarrer et ouvrir la preview atelier'
+            previewStatus !== 'running'
+              ? 'Démarre le serveur de dev pour ouvrir la preview'
+              : 'Ouvrir la preview atelier (dev-…)'
           }
           aria-label="Ouvrir la preview"
         >
           <Eye size={14} strokeWidth={2} aria-hidden />
-          <span class="hidden sm:inline">{previewStarting ? '…' : 'Preview'}</span>
+          <span class="hidden sm:inline">Preview</span>
         </Button>
 
         {deploymentsHref && (
@@ -64,7 +117,7 @@ export function WorkspaceTopBar({
             size="sm"
             variant="ghost"
             href={deploymentsHref}
-            title="Déploiements production (hors atelier)"
+            title="Déploiements production (conteneur Docker séparé)"
             aria-label="Déploiements"
           >
             <span class="hidden md:inline text-[var(--color-ink-muted)]">Déployer</span>

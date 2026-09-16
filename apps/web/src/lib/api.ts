@@ -468,6 +468,36 @@ export const api = {
       `/projects/${projectUuid}/lifecycle/${action}`,
       { method: 'POST', body: '{}' },
     ),
+  previewStatus: (projectUuid: string) =>
+    request<{
+      data: {
+        ok?: boolean;
+        status?: 'running' | 'stopped' | 'starting';
+        port?: number;
+        pid?: number | null;
+        preview_url?: string | null;
+        local_url?: string;
+        mode?: string;
+      };
+    }>(`/projects/${projectUuid}/preview`),
+  previewStart: (projectUuid: string, force = false) =>
+    request<{
+      data: {
+        ok?: boolean;
+        status?: string;
+        preview_url?: string;
+        error?: string;
+        message?: string;
+      };
+    }>(`/projects/${projectUuid}/preview/start`, {
+      method: 'POST',
+      body: JSON.stringify({ force }),
+    }),
+  previewStop: (projectUuid: string) =>
+    request<{ data: { ok?: boolean; status?: string; message?: string } }>(
+      `/projects/${projectUuid}/preview/stop`,
+      { method: 'POST', body: '{}' },
+    ),
   storageBuckets: () =>
     request<{ ok: boolean; mode?: string; buckets: Array<{ name: string; region: string }> }>(
       '/storage/buckets',

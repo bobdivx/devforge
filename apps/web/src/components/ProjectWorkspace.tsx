@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'preact/hooks';
-import { Loader2 } from 'lucide-preact';
-import { api, type Project } from '../lib/api';
+import { useCallback, useEffect, useState } from 'preact/hooks';
+import { api } from '../lib/api';
 import { notifyPreviewRefresh, previewUrlFromTools } from '../lib/agent-stream';
 import { cn } from '../lib/cn';
 import { ProjectAgentsPanel } from './ProjectAgentsPanel';
-import { WorkspaceTopBar } from './workspace/WorkspaceTopBar';
+import {
+  WorkspaceTopBar,
+  type PreviewServerStatus,
+} from './workspace/WorkspaceTopBar';
 import { PreviewModal } from './workspace/PreviewModal';
 import { FadeIn } from './ui';
+import type { Project } from '../lib/api';
 
 type Props = {
   projectUuid: string;
@@ -17,13 +20,28 @@ type Props = {
 
 /**
  * Workspace = atelier local (chat + workdir + preview).
- * Preview démarre toute seule (API / tool) — pas besoin de « demander à l’agent ».
+ * Dev server = process npm run dev (pas de conteneur df-dev-*).
  */
 export function ProjectWorkspace({ projectUuid, project, builderMode, builderAgentUuid }: Props) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
-  const [previewStarting, setPreviewStarting] = useState(false);
+  const [previewStatus, setPreviewStatus] = useState<PreviewServerStatus>('stopped');
+  const [previewBusy, setPreviewBusy] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const refreshStatus = useCallback(async () => {
+    try {
+      const r = await api.previewStatus(projectUuid);
+      const data = r.data ?? {};
+      const status = data.status === 'running' ? 'running' : 'stopped';
+      setPreviewStatus(status);
+      if (typeof data.preview_url === 'string' && data.preview_url) {
+        setLocalPreviewUrl(data.preview_url);
+      }
+    } catch {
+      // Ignorer les erreurs de polling
+    }
+  }, [projectUuid]);
 
   useEffect(() => {
     function onPreviewRefresh(ev: Event) {
@@ -31,6 +49,7 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
       if (detail?.url) {
         setLocalPreviewUrl(detail.url);
         setPreviewError(null);
+        setPreviewStatus('running');
       }
     }
     window.addEventListener('devforge:preview-refresh', onPreviewRefresh);
@@ -40,8 +59,17 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
   useEffect(() => {
     async function checkLocalPreview() {
       try {
-        const r = await api.projectAgents(projectUuid);
-        for (const agent of r.data ?? []) {
+        const r = await api.previewStatus(projectUuid);
+        const data = r.data ?? {};
+        if (data.status === 'running') {
+          setPreviewStatus('running');
+          if (typeof data.preview_url === 'string') {
+            setLocalPreviewUrl(data.preview_url);
+          }
+          return;
+        }
+        const agents = await api.projectAgents(projectUuid);
+        for (const agent of agents.data ?? []) {
           const msgs = await api.agentMessages(projectUuid, agent.uuid);
           for (const msg of msgs.data ?? []) {
             if (msg.tool_calls_json) {
@@ -65,35 +93,64 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
     void checkLocalPreview();
   }, [projectUuid]);
 
-  async function handleOpenPreview() {
-    setPreviewError(null);
-    if (localPreviewUrl) {
-      setPreviewOpen(true);
-      return;
-    }
+  useEffect(() => {
+    void refreshStatus();
+    const id = window.setInterval(() => void refreshStatus(), 8000);
+    return () => window.clearInterval(id);
+  }, [refreshStatus]);
 
-    setPreviewStarting(true);
+  async function handleStartServer(force = false) {
+    setPreviewError(null);
+    setPreviewBusy(true);
+    setPreviewStatus('starting');
     try {
-      const res = await api.executeAgentTool('start_local_preview', {
-        project_uuid: projectUuid,
-      });
+      const res = await api.previewStart(projectUuid, force);
       const data = res.data ?? {};
       const url = typeof data.preview_url === 'string' ? data.preview_url : null;
       if (data.ok && url) {
         setLocalPreviewUrl(url);
-        notifyPreviewRefresh({ url, reason: 'workspace-preview-button' });
-        setPreviewOpen(true);
+        setPreviewStatus('running');
+        notifyPreviewRefresh({ url, reason: 'workspace-start' });
+      } else if (data.ok) {
+        setPreviewStatus('running');
+        await refreshStatus();
       } else {
+        setPreviewStatus('stopped');
         setPreviewError(
           typeof data.error === 'string'
             ? data.error
-            : 'Impossible de démarrer la preview atelier.',
+            : 'Impossible de démarrer le serveur de dev.',
         );
       }
     } catch (e) {
-      setPreviewError(e instanceof Error ? e.message : 'Erreur au démarrage de la preview');
+      setPreviewStatus('stopped');
+      setPreviewError(e instanceof Error ? e.message : 'Erreur au démarrage');
     } finally {
-      setPreviewStarting(false);
+      setPreviewBusy(false);
+    }
+  }
+
+  async function handleStopServer() {
+    setPreviewError(null);
+    setPreviewBusy(true);
+    try {
+      await api.previewStop(projectUuid);
+      setPreviewStatus('stopped');
+    } catch (e) {
+      setPreviewError(e instanceof Error ? e.message : 'Erreur à l’arrêt');
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
+
+  async function handleRestartServer() {
+    await handleStartServer(true);
+  }
+
+  function handleOpenPreview() {
+    setPreviewError(null);
+    if (localPreviewUrl && previewStatus === 'running') {
+      setPreviewOpen(true);
     }
   }
 
@@ -107,21 +164,18 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
       >
         <WorkspaceTopBar
           project={project}
-          previewAvailable={!!localPreviewUrl}
-          previewStarting={previewStarting}
+          previewStatus={previewStatus}
+          previewUrl={localPreviewUrl}
+          previewBusy={previewBusy}
           onOpenPreview={handleOpenPreview}
+          onStartServer={() => void handleStartServer(false)}
+          onStopServer={() => void handleStopServer()}
+          onRestartServer={() => void handleRestartServer()}
         />
 
         {previewError && (
           <div class="border-b border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-danger)] sm:px-4 sm:text-sm">
             {previewError}
-          </div>
-        )}
-
-        {previewStarting && !previewOpen && (
-          <div class="flex items-center gap-2 border-b border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-ink-muted)] sm:px-4 sm:text-sm">
-            <Loader2 size={14} class="animate-spin shrink-0" aria-hidden />
-            Démarrage de la preview atelier…
           </div>
         )}
 

@@ -2403,7 +2403,7 @@ pub(crate) async fn ensure_all_domain_proxy_routes(
     }
 }
 
-/// Génère une URL d’atelier isolée pour le workspace / conteneurs `df-dev-*`.
+/// Génère une URL d’atelier isolée pour le workspace (process npm run dev + Traefik file).
 /// Format: `https://dev-{short-uuid}.{wildcard_domain}`
 async fn generate_dev_url(state: &AppState, project_uuid: &str) -> Option<String> {
     let domain = wildcard_domain(state).await.ok()?;

@@ -46,6 +46,9 @@ pub fn router() -> Router<AppState> {
             "/api/v1/projects/{uuid}/lifecycle/{action}",
             post(lifecycle),
         )
+        .route("/api/v1/projects/{uuid}/preview", get(preview_status))
+        .route("/api/v1/projects/{uuid}/preview/start", post(preview_start))
+        .route("/api/v1/projects/{uuid}/preview/stop", post(preview_stop))
         .route("/api/v1/projects/{uuid}/status", get(project_status))
         .route("/api/v1/system/proxy/status", get(proxy_status))
         .route("/api/v1/system/proxy/restart", post(proxy_restart))
@@ -612,6 +615,58 @@ async fn sync_proxy(
             .await
             .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
     ))
+}
+
+async fn preview_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let _ = auth_project(&state, &headers, &uuid).await?;
+    let result = state
+        .registry
+        .execute("local_preview_status", json!({ "project_uuid": uuid }))
+        .await
+        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+    Ok(Json(json!({ "data": result })))
+}
+
+#[derive(Deserialize, Default)]
+struct PreviewStartBody {
+    force: Option<bool>,
+}
+
+async fn preview_start(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+    body: Option<Json<PreviewStartBody>>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let _ = auth_project(&state, &headers, &uuid).await?;
+    let force = body.and_then(|Json(b)| b.force).unwrap_or(false);
+    let result = state
+        .registry
+        .execute(
+            "start_local_preview",
+            json!({ "project_uuid": uuid, "force": force }),
+        )
+        .await
+        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+    Ok(Json(json!({ "data": result })))
+}
+
+async fn preview_stop(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let _ = auth_project(&state, &headers, &uuid).await?;
+    let result = state
+        .registry
+        .execute("stop_local_preview", json!({ "project_uuid": uuid }))
+        .await
+        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+    Ok(Json(json!({ "data": result })))
 }
 
 async fn lifecycle(

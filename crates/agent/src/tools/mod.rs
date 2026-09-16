@@ -23,7 +23,7 @@ pub use github_repo::CreateGitHubRepoTool;
 pub use http::HttpSmokeTool;
 pub use mcp::{McpCallTool, McpListRemoteToolsTool, McpListServersTool};
 pub use plan::ProposePlanTool;
-pub use preview::StartLocalPreviewTool;
+pub use preview::{LocalPreviewStatusTool, StartLocalPreviewTool, StopLocalPreviewTool};
 pub use project_files::{ListProjectFilesTool, ReadProjectFileTool, WriteProjectFileTool};
 pub use projects::{GetProjectTool, ListProjectsTool};
 pub use publish::PublishToGitHubTool;
