@@ -21,6 +21,8 @@ export type DnsSettingsPublic = {
   porkbun_token_set?: boolean;
   api_key_set: boolean;
   secret_set: boolean;
+  /** Providers with stored secrets that are not currently active. */
+  inactive_credentials?: string[];
 };
 
 export type DnsNodeStatus = {
@@ -258,6 +260,7 @@ export const api = {
     token?: string;
     api_key?: string;
     secret?: string;
+    clear_inactive?: boolean;
   }) =>
     request<{
       ok: boolean;
@@ -274,6 +277,14 @@ export const api = {
       method: 'POST',
       body: '{}',
     }),
+  clearDnsCredentials: (which: 'cloudflare' | 'porkbun' | 'inactive') =>
+    request<{ ok: boolean; dns: DnsSettingsPublic; status?: DnsRuntimeStatus }>(
+      '/settings/dns/clear-credentials',
+      {
+        method: 'POST',
+        body: JSON.stringify({ which }),
+      },
+    ),
   sshStatus: () =>
     request<{
       ok: boolean;

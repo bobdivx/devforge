@@ -18,11 +18,18 @@ import {
   HubTile,
   Input,
   LiveStatus,
+  Modal,
   PulseDot,
   Skeleton,
   Spinner,
   useToast,
 } from './ui';
+
+function dnsProviderLabel(p: string): string {
+  if (p === 'cloudflare') return 'Cloudflare';
+  if (p === 'porkbun') return 'Porkbun';
+  return 'Aucun';
+}
 
 type Health = {
   ok: boolean;
@@ -162,6 +169,8 @@ export function SettingsPage() {
   const [instanceName, setInstanceName] = useState('');
   const [domainBusy, setDomainBusy] = useState(false);
   const [dnsProvider, setDnsProvider] = useState('');
+  /** Provider réellement enregistré côté serveur (pas le brouillon du formulaire). */
+  const [activeDnsProvider, setActiveDnsProvider] = useState('');
   const [dnsZone, setDnsZone] = useState('');
   const [dnsToken, setDnsToken] = useState('');
   const [porkbunApiKey, setPorkbunApiKey] = useState('');
@@ -169,9 +178,13 @@ export function SettingsPage() {
   const [cfTokenSet, setCfTokenSet] = useState(false);
   const [porkbunKeySet, setPorkbunKeySet] = useState(false);
   const [porkbunSecretSet, setPorkbunSecretSet] = useState(false);
+  const [inactiveCreds, setInactiveCreds] = useState<string[]>([]);
   const [dnsBusy, setDnsBusy] = useState(false);
   const [dnsStatus, setDnsStatus] = useState<DnsRuntimeStatus | null>(null);
   const [dnsStatusLoading, setDnsStatusLoading] = useState(false);
+  const [switchTarget, setSwitchTarget] = useState<string | null>(null);
+  const [clearOnSwitch, setClearOnSwitch] = useState(true);
+  const [clearInactiveOnSave, setClearInactiveOnSave] = useState(false);
   const [sshHost, setSshHost] = useState('');
   const [sshUser, setSshUser] = useState('root');
   const [sshLocal, setSshLocal] = useState(true);
@@ -184,6 +197,27 @@ export function SettingsPage() {
     setCfTokenSet(!!(dns.cloudflare_token_set || (dns.provider === 'cloudflare' && dns.token_set)));
     setPorkbunKeySet(!!(dns.porkbun_token_set || (dns.api_key_set && dns.secret_set)));
     setPorkbunSecretSet(!!(dns.porkbun_token_set || (dns.api_key_set && dns.secret_set)));
+    setInactiveCreds(dns.inactive_credentials ?? []);
+    setActiveDnsProvider(dns.provider || '');
+  }
+
+  function requestProviderSwitch(next: string) {
+    if (next === dnsProvider) return;
+    // Confirmer seulement si on quitte le provider réellement enregistré.
+    if (activeDnsProvider && activeDnsProvider !== next) {
+      setClearOnSwitch(true);
+      setSwitchTarget(next);
+      return;
+    }
+    setDnsProvider(next);
+    setClearInactiveOnSave(false);
+  }
+
+  function confirmProviderSwitch() {
+    if (switchTarget === null) return;
+    setDnsProvider(switchTarget);
+    setClearInactiveOnSave(clearOnSwitch);
+    setSwitchTarget(null);
   }
 
   async function loadGh() {
@@ -486,20 +520,56 @@ export function SettingsPage() {
               action={
                 dnsStatusLoading ? (
                   <Spinner />
-                ) : dnsStatus?.configured ? (
-                  <Badge tone={dnsStatus.ok ? 'ok' : 'danger'}>
-                    {dnsStatus.ok ? 'opérationnel' : 'à corriger'}
-                  </Badge>
-                ) : dnsProvider === 'cloudflare' || dnsProvider === 'porkbun' ? (
-                  <Badge tone="warn">
-                    {dnsProvider === 'cloudflare' ? 'Cloudflare' : 'Porkbun'}
+                ) : activeDnsProvider ? (
+                  <Badge
+                    tone={
+                      dnsStatus?.configured
+                        ? dnsStatus.ok
+                          ? 'ok'
+                          : 'danger'
+                        : 'warn'
+                    }
+                  >
+                    {dnsStatus?.configured
+                      ? dnsStatus.ok
+                        ? 'opérationnel'
+                        : 'à corriger'
+                      : 'config incomplète'}
                   </Badge>
                 ) : (
                   <Badge tone="neutral">off</Badge>
                 )
               }
             />
-            {dnsProvider ? (
+
+            {/* Vue claire : ce qui est réellement en place */}
+            <div class="mb-4 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-3">
+              <p class="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
+                Système actif
+              </p>
+              <p class="mt-1 text-sm font-medium text-[var(--color-ink)]">
+                {activeDnsProvider
+                  ? `${dnsProviderLabel(activeDnsProvider)}${
+                      (dnsStatus?.zone || dnsZone) ? ` · zone ${dnsStatus?.zone || dnsZone}` : ''
+                    }${
+                      dnsStatus?.account && activeDnsProvider === 'cloudflare'
+                        ? ` · ${dnsStatus.account}`
+                        : ''
+                    }`
+                  : 'Aucun DNS auto'}
+              </p>
+              <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
+                Un seul provider à la fois. Cloudflare = tunnels + CNAME · Porkbun = records A vers
+                l’IP du nœud.
+              </p>
+              {dnsProvider !== activeDnsProvider && (
+                <p class="mt-2 text-xs text-[var(--color-warn)]">
+                  Brouillon : {dnsProviderLabel(dnsProvider || '')} — pas encore enregistré.
+                </p>
+              )}
+            </div>
+
+            {activeDnsProvider ? (
               dnsStatusLoading && !dnsStatus ? (
                 <Skeleton class="mb-3 h-16" />
               ) : dnsStatus ? (
@@ -551,7 +621,10 @@ export function SettingsPage() {
                                 {n.ingress || n.public_ip || '—'}
                               </code>
                             </div>
-                            {dnsStatus.provider === 'porkbun' && n.public_ip && n.ingress && n.public_ip !== n.ingress ? (
+                            {dnsStatus.provider === 'porkbun' &&
+                            n.public_ip &&
+                            n.ingress &&
+                            n.public_ip !== n.ingress ? (
                               <div class="min-w-0">
                                 IP détectée{' '}
                                 <code class="break-all text-[var(--color-ink)]">{n.public_ip}</code>
@@ -634,18 +707,77 @@ export function SettingsPage() {
                 </div>
               ) : (
                 <Alert tone="info" class="mb-3">
-                  {dnsProvider === 'porkbun'
-                    ? 'Colle la clé API et le Secret API Porkbun. DevForge détecte l’IP de chaque nœud, démarre Traefik et pousse les records A.'
-                    : 'DevForge crée Traefik, les records DNS et — avec Cloudflare — un tunnel par nœud. Enregistre le token pour voir ce qui a été créé.'}
+                  {activeDnsProvider === 'porkbun'
+                    ? 'Colle la clé API et le Secret API Porkbun, puis enregistre.'
+                    : 'Enregistre le token Cloudflare pour provisionner tunnels et CNAME.'}
                 </Alert>
               )
             ) : (
               <Alert tone="info" class="mb-3">
                 Choisis Cloudflare (tunnel, pas de ports à ouvrir) ou Porkbun (record A vers
-                l’IP, ports 80/443). Cloudflare : un token. Porkbun : clé API + secret. Le
-                domaine est optionnel s’il se déduit du wildcard.
+                l’IP, ports 80/443). Un seul système pilote le DNS — pas les deux.
               </Alert>
             )}
+
+            {inactiveCreds.length > 0 && (
+              <div class="mb-4 rounded-xl border border-dashed border-[var(--color-line)] px-3 py-3">
+                <p class="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
+                  Credentials non utilisés
+                </p>
+                <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
+                  Stockés en base mais{' '}
+                  {activeDnsProvider
+                    ? `ignorés tant que ${dnsProviderLabel(activeDnsProvider)} est actif`
+                    : 'pas liés à un provider actif'}
+                  .
+                </p>
+                <ul class="mt-2 space-y-2">
+                  {inactiveCreds.map((p) => (
+                    <li
+                      key={p}
+                      class="flex flex-wrap items-center justify-between gap-2 text-sm text-[var(--color-ink)]"
+                    >
+                      <span>{dnsProviderLabel(p)} — enregistré, inactif</span>
+                      {isAdmin && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={dnsBusy}
+                          onClick={async () => {
+                            setDnsBusy(true);
+                            try {
+                              const r = await api.clearDnsCredentials(
+                                p === 'cloudflare' ? 'cloudflare' : 'porkbun',
+                              );
+                              applyDnsFlags(r.dns);
+                              setDnsProvider(r.dns.provider || '');
+                              if (r.status) setDnsStatus(r.status);
+                              toast.push({
+                                title: 'Credentials effacés',
+                                detail: dnsProviderLabel(p),
+                                tone: 'ok',
+                              });
+                            } catch (err) {
+                              toast.push({
+                                title: 'Échec',
+                                detail: String((err as Error).message || err),
+                                tone: 'danger',
+                              });
+                            } finally {
+                              setDnsBusy(false);
+                            }
+                          }}
+                        >
+                          Effacer
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {isAdmin ? (
               <form
                 class="flex flex-col gap-3"
@@ -653,17 +785,20 @@ export function SettingsPage() {
                   e.preventDefault();
                   setDnsBusy(true);
                   try {
+                    const base = {
+                      provider: dnsProvider,
+                      zone: dnsZone,
+                      clear_inactive: clearInactiveOnSave || undefined,
+                    };
                     const r = await api.saveDnsSettings(
                       dnsProvider === 'porkbun'
                         ? {
-                            provider: dnsProvider,
-                            zone: dnsZone,
+                            ...base,
                             api_key: porkbunApiKey.trim() || undefined,
                             secret: porkbunSecret.trim() || undefined,
                           }
                         : {
-                            provider: dnsProvider,
-                            zone: dnsZone,
+                            ...base,
                             token: dnsToken.trim() || undefined,
                           },
                     );
@@ -673,6 +808,7 @@ export function SettingsPage() {
                     setDnsToken('');
                     setPorkbunApiKey('');
                     setPorkbunSecret('');
+                    setClearInactiveOnSave(false);
                     if (r.status) setDnsStatus(r.status);
                     if (r.provision_error) {
                       toast.push({
@@ -702,13 +838,16 @@ export function SettingsPage() {
                   }
                 }}
               >
+                <p class="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
+                  Changer de système
+                </p>
                 <div class="grid grid-cols-3 gap-1.5">
                   <Button
                     type="button"
                     size="sm"
                     class="w-full px-1.5 sm:px-3"
                     variant={dnsProvider === 'cloudflare' ? 'secondary' : 'ghost'}
-                    onClick={() => setDnsProvider('cloudflare')}
+                    onClick={() => requestProviderSwitch('cloudflare')}
                   >
                     Cloudflare
                   </Button>
@@ -717,7 +856,7 @@ export function SettingsPage() {
                     size="sm"
                     class="w-full px-1.5 sm:px-3"
                     variant={dnsProvider === 'porkbun' ? 'secondary' : 'ghost'}
-                    onClick={() => setDnsProvider('porkbun')}
+                    onClick={() => requestProviderSwitch('porkbun')}
                   >
                     Porkbun
                   </Button>
@@ -726,7 +865,7 @@ export function SettingsPage() {
                     size="sm"
                     class="w-full px-1.5 sm:px-3"
                     variant={!dnsProvider ? 'secondary' : 'ghost'}
-                    onClick={() => setDnsProvider('')}
+                    onClick={() => requestProviderSwitch('')}
                   >
                     <span class="sm:hidden">Off</span>
                     <span class="hidden sm:inline">Désactivé</span>
@@ -742,57 +881,58 @@ export function SettingsPage() {
                 {dnsProvider === 'porkbun' && (
                   <p class="text-xs text-[var(--color-ink-muted)]">
                     Chez Porkbun : Account → API Access, puis active l’API sur le domaine.
-                    Colle l’API Key (`pk1_…`) et le Secret Key (`sk1_…`) dans les deux champs
-                    (pas un seul token). DevForge pousse un A vers l’IP publique de chaque
-                    nœud. Ports 80/443 ouverts (Let’s Encrypt HTTP-01).
+                    Colle l’API Key (`pk1_…`) et le Secret Key (`sk1_…`) dans les deux champs.
+                    DevForge pousse un A vers l’IP publique de chaque nœud. Ports 80/443 ouverts.
                   </p>
                 )}
-                <Input
-                  label="Domaine (optionnel)"
-                  placeholder="jeser.app"
-                  value={dnsZone}
-                  onInput={(e) => setDnsZone((e.target as HTMLInputElement).value)}
-                  hint="Vide = déduit du wildcard ci-dessus (apps.jeser.app → jeser.app)."
-                />
-                {dnsProvider === 'porkbun' ? (
-                  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {dnsProvider ? (
+                  <>
                     <Input
-                      label="Clé API"
-                      type="password"
-                      autocomplete="off"
-                      placeholder={porkbunKeySet ? '•••• déjà enregistrée' : 'API Key'}
-                      value={porkbunApiKey}
-                      onInput={(e) => setPorkbunApiKey((e.target as HTMLInputElement).value)}
-                      hint={
-                        cfTokenSet && !porkbunKeySet
-                          ? 'La clé Cloudflare reste à part. Colle ici l’API Key Porkbun.'
-                          : undefined
-                      }
+                      label="Domaine (optionnel)"
+                      placeholder="jeser.app"
+                      value={dnsZone}
+                      onInput={(e) => setDnsZone((e.target as HTMLInputElement).value)}
+                      hint="Vide = déduit du wildcard ci-dessus (apps.jeser.app → jeser.app)."
                     />
-                    <Input
-                      label="Secret API"
-                      type="password"
-                      autocomplete="off"
-                      placeholder={porkbunSecretSet ? '•••• déjà enregistré' : 'Secret API Key'}
-                      value={porkbunSecret}
-                      onInput={(e) => setPorkbunSecret((e.target as HTMLInputElement).value)}
-                    />
-                  </div>
-                ) : (
-                  <Input
-                    label="Token"
-                    type="password"
-                    autocomplete="off"
-                    placeholder={cfTokenSet ? '•••• déjà enregistré' : 'Token Cloudflare'}
-                    value={dnsToken}
-                    onInput={(e) => setDnsToken((e.target as HTMLInputElement).value)}
-                    disabled={!dnsProvider}
-                    hint={
-                      porkbunKeySet && porkbunSecretSet && !cfTokenSet
-                        ? 'La clé Porkbun reste enregistrée à part. Colle ici le token Cloudflare.'
-                        : undefined
-                    }
-                  />
+                    {dnsProvider === 'porkbun' ? (
+                      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <Input
+                          label="Clé API"
+                          type="password"
+                          autocomplete="off"
+                          placeholder={porkbunKeySet ? '•••• déjà enregistrée' : 'API Key'}
+                          value={porkbunApiKey}
+                          onInput={(e) =>
+                            setPorkbunApiKey((e.target as HTMLInputElement).value)
+                          }
+                        />
+                        <Input
+                          label="Secret API"
+                          type="password"
+                          autocomplete="off"
+                          placeholder={porkbunSecretSet ? '•••• déjà enregistré' : 'Secret API Key'}
+                          value={porkbunSecret}
+                          onInput={(e) =>
+                            setPorkbunSecret((e.target as HTMLInputElement).value)
+                          }
+                        />
+                      </div>
+                    ) : (
+                      <Input
+                        label="Token Cloudflare"
+                        type="password"
+                        autocomplete="off"
+                        placeholder={cfTokenSet ? '•••• déjà enregistré' : 'Token Cloudflare'}
+                        value={dnsToken}
+                        onInput={(e) => setDnsToken((e.target as HTMLInputElement).value)}
+                      />
+                    )}
+                  </>
+                ) : null}
+                {clearInactiveOnSave && (
+                  <Alert tone="warn">
+                    À l’enregistrement, les credentials de l’ancien provider seront effacés.
+                  </Alert>
                 )}
                 <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   <Button type="submit" size="sm" class="w-full sm:w-auto" disabled={dnsBusy}>
@@ -837,6 +977,42 @@ export function SettingsPage() {
               <Alert tone="warn">Réservé à l’admin instance.</Alert>
             )}
           </Card>
+
+          <Modal
+            open={switchTarget !== null}
+            onClose={() => setSwitchTarget(null)}
+            title="Changer de système DNS"
+            size="sm"
+            description="Un seul provider pilote l’entrée publique. L’autre ne sera plus utilisé pour synchroniser les records."
+            footer={
+              <>
+                <Button type="button" variant="ghost" onClick={() => setSwitchTarget(null)}>
+                  Annuler
+                </Button>
+                <Button type="button" onClick={confirmProviderSwitch}>
+                  Continuer
+                </Button>
+              </>
+            }
+          >
+            <p class="text-sm text-[var(--color-ink)]">
+              Passer de{' '}
+              <strong>{dnsProviderLabel(activeDnsProvider || dnsProvider)}</strong> à{' '}
+              <strong>{dnsProviderLabel(switchTarget || '')}</strong>.
+            </p>
+            <label class="mt-4 flex cursor-pointer items-start gap-2 text-sm text-[var(--color-ink)]">
+              <input
+                type="checkbox"
+                class="mt-1"
+                checked={clearOnSwitch}
+                onChange={(e) => setClearOnSwitch((e.target as HTMLInputElement).checked)}
+              />
+              <span>
+                Effacer les credentials de l’ancien provider à l’enregistrement (recommandé pour
+                éviter la confusion).
+              </span>
+            </label>
+          </Modal>
         </FadeIn>
       )}
 

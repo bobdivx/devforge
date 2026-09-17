@@ -683,6 +683,27 @@ pub fn public_json(dns: &DnsSettings) -> Value {
         "porkbun" => pb_set,
         _ => false,
     };
+    let mut inactive = Vec::new();
+    match dns.provider.as_str() {
+        "cloudflare" => {
+            if pb_set {
+                inactive.push("porkbun");
+            }
+        }
+        "porkbun" => {
+            if cf_set {
+                inactive.push("cloudflare");
+            }
+        }
+        _ => {
+            if cf_set {
+                inactive.push("cloudflare");
+            }
+            if pb_set {
+                inactive.push("porkbun");
+            }
+        }
+    }
     json!({
         "provider": dns.provider,
         "zone": dns.zone,
@@ -692,7 +713,71 @@ pub fn public_json(dns: &DnsSettings) -> Value {
         "porkbun_token_set": pb_set,
         "api_key_set": !dns.api_key.trim().is_empty(),
         "secret_set": !dns.secret.trim().is_empty(),
+        "inactive_credentials": inactive,
     })
+}
+
+/// Efface les credentials d’un provider. Si on efface ceux du provider actif, désactive le DNS auto.
+pub async fn clear_credentials(state: &AppState, which: &str) -> Result<DnsSettings, String> {
+    let mut dns = load(state).await;
+    let which = which.trim().to_lowercase();
+    let targets: Vec<&str> = match which.as_str() {
+        "cloudflare" => vec!["cloudflare"],
+        "porkbun" => vec!["porkbun"],
+        "inactive" => match dns.provider.as_str() {
+            "cloudflare" => vec!["porkbun"],
+            "porkbun" => vec!["cloudflare"],
+            _ => {
+                let mut t = Vec::new();
+                if !cf_key(&dns).is_empty() {
+                    t.push("cloudflare");
+                }
+                if porkbun_ready(&dns) {
+                    t.push("porkbun");
+                }
+                t
+            }
+        },
+        _ => return Err("which: cloudflare | porkbun | inactive".into()),
+    };
+    for t in targets {
+        match t {
+            "cloudflare" => {
+                dns.cf_token.clear();
+                // Legacy : token CF dans porkbun_api_key sans secret.
+                if dns.secret.trim().is_empty() && !dns.api_key.trim().is_empty() {
+                    dns.api_key.clear();
+                }
+                if dns.provider == "cloudflare" {
+                    dns.provider.clear();
+                }
+            }
+            "porkbun" => {
+                dns.api_key.clear();
+                dns.secret.clear();
+                if dns.provider == "porkbun" {
+                    dns.provider.clear();
+                }
+            }
+            _ => {}
+        }
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        r#"UPDATE instance_settings SET
+            dns_provider = ?, porkbun_api_key = ?, porkbun_secret = ?,
+            cloudflare_api_token = ?, updated_at = ?
+           WHERE id = 1"#,
+    )
+    .bind(&dns.provider)
+    .bind(&dns.api_key)
+    .bind(&dns.secret)
+    .bind(&dns.cf_token)
+    .bind(&now)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(load(state).await)
 }
 
 pub async fn ping_configured(state: &AppState) -> Result<(), String> {

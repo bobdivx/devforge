@@ -58,6 +58,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/settings/dns", get(get_dns).post(save_dns))
         .route("/api/v1/settings/dns/status", get(dns_status))
         .route("/api/v1/settings/dns/test", post(test_dns))
+        .route("/api/v1/settings/dns/clear-credentials", post(clear_dns_credentials))
         .route("/api/v1/settings/ssh", get(ssh_status).post(save_ssh))
         .route("/api/v1/settings/ssh/generate-key", post(generate_ssh_key))
         .route("/api/v1/admin/overview", get(admin_overview))
@@ -703,6 +704,14 @@ struct DnsSaveBody {
     pub token: Option<String>,
     pub api_key: Option<String>,
     pub secret: Option<String>,
+    /// Si true au switch de provider : efface les credentials de l’ancien.
+    pub clear_inactive: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct DnsClearBody {
+    /// cloudflare | porkbun | inactive
+    pub which: String,
 }
 
 async fn get_dns(
@@ -721,11 +730,27 @@ async fn save_dns(
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     require_instance_admin(&state, &headers).await?;
     let mut dns = crate::dns::load(&state).await;
+    let prev_provider = dns.provider.clone();
     if let Some(p) = body.provider {
         dns.provider = match p.trim().to_lowercase().as_str() {
             "cloudflare" | "porkbun" => p.trim().to_lowercase(),
             _ => String::new(),
         };
+    }
+    if body.clear_inactive == Some(true) && prev_provider != dns.provider {
+        match prev_provider.as_str() {
+            "cloudflare" => {
+                dns.cf_token.clear();
+                if dns.secret.trim().is_empty() {
+                    dns.api_key.clear();
+                }
+            }
+            "porkbun" => {
+                dns.api_key.clear();
+                dns.secret.clear();
+            }
+            _ => {}
+        }
     }
     if let Some(z) = body.zone {
         dns.zone = z.trim().trim_start_matches('.').to_lowercase();
@@ -873,6 +898,22 @@ async fn test_dns(
         .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e}))))?;
     Ok(Json(json!({
         "ok": true,
+        "status": crate::dns::collect_status(&state).await,
+    })))
+}
+
+async fn clear_dns_credentials(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<DnsClearBody>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_instance_admin(&state, &headers).await?;
+    let dns = crate::dns::clear_credentials(&state, &body.which)
+        .await
+        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e}))))?;
+    Ok(Json(json!({
+        "ok": true,
+        "dns": crate::dns::public_json(&dns),
         "status": crate::dns::collect_status(&state).await,
     })))
 }
