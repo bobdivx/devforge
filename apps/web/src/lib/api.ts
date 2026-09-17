@@ -61,6 +61,7 @@ export type DnsRuntimeStatus = {
   error?: string | null;
   nodes: DnsNodeStatus[];
   domains: DnsDomainStatus[];
+  sync_results?: { fqdn: string; ok: boolean; error?: string }[];
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

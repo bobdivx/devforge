@@ -289,21 +289,32 @@ export function DnsEntrypointPanel(props: Props) {
       setDnsZone(r.dns.zone || '');
       if (r.status) setDnsStatus(r.status);
       setSyncProgress(100);
-      const after = (r.status?.domains ?? []).filter((d) => d.in_sync === false && !d.out_of_zone)
-        .length;
+      const results = r.status?.sync_results ?? [];
+      const wroteOk = results.filter((x) => x.ok).length;
+      const wroteFail = results.filter((x) => !x.ok);
+      const after = (r.status?.domains ?? []).filter(
+        (d) => d.in_sync === false && !d.out_of_zone,
+      ).length;
       const fixed = Math.max(0, beforeBroken - after);
-      const summary =
-        r.provision_error
-          ? `Resync partiel : ${r.provision_error}`
-          : fixed > 0
-            ? `${fixed} domaine${fixed > 1 ? 's' : ''} corrigé${fixed > 1 ? 's' : ''}${
-                after > 0 ? ` · ${after} encore en erreur` : ''
-              }`
-            : after === 0 && (r.status?.ok || beforeBroken === 0)
-              ? 'Tout est à jour'
-              : after > 0
-                ? `${after} domaine${after > 1 ? 's' : ''} encore à corriger (voir détails)`
-                : 'État actualisé';
+      let summary: string;
+      if (r.provision_error) {
+        summary = `Resync partiel : ${r.provision_error}`;
+      } else if (wroteFail.length > 0) {
+        summary = `${wroteOk} écrit(s) OK · ${wroteFail.length} échec(s) : ${wroteFail
+          .slice(0, 2)
+          .map((x) => `${x.fqdn} (${x.error || 'erreur'})`)
+          .join(' · ')}${wroteFail.length > 2 ? '…' : ''}`;
+      } else if (fixed > 0) {
+        summary = `${fixed} domaine${fixed > 1 ? 's' : ''} corrigé${fixed > 1 ? 's' : ''}${
+          after > 0 ? ` · ${after} encore en erreur` : ''
+        }`;
+      } else if (after === 0 && (r.status?.ok || beforeBroken === 0)) {
+        summary = 'Tout est à jour';
+      } else if (after > 0) {
+        summary = `${after} domaine${after > 1 ? 's' : ''} encore à corriger (voir détails)`;
+      } else {
+        summary = 'État actualisé';
+      }
       setLastSyncSummary(summary);
       toast.push({
         title: r.status?.ok ? 'DNS OK' : 'Resync terminé',

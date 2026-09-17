@@ -320,13 +320,41 @@ impl CloudflareClient {
             &self.token,
             reqwest::Method::GET,
             &format!(
-                "/zones/{}/dns_records?name={fqdn}&per_page=20",
+                "/zones/{}/dns_records?name={fqdn}&per_page=50",
                 self.zone_id
             ),
             None,
         )
         .await
         .unwrap_or_default();
+
+        let cnames: Vec<&CfDnsRec> = existing
+            .iter()
+            .filter(|r| r.kind.eq_ignore_ascii_case("CNAME"))
+            .collect();
+        if cnames.iter().any(|r| {
+            r.content
+                .trim()
+                .trim_end_matches('.')
+                .eq_ignore_ascii_case(&target)
+        }) {
+            return Ok(());
+        }
+
+        // A / AAAA bloquent un CNAME sur le même nom — on les retire.
+        for rec in existing.iter().filter(|r| {
+            r.kind.eq_ignore_ascii_case("A") || r.kind.eq_ignore_ascii_case("AAAA")
+        }) {
+            let _: Value = cf_request(
+                &self.token,
+                reqwest::Method::DELETE,
+                &format!("/zones/{}/dns_records/{}", self.zone_id, rec.id),
+                None,
+            )
+            .await
+            .unwrap_or(json!({}));
+        }
+
         let body = json!({
             "type": "CNAME",
             "name": fqdn,
@@ -334,11 +362,8 @@ impl CloudflareClient {
             "ttl": 1,
             "proxied": true,
         });
-        if let Some(rec) = existing.iter().find(|r| r.content.trim_end_matches('.') == target) {
-            let _ = rec;
-            return Ok(());
-        }
-        if let Some(rec) = existing.first() {
+
+        if let Some(rec) = cnames.first() {
             let _: CfDnsRec = cf_request(
                 &self.token,
                 reqwest::Method::PUT,
@@ -346,8 +371,20 @@ impl CloudflareClient {
                 Some(body),
             )
             .await?;
+            // Autres CNAME en doublon (rare) → supprimer.
+            for extra in cnames.iter().skip(1) {
+                let _: Value = cf_request(
+                    &self.token,
+                    reqwest::Method::DELETE,
+                    &format!("/zones/{}/dns_records/{}", self.zone_id, extra.id),
+                    None,
+                )
+                .await
+                .unwrap_or(json!({}));
+            }
             return Ok(());
         }
+
         let _: CfDnsRec = cf_request(
             &self.token,
             reqwest::Method::POST,
@@ -364,14 +401,17 @@ impl CloudflareClient {
             &self.token,
             reqwest::Method::GET,
             &format!(
-                "/zones/{}/dns_records?name={fqdn}&per_page=20",
+                "/zones/{}/dns_records?name={fqdn}&per_page=50",
                 self.zone_id
             ),
             None,
         )
         .await
         .unwrap_or_default();
-        for rec in existing {
+        for rec in existing.iter().filter(|r| {
+            let k = r.kind.to_ascii_uppercase();
+            k == "CNAME" || k == "A" || k == "AAAA"
+        }) {
             let _: Value = cf_request(
                 &self.token,
                 reqwest::Method::DELETE,
@@ -390,14 +430,28 @@ impl CloudflareClient {
             &self.token,
             reqwest::Method::GET,
             &format!(
-                "/zones/{}/dns_records?name={fqdn}&per_page=20",
+                "/zones/{}/dns_records?name={fqdn}&per_page=50",
                 self.zone_id
             ),
             None,
         )
         .await
         .unwrap_or_default();
-        Ok(existing.into_iter().next().map(|r| {
+        // Priorité CNAME > A > AAAA — ignore CAA / TXT / MX (sinon Sectigo apparaît comme « cible »).
+        let prefer = |kind: &str| -> i32 {
+            match kind.to_ascii_uppercase().as_str() {
+                "CNAME" => 0,
+                "A" => 1,
+                "AAAA" => 2,
+                _ => 99,
+            }
+        };
+        let mut usable: Vec<CfDnsRec> = existing
+            .into_iter()
+            .filter(|r| prefer(&r.kind) < 99)
+            .collect();
+        usable.sort_by_key(|r| prefer(&r.kind));
+        Ok(usable.into_iter().next().map(|r| {
             let kind = if r.kind.trim().is_empty() {
                 "CNAME".into()
             } else {

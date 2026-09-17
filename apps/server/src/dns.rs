@@ -278,10 +278,15 @@ pub async fn provision_all(state: &AppState) -> Result<Value, String> {
         .fetch_all(&state.pool)
         .await
         .unwrap_or_default();
+    let mut sync_results = Vec::new();
     for (uuid,) in projects {
-        sync_project(state, &uuid).await;
+        sync_results.extend(sync_project(state, &uuid).await);
     }
-    Ok(collect_status(state).await)
+    let mut status = collect_status(state).await;
+    if let Some(obj) = status.as_object_mut() {
+        obj.insert("sync_results".into(), json!(sync_results));
+    }
+    Ok(status)
 }
 
 pub fn spawn_dns_loop(state: AppState) {
@@ -304,44 +309,47 @@ pub fn spawn_dns_loop(state: AppState) {
     });
 }
 
-pub async fn sync_fqdn(state: &AppState, fqdn: &str, server_id: &str) {
+pub async fn sync_fqdn(state: &AppState, fqdn: &str, server_id: &str) -> Result<(), String> {
     let dns = load(state).await;
     if !configured(&dns) {
-        return;
+        return Err("DNS auto non configuré".into());
     }
-    let mut host = ingress_for(state, server_id).await;
+    let sid = if server_id.trim().is_empty() {
+        LEADER_NODE_ID.to_string()
+    } else {
+        crate::cluster_routes::normalize_server_id(server_id)
+    };
+    let mut host = ingress_for(state, &sid).await;
     if host.is_empty() {
-        provision_node(state, server_id).await;
-        host = ingress_for(state, server_id).await;
+        provision_node(state, &sid).await;
+        host = ingress_for(state, &sid).await;
     }
     if host.is_empty() {
-        tracing::warn!(fqdn, "pas de cible DNS pour ce nœud");
-        return;
+        return Err(format!("pas de cible DNS pour le nœud {sid}"));
     }
     match dns.provider.as_str() {
         "porkbun" => {
             if split_host(fqdn, &dns.zone).is_err() {
-                tracing::debug!(fqdn, zone = %dns.zone, "hors zone Porkbun — skip sync");
-                return;
+                return Err(format!("{fqdn} hors zone {}", dns.zone));
             }
-            if let Some(c) = porkbun_creds(&dns) {
-                match upsert_record(&c, fqdn, &host).await {
-                    Ok(()) => tracing::info!(fqdn, target = %host, "Porkbun OK"),
-                    Err(e) => tracing::warn!(fqdn, error = %e, "Porkbun"),
-                }
-            }
+            let c = porkbun_creds(&dns).ok_or("Porkbun : credentials manquants")?;
+            upsert_record(&c, fqdn, &host)
+                .await
+                .map_err(|e| e.to_string())?;
+            tracing::info!(fqdn, target = %host, "Porkbun OK");
+            Ok(())
         }
-        "cloudflare" => match cloudflare_connect_for_fqdn(cf_key(&dns), fqdn).await {
-            Ok(cf) => {
-                if let Err(e) = cf.upsert_cname(fqdn, &host).await {
-                    tracing::warn!(fqdn, zone = %cf.zone, error = %e, "Cloudflare DNS");
-                } else {
-                    tracing::info!(fqdn, zone = %cf.zone, target = %host, "Cloudflare CNAME OK");
-                }
-            }
-            Err(e) => tracing::warn!(fqdn, error = %e, "Cloudflare zone"),
-        },
-        _ => {}
+        "cloudflare" => {
+            let cf = cloudflare_connect_for_fqdn(cf_key(&dns), fqdn)
+                .await
+                .map_err(|e| e.to_string())?;
+            cf.upsert_cname(fqdn, &host)
+                .await
+                .map_err(|e| format!("zone {}: {e}", cf.zone))?;
+            tracing::info!(fqdn, zone = %cf.zone, target = %host, "Cloudflare CNAME OK");
+            Ok(())
+        }
+        _ => Err("provider DNS inconnu".into()),
     }
 }
 
@@ -369,7 +377,8 @@ pub async fn remove_fqdn(state: &AppState, fqdn: &str) {
     }
 }
 
-pub async fn sync_project(state: &AppState, project_uuid: &str) {
+/// Retourne une entrée par FQDN synchronisé : `{ fqdn, ok, error? }`.
+pub async fn sync_project(state: &AppState, project_uuid: &str) -> Vec<Value> {
     let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT server_id, production_url FROM projects WHERE uuid = ?",
     )
@@ -378,9 +387,11 @@ pub async fn sync_project(state: &AppState, project_uuid: &str) {
     .ok()
     .flatten();
     let Some((server_id, production_url)) = row else {
-        return;
+        return vec![];
     };
-    let server_id = server_id.unwrap_or_default();
+    let server_id = server_id
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| LEADER_NODE_ID.to_string());
     let mut fqdns = Vec::new();
     if let Some(url) = production_url.as_deref() {
         if let Some(f) = crate::routes::fqdn_from_url(url) {
@@ -399,9 +410,17 @@ pub async fn sync_project(state: &AppState, project_uuid: &str) {
             }
         }
     }
+    let mut out = Vec::new();
     for fqdn in fqdns {
-        sync_fqdn(state, &fqdn, &server_id).await;
+        match sync_fqdn(state, &fqdn, &server_id).await {
+            Ok(()) => out.push(json!({ "fqdn": fqdn, "ok": true })),
+            Err(e) => {
+                tracing::warn!(fqdn, error = %e, "sync DNS");
+                out.push(json!({ "fqdn": fqdn, "ok": false, "error": e }));
+            }
+        }
     }
+    out
 }
 
 pub async fn note_public_ip(state: &AppState, node_id: &str, ip: &str) {
