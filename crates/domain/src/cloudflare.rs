@@ -316,43 +316,62 @@ impl CloudflareClient {
     pub async fn upsert_cname(&self, fqdn: &str, target: &str) -> Result<()> {
         let fqdn = crate::porkbun::normalize_fqdn(fqdn);
         let target = target.trim().trim_end_matches('.').to_lowercase();
+        if target.is_empty() {
+            return Err(fail("cible CNAME vide"));
+        }
+        let name_q = urlencoding_loose(&fqdn);
         let existing: Vec<CfDnsRec> = cf_request(
             &self.token,
             reqwest::Method::GET,
             &format!(
-                "/zones/{}/dns_records?name={fqdn}&per_page=50",
+                "/zones/{}/dns_records?name={name_q}&per_page=50",
                 self.zone_id
             ),
             None,
         )
-        .await
-        .unwrap_or_default();
+        .await?;
 
-        let cnames: Vec<&CfDnsRec> = existing
-            .iter()
-            .filter(|r| r.kind.eq_ignore_ascii_case("CNAME"))
-            .collect();
-        if cnames.iter().any(|r| {
-            r.content
-                .trim()
+        let is_addr = |k: &str| {
+            let u = k.to_ascii_uppercase();
+            u == "CNAME" || u == "A" || u == "AAAA"
+        };
+        let content_is_target = |c: &str| {
+            c.trim()
                 .trim_end_matches('.')
                 .eq_ignore_ascii_case(&target)
-        }) {
+        };
+
+        let already_ok = existing.iter().any(|r| {
+            r.kind.eq_ignore_ascii_case("CNAME") && content_is_target(&r.content)
+        }) && !existing.iter().any(|r| {
+            is_addr(&r.kind)
+                && !(r.kind.eq_ignore_ascii_case("CNAME") && content_is_target(&r.content))
+        });
+        if already_ok {
             return Ok(());
         }
 
-        // A / AAAA bloquent un CNAME sur le même nom — on les retire.
-        for rec in existing.iter().filter(|r| {
-            r.kind.eq_ignore_ascii_case("A") || r.kind.eq_ignore_ascii_case("AAAA")
-        }) {
-            let _: Value = cf_request(
+        // Supprime tous les CNAME/A/AAAA (y compris records « managed » tunnel),
+        // puis recrée le CNAME — plus fiable qu’un PUT sur un ancien tunnel.
+        for rec in existing.iter().filter(|r| is_addr(&r.kind)) {
+            let del = cf_request::<Value>(
                 &self.token,
                 reqwest::Method::DELETE,
                 &format!("/zones/{}/dns_records/{}", self.zone_id, rec.id),
                 None,
             )
-            .await
-            .unwrap_or(json!({}));
+            .await;
+            if let Err(e) = del {
+                // Certaines réponses DELETE n’ont pas de `result` — on tolère si le message
+                // n’est pas une vraie erreur métier.
+                let msg = e.to_string();
+                if !msg.contains("réponse vide") {
+                    return Err(fail(format!(
+                        "suppression {} {} : {msg}",
+                        rec.kind, fqdn
+                    )));
+                }
+            }
         }
 
         let body = json!({
@@ -361,53 +380,46 @@ impl CloudflareClient {
             "content": target,
             "ttl": 1,
             "proxied": true,
+            "comment": "devforge",
         });
-
-        if let Some(rec) = cnames.first() {
-            let _: CfDnsRec = cf_request(
-                &self.token,
-                reqwest::Method::PUT,
-                &format!("/zones/{}/dns_records/{}", self.zone_id, rec.id),
-                Some(body),
-            )
-            .await?;
-            // Autres CNAME en doublon (rare) → supprimer.
-            for extra in cnames.iter().skip(1) {
-                let _: Value = cf_request(
-                    &self.token,
-                    reqwest::Method::DELETE,
-                    &format!("/zones/{}/dns_records/{}", self.zone_id, extra.id),
-                    None,
-                )
-                .await
-                .unwrap_or(json!({}));
-            }
-            return Ok(());
-        }
-
         let _: CfDnsRec = cf_request(
             &self.token,
             reqwest::Method::POST,
             &format!("/zones/{}/dns_records", self.zone_id),
             Some(body),
         )
-        .await?;
-        Ok(())
+        .await
+        .map_err(|e| fail(format!("création CNAME {fqdn} → {target} : {e}")))?;
+
+        // Vérifie immédiatement que Cloudflare a bien le nouveau contenu.
+        match self.lookup_name(&fqdn).await? {
+            Some((kind, content))
+                if kind.eq_ignore_ascii_case("CNAME") && content_is_target(&content) =>
+            {
+                Ok(())
+            }
+            Some((kind, content)) => Err(fail(format!(
+                "après écriture, Cloudflare a encore {kind} {content} (attendu CNAME {target})"
+            ))),
+            None => Err(fail(format!(
+                "après écriture, aucun record pour {fqdn}"
+            ))),
+        }
     }
 
     pub async fn delete_name(&self, fqdn: &str) -> Result<()> {
         let fqdn = crate::porkbun::normalize_fqdn(fqdn);
+        let name_q = urlencoding_loose(&fqdn);
         let existing: Vec<CfDnsRec> = cf_request(
             &self.token,
             reqwest::Method::GET,
             &format!(
-                "/zones/{}/dns_records?name={fqdn}&per_page=50",
+                "/zones/{}/dns_records?name={name_q}&per_page=50",
                 self.zone_id
             ),
             None,
         )
-        .await
-        .unwrap_or_default();
+        .await?;
         for rec in existing.iter().filter(|r| {
             let k = r.kind.to_ascii_uppercase();
             k == "CNAME" || k == "A" || k == "AAAA"
@@ -426,17 +438,17 @@ impl CloudflareClient {
 
     pub async fn lookup_name(&self, fqdn: &str) -> Result<Option<(String, String)>> {
         let fqdn = crate::porkbun::normalize_fqdn(fqdn);
+        let name_q = urlencoding_loose(&fqdn);
         let existing: Vec<CfDnsRec> = cf_request(
             &self.token,
             reqwest::Method::GET,
             &format!(
-                "/zones/{}/dns_records?name={fqdn}&per_page=50",
+                "/zones/{}/dns_records?name={name_q}&per_page=50",
                 self.zone_id
             ),
             None,
         )
-        .await
-        .unwrap_or_default();
+        .await?;
         // Priorité CNAME > A > AAAA — ignore CAA / TXT / MX (sinon Sectigo apparaît comme « cible »).
         let prefer = |kind: &str| -> i32 {
             match kind.to_ascii_uppercase().as_str() {
@@ -463,6 +475,15 @@ impl CloudflareClient {
             )
         }))
     }
+}
+
+fn urlencoding_loose(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '.' | '_' | '~' => c.to_string(),
+            _ => format!("%{:02X}", c as u8),
+        })
+        .collect()
 }
 
 /// `apps.jeser.app` → `jeser.app`

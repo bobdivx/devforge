@@ -217,6 +217,9 @@ export function DnsEntrypointPanel(props: Props) {
   const [syncProgress, setSyncProgress] = useState(0);
   const [syncStep, setSyncStep] = useState(0);
   const [lastSyncSummary, setLastSyncSummary] = useState<string | null>(null);
+  const [lastSyncResults, setLastSyncResults] = useState<
+    { fqdn: string; ok: boolean; error?: string }[]
+  >([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
@@ -282,6 +285,7 @@ export function DnsEntrypointPanel(props: Props) {
     setSyncing(true);
     setBusy(true);
     setLastSyncSummary(null);
+    setLastSyncResults([]);
     try {
       const r = await api.resyncDnsSettings();
       applyDnsFlags(r.dns);
@@ -290,6 +294,7 @@ export function DnsEntrypointPanel(props: Props) {
       if (r.status) setDnsStatus(r.status);
       setSyncProgress(100);
       const results = r.status?.sync_results ?? [];
+      setLastSyncResults(results);
       const wroteOk = results.filter((x) => x.ok).length;
       const wroteFail = results.filter((x) => !x.ok);
       const after = (r.status?.domains ?? []).filter(
@@ -452,7 +457,25 @@ export function DnsEntrypointPanel(props: Props) {
                     </div>
                   )}
                   {!syncing && lastSyncSummary && (
-                    <p class="mt-2 text-xs text-[var(--color-ink)]">{lastSyncSummary}</p>
+                    <div class="mt-2 space-y-1">
+                      <p class="text-xs text-[var(--color-ink)]">{lastSyncSummary}</p>
+                      {lastSyncResults.length > 0 && (
+                        <ul class="max-h-40 space-y-1 overflow-y-auto text-[11px] text-[var(--color-ink-muted)]">
+                          {lastSyncResults.map((x) => (
+                            <li key={x.fqdn} class="break-words">
+                              {x.ok ? '✓' : '✗'} {x.fqdn}
+                              {x.error ? ` — ${x.error}` : ''}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {lastSyncResults.length === 0 && (
+                        <p class="text-[11px] text-[var(--color-warn)]">
+                          Aucun détail d’écriture renvoyé — l’instance n’est peut‑être pas encore
+                          en 2.0.81+. Mets à jour DevForge puis réessaie.
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
