@@ -29,8 +29,8 @@ function providerLabel(p: string): string {
 }
 
 function shortTarget(t: string): string {
-  const s = t.trim();
-  if (s.ends_with('cfargotunnel.com')) {
+  const s = String(t ?? '').trim();
+  if (s.endsWith('cfargotunnel.com')) {
     const id = s.split('.')[0] || s;
     return `tunnel ${id.slice(0, 8)}…`;
   }
