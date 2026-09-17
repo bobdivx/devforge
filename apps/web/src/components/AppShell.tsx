@@ -197,7 +197,7 @@ function ShellInner({
             )}
           </aside>
 
-          <main class="min-w-0 flex-1 py-2">
+          <main class="min-w-0 flex-1 overflow-x-hidden py-2">
             <AppHeader worker={isWorker} />
             {(title || actions) && (
               <div class="mb-4 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-end sm:justify-between">

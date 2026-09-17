@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api } from '../lib/api';
+import { api, type DnsRuntimeStatus } from '../lib/api';
 import { AppShell } from './AppShell';
 import { BackupSettingsPanel } from './BackupSettingsPanel';
 import { DockerEngineAlert } from './DockerEngineAlert';
@@ -20,6 +20,7 @@ import {
   LiveStatus,
   PulseDot,
   Skeleton,
+  Spinner,
   useToast,
 } from './ui';
 
@@ -165,6 +166,8 @@ export function SettingsPage() {
   const [dnsToken, setDnsToken] = useState('');
   const [dnsTokenSet, setDnsTokenSet] = useState(false);
   const [dnsBusy, setDnsBusy] = useState(false);
+  const [dnsStatus, setDnsStatus] = useState<DnsRuntimeStatus | null>(null);
+  const [dnsStatusLoading, setDnsStatusLoading] = useState(false);
   const [sshHost, setSshHost] = useState('');
   const [sshUser, setSshUser] = useState('root');
   const [sshLocal, setSshLocal] = useState(true);
@@ -200,6 +203,21 @@ export function SettingsPage() {
     }
   }
 
+  async function loadDnsStatus() {
+    setDnsStatusLoading(true);
+    try {
+      const r = await api.dnsRuntimeStatus();
+      setDnsProvider(r.dns.provider || '');
+      setDnsZone(r.dns.zone || '');
+      setDnsTokenSet(!!(r.dns.token_set || r.dns.api_key_set));
+      setDnsStatus(r.status);
+    } catch {
+      setDnsStatus(null);
+    } finally {
+      setDnsStatusLoading(false);
+    }
+  }
+
   useEffect(() => {
     Promise.all([
       api
@@ -223,6 +241,11 @@ export function SettingsPage() {
         .catch(() => null),
     ]).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (section !== 'domaine' || !isAdmin) return;
+    void loadDnsStatus();
+  }, [section, isAdmin]);
 
   async function connectGithub(e: Event) {
     e.preventDefault();
@@ -301,17 +324,17 @@ export function SettingsPage() {
     <AppShell
       active="settings"
       title={
-        <div class="flex items-center gap-3">
+        <div class="flex min-w-0 items-center gap-2.5 sm:gap-3">
           <a
             href="/app/settings"
-            class="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink-muted)] transition hover:border-white/30 hover:bg-white/5 hover:text-white"
+            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink-muted)] transition hover:border-white/30 hover:bg-white/5 hover:text-white"
             aria-label="Retour à Paramètres"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <path d="M19 12H5M12 19l-7-7 7-7" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </a>
-          <span>{SECTION_TITLES[section]}</span>
+          <span class="min-w-0 truncate">{SECTION_TITLES[section]}</span>
         </div>
       }
     >
@@ -344,9 +367,9 @@ export function SettingsPage() {
                 {backends.map((b) => (
                   <li
                     key={b.key}
-                    class="flex items-center justify-between rounded-xl border border-[var(--color-line)] px-3 py-2"
+                    class="flex min-w-0 items-center justify-between gap-2 rounded-xl border border-[var(--color-line)] px-3 py-2"
                   >
-                    <span class="flex items-center gap-2 text-sm">
+                    <span class="flex min-w-0 items-center gap-2 text-sm">
                       <PulseDot
                         tone={
                           b.value === 'stub' || b.value === 'off' || b.value === '—'
@@ -354,9 +377,9 @@ export function SettingsPage() {
                             : 'ok'
                         }
                       />
-                      {b.label}
+                      <span class="truncate">{b.label}</span>
                     </span>
-                    <Badge>{b.value}</Badge>
+                    <Badge class="max-w-[55%] min-w-0 overflow-hidden truncate">{b.value}</Badge>
                   </li>
                 ))}
               </ul>
@@ -390,9 +413,9 @@ export function SettingsPage() {
                 )
               }
             />
-            <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
-              Chaque app reçoit un sous-domaine <code>nom-app.{wildcard || 'ton-domaine'}</code> au
-              déploiement.
+            <p class="mb-3 break-words text-sm text-[var(--color-ink-muted)]">
+              Chaque app reçoit un sous-domaine{' '}
+              <code class="break-all">nom-app.{wildcard || 'ton-domaine'}</code> au déploiement.
             </p>
             {isAdmin ? (
               <form
@@ -439,7 +462,7 @@ export function SettingsPage() {
                     onInput={(e) => setWildcard((e.target as HTMLInputElement).value)}
                   />
                 </div>
-                <Button type="submit" size="sm" disabled={domainBusy}>
+                <Button type="submit" size="sm" class="w-full sm:w-auto" disabled={domainBusy}>
                   Enregistrer
                 </Button>
               </form>
@@ -451,8 +474,14 @@ export function SettingsPage() {
             <CardHeader
               title="Entrée publique"
               action={
-                dnsProvider === 'cloudflare' || dnsProvider === 'porkbun' ? (
-                  <Badge tone="ok">
+                dnsStatusLoading ? (
+                  <Spinner />
+                ) : dnsStatus?.configured ? (
+                  <Badge tone={dnsStatus.ok ? 'ok' : 'danger'}>
+                    {dnsStatus.ok ? 'opérationnel' : 'à corriger'}
+                  </Badge>
+                ) : dnsProvider === 'cloudflare' || dnsProvider === 'porkbun' ? (
+                  <Badge tone="warn">
                     {dnsProvider === 'cloudflare' ? 'Cloudflare' : 'Porkbun'}
                   </Badge>
                 ) : (
@@ -460,10 +489,153 @@ export function SettingsPage() {
                 )
               }
             />
-            <Alert tone="info" class="mb-3">
-              DevForge crée Traefik, les records DNS et — avec Cloudflare — un tunnel par nœud.
-              Tu n’as qu’un token à coller. Le domaine est optionnel s’il se déduit du wildcard.
-            </Alert>
+            {dnsProvider ? (
+              dnsStatusLoading && !dnsStatus ? (
+                <Skeleton class="mb-3 h-16" />
+              ) : dnsStatus ? (
+                <div class="mb-4 space-y-3">
+                  <Alert tone={dnsStatus.ok ? 'ok' : dnsStatus.token_ok ? 'warn' : 'danger'}>
+                    {dnsStatus.ok
+                      ? dnsStatus.provider === 'cloudflare'
+                        ? `Cloudflare OK${dnsStatus.account ? ` · ${dnsStatus.account}` : ''}${dnsStatus.zone ? ` · zone ${dnsStatus.zone}` : ''}. Un tunnel par nœud est en place.`
+                        : `Porkbun OK${dnsStatus.zone ? ` · zone ${dnsStatus.zone}` : ''}. Les records A visent l’IP de chaque nœud.`
+                      : dnsStatus.error
+                        ? dnsStatus.error
+                        : 'Token enregistré, mais le provisionnement n’est pas complet.'}
+                  </Alert>
+                  {dnsStatus.nodes.length > 0 && (
+                    <div class="space-y-2">
+                      <p class="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
+                        Nœuds
+                      </p>
+                      {dnsStatus.nodes.map((n) => (
+                        <div
+                          key={n.id}
+                          class="min-w-0 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2.5"
+                        >
+                          <div class="flex min-w-0 items-start justify-between gap-2">
+                            <div class="flex min-w-0 items-center gap-2">
+                              <PulseDot tone={n.ok ? 'ok' : 'warn'} />
+                              <span class="min-w-0 truncate text-sm font-medium">{n.name}</span>
+                              <span class="hidden shrink-0 text-xs text-[var(--color-ink-muted)] sm:inline">
+                                {n.role}
+                              </span>
+                            </div>
+                            <Badge tone={n.ok ? 'ok' : 'danger'} class="shrink-0">
+                              {n.ok ? 'OK' : 'KO'}
+                            </Badge>
+                          </div>
+                          <p class="mt-0.5 text-[11px] text-[var(--color-ink-muted)] sm:hidden">
+                            {n.role}
+                          </p>
+                          <dl class="mt-2 grid min-w-0 gap-1 text-xs text-[var(--color-ink-muted)]">
+                            {n.tunnel ? (
+                              <div class="min-w-0">
+                                Tunnel{' '}
+                                <code class="break-all text-[var(--color-ink)]">{n.tunnel}</code>
+                              </div>
+                            ) : null}
+                            <div class="min-w-0">
+                              {dnsStatus.provider === 'porkbun' ? 'IP / cible' : 'Cible'}{' '}
+                              <code class="break-all text-[var(--color-ink)]">
+                                {n.ingress || n.public_ip || '—'}
+                              </code>
+                            </div>
+                            {dnsStatus.provider === 'porkbun' && n.public_ip && n.ingress && n.public_ip !== n.ingress ? (
+                              <div class="min-w-0">
+                                IP détectée{' '}
+                                <code class="break-all text-[var(--color-ink)]">{n.public_ip}</code>
+                              </div>
+                            ) : null}
+                            <div>
+                              Traefik {n.traefik ? 'up' : 'down'}
+                              {dnsStatus.provider === 'cloudflare'
+                                ? ` · cloudflared ${n.cloudflared ? 'up' : 'down'}`
+                                : ' · 80/443 ouverts'}
+                            </div>
+                            {n.error ? (
+                              <div class="break-words text-[var(--color-danger)]">{n.error}</div>
+                            ) : null}
+                          </dl>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div class="space-y-2">
+                    <p class="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
+                      Domaines publics
+                    </p>
+                    {dnsStatus.domains.length === 0 ? (
+                      <p class="text-xs text-[var(--color-ink-muted)]">
+                        {dnsStatus.provider === 'porkbun'
+                          ? 'Aucune app avec un domaine pour l’instant. Traefik et l’IP du nœud sont prêts : le record A se crée au prochain déploiement / domaine attaché.'
+                          : 'Aucune app avec un domaine pour l’instant. Les tunnels ci-dessus sont prêts : le CNAME se crée au prochain déploiement / domaine attaché.'}
+                      </p>
+                    ) : (
+                      dnsStatus.domains.map((d) => (
+                        <div
+                          key={`${d.project_uuid}-${d.fqdn}`}
+                          class="flex min-w-0 flex-col gap-1.5 rounded-xl border border-[var(--color-line)] px-3 py-2 text-xs sm:flex-row sm:flex-wrap sm:items-baseline sm:justify-between"
+                        >
+                          <div class="min-w-0">
+                            <div class="flex min-w-0 flex-wrap items-center gap-2 font-mono text-[var(--color-ink)]">
+                              <span class="min-w-0 break-all">{d.fqdn}</span>
+                              <Badge
+                                class="shrink-0"
+                                tone={
+                                  d.in_sync === false
+                                    ? 'danger'
+                                    : d.in_sync
+                                      ? 'ok'
+                                      : 'neutral'
+                                }
+                              >
+                                {d.in_sync === false
+                                  ? 'pas en sync'
+                                  : d.in_sync
+                                    ? d.live_kind || 'sync'
+                                    : 'cible'}
+                              </Badge>
+                            </div>
+                            <div class="truncate text-[var(--color-ink-muted)]">{d.project}</div>
+                            {d.error ? (
+                              <div class="break-words text-[var(--color-danger)]">{d.error}</div>
+                            ) : null}
+                          </div>
+                          <code class="min-w-0 break-all text-[var(--color-ink-muted)]">
+                            {d.live
+                              ? `${d.live_kind || ''} ${d.live}`.trim()
+                              : `→ ${d.target || 'pas de cible'}`}
+                          </code>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    class="w-full sm:w-auto"
+                    disabled={dnsBusy || dnsStatusLoading}
+                    onClick={() => void loadDnsStatus()}
+                  >
+                    Actualiser l’état
+                  </Button>
+                </div>
+              ) : (
+                <Alert tone="info" class="mb-3">
+                  {dnsProvider === 'porkbun'
+                    ? 'Colle APIKEY:SECRET. DevForge détecte l’IP de chaque nœud, démarre Traefik et pousse les records A.'
+                    : 'DevForge crée Traefik, les records DNS et — avec Cloudflare — un tunnel par nœud. Enregistre le token pour voir ce qui a été créé.'}
+                </Alert>
+              )
+            ) : (
+              <Alert tone="info" class="mb-3">
+                Choisis Cloudflare (tunnel, pas de ports à ouvrir) ou Porkbun (record A vers
+                l’IP, ports 80/443). Un token suffit ; le domaine est optionnel s’il se déduit du
+                wildcard.
+              </Alert>
+            )}
             {isAdmin ? (
               <form
                 class="flex flex-col gap-3"
@@ -480,6 +652,7 @@ export function SettingsPage() {
                     setDnsZone(r.dns.zone);
                     setDnsTokenSet(!!(r.dns.token_set || r.dns.api_key_set));
                     setDnsToken('');
+                    if (r.status) setDnsStatus(r.status);
                     if (r.provision_error) {
                       toast.push({
                         title: 'Enregistré, provision incomplet',
@@ -487,11 +660,14 @@ export function SettingsPage() {
                         tone: 'danger',
                       });
                     } else {
-                      const n = r.provision?.nodes;
+                      const nodes = r.status?.nodes ?? [];
+                      const ok = nodes.filter((n) => n.ok).length;
                       toast.push({
-                        title: 'DNS automatique',
-                        detail: n ? `${n} nœud${n > 1 ? 's' : ''} provisionné${n > 1 ? 's' : ''}` : undefined,
-                        tone: 'ok',
+                        title: r.status?.ok ? 'Entrée publique OK' : 'DNS enregistré',
+                        detail: nodes.length
+                          ? `${ok}/${nodes.length} nœud${nodes.length > 1 ? 's' : ''} prêt${ok > 1 ? 's' : ''}`
+                          : undefined,
+                        tone: r.status?.ok ? 'ok' : 'warn',
                       });
                     }
                   } catch (err) {
@@ -505,10 +681,11 @@ export function SettingsPage() {
                   }
                 }}
               >
-                <div class="flex flex-wrap gap-2">
+                <div class="grid grid-cols-3 gap-1.5">
                   <Button
                     type="button"
                     size="sm"
+                    class="w-full px-1.5 sm:px-3"
                     variant={dnsProvider === 'cloudflare' ? 'secondary' : 'ghost'}
                     onClick={() => setDnsProvider('cloudflare')}
                   >
@@ -517,6 +694,7 @@ export function SettingsPage() {
                   <Button
                     type="button"
                     size="sm"
+                    class="w-full px-1.5 sm:px-3"
                     variant={dnsProvider === 'porkbun' ? 'secondary' : 'ghost'}
                     onClick={() => setDnsProvider('porkbun')}
                   >
@@ -525,10 +703,12 @@ export function SettingsPage() {
                   <Button
                     type="button"
                     size="sm"
+                    class="w-full px-1.5 sm:px-3"
                     variant={!dnsProvider ? 'secondary' : 'ghost'}
                     onClick={() => setDnsProvider('')}
                   >
-                    Désactivé
+                    <span class="sm:hidden">Off</span>
+                    <span class="hidden sm:inline">Désactivé</span>
                   </Button>
                 </div>
                 {dnsProvider === 'cloudflare' && (
@@ -565,22 +745,29 @@ export function SettingsPage() {
                   onInput={(e) => setDnsToken((e.target as HTMLInputElement).value)}
                   disabled={!dnsProvider}
                 />
-                <div class="flex flex-wrap gap-2">
-                  <Button type="submit" size="sm" disabled={dnsBusy}>
+                <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  <Button type="submit" size="sm" class="w-full sm:w-auto" disabled={dnsBusy}>
                     Enregistrer
                   </Button>
                   <Button
                     type="button"
                     size="sm"
                     variant="ghost"
+                    class="w-full sm:w-auto"
                     disabled={dnsBusy || !dnsProvider}
                     onClick={async () => {
                       setDnsBusy(true);
                       try {
-                        await api.testDnsSettings();
+                        const r = await api.testDnsSettings();
+                        if (r.status) setDnsStatus(r.status);
                         toast.push({
-                          title: dnsProvider === 'porkbun' ? 'Porkbun OK' : 'Cloudflare OK',
-                          tone: 'ok',
+                          title: r.status?.ok
+                            ? 'Entrée publique OK'
+                            : dnsProvider === 'porkbun'
+                              ? 'Porkbun joignable'
+                              : 'Cloudflare joignable',
+                          detail: r.status?.error || undefined,
+                          tone: r.status?.ok ? 'ok' : 'warn',
                         });
                       } catch (err) {
                         toast.push({
@@ -681,14 +868,15 @@ export function SettingsPage() {
                   autocomplete="off"
                   onInput={(e) => setToken((e.target as HTMLInputElement).value)}
                 />
-                <div class="flex flex-wrap gap-2">
-                  <Button type="submit" size="sm" disabled={ghBusy || !token.trim()}>
+                <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  <Button type="submit" size="sm" class="w-full sm:w-auto" disabled={ghBusy || !token.trim()}>
                     {ghBusy ? 'Vérification…' : 'Connecter'}
                   </Button>
                   <Button
                     href="https://github.com/settings/tokens?type=beta"
                     size="sm"
                     variant="outline"
+                    class="w-full sm:w-auto"
                     target="_blank"
                   >
                     Créer un token
@@ -762,7 +950,7 @@ export function SettingsPage() {
                       onInput={(e) => setSshUser((e.target as HTMLInputElement).value)}
                     />
                   </div>
-                  <Button type="submit" size="sm" disabled={sshBusy}>
+                  <Button type="submit" size="sm" class="w-full sm:w-auto" disabled={sshBusy}>
                     Enregistrer
                   </Button>
                 </form>

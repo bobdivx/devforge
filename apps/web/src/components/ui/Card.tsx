@@ -9,16 +9,16 @@ type Props = {
 
 const pads = {
   none: '',
-  sm: 'p-4',
-  md: 'p-5',
-  lg: 'p-6',
+  sm: 'p-3 sm:p-4',
+  md: 'p-4 sm:p-5',
+  lg: 'p-4 sm:p-6',
 };
 
 export function Card({ class: className, children, padding = 'md' }: Props) {
   return (
     <div
       class={cn(
-        'rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]',
+        'min-w-0 overflow-x-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]',
         pads[padding],
         className,
       )}

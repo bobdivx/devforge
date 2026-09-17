@@ -3,7 +3,7 @@ import { cn } from '../../lib/cn';
 import { FadeIn } from './Motion';
 
 const TILE_CLASS =
-  'group flex aspect-square flex-col items-center justify-center gap-3 rounded-2xl bg-[#1c1c1e] px-3 py-4 text-center transition duration-200 hover:-translate-y-0.5 hover:bg-[#252528] hover:ring-1 hover:ring-white/10';
+  'group flex min-h-[8.75rem] flex-col items-center justify-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 text-center transition duration-200 hover:-translate-y-0.5 hover:bg-[#252528] hover:ring-1 hover:ring-white/10 sm:aspect-square sm:min-h-0 sm:gap-3 sm:px-3 sm:py-4';
 
 const ICON_WRAP =
   'relative flex h-16 w-16 items-center justify-center rounded-[1.15rem] bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition group-hover:scale-[1.03] sm:h-[4.5rem] sm:w-[4.5rem]';
@@ -19,7 +19,7 @@ export function HubGrid({ class: className, cols = 4, children }: HubGridProps) 
   return (
     <div
       class={cn(
-        'grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4',
+        'grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-4',
         cols === 3 && 'md:grid-cols-3',
         cols === 4 && 'md:grid-cols-4',
         cols === 5 && 'md:grid-cols-4 lg:grid-cols-5',
@@ -65,7 +65,7 @@ export function HubTile({
         {badge}
       </div>
       <div class="w-full">
-        <div class="truncate text-sm font-medium text-white">{title}</div>
+        <div class="truncate text-[13px] font-medium text-white sm:text-sm">{title}</div>
         {subtitle ??
           (description ? (
             <div class="mt-1 line-clamp-2 text-[11px] leading-snug text-[var(--color-ink-muted)]">
@@ -108,7 +108,7 @@ export function HubAddTile({
       <button
         type="button"
         onClick={onClick}
-        class="group flex aspect-square h-full w-full flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/15 bg-[#1c1c1e] px-3 py-4 transition duration-200 hover:-translate-y-0.5 hover:border-white/25 hover:bg-[#252528] hover:ring-1 hover:ring-white/10"
+        class="group flex min-h-[8.75rem] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-white/15 bg-[#1c1c1e] px-2.5 py-3 transition duration-200 hover:-translate-y-0.5 hover:border-white/25 hover:bg-[#252528] hover:ring-1 hover:ring-white/10 sm:aspect-square sm:min-h-0 sm:gap-3 sm:px-3 sm:py-4"
       >
         <div class="flex h-16 w-16 items-center justify-center rounded-[1.15rem] border border-dashed border-white/20 text-[var(--color-ink-muted)] transition group-hover:scale-[1.03] group-hover:border-white/30 group-hover:text-white sm:h-[4.5rem] sm:w-[4.5rem]">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden>

@@ -20,7 +20,7 @@ export function Alert({
   class?: string;
 }) {
   return (
-    <div class={cn('rounded-xl border px-4 py-3 text-sm', tones[tone], className)}>
+    <div class={cn('rounded-xl border px-3 py-2.5 text-sm break-words sm:px-4 sm:py-3', tones[tone], className)}>
       {children}
     </div>
   );

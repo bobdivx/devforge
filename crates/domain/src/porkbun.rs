@@ -111,6 +111,31 @@ pub async fn ping(creds: &PorkbunCreds) -> Result<()> {
     Ok(())
 }
 
+/// Vérifie que la zone est bien sur ce compte Porkbun.
+pub async fn verify_zone(creds: &PorkbunCreds) -> Result<()> {
+    let zone = normalize_zone(&creds.zone);
+    if zone.is_empty() || !zone.contains('.') {
+        return Err(DevForgeError::Message("zone DNS Porkbun invalide".into()));
+    }
+    let _ = post_json(&format!("/dns/retrieve/{zone}"), auth_body(creds)).await?;
+    Ok(())
+}
+
+pub async fn lookup(creds: &PorkbunCreds, fqdn: &str) -> Result<Option<(String, String)>> {
+    let zone = normalize_zone(&creds.zone);
+    let name = split_host(fqdn, &zone)?;
+    for kind in ["A", "AAAA", "CNAME"] {
+        let listed = retrieve(creds, &zone, kind, &name).await?;
+        if let Some(r) = listed.into_iter().next() {
+            return Ok(Some((
+                kind.to_string(),
+                r.content.trim().trim_end_matches('.').to_string(),
+            )));
+        }
+    }
+    Ok(None)
+}
+
 pub async fn upsert_record(creds: &PorkbunCreds, fqdn: &str, content: &str) -> Result<()> {
     let zone = normalize_zone(&creds.zone);
     let name = split_host(fqdn, &zone)?;

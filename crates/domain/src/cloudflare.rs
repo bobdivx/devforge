@@ -31,6 +31,8 @@ struct CfError {
 #[derive(Deserialize)]
 struct CfAccount {
     id: String,
+    #[serde(default)]
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -54,6 +56,9 @@ struct CfDnsRec {
     id: String,
     #[serde(default)]
     content: String,
+    #[serde(rename = "type")]
+    #[serde(default)]
+    kind: String,
 }
 
 fn fail(msg: impl Into<String>) -> DevForgeError {
@@ -102,15 +107,22 @@ async fn cf_request<T: for<'de> Deserialize<'de>>(
     parsed.result.ok_or_else(|| fail("Cloudflare: réponse vide"))
 }
 
-pub async fn ping(token: &str) -> Result<()> {
-    let _: Vec<CfAccount> = cf_request(
+pub async fn ping(token: &str) -> Result<String> {
+    let accounts: Vec<CfAccount> = cf_request(
         token,
         reqwest::Method::GET,
-        "/accounts?per_page=1",
+        "/accounts?per_page=5",
         None,
     )
     .await?;
-    Ok(())
+    let a = accounts
+        .first()
+        .ok_or_else(|| fail("Aucun compte Cloudflare pour ce token"))?;
+    Ok(if a.name.trim().is_empty() {
+        a.id.clone()
+    } else {
+        a.name.clone()
+    })
 }
 
 pub async fn connect(token: &str, zone: &str) -> Result<CloudflareClient> {
@@ -308,6 +320,32 @@ impl CloudflareClient {
             .unwrap_or(json!({}));
         }
         Ok(())
+    }
+
+    pub async fn lookup_name(&self, fqdn: &str) -> Result<Option<(String, String)>> {
+        let fqdn = crate::porkbun::normalize_fqdn(fqdn);
+        let existing: Vec<CfDnsRec> = cf_request(
+            &self.token,
+            reqwest::Method::GET,
+            &format!(
+                "/zones/{}/dns_records?name={fqdn}&per_page=20",
+                self.zone_id
+            ),
+            None,
+        )
+        .await
+        .unwrap_or_default();
+        Ok(existing.into_iter().next().map(|r| {
+            let kind = if r.kind.trim().is_empty() {
+                "CNAME".into()
+            } else {
+                r.kind
+            };
+            (
+                kind,
+                r.content.trim().trim_end_matches('.').to_string(),
+            )
+        }))
     }
 }
 

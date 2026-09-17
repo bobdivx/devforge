@@ -56,6 +56,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/onboarding", get(onboarding_status).post(save_onboarding))
         .route("/api/v1/onboarding/complete", post(complete_onboarding))
         .route("/api/v1/settings/dns", get(get_dns).post(save_dns))
+        .route("/api/v1/settings/dns/status", get(dns_status))
         .route("/api/v1/settings/dns/test", post(test_dns))
         .route("/api/v1/settings/ssh", get(ssh_status).post(save_ssh))
         .route("/api/v1/settings/ssh/generate-key", post(generate_ssh_key))
@@ -804,18 +805,34 @@ async fn save_dns(
     .map_err(internal)?;
     let provision = crate::dns::provision_all(&state).await;
     let dns = crate::dns::load(&state).await;
+    let status = crate::dns::collect_status(&state).await;
     match provision {
         Ok(v) => Ok(Json(json!({
             "ok": true,
             "dns": crate::dns::public_json(&dns),
             "provision": v,
+            "status": status,
         }))),
         Err(e) => Ok(Json(json!({
             "ok": true,
             "dns": crate::dns::public_json(&dns),
             "provision_error": e,
+            "status": status,
         }))),
     }
+}
+
+async fn dns_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_instance_admin(&state, &headers).await?;
+    let dns = crate::dns::load(&state).await;
+    Ok(Json(json!({
+        "ok": true,
+        "dns": crate::dns::public_json(&dns),
+        "status": crate::dns::collect_status(&state).await,
+    })))
 }
 
 async fn test_dns(
@@ -826,7 +843,10 @@ async fn test_dns(
     crate::dns::ping_configured(&state)
         .await
         .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e}))))?;
-    Ok(Json(json!({ "ok": true })))
+    Ok(Json(json!({
+        "ok": true,
+        "status": crate::dns::collect_status(&state).await,
+    })))
 }
 
 async fn complete_onboarding(

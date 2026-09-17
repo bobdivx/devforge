@@ -12,6 +12,52 @@ export type ProjectTemplate = {
   stack: string[];
 };
 
+export type DnsSettingsPublic = {
+  provider: string;
+  zone: string;
+  configured: boolean;
+  token_set: boolean;
+  api_key_set: boolean;
+  secret_set: boolean;
+};
+
+export type DnsNodeStatus = {
+  id: string;
+  name: string;
+  role: string;
+  tunnel: string;
+  ingress: string;
+  public_ip?: string;
+  traefik: boolean;
+  cloudflared: boolean;
+  ok: boolean;
+  error?: string | null;
+};
+
+export type DnsDomainStatus = {
+  fqdn: string;
+  project: string;
+  project_uuid: string;
+  node_id: string;
+  target: string;
+  live?: string | null;
+  live_kind?: string | null;
+  in_sync?: boolean;
+  error?: string | null;
+};
+
+export type DnsRuntimeStatus = {
+  ok: boolean;
+  configured: boolean;
+  provider: string;
+  zone: string;
+  account?: string;
+  token_ok: boolean;
+  error?: string | null;
+  nodes: DnsNodeStatus[];
+  domains: DnsDomainStatus[];
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
   const res = await fetch(`${SERVER_BASE}${path}`, {
@@ -200,15 +246,10 @@ export const api = {
   dnsSettings: () =>
     request<{
       ok: boolean;
-      dns: {
-        provider: string;
-        zone: string;
-        configured: boolean;
-        token_set: boolean;
-        api_key_set: boolean;
-        secret_set: boolean;
-      };
+      dns: DnsSettingsPublic;
     }>('/settings/dns'),
+  dnsRuntimeStatus: () =>
+    request<{ ok: boolean; dns: DnsSettingsPublic; status: DnsRuntimeStatus }>('/settings/dns/status'),
   saveDnsSettings: (body: {
     provider?: string;
     zone?: string;
@@ -216,22 +257,19 @@ export const api = {
   }) =>
     request<{
       ok: boolean;
-      dns: {
-        provider: string;
-        zone: string;
-        configured: boolean;
-        token_set: boolean;
-        api_key_set: boolean;
-        secret_set: boolean;
-      };
-      provision?: { ok?: boolean; nodes?: number; skipped?: boolean };
+      dns: DnsSettingsPublic;
+      provision?: DnsRuntimeStatus & { skipped?: boolean; nodes?: number | DnsNodeStatus[] };
       provision_error?: string;
+      status?: DnsRuntimeStatus;
     }>('/settings/dns', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
   testDnsSettings: () =>
-    request<{ ok: boolean }>('/settings/dns/test', { method: 'POST', body: '{}' }),
+    request<{ ok: boolean; status?: DnsRuntimeStatus }>('/settings/dns/test', {
+      method: 'POST',
+      body: '{}',
+    }),
   sshStatus: () =>
     request<{
       ok: boolean;

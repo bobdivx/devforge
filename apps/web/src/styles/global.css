@@ -54,6 +54,8 @@ a {
 code,
 pre {
   font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 ::selection {

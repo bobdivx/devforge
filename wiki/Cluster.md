@@ -108,4 +108,5 @@ Le crate `crates/cluster` + tables SQLite `cluster_*` portent le v1.
 | POST | `/api/v1/cluster/heartbeat` | secret nœud (+ métriques) |
 | GET/POST/PATCH | `/api/v1/cluster/local` | ouvert si 0 users, sinon admin — PATCH `{ leader_url?, advertise_url? }` (aussi sur un worker) |
 | GET/POST | `/api/v1/settings/dns` | admin — `{ provider: cloudflare\|porkbun\|'', zone?, token? }` puis provision auto |
+| GET | `/api/v1/settings/dns/status` | admin — état réel (tunnels, Traefik, cloudflared, domaines) |
 | POST | `/api/v1/settings/dns/test` | admin — ping Cloudflare ou Porkbun |

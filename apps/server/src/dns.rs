@@ -3,8 +3,8 @@
 use crate::state::AppState;
 use devforge_cluster::LEADER_NODE_ID;
 use devforge_domain::{
-    cloudflare_connect, cloudflare_ping, infer_zone, porkbun_ping, upsert_record, CloudflareClient,
-    PorkbunCreds,
+    cloudflare_connect, cloudflare_ping, infer_zone, porkbun_lookup, porkbun_ping,
+    porkbun_verify_zone, upsert_record, CloudflareClient, PorkbunCreds,
 };
 use serde_json::{json, Value};
 
@@ -154,12 +154,22 @@ pub async fn provision_node(state: &AppState, server_id: &str) {
     }
 }
 
+async fn docker_running(state: &AppState, server_id: &str, container: &str) -> Result<bool, String> {
+    let cmd = format!(
+        "docker inspect -f '{{{{.State.Running}}}}' {container} 2>/dev/null || echo false"
+    );
+    let res = state
+        .deploy
+        .exec(server_id, "", &cmd, 8)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(res.output.trim().eq_ignore_ascii_case("true"))
+}
+
 async fn cloudflared_running(state: &AppState, server_id: &str) -> bool {
-    let cmd = "docker inspect -f '{{.State.Running}}' devforge-cloudflared 2>/dev/null || echo false";
-    let Ok(res) = state.deploy.exec(server_id, "", cmd, 8).await else {
-        return false;
-    };
-    res.output.trim().eq_ignore_ascii_case("true")
+    docker_running(state, server_id, "devforge-cloudflared")
+        .await
+        .unwrap_or(false)
 }
 
 async fn node_ids(state: &AppState) -> Result<Vec<String>, String> {
@@ -187,9 +197,11 @@ pub async fn provision_nodes(state: &AppState) -> Result<Value, String> {
         return Err("Token manquant".into());
     }
     match dns.provider.as_str() {
-        "cloudflare" => cloudflare_ping(&dns.api_key)
-            .await
-            .map_err(|e| e.to_string())?,
+        "cloudflare" => {
+            let _ = cloudflare_ping(&dns.api_key)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
         "porkbun" => {
             let c = porkbun_creds(&dns).ok_or("Porkbun : colle APIKEY:SECRET")?;
             porkbun_ping(&c).await.map_err(|e| e.to_string())?;
@@ -215,7 +227,7 @@ pub async fn provision_all(state: &AppState) -> Result<Value, String> {
     for (uuid,) in projects {
         sync_project(state, &uuid).await;
     }
-    Ok(v)
+    Ok(collect_status(state).await)
 }
 
 pub fn spawn_dns_loop(state: AppState) {
@@ -353,6 +365,271 @@ pub async fn note_public_ip(state: &AppState, node_id: &str, ip: &str) {
     }
 }
 
+async fn list_managed_domains(state: &AppState) -> Vec<Value> {
+    let rows: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT uuid, name, server_id, production_url FROM projects ORDER BY name",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .unwrap_or_default();
+    let mut out = Vec::new();
+    for (uuid, name, server_id, production_url) in rows {
+        let sid = server_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(LEADER_NODE_ID)
+            .to_string();
+        let target = ingress_for(state, &sid).await;
+        let mut fqdns = Vec::new();
+        if let Some(url) = production_url.as_deref() {
+            if let Some(f) = crate::routes::fqdn_from_url(url) {
+                fqdns.push(f);
+            }
+        }
+        if let Ok(listed) = state.domains.list(&uuid).await {
+            if let Some(arr) = listed.get("domains").and_then(|d| d.as_array()) {
+                for d in arr {
+                    if let Some(f) = d.get("fqdn").and_then(|v| v.as_str()) {
+                        let t = f.trim().trim_end_matches('.').to_lowercase();
+                        if t.contains('.') && !fqdns.iter().any(|x| x == &t) {
+                            fqdns.push(t);
+                        }
+                    }
+                }
+            }
+        }
+        for fqdn in fqdns {
+            out.push(json!({
+                "fqdn": fqdn,
+                "project": name,
+                "project_uuid": uuid,
+                "node_id": sid,
+                "target": target,
+            }));
+        }
+    }
+    out
+}
+
+fn same_dns_target(a: &str, b: &str) -> bool {
+    a.trim().trim_end_matches('.').eq_ignore_ascii_case(b.trim().trim_end_matches('.'))
+}
+
+async fn enrich_live_records(dns: &DnsSettings, domains: &mut [Value]) {
+    if domains.is_empty() {
+        return;
+    }
+    match dns.provider.as_str() {
+        "porkbun" => {
+            let Some(c) = porkbun_creds(dns) else {
+                return;
+            };
+            for d in domains.iter_mut() {
+                let fqdn = d["fqdn"].as_str().unwrap_or("").to_string();
+                let target = d["target"].as_str().unwrap_or("").to_string();
+                match porkbun_lookup(&c, &fqdn).await {
+                    Ok(Some((kind, content))) => {
+                        let synced = same_dns_target(&content, &target);
+                        d["live_kind"] = json!(kind);
+                        d["live"] = json!(content);
+                        d["in_sync"] = json!(synced);
+                        if !synced {
+                            d["error"] = json!(format!(
+                                "Porkbun a {kind} {content}, attendu {target}"
+                            ));
+                        }
+                    }
+                    Ok(None) => {
+                        d["in_sync"] = json!(false);
+                        d["error"] = json!("record absent chez Porkbun");
+                    }
+                    Err(e) => {
+                        d["in_sync"] = json!(false);
+                        d["error"] = json!(e.to_string());
+                    }
+                }
+            }
+        }
+        "cloudflare" => {
+            let Ok(cf) = cloudflare_connect(&dns.api_key, &dns.zone).await else {
+                return;
+            };
+            for d in domains.iter_mut() {
+                let fqdn = d["fqdn"].as_str().unwrap_or("").to_string();
+                let target = d["target"].as_str().unwrap_or("").to_string();
+                match cf.lookup_name(&fqdn).await {
+                    Ok(Some((kind, content))) => {
+                        let synced = same_dns_target(&content, &target);
+                        d["live_kind"] = json!(kind);
+                        d["live"] = json!(content);
+                        d["in_sync"] = json!(synced);
+                        if !synced {
+                            d["error"] = json!(format!(
+                                "Cloudflare a {kind} {content}, attendu {target}"
+                            ));
+                        }
+                    }
+                    Ok(None) => {
+                        d["in_sync"] = json!(false);
+                        d["error"] = json!("CNAME absent chez Cloudflare");
+                    }
+                    Err(e) => {
+                        d["in_sync"] = json!(false);
+                        d["error"] = json!(e.to_string());
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+pub async fn collect_status(state: &AppState) -> Value {
+    let dns = load(state).await;
+    let mut token_ok = false;
+    let mut account = String::new();
+    let mut error: Option<String> = None;
+    if !dns.provider.is_empty() && !dns.api_key.trim().is_empty() {
+        match dns.provider.as_str() {
+            "cloudflare" => match cloudflare_ping(&dns.api_key).await {
+                Ok(name) => {
+                    token_ok = true;
+                    account = name;
+                    if !dns.zone.is_empty() {
+                        if let Err(e) = cloudflare_connect(&dns.api_key, &dns.zone).await {
+                            error = Some(e.to_string());
+                            token_ok = false;
+                        }
+                    }
+                }
+                Err(e) => error = Some(e.to_string()),
+            },
+            "porkbun" => match porkbun_creds(&dns) {
+                Some(c) => match porkbun_ping(&c).await {
+                    Ok(()) => {
+                        token_ok = true;
+                        if let Err(e) = porkbun_verify_zone(&c).await {
+                            error = Some(e.to_string());
+                            token_ok = false;
+                        }
+                    }
+                    Err(e) => error = Some(e.to_string()),
+                },
+                None => error = Some("Porkbun : token APIKEY:SECRET incomplet".into()),
+            },
+            _ => {}
+        }
+    } else if !dns.provider.is_empty() {
+        error = Some("Token manquant".into());
+    }
+
+    let listed = state.cluster.list_nodes().await.unwrap_or_default();
+    let ids = node_ids(state).await.unwrap_or_else(|_| vec![LEADER_NODE_ID.into()]);
+    let mut nodes_out = Vec::new();
+    for id in ids {
+        let meta = listed.iter().find(|n| n.id == id);
+        let name = meta
+            .map(|n| n.name.clone())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| id.clone());
+        let role = meta
+            .map(|n| n.role.as_str().to_string())
+            .unwrap_or_else(|| "leader".into());
+        let ingress = meta
+            .map(|n| n.ingress_host.trim().to_string())
+            .unwrap_or_default();
+        let public_ip = meta
+            .and_then(|n| n.metrics.public_ip.clone())
+            .unwrap_or_default();
+        let traefik = docker_running(state, &id, "devforge-traefik").await;
+        let agent = if dns.provider == "cloudflare" {
+            docker_running(state, &id, "devforge-cloudflared").await
+        } else {
+            Ok(false)
+        };
+        let mut node_error = None;
+        let (traefik_ok, traefik_err) = match &traefik {
+            Ok(v) => (*v, None),
+            Err(e) => (false, Some(e.clone())),
+        };
+        let (agent_ok, agent_err) = match &agent {
+            Ok(v) => (*v, None),
+            Err(e) => (false, Some(e.clone())),
+        };
+        if let Some(e) = traefik_err {
+            node_error = Some(format!("nœud injoignable ({e})"));
+        } else if dns.provider == "cloudflare" {
+            if let Some(e) = agent_err {
+                node_error = Some(format!("nœud injoignable ({e})"));
+            }
+        }
+        match dns.provider.as_str() {
+            "cloudflare" => {
+                if !ingress.ends_with("cfargotunnel.com") {
+                    node_error = Some(
+                        node_error.unwrap_or_else(|| "tunnel Cloudflare non créé".into()),
+                    );
+                } else if !agent_ok && node_error.is_none() {
+                    node_error = Some("cloudflared n’est pas démarré".into());
+                } else if !traefik_ok && node_error.is_none() {
+                    node_error = Some("Traefik n’est pas démarré".into());
+                }
+            }
+            "porkbun" => {
+                if ingress.is_empty() && node_error.is_none() {
+                    node_error = Some(if public_ip.is_empty() {
+                        "IP publique absente".into()
+                    } else {
+                        format!("IP {public_ip} détectée, pas encore écrite comme cible DNS")
+                    });
+                } else if !traefik_ok && node_error.is_none() {
+                    node_error = Some("Traefik n’est pas démarré".into());
+                }
+            }
+            _ => {}
+        }
+        let ok = node_error.is_none()
+            && traefik_ok
+            && match dns.provider.as_str() {
+                "cloudflare" => agent_ok && ingress.ends_with("cfargotunnel.com"),
+                "porkbun" => !ingress.is_empty(),
+                _ => true,
+            };
+        nodes_out.push(json!({
+            "id": id,
+            "name": name,
+            "role": role,
+            "tunnel": if dns.provider == "cloudflare" { tunnel_name(&id) } else { String::new() },
+            "ingress": ingress,
+            "public_ip": public_ip,
+            "traefik": traefik_ok,
+            "cloudflared": agent_ok,
+            "ok": ok,
+            "error": node_error,
+        }));
+    }
+
+    let mut domains = list_managed_domains(state).await;
+    enrich_live_records(&dns, &mut domains).await;
+    let nodes_ok = !nodes_out.is_empty() && nodes_out.iter().all(|n| n["ok"].as_bool() == Some(true));
+    let domains_ok = domains
+        .iter()
+        .all(|d| d["in_sync"].as_bool().unwrap_or(true));
+    let ok = configured(&dns) && token_ok && error.is_none() && nodes_ok && domains_ok;
+    json!({
+        "ok": ok,
+        "configured": configured(&dns),
+        "provider": dns.provider,
+        "zone": dns.zone,
+        "account": account,
+        "token_ok": token_ok,
+        "error": error,
+        "nodes": nodes_out,
+        "domains": domains,
+    })
+}
+
 pub fn public_json(dns: &DnsSettings) -> Value {
     json!({
         "provider": dns.provider,
@@ -371,7 +648,7 @@ pub async fn ping_configured(state: &AppState) -> Result<(), String> {
             if dns.api_key.trim().is_empty() {
                 return Err("Token Cloudflare manquant".into());
             }
-            cloudflare_ping(&dns.api_key)
+            let _ = cloudflare_ping(&dns.api_key)
                 .await
                 .map_err(|e| e.to_string())?;
             if !dns.zone.is_empty() {
@@ -383,7 +660,8 @@ pub async fn ping_configured(state: &AppState) -> Result<(), String> {
         }
         "porkbun" => {
             let c = porkbun_creds(&dns).ok_or("Porkbun : token APIKEY:SECRET et domaine")?;
-            porkbun_ping(&c).await.map_err(|e| e.to_string())
+            porkbun_ping(&c).await.map_err(|e| e.to_string())?;
+            porkbun_verify_zone(&c).await.map_err(|e| e.to_string())
         }
         _ => Err("Choisis Cloudflare ou Porkbun".into()),
     }

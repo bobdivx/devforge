@@ -1,7 +1,10 @@
 mod porkbun;
 mod cloudflare;
 
-pub use porkbun::{delete_record, ping as porkbun_ping, split_host, upsert_record, PorkbunCreds};
+pub use porkbun::{
+    delete_record, lookup as porkbun_lookup, ping as porkbun_ping, split_host, upsert_record,
+    verify_zone as porkbun_verify_zone, PorkbunCreds,
+};
 pub use cloudflare::{
     connect as cloudflare_connect, infer_zone, parse_porkbun_token, ping as cloudflare_ping,
     CloudflareClient,
