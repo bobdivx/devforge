@@ -299,6 +299,7 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ("porkbun_api_key", "TEXT NOT NULL DEFAULT ''"),
         ("porkbun_secret", "TEXT NOT NULL DEFAULT ''"),
         ("porkbun_zone", "TEXT NOT NULL DEFAULT ''"),
+        ("cloudflare_api_token", "TEXT NOT NULL DEFAULT ''"),
     ] {
         let sql = format!("ALTER TABLE instance_settings ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;

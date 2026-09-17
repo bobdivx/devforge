@@ -734,71 +734,99 @@ async fn save_dns(
         .token
         .as_deref()
         .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
-    if let Some(t) = token {
-        match dns.provider.as_str() {
-            "porkbun" => {
-                let (k, s) = devforge_domain::parse_porkbun_token(&t);
-                if k.is_empty() {
-                    return Err((
-                        axum::http::StatusCode::BAD_REQUEST,
-                        Json(json!({"error": "Token Porkbun vide"})),
-                    ));
+        .filter(|s| !s.is_empty());
+    match dns.provider.as_str() {
+        "cloudflare" => {
+            if let Some(t) = token {
+                dns.cf_token = t.to_string();
+            }
+        }
+        "porkbun" => {
+            let mut k = body
+                .api_key
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let mut s = body
+                .secret
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            if k.is_none() && s.is_none() {
+                if let Some(t) = token {
+                    let (pk, ps) = devforge_domain::parse_porkbun_token(t);
+                    if pk.is_empty() {
+                        return Err((
+                            axum::http::StatusCode::BAD_REQUEST,
+                            Json(json!({"error": "Clé API Porkbun vide"})),
+                        ));
+                    }
+                    if ps.is_empty() {
+                        return Err((
+                            axum::http::StatusCode::BAD_REQUEST,
+                            Json(json!({"error": "Porkbun : renseigne la clé API et le Secret API (deux champs)"})),
+                        ));
+                    }
+                    k = Some(pk);
+                    s = Some(ps);
                 }
+            } else if s.is_none() {
+                if let Some(ref key) = k {
+                    if key.contains(':') || key.contains('|') {
+                        let (pk, ps) = devforge_domain::parse_porkbun_token(key);
+                        if !ps.is_empty() {
+                            k = Some(pk);
+                            s = Some(ps);
+                        }
+                    }
+                }
+            }
+            if let Some(k) = k {
                 dns.api_key = k;
-                if s.is_empty() {
-                    return Err((
-                        axum::http::StatusCode::BAD_REQUEST,
-                        Json(json!({"error": "Porkbun : colle APIKEY:SECRET dans le champ token"})),
-                    ));
-                }
+            }
+            if let Some(s) = s {
                 dns.secret = s;
             }
-            "cloudflare" => {
-                dns.api_key = t;
-                dns.secret.clear();
-            }
-            _ => {
-                dns.api_key = t;
-            }
+            let (nk, ns) = devforge_domain::normalize_porkbun_keys(&dns.api_key, &dns.secret);
+            dns.api_key = nk;
+            dns.secret = ns;
         }
-    } else {
-        if let Some(k) = body.api_key {
-            let t = k.trim().to_string();
-            if !t.is_empty() {
-                dns.api_key = t;
-            }
-        }
-        if let Some(s) = body.secret {
-            let t = s.trim().to_string();
-            if !t.is_empty() {
-                dns.secret = t;
-            }
-        }
+        _ => {}
     }
     if dns.provider == "porkbun" && (dns.api_key.is_empty() || dns.secret.is_empty()) {
         return Err((
             axum::http::StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Porkbun : token APIKEY:SECRET requis"})),
+            Json(json!({"error": "Porkbun : renseigne la clé API et le Secret API (ce ne sont pas le token Cloudflare)"})),
         ));
     }
-    if dns.provider == "cloudflare" && dns.api_key.is_empty() {
-        return Err((
-            axum::http::StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Token Cloudflare requis"})),
-        ));
+    if dns.provider == "cloudflare" {
+        if dns.cf_token.trim().is_empty()
+            && dns.secret.trim().is_empty()
+            && !dns.api_key.trim().is_empty()
+        {
+            dns.cf_token = dns.api_key.clone();
+        }
+        if dns.cf_token.trim().is_empty() {
+            return Err((
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Token Cloudflare requis"})),
+            ));
+        }
     }
     let now = now_str();
     sqlx::query(
         r#"UPDATE instance_settings SET
-            dns_provider = ?, porkbun_zone = ?, porkbun_api_key = ?, porkbun_secret = ?, updated_at = ?
+            dns_provider = ?, porkbun_zone = ?, porkbun_api_key = ?, porkbun_secret = ?,
+            cloudflare_api_token = ?, updated_at = ?
            WHERE id = 1"#,
     )
     .bind(&dns.provider)
     .bind(&dns.zone)
     .bind(&dns.api_key)
     .bind(&dns.secret)
+    .bind(&dns.cf_token)
     .bind(&now)
     .execute(&state.pool)
     .await

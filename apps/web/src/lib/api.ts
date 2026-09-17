@@ -17,6 +17,8 @@ export type DnsSettingsPublic = {
   zone: string;
   configured: boolean;
   token_set: boolean;
+  cloudflare_token_set?: boolean;
+  porkbun_token_set?: boolean;
   api_key_set: boolean;
   secret_set: boolean;
 };
@@ -254,6 +256,8 @@ export const api = {
     provider?: string;
     zone?: string;
     token?: string;
+    api_key?: string;
+    secret?: string;
   }) =>
     request<{
       ok: boolean;

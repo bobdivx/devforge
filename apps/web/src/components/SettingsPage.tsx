@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api, type DnsRuntimeStatus } from '../lib/api';
+import { api, type DnsRuntimeStatus, type DnsSettingsPublic } from '../lib/api';
 import { AppShell } from './AppShell';
 import { BackupSettingsPanel } from './BackupSettingsPanel';
 import { DockerEngineAlert } from './DockerEngineAlert';
@@ -164,7 +164,11 @@ export function SettingsPage() {
   const [dnsProvider, setDnsProvider] = useState('');
   const [dnsZone, setDnsZone] = useState('');
   const [dnsToken, setDnsToken] = useState('');
-  const [dnsTokenSet, setDnsTokenSet] = useState(false);
+  const [porkbunApiKey, setPorkbunApiKey] = useState('');
+  const [porkbunSecret, setPorkbunSecret] = useState('');
+  const [cfTokenSet, setCfTokenSet] = useState(false);
+  const [porkbunKeySet, setPorkbunKeySet] = useState(false);
+  const [porkbunSecretSet, setPorkbunSecretSet] = useState(false);
   const [dnsBusy, setDnsBusy] = useState(false);
   const [dnsStatus, setDnsStatus] = useState<DnsRuntimeStatus | null>(null);
   const [dnsStatusLoading, setDnsStatusLoading] = useState(false);
@@ -175,6 +179,12 @@ export function SettingsPage() {
   const [sshPublicKey, setSshPublicKey] = useState('');
   const [sshBusy, setSshBusy] = useState(false);
   const toast = useToast();
+
+  function applyDnsFlags(dns: DnsSettingsPublic) {
+    setCfTokenSet(!!(dns.cloudflare_token_set || (dns.provider === 'cloudflare' && dns.token_set)));
+    setPorkbunKeySet(!!(dns.porkbun_token_set || (dns.api_key_set && dns.secret_set)));
+    setPorkbunSecretSet(!!(dns.porkbun_token_set || (dns.api_key_set && dns.secret_set)));
+  }
 
   async function loadGh() {
     try {
@@ -209,7 +219,7 @@ export function SettingsPage() {
       const r = await api.dnsRuntimeStatus();
       setDnsProvider(r.dns.provider || '');
       setDnsZone(r.dns.zone || '');
-      setDnsTokenSet(!!(r.dns.token_set || r.dns.api_key_set));
+      applyDnsFlags(r.dns);
       setDnsStatus(r.status);
     } catch {
       setDnsStatus(null);
@@ -236,7 +246,7 @@ export function SettingsPage() {
         .then((r) => {
           setDnsProvider(r.dns.provider || '');
           setDnsZone(r.dns.zone || '');
-          setDnsTokenSet(!!(r.dns.token_set || r.dns.api_key_set));
+          applyDnsFlags(r.dns);
         })
         .catch(() => null),
     ]).finally(() => setLoading(false));
@@ -625,15 +635,15 @@ export function SettingsPage() {
               ) : (
                 <Alert tone="info" class="mb-3">
                   {dnsProvider === 'porkbun'
-                    ? 'Colle APIKEY:SECRET. DevForge détecte l’IP de chaque nœud, démarre Traefik et pousse les records A.'
+                    ? 'Colle la clé API et le Secret API Porkbun. DevForge détecte l’IP de chaque nœud, démarre Traefik et pousse les records A.'
                     : 'DevForge crée Traefik, les records DNS et — avec Cloudflare — un tunnel par nœud. Enregistre le token pour voir ce qui a été créé.'}
                 </Alert>
               )
             ) : (
               <Alert tone="info" class="mb-3">
                 Choisis Cloudflare (tunnel, pas de ports à ouvrir) ou Porkbun (record A vers
-                l’IP, ports 80/443). Un token suffit ; le domaine est optionnel s’il se déduit du
-                wildcard.
+                l’IP, ports 80/443). Cloudflare : un token. Porkbun : clé API + secret. Le
+                domaine est optionnel s’il se déduit du wildcard.
               </Alert>
             )}
             {isAdmin ? (
@@ -643,15 +653,26 @@ export function SettingsPage() {
                   e.preventDefault();
                   setDnsBusy(true);
                   try {
-                    const r = await api.saveDnsSettings({
-                      provider: dnsProvider,
-                      zone: dnsZone,
-                      token: dnsToken.trim() || undefined,
-                    });
+                    const r = await api.saveDnsSettings(
+                      dnsProvider === 'porkbun'
+                        ? {
+                            provider: dnsProvider,
+                            zone: dnsZone,
+                            api_key: porkbunApiKey.trim() || undefined,
+                            secret: porkbunSecret.trim() || undefined,
+                          }
+                        : {
+                            provider: dnsProvider,
+                            zone: dnsZone,
+                            token: dnsToken.trim() || undefined,
+                          },
+                    );
                     setDnsProvider(r.dns.provider);
                     setDnsZone(r.dns.zone);
-                    setDnsTokenSet(!!(r.dns.token_set || r.dns.api_key_set));
+                    applyDnsFlags(r.dns);
                     setDnsToken('');
+                    setPorkbunApiKey('');
+                    setPorkbunSecret('');
                     if (r.status) setDnsStatus(r.status);
                     if (r.provision_error) {
                       toast.push({
@@ -720,8 +741,10 @@ export function SettingsPage() {
                 )}
                 {dnsProvider === 'porkbun' && (
                   <p class="text-xs text-[var(--color-ink-muted)]">
-                    Colle <code>APIKEY:SECRET</code>. DevForge pousse un A vers l’IP publique de
-                    chaque nœud. Ports 80/443 ouverts (Let’s Encrypt HTTP-01).
+                    Chez Porkbun : Account → API Access, puis active l’API sur le domaine.
+                    Colle l’API Key (`pk1_…`) et le Secret Key (`sk1_…`) dans les deux champs
+                    (pas un seul token). DevForge pousse un A vers l’IP publique de chaque
+                    nœud. Ports 80/443 ouverts (Let’s Encrypt HTTP-01).
                   </p>
                 )}
                 <Input
@@ -731,20 +754,46 @@ export function SettingsPage() {
                   onInput={(e) => setDnsZone((e.target as HTMLInputElement).value)}
                   hint="Vide = déduit du wildcard ci-dessus (apps.jeser.app → jeser.app)."
                 />
-                <Input
-                  label="Token"
-                  type="password"
-                  placeholder={
-                    dnsTokenSet
-                      ? '•••• déjà enregistré'
-                      : dnsProvider === 'porkbun'
-                        ? 'APIKEY:SECRET'
-                        : 'Token Cloudflare'
-                  }
-                  value={dnsToken}
-                  onInput={(e) => setDnsToken((e.target as HTMLInputElement).value)}
-                  disabled={!dnsProvider}
-                />
+                {dnsProvider === 'porkbun' ? (
+                  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <Input
+                      label="Clé API"
+                      type="password"
+                      autocomplete="off"
+                      placeholder={porkbunKeySet ? '•••• déjà enregistrée' : 'API Key'}
+                      value={porkbunApiKey}
+                      onInput={(e) => setPorkbunApiKey((e.target as HTMLInputElement).value)}
+                      hint={
+                        cfTokenSet && !porkbunKeySet
+                          ? 'La clé Cloudflare reste à part. Colle ici l’API Key Porkbun.'
+                          : undefined
+                      }
+                    />
+                    <Input
+                      label="Secret API"
+                      type="password"
+                      autocomplete="off"
+                      placeholder={porkbunSecretSet ? '•••• déjà enregistré' : 'Secret API Key'}
+                      value={porkbunSecret}
+                      onInput={(e) => setPorkbunSecret((e.target as HTMLInputElement).value)}
+                    />
+                  </div>
+                ) : (
+                  <Input
+                    label="Token"
+                    type="password"
+                    autocomplete="off"
+                    placeholder={cfTokenSet ? '•••• déjà enregistré' : 'Token Cloudflare'}
+                    value={dnsToken}
+                    onInput={(e) => setDnsToken((e.target as HTMLInputElement).value)}
+                    disabled={!dnsProvider}
+                    hint={
+                      porkbunKeySet && porkbunSecretSet && !cfTokenSet
+                        ? 'La clé Porkbun reste enregistrée à part. Colle ici le token Cloudflare.'
+                        : undefined
+                    }
+                  />
+                )}
                 <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   <Button type="submit" size="sm" class="w-full sm:w-auto" disabled={dnsBusy}>
                     Enregistrer

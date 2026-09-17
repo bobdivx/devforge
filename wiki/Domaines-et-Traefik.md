@@ -19,7 +19,7 @@ Settings → Domaine → **Entrée publique**. Token + domaine optionnel (sinon 
 | **Porkbun** | Record A (ou AAAA/CNAME) vers l’IP publique du nœud | Idem, le record pointe vers le nœud d’hébergement |
 | Tunnel Cloudflare **manuel, leader seul** | — | Tous les hostnames de ce tunnel meurent |
 
-Cloudflare : token Account Tunnel Edit + Zone DNS Edit + Account Read. Porkbun : `APIKEY:SECRET`. Ports **80/443** seulement pour Porkbun (Let’s Encrypt HTTP-01). Cloudflare tunnel n’a pas besoin de ports publics.
+Cloudflare : token Account Tunnel Edit + Zone DNS Edit + Account Read. Porkbun : **clé API** + **Secret API** (deux champs). Ports **80/443** seulement pour Porkbun (Let’s Encrypt HTTP-01). Cloudflare tunnel n’a pas besoin de ports publics.
 
 Certificats : crate `domain` + **certbot ACME** via l’executor. Traefik gère aussi l’HTTP challenge.
 
