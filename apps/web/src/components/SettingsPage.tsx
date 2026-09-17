@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { api, type DnsRuntimeStatus, type DnsSettingsPublic } from '../lib/api';
 import { AppShell } from './AppShell';
 import { BackupSettingsPanel } from './BackupSettingsPanel';
+import { DnsEntrypointPanel } from './DnsEntrypointPanel';
 import { DockerEngineAlert } from './DockerEngineAlert';
 import { LlmProvidersPanel } from './LlmProvidersPanel';
 import { SsoSettingsPanel } from './SsoSettingsPanel';
@@ -18,18 +19,10 @@ import {
   HubTile,
   Input,
   LiveStatus,
-  Modal,
   PulseDot,
   Skeleton,
-  Spinner,
   useToast,
 } from './ui';
-
-function dnsProviderLabel(p: string): string {
-  if (p === 'cloudflare') return 'Cloudflare';
-  if (p === 'porkbun') return 'Porkbun';
-  return 'Aucun';
-}
 
 type Health = {
   ok: boolean;
@@ -179,7 +172,6 @@ export function SettingsPage() {
   const [porkbunKeySet, setPorkbunKeySet] = useState(false);
   const [porkbunSecretSet, setPorkbunSecretSet] = useState(false);
   const [inactiveCreds, setInactiveCreds] = useState<string[]>([]);
-  const [dnsBusy, setDnsBusy] = useState(false);
   const [dnsStatus, setDnsStatus] = useState<DnsRuntimeStatus | null>(null);
   const [dnsStatusLoading, setDnsStatusLoading] = useState(false);
   const [switchTarget, setSwitchTarget] = useState<string | null>(null);
@@ -514,540 +506,36 @@ export function SettingsPage() {
               <Alert tone="warn">Réservé à l’admin instance.</Alert>
             )}
           </Card>
-          <Card class="mt-4">
-            <CardHeader
-              title="Entrée publique"
-              action={
-                dnsStatusLoading ? (
-                  <Spinner />
-                ) : activeDnsProvider ? (
-                  <Badge
-                    tone={
-                      dnsStatus?.configured
-                        ? dnsStatus.ok
-                          ? 'ok'
-                          : 'danger'
-                        : 'warn'
-                    }
-                  >
-                    {dnsStatus?.configured
-                      ? dnsStatus.ok
-                        ? 'opérationnel'
-                        : 'à corriger'
-                      : 'config incomplète'}
-                  </Badge>
-                ) : (
-                  <Badge tone="neutral">off</Badge>
-                )
-              }
-            />
-
-            {/* Vue claire : ce qui est réellement en place */}
-            <div class="mb-4 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-3">
-              <p class="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
-                Système actif
-              </p>
-              <p class="mt-1 text-sm font-medium text-[var(--color-ink)]">
-                {activeDnsProvider
-                  ? `${dnsProviderLabel(activeDnsProvider)}${
-                      (dnsStatus?.zone || dnsZone) ? ` · zone ${dnsStatus?.zone || dnsZone}` : ''
-                    }${
-                      dnsStatus?.account && activeDnsProvider === 'cloudflare'
-                        ? ` · ${dnsStatus.account}`
-                        : ''
-                    }`
-                  : 'Aucun DNS auto'}
-              </p>
-              <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
-                Un seul provider à la fois. Cloudflare = tunnels + CNAME · Porkbun = records A vers
-                l’IP du nœud.
-              </p>
-              {dnsProvider !== activeDnsProvider && (
-                <p class="mt-2 text-xs text-[var(--color-warn)]">
-                  Brouillon : {dnsProviderLabel(dnsProvider || '')} — pas encore enregistré.
-                </p>
-              )}
-            </div>
-
-            {activeDnsProvider ? (
-              dnsStatusLoading && !dnsStatus ? (
-                <Skeleton class="mb-3 h-16" />
-              ) : dnsStatus ? (
-                <div class="mb-4 space-y-3">
-                  <Alert tone={dnsStatus.ok ? 'ok' : dnsStatus.token_ok ? 'warn' : 'danger'}>
-                    {dnsStatus.ok
-                      ? dnsStatus.provider === 'cloudflare'
-                        ? `Cloudflare OK${dnsStatus.account ? ` · ${dnsStatus.account}` : ''}${dnsStatus.zone ? ` · zone ${dnsStatus.zone}` : ''}. Un tunnel par nœud est en place.`
-                        : `Porkbun OK${dnsStatus.zone ? ` · zone ${dnsStatus.zone}` : ''}. Les records A visent l’IP de chaque nœud.`
-                      : dnsStatus.error
-                        ? dnsStatus.error
-                        : 'Token enregistré, mais le provisionnement n’est pas complet.'}
-                  </Alert>
-                  {dnsStatus.nodes.length > 0 && (
-                    <div class="space-y-2">
-                      <p class="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
-                        Nœuds
-                      </p>
-                      {dnsStatus.nodes.map((n) => (
-                        <div
-                          key={n.id}
-                          class="min-w-0 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2.5"
-                        >
-                          <div class="flex min-w-0 items-start justify-between gap-2">
-                            <div class="flex min-w-0 items-center gap-2">
-                              <PulseDot tone={n.ok ? 'ok' : 'warn'} />
-                              <span class="min-w-0 truncate text-sm font-medium">{n.name}</span>
-                              <span class="hidden shrink-0 text-xs text-[var(--color-ink-muted)] sm:inline">
-                                {n.role}
-                              </span>
-                            </div>
-                            <Badge tone={n.ok ? 'ok' : 'danger'} class="shrink-0">
-                              {n.ok ? 'OK' : 'KO'}
-                            </Badge>
-                          </div>
-                          <p class="mt-0.5 text-[11px] text-[var(--color-ink-muted)] sm:hidden">
-                            {n.role}
-                          </p>
-                          <dl class="mt-2 grid min-w-0 gap-1 text-xs text-[var(--color-ink-muted)]">
-                            {n.tunnel ? (
-                              <div class="min-w-0">
-                                Tunnel{' '}
-                                <code class="break-all text-[var(--color-ink)]">{n.tunnel}</code>
-                              </div>
-                            ) : null}
-                            <div class="min-w-0">
-                              {dnsStatus.provider === 'porkbun' ? 'IP / cible' : 'Cible'}{' '}
-                              <code class="break-all text-[var(--color-ink)]">
-                                {n.ingress || n.public_ip || '—'}
-                              </code>
-                            </div>
-                            {dnsStatus.provider === 'porkbun' &&
-                            n.public_ip &&
-                            n.ingress &&
-                            n.public_ip !== n.ingress ? (
-                              <div class="min-w-0">
-                                IP détectée{' '}
-                                <code class="break-all text-[var(--color-ink)]">{n.public_ip}</code>
-                              </div>
-                            ) : null}
-                            <div>
-                              Traefik {n.traefik ? 'up' : 'down'}
-                              {dnsStatus.provider === 'cloudflare'
-                                ? ` · cloudflared ${n.cloudflared ? 'up' : 'down'}`
-                                : ' · 80/443 ouverts'}
-                            </div>
-                            {n.error ? (
-                              <div class="break-words text-[var(--color-danger)]">{n.error}</div>
-                            ) : null}
-                          </dl>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div class="space-y-2">
-                    <p class="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
-                      Domaines publics
-                    </p>
-                    {dnsStatus.domains.length === 0 ? (
-                      <p class="text-xs text-[var(--color-ink-muted)]">
-                        {dnsStatus.provider === 'porkbun'
-                          ? 'Aucune app avec un domaine pour l’instant. Traefik et l’IP du nœud sont prêts : le record A se crée au prochain déploiement / domaine attaché.'
-                          : 'Aucune app avec un domaine pour l’instant. Les tunnels ci-dessus sont prêts : le CNAME se crée au prochain déploiement / domaine attaché.'}
-                      </p>
-                    ) : (
-                      dnsStatus.domains.map((d) => (
-                        <div
-                          key={`${d.project_uuid}-${d.fqdn}`}
-                          class="flex min-w-0 flex-col gap-1.5 rounded-xl border border-[var(--color-line)] px-3 py-2 text-xs sm:flex-row sm:flex-wrap sm:items-baseline sm:justify-between"
-                        >
-                          <div class="min-w-0">
-                            <div class="flex min-w-0 flex-wrap items-center gap-2 font-mono text-[var(--color-ink)]">
-                              <span class="min-w-0 break-all">{d.fqdn}</span>
-                              <Badge
-                                class="shrink-0"
-                                tone={
-                                  d.out_of_zone
-                                    ? 'neutral'
-                                    : d.in_sync === false
-                                      ? 'danger'
-                                      : d.in_sync
-                                        ? 'ok'
-                                        : 'neutral'
-                                }
-                              >
-                                {d.out_of_zone
-                                  ? 'hors zone'
-                                  : d.in_sync === false
-                                    ? 'pas en sync'
-                                    : d.in_sync
-                                      ? d.live_kind || 'sync'
-                                      : 'cible'}
-                              </Badge>
-                            </div>
-                            <div class="truncate text-[var(--color-ink-muted)]">{d.project}</div>
-                            {d.error ? (
-                              <div class="break-words text-[var(--color-danger)]">{d.error}</div>
-                            ) : null}
-                          </div>
-                          <code class="min-w-0 break-all text-[var(--color-ink-muted)]">
-                            {d.live
-                              ? `${d.live_kind || ''} ${d.live}`.trim()
-                              : `→ ${d.target || 'pas de cible'}`}
-                          </code>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    class="w-full sm:w-auto"
-                    disabled={dnsBusy || dnsStatusLoading}
-                    onClick={async () => {
-                      setDnsBusy(true);
-                      setDnsStatusLoading(true);
-                      try {
-                        const r = await api.resyncDnsSettings();
-                        applyDnsFlags(r.dns);
-                        setDnsProvider(r.dns.provider || '');
-                        setDnsZone(r.dns.zone || '');
-                        if (r.status) setDnsStatus(r.status);
-                        if (r.provision_error) {
-                          toast.push({
-                            title: 'Resync incomplet',
-                            detail: r.provision_error,
-                            tone: 'danger',
-                          });
-                        } else {
-                          toast.push({
-                            title: r.status?.ok ? 'DNS synchronisé' : 'État actualisé',
-                            tone: r.status?.ok ? 'ok' : 'warn',
-                          });
-                        }
-                      } catch (err) {
-                        toast.push({
-                          title: 'Resync KO',
-                          detail: String((err as Error).message || err),
-                          tone: 'danger',
-                        });
-                      } finally {
-                        setDnsBusy(false);
-                        setDnsStatusLoading(false);
-                      }
-                    }}
-                  >
-                    Actualiser / resync
-                  </Button>
-                </div>
-              ) : (
-                <Alert tone="info" class="mb-3">
-                  {activeDnsProvider === 'porkbun'
-                    ? 'Colle la clé API et le Secret API Porkbun, puis enregistre.'
-                    : 'Enregistre le token Cloudflare pour provisionner tunnels et CNAME.'}
-                </Alert>
-              )
-            ) : (
-              <Alert tone="info" class="mb-3">
-                Choisis Cloudflare (tunnel, pas de ports à ouvrir) ou Porkbun (record A vers
-                l’IP, ports 80/443). Un seul système pilote le DNS — pas les deux.
-              </Alert>
-            )}
-
-            {inactiveCreds.length > 0 && (
-              <div class="mb-4 rounded-xl border border-dashed border-[var(--color-line)] px-3 py-3">
-                <p class="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
-                  Credentials non utilisés
-                </p>
-                <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
-                  Stockés en base mais{' '}
-                  {activeDnsProvider
-                    ? `ignorés tant que ${dnsProviderLabel(activeDnsProvider)} est actif`
-                    : 'pas liés à un provider actif'}
-                  .
-                </p>
-                <ul class="mt-2 space-y-2">
-                  {inactiveCreds.map((p) => (
-                    <li
-                      key={p}
-                      class="flex flex-wrap items-center justify-between gap-2 text-sm text-[var(--color-ink)]"
-                    >
-                      <span>{dnsProviderLabel(p)} — enregistré, inactif</span>
-                      {isAdmin && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          disabled={dnsBusy}
-                          onClick={async () => {
-                            setDnsBusy(true);
-                            try {
-                              const r = await api.clearDnsCredentials(
-                                p === 'cloudflare' ? 'cloudflare' : 'porkbun',
-                              );
-                              applyDnsFlags(r.dns);
-                              setDnsProvider(r.dns.provider || '');
-                              if (r.status) setDnsStatus(r.status);
-                              toast.push({
-                                title: 'Credentials effacés',
-                                detail: dnsProviderLabel(p),
-                                tone: 'ok',
-                              });
-                            } catch (err) {
-                              toast.push({
-                                title: 'Échec',
-                                detail: String((err as Error).message || err),
-                                tone: 'danger',
-                              });
-                            } finally {
-                              setDnsBusy(false);
-                            }
-                          }}
-                        >
-                          Effacer
-                        </Button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {isAdmin ? (
-              <form
-                class="flex flex-col gap-3"
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  setDnsBusy(true);
-                  try {
-                    const base = {
-                      provider: dnsProvider,
-                      zone: dnsZone,
-                      clear_inactive: clearInactiveOnSave || undefined,
-                    };
-                    const r = await api.saveDnsSettings(
-                      dnsProvider === 'porkbun'
-                        ? {
-                            ...base,
-                            api_key: porkbunApiKey.trim() || undefined,
-                            secret: porkbunSecret.trim() || undefined,
-                          }
-                        : {
-                            ...base,
-                            token: dnsToken.trim() || undefined,
-                          },
-                    );
-                    setDnsProvider(r.dns.provider);
-                    setDnsZone(r.dns.zone);
-                    applyDnsFlags(r.dns);
-                    setDnsToken('');
-                    setPorkbunApiKey('');
-                    setPorkbunSecret('');
-                    setClearInactiveOnSave(false);
-                    if (r.status) setDnsStatus(r.status);
-                    if (r.provision_error) {
-                      toast.push({
-                        title: 'Enregistré, provision incomplet',
-                        detail: r.provision_error,
-                        tone: 'danger',
-                      });
-                    } else {
-                      const nodes = r.status?.nodes ?? [];
-                      const ok = nodes.filter((n) => n.ok).length;
-                      toast.push({
-                        title: r.status?.ok ? 'Entrée publique OK' : 'DNS enregistré',
-                        detail: nodes.length
-                          ? `${ok}/${nodes.length} nœud${nodes.length > 1 ? 's' : ''} prêt${ok > 1 ? 's' : ''}`
-                          : undefined,
-                        tone: r.status?.ok ? 'ok' : 'warn',
-                      });
-                    }
-                  } catch (err) {
-                    toast.push({
-                      title: 'DNS KO',
-                      detail: String((err as Error).message || err),
-                      tone: 'danger',
-                    });
-                  } finally {
-                    setDnsBusy(false);
-                  }
-                }}
-              >
-                <p class="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
-                  Changer de système
-                </p>
-                <div class="grid grid-cols-3 gap-1.5">
-                  <Button
-                    type="button"
-                    size="sm"
-                    class="w-full px-1.5 sm:px-3"
-                    variant={dnsProvider === 'cloudflare' ? 'secondary' : 'ghost'}
-                    onClick={() => requestProviderSwitch('cloudflare')}
-                  >
-                    Cloudflare
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    class="w-full px-1.5 sm:px-3"
-                    variant={dnsProvider === 'porkbun' ? 'secondary' : 'ghost'}
-                    onClick={() => requestProviderSwitch('porkbun')}
-                  >
-                    Porkbun
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    class="w-full px-1.5 sm:px-3"
-                    variant={!dnsProvider ? 'secondary' : 'ghost'}
-                    onClick={() => requestProviderSwitch('')}
-                  >
-                    <span class="sm:hidden">Off</span>
-                    <span class="hidden sm:inline">Désactivé</span>
-                  </Button>
-                </div>
-                {dnsProvider === 'cloudflare' && (
-                  <p class="text-xs text-[var(--color-ink-muted)]">
-                    Token API avec Account Tunnel Edit, Zone DNS Edit et Account Read. Un tunnel
-                    par machine (`devforge-` + id du nœud), CNAME vers cfargotunnel.com (pas de
-                    ports 80/443 à ouvrir).
-                  </p>
-                )}
-                {dnsProvider === 'porkbun' && (
-                  <p class="text-xs text-[var(--color-ink-muted)]">
-                    Chez Porkbun : Account → API Access, puis active l’API sur le domaine.
-                    Colle l’API Key (`pk1_…`) et le Secret Key (`sk1_…`) dans les deux champs.
-                    DevForge pousse un A vers l’IP publique de chaque nœud. Ports 80/443 ouverts.
-                  </p>
-                )}
-                {dnsProvider ? (
-                  <>
-                    <Input
-                      label="Domaine (optionnel)"
-                      placeholder="jeser.app"
-                      value={dnsZone}
-                      onInput={(e) => setDnsZone((e.target as HTMLInputElement).value)}
-                      hint="Vide = déduit du wildcard ci-dessus (apps.jeser.app → jeser.app)."
-                    />
-                    {dnsProvider === 'porkbun' ? (
-                      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <Input
-                          label="Clé API"
-                          type="password"
-                          autocomplete="off"
-                          placeholder={porkbunKeySet ? '•••• déjà enregistrée' : 'API Key'}
-                          value={porkbunApiKey}
-                          onInput={(e) =>
-                            setPorkbunApiKey((e.target as HTMLInputElement).value)
-                          }
-                        />
-                        <Input
-                          label="Secret API"
-                          type="password"
-                          autocomplete="off"
-                          placeholder={porkbunSecretSet ? '•••• déjà enregistré' : 'Secret API Key'}
-                          value={porkbunSecret}
-                          onInput={(e) =>
-                            setPorkbunSecret((e.target as HTMLInputElement).value)
-                          }
-                        />
-                      </div>
-                    ) : (
-                      <Input
-                        label="Token Cloudflare"
-                        type="password"
-                        autocomplete="off"
-                        placeholder={cfTokenSet ? '•••• déjà enregistré' : 'Token Cloudflare'}
-                        value={dnsToken}
-                        onInput={(e) => setDnsToken((e.target as HTMLInputElement).value)}
-                      />
-                    )}
-                  </>
-                ) : null}
-                {clearInactiveOnSave && (
-                  <Alert tone="warn">
-                    À l’enregistrement, les credentials de l’ancien provider seront effacés.
-                  </Alert>
-                )}
-                <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                  <Button type="submit" size="sm" class="w-full sm:w-auto" disabled={dnsBusy}>
-                    Enregistrer
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    class="w-full sm:w-auto"
-                    disabled={dnsBusy || !dnsProvider}
-                    onClick={async () => {
-                      setDnsBusy(true);
-                      try {
-                        const r = await api.testDnsSettings();
-                        if (r.status) setDnsStatus(r.status);
-                        toast.push({
-                          title: r.status?.ok
-                            ? 'Entrée publique OK'
-                            : dnsProvider === 'porkbun'
-                              ? 'Porkbun joignable'
-                              : 'Cloudflare joignable',
-                          detail: r.status?.error || undefined,
-                          tone: r.status?.ok ? 'ok' : 'warn',
-                        });
-                      } catch (err) {
-                        toast.push({
-                          title: 'Ping DNS KO',
-                          detail: String((err as Error).message || err),
-                          tone: 'danger',
-                        });
-                      } finally {
-                        setDnsBusy(false);
-                      }
-                    }}
-                  >
-                    Tester
-                  </Button>
-                </div>
-              </form>
-            ) : (
-              <Alert tone="warn">Réservé à l’admin instance.</Alert>
-            )}
-          </Card>
-
-          <Modal
-            open={switchTarget !== null}
-            onClose={() => setSwitchTarget(null)}
-            title="Changer de système DNS"
-            size="sm"
-            description="Un seul provider pilote l’entrée publique. L’autre ne sera plus utilisé pour synchroniser les records."
-            footer={
-              <>
-                <Button type="button" variant="ghost" onClick={() => setSwitchTarget(null)}>
-                  Annuler
-                </Button>
-                <Button type="button" onClick={confirmProviderSwitch}>
-                  Continuer
-                </Button>
-              </>
-            }
-          >
-            <p class="text-sm text-[var(--color-ink)]">
-              Passer de{' '}
-              <strong>{dnsProviderLabel(activeDnsProvider || dnsProvider)}</strong> à{' '}
-              <strong>{dnsProviderLabel(switchTarget || '')}</strong>.
-            </p>
-            <label class="mt-4 flex cursor-pointer items-start gap-2 text-sm text-[var(--color-ink)]">
-              <input
-                type="checkbox"
-                class="mt-1"
-                checked={clearOnSwitch}
-                onChange={(e) => setClearOnSwitch((e.target as HTMLInputElement).checked)}
-              />
-              <span>
-                Effacer les credentials de l’ancien provider à l’enregistrement (recommandé pour
-                éviter la confusion).
-              </span>
-            </label>
-          </Modal>
+          <DnsEntrypointPanel
+            isAdmin={isAdmin}
+            dnsProvider={dnsProvider}
+            setDnsProvider={setDnsProvider}
+            activeDnsProvider={activeDnsProvider}
+            dnsZone={dnsZone}
+            setDnsZone={setDnsZone}
+            dnsToken={dnsToken}
+            setDnsToken={setDnsToken}
+            porkbunApiKey={porkbunApiKey}
+            setPorkbunApiKey={setPorkbunApiKey}
+            porkbunSecret={porkbunSecret}
+            setPorkbunSecret={setPorkbunSecret}
+            cfTokenSet={cfTokenSet}
+            porkbunKeySet={porkbunKeySet}
+            porkbunSecretSet={porkbunSecretSet}
+            inactiveCreds={inactiveCreds}
+            dnsStatus={dnsStatus}
+            setDnsStatus={setDnsStatus}
+            dnsStatusLoading={dnsStatusLoading}
+            applyDnsFlags={applyDnsFlags}
+            clearInactiveOnSave={clearInactiveOnSave}
+            setClearInactiveOnSave={setClearInactiveOnSave}
+            requestProviderSwitch={requestProviderSwitch}
+            switchTarget={switchTarget}
+            setSwitchTarget={setSwitchTarget}
+            clearOnSwitch={clearOnSwitch}
+            setClearOnSwitch={setClearOnSwitch}
+            confirmProviderSwitch={confirmProviderSwitch}
+          />
         </FadeIn>
       )}
 
