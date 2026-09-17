@@ -666,18 +666,22 @@ export function SettingsPage() {
                               <Badge
                                 class="shrink-0"
                                 tone={
-                                  d.in_sync === false
-                                    ? 'danger'
-                                    : d.in_sync
-                                      ? 'ok'
-                                      : 'neutral'
+                                  d.out_of_zone
+                                    ? 'neutral'
+                                    : d.in_sync === false
+                                      ? 'danger'
+                                      : d.in_sync
+                                        ? 'ok'
+                                        : 'neutral'
                                 }
                               >
-                                {d.in_sync === false
-                                  ? 'pas en sync'
-                                  : d.in_sync
-                                    ? d.live_kind || 'sync'
-                                    : 'cible'}
+                                {d.out_of_zone
+                                  ? 'hors zone'
+                                  : d.in_sync === false
+                                    ? 'pas en sync'
+                                    : d.in_sync
+                                      ? d.live_kind || 'sync'
+                                      : 'cible'}
                               </Badge>
                             </div>
                             <div class="truncate text-[var(--color-ink-muted)]">{d.project}</div>
@@ -700,9 +704,40 @@ export function SettingsPage() {
                     variant="ghost"
                     class="w-full sm:w-auto"
                     disabled={dnsBusy || dnsStatusLoading}
-                    onClick={() => void loadDnsStatus()}
+                    onClick={async () => {
+                      setDnsBusy(true);
+                      setDnsStatusLoading(true);
+                      try {
+                        const r = await api.resyncDnsSettings();
+                        applyDnsFlags(r.dns);
+                        setDnsProvider(r.dns.provider || '');
+                        setDnsZone(r.dns.zone || '');
+                        if (r.status) setDnsStatus(r.status);
+                        if (r.provision_error) {
+                          toast.push({
+                            title: 'Resync incomplet',
+                            detail: r.provision_error,
+                            tone: 'danger',
+                          });
+                        } else {
+                          toast.push({
+                            title: r.status?.ok ? 'DNS synchronisé' : 'État actualisé',
+                            tone: r.status?.ok ? 'ok' : 'warn',
+                          });
+                        }
+                      } catch (err) {
+                        toast.push({
+                          title: 'Resync KO',
+                          detail: String((err as Error).message || err),
+                          tone: 'danger',
+                        });
+                      } finally {
+                        setDnsBusy(false);
+                        setDnsStatusLoading(false);
+                      }
+                    }}
                   >
-                    Actualiser l’état
+                    Actualiser / resync
                   </Button>
                 </div>
               ) : (

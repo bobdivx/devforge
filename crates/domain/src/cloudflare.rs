@@ -168,6 +168,68 @@ pub async fn connect(token: &str, zone: &str) -> Result<CloudflareClient> {
     })
 }
 
+/// Client Cloudflare pointé sur la zone Cloudflare qui possède ce FQDN (plus long match).
+pub async fn connect_for_fqdn(token: &str, fqdn: &str) -> Result<CloudflareClient> {
+    let token = token.trim();
+    if token.is_empty() {
+        return Err(fail("token Cloudflare manquant"));
+    }
+    let fqdn = crate::porkbun::normalize_fqdn(fqdn);
+    if !fqdn.contains('.') {
+        return Err(fail(format!("FQDN invalide: {fqdn}")));
+    }
+    let accounts: Vec<CfAccount> = cf_request(
+        token,
+        reqwest::Method::GET,
+        "/accounts?per_page=5",
+        None,
+    )
+    .await?;
+    let account_id = accounts
+        .first()
+        .map(|a| a.id.clone())
+        .ok_or_else(|| fail("Aucun compte Cloudflare pour ce token"))?;
+    let zones: Vec<CfZone> = cf_request(
+        token,
+        reqwest::Method::GET,
+        "/zones?per_page=50",
+        None,
+    )
+    .await?;
+    let mut best: Option<CfZone> = None;
+    for z in zones {
+        let name = z.name.trim().trim_end_matches('.').to_lowercase();
+        if name.is_empty() {
+            continue;
+        }
+        let matches = fqdn == name || fqdn.ends_with(&format!(".{name}"));
+        if !matches {
+            continue;
+        }
+        let better = best
+            .as_ref()
+            .map(|b| name.len() > b.name.len())
+            .unwrap_or(true);
+        if better {
+            best = Some(CfZone {
+                id: z.id,
+                name,
+            });
+        }
+    }
+    let z = best.ok_or_else(|| {
+        fail(format!(
+            "Aucune zone Cloudflare pour {fqdn} sur ce compte — ajoute le domaine dans Cloudflare ou retire-le du projet"
+        ))
+    })?;
+    Ok(CloudflareClient {
+        token: token.into(),
+        account_id,
+        zone_id: z.id,
+        zone: z.name,
+    })
+}
+
 impl CloudflareClient {
     pub fn tunnel_hostname(tunnel_id: &str) -> String {
         format!("{}.cfargotunnel.com", tunnel_id.trim())

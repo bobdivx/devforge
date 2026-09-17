@@ -58,6 +58,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/settings/dns", get(get_dns).post(save_dns))
         .route("/api/v1/settings/dns/status", get(dns_status))
         .route("/api/v1/settings/dns/test", post(test_dns))
+        .route("/api/v1/settings/dns/resync", post(resync_dns))
         .route("/api/v1/settings/dns/clear-credentials", post(clear_dns_credentials))
         .route("/api/v1/settings/ssh", get(ssh_status).post(save_ssh))
         .route("/api/v1/settings/ssh/generate-key", post(generate_ssh_key))
@@ -900,6 +901,28 @@ async fn test_dns(
         "ok": true,
         "status": crate::dns::collect_status(&state).await,
     })))
+}
+
+async fn resync_dns(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_instance_admin(&state, &headers).await?;
+    let provision = crate::dns::provision_all(&state).await;
+    let dns = crate::dns::load(&state).await;
+    match provision {
+        Ok(status) => Ok(Json(json!({
+            "ok": true,
+            "dns": crate::dns::public_json(&dns),
+            "status": status,
+        }))),
+        Err(e) => Ok(Json(json!({
+            "ok": true,
+            "dns": crate::dns::public_json(&dns),
+            "provision_error": e,
+            "status": crate::dns::collect_status(&state).await,
+        }))),
+    }
 }
 
 async fn clear_dns_credentials(

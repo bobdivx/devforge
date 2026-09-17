@@ -46,7 +46,8 @@ export type DnsDomainStatus = {
   target: string;
   live?: string | null;
   live_kind?: string | null;
-  in_sync?: boolean;
+  in_sync?: boolean | null;
+  out_of_zone?: boolean;
   error?: string | null;
 };
 
@@ -274,6 +275,16 @@ export const api = {
     }),
   testDnsSettings: () =>
     request<{ ok: boolean; status?: DnsRuntimeStatus }>('/settings/dns/test', {
+      method: 'POST',
+      body: '{}',
+    }),
+  resyncDnsSettings: () =>
+    request<{
+      ok: boolean;
+      dns: DnsSettingsPublic;
+      status?: DnsRuntimeStatus;
+      provision_error?: string;
+    }>('/settings/dns/resync', {
       method: 'POST',
       body: '{}',
     }),

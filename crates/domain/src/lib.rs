@@ -7,8 +7,8 @@ pub use porkbun::{
     PorkbunCreds,
 };
 pub use cloudflare::{
-    connect as cloudflare_connect, infer_zone, parse_porkbun_token, ping as cloudflare_ping,
-    CloudflareClient,
+    connect as cloudflare_connect, connect_for_fqdn as cloudflare_connect_for_fqdn, infer_zone,
+    parse_porkbun_token, ping as cloudflare_ping, CloudflareClient,
 };
 
 use async_trait::async_trait;

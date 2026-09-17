@@ -3,8 +3,8 @@
 use crate::state::AppState;
 use devforge_cluster::LEADER_NODE_ID;
 use devforge_domain::{
-    cloudflare_connect, cloudflare_ping, infer_zone, porkbun_lookup, porkbun_ping,
-    porkbun_verify_zone, upsert_record, CloudflareClient, PorkbunCreds,
+    cloudflare_connect, cloudflare_connect_for_fqdn, cloudflare_ping, infer_zone, porkbun_lookup,
+    porkbun_ping, porkbun_verify_zone, split_host, upsert_record, CloudflareClient, PorkbunCreds,
 };
 use serde_json::{json, Value};
 
@@ -184,9 +184,18 @@ pub async fn provision_node(state: &AppState, server_id: &str) {
         }
         "porkbun" => {
             let cur = ingress_for(state, &sid).await;
-            if cur.is_empty() {
+            let needs_ip = cur.is_empty()
+                || cur.ends_with("cfargotunnel.com")
+                || cur.parse::<std::net::IpAddr>().is_err();
+            if needs_ip {
                 if let Some(ip) = detect_public_ip(state, &sid).await {
                     set_ingress_host(state, &sid, &ip).await;
+                    tracing::info!(node = %sid, %ip, "Porkbun : cible IP (remplace tunnel/legacy)");
+                } else if cur.ends_with("cfargotunnel.com") {
+                    tracing::warn!(
+                        node = %sid,
+                        "Porkbun : IP publique introuvable, cible tunnel Cloudflare encore en place"
+                    );
                 }
             }
         }
@@ -286,7 +295,7 @@ pub fn spawn_dns_loop(state: AppState) {
         interval.tick().await;
         loop {
             interval.tick().await;
-            match provision_nodes(&state).await {
+            match provision_all(&state).await {
                 Ok(v) if v.get("skipped").and_then(|x| x.as_bool()).unwrap_or(false) => {}
                 Ok(_) => tracing::debug!("dns loop ok"),
                 Err(e) => tracing::warn!(error = %e, "dns loop"),
@@ -311,6 +320,10 @@ pub async fn sync_fqdn(state: &AppState, fqdn: &str, server_id: &str) {
     }
     match dns.provider.as_str() {
         "porkbun" => {
+            if split_host(fqdn, &dns.zone).is_err() {
+                tracing::debug!(fqdn, zone = %dns.zone, "hors zone Porkbun — skip sync");
+                return;
+            }
             if let Some(c) = porkbun_creds(&dns) {
                 match upsert_record(&c, fqdn, &host).await {
                     Ok(()) => tracing::info!(fqdn, target = %host, "Porkbun OK"),
@@ -318,15 +331,15 @@ pub async fn sync_fqdn(state: &AppState, fqdn: &str, server_id: &str) {
                 }
             }
         }
-        "cloudflare" => match cloudflare_connect(cf_key(&dns), &dns.zone).await {
+        "cloudflare" => match cloudflare_connect_for_fqdn(cf_key(&dns), fqdn).await {
             Ok(cf) => {
                 if let Err(e) = cf.upsert_cname(fqdn, &host).await {
-                    tracing::warn!(fqdn, error = %e, "Cloudflare DNS");
+                    tracing::warn!(fqdn, zone = %cf.zone, error = %e, "Cloudflare DNS");
                 } else {
-                    tracing::info!(fqdn, target = %host, "Cloudflare CNAME OK");
+                    tracing::info!(fqdn, zone = %cf.zone, target = %host, "Cloudflare CNAME OK");
                 }
             }
-            Err(e) => tracing::warn!(error = %e, "Cloudflare connect"),
+            Err(e) => tracing::warn!(fqdn, error = %e, "Cloudflare zone"),
         },
         _ => {}
     }
@@ -346,7 +359,7 @@ pub async fn remove_fqdn(state: &AppState, fqdn: &str) {
             }
         }
         "cloudflare" => {
-            if let Ok(cf) = cloudflare_connect(cf_key(&dns), &dns.zone).await {
+            if let Ok(cf) = cloudflare_connect_for_fqdn(cf_key(&dns), fqdn).await {
                 if let Err(e) = cf.delete_name(fqdn).await {
                     tracing::warn!(fqdn, error = %e, "Cloudflare delete");
                 }
@@ -401,10 +414,13 @@ pub async fn note_public_ip(state: &AppState, node_id: &str, ip: &str) {
     }
     let id = crate::cluster_routes::normalize_server_id(node_id);
     if let Ok(Some(n)) = state.cluster.store().get_node(&id).await {
-        if n.ingress_host.ends_with("cfargotunnel.com") {
-            return;
-        }
-        if n.ingress_host.trim().is_empty() || n.ingress_host == ip {
+        let cur = n.ingress_host.trim();
+        // Remplacer aussi les tunnels Cloudflare résiduels après un switch Porkbun.
+        if cur.is_empty()
+            || cur == ip
+            || cur.ends_with("cfargotunnel.com")
+            || cur.parse::<std::net::IpAddr>().is_err()
+        {
             set_ingress_host(state, &id, ip).await;
         }
     }
@@ -465,6 +481,7 @@ async fn enrich_live_records(dns: &DnsSettings, domains: &mut [Value]) {
     if domains.is_empty() {
         return;
     }
+    let zone = dns.zone.trim().trim_start_matches('.').to_lowercase();
     match dns.provider.as_str() {
         "porkbun" => {
             let Some(c) = porkbun_creds(dns) else {
@@ -473,6 +490,14 @@ async fn enrich_live_records(dns: &DnsSettings, domains: &mut [Value]) {
             for d in domains.iter_mut() {
                 let fqdn = d["fqdn"].as_str().unwrap_or("").to_string();
                 let target = d["target"].as_str().unwrap_or("").to_string();
+                if !zone.is_empty() && split_host(&fqdn, &zone).is_err() {
+                    d["out_of_zone"] = json!(true);
+                    d["in_sync"] = Value::Null;
+                    d["error"] = json!(format!(
+                        "Hors zone {zone} — Porkbun ne gère que *.{zone} (passe en Cloudflare multi-zone ou une zone Porkbun dédiée)"
+                    ));
+                    continue;
+                }
                 match porkbun_lookup(&c, &fqdn).await {
                     Ok(Some((kind, content))) => {
                         let synced = same_dns_target(&content, &target);
@@ -497,12 +522,23 @@ async fn enrich_live_records(dns: &DnsSettings, domains: &mut [Value]) {
             }
         }
         "cloudflare" => {
-            let Ok(cf) = cloudflare_connect(cf_key(&dns), &dns.zone).await else {
+            let token = cf_key(dns).to_string();
+            if token.is_empty() {
                 return;
-            };
+            }
             for d in domains.iter_mut() {
                 let fqdn = d["fqdn"].as_str().unwrap_or("").to_string();
                 let target = d["target"].as_str().unwrap_or("").to_string();
+                let cf = match cloudflare_connect_for_fqdn(&token, &fqdn).await {
+                    Ok(cf) => cf,
+                    Err(e) => {
+                        d["out_of_zone"] = json!(true);
+                        d["in_sync"] = Value::Null;
+                        d["error"] = json!(e.to_string());
+                        continue;
+                    }
+                };
+                d["dns_zone"] = json!(cf.zone);
                 match cf.lookup_name(&fqdn).await {
                     Ok(Some((kind, content))) => {
                         let synced = same_dns_target(&content, &target);
@@ -511,13 +547,14 @@ async fn enrich_live_records(dns: &DnsSettings, domains: &mut [Value]) {
                         d["in_sync"] = json!(synced);
                         if !synced {
                             d["error"] = json!(format!(
-                                "Cloudflare a {kind} {content}, attendu {target}"
+                                "Cloudflare ({}) a {kind} {content}, attendu {target}",
+                                cf.zone
                             ));
                         }
                     }
                     Ok(None) => {
                         d["in_sync"] = json!(false);
-                        d["error"] = json!("CNAME absent chez Cloudflare");
+                        d["error"] = json!(format!("CNAME absent chez Cloudflare (zone {})", cf.zone));
                     }
                     Err(e) => {
                         d["in_sync"] = json!(false);
@@ -622,7 +659,11 @@ pub async fn collect_status(state: &AppState) -> Value {
                 }
             }
             "porkbun" => {
-                if ingress.is_empty() && node_error.is_none() {
+                if ingress.ends_with("cfargotunnel.com") && node_error.is_none() {
+                    node_error = Some(
+                        "cible tunnel Cloudflare résiduelle — Enregistrer / Actualiser pour forcer l’IP publique".into(),
+                    );
+                } else if ingress.is_empty() && node_error.is_none() {
                     node_error = Some(if public_ip.is_empty() {
                         "IP publique absente".into()
                     } else {
@@ -638,7 +679,9 @@ pub async fn collect_status(state: &AppState) -> Value {
             && traefik_ok
             && match dns.provider.as_str() {
                 "cloudflare" => agent_ok && ingress.ends_with("cfargotunnel.com"),
-                "porkbun" => !ingress.is_empty(),
+                "porkbun" => {
+                    !ingress.is_empty() && !ingress.ends_with("cfargotunnel.com")
+                }
                 _ => true,
             };
         nodes_out.push(json!({
@@ -658,9 +701,12 @@ pub async fn collect_status(state: &AppState) -> Value {
     let mut domains = list_managed_domains(state).await;
     enrich_live_records(&dns, &mut domains).await;
     let nodes_ok = !nodes_out.is_empty() && nodes_out.iter().all(|n| n["ok"].as_bool() == Some(true));
-    let domains_ok = domains
-        .iter()
-        .all(|d| d["in_sync"].as_bool().unwrap_or(true));
+    let domains_ok = domains.iter().all(|d| {
+        if d["out_of_zone"].as_bool() == Some(true) {
+            return true;
+        }
+        d["in_sync"].as_bool().unwrap_or(true)
+    });
     let ok = configured(&dns) && token_ok && error.is_none() && nodes_ok && domains_ok;
     json!({
         "ok": ok,
