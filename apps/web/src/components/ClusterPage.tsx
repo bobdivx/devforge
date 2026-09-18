@@ -247,15 +247,22 @@ function ClusterInner() {
   const [actingNodeId, setActingNodeId] = useState('');
   const [placementAuto, setPlacementAuto] = useState(true);
   const [rebalanceBusy, setRebalanceBusy] = useState(false);
+  const [dnsProvider, setDnsProvider] = useState('');
+  const [dnsConfigured, setDnsConfigured] = useState(false);
 
   async function load() {
     try {
-      const [n, i, chk, p] = await Promise.all([
+      const [n, i, chk, p, boot] = await Promise.all([
         api.clusterNodes(),
         api.clusterInvites().catch(() => null),
         api.updateCheck().catch(() => null),
         api.projects().catch(() => null),
+        api.bootstrap().catch(() => null),
       ]);
+      if (boot?.settings?.dns) {
+        setDnsProvider(boot.settings.dns.provider || '');
+        setDnsConfigured(!!boot.settings.dns.configured);
+      }
       setNodes(n.nodes ?? []);
       setActingLeader(!!n.acting_leader);
       setActingNodeId(n.acting_node_id ?? '');
@@ -674,7 +681,8 @@ function ClusterInner() {
           </li>
           <li>
             <strong class="text-[var(--color-ink)]">Worker</strong> — compute. URL d’annonce
-            loopback (127.0.0.1) refusée. S’il tombe : seules les forges de <em>ce</em> nœud
+            saisie manuellement (domaine si Cloudflare / Porkbun, sinon IP LAN — pas 127.0.0.1).
+            S’il tombe : seules les forges de <em>ce</em> nœud
             s’arrêtent.
           </li>
         </ul>
@@ -1010,7 +1018,11 @@ function ClusterInner() {
                       isLeader(selected)
                         ? 'Adresse que les workers utilisent pour joindre ce leader.'
                         : selected.advertise_hint ||
-                          'IP LAN joignable depuis le leader (pas 127.0.0.1).'
+                          (dnsConfigured && dnsProvider === 'cloudflare'
+                            ? 'Cloudflare actif : hostname / domaine public (pas l’IP machine auto). Saisie manuelle.'
+                            : dnsConfigured && dnsProvider === 'porkbun'
+                              ? 'Porkbun actif : hostname public ou IP joignable — pas 127.0.0.1. Saisie manuelle.'
+                              : 'IP LAN ou hostname joignable depuis le leader (pas 127.0.0.1). Saisie manuelle.')
                     }
                   />
                   <Input
@@ -1018,7 +1030,13 @@ function ClusterInner() {
                     value={ingressHost}
                     placeholder="rempli par DevForge"
                     onInput={(e) => setIngressHost((e.target as HTMLInputElement).value)}
-                    hint="Cloudflare : *.cfargotunnel.com. Porkbun : IP publique. Surcharge manuelle possible."
+                    hint={
+                      dnsConfigured && dnsProvider === 'cloudflare'
+                        ? 'Cloudflare : *.cfargotunnel.com (resync DNS). Surcharge manuelle possible.'
+                        : dnsConfigured && dnsProvider === 'porkbun'
+                          ? 'Porkbun : IP publique détectée (resync DNS). Surcharge manuelle possible.'
+                          : 'Sans DNS : laisse vide ou saisis une cible. Cloudflare / Porkbun remplissent via resync.'
+                    }
                   />
                 </div>
                 <Button

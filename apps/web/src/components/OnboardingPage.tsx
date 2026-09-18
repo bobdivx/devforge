@@ -186,6 +186,17 @@ function OnboardingWizard() {
               </p>
               <JoinClusterForm
                 busy={busy}
+                context={{
+                  instanceUrl: boot?.settings?.instance_url || instanceUrl,
+                  wildcardDomain: boot?.settings?.wildcard_domain || domain,
+                  dns: boot?.settings?.dns
+                    ? {
+                        provider: boot.settings.dns.provider || '',
+                        configured: !!boot.settings.dns.configured,
+                        zone: boot.settings.dns.zone || '',
+                      }
+                    : null,
+                }}
                 onCancel={() => {
                   setJoinMode(false);
                   setError(null);
@@ -194,10 +205,7 @@ function OnboardingWizard() {
                   setBusy(true);
                   setError(null);
                   try {
-                    await api.clusterJoinLocal({
-                      ...body,
-                      advertise_url: window.location.origin,
-                    });
+                    await api.clusterJoinLocal(body);
                     toast.push({ title: 'Nœud enrôlé', tone: 'ok' });
                     window.location.href = '/app/node';
                   } catch (e) {

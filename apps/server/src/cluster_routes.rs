@@ -520,12 +520,34 @@ async fn local_join(
     {
         u.trim_end_matches('/').to_string()
     } else {
-        instance_url(&state).await
+        let from_settings = instance_url(&state).await;
+        if !from_settings.is_empty()
+            && !devforge_cluster::is_loopback_advertise_url(&from_settings)
+        {
+            from_settings
+        } else {
+            String::new()
+        }
     };
     let advertise_url = match devforge_cluster::validate_worker_advertise_url(&advertise_url) {
         Ok(u) => u,
         Err(msg) => {
-            return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": msg }))));
+            let dns = crate::dns::load(&state).await;
+            let hint = if crate::dns::configured(&dns) {
+                format!(
+                    "{msg}. DNS {} actif : utilise le hostname / domaine public du nœud (pas l’IP machine ni localhost).",
+                    if dns.provider.is_empty() {
+                        "domaine"
+                    } else {
+                        dns.provider.as_str()
+                    }
+                )
+            } else {
+                format!(
+                    "{msg}. Indique une URL d’annonce (domaine public ou IP LAN joignable depuis le leader)."
+                )
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": hint }))));
         }
     };
 

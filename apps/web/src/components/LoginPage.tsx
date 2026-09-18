@@ -179,6 +179,17 @@ export function LoginPage() {
               busy={busy}
               submitLabel="Rejoindre le cluster"
               cancelLabel="Créer une instance à la place"
+              context={{
+                instanceUrl: bootstrap?.settings?.instance_url,
+                wildcardDomain: bootstrap?.settings?.wildcard_domain,
+                dns: bootstrap?.settings?.dns
+                  ? {
+                      provider: bootstrap.settings.dns.provider || '',
+                      configured: !!bootstrap.settings.dns.configured,
+                      zone: bootstrap.settings.dns.zone || '',
+                    }
+                  : null,
+              }}
               onCancel={() => {
                 setMode('setup');
                 setError(null);
@@ -187,10 +198,7 @@ export function LoginPage() {
                 setBusy(true);
                 setError(null);
                 try {
-                  await api.clusterJoinLocal({
-                    ...body,
-                    advertise_url: window.location.origin,
-                  });
+                  await api.clusterJoinLocal(body);
                   window.location.href = '/app/node';
                 } catch (err) {
                   setError(String((err as Error).message || err));

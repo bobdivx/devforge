@@ -48,6 +48,12 @@ export type Bootstrap = {
     github_connected: boolean;
     ssh_host: string;
     ssh_user: string;
+    dns?: {
+      provider: string;
+      zone: string;
+      configured: boolean;
+      token_set?: boolean;
+    };
   };
     sso?: {
     enabled: boolean;
