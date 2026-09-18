@@ -491,7 +491,7 @@ fn local_first_rules(publish_ok: bool) -> String {
     let gate = if publish_ok {
         "L'utilisateur a VALIDÉ explicitement une publication. Tu PEUX maintenant : create_github_fix, sync_workdir_to_github, publish_to_github, ou trigger_deploy. Travaille toujours depuis les fichiers locaux déjà écrits.".to_string()
     } else {
-        "❌ INTERDIT (pas de validation PR) : create_github_fix, create_pull_request, publish_to_github, sync_workdir_to_github, create_github_repo, mcp_call_tool create_pull_request / create_or_update_file / create_branch. « go », « oui », « améliore le site » NE sont PAS une validation de PR. ✅ AUTORISÉ : propose_plan, list_project_files, read_project_file, write_project_file mode=local, start_local_preview, get_project, get_deployment_logs, run_application_tests, http_smoke, list_env_vars.".to_string()
+        "❌ INTERDIT (pas de validation PR) : create_github_fix, create_pull_request, publish_to_github, sync_workdir_to_github, create_github_repo, mcp_call_tool create_pull_request / create_or_update_file / create_branch. « go », « oui », « améliore le site » NE sont PAS une validation de PR. ✅ AUTORISÉ : propose_plan, list_project_files, read_project_file, write_project_file mode=local, start_local_preview, get_project, get_deployment_logs, run_application_tests, http_smoke, list_env_vars. ❌ N’invente PAS un MCP « devforge-workdir » — ces tools sont natifs.".to_string()
     };
     format!("WORKFLOW OBLIGATOIRE (autonomie locale, PR en dernier) :\n1. PLAN : appelle propose_plan (titre + étapes) AVANT d'écrire des fichiers.\n2. EXÉCUTE EN LOCAL dans le dossier de l'app : list_project_files, read_project_file, write_project_file mode='local'. Ne te contente pas de conseiller.\n3. PREVIEW : après des edits, appelle start_local_preview et dis à l'utilisateur de regarder le panneau Preview du workspace.\n4. RAPPORT : résume les fichiers touchés, puis UNE SEULE question : « Valide pour ouvrir une PR ? »\n{gate}")
 }
@@ -526,7 +526,7 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
     let scoped = if ctx.project_brief.is_some() || ctx.project_uuid.is_some() {
         "\nLe projet courant est déjà dans le contexte — ne demande pas l'UUID. Agis."
     } else { "" };
-    let mcp_guidance = "\n\nTOOLS LOCAUX (prioritaires) : propose_plan, list_project_files, read_project_file, write_project_file (mode=local), start_local_preview.\nMCP GitHub (create_branch / create_or_update_file / create_pull_request) : UNIQUEMENT après validation PR explicite. Pas besoin de lister les serveurs MCP à chaque tour.";
+    let mcp_guidance = "\n\nTOOLS LOCAUX (prioritaires, PAS du MCP) : propose_plan, list_project_files, read_project_file, write_project_file (mode=local), start_local_preview.\nIl n’existe PAS de serveur MCP « devforge-workdir » / « workdir » — n’invente pas ce nom et ne demande JAMAIS à l’utilisateur de le configurer.\nMCP distants (mcp_list_servers / mcp_call_tool) : uniquement GitHub, Turso, Slack… après validation PR pour GitHub. Pas besoin de lister les serveurs MCP à chaque tour.";
     format!("Tu es {name} ({role}) sur DevForge. {role_focus}{nudge}{scoped}{mcp_guidance}\nRéponds en français, concret, orienté ACTION. N'invente pas de résultats. Le panneau Preview du workspace est l'endroit où l'utilisateur voit tes changements.")
 }
 

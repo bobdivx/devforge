@@ -261,7 +261,29 @@ impl McpClientRegistry {
     }
 
     pub async fn get(&self, id: &str) -> Option<McpServerConfig> {
-        self.servers.read().await.get(id).cloned()
+        let key = id.trim();
+        if key.is_empty() {
+            return None;
+        }
+        {
+            let map = self.servers.read().await;
+            if let Some(s) = map.get(key) {
+                return Some(s.clone());
+            }
+        }
+        // Résolution souple : catalog_id ou nom (ex. « github », « GitHub MCP »)
+        let needle = key.to_ascii_lowercase();
+        self.list()
+            .await
+            .into_iter()
+            .find(|s| {
+                s.catalog_id
+                    .as_deref()
+                    .map(|c| c.eq_ignore_ascii_case(&needle))
+                    .unwrap_or(false)
+                    || s.name.eq_ignore_ascii_case(&needle)
+                    || s.name.to_ascii_lowercase().contains(&needle)
+            })
     }
 
     pub async fn list_remote_tools(&self, server_id: &str) -> Result<Vec<RemoteTool>> {
