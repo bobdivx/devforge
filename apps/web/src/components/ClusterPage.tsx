@@ -149,6 +149,12 @@ function NodeHubCard({
               {n.advertise_url.replace(/^https?:\/\//, '')}
             </span>
           ) : null}
+          {!leader && n.advertise_ok === false ? (
+            <Badge tone="danger">URL loopback</Badge>
+          ) : null}
+          {!leader && n.ingress_ready === false ? (
+            <Badge tone="warn">Ingress</Badge>
+          ) : null}
         </span>
       }
       onClick={() => onOpen(n)}
@@ -239,6 +245,8 @@ function ClusterInner() {
   const [forges, setForges] = useState<Project[]>([]);
   const [actingLeader, setActingLeader] = useState(false);
   const [actingNodeId, setActingNodeId] = useState('');
+  const [placementAuto, setPlacementAuto] = useState(true);
+  const [rebalanceBusy, setRebalanceBusy] = useState(false);
 
   async function load() {
     try {
@@ -251,6 +259,7 @@ function ClusterInner() {
       setNodes(n.nodes ?? []);
       setActingLeader(!!n.acting_leader);
       setActingNodeId(n.acting_node_id ?? '');
+      if (typeof n.placement_auto === 'boolean') setPlacementAuto(n.placement_auto);
       setInvites(i?.invites ?? []);
       setForges(p?.data ?? []);
       if (chk?.data?.latest) setLatest(chk.data.latest.replace(/^v/, ''));
@@ -530,6 +539,64 @@ function ClusterInner() {
     }
   }
 
+  async function togglePlacementAuto() {
+    const next = !placementAuto;
+    setBusy(true);
+    try {
+      const r = await api.clusterPatchSettings({ placement_auto: next });
+      setPlacementAuto(!!r.placement_auto);
+      toast.push({
+        title: r.placement_auto ? 'Placement auto ON' : 'Placement auto OFF',
+        detail: r.placement_auto
+          ? 'Les nouveaux projets / deploys choisissent le meilleur nœud.'
+          : 'Les nouveaux projets vont sur le leader.',
+        tone: 'ok',
+      });
+    } catch (err) {
+      toast.push({ title: 'Réglage KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runRebalance(apply: boolean) {
+    setRebalanceBusy(true);
+    try {
+      const r = await api.clusterRebalance({ apply });
+      const n = r.suggestions?.length ?? 0;
+      if (!apply) {
+        if (!n) {
+          toast.push({
+            title: 'Déjà équilibré',
+            detail: 'Aucune suggestion de déplacement.',
+            tone: 'ok',
+          });
+        } else {
+          const ok = window.confirm(
+            `${n} forge(s) seraient déplacées. Appliquer le rebalance ?\n\n` +
+              (r.suggestions || [])
+                .slice(0, 8)
+                .map((s) => `• ${s.name}: ${s.from} → ${s.to}`)
+                .join('\n') +
+              (n > 8 ? `\n… +${n - 8}` : ''),
+          );
+          if (ok) await runRebalance(true);
+        }
+        return;
+      }
+      toast.push({
+        title: 'Rebalance appliqué',
+        detail: `${r.moved} projet(s) réassignés — redeploy pour lancer sur la cible.`,
+        tone: 'ok',
+      });
+      await load();
+    } catch (err) {
+      toast.push({ title: 'Rebalance KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setRebalanceBusy(false);
+    }
+  }
+
   const leaderNode = nodes.find(isLeader) ?? null;
   const workers = nodes.filter((n) => !isLeader(n));
   const actingNode = nodes.find((x) => x.id === actingNodeId) ?? null;
@@ -545,9 +612,28 @@ function ClusterInner() {
       title="Cluster"
       description="Un leader (control plane) et des workers (compute). Les apps Docker restent sur leur machine."
       actions={
-        <Button size="sm" variant="secondary" disabled={busy} onClick={createInvite}>
-          Inviter
-        </Button>
+        <div class="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={togglePlacementAuto}
+            title="Placement automatique des forges"
+          >
+            Placement {placementAuto ? 'auto' : 'manuel'}
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy || rebalanceBusy}
+            onClick={() => runRebalance(false)}
+          >
+            Rebalance
+          </Button>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={createInvite}>
+            Inviter
+          </Button>
+        </div>
       }
     >
       {error && (
@@ -576,15 +662,20 @@ function ClusterInner() {
             (leader ou worker). Il n’y a pas de copie automatique des conteneurs.
           </li>
           <li>
-            <strong class="text-[var(--color-ink)]">Leader</strong> — UI, API, SQLite. Les workers
-            gardent une copie récente. S’il tombe : un worker est élu jusqu’au retour (perte max
-            ~1 min). Les conteneurs déjà lancés continuent. Un tunnel Cloudflare seulement sur le
-            leader coupe quand même tous les domaines publics — utilise Porkbun (Settings → Domaine)
-            + IP publique par nœud.
+            <strong class="text-[var(--color-ink)]">Placement auto</strong>{' '}
+            {placementAuto ? 'ON' : 'OFF'} — créations / deploys sans nœud fixe choisissent le
+            meilleur worker sain (pénalité leader si workers dispo). Rebalance pour répartir.
           </li>
           <li>
-            <strong class="text-[var(--color-ink)]">Worker</strong> — compute. S’il tombe : seules
-            les forges de <em>ce</em> nœud s’arrêtent. Réassigne puis redéploie sur un nœud en ligne.
+            <strong class="text-[var(--color-ink)]">Leader</strong> — UI, API, SQLite. Les workers
+            gardent une copie récente. S’il tombe : un worker est élu jusqu’au retour (perte max
+            ~1 min). Un tunnel Cloudflare seulement sur le leader reste un SPOF DNS — un tunnel
+            par nœud + placement corrige ça (Phase 2).
+          </li>
+          <li>
+            <strong class="text-[var(--color-ink)]">Worker</strong> — compute. URL d’annonce
+            loopback (127.0.0.1) refusée. S’il tombe : seules les forges de <em>ce</em> nœud
+            s’arrêtent.
           </li>
         </ul>
       </Alert>
@@ -918,7 +1009,8 @@ function ClusterInner() {
                     hint={
                       isLeader(selected)
                         ? 'Adresse que les workers utilisent pour joindre ce leader.'
-                        : 'Adresse que le leader utilise pour joindre ce nœud.'
+                        : selected.advertise_hint ||
+                          'IP LAN joignable depuis le leader (pas 127.0.0.1).'
                     }
                   />
                   <Input

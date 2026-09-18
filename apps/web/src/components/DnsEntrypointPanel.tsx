@@ -105,11 +105,24 @@ function explainNode(n: DnsNodeStatus, provider: string): {
     };
   }
   const err = (n.error || '').toLowerCase();
-  if (err.includes('pas un nœud worker') || err.includes('injoignable')) {
+  if (err.includes('loopback') || err.includes('127.0.0.1') || err.includes('url d’annonce')) {
+    return {
+      title: 'URL worker invalide',
+      detail:
+        'Ce n’est pas un problème DNS. Le worker annonce 127.0.0.1 / localhost — corrige l’IP LAN dans Cluster, puis reviens ici.',
+      tone: 'danger',
+      dnsFixable: false,
+    };
+  }
+  if (
+    err.includes('pas un nœud worker') ||
+    err.includes('injoignable') ||
+    err.includes('rôle / secret')
+  ) {
     return {
       title: 'Nœud injoignable',
       detail:
-        'Ce n’est pas un problème DNS. Le worker ne répond pas (rôle / secret). Répare-le dans Cluster / Runners, puis reviens ici.',
+        'Ce n’est pas un problème DNS. Le worker ne répond pas (rôle / secret / URL). Répare-le dans Cluster, puis reviens ici.',
       tone: 'danger',
       dnsFixable: false,
     };

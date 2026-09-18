@@ -224,7 +224,8 @@ impl ClusterFacade {
             return Err(DevForgeError::Message("nom du nœud requis".into()));
         }
 
-        let advertise = req.advertise_url.trim().trim_end_matches('/').to_string();
+        let advertise = crate::placement::validate_worker_advertise_url(&req.advertise_url)
+            .map_err(DevForgeError::Message)?;
         let existing = self.store.list_nodes().await?;
         let reuse = existing.into_iter().find(|n| {
             n.role == NodeRole::Worker
@@ -316,7 +317,14 @@ impl ClusterFacade {
         updated.last_error = None;
         if let Some(url) = payload.advertise_url {
             if !url.trim().is_empty() {
-                updated.advertise_url = url.trim().trim_end_matches('/').into();
+                // Workers : pas de loopback. Leader : autorisé (exec local).
+                if updated.role == NodeRole::Worker {
+                    updated.advertise_url =
+                        crate::placement::validate_worker_advertise_url(&url)
+                            .map_err(DevForgeError::Message)?;
+                } else {
+                    updated.advertise_url = url.trim().trim_end_matches('/').into();
+                }
             }
         }
         if let Some(os) = payload.os {
@@ -414,7 +422,13 @@ impl ClusterFacade {
             node.drained = d;
         }
         if let Some(url) = advertise_url {
-            node.advertise_url = normalize_http_url(&url)?;
+            if node.role == NodeRole::Worker {
+                node.advertise_url =
+                    crate::placement::validate_worker_advertise_url(&url)
+                        .map_err(DevForgeError::Message)?;
+            } else {
+                node.advertise_url = normalize_http_url(&url)?;
+            }
             if node.role == NodeRole::Leader {
                 let mut local = self.store.get_local().await?;
                 local.leader_url = node.advertise_url.clone();

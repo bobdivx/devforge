@@ -32,6 +32,8 @@ export type DnsNodeStatus = {
   tunnel: string;
   ingress: string;
   public_ip?: string;
+  advertise_url?: string;
+  advertise_ok?: boolean;
   traefik: boolean;
   cloudflared: boolean;
   ok: boolean;
@@ -1468,8 +1470,32 @@ export const api = {
       acting_leader?: boolean;
       acting_node_id?: string;
       preferred_leader_id?: string;
+      placement_auto?: boolean;
       nodes: ClusterNode[];
     }>('/cluster/nodes'),
+  clusterSettings: () =>
+    request<{ ok: boolean; placement_auto: boolean }>('/cluster/settings'),
+  clusterPatchSettings: (body: { placement_auto?: boolean }) =>
+    request<{ ok: boolean; placement_auto: boolean }>('/cluster/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  clusterRebalance: (body?: { apply?: boolean }) =>
+    request<{
+      ok: boolean;
+      dry_run: boolean;
+      moved: number;
+      suggestions: Array<{
+        project_uuid: string;
+        name: string;
+        from: string;
+        to: string;
+        score: number;
+      }>;
+    }>('/cluster/rebalance', {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    }),
   clusterAddNode: (body: {
     name: string;
     host: string;
@@ -1631,6 +1657,10 @@ export type ClusterNode = {
   ingress_host?: string;
   metrics?: ClusterNodeMetrics;
   project_count?: number;
+  advertise_ok?: boolean;
+  ingress_ready?: boolean;
+  placement_eligible?: boolean;
+  advertise_hint?: string;
   created_at: string;
   updated_at: string;
 };

@@ -9,7 +9,7 @@ use axum::{
 use chrono::Utc;
 use devforge_cluster::{
     collect_node_metrics, diagnostic_command, AddNodeRequest, HeartbeatPayload, JoinRequest,
-    LeaderClient, LocalClusterState, NodeRole,
+    LeaderClient, LocalClusterState, NodeRole, NodeStatus, LEADER_NODE_ID,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -42,6 +42,11 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/cluster/join", post(join_node))
         .route("/api/v1/cluster/heartbeat", post(heartbeat))
         .route("/api/v1/cluster/local", get(local_state).post(local_join).patch(local_patch))
+        .route(
+            "/api/v1/cluster/settings",
+            get(cluster_settings).patch(patch_cluster_settings),
+        )
+        .route("/api/v1/cluster/rebalance", post(rebalance))
 }
 
 pub fn internal_cluster_routes() -> Router<AppState> {
@@ -140,10 +145,27 @@ async fn list_nodes(
         "acting_leader": local.acting_leader,
         "acting_node_id": local.node_id,
         "leader_version": state.updater.current_version(),
+        "placement_auto": placement_auto_enabled(&state).await,
         "nodes": nodes.iter().map(|n| {
             let mut v = devforge_cluster::ClusterFacade::node_json(n);
             let key = normalize_server_id(&n.id);
             v["project_count"] = json!(counts.get(&key).copied().unwrap_or(0));
+            let advertise_ok = n.role == NodeRole::Leader
+                || (!n.advertise_url.trim().is_empty()
+                    && !devforge_cluster::is_loopback_advertise_url(&n.advertise_url));
+            let ingress_ready = !n.ingress_host.trim().is_empty();
+            v["advertise_ok"] = json!(advertise_ok);
+            v["ingress_ready"] = json!(ingress_ready);
+            v["placement_eligible"] = json!(
+                !n.drained
+                    && n.status == NodeStatus::Online
+                    && (n.role == NodeRole::Leader || advertise_ok)
+            );
+            if n.role == NodeRole::Worker && !advertise_ok {
+                v["advertise_hint"] = json!(
+                    "URL d’annonce loopback ou vide — le leader ne peut pas joindre ce worker (corrige l’IP LAN)"
+                );
+            }
             v
         }).collect::<Vec<_>>(),
     })))
@@ -500,6 +522,12 @@ async fn local_join(
     } else {
         instance_url(&state).await
     };
+    let advertise_url = match devforge_cluster::validate_worker_advertise_url(&advertise_url) {
+        Ok(u) => u,
+        Err(msg) => {
+            return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": msg }))));
+        }
+    };
 
     let (leader_url, token) =
         devforge_cluster::parse_join_invite(&body.token, &body.leader_url).map_err(|msg| {
@@ -629,6 +657,181 @@ async fn project_counts_by_node(state: &AppState) -> std::collections::HashMap<S
         *map.entry(key).or_insert(0) += n;
     }
     map
+}
+
+pub async fn placement_auto_enabled(state: &AppState) -> bool {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT COALESCE(placement_auto, 1) FROM instance_settings WHERE id = 1")
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten();
+    row.map(|(v,)| v != 0).unwrap_or(true)
+}
+
+/// Résout le nœud cible : `auto` / vide → placement ; sinon id explicite.
+pub async fn resolve_server_id(state: &AppState, requested: Option<&str>) -> String {
+    let raw = requested.map(str::trim).unwrap_or("");
+    let auto = raw.is_empty() || raw.eq_ignore_ascii_case("auto");
+    if !auto {
+        return normalize_server_id(raw);
+    }
+    if !placement_auto_enabled(state).await {
+        return LEADER_NODE_ID.to_string();
+    }
+    let nodes = state.cluster.list_nodes().await.unwrap_or_default();
+    let counts_i64 = project_counts_by_node(state).await;
+    let counts: std::collections::HashMap<String, u32> = counts_i64
+        .into_iter()
+        .map(|(k, v)| (k, v.max(0) as u32))
+        .collect();
+    if let Some((id, _)) =
+        devforge_cluster::pick_placement(&nodes, &counts, &devforge_cluster::PlacementWeights::default())
+    {
+        return normalize_server_id(&id);
+    }
+    LEADER_NODE_ID.to_string()
+}
+
+/// Si le nœud courant est mort / drainé / worker loopback, re-place (placement auto).
+pub async fn ensure_live_server_id(state: &AppState, current: &str) -> String {
+    let sid = normalize_server_id(current);
+    let ok = match state.cluster.store().get_node(&sid).await {
+        Ok(Some(n)) => {
+            !n.drained
+                && n.status == NodeStatus::Online
+                && (n.role == NodeRole::Leader
+                    || (!n.advertise_url.trim().is_empty()
+                        && !devforge_cluster::is_loopback_advertise_url(&n.advertise_url)))
+        }
+        _ => false,
+    };
+    if ok {
+        return sid;
+    }
+    if placement_auto_enabled(state).await {
+        return resolve_server_id(state, Some("auto")).await;
+    }
+    sid
+}
+
+async fn cluster_settings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    Ok(Json(json!({
+        "ok": true,
+        "placement_auto": placement_auto_enabled(&state).await,
+    })))
+}
+
+#[derive(Deserialize)]
+struct PatchClusterSettings {
+    #[serde(default)]
+    placement_auto: Option<bool>,
+}
+
+async fn patch_cluster_settings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<PatchClusterSettings>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    if body.placement_auto.is_none() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Rien à modifier (placement_auto)"})),
+        ));
+    }
+    if let Some(v) = body.placement_auto {
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "UPDATE instance_settings SET placement_auto = ?, updated_at = ? WHERE id = 1",
+        )
+        .bind(if v { 1i64 } else { 0 })
+        .bind(&now)
+        .execute(&state.pool)
+        .await
+        .map_err(map_err_sql)?;
+    }
+    Ok(Json(json!({
+        "ok": true,
+        "placement_auto": placement_auto_enabled(&state).await,
+    })))
+}
+
+#[derive(Deserialize)]
+struct RebalanceBody {
+    #[serde(default)]
+    apply: bool,
+}
+
+async fn rebalance(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<RebalanceBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    let nodes = state.cluster.list_nodes().await.map_err(map_err)?;
+    let rows: Vec<(String, Option<String>, String)> = sqlx::query_as(
+        "SELECT uuid, server_id, name FROM projects ORDER BY name",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(map_err_sql)?;
+
+    let mut counts: HashMap<String, u32> = HashMap::new();
+    for (_, sid, _) in &rows {
+        let key = normalize_server_id(sid.as_deref().unwrap_or(""));
+        *counts.entry(key).or_insert(0) += 1;
+    }
+
+    let weights = devforge_cluster::PlacementWeights::default();
+    let mut suggestions = Vec::new();
+    let mut moved = 0u32;
+    let now = Utc::now().to_rfc3339();
+
+    for (uuid, sid, name) in rows {
+        let from = normalize_server_id(sid.as_deref().unwrap_or(""));
+        // Simuler sans ce projet pour le score cible
+        *counts.entry(from.clone()).or_insert(0) = counts.get(&from).copied().unwrap_or(0).saturating_sub(1);
+        let Some((to, score)) = devforge_cluster::pick_placement(&nodes, &counts, &weights) else {
+            *counts.entry(from).or_insert(0) += 1;
+            continue;
+        };
+        let to = normalize_server_id(&to);
+        *counts.entry(to.clone()).or_insert(0) += 1;
+        if to == from {
+            continue;
+        }
+        let item = json!({
+            "project_uuid": uuid,
+            "name": name,
+            "from": from,
+            "to": to,
+            "score": score,
+        });
+        if body.apply {
+            sqlx::query("UPDATE projects SET server_id = ?, updated_at = ? WHERE uuid = ?")
+                .bind(&to)
+                .bind(&now)
+                .bind(&uuid)
+                .execute(&state.pool)
+                .await
+                .map_err(map_err_sql)?;
+            moved += 1;
+            crate::dns::sync_project(&state, &uuid).await;
+        }
+        suggestions.push(item);
+    }
+
+    Ok(Json(json!({
+        "ok": true,
+        "dry_run": !body.apply,
+        "moved": moved,
+        "suggestions": suggestions,
+    })))
 }
 
 async fn count_projects_on_node(state: &AppState, node_id: &str) -> Result<i64, sqlx::Error> {

@@ -7,6 +7,7 @@ mod facade;
 mod failover;
 mod metrics;
 mod models;
+mod placement;
 mod store;
 
 pub use client::{
@@ -25,4 +26,8 @@ pub use failover::{
 };
 pub use metrics::{collect_node_metrics, diagnostic_command};
 pub use models::*;
+pub use placement::{
+    is_loopback_advertise_url, pick_placement, score_node, validate_worker_advertise_url,
+    PlacementWeights,
+};
 pub use store::{ClusterStore, MemoryClusterStore};

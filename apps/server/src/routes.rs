@@ -323,6 +323,9 @@ async fn create_project(
         })
     };
 
+    let server_id =
+        crate::cluster_routes::resolve_server_id(&state, body.server_id.as_deref()).await;
+
     sqlx::query(
         r#"INSERT INTO projects (
             uuid, name, slug, status, git_repository, git_branch,
@@ -336,7 +339,7 @@ async fn create_project(
     .bind(&slug)
     .bind(&body.git_repository)
     .bind(body.git_branch.clone().unwrap_or_else(|| "main".into()))
-    .bind(body.server_id.unwrap_or_else(|| "default".into()))
+    .bind(&server_id)
     .bind(body.workdir.unwrap_or_else(|| {
         format!("/data/devforge/applications/{slug}")
     }))
@@ -452,12 +455,8 @@ async fn scaffold_project(
     );
     let now = now_str();
 
-    let server_id = body
-        .server_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("default");
+    let server_id =
+        crate::cluster_routes::resolve_server_id(&state, body.server_id.as_deref()).await;
 
     // Create minimal project
     sqlx::query(
@@ -1128,13 +1127,31 @@ pub(crate) async fn run_real_deploy(
     // Fetch unmasked from SQLite directly for deploy.
     let env_file = load_env_file_content(&state.pool, &project.uuid).await;
 
+    let current = project
+        .server_id
+        .clone()
+        .unwrap_or_else(|| "default".into());
+    let server_id = crate::cluster_routes::ensure_live_server_id(state, &current).await;
+    if server_id != crate::cluster_routes::normalize_server_id(&current) {
+        let now = now_str();
+        let _ = sqlx::query("UPDATE projects SET server_id = ?, updated_at = ? WHERE uuid = ?")
+            .bind(&server_id)
+            .bind(&now)
+            .bind(&project.uuid)
+            .execute(&state.pool)
+            .await;
+        tracing::info!(
+            project = %project.uuid,
+            from = %current,
+            to = %server_id,
+            "placement : nœud réassigné avant deploy"
+        );
+    }
+
     let _ = env_vars; // public view unused
     let req = devforge_deploy::DeployRequest {
         project_uuid: project.uuid.clone(),
-        server_id: project
-            .server_id
-            .clone()
-            .unwrap_or_else(|| "default".into()),
+        server_id: server_id.clone(),
         workdir: project.workdir.clone().unwrap_or_default(),
         git_repository: project.git_repository.clone().unwrap_or_default(),
         git_branch: project
@@ -1162,6 +1179,7 @@ pub(crate) async fn run_real_deploy(
     let result = state.deploy.deploy(&req).await;
     if result.ok {
         crate::sso::sync_project_proxy(state, project).await;
+        crate::dns::sync_project(state, &project.uuid).await;
     }
     result
 }

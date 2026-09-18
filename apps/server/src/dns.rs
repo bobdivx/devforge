@@ -660,11 +660,22 @@ pub async fn collect_status(state: &AppState) -> Value {
         let public_ip = meta
             .and_then(|n| n.metrics.public_ip.clone())
             .unwrap_or_default();
-        let traefik = docker_running(state, &id, "devforge-traefik").await;
-        let agent = if dns.provider == "cloudflare" {
-            docker_running(state, &id, "devforge-cloudflared").await
+        let advertise_url = meta.map(|n| n.advertise_url.clone()).unwrap_or_default();
+        let advertise_ok = role == "leader"
+            || (!advertise_url.trim().is_empty()
+                && !devforge_cluster::is_loopback_advertise_url(&advertise_url));
+        let skip_remote = role != "leader" && !advertise_ok;
+        let traefik = if skip_remote {
+            Err("URL d’annonce loopback ou vide — corrige l’IP LAN du worker".into())
         } else {
+            docker_running(state, &id, "devforge-traefik").await
+        };
+        let agent = if dns.provider != "cloudflare" {
             Ok(false)
+        } else if skip_remote {
+            Err("URL d’annonce loopback ou vide — corrige l’IP LAN du worker".into())
+        } else {
+            docker_running(state, &id, "devforge-cloudflared").await
         };
         let mut node_error = None;
         let (traefik_ok, traefik_err) = match &traefik {
@@ -675,11 +686,28 @@ pub async fn collect_status(state: &AppState) -> Value {
             Ok(v) => (*v, None),
             Err(e) => (false, Some(e.clone())),
         };
-        if let Some(e) = traefik_err {
-            node_error = Some(format!("nœud injoignable ({e})"));
+        if skip_remote {
+            node_error = Some(
+                "URL d’annonce loopback (127.0.0.1) — le leader ne peut pas joindre ce worker"
+                    .into(),
+            );
+        } else if let Some(e) = traefik_err {
+            let msg = if e.contains("pas un nœud worker") {
+                "worker injoignable (rôle / secret) — vérifie advertise_url et le join"
+                    .to_string()
+            } else {
+                format!("nœud injoignable ({e})")
+            };
+            node_error = Some(msg);
         } else if dns.provider == "cloudflare" {
             if let Some(e) = agent_err {
-                node_error = Some(format!("nœud injoignable ({e})"));
+                let msg = if e.contains("pas un nœud worker") {
+                    "worker injoignable (rôle / secret) — vérifie advertise_url et le join"
+                        .to_string()
+                } else {
+                    format!("nœud injoignable ({e})")
+                };
+                node_error = Some(msg);
             }
         }
         match dns.provider.as_str() {
@@ -727,6 +755,8 @@ pub async fn collect_status(state: &AppState) -> Value {
             "tunnel": if dns.provider == "cloudflare" { tunnel_name(&id) } else { String::new() },
             "ingress": ingress,
             "public_ip": public_ip,
+            "advertise_url": advertise_url,
+            "advertise_ok": advertise_ok,
             "traefik": traefik_ok,
             "cloudflared": agent_ok,
             "ok": ok,
