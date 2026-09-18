@@ -62,6 +62,9 @@ export type DnsRuntimeStatus = {
   nodes: DnsNodeStatus[];
   domains: DnsDomainStatus[];
   sync_results?: { fqdn: string; ok: boolean; error?: string }[];
+  server_version?: string;
+  /** ≥ 2 = sync_results + delete/recreate CNAME */
+  dns_sync_api?: number;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -285,6 +288,7 @@ export const api = {
       dns: DnsSettingsPublic;
       status?: DnsRuntimeStatus;
       provision_error?: string;
+      server_version?: string;
     }>('/settings/dns/resync', {
       method: 'POST',
       body: '{}',

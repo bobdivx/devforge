@@ -272,19 +272,36 @@ pub async fn provision_nodes(state: &AppState) -> Result<Value, String> {
 pub async fn provision_all(state: &AppState) -> Result<Value, String> {
     let v = provision_nodes(state).await?;
     if v.get("skipped").and_then(|x| x.as_bool()).unwrap_or(false) {
-        return Ok(v);
+        let mut skipped = v;
+        if let Some(obj) = skipped.as_object_mut() {
+            obj.insert("sync_results".into(), json!([]));
+            obj.insert("server_version".into(), json!(env!("CARGO_PKG_VERSION")));
+            obj.insert("dns_sync_api".into(), json!(2));
+        }
+        return Ok(skipped);
     }
-    let projects: Vec<(String,)> = sqlx::query_as("SELECT uuid FROM projects")
-        .fetch_all(&state.pool)
-        .await
-        .unwrap_or_default();
+    // Même liste que l’UI (production_url + domaines attachés), pas seulement sync_project.
+    let managed = list_managed_domains(state).await;
     let mut sync_results = Vec::new();
-    for (uuid,) in projects {
-        sync_results.extend(sync_project(state, &uuid).await);
+    for d in &managed {
+        let fqdn = d["fqdn"].as_str().unwrap_or("").to_string();
+        let node_id = d["node_id"].as_str().unwrap_or(LEADER_NODE_ID).to_string();
+        if fqdn.is_empty() {
+            continue;
+        }
+        match sync_fqdn(state, &fqdn, &node_id).await {
+            Ok(()) => sync_results.push(json!({ "fqdn": fqdn, "ok": true })),
+            Err(e) => {
+                tracing::warn!(fqdn, error = %e, "sync DNS");
+                sync_results.push(json!({ "fqdn": fqdn, "ok": false, "error": e }));
+            }
+        }
     }
     let mut status = collect_status(state).await;
     if let Some(obj) = status.as_object_mut() {
         obj.insert("sync_results".into(), json!(sync_results));
+        obj.insert("server_version".into(), json!(env!("CARGO_PKG_VERSION")));
+        obj.insert("dns_sync_api".into(), json!(2));
     }
     Ok(status)
 }
@@ -737,6 +754,8 @@ pub async fn collect_status(state: &AppState) -> Value {
         "error": error,
         "nodes": nodes_out,
         "domains": domains,
+        "server_version": env!("CARGO_PKG_VERSION"),
+        "dns_sync_api": 2,
     })
 }
 

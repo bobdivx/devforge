@@ -150,6 +150,7 @@ const SYNC_STEPS = [
 
 type Props = {
   isAdmin: boolean;
+  serverVersion?: string;
   dnsProvider: string;
   setDnsProvider: (v: string) => void;
   activeDnsProvider: string;
@@ -182,6 +183,7 @@ type Props = {
 export function DnsEntrypointPanel(props: Props) {
   const {
     isAdmin,
+    serverVersion,
     dnsProvider,
     setDnsProvider,
     activeDnsProvider,
@@ -220,11 +222,26 @@ export function DnsEntrypointPanel(props: Props) {
   const [lastSyncResults, setLastSyncResults] = useState<
     { fqdn: string; ok: boolean; error?: string }[]
   >([]);
+  const [lastServerVersion, setLastServerVersion] = useState<string | undefined>(
+    serverVersion,
+  );
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
     if (!activeDnsProvider) setShowAdvanced(true);
   }, [activeDnsProvider]);
+
+  useEffect(() => {
+    if (serverVersion) setLastServerVersion(serverVersion);
+  }, [serverVersion]);
+
+  useEffect(() => {
+    if (dnsStatus?.server_version) setLastServerVersion(dnsStatus.server_version);
+  }, [dnsStatus?.server_version]);
+
+  const syncApiOk =
+    !dnsStatus || (dnsStatus.dns_sync_api ?? 0) >= 2 || !!dnsStatus.sync_results;
+  const showOldServerAlert = !!dnsStatus && !syncApiOk;
 
   const domains = dnsStatus?.domains ?? [];
   const nodes = dnsStatus?.nodes ?? [];
@@ -292,9 +309,12 @@ export function DnsEntrypointPanel(props: Props) {
       setDnsProvider(r.dns.provider || '');
       setDnsZone(r.dns.zone || '');
       if (r.status) setDnsStatus(r.status);
+      if (r.server_version) setLastServerVersion(r.server_version);
+      else if (r.status?.server_version) setLastServerVersion(r.status.server_version);
       setSyncProgress(100);
       const results = r.status?.sync_results ?? [];
       setLastSyncResults(results);
+      const apiOk = (r.status?.dns_sync_api ?? 0) >= 2;
       const wroteOk = results.filter((x) => x.ok).length;
       const wroteFail = results.filter((x) => !x.ok);
       const after = (r.status?.domains ?? []).filter(
@@ -302,7 +322,9 @@ export function DnsEntrypointPanel(props: Props) {
       ).length;
       const fixed = Math.max(0, beforeBroken - after);
       let summary: string;
-      if (r.provision_error) {
+      if (!apiOk) {
+        summary = `Serveur ${r.server_version || r.status?.server_version || lastServerVersion || '?'} trop ancien — mets à jour vers 2.0.82+ (Settings → Mise à jour)`;
+      } else if (r.provision_error) {
         summary = `Resync partiel : ${r.provision_error}`;
       } else if (wroteFail.length > 0) {
         summary = `${wroteOk} écrit(s) OK · ${wroteFail.length} échec(s) : ${wroteFail
@@ -360,9 +382,14 @@ export function DnsEntrypointPanel(props: Props) {
 
         <FadeIn>
           <div class="mb-4 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-3">
-            <p class="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
-              En place maintenant
-            </p>
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <p class="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
+                En place maintenant
+              </p>
+              {lastServerVersion && (
+                <Badge tone={syncApiOk ? 'ok' : 'warn'}>v{lastServerVersion}</Badge>
+              )}
+            </div>
             <p class="mt-1 text-base font-medium text-[var(--color-ink)]">
               {activeDnsProvider
                 ? `${providerLabel(activeDnsProvider)}${
@@ -379,6 +406,25 @@ export function DnsEntrypointPanel(props: Props) {
             </p>
           </div>
         </FadeIn>
+
+        {activeDnsProvider && showOldServerAlert && (
+          <Alert tone="danger" class="mb-4">
+            <p class="font-medium">
+              Serveur trop ancien{lastServerVersion ? ` (v${lastServerVersion})` : ''}
+            </p>
+            <p class="mt-1 text-sm">
+              Le correctif DNS (écriture CNAME + détails) exige{' '}
+              <strong>2.0.82+</strong>. Sans ça, « Corriger les DNS » ne peut pas réécrire les
+              tunnels.
+            </p>
+            <a
+              href="/app/settings?tab=update"
+              class="mt-2 inline-block text-sm font-medium text-[var(--color-accent)] underline"
+            >
+              Aller à Mise à jour →
+            </a>
+          </Alert>
+        )}
 
         {activeDnsProvider && dnsStatus && (
           <FadeIn delay={40}>
@@ -471,8 +517,9 @@ export function DnsEntrypointPanel(props: Props) {
                       )}
                       {lastSyncResults.length === 0 && (
                         <p class="text-[11px] text-[var(--color-warn)]">
-                          Aucun détail d’écriture renvoyé — l’instance n’est peut‑être pas encore
-                          en 2.0.81+. Mets à jour DevForge puis réessaie.
+                          {(dnsStatus?.dns_sync_api ?? 0) < 2
+                            ? `Serveur ${lastServerVersion || '?'} sans API sync v2 — mets à jour (Settings → Mise à jour) puis réessaie.`
+                            : 'Aucun domaine à synchroniser (liste vide côté serveur).'}
                         </p>
                       )}
                     </div>

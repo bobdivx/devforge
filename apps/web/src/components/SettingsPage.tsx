@@ -508,6 +508,7 @@ export function SettingsPage() {
           </Card>
           <DnsEntrypointPanel
             isAdmin={isAdmin}
+            serverVersion={health?.version}
             dnsProvider={dnsProvider}
             setDnsProvider={setDnsProvider}
             activeDnsProvider={activeDnsProvider}

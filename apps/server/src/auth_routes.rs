@@ -915,13 +915,23 @@ async fn resync_dns(
             "ok": true,
             "dns": crate::dns::public_json(&dns),
             "status": status,
+            "server_version": env!("CARGO_PKG_VERSION"),
         }))),
-        Err(e) => Ok(Json(json!({
-            "ok": true,
-            "dns": crate::dns::public_json(&dns),
-            "provision_error": e,
-            "status": crate::dns::collect_status(&state).await,
-        }))),
+        Err(e) => {
+            let mut status = crate::dns::collect_status(&state).await;
+            if let Some(obj) = status.as_object_mut() {
+                obj.insert("sync_results".into(), json!([]));
+                obj.insert("server_version".into(), json!(env!("CARGO_PKG_VERSION")));
+                obj.insert("dns_sync_api".into(), json!(2));
+            }
+            Ok(Json(json!({
+                "ok": true,
+                "dns": crate::dns::public_json(&dns),
+                "provision_error": e,
+                "status": status,
+                "server_version": env!("CARGO_PKG_VERSION"),
+            })))
+        }
     }
 }
 
