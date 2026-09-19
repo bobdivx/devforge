@@ -6,12 +6,14 @@ import {
   streamAgentChat,
   wroteLocalFiles,
   type AgentPlan,
+  type AgentReflection,
   type AgentToolCall,
 } from '../lib/agent-stream';
 import { cn } from '../lib/cn';
 import {
   AgentActionList,
   AgentPlanActions,
+  AgentReflectionList,
   AgentThinkingBlock,
   toLiveActions,
   type LiveAction,
@@ -61,6 +63,7 @@ type ChatMessage = {
   content: string;
   provider?: string;
   toolCalls?: AgentToolCall[];
+  reflections?: AgentReflection[];
   plan?: AgentPlan | null;
   canOpenPr?: boolean;
   needsUserAction?: {
@@ -113,8 +116,10 @@ export function ProjectAgentsPanel({
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
   const [thinking, setThinking] = useState<string | null>(null);
+  const [thinkDetail, setThinkDetail] = useState<string | undefined>(undefined);
   const [thinkStarted, setThinkStarted] = useState(0);
   const [liveActions, setLiveActions] = useState<LiveAction[]>([]);
+  const [liveReflections, setLiveReflections] = useState<AgentReflection[]>([]);
   const [llmMode, setLlmMode] = useState<string>('—');
   const [llmError, setLlmError] = useState<string | null>(null);
   const [pollEnabled, setPollEnabled] = useState(builderMode || false);
@@ -326,7 +331,7 @@ export function ProjectAgentsPanel({
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, thinking, liveActions]);
+  }, [messages, thinking, liveActions, liveReflections, thinkDetail]);
 
   async function clearChat() {
     if (!selected) return;
@@ -339,8 +344,10 @@ export function ProjectAgentsPanel({
     if (!trimmed || busy || !selected) return;
     setBusy(true);
     setThinking('Analyse de la demande…');
+    setThinkDetail(undefined);
     setThinkStarted(Date.now());
     setLiveActions([]);
+    setLiveReflections([]);
     setMessages((m) => [...m, { role: 'user', content: trimmed }]);
     setInput('');
 
@@ -367,9 +374,16 @@ export function ProjectAgentsPanel({
           agent_uuid: selected,
         },
         {
-          onThinking: (label) => setThinking(label),
+          onThinking: (label, _round, detail) => {
+            setThinking(label);
+            if (detail?.trim()) {
+              setThinkDetail(detail);
+              setLiveReflections((prev) => [...prev, { label, detail, round: _round }]);
+            }
+          },
           onToolStart: (call) => {
             setThinking(call.name.replace(/_/g, ' '));
+            setThinkDetail(undefined);
             setLiveActions((prev) => [...prev, { ...call, status: 'running' }]);
           },
           onToolDone: (call, ok) => {
@@ -411,6 +425,7 @@ export function ProjectAgentsPanel({
           content: res.reply,
           provider: res.provider || undefined,
           toolCalls: tools,
+          reflections: res.reflections ?? [],
           plan: res.plan,
           canOpenPr: wroteLocalFiles(tools),
           needsUserAction,
@@ -435,7 +450,9 @@ export function ProjectAgentsPanel({
     } finally {
       setBusy(false);
       setThinking(null);
+      setThinkDetail(undefined);
       setLiveActions([]);
+      setLiveReflections([]);
     }
   }
 
@@ -671,6 +688,9 @@ export function ProjectAgentsPanel({
                   </div>
                 ) : (
                   <>
+                    {m.reflections && m.reflections.length > 0 && (
+                      <AgentReflectionList items={m.reflections} />
+                    )}
                     {m.toolCalls && m.toolCalls.length > 0 && (
                       <AgentActionList actions={toLiveActions(m.toolCalls)} />
                     )}
@@ -745,9 +765,16 @@ export function ProjectAgentsPanel({
                 )}
               </div>
             ))}
+            {busy && liveReflections.length > 0 && (
+              <AgentReflectionList items={liveReflections} />
+            )}
             {busy && liveActions.length > 0 && <AgentActionList actions={liveActions} />}
             {busy && thinking && (
-              <AgentThinkingBlock label={thinking} startedAt={thinkStarted || Date.now()} />
+              <AgentThinkingBlock
+                label={thinking}
+                detail={thinkDetail}
+                startedAt={thinkStarted || Date.now()}
+              />
             )}
             <div ref={endRef} />
           </div>

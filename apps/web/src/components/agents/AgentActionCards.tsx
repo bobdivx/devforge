@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import type { AgentPlan, AgentToolCall } from '../../lib/agent-stream';
+import type { AgentPlan, AgentReflection, AgentToolCall } from '../../lib/agent-stream';
 import { cn } from '../../lib/cn';
+import { InlinePatch } from '../DiffViewer';
 import { Button, PulseDot, Spinner } from '../ui';
 
 export type LiveAction = AgentToolCall & { status: 'running' | 'ok' | 'fail' };
@@ -14,7 +15,7 @@ const SHELL_TOOLS = new Set([
   'mcp_call_tool',
   'publish_to_github',
   'sync_workdir_to_github',
-  'create_github_fix',
+  'create_github_pr',
   'create_github_repo',
 ]);
 
@@ -105,10 +106,19 @@ function headerLabel(call: AgentToolCall): string {
   if (kind === 'file') {
     const path = filePath(call) || 'fichier';
     const content = strArg(call, 'content');
-    const n = lineCount(content);
+    const add =
+      typeof call.result?.additions === 'number' ? call.result.additions : lineCount(content);
+    const del = typeof call.result?.deletions === 'number' ? call.result.deletions : 0;
     const lang = langFromPath(path);
     const base = path.split('/').pop() || path;
-    return n > 0 ? `${lang} ${base} +${n}` : `${lang} ${base}`;
+    if (call.result?.created) return `${lang} ${base} +${add}`;
+    if (del > 0 || add > 0) {
+      const parts = [`${lang} ${base}`];
+      if (add > 0) parts.push(`+${add}`);
+      if (del > 0) parts.push(`−${del}`);
+      return parts.join(' ');
+    }
+    return `${lang} ${base}`;
   }
   if (kind === 'shell') {
     if (call.name === 'start_local_preview') {
@@ -138,10 +148,20 @@ function headerLabel(call: AgentToolCall): string {
   return call.name.replace(/_/g, ' ');
 }
 
-function ActionIcon({ kind, status }: { kind: ReturnType<typeof kindOf>; status: LiveAction['status'] }) {
+function ActionIcon({
+  kind,
+  status,
+}: {
+  kind: ReturnType<typeof kindOf>;
+  status: LiveAction['status'];
+}) {
   if (status === 'running') return <Spinner class="h-3.5 w-3.5 shrink-0" />;
   if (kind === 'shell') {
-    return <span class="w-4 shrink-0 text-center font-mono text-[11px] text-[var(--color-ink-faint)]">&gt;_</span>;
+    return (
+      <span class="w-4 shrink-0 text-center font-mono text-[11px] text-[var(--color-ink-faint)]">
+        &gt;_
+      </span>
+    );
   }
   if (kind === 'file') {
     return <span class="w-4 shrink-0 text-center text-[11px] text-[var(--color-ink-faint)]">⌘</span>;
@@ -171,6 +191,21 @@ export function AgentActionCard({
   const body = useMemo(() => {
     if (kind === 'file') {
       const content = strArg(call, 'content');
+      const diff =
+        typeof call.result?.unified_diff === 'string' ? call.result.unified_diff : '';
+      if (diff.trim()) {
+        const lines = diff.split('\n');
+        const max = 80;
+        const clipped =
+          lines.length > max
+            ? `${lines.slice(0, max).join('\n')}\n… ${lines.length - max} lignes`
+            : diff;
+        return (
+          <div class="border-t border-[var(--color-line)]">
+            <InlinePatch patch={clipped} />
+          </div>
+        );
+      }
       if (!content) {
         return (
           <p class="px-3 py-2 text-xs text-[var(--color-ink-muted)]">
@@ -178,7 +213,7 @@ export function AgentActionCard({
           </p>
         );
       }
-      const preview = previewLines(content);
+      const preview = previewLines(content, 24);
       return (
         <pre class="overflow-x-auto bg-[var(--color-bg)]/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-[var(--color-ink-muted)]">
           {preview.text.split('\n').map((line, i) => (
@@ -198,55 +233,35 @@ export function AgentActionCard({
     if (kind === 'plan') {
       const steps = Array.isArray(call.arguments?.steps)
         ? (call.arguments?.steps as unknown[]).map(String)
-        : call.result?.plan?.steps ?? [];
-      const summary =
-        strArg(call, 'summary') ||
-        (typeof call.result?.plan?.summary === 'string' ? call.result.plan.summary : '');
+        : call.result?.plan?.steps?.map(String) || [];
       return (
-        <div class="px-3 py-2 text-sm">
-          {summary && <p class="mb-2 text-[var(--color-ink-muted)]">{summary}</p>}
-          <ol class="list-decimal space-y-1 pl-4 text-[var(--color-ink)]">
-            {steps.map((s) => (
-              <li key={s}>{s}</li>
-            ))}
-          </ol>
-        </div>
+        <ol class="list-decimal space-y-1 px-3 py-2 pl-7 text-xs text-[var(--color-ink-muted)]">
+          {steps.map((s, i) => (
+            <li key={i}>{s}</li>
+          ))}
+        </ol>
       );
     }
     const text = resultText(call);
-    if (!text && call.status === 'running') {
-      return (
-        <p class="px-3 py-2 text-xs text-[var(--color-ink-faint)]">En cours…</p>
-      );
-    }
     if (!text) return null;
-    const preview = previewLines(text, kind === 'shell' ? 8 : 6);
+    const preview = previewLines(text, 16);
     return (
       <pre class="overflow-x-auto whitespace-pre-wrap break-words bg-[var(--color-bg)]/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-[var(--color-ink-muted)]">
         {preview.text}
-        {preview.more > 0 ? `\n… ${preview.more} lignes de plus` : ''}
+        {preview.more > 0 ? `\n… ${preview.more} lignes` : ''}
       </pre>
     );
   }, [call, kind]);
 
   return (
-    <div
-      class={cn(
-        'overflow-hidden rounded-xl border bg-[var(--color-surface)]',
-        call.status === 'fail' || !ok
-          ? 'border-rose-500/30'
-          : 'border-[var(--color-line)]',
-      )}
-    >
+    <div class="overflow-hidden rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)]">
       <button
         type="button"
-        class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm"
-        onClick={() => setOpen((v) => !v)}
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-bg)]/40"
+        onClick={() => setOpen((o) => !o)}
       >
         <ActionIcon kind={kind} status={call.status} />
-        <span class="min-w-0 flex-1 truncate font-mono text-[13px] tracking-tight text-[var(--color-ink)]">
-          {label}
-        </span>
+        <span class="min-w-0 flex-1 truncate font-medium text-[var(--color-ink)]">{label}</span>
         {call.status === 'fail' || !ok ? (
           <span class="text-[11px] text-[var(--color-danger)]">échec</span>
         ) : call.status === 'ok' ? (
@@ -288,11 +303,14 @@ export function AgentActionList({
 export function AgentThinkingBlock({
   label,
   startedAt,
+  detail,
 }: {
   label: string;
   startedAt: number;
+  detail?: string;
 }) {
   const [secs, setSecs] = useState(0);
+  const [open, setOpen] = useState(Boolean(detail));
   useEffect(() => {
     const tick = () => setSecs(Math.max(0, Math.round((Date.now() - startedAt) / 1000)));
     tick();
@@ -301,15 +319,69 @@ export function AgentThinkingBlock({
   }, [startedAt]);
 
   return (
-    <div class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)]">
-      <Spinner class="h-3.5 w-3.5" />
-      <span>
-        Réflexion {secs}s
-        {label ? (
-          <span class="text-[var(--color-ink-faint)]"> · {label}</span>
+    <div class="max-w-[92%] space-y-1.5">
+      <button
+        type="button"
+        class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)]"
+        onClick={() => detail && setOpen((o) => !o)}
+      >
+        <Spinner class="h-3.5 w-3.5" />
+        <span>
+          Réflexion {secs}s
+          {label ? <span class="text-[var(--color-ink-faint)]"> · {label}</span> : null}
+        </span>
+        <PulseDot tone="accent" />
+      </button>
+      {open && detail ? (
+        <div class="rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)]/80 px-3 py-2 text-xs leading-relaxed text-[var(--color-ink-muted)] whitespace-pre-wrap">
+          {detail}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function AgentReflectionList({ items }: { items: AgentReflection[] }) {
+  if (!items.length) return null;
+  return (
+    <div class="max-w-[92%] space-y-2">
+      {items.map((r, i) => (
+        <AgentReflectionCard key={i} item={r} defaultOpen={i === items.length - 1} />
+      ))}
+    </div>
+  );
+}
+
+function AgentReflectionCard({
+  item,
+  defaultOpen,
+}: {
+  item: AgentReflection;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(Boolean(defaultOpen));
+  const hasDetail = Boolean(item.detail?.trim());
+  return (
+    <div class="overflow-hidden rounded-lg border border-dashed border-[var(--color-line)] bg-[var(--color-bg)]/40">
+      <button
+        type="button"
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-[var(--color-ink-muted)] hover:bg-[var(--color-surface)]/50"
+        onClick={() => hasDetail && setOpen((o) => !o)}
+      >
+        <span class="text-[var(--color-ink-faint)]">·</span>
+        <span class="min-w-0 flex-1 truncate">
+          {item.label || 'Réflexion'}
+          {item.round ? ` · tour ${item.round}` : ''}
+        </span>
+        {hasDetail ? (
+          <span class="text-[10px] text-[var(--color-ink-faint)]">{open ? 'masquer' : 'voir'}</span>
         ) : null}
-      </span>
-      <PulseDot tone="accent" />
+      </button>
+      {open && hasDetail ? (
+        <div class="border-t border-[var(--color-line)] px-3 py-2 text-xs leading-relaxed text-[var(--color-ink-muted)] whitespace-pre-wrap">
+          {item.detail}
+        </div>
+      ) : null}
     </div>
   );
 }

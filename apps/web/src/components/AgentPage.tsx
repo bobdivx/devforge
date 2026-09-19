@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { api } from '../lib/api';
-import { streamAgentChat, type AgentToolCall } from '../lib/agent-stream';
+import { streamAgentChat, type AgentReflection, type AgentToolCall } from '../lib/agent-stream';
 import { AppShell } from './AppShell';
 import {
   AgentActionList,
+  AgentReflectionList,
   AgentThinkingBlock,
   toLiveActions,
   type LiveAction,
@@ -15,6 +16,7 @@ type Msg = {
   content: string;
   provider?: string;
   toolCalls?: AgentToolCall[];
+  reflections?: AgentReflection[];
 };
 
 export function AgentPage() {
@@ -22,8 +24,10 @@ export function AgentPage() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [busy, setBusy] = useState(false);
   const [thinking, setThinking] = useState<string | null>(null);
+  const [thinkDetail, setThinkDetail] = useState<string | undefined>(undefined);
   const [thinkStarted, setThinkStarted] = useState(0);
   const [liveActions, setLiveActions] = useState<LiveAction[]>([]);
+  const [liveReflections, setLiveReflections] = useState<AgentReflection[]>([]);
   const [llm, setLlm] = useState<string>('—');
   const [llmError, setLlmError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -58,7 +62,7 @@ export function AgentPage() {
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, thinking, liveActions]);
+  }, [messages, thinking, liveActions, liveReflections, thinkDetail]);
 
   async function send(e: Event) {
     e.preventDefault();
@@ -66,8 +70,10 @@ export function AgentPage() {
     if (!text || busy) return;
     setBusy(true);
     setThinking('Analyse de la demande…');
+    setThinkDetail(undefined);
     setThinkStarted(Date.now());
     setLiveActions([]);
+    setLiveReflections([]);
     setMessages((m) => [...m, { role: 'user', content: text }]);
     setInput('');
     try {
@@ -75,9 +81,16 @@ export function AgentPage() {
         text,
         {},
         {
-          onThinking: (label) => setThinking(label),
+          onThinking: (label, round, detail) => {
+            setThinking(label);
+            if (detail?.trim()) {
+              setThinkDetail(detail);
+              setLiveReflections((prev) => [...prev, { label, detail, round }]);
+            }
+          },
           onToolStart: (call) => {
             setThinking(call.name.replace(/_/g, ' '));
+            setThinkDetail(undefined);
             setLiveActions((prev) => [...prev, { ...call, status: 'running' }]);
           },
           onToolDone: (call, ok) => {
@@ -105,6 +118,7 @@ export function AgentPage() {
           content: res.reply,
           provider: res.provider ?? llm,
           toolCalls: res.tool_calls ?? [],
+          reflections: res.reflections ?? [],
         },
       ]);
     } catch (err: unknown) {
@@ -115,7 +129,9 @@ export function AgentPage() {
     } finally {
       setBusy(false);
       setThinking(null);
+      setThinkDetail(undefined);
       setLiveActions([]);
+      setLiveReflections([]);
     }
   }
 
@@ -156,6 +172,9 @@ export function AgentPage() {
                 </div>
               ) : (
                 <>
+                  {m.reflections && m.reflections.length > 0 && (
+                    <AgentReflectionList items={m.reflections} />
+                  )}
                   {m.toolCalls && m.toolCalls.length > 0 && (
                     <AgentActionList actions={toLiveActions(m.toolCalls)} />
                   )}
@@ -171,9 +190,16 @@ export function AgentPage() {
               )}
             </div>
           ))}
+          {busy && liveReflections.length > 0 && (
+            <AgentReflectionList items={liveReflections} />
+          )}
           {busy && liveActions.length > 0 && <AgentActionList actions={liveActions} />}
           {busy && thinking && (
-            <AgentThinkingBlock label={thinking} startedAt={thinkStarted || Date.now()} />
+            <AgentThinkingBlock
+              label={thinking}
+              detail={thinkDetail}
+              startedAt={thinkStarted || Date.now()}
+            />
           )}
           <div ref={endRef} />
         </div>

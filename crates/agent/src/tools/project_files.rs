@@ -240,6 +240,13 @@ impl WriteProjectFileTool {
             })?;
         }
 
+        let previous = if file_path.is_file() {
+            std::fs::read_to_string(&file_path).ok()
+        } else {
+            None
+        };
+        let created = previous.is_none();
+
         // Écrire le fichier
         std::fs::write(&file_path, content).map_err(|e| {
             devforge_shared::DevForgeError::Message(format!(
@@ -248,6 +255,9 @@ impl WriteProjectFileTool {
             ))
         })?;
 
+        let old = previous.as_deref().unwrap_or("");
+        let (additions, deletions, unified_diff) = line_diff_stats(path, old, content);
+
         Ok(json!({
             "ok": true,
             "mode": "local",
@@ -255,6 +265,11 @@ impl WriteProjectFileTool {
             "workdir": workdir,
             "full_path": file_path.display().to_string(),
             "bytes": content.len(),
+            "created": created,
+            "previous_content": previous,
+            "additions": additions,
+            "deletions": deletions,
+            "unified_diff": unified_diff,
             "message": format!("✓ Fichier écrit localement : {path}")
         }))
     }
@@ -670,4 +685,95 @@ fn slugify_project_name(s: &str) -> String {
         .filter(|p| !p.is_empty())
         .collect::<Vec<_>>()
         .join("-")
+}
+
+/// Diff ligne-à-ligne simple (LCS) pour l’UI chat — style Cursor.
+fn line_diff_stats(path: &str, old: &str, new: &str) -> (usize, usize, String) {
+    let a: Vec<&str> = if old.is_empty() {
+        Vec::new()
+    } else {
+        old.lines().collect()
+    };
+    let b: Vec<&str> = new.lines().collect();
+    if a.is_empty() && b.is_empty() {
+        return (0, 0, String::new());
+    }
+    // Garde-fou perf : gros fichiers → aperçu +/− sans LCS complet
+    if a.len() > 1500 || b.len() > 1500 {
+        let mut out = format!("--- a/{path}\n+++ b/{path}\n");
+        let show_old = a.len().min(80);
+        let show_new = b.len().min(120);
+        for line in a.iter().take(show_old) {
+            out.push('-');
+            out.push_str(line);
+            out.push('\n');
+        }
+        if a.len() > show_old {
+            out.push_str(&format!("… {} lignes retirées non affichées\n", a.len() - show_old));
+        }
+        for line in b.iter().take(show_new) {
+            out.push('+');
+            out.push_str(line);
+            out.push('\n');
+        }
+        if b.len() > show_new {
+            out.push_str(&format!("… {} lignes ajoutées non affichées\n", b.len() - show_new));
+        }
+        return (b.len(), a.len(), out);
+    }
+    if a.is_empty() {
+        let mut out = format!("--- /dev/null\n+++ b/{path}\n");
+        for line in &b {
+            out.push('+');
+            out.push_str(line);
+            out.push('\n');
+        }
+        return (b.len(), 0, out);
+    }
+    if a == b {
+        return (0, 0, String::new());
+    }
+
+    let n = a.len();
+    let m = b.len();
+    let mut dp = vec![vec![0usize; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            dp[i][j] = if a[i] == b[j] {
+                dp[i + 1][j + 1] + 1
+            } else {
+                dp[i + 1][j].max(dp[i][j + 1])
+            };
+        }
+    }
+
+    let mut additions = 0usize;
+    let mut deletions = 0usize;
+    let mut body = String::new();
+    let mut i = 0usize;
+    let mut j = 0usize;
+    while i < n || j < m {
+        if i < n && j < m && a[i] == b[j] {
+            body.push(' ');
+            body.push_str(a[i]);
+            body.push('\n');
+            i += 1;
+            j += 1;
+        } else if j < m && (i == n || dp[i][j + 1] >= dp[i + 1][j]) {
+            body.push('+');
+            body.push_str(b[j]);
+            body.push('\n');
+            additions += 1;
+            j += 1;
+        } else if i < n {
+            body.push('-');
+            body.push_str(a[i]);
+            body.push('\n');
+            deletions += 1;
+            i += 1;
+        }
+    }
+
+    let patch = format!("--- a/{path}\n+++ b/{path}\n@@\n{body}");
+    (additions, deletions, patch)
 }

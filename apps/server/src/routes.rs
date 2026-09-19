@@ -1762,13 +1762,109 @@ async fn agent_chat(
 
     let project_uuid = ctx.project_uuid.clone();
     let agent_uuid = ctx.agent_uuid.clone();
+    let user_message = body.message.clone();
+    let force_tool = body.tool.clone();
+    let force_args = body.arguments.clone();
+    let want_stream = body.stream.unwrap_or(false);
+
+    if want_stream {
+        let agent = state.agent.clone();
+        let pool = state.pool.clone();
+        let (ev_tx, ev_rx) =
+            tokio::sync::mpsc::unbounded_channel::<devforge_agent::AgentEvent>();
+        let progress_tx = ev_tx.clone();
+
+        tokio::spawn(async move {
+            let result = agent
+                .handle_with_progress(
+                    &user_message,
+                    force_tool.as_deref(),
+                    force_args,
+                    ctx,
+                    Some(progress_tx),
+                )
+                .await;
+            match result {
+                Ok(result) => {
+                    let _ = ev_tx.send(devforge_agent::AgentEvent::Reply {
+                        content: result.reply.clone(),
+                        provider: result.provider.clone(),
+                        tool_calls: result.tool_calls.clone(),
+                    });
+                    if let (Some(project_uuid), Some(agent_uuid)) =
+                        (project_uuid.as_ref(), agent_uuid.as_ref())
+                    {
+                        let now = crate::state::now_str();
+                        let tools_json = serde_json::to_string(&result.tool_calls)
+                            .unwrap_or_else(|_| "[]".into());
+                        let _ = sqlx::query(
+                            r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
+                               VALUES (?, ?, ?, 'user', ?, '[]', '', ?)"#,
+                        )
+                        .bind(crate::state::new_uuid())
+                        .bind(project_uuid)
+                        .bind(agent_uuid)
+                        .bind(&user_message)
+                        .bind(&now)
+                        .execute(&pool)
+                        .await;
+                        let _ = sqlx::query(
+                            r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
+                               VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?)"#,
+                        )
+                        .bind(crate::state::new_uuid())
+                        .bind(project_uuid)
+                        .bind(agent_uuid)
+                        .bind(&result.reply)
+                        .bind(&tools_json)
+                        .bind(&result.provider)
+                        .bind(&now)
+                        .execute(&pool)
+                        .await;
+                        let _ = sqlx::query(
+                            "UPDATE project_agents SET status = 'idle', updated_at = ? WHERE uuid = ?",
+                        )
+                        .bind(&now)
+                        .bind(agent_uuid)
+                        .execute(&pool)
+                        .await;
+                    }
+                }
+                Err(e) => {
+                    let _ = ev_tx.send(devforge_agent::AgentEvent::Error {
+                        message: e.to_string(),
+                    });
+                }
+            }
+        });
+
+        let stream = stream::unfold(ev_rx, |mut rx| async move {
+            match rx.recv().await {
+                Some(ev) => {
+                    let data = serde_json::to_string(&ev).unwrap_or_else(|_| "{}".into());
+                    Some((
+                        Ok::<Event, Infallible>(Event::default().event("message").data(data)),
+                        rx,
+                    ))
+                }
+                None => None,
+            }
+        })
+        .chain(stream::iter(std::iter::once(Ok::<Event, Infallible>(
+            Event::default().event("done").data("{}"),
+        ))));
+
+        return Ok(Sse::new(stream)
+            .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
+            .into_response());
+    }
 
     let result = state
         .agent
         .handle_with_context(
-            &body.message,
-            body.tool.as_deref(),
-            body.arguments.clone(),
+            &user_message,
+            force_tool.as_deref(),
+            force_args,
             ctx,
         )
         .await
@@ -1785,7 +1881,7 @@ async fn agent_chat(
         .bind(crate::state::new_uuid())
         .bind(&project_uuid)
         .bind(&agent_uuid)
-        .bind(&body.message)
+        .bind(&user_message)
         .bind(&now)
         .execute(&state.pool)
         .await;
@@ -1809,33 +1905,6 @@ async fn agent_chat(
         .bind(&agent_uuid)
         .execute(&state.pool)
         .await;
-    }
-
-    if body.stream.unwrap_or(false) {
-        let reply = result.reply.clone();
-        let tools = result.tool_calls.clone();
-        let provider = result.provider.clone();
-        let stream = stream::iter(std::iter::once(Ok::<Event, Infallible>(
-            Event::default()
-                .event("message")
-                .data(
-                    json!({"type":"reply","content": reply, "provider": provider}).to_string(),
-                ),
-        )))
-        .chain(stream::iter(tools.into_iter().map(|call| {
-            Ok::<Event, Infallible>(
-                Event::default()
-                    .event("tool")
-                    .data(serde_json::to_string(&call).unwrap_or_default()),
-            )
-        })))
-        .chain(stream::iter(std::iter::once(Ok::<Event, Infallible>(
-            Event::default().event("done").data("{}"),
-        ))));
-
-        return Ok(Sse::new(stream)
-            .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
-            .into_response());
     }
 
     Ok(Json(json!({"data": result})).into_response())

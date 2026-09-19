@@ -18,6 +18,11 @@ export type AgentToolCall = {
     settings_href?: string;
     resume_hint?: string;
     preview_url?: string;
+    previous_content?: string | null;
+    unified_diff?: string;
+    additions?: number;
+    deletions?: number;
+    created?: boolean;
     plan?: { title?: string; summary?: string; steps?: string[] };
     [key: string]: unknown;
   };
@@ -29,15 +34,22 @@ export type AgentPlan = {
   steps: string[];
 };
 
+export type AgentReflection = {
+  label: string;
+  detail?: string;
+  round?: number;
+};
+
 export type AgentChatResult = {
   reply: string;
   provider?: string;
   tool_calls: AgentToolCall[];
   plan?: AgentPlan | null;
+  reflections?: AgentReflection[];
 };
 
 type StreamHandlers = {
-  onThinking?: (label: string, round: number) => void;
+  onThinking?: (label: string, round: number, detail?: string) => void;
   onToolStart?: (call: AgentToolCall) => void;
   onToolDone?: (call: AgentToolCall, ok: boolean) => void;
   onPlan?: (plan: AgentPlan) => void;
@@ -151,6 +163,8 @@ export async function streamAgentChat(
   let reply = '';
   let provider: string | undefined;
   let toolCalls: AgentToolCall[] = [];
+  const liveTools: AgentToolCall[] = [];
+  const reflections: AgentReflection[] = [];
   let plan: AgentPlan | null = null;
   let streamError: string | null = null;
 
@@ -168,22 +182,34 @@ export async function streamAgentChat(
       }
       const type = String(payload.type || parsed.event);
       if (type === 'thinking') {
-        handlers.onThinking?.(String(payload.label || 'Réflexion…'), Number(payload.round || 0));
+        const label = String(payload.label || 'Réflexion…');
+        const detail = payload.detail ? String(payload.detail) : '';
+        const round = Number(payload.round || 0);
+        if (detail.trim()) {
+          reflections.push({ label, detail, round });
+        }
+        handlers.onThinking?.(label, round, detail || undefined);
       } else if (type === 'tool_start') {
-        handlers.onToolStart?.({
+        const call: AgentToolCall = {
           name: String(payload.name || '?'),
           arguments: (payload.arguments as Record<string, unknown>) || {},
-        });
+        };
+        liveTools.push(call);
+        handlers.onToolStart?.(call);
       } else if (type === 'tool_done') {
         const ok = payload.ok !== false;
-        handlers.onToolDone?.(
-          {
-            name: String(payload.name || '?'),
-            arguments: (payload.arguments as Record<string, unknown>) || {},
-            result: (payload.result as AgentToolCall['result']) || { ok },
-          },
-          ok,
-        );
+        const call: AgentToolCall = {
+          name: String(payload.name || '?'),
+          arguments: (payload.arguments as Record<string, unknown>) || {},
+          result: (payload.result as AgentToolCall['result']) || { ok },
+        };
+        const idx = [...liveTools]
+          .map((t, i) => ({ t, i }))
+          .reverse()
+          .find((x) => x.t.name === call.name && !x.t.result)?.i;
+        if (idx != null) liveTools[idx] = call;
+        else liveTools.push(call);
+        handlers.onToolDone?.(call, ok);
       } else if (type === 'plan') {
         const steps = Array.isArray(payload.steps) ? payload.steps.map((s) => String(s)) : [];
         plan = {
@@ -197,10 +223,15 @@ export async function streamAgentChat(
         provider = payload.provider ? String(payload.provider) : undefined;
         toolCalls = Array.isArray(payload.tool_calls)
           ? (payload.tool_calls as AgentToolCall[])
-          : [];
+          : [...liveTools];
         if (!plan) plan = planFromToolCalls(toolCalls);
       } else if (type === 'error') {
         streamError = String(payload.message || 'Erreur agent');
+      } else if (parsed.event === 'tool' && payload.name) {
+        // Fallback ancien format
+        const call = payload as unknown as AgentToolCall;
+        liveTools.push(call);
+        handlers.onToolDone?.(call, call.result?.ok !== false);
       }
     }
   };
@@ -213,6 +244,7 @@ export async function streamAgentChat(
   if (buf.trim()) consume(`${buf}\n\n`);
 
   if (streamError) throw new Error(streamError);
+  if (!toolCalls.length && liveTools.length) toolCalls = [...liveTools];
   if (!reply && toolCalls.length === 0 && !plan) {
     throw new Error('Réponse agent vide');
   }
@@ -222,5 +254,11 @@ export async function streamAgentChat(
     notifyPreviewRefresh({ url: preview, reason: 'agent' });
   }
 
-  return { reply: reply || 'Terminé.', provider, tool_calls: toolCalls, plan };
+  return {
+    reply: reply || 'Terminé.',
+    provider,
+    tool_calls: toolCalls,
+    plan,
+    reflections,
+  };
 }

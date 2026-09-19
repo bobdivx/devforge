@@ -170,7 +170,13 @@ pub struct AgentReply {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
-    Thinking { round: usize, label: String },
+    Thinking {
+        round: usize,
+        label: String,
+        /// Texte de réflexion du modèle (avant / entre tools), style Cursor.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        detail: String,
+    },
     ToolStart { name: String, arguments: Value },
     ToolDone {
         name: String,
@@ -280,7 +286,14 @@ impl AgentRunner {
     ) -> Result<AgentReply> {
         let provider = self.provider_mode().await;
         if let Some(tool) = force_tool.filter(|t| !t.is_empty()) {
-            emit(&progress, AgentEvent::Thinking { round: 0, label: format!("Outil {tool}…") });
+            emit(
+                &progress,
+                AgentEvent::Thinking {
+                    round: 0,
+                    label: format!("Outil {tool}…"),
+                    detail: String::new(),
+                },
+            );
             let mut args = force_args.unwrap_or_else(|| json!({}));
             inject_tool_defaults(&mut args, &ctx);
             emit(&progress, AgentEvent::ToolStart { name: tool.to_string(), arguments: args.clone() });
@@ -332,22 +345,52 @@ impl AgentRunner {
                     return Ok(AgentReply { reply: nudge, tool_calls: records, provider });
                 }
             }
-            emit(&progress, AgentEvent::Thinking {
-                round: round + 1,
-                label: if round == 0 { "Analyse de la demande…".into() } else { format!("Réflexion (tour {})…", round + 1) },
-            });
-            let turn: AssistantTurn = llm.chat(ChatRequest {
-                messages: messages.clone(),
-                tools: tools.clone(),
-                temperature: 0.2,
-            }).await?;
-            if !turn.content.trim().is_empty() && !turn.tool_calls.is_empty() {
-                let snippet: String = turn.content.chars().take(140).collect();
-                emit(&progress, AgentEvent::Thinking { round: round + 1, label: snippet });
+            emit(
+                &progress,
+                AgentEvent::Thinking {
+                    round: round + 1,
+                    label: if round == 0 {
+                        "Analyse de la demande…".into()
+                    } else {
+                        format!("Réflexion (tour {})…", round + 1)
+                    },
+                    detail: String::new(),
+                },
+            );
+            let turn: AssistantTurn = llm
+                .chat(ChatRequest {
+                    messages: messages.clone(),
+                    tools: tools.clone(),
+                    temperature: 0.2,
+                })
+                .await?;
+            if !turn.content.trim().is_empty() {
+                let detail = turn.content.trim().to_string();
+                let label: String = detail.chars().take(120).collect();
+                emit(
+                    &progress,
+                    AgentEvent::Thinking {
+                        round: round + 1,
+                        label: if detail.chars().count() > 120 {
+                            format!("{label}…")
+                        } else {
+                            label
+                        },
+                        detail,
+                    },
+                );
             }
             if turn.tool_calls.is_empty() {
-                let reply = if turn.content.trim().is_empty() { "Terminé.".into() } else { turn.content };
-                return Ok(AgentReply { reply, tool_calls: records, provider });
+                let reply = if turn.content.trim().is_empty() {
+                    "Terminé.".into()
+                } else {
+                    turn.content
+                };
+                return Ok(AgentReply {
+                    reply,
+                    tool_calls: records,
+                    provider,
+                });
             }
             messages.push(ChatMessage::assistant_tools(turn.content.clone(), turn.tool_calls.clone()));
             for call in turn.tool_calls {

@@ -60,6 +60,15 @@ function PatchLines({ patch }: { patch: string }) {
   );
 }
 
+/** Patch unifié inline (chat agent). */
+export function InlinePatch({ patch, class: className }: { patch: string; class?: string }) {
+  return (
+    <div class={className}>
+      <PatchLines patch={patch} />
+    </div>
+  );
+}
+
 export function DiffViewer({
   open,
   onClose,
