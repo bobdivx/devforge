@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { MessageSquare, Plus } from 'lucide-preact';
+import { MessageSquare, Plus, Share2 } from 'lucide-preact';
 import { api, type ProjectAgent } from '../lib/api';
 import {
   planFromToolCalls,
@@ -123,6 +123,7 @@ export function ProjectAgentsPanel({
   const [llmMode, setLlmMode] = useState<string>('—');
   const [llmError, setLlmError] = useState<string | null>(null);
   const [pollEnabled, setPollEnabled] = useState(builderMode || false);
+  const [sharing, setSharing] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const bootstrapped = useRef(false);
 
@@ -337,6 +338,26 @@ export function ProjectAgentsPanel({
     if (!selected) return;
     await api.clearAgentMessages(projectUuid, selected);
     setMessages([]);
+  }
+
+  async function shareChat() {
+    if (!selected || sharing) return;
+    setSharing(true);
+    try {
+      const r = await api.shareAgentConversation(projectUuid, selected);
+      const url =
+        r.url.startsWith('http') ? r.url : `${window.location.origin}${r.path || r.url}`;
+      await navigator.clipboard.writeText(url);
+      toast.push({ title: 'Lien de partage copié', tone: 'ok' });
+    } catch (e) {
+      toast.push({
+        title: 'Partage impossible',
+        detail: e instanceof Error ? e.message : String(e),
+        tone: 'danger',
+      });
+    } finally {
+      setSharing(false);
+    }
   }
 
   async function sendText(text: string) {
@@ -624,15 +645,28 @@ export function ProjectAgentsPanel({
                 <p class="mt-0.5 truncate text-xs text-[var(--color-ink-faint)]">{chatHeaderBlurb}</p>
               )}
             </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={!selected || busy || messages.length === 0}
-              onClick={() => void clearChat()}
-            >
-              Effacer
-            </Button>
+            <div class="flex shrink-0 items-center gap-1">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={!selected || sharing || messages.length === 0}
+                onClick={() => void shareChat()}
+                title="Copier un lien de partage"
+                aria-label="Partager la conversation"
+              >
+                {sharing ? <Spinner /> : <Share2 size={14} strokeWidth={2} aria-hidden />}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={!selected || busy || messages.length === 0}
+                onClick={() => void clearChat()}
+              >
+                Effacer
+              </Button>
+            </div>
           </div>
 
           {!llmReady && (

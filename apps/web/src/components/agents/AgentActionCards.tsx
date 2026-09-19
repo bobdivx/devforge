@@ -8,6 +8,9 @@ export type LiveAction = AgentToolCall & { status: 'running' | 'ok' | 'fail' };
 
 const SHELL_TOOLS = new Set([
   'start_local_preview',
+  'stop_local_preview',
+  'local_preview_status',
+  'run_workdir_command',
   'run_application_tests',
   'get_deployment_logs',
   'http_smoke',
@@ -30,6 +33,9 @@ const READ_TOOLS = new Set([
   'github_workflow_runs',
   'mcp_list_servers',
   'mcp_list_remote_tools',
+  'list_project_agents',
+  'list_agent_messages',
+  'list_agent_tool_failures',
 ]);
 
 function strArg(call: AgentToolCall, key: string): string {
@@ -74,9 +80,13 @@ function resultText(call: AgentToolCall): string {
   if (!r) return '';
   if (typeof r.message === 'string' && r.message.trim()) return r.message;
   if (typeof r.error === 'string') return r.error;
+  if (typeof r.logs_tail === 'string' && r.logs_tail.trim()) return r.logs_tail;
   if (typeof r.content === 'string') return r.content;
   if (typeof r.logs === 'string') return r.logs;
   if (typeof r.output === 'string') return r.output;
+  if (typeof r.stdout === 'string' || typeof r.stderr === 'string') {
+    return [r.stdout, r.stderr].filter((s) => typeof s === 'string' && s.trim()).join('\n');
+  }
   if (typeof r.hint === 'string') return r.hint;
   try {
     return JSON.stringify(r, null, 2);
@@ -126,6 +136,12 @@ function headerLabel(call: AgentToolCall): string {
         strArg(call, 'command') ||
         (typeof call.result?.command === 'string' ? call.result.command : 'preview');
       return cmd;
+    }
+    if (call.name === 'run_workdir_command') {
+      return (
+        strArg(call, 'command') ||
+        (typeof call.result?.command === 'string' ? call.result.command : 'shell')
+      );
     }
     if (call.name === 'run_application_tests') return 'tests';
     if (call.name === 'get_deployment_logs') return 'logs de déploiement';
@@ -291,6 +307,7 @@ export function AgentActionList({
             a.status === 'running' ||
             a.name === 'write_project_file' ||
             a.name === 'start_local_preview' ||
+            a.name === 'run_workdir_command' ||
             a.name === 'propose_plan' ||
             a.name === 'run_application_tests'
           }

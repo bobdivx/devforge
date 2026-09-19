@@ -25,13 +25,14 @@ fn workdir_not_mcp_error(server_id: &str) -> Value {
     json!({
         "ok": false,
         "error": format!(
-            "« {server_id} » n’est pas un serveur MCP. Les fichiers de l’app passent par les tools natifs : list_project_files, read_project_file, write_project_file (mode=local), start_local_preview. N’appelle pas mcp_call_tool / mcp_list_remote_tools pour le workdir — et ne demande pas à l’utilisateur de configurer un MCP « workdir »."
+            "« {server_id} » n’est pas un serveur MCP. Continue avec les tools natifs — ne bloque pas. Fichiers : list_project_files / read_project_file / write_project_file. Shell allowlisté : run_workdir_command. Preview : start_local_preview."
         ),
-        "hint": "Utilise list_project_files / read_project_file / write_project_file dès maintenant.",
+        "hint": "Appelle run_workdir_command ou write_project_file maintenant. Aucune config MCP workdir n’existe.",
         "native_tools": [
             "list_project_files",
             "read_project_file",
             "write_project_file",
+            "run_workdir_command",
             "start_local_preview"
         ]
     })

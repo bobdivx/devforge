@@ -66,6 +66,14 @@ pub fn router() -> Router<AppState> {
             "/api/v1/projects/{uuid}/agents/{agent_uuid}/messages",
             get(list_agent_messages).delete(clear_agent_messages),
         )
+        .route(
+            "/api/v1/projects/{uuid}/agents/{agent_uuid}/share",
+            post(create_agent_share),
+        )
+        .route(
+            "/api/v1/shared/agents/{token}",
+            get(get_shared_agent_conversation),
+        )
         .route("/api/v1/wireguard/networks", get(list_wg).post(create_wg))
         .route(
             "/api/v1/wireguard/networks/{id}/peers",
@@ -943,6 +951,178 @@ async fn clear_agent_messages(
             )
         })?;
     Ok(Json(json!({"ok": true})))
+}
+
+async fn create_agent_share(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((uuid, agent_uuid)): Path<(String, String)>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let _ = auth_project(&state, &headers, &uuid).await?;
+    let exists: Option<(String,)> = sqlx::query_as(
+        "SELECT uuid FROM project_agents WHERE uuid = ? AND project_uuid = ?",
+    )
+    .bind(&agent_uuid)
+    .bind(&uuid)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+    if exists.is_none() {
+        return Err((
+            axum::http::StatusCode::NOT_FOUND,
+            Json(json!({"error": "Agent introuvable"})),
+        ));
+    }
+
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let expires = (chrono::Utc::now() + chrono::Duration::days(30)).to_rfc3339();
+    sqlx::query(
+        r#"INSERT INTO agent_conversation_shares (token, project_uuid, agent_uuid, created_at, expires_at)
+           VALUES (?, ?, ?, ?, ?)"#,
+    )
+    .bind(&token)
+    .bind(&uuid)
+    .bind(&agent_uuid)
+    .bind(&now)
+    .bind(&expires)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+
+    let instance_url: String = sqlx::query_scalar(
+        "SELECT instance_url FROM instance_settings WHERE id = 1",
+    )
+    .fetch_optional(&state.pool)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_default();
+    let base = instance_url.trim().trim_end_matches('/');
+    let path = format!("/share/agent/{token}");
+    let url = if base.is_empty() {
+        path.clone()
+    } else {
+        format!("{base}{path}")
+    };
+
+    Ok(Json(json!({
+        "ok": true,
+        "token": token,
+        "path": path,
+        "url": url,
+        "expires_at": expires,
+    })))
+}
+
+async fn get_shared_agent_conversation(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let token = token.trim();
+    if token.is_empty() {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": "token requis"})),
+        ));
+    }
+
+    let share: Option<(String, String, Option<String>)> = sqlx::query_as(
+        "SELECT project_uuid, agent_uuid, expires_at FROM agent_conversation_shares WHERE token = ?",
+    )
+    .bind(token)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+
+    let Some((project_uuid, agent_uuid, expires_at)) = share else {
+        return Err((
+            axum::http::StatusCode::NOT_FOUND,
+            Json(json!({"error": "Lien de partage introuvable ou expiré"})),
+        ));
+    };
+
+    if let Some(exp) = expires_at.as_deref() {
+        if let Ok(exp_t) = chrono::DateTime::parse_from_rfc3339(exp) {
+            if exp_t < chrono::Utc::now() {
+                return Err((
+                    axum::http::StatusCode::GONE,
+                    Json(json!({"error": "Lien de partage expiré"})),
+                ));
+            }
+        }
+    }
+
+    let agent: Option<(String, String, String)> = sqlx::query_as(
+        "SELECT name, role, status FROM project_agents WHERE uuid = ? AND project_uuid = ?",
+    )
+    .bind(&agent_uuid)
+    .bind(&project_uuid)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+
+    let project_name: Option<String> =
+        sqlx::query_scalar("SELECT name FROM projects WHERE uuid = ?")
+            .bind(&project_uuid)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten();
+
+    let rows = sqlx::query_as::<_, AgentMessageRow>(
+        r#"SELECT uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at
+           FROM agent_messages WHERE project_uuid = ? AND agent_uuid = ?
+           ORDER BY id ASC LIMIT 500"#,
+    )
+    .bind(&project_uuid)
+    .bind(&agent_uuid)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+
+    let (agent_name, agent_role, agent_status) = agent.unwrap_or_else(|| {
+        ("Conversation".into(), "custom".into(), "idle".into())
+    });
+
+    Ok(Json(json!({
+        "ok": true,
+        "data": {
+            "project_uuid": project_uuid,
+            "project_name": project_name,
+            "agent_uuid": agent_uuid,
+            "agent_name": agent_name,
+            "agent_role": agent_role,
+            "agent_status": agent_status,
+            "expires_at": expires_at,
+            "messages": rows,
+        }
+    })))
 }
 
 

@@ -435,6 +435,32 @@ export const api = {
     request<{ ok: boolean }>(`/projects/${projectUuid}/agents/${agentUuid}/messages`, {
       method: 'DELETE',
     }),
+  shareAgentConversation: (projectUuid: string, agentUuid: string) =>
+    request<{ ok: boolean; token: string; path: string; url: string; expires_at: string }>(
+      `/projects/${projectUuid}/agents/${agentUuid}/share`,
+      { method: 'POST', body: '{}' },
+    ),
+  sharedAgentConversation: (token: string) =>
+    request<{
+      ok: boolean;
+      data: {
+        project_uuid: string;
+        project_name?: string | null;
+        agent_uuid: string;
+        agent_name: string;
+        agent_role: string;
+        agent_status: string;
+        expires_at?: string | null;
+        messages: Array<{
+          uuid: string;
+          role: string;
+          content: string;
+          provider?: string;
+          tool_calls_json?: string;
+          created_at: string;
+        }>;
+      };
+    }>(`/shared/agents/${encodeURIComponent(token)}`),
   llmStatus: () =>
     request<{
       mode: string;

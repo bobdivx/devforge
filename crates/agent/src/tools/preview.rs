@@ -105,22 +105,39 @@ impl Tool for StartLocalPreviewTool {
         };
 
         if !force && port_is_open(ctx.port).await {
-            let _ = write_dev_traefik_dynamic(&preview_url, &ctx.uuid, ctx.port);
-            return Ok(json!({
-                "ok": true,
-                "command": command,
-                "workdir": ctx.workdir,
-                "port": ctx.port,
-                "production_port": ctx.production_port,
-                "pid": read_preview_pid(workdir_path),
-                "preview_url": preview_url,
-                "local_url": format!("http://127.0.0.1:{}", ctx.port),
-                "mode": "process",
-                "status": "running",
-                "reused": true,
-                "message": format!("✓ Serveur atelier déjà actif : {preview_url} (port {})", ctx.port),
-                "hint": "Utilise force=true ou le bouton Redémarrer pour relancer après des changements."
-            }));
+            let upstream = write_dev_traefik_dynamic(&preview_url, &ctx.uuid, ctx.port)
+                .unwrap_or_else(|_| dev_preview_upstream_url(ctx.port));
+            // Laisse Traefik recharger si le yaml vient d’être réécrit
+            tokio::time::sleep(Duration::from_millis(600)).await;
+            let (public_ok, public_status, _public_detail) =
+                public_preview_health(&preview_url).await;
+            let logs_tail = read_preview_logs(workdir_path, 40);
+            if public_ok {
+                return Ok(json!({
+                    "ok": true,
+                    "command": command,
+                    "workdir": ctx.workdir,
+                    "port": ctx.port,
+                    "production_port": ctx.production_port,
+                    "pid": read_preview_pid(workdir_path),
+                    "preview_url": preview_url,
+                    "local_url": format!("http://127.0.0.1:{}", ctx.port),
+                    "upstream": upstream,
+                    "mode": "process",
+                    "status": "running",
+                    "reused": true,
+                    "public_ok": true,
+                    "public_status": public_status,
+                    "logs_tail": logs_tail,
+                    "message": format!("✓ Serveur atelier déjà actif + URL publique OK : {preview_url} (port {})", ctx.port),
+                    "hint": "Utilise force=true ou le bouton Redémarrer pour relancer après des changements."
+                }));
+            }
+            // Port local OK mais Traefik 404/502 → pas de reuse : on redémarre (même sans force)
+            eprintln!(
+                "[start_local_preview] port {} ouvert mais URL publique KO (status={:?}) — redémarrage",
+                ctx.port, public_status
+            );
         }
 
         let project_env = load_project_env_vars(self.pool.as_ref(), &ctx.uuid).await;
@@ -219,8 +236,44 @@ impl Tool for StartLocalPreviewTool {
 
         let local_url = format!("http://127.0.0.1:{bound_port}");
 
-        if let Err(e) = write_dev_traefik_dynamic(&preview_url, &ctx.uuid, bound_port) {
-            eprintln!("[start_local_preview] traefik dynamic: {e}");
+        let upstream = match write_dev_traefik_dynamic(&preview_url, &ctx.uuid, bound_port) {
+            Ok(u) => u,
+            Err(e) => {
+                eprintln!("[start_local_preview] traefik dynamic: {e}");
+                dev_preview_upstream_url(bound_port)
+            }
+        };
+
+        // Laisse Traefik recharger le file provider
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        let (public_ok, public_status, public_detail) =
+            public_preview_health(&preview_url).await;
+        let logs_tail = read_preview_logs(workdir_path, 60);
+
+        if !public_ok {
+            return Ok(json!({
+                "ok": false,
+                "error": format!(
+                    "Process démarré (pid={pid}, port {bound_port}) mais URL publique KO : {public_detail}"
+                ),
+                "command": command,
+                "workdir": ctx.workdir,
+                "port": bound_port,
+                "requested_port": ctx.port,
+                "production_port": ctx.production_port,
+                "pid": pid,
+                "preview_url": preview_url,
+                "local_url": local_url,
+                "upstream": upstream,
+                "mode": "process",
+                "status": "degraded",
+                "reused": false,
+                "npm_install": npm_install,
+                "public_ok": false,
+                "public_status": public_status,
+                "logs_tail": logs_tail,
+                "hint": "Traefik n’atteint pas le process. Upstream attendu = conteneur DevForge (DEVFORGE_SELF_CONTAINER). Évite host.docker.internal si npm tourne dans le conteneur."
+            }));
         }
 
         let mut message = if npm_install {
@@ -246,12 +299,16 @@ impl Tool for StartLocalPreviewTool {
             "pid": pid,
             "preview_url": preview_url,
             "local_url": local_url,
+            "upstream": upstream,
             "mode": "process",
             "status": "running",
             "reused": false,
             "npm_install": npm_install,
             "env_count": env_keys.len(),
             "env_keys": env_keys,
+            "public_ok": true,
+            "public_status": public_status,
+            "logs_tail": logs_tail,
             "message": message,
             "hint": "Ouvre Preview dans le workspace. Production reste sur le conteneur df-* séparé."
         }))
@@ -320,17 +377,43 @@ impl Tool for LocalPreviewStatusTool {
         let workdir_path = Path::new(&ctx.workdir);
         let running = port_is_open(ctx.port).await;
         let pid = read_preview_pid(workdir_path);
+        let logs_tail = read_preview_logs(workdir_path, 40);
+        let upstream = if running {
+            Some(dev_preview_upstream_url(ctx.port))
+        } else {
+            None
+        };
+        let (public_ok, public_status) = if let Some(ref url) = ctx.preview_url {
+            if running {
+                let (ok, status, _) = public_preview_health(url).await;
+                (Some(ok), status)
+            } else {
+                (Some(false), None)
+            }
+        } else {
+            (None, None)
+        };
 
         Ok(json!({
             "ok": true,
-            "status": if running { "running" } else { "stopped" },
+            "status": if running && public_ok.unwrap_or(true) {
+                "running"
+            } else if running {
+                "degraded"
+            } else {
+                "stopped"
+            },
             "port": ctx.port,
             "production_port": ctx.production_port,
             "pid": pid,
             "preview_url": ctx.preview_url,
             "local_url": format!("http://127.0.0.1:{}", ctx.port),
+            "upstream": upstream,
             "mode": "process",
-            "workdir": ctx.workdir
+            "workdir": ctx.workdir,
+            "public_ok": public_ok,
+            "public_status": public_status,
+            "logs_tail": logs_tail,
         }))
     }
 }
@@ -484,13 +567,77 @@ fn dev_preview_upstream_url(port: u16) -> String {
             return format!("http://{host}:{port}");
         }
     }
+    // Mode explicite : self | host
+    let mode = std::env::var("DEVFORGE_DEV_PREVIEW_UPSTREAM_MODE")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if mode == "host" {
+        return format!("http://host.docker.internal:{port}");
+    }
+    // Défaut : process preview dans le conteneur DevForge → Traefik joint via nom Docker.
     if let Ok(self_container) = std::env::var("DEVFORGE_SELF_CONTAINER") {
         let name = self_container.trim();
         if !name.is_empty() {
             return format!("http://{name}:{port}");
         }
     }
+    // Hostname du conteneur (souvent = container_name)
+    if Path::new("/.dockerenv").exists() {
+        if let Ok(hn) = std::fs::read_to_string("/etc/hostname") {
+            let hn = hn.trim();
+            if !hn.is_empty() && hn != "localhost" {
+                return format!("http://{hn}:{port}");
+            }
+        }
+        // Dernier recours en Docker : IP de l’interface eth0 du conteneur
+        if let Some(ip) = container_eth0_ip() {
+            return format!("http://{ip}:{port}");
+        }
+    }
     format!("http://host.docker.internal:{port}")
+}
+
+fn container_eth0_ip() -> Option<String> {
+    let out = Command::new("hostname")
+        .arg("-i")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout);
+    s.split_whitespace()
+        .find(|p| p.contains('.') && !p.starts_with("127."))
+        .map(|s| s.to_string())
+}
+
+/// Healthcheck HTTP sur l’URL publique Traefik (404 = pas ok).
+async fn public_preview_health(url: &str) -> (bool, Option<u16>, String) {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .danger_accept_invalid_certs(true)
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .user_agent("DevForge-Preview-Health/2.0")
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return (false, None, e.to_string()),
+    };
+    match client.get(url).send().await {
+        Ok(r) => {
+            let status = r.status().as_u16();
+            // 404 Traefik / 502 bad gateway = preview publique KO
+            let ok = (200..400).contains(&status);
+            let msg = if ok {
+                format!("HTTP {status}")
+            } else {
+                format!("HTTP {status} — URL publique inaccessible")
+            };
+            (ok, Some(status), msg)
+        }
+        Err(e) => (false, None, e.to_string()),
+    }
 }
 
 fn host_from_preview_url(preview_url: &str) -> Option<String> {
@@ -507,7 +654,7 @@ fn write_dev_traefik_dynamic(
     preview_url: &str,
     project_uuid: &str,
     port: u16,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<String, String> {
     let host = host_from_preview_url(preview_url).ok_or_else(|| "hôte dev- invalide".to_string())?;
     let short: String = project_uuid.chars().take(8).collect();
     let service = format!("dfdev-{short}");
@@ -547,7 +694,8 @@ fn write_dev_traefik_dynamic(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(&path, yaml).map_err(|e| e.to_string())
+    std::fs::write(&path, yaml).map_err(|e| e.to_string())?;
+    Ok(upstream)
 }
 
 fn remove_dev_traefik_dynamic(project_uuid: &str) {

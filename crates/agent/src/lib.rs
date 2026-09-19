@@ -15,11 +15,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tools::{
     CreateGitHubFixTool, CreateGitHubRepoTool, GetDeploymentLogsTool, GetProjectTool,
-    GitHubListPrsTool, GitHubWorkflowRunsTool, HttpSmokeTool, ListEnvVarsTool, ListProjectFilesTool,
-    ListProjectsTool, McpCallTool, McpListRemoteToolsTool, McpListServersTool, ProposePlanTool,
-    PublishToGitHubTool, ReadGitHubFileTool, ReadProjectFileTool, RunApplicationTestsTool,
-    LocalPreviewStatusTool, StartLocalPreviewTool, StopLocalPreviewTool, SyncWorkdirToGitHubTool,
-    TriggerDeployTool, UpsertEnvVarsTool,
+    GitHubListPrsTool, GitHubWorkflowRunsTool, HttpSmokeTool, ListAgentMessagesTool,
+    ListAgentToolFailuresTool, ListEnvVarsTool, ListProjectAgentsTool, ListProjectFilesTool,
+    ListProjectsTool, LocalPreviewStatusTool, McpCallTool, McpListRemoteToolsTool,
+    McpListServersTool, ProposePlanTool, PublishToGitHubTool, ReadGitHubFileTool,
+    ReadProjectFileTool, RunApplicationTestsTool, RunWorkdirCommandTool, StartLocalPreviewTool,
+    StopLocalPreviewTool, SyncWorkdirToGitHubTool, TriggerDeployTool, UpsertEnvVarsTool,
     WriteProjectFileTool,
 };
 
@@ -148,7 +149,19 @@ pub fn build_core_registry(
     registry.register(Arc::new(StopLocalPreviewTool {
         pool: pool.clone(),
     }));
-    registry.register(Arc::new(LocalPreviewStatusTool { pool }));
+    registry.register(Arc::new(LocalPreviewStatusTool {
+        pool: pool.clone(),
+    }));
+    registry.register(Arc::new(RunWorkdirCommandTool {
+        pool: pool.clone(),
+    }));
+    registry.register(Arc::new(ListProjectAgentsTool {
+        pool: pool.clone(),
+    }));
+    registry.register(Arc::new(ListAgentMessagesTool {
+        pool: pool.clone(),
+    }));
+    registry.register(Arc::new(ListAgentToolFailuresTool { pool }));
     registry
 }
 
@@ -532,11 +545,11 @@ fn is_publish_request(msg: &str) -> bool {
 
 fn local_first_rules(publish_ok: bool) -> String {
     let gate = if publish_ok {
-        "L'utilisateur a VALIDÉ explicitement une publication. Tu PEUX maintenant : create_github_fix, sync_workdir_to_github, publish_to_github, ou trigger_deploy. Travaille toujours depuis les fichiers locaux déjà écrits.".to_string()
+        "L'utilisateur a VALIDÉ explicitement une publication. Tu PEUX maintenant : create_github_pr, sync_workdir_to_github, publish_to_github, ou trigger_deploy. Travaille toujours depuis les fichiers locaux déjà écrits.".to_string()
     } else {
-        "❌ INTERDIT (pas de validation PR) : create_github_fix, create_pull_request, publish_to_github, sync_workdir_to_github, create_github_repo, mcp_call_tool create_pull_request / create_or_update_file / create_branch. « go », « oui », « améliore le site » NE sont PAS une validation de PR. ✅ AUTORISÉ : propose_plan, list_project_files, read_project_file, write_project_file mode=local, start_local_preview, get_project, get_deployment_logs, run_application_tests, http_smoke, list_env_vars. ❌ N’invente PAS un MCP « devforge-workdir » — ces tools sont natifs.".to_string()
+        "❌ INTERDIT (pas de validation PR) : create_github_pr, create_pull_request, publish_to_github, sync_workdir_to_github, create_github_repo, mcp_call_tool create_pull_request / create_or_update_file / create_branch. « go », « oui », « améliore le site » NE sont PAS une validation de PR. ✅ AUTORISÉ : propose_plan, list_project_files, read_project_file, write_project_file mode=local, run_workdir_command, start_local_preview, get_project, get_deployment_logs, run_application_tests, http_smoke, list_env_vars. ❌ N’invente PAS un MCP « devforge-workdir » — shell = run_workdir_command (allowlist npm/node/astro…), fichiers = tools natifs.".to_string()
     };
-    format!("WORKFLOW OBLIGATOIRE (autonomie locale, PR en dernier) :\n1. PLAN : appelle propose_plan (titre + étapes) AVANT d'écrire des fichiers.\n2. EXÉCUTE EN LOCAL dans le dossier de l'app : list_project_files, read_project_file, write_project_file mode='local'. Ne te contente pas de conseiller.\n3. PREVIEW : après des edits, appelle start_local_preview et dis à l'utilisateur de regarder le panneau Preview du workspace.\n4. RAPPORT : résume les fichiers touchés, puis UNE SEULE question : « Valide pour ouvrir une PR ? »\n{gate}")
+    format!("WORKFLOW OBLIGATOIRE (autonomie locale, PR en dernier) :\n1. PLAN : appelle propose_plan (titre + étapes) AVANT d'écrire des fichiers.\n2. EXÉCUTE EN LOCAL : list_project_files, read_project_file, write_project_file mode='local', run_workdir_command (build/test). Ne te contente pas de conseiller.\n3. PREVIEW : après des edits, appelle start_local_preview. Si public_ok=false ou logs_tail montre une erreur, corrige et relance (force=true). Ne dis jamais que la preview marche sans public_ok=true.\n4. RAPPORT : résume les fichiers touchés, puis UNE SEULE question : « Valide pour ouvrir une PR ? »\n{gate}")
 }
 
 fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
@@ -569,7 +582,7 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
     let scoped = if ctx.project_brief.is_some() || ctx.project_uuid.is_some() {
         "\nLe projet courant est déjà dans le contexte — ne demande pas l'UUID. Agis."
     } else { "" };
-    let mcp_guidance = "\n\nTOOLS LOCAUX (prioritaires, PAS du MCP) : propose_plan, list_project_files, read_project_file, write_project_file (mode=local), start_local_preview.\nIl n’existe PAS de serveur MCP « devforge-workdir » / « workdir » — n’invente pas ce nom et ne demande JAMAIS à l’utilisateur de le configurer.\nMCP distants (mcp_list_servers / mcp_call_tool) : uniquement GitHub, Turso, Slack… après validation PR pour GitHub. Pas besoin de lister les serveurs MCP à chaque tour.";
+    let mcp_guidance = "\n\nTOOLS LOCAUX (prioritaires, PAS du MCP) : propose_plan, list_project_files, read_project_file, write_project_file (mode=local), run_workdir_command, start_local_preview, local_preview_status, list_project_agents, list_agent_messages, list_agent_tool_failures.\nIl n’existe PAS de serveur MCP « devforge-workdir » / « workdir » / « atelier » — n’invente pas ce nom, ne bloque PAS en attendant un MCP manquant, et ne demande JAMAIS à l’utilisateur de le configurer. Pour npm/build/test : run_workdir_command. Pour la preview : start_local_preview (npm install inclus).\nMCP distants (mcp_list_servers / mcp_call_tool) : uniquement GitHub, Turso, Slack… après validation PR pour GitHub. Pas besoin de lister les serveurs MCP à chaque tour.";
     format!("Tu es {name} ({role}) sur DevForge. {role_focus}{nudge}{scoped}{mcp_guidance}\nRéponds en français, concret, orienté ACTION. N'invente pas de résultats. Le panneau Preview du workspace est l'endroit où l'utilisateur voit tes changements.")
 }
 

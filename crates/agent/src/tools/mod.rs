@@ -1,3 +1,4 @@
+mod agent_threads;
 mod deploy;
 mod deploy_logs;
 mod env;
@@ -13,7 +14,11 @@ mod projects;
 mod publish;
 mod sync_workdir;
 mod tests;
+mod workdir_cmd;
 
+pub use agent_threads::{
+    ListAgentMessagesTool, ListAgentToolFailuresTool, ListProjectAgentsTool,
+};
 pub use deploy::TriggerDeployTool;
 pub use deploy_logs::GetDeploymentLogsTool;
 pub use env::{ListEnvVarsTool, UpsertEnvVarsTool};
@@ -29,3 +34,4 @@ pub use projects::{GetProjectTool, ListProjectsTool};
 pub use publish::PublishToGitHubTool;
 pub use sync_workdir::SyncWorkdirToGitHubTool;
 pub use tests::RunApplicationTestsTool;
+pub use workdir_cmd::RunWorkdirCommandTool;
