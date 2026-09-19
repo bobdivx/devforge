@@ -1,0 +1,7 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { SharedAgentConversation } from '../../components/SharedAgentConversation';
+---
+<BaseLayout title="Conversation partagée · DevForge">
+  <SharedAgentConversation client:only="preact" />
+</BaseLayout>

@@ -32,14 +32,34 @@ function parseTools(raw?: string): AgentToolCall[] {
   }
 }
 
-export function SharedAgentConversation({ token }: { token: string }) {
+export function SharedAgentConversation({ token: tokenProp }: { token?: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState('Conversation partagée');
   const [projectName, setProjectName] = useState<string | null>(null);
   const [messages, setMessages] = useState<SharedMsg[]>([]);
+  const [token, setToken] = useState(tokenProp || '');
 
   useEffect(() => {
+    if (tokenProp) {
+      setToken(tokenProp);
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    let t = params.get('token') || '';
+    if (!t) {
+      const m = window.location.pathname.match(/\/share\/agent\/([^/?#]+)/);
+      if (m) t = decodeURIComponent(m[1]);
+    }
+    setToken(t);
+  }, [tokenProp]);
+
+  useEffect(() => {
+    if (!token) {
+      setLoading(false);
+      setError('Lien invalide — token manquant.');
+      return;
+    }
     let cancelled = false;
     (async () => {
       setLoading(true);

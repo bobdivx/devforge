@@ -1009,7 +1009,7 @@ async fn create_agent_share(
     .flatten()
     .unwrap_or_default();
     let base = instance_url.trim().trim_end_matches('/');
-    let path = format!("/share/agent/{token}");
+    let path = format!("/share/agent?token={token}");
     let url = if base.is_empty() {
         path.clone()
     } else {
