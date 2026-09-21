@@ -54,6 +54,10 @@ pub fn router() -> Router<AppState> {
             post(import_env),
         )
         .route(
+            "/api/v1/projects/{uuid}/env/sync-workdir",
+            post(sync_env_from_workdir),
+        )
+        .route(
             "/api/v1/projects/{uuid}/env/{key}",
             get(get_env).delete(delete_env),
         )
@@ -341,7 +345,8 @@ async fn create_project(
     .bind(body.git_branch.clone().unwrap_or_else(|| "main".into()))
     .bind(&server_id)
     .bind(body.workdir.unwrap_or_else(|| {
-        format!("/data/devforge/applications/{slug}")
+        // UUID isolé : évite collision / leftover `.env` entre projets au même nom.
+        format!("/data/devforge/applications/{uuid}")
     }))
     .bind(&body.test_command)
     .bind(&production_url)
@@ -471,7 +476,7 @@ async fn scaffold_project(
     .bind(&body.title)
     .bind(&slug)
     .bind(server_id)
-    .bind(&format!("/data/devforge/applications/{slug}"))
+    .bind(&format!("/data/devforge/applications/{uuid}"))
     .bind(&workspace.uuid)
     .bind(&now)
     .bind(&now)
@@ -518,7 +523,7 @@ async fn scaffold_project(
     
     // Apply template if provided
     let template_name = body.template.as_deref().unwrap_or("astro-preact-sqlite");
-    let template_applied = if let Err(e) = apply_template(template_name, &format!("/data/devforge/applications/{slug}")) {
+    let template_applied = if let Err(e) = apply_template(template_name, &format!("/data/devforge/applications/{uuid}")) {
         eprintln!("[scaffold] Erreur lors de l'application du template {} : {}", template_name, e);
         false
     } else {
@@ -781,6 +786,14 @@ async fn delete_project(
         .execute(&state.pool)
         .await
         .map_err(ApiError::from)?;
+
+    // Purge le `.env` workdir pour éviter qu’un futur projet hérite des secrets.
+    if let Some(raw) = project.workdir.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let workdir = devforge_deploy::resolve_project_workdir(raw, &project.uuid);
+        let env_path = std::path::Path::new(&workdir).join(".env");
+        let _ = fs::remove_file(&env_path);
+    }
+
     // deployments cascade via FK on project_id
     let res = sqlx::query("DELETE FROM projects WHERE uuid = ? AND workspace_uuid = ?")
         .bind(&uuid)
@@ -886,12 +899,7 @@ async fn update_project_rules(
 
     let mut raw_workdir = project.workdir.as_deref().unwrap_or("").trim().to_string();
     if raw_workdir.is_empty() {
-        let slug = if project.slug.is_empty() {
-            project.uuid.chars().take(12).collect::<String>()
-        } else {
-            project.slug.clone()
-        };
-        raw_workdir = format!("/data/devforge/applications/{slug}");
+        raw_workdir = format!("/data/devforge/applications/{}", project.uuid);
         let _ = sqlx::query("UPDATE projects SET workdir = ?, updated_at = datetime('now') WHERE uuid = ?")
             .bind(&raw_workdir)
             .bind(&project.uuid)
@@ -1199,6 +1207,41 @@ pub(crate) async fn load_env_file_content(
         return None;
     }
     Some(devforge_env::serialize_docker_env_file(&rows))
+}
+
+/// Clone les env du projet vers `{workdir}/.env` (ou purge si vide).
+pub(crate) async fn materialize_project_env_to_workdir(
+    pool: &sqlx::SqlitePool,
+    project: &Project,
+) -> Result<String, ApiError> {
+    let raw = project.workdir.as_deref().unwrap_or("").trim();
+    let raw = if raw.is_empty() {
+        format!("/data/devforge/applications/{}", project.uuid)
+    } else {
+        raw.to_string()
+    };
+    let workdir = devforge_deploy::resolve_project_workdir(&raw, &project.uuid);
+    let path = std::path::Path::new(&workdir);
+    if !path.exists() {
+        fs::create_dir_all(path).map_err(|e| {
+            ApiError::message(format!("Impossible de créer le workdir {workdir} : {e}"))
+        })?;
+    }
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT key, value FROM project_env_vars WHERE project_uuid = ? ORDER BY key",
+    )
+    .bind(&project.uuid)
+    .fetch_all(pool)
+    .await
+    .map_err(ApiError::from)?;
+    let outcome = devforge_env::materialize_dotenv_file(path, &rows).map_err(|e| {
+        ApiError::message(format!("materialize .env dans {workdir} : {e}"))
+    })?;
+    Ok(match outcome {
+        devforge_env::MaterializeOutcome::Written => format!("cloned {} keys → {workdir}/.env", rows.len()),
+        devforge_env::MaterializeOutcome::Removed => format!("cleared stale .env in {workdir}"),
+        devforge_env::MaterializeOutcome::Absent => format!("no .env (empty env) in {workdir}"),
+    })
 }
 
 async fn get_deployment(
@@ -2028,7 +2071,22 @@ async fn upsert_env(
     Path(uuid): Path<String>,
     Json(body): Json<UpsertEnvBody>,
 ) -> Result<Json<Value>, ApiError> {
-    let _ = auth_project(&state, &headers, &uuid).await?;
+    let (_user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
+    let existing = state
+        .env
+        .get(&uuid, body.key.trim())
+        .await
+        .map_err(|e| ApiError::message(e.to_string()))?;
+    let unchanged = existing
+        .as_ref()
+        .is_some_and(|v| v.value == body.value);
+    if unchanged {
+        let _ = materialize_project_env_to_workdir(&state.pool, &project).await;
+        return Ok(Json(json!({
+            "data": existing.unwrap().public_view(),
+            "unchanged": true,
+        })));
+    }
     let view = state
         .env
         .upsert(
@@ -2041,7 +2099,10 @@ async fn upsert_env(
         )
         .await
         .map_err(|e| ApiError::message(e.to_string()))?;
-    Ok(Json(json!({"data": view})))
+    let materialize = materialize_project_env_to_workdir(&state.pool, &project)
+        .await
+        .unwrap_or_else(|e| format!("materialize warn: {}", e.message));
+    Ok(Json(json!({"data": view, "materialize": materialize})))
 }
 
 async fn delete_env(
@@ -2049,13 +2110,16 @@ async fn delete_env(
     headers: HeaderMap,
     Path((uuid, key)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
-    let _ = auth_project(&state, &headers, &uuid).await?;
+    let (_user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
     let deleted = state
         .env
         .delete(&uuid, &key)
         .await
         .map_err(|e| ApiError::message(e.to_string()))?;
-    Ok(Json(json!({"ok": deleted})))
+    let materialize = materialize_project_env_to_workdir(&state.pool, &project)
+        .await
+        .unwrap_or_else(|e| format!("materialize warn: {}", e.message));
+    Ok(Json(json!({"ok": deleted, "materialize": materialize})))
 }
 
 #[derive(Deserialize)]
@@ -2070,13 +2134,63 @@ async fn import_env(
     Path(uuid): Path<String>,
     Json(body): Json<ImportEnvBody>,
 ) -> Result<Json<Value>, ApiError> {
-    let _ = auth_project(&state, &headers, &uuid).await?;
-    let result = state
+    let (_user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
+    let mut result = state
         .env
         .import_dotenv(&uuid, &body.content, body.overwrite.unwrap_or(true))
         .await
         .map_err(|e| ApiError::message(e.to_string()))?;
+    let materialize = materialize_project_env_to_workdir(&state.pool, &project)
+        .await
+        .unwrap_or_else(|e| format!("materialize warn: {}", e.message));
+    if let Some(obj) = result.as_object_mut() {
+        obj.insert("materialize".into(), json!(materialize));
+    }
     Ok(Json(result))
+}
+
+/// Relit `{workdir}/.env` et n’écrase en DB que les clés vraiment modifiées.
+async fn sync_env_from_workdir(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let (_user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
+    let raw = project.workdir.as_deref().unwrap_or("").trim();
+    let raw = if raw.is_empty() {
+        format!("/data/devforge/applications/{}", project.uuid)
+    } else {
+        raw.to_string()
+    };
+    let workdir = devforge_deploy::resolve_project_workdir(&raw, &project.uuid);
+    let workdir_path = std::path::Path::new(&workdir);
+    let disk = devforge_env::read_dotenv_file(workdir_path)
+        .map_err(|e| ApiError::message(e.to_string()))?;
+    let Some(incoming) = disk else {
+        return Ok(Json(json!({
+            "ok": true,
+            "imported": 0,
+            "updated": 0,
+            "unchanged": 0,
+            "skipped": 0,
+            "message": "aucun .env dans le workdir",
+        })));
+    };
+    let stats = state
+        .env
+        .merge_vars(&uuid, incoming, true)
+        .await
+        .map_err(|e| ApiError::message(e.to_string()))?;
+    // Re-clone DB → workdir pour garantir un fichier cohérent avec le projet.
+    let materialize = materialize_project_env_to_workdir(&state.pool, &project)
+        .await
+        .unwrap_or_else(|e| format!("materialize warn: {}", e.message));
+    let mut out = stats.to_json();
+    if let Some(obj) = out.as_object_mut() {
+        obj.insert("materialize".into(), json!(materialize));
+        obj.insert("workdir".into(), json!(workdir));
+    }
+    Ok(Json(out))
 }
 
 #[derive(Deserialize)]

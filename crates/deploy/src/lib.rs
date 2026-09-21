@@ -582,20 +582,31 @@ impl DeployFacade {
             logs.push_str(&format!("[git] HEAD={s}\n"));
         }
 
-        // Write env file if provided (local filesystem; remote uses printf)
-        if let Some(ref env_body) = req.env_file {
+        // Clone env projet → workdir `.env` (source de vérité = DB / req.env_file).
+        // Si aucune var : supprimer un éventuel leftover (évite mélange entre projets).
+        {
             let env_path = std::path::PathBuf::from(&workdir).join(".env");
-            if std::fs::write(&env_path, env_body).is_ok() {
-                logs.push_str("[env] wrote .env\n");
-            } else {
-                let escaped = env_body.replace('\'', "'\\''");
-                let write_cmd = format!("printf '%s' '{escaped}' > .env");
-                match self.executor.exec(server, &workdir, &write_cmd, 30).await {
-                    Ok(r) => logs.push_str(&format!(
-                        "[env] remote write exit={}\n",
-                        r.exit_code
-                    )),
-                    Err(e) => logs.push_str(&format!("[env] write error: {e}\n")),
+            match req.env_file.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                Some(env_body) => {
+                    if std::fs::write(&env_path, env_body).is_ok() {
+                        logs.push_str("[env] cloned project env → .env\n");
+                    } else {
+                        let escaped = env_body.replace('\'', "'\\''");
+                        let write_cmd = format!("printf '%s' '{escaped}' > .env");
+                        match self.executor.exec(server, &workdir, &write_cmd, 30).await {
+                            Ok(r) => logs.push_str(&format!(
+                                "[env] remote clone exit={}\n",
+                                r.exit_code
+                            )),
+                            Err(e) => logs.push_str(&format!("[env] write error: {e}\n")),
+                        }
+                    }
+                }
+                None => {
+                    let _ = std::fs::remove_file(&env_path);
+                    let rm = "rm -f .env 2>/dev/null; true";
+                    let _ = self.executor.exec(server, &workdir, rm, 15).await;
+                    logs.push_str("[env] no project env — cleared stale .env\n");
                 }
             }
         }
@@ -1046,10 +1057,21 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             Err(e) => logs.push_str(&format!("[prepare] warn: {e}\n")),
         }
         
-        let env_file = if std::path::Path::new(&format!("{workdir}/.env")).exists() {
-            Some(".env")
-        } else {
-            None
+        // Vérifier `.env` via l’executor (local ou remote), pas seulement le FS local.
+        let env_file = {
+            let local = std::path::Path::new(&format!("{workdir}/.env")).exists();
+            if local {
+                Some(".env")
+            } else {
+                match self
+                    .executor
+                    .exec(server, workdir, "test -f .env", 10)
+                    .await
+                {
+                    Ok(r) if r.ok => Some(".env"),
+                    _ => None,
+                }
+            }
         };
         
         // Try to get network from env, then auto-detect if Traefik labels are present

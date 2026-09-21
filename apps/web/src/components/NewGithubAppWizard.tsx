@@ -235,7 +235,6 @@ export function NewGithubAppWizard({
         docker_compose_location:
           buildPack === 'dockercompose' ? composePath.trim() || '/docker-compose.yaml' : null,
         server_id: serverId || 'default',
-        workdir: `/data/devforge/applications/${selected.name}`,
         test_command: testCommand || 'npm test --if-present',
         production_url: productionUrl,
       });
@@ -243,7 +242,7 @@ export function NewGithubAppWizard({
         const imported = await api.envImport(p.data.uuid, dotenv, true);
         toast.push({
           title: 'Env importées',
-          detail: `${imported.imported} variable${imported.imported > 1 ? 's' : ''}`,
+          detail: `${imported.imported} nouvelle(s), ${imported.updated ?? 0} mise(s) à jour, ${imported.unchanged ?? 0} inchangée(s)`,
           tone: 'ok',
         });
       }

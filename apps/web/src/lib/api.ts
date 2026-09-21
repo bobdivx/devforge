@@ -724,10 +724,28 @@ export const api = {
       method: 'DELETE',
     }),
   envImport: (projectUuid: string, content: string, overwrite = true) =>
-    request<{ ok: boolean; imported: number; skipped: number }>(
-      `/projects/${projectUuid}/env/import`,
-      { method: 'POST', body: JSON.stringify({ content, overwrite }) },
-    ),
+    request<{
+      ok: boolean;
+      imported: number;
+      updated?: number;
+      unchanged?: number;
+      skipped: number;
+      materialize?: string;
+    }>(`/projects/${projectUuid}/env/import`, {
+      method: 'POST',
+      body: JSON.stringify({ content, overwrite }),
+    }),
+  envSyncWorkdir: (projectUuid: string) =>
+    request<{
+      ok: boolean;
+      imported: number;
+      updated: number;
+      unchanged: number;
+      skipped: number;
+      materialize?: string;
+      workdir?: string;
+      message?: string;
+    }>(`/projects/${projectUuid}/env/sync-workdir`, { method: 'POST' }),
   domains: (projectUuid: string) =>
     request<{
       data?: Array<{

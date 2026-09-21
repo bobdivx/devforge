@@ -141,6 +141,8 @@ impl Tool for StartLocalPreviewTool {
         }
 
         let project_env = load_project_env_vars(self.pool.as_ref(), &ctx.uuid).await;
+        // Clone env projet → workdir `.env` (isolation ; purge si vide).
+        let _ = devforge_env::materialize_dotenv_file(workdir_path, &project_env);
         let env_keys: Vec<String> = project_env_for_preview(&project_env)
             .into_iter()
             .map(|(k, _)| k)
@@ -441,7 +443,7 @@ async fn resolve_preview_context(
     .await
     .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
-    let Some((uuid, workdir_opt, port_i, name)) = project else {
+    let Some((uuid, workdir_opt, port_i, _name)) = project else {
         return Err(devforge_shared::DevForgeError::NotFound(format!(
             "Projet introuvable : {project_uuid}"
         )));
@@ -449,13 +451,7 @@ async fn resolve_preview_context(
 
     let mut workdir_raw = workdir_opt.as_deref().unwrap_or("").trim().to_string();
     if workdir_raw.is_empty() {
-        let slug = slugify_name(&name);
-        let slug = if slug.is_empty() {
-            uuid.chars().take(12).collect::<String>()
-        } else {
-            slug
-        };
-        workdir_raw = format!("/data/devforge/applications/{slug}");
+        workdir_raw = format!("/data/devforge/applications/{uuid}");
         let _ = sqlx::query("UPDATE projects SET workdir = ?, updated_at = datetime('now') WHERE uuid = ?")
             .bind(&workdir_raw)
             .bind(&uuid)
@@ -490,22 +486,6 @@ async fn resolve_preview_context(
         production_port,
         preview_url,
     })
-}
-
-fn slugify_name(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|p| !p.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
 }
 
 async fn resolve_dev_url(pool: &SqlitePool, project_uuid: &str) -> Result<Option<String>> {

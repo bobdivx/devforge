@@ -1331,7 +1331,7 @@ function EnvPanel({ uuid }: { uuid: string }) {
       const r = await api.envImport(uuid, dotenv, true);
       toast.push({
         title: 'Import .env',
-        detail: `${r.imported} importées, ${r.skipped} ignorées`,
+        detail: `${r.imported} nouvelle(s), ${r.updated ?? 0} modifiée(s), ${r.unchanged ?? 0} inchangée(s), ${r.skipped} ignorée(s)`,
         tone: 'ok',
       });
       setDotenv('');
@@ -1354,6 +1354,25 @@ function EnvPanel({ uuid }: { uuid: string }) {
     setFileName(file.name);
   }
 
+  async function syncFromWorkdir() {
+    setBusy(true);
+    try {
+      const r = await api.envSyncWorkdir(uuid);
+      toast.push({
+        title: 'Sync workdir → projet',
+        detail:
+          r.message ||
+          `${r.imported} nouvelle(s), ${r.updated} modifiée(s), ${r.unchanged} inchangée(s)`,
+        tone: 'ok',
+      });
+      await load();
+    } catch (err) {
+      toast.push({ title: 'Sync KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function closeImport() {
     setImportOpen(false);
     setDotenv('');
@@ -1373,9 +1392,14 @@ function EnvPanel({ uuid }: { uuid: string }) {
             title="Variables"
             description="Clique une variable pour la voir ou la modifier."
             action={
-              <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
-                Importer .env
-              </Button>
+              <div class="flex flex-wrap gap-2">
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => void syncFromWorkdir()}>
+                  Sync depuis workdir
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
+                  Importer .env
+                </Button>
+              </div>
             }
           />
           <form class="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end" onSubmit={add}>

@@ -144,15 +144,15 @@ impl Tool for RunWorkdirCommandTool {
             }
         };
 
-        let project: Option<(String, Option<String>, String)> = sqlx::query_as(
-            "SELECT uuid, workdir, name FROM projects WHERE uuid = ?",
+        let project: Option<(String, Option<String>)> = sqlx::query_as(
+            "SELECT uuid, workdir FROM projects WHERE uuid = ?",
         )
         .bind(project_uuid)
         .fetch_optional(self.pool.as_ref())
         .await
         .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
-        let Some((uuid, workdir_opt, name)) = project else {
+        let Some((uuid, workdir_opt)) = project else {
             return Ok(json!({
                 "ok": false,
                 "error": format!("Projet introuvable : {project_uuid}")
@@ -161,17 +161,7 @@ impl Tool for RunWorkdirCommandTool {
 
         let mut workdir_raw = workdir_opt.as_deref().unwrap_or("").trim().to_string();
         if workdir_raw.is_empty() {
-            let slug: String = name
-                .chars()
-                .map(|c| {
-                    if c.is_ascii_alphanumeric() {
-                        c.to_ascii_lowercase()
-                    } else {
-                        '-'
-                    }
-                })
-                .collect();
-            workdir_raw = format!("/data/devforge/applications/{slug}");
+            workdir_raw = format!("/data/devforge/applications/{uuid}");
         }
         let workdir = devforge_deploy::resolve_project_workdir(&workdir_raw, &uuid);
         let workdir_path = Path::new(&workdir);

@@ -155,15 +155,15 @@ impl Tool for WriteProjectFileTool {
         }
 
         // Récupérer le projet
-        let project: Option<(String, Option<String>, Option<String>, String)> = sqlx::query_as(
-            "SELECT uuid, workdir, git_repository, name FROM projects WHERE uuid = ?",
+        let project: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT uuid, workdir, git_repository FROM projects WHERE uuid = ?",
         )
         .bind(project_uuid)
         .fetch_optional(self.pool.as_ref())
         .await
         .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
-        let Some((uuid, workdir_opt, git_repo_opt, name)) = project else {
+        let Some((uuid, workdir_opt, git_repo_opt)) = project else {
             return Ok(json!({
                 "ok": false,
                 "error": format!("Projet introuvable : {project_uuid}")
@@ -182,7 +182,7 @@ impl Tool for WriteProjectFileTool {
                 )
                 .await
             }
-            "local" | _ => self.write_local(&uuid, workdir_opt, &name, path, content).await,
+            "local" | _ => self.write_local(&uuid, workdir_opt, path, content).await,
         }
     }
 }
@@ -192,20 +192,13 @@ impl WriteProjectFileTool {
         &self,
         project_uuid: &str,
         workdir_opt: Option<String>,
-        project_name: &str,
         path: &str,
         content: &str,
     ) -> Result<Value> {
         let mut workdir_raw = workdir_opt.as_deref().unwrap_or("").trim().to_string();
 
         if workdir_raw.is_empty() {
-            let slug = slugify_project_name(project_name);
-            let slug = if slug.is_empty() {
-                project_uuid.chars().take(12).collect::<String>()
-            } else {
-                slug
-            };
-            workdir_raw = format!("/data/devforge/applications/{slug}");
+            workdir_raw = format!("/data/devforge/applications/{project_uuid}");
             let _ = sqlx::query(
                 "UPDATE projects SET workdir = ?, updated_at = datetime('now') WHERE uuid = ?",
             )
@@ -669,22 +662,6 @@ fn collect_files(root: &Path, current: &Path, out: &mut Vec<String>) {
             out.push(rel);
         }
     }
-}
-
-fn slugify_project_name(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|p| !p.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
 }
 
 /// Diff ligne-à-ligne simple (LCS) pour l’UI chat — style Cursor.

@@ -132,14 +132,9 @@ export function ProjectsListPage() {
     if (!name.trim()) return;
     setBusy(true);
     try {
-      const slug = name
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9-_]+/g, '-');
       await api.createProject({
         name: name.trim(),
         server_id: serverId || 'default',
-        workdir: `/data/devforge/applications/${slug}`,
         test_command: 'npm test --if-present',
         build_pack: 'nixpacks',
         port: 3000,
