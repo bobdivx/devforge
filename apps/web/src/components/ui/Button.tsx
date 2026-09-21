@@ -50,7 +50,7 @@ export function Button({
   onClick,
 }: Props) {
   const cls = cn(
-    'inline-flex items-center justify-center gap-2 font-medium tracking-tight transition disabled:opacity-50',
+    'inline-flex items-center justify-center gap-2 font-medium tracking-tight transition-[transform,filter,background-color,color,opacity,box-shadow] duration-200 ease-out active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100',
     variants[variant],
     sizes[size],
     className,

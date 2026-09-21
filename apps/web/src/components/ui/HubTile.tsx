@@ -3,10 +3,10 @@ import { cn } from '../../lib/cn';
 import { FadeIn } from './Motion';
 
 const TILE_CLASS =
-  'group flex min-h-[8.75rem] flex-col items-center justify-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 text-center transition duration-200 hover:-translate-y-0.5 hover:bg-[#252528] hover:ring-1 hover:ring-white/10 sm:aspect-square sm:min-h-0 sm:gap-3 sm:px-3 sm:py-4';
+  'group flex min-h-[8.75rem] flex-col items-center justify-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 text-center transition-[transform,background-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:bg-[#252528] hover:ring-1 hover:ring-white/10 active:scale-[0.98] sm:aspect-square sm:min-h-0 sm:gap-3 sm:px-3 sm:py-4';
 
 const ICON_WRAP =
-  'relative flex h-16 w-16 items-center justify-center rounded-[1.15rem] bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition group-hover:scale-[1.03] sm:h-[4.5rem] sm:w-[4.5rem]';
+  'relative flex h-16 w-16 items-center justify-center rounded-[1.15rem] bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition-transform duration-200 ease-out group-hover:scale-[1.04] sm:h-[4.5rem] sm:w-[4.5rem]';
 
 type HubGridProps = {
   class?: string;
@@ -108,7 +108,7 @@ export function HubAddTile({
       <button
         type="button"
         onClick={onClick}
-        class="group flex min-h-[8.75rem] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-white/15 bg-[#1c1c1e] px-2.5 py-3 transition duration-200 hover:-translate-y-0.5 hover:border-white/25 hover:bg-[#252528] hover:ring-1 hover:ring-white/10 sm:aspect-square sm:min-h-0 sm:gap-3 sm:px-3 sm:py-4"
+        class="group flex min-h-[8.75rem] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-white/15 bg-[#1c1c1e] px-2.5 py-3 transition-[transform,background-color,border-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:border-white/25 hover:bg-[#252528] hover:ring-1 hover:ring-white/10 active:scale-[0.98] sm:aspect-square sm:min-h-0 sm:gap-3 sm:px-3 sm:py-4"
       >
         <div class="flex h-16 w-16 items-center justify-center rounded-[1.15rem] border border-dashed border-white/20 text-[var(--color-ink-muted)] transition group-hover:scale-[1.03] group-hover:border-white/30 group-hover:text-white sm:h-[4.5rem] sm:w-[4.5rem]">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden>

@@ -68,7 +68,7 @@ export function Modal({
       <button
         type="button"
         aria-label="Fermer"
-        class="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        class="df-modal-backdrop absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={onClose}
       />
       <div
@@ -77,7 +77,7 @@ export function Modal({
         aria-labelledby={titleId}
         aria-describedby={description ? descId : undefined}
         class={cn(
-          'relative z-10 flex w-full flex-col overflow-hidden border border-[var(--color-line)] bg-[var(--color-card)] shadow-2xl',
+          'df-modal-panel relative z-10 flex w-full flex-col overflow-hidden border border-[var(--color-line)] bg-[var(--color-card)] shadow-2xl',
           // Hauteur bornée au viewport MOINS le dock mobile (4.5rem + safe area)
           // Sur mobile : laisse de la place pour le dock en bas (72px = 4.5rem)
           'max-h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom,0px))] sm:max-h-[min(90dvh,880px)]',

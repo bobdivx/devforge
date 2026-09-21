@@ -145,8 +145,11 @@ function ShellInner({
       <div class="min-h-screen pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-8">
         <div class="mx-auto flex min-h-screen max-w-6xl gap-8 px-4 pt-4 lg:px-6">
           <aside class="hidden w-52 shrink-0 lg:block">
-            <a href={isWorker ? '/app/node' : '/app'} class="mb-8 flex items-center gap-2.5">
-              <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
+            <a
+              href={isWorker ? '/app/node' : '/app'}
+              class="mb-8 flex items-center gap-2.5 transition-opacity duration-200 hover:opacity-90"
+            >
+              <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition-transform duration-200 hover:scale-105">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                   <path d="M13 2 4 14h7l-1 8 10-14h-7l1-6z" />
                 </svg>
@@ -158,8 +161,9 @@ function ShellInner({
                 <a
                   key={item.key}
                   href={item.href}
+                  data-active={active === item.key ? 'true' : 'false'}
                   class={cn(
-                    'rounded-lg px-3 py-2 text-sm transition',
+                    'df-nav-active-indicator rounded-lg px-3 py-2 text-sm transition-[background-color,color,transform] duration-200',
                     active === item.key
                       ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
                       : 'text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
@@ -182,7 +186,7 @@ function ShellInner({
                         key={item.key}
                         href={item.href}
                         class={cn(
-                          'rounded-lg px-3 py-2 text-sm transition',
+                          'rounded-lg px-3 py-2 text-sm transition-[background-color,color] duration-200',
                           on
                             ? 'bg-white/5 font-medium text-[var(--color-ink)]'
                             : 'text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
@@ -197,7 +201,7 @@ function ShellInner({
             )}
           </aside>
 
-          <main class="min-w-0 flex-1 overflow-x-hidden py-2">
+          <main class="df-page-enter min-w-0 flex-1 overflow-x-hidden py-2">
             <AppHeader worker={isWorker} />
             {(title || actions) && (
               <div class="mb-4 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-end sm:justify-between">
@@ -230,7 +234,7 @@ function ShellInner({
                           key={item.key}
                           href={item.href}
                           class={cn(
-                            'shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition',
+                            'shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-[background-color,color,transform] duration-200 active:scale-[0.97]',
                             on
                               ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
                               : 'bg-white/[0.03] text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
@@ -263,8 +267,8 @@ function ShellInner({
                     key={item.key}
                     type="button"
                     class={cn(
-                      'flex min-h-[44px] min-w-[3.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] leading-tight transition-colors',
-                      'text-[var(--color-ink-muted)] active:bg-white/5',
+                      'flex min-h-[44px] min-w-[3.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] leading-tight transition-[background-color,color,transform] duration-200',
+                      'text-[var(--color-ink-muted)] active:scale-[0.96] active:bg-white/5',
                     )}
                     onClick={() => setMobileSheetOpen(true)}
                     aria-label="Ouvrir le menu"
@@ -281,7 +285,7 @@ function ShellInner({
                   key={item.key}
                   href={item.href}
                   class={cn(
-                    'flex min-h-[44px] min-w-[3.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] leading-tight transition-colors',
+                    'flex min-h-[44px] min-w-[3.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] leading-tight transition-[background-color,color,transform] duration-200 active:scale-[0.96]',
                     active === item.key
                       ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
                       : 'text-[var(--color-ink-muted)] active:bg-white/5',

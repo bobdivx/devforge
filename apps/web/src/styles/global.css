@@ -22,6 +22,10 @@
   --color-card: #121216;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 html,
 body {
   margin: 0;
@@ -66,7 +70,7 @@ pre {
 @keyframes df-fade-up {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(14px);
   }
   to {
     opacity: 1;
@@ -84,16 +88,99 @@ pre {
   }
 }
 
+@keyframes df-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes df-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes df-modal-backdrop {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes df-modal-panel {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes df-sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .df-fade-up {
-  animation: df-fade-up 0.7s ease both;
+  animation: df-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .df-fade-up-delay {
-  animation: df-fade-up 0.7s ease 0.12s both;
+  animation: df-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
 }
 
 .df-fade-up-delay-2 {
-  animation: df-fade-up 0.7s ease 0.24s both;
+  animation: df-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.2s both;
+}
+
+.df-fade-up-delay-3 {
+  animation: df-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both;
+}
+
+.df-reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition:
+    opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+
+.df-reveal-on {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.df-float {
+  animation: df-float 5.5s ease-in-out infinite;
+}
+
+.df-shimmer-border {
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    rgb(167 139 250 / 0.35) 50%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  animation: df-shimmer 4.5s ease-in-out infinite;
 }
 
 .df-glow-ring {
@@ -101,6 +188,14 @@ pre {
     0 0 0 1px var(--color-line-strong),
     0 24px 80px rgb(0 0 0 / 0.55),
     0 0 60px rgb(167 139 250 / 0.08);
+  transition: box-shadow 0.35s ease;
+}
+
+.df-glow-ring:hover {
+  box-shadow:
+    0 0 0 1px rgb(167 139 250 / 0.35),
+    0 28px 90px rgb(0 0 0 / 0.6),
+    0 0 80px rgb(167 139 250 / 0.14);
 }
 
 .df-dot-grid {
@@ -110,9 +205,83 @@ pre {
 
 .df-gradient-text {
   background: linear-gradient(105deg, #fafafa 0%, #a78bfa 45%, #e879f9 100%);
+  background-size: 180% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  animation: df-shimmer 8s ease-in-out infinite;
+}
+
+.df-modal-backdrop {
+  animation: df-modal-backdrop 0.22s ease-out both;
+}
+
+.df-modal-panel {
+  animation: df-modal-panel 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.df-sheet-panel {
+  animation: df-sheet-up 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (max-width: 639px) {
+  .df-modal-panel {
+    animation: df-sheet-up 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+.df-nav-link {
+  position: relative;
+  transition: color 0.2s ease;
+}
+
+.df-nav-link::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 1.5px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.df-nav-link:hover::after,
+.df-nav-link:focus-visible::after {
+  transform: scaleX(1);
+}
+
+.df-menu-enter {
+  animation: df-fade-up 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.df-page-enter {
+  animation: df-fade-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.df-nav-active-indicator {
+  position: relative;
+}
+
+.df-nav-active-indicator::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 2px;
+  height: 1rem;
+  border-radius: 999px;
+  background: var(--color-accent);
+  transform: translateY(-50%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.df-nav-active-indicator[data-active='true']::before {
+  opacity: 1;
 }
 
 @keyframes df-toast-in {
@@ -225,5 +394,50 @@ pre {
 
 .df-toast-in {
   animation: df-toast-in 0.28s ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .df-fade-up,
+  .df-fade-up-delay,
+  .df-fade-up-delay-2,
+  .df-fade-up-delay-3,
+  .df-float,
+  .df-shimmer-border,
+  .df-gradient-text,
+  .df-modal-backdrop,
+  .df-modal-panel,
+  .df-sheet-panel,
+  .df-menu-enter,
+  .df-page-enter,
+  .df-toast-in,
+  .df-step-in,
+  .df-orbit,
+  .df-breathe,
+  .df-status-spin,
+  .df-status-live,
+  .df-status-fail {
+    animation: none !important;
+  }
+
+  .df-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .df-glow-ring:hover {
+    box-shadow:
+      0 0 0 1px var(--color-line-strong),
+      0 24px 80px rgb(0 0 0 / 0.55),
+      0 0 60px rgb(167 139 250 / 0.08);
+  }
+
+  .df-nav-link::after {
+    transition: none;
+  }
 }
 

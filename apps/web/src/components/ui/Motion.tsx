@@ -1,6 +1,18 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { cn } from '../../lib/cn';
+
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const sync = () => setReduced(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+  return reduced;
+}
 
 export function FadeIn({
   children,
@@ -11,20 +23,101 @@ export function FadeIn({
   class?: string;
   delay?: number;
 }) {
-  const [on, setOn] = useState(false);
+  const reduced = usePrefersReducedMotion();
+  const [on, setOn] = useState(reduced);
   useEffect(() => {
+    if (reduced) {
+      setOn(true);
+      return;
+    }
     const t = setTimeout(() => setOn(true), delay);
     return () => clearTimeout(t);
-  }, [delay]);
+  }, [delay, reduced]);
   return (
     <div
       class={cn(
-        'transition-all duration-500 ease-out',
+        'transition-[opacity,transform] duration-500 ease-out',
         on ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0',
         className,
       )}
     >
       {children}
+    </div>
+  );
+}
+
+/** Reveal on scroll — opacity + translateY only (GPU-friendly). */
+export function Reveal({
+  children,
+  class: className,
+  delay = 0,
+  once = true,
+}: {
+  children: ComponentChildren;
+  class?: string;
+  delay?: number;
+  once?: boolean;
+}) {
+  const reduced = usePrefersReducedMotion();
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(reduced);
+
+  useEffect(() => {
+    if (reduced) {
+      setVisible(true);
+      return;
+    }
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          setVisible(true);
+          if (once) io.disconnect();
+        } else if (!once) {
+          setVisible(false);
+        }
+      },
+      { threshold: 0.12, rootMargin: '0px 0px -6% 0px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [once, reduced]);
+
+  return (
+    <div
+      ref={ref}
+      class={cn('df-reveal', visible && 'df-reveal-on', className)}
+      style={
+        visible && delay > 0 && !reduced
+          ? { transitionDelay: `${delay}ms` }
+          : undefined
+      }
+    >
+      {children}
+    </div>
+  );
+}
+
+export function Stagger({
+  children,
+  class: className,
+  baseDelay = 0,
+  step = 70,
+}: {
+  children: ComponentChildren;
+  class?: string;
+  baseDelay?: number;
+  step?: number;
+}) {
+  const items = Array.isArray(children) ? children : [children];
+  return (
+    <div class={className}>
+      {items.map((child, i) => (
+        <Reveal key={i} delay={baseDelay + i * step}>
+          {child}
+        </Reveal>
+      ))}
     </div>
   );
 }
@@ -83,7 +176,7 @@ export function ProgressBar({
       )}
     >
       <div
-        class="h-full rounded-full bg-gradient-to-r from-[var(--color-accent)] to-[var(--color-accent-2)] transition-all duration-500 ease-out"
+        class="h-full rounded-full bg-gradient-to-r from-[var(--color-accent)] to-[var(--color-accent-2)] transition-[width] duration-500 ease-out"
         style={{ width: `${v}%` }}
       />
     </div>

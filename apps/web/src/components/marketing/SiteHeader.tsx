@@ -12,10 +12,12 @@ export function SiteHeader() {
   const [open, setOpen] = useState(false);
 
   return (
-    <header class="sticky top-0 z-30 border-b border-[var(--color-line)] bg-[var(--color-bg)]/70 backdrop-blur-xl">
+    <header
+      class="sticky top-0 z-30 border-b border-[var(--color-line)] bg-[var(--color-bg)]/70 backdrop-blur-xl"
+    >
       <div class="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
-        <a href="/" class="flex items-center gap-2.5">
-          <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
+        <a href="/" class="flex items-center gap-2.5 transition-opacity duration-200 hover:opacity-90">
+          <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition-transform duration-200 hover:scale-105">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
               <path d="M13 2 4 14h7l-1 8 10-14h-7l1-6z" />
             </svg>
@@ -24,7 +26,7 @@ export function SiteHeader() {
         </a>
         <nav class="hidden items-center gap-7 text-sm text-[var(--color-ink-muted)] md:flex">
           {LINKS.map((l) => (
-            <a key={l.href} class="hover:text-[var(--color-ink)]" href={l.href}>
+            <a key={l.href} class="df-nav-link hover:text-[var(--color-ink)]" href={l.href}>
               {l.label}
             </a>
           ))}
@@ -38,7 +40,7 @@ export function SiteHeader() {
           </Button>
           <button
             type="button"
-            class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)] md:hidden"
+            class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[var(--color-ink-muted)] transition duration-200 hover:bg-white/5 hover:text-[var(--color-ink)] md:hidden"
             aria-expanded={open}
             aria-controls="site-mobile-nav"
             aria-label={open ? 'Fermer le menu' : 'Ouvrir le menu'}
@@ -58,7 +60,7 @@ export function SiteHeader() {
         id="site-mobile-nav"
         class={cn(
           'border-t border-[var(--color-line)] md:hidden',
-          open ? 'block' : 'hidden',
+          open ? 'df-menu-enter block' : 'hidden',
         )}
       >
         <nav class="mx-auto flex max-w-6xl flex-col gap-1 px-4 py-3">
@@ -66,7 +68,7 @@ export function SiteHeader() {
             <a
               key={l.href}
               href={l.href}
-              class="rounded-lg px-3 py-2.5 text-sm text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]"
+              class="rounded-lg px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition duration-200 hover:bg-white/5 hover:text-[var(--color-ink)]"
               onClick={() => setOpen(false)}
             >
               {l.label}
@@ -74,7 +76,7 @@ export function SiteHeader() {
           ))}
           <a
             href="/login"
-            class="rounded-lg px-3 py-2.5 text-sm text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)] sm:hidden"
+            class="rounded-lg px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition duration-200 hover:bg-white/5 hover:text-[var(--color-ink)] sm:hidden"
             onClick={() => setOpen(false)}
           >
             Log in

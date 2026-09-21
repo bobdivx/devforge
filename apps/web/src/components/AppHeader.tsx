@@ -179,7 +179,7 @@ export function AppHeader({ worker = false }: { worker?: boolean }) {
       <div class="relative" ref={menuRef}>
         <button
           type="button"
-          class="flex min-h-[44px] w-full items-center gap-2.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] py-1 pl-1 pr-3 transition hover:border-white/20 hover:bg-white/[0.06] sm:w-auto"
+          class="flex min-h-[44px] w-full items-center gap-2.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] py-1 pl-1 pr-3 transition-[border-color,background-color,transform] duration-200 hover:border-white/20 hover:bg-white/[0.06] active:scale-[0.99] sm:w-auto"
           aria-expanded={menuOpen}
           aria-haspopup="menu"
           onClick={() => setMenuOpen((o) => !o)}
@@ -212,7 +212,7 @@ export function AppHeader({ worker = false }: { worker?: boolean }) {
             stroke="currentColor"
             stroke-width="2"
             class={cn(
-              'shrink-0 text-[var(--color-ink-muted)] transition',
+              'shrink-0 text-[var(--color-ink-muted)] transition-transform duration-200',
               menuOpen && 'rotate-180',
             )}
             aria-hidden
@@ -224,7 +224,7 @@ export function AppHeader({ worker = false }: { worker?: boolean }) {
         {menuOpen && (
           <div
             role="menu"
-            class="absolute right-0 z-30 mt-2 w-full min-w-[14rem] overflow-hidden rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] py-1 shadow-xl shadow-black/40 sm:w-56"
+            class="df-menu-enter absolute right-0 z-30 mt-2 w-full min-w-[14rem] overflow-hidden rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] py-1 shadow-xl shadow-black/40 sm:w-56"
           >
             <div class="border-b border-[var(--color-line)] px-3 py-2.5 sm:hidden">
               <p class="truncate text-sm font-medium">{displayName}</p>

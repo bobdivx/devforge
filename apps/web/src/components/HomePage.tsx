@@ -28,7 +28,7 @@ function AppCard({
     <FadeIn delay={Math.min(index * 40, 280)} class="h-full w-full">
       <a
         href={`/app/projects/view?uuid=${encodeURIComponent(project.uuid)}`}
-        class="group flex aspect-square h-full w-full flex-col items-center justify-center gap-3 rounded-2xl bg-[#1c1c1e] px-3 py-4 transition duration-200 hover:-translate-y-0.5 hover:bg-[#252528] hover:ring-1 hover:ring-white/10"
+        class="group flex aspect-square h-full w-full flex-col items-center justify-center gap-3 rounded-2xl bg-[#1c1c1e] px-3 py-4 transition-[transform,background-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:bg-[#252528] hover:ring-1 hover:ring-white/10 active:scale-[0.98]"
       >
         <div class="relative">
           <AppIcon project={project} statusTone={status.tone} class="group-hover:scale-[1.03]" />
@@ -211,8 +211,14 @@ export function HomePage() {
       )}
 
       {wizardOpen && (
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div class="w-full max-w-2xl rounded-2xl bg-[var(--color-card)] p-6 shadow-2xl">
+        <div class="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
+          <button
+            type="button"
+            aria-label="Fermer"
+            class="df-modal-backdrop absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={closeWizard}
+          />
+          <div class="df-modal-panel relative z-10 w-full max-w-2xl rounded-t-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-6 shadow-2xl sm:rounded-2xl">
             <div class="mb-4 flex items-start justify-between">
               <div>
                 <h2 class="text-xl font-semibold">Nouvelle application</h2>
@@ -225,7 +231,7 @@ export function HomePage() {
               <button
                 type="button"
                 onClick={closeWizard}
-                class="text-[var(--color-ink-muted)] transition hover:text-white"
+                class="rounded-lg px-2 py-1 text-[var(--color-ink-muted)] transition duration-200 hover:bg-white/5 hover:text-white"
                 aria-label="Fermer"
               >
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -239,10 +245,10 @@ export function HomePage() {
                 <button
                   type="button"
                   onClick={() => setWizardMode('builder')}
-                  class="group flex w-full flex-col gap-2 rounded-xl border border-[var(--color-line)] p-4 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
+                  class="group flex w-full flex-col gap-2 rounded-xl border border-[var(--color-line)] p-4 text-left transition-[border-color,background-color,transform] duration-200 hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-soft)] active:scale-[0.99]"
                 >
                   <div class="flex items-center gap-2">
-                    <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
+                    <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition-transform duration-200 group-hover:scale-105">
                       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 20h9M12 4L4 8l8 4 8-4-8-4zM4 12l8 4 8-4" stroke-linecap="round" stroke-linejoin="round" />
                       </svg>
@@ -257,10 +263,10 @@ export function HomePage() {
                 <button
                   type="button"
                   onClick={() => setWizardMode('github')}
-                  class="group flex w-full flex-col gap-2 rounded-xl border border-[var(--color-line)] p-4 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
+                  class="group flex w-full flex-col gap-2 rounded-xl border border-[var(--color-line)] p-4 text-left transition-[border-color,background-color,transform] duration-200 hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-soft)] active:scale-[0.99]"
                 >
                   <div class="flex items-center gap-2">
-                    <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-surface)] text-white">
+                    <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-surface)] text-white transition-transform duration-200 group-hover:scale-105">
                       <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
                       </svg>

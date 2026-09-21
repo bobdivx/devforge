@@ -74,7 +74,7 @@ export function MobileMenuSheet({ open, onClose, active, userRole }: Props) {
       <button
         type="button"
         aria-label="Fermer"
-        class="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        class="df-modal-backdrop absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={onClose}
       />
       <div
@@ -82,7 +82,7 @@ export function MobileMenuSheet({ open, onClose, active, userRole }: Props) {
         aria-modal="true"
         aria-labelledby={titleId}
         class={cn(
-          'relative z-10 flex w-full max-w-lg flex-col overflow-hidden border-t border-[var(--color-line)] bg-[var(--color-card)] shadow-2xl',
+          'df-sheet-panel relative z-10 flex w-full max-w-lg flex-col overflow-hidden border-t border-[var(--color-line)] bg-[var(--color-card)] shadow-2xl',
           'max-h-[min(75dvh,600px)] rounded-t-2xl',
         )}
       >
@@ -117,7 +117,7 @@ export function MobileMenuSheet({ open, onClose, active, userRole }: Props) {
                       key={item.key}
                       href={item.href}
                       class={cn(
-                        'flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition',
+                        'flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-[background-color,color,transform] duration-200 active:scale-[0.98]',
                         isCurrent
                           ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
                           : 'text-[var(--color-ink-muted)] active:bg-white/5 active:text-[var(--color-ink)]',

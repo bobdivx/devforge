@@ -8,5 +8,14 @@ export { Modal } from './Modal';
 export { Table, Tr, Td } from './Table';
 export { Container, Section, PageHeader, Separator } from './Layout';
 export { ChartCanvas } from './ChartCanvas';
-export { FadeIn, Spinner, PulseDot, ProgressBar, Skeleton, LiveStatus } from './Motion';
+export {
+  FadeIn,
+  Reveal,
+  Stagger,
+  Spinner,
+  PulseDot,
+  ProgressBar,
+  Skeleton,
+  LiveStatus,
+} from './Motion';
 export { ToastProvider, useToast } from './Toast';

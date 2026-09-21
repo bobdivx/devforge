@@ -3,8 +3,16 @@ import { Button, ChartCanvas, Container } from '../ui';
 export function Hero() {
   return (
     <section class="relative overflow-hidden pb-8 pt-16 md:pb-12 md:pt-24">
+      <div
+        class="pointer-events-none absolute inset-x-0 top-0 h-[28rem] opacity-70"
+        aria-hidden
+      >
+        <div class="absolute left-1/2 top-8 h-64 w-[36rem] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgb(167_139_250/0.22),transparent_70%)] blur-2xl" />
+        <div class="absolute right-[12%] top-24 h-40 w-40 rounded-full bg-[radial-gradient(circle,rgb(232_121_249/0.16),transparent_70%)] blur-xl df-float" />
+      </div>
+
       <Container>
-        <div class="mx-auto max-w-3xl text-center">
+        <div class="relative mx-auto max-w-3xl text-center">
           <p class="df-fade-up mb-5 text-sm font-medium tracking-wide text-[var(--color-accent)]">
             DevForge
           </p>
@@ -17,7 +25,7 @@ export function Hero() {
             Plateforme claire pour déployer vos apps. Agents attachés à chaque project — tests, PRs,
             Actions.
           </p>
-            <div class="df-fade-up-delay-2 mt-8 flex flex-wrap items-center justify-center gap-3">
+          <div class="df-fade-up-delay-2 mt-8 flex flex-wrap items-center justify-center gap-3">
             <Button href="/login" size="lg">
               Commencer
             </Button>
@@ -27,8 +35,9 @@ export function Hero() {
           </div>
         </div>
 
-        <div class="df-fade-up-delay-2 relative mx-auto mt-14 max-w-5xl">
-          <div class="df-glow-ring overflow-hidden rounded-2xl border border-[var(--color-line-strong)] bg-[var(--color-bg-elevated)]">
+        <div class="df-fade-up-delay-3 relative mx-auto mt-14 max-w-5xl">
+          <div class="pointer-events-none absolute -inset-px rounded-2xl df-shimmer-border opacity-40" aria-hidden />
+          <div class="df-glow-ring relative overflow-hidden rounded-2xl border border-[var(--color-line-strong)] bg-[var(--color-bg-elevated)]">
             <div class="flex items-center gap-2 border-b border-[var(--color-line)] px-4 py-3">
               <span class="h-2.5 w-2.5 rounded-full bg-white/15" />
               <span class="h-2.5 w-2.5 rounded-full bg-white/15" />
@@ -41,7 +50,7 @@ export function Hero() {
                 {['Projects', 'Team', 'Settings'].map((item, i) => (
                   <div
                     key={item}
-                    class={`mb-1 rounded-lg px-3 py-2 text-sm ${
+                    class={`mb-1 rounded-lg px-3 py-2 text-sm transition-colors duration-200 ${
                       i === 0
                         ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
                         : 'text-[var(--color-ink-muted)]'
