@@ -143,8 +143,21 @@ function ShellInner({
         />
       )}
       <div class="min-h-screen pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-8">
-        <div class="mx-auto flex min-h-screen max-w-6xl gap-8 px-4 pt-4 lg:px-6">
-          <aside class="hidden w-52 shrink-0 lg:block">
+        <div
+          class={cn(
+            'mx-auto flex min-h-screen px-4 pt-4 lg:px-6',
+            // Plus d’air quand le menu projet est présent (évite le chevauchement)
+            nav ? 'max-w-7xl gap-6 lg:gap-10' : 'max-w-6xl gap-6 lg:gap-8',
+          )}
+        >
+          <aside
+            class={cn(
+              'hidden shrink-0 lg:block',
+              'sticky top-4 self-start max-h-[calc(100dvh-1.5rem)] overflow-y-auto overflow-x-hidden',
+              'border-r border-[var(--color-line)] pr-5',
+              nav ? 'w-56' : 'w-52',
+            )}
+          >
             <a
               href={isWorker ? '/app/node' : '/app'}
               class="mb-8 flex items-center gap-2.5 transition-opacity duration-200 hover:opacity-90"
@@ -178,7 +191,7 @@ function ShellInner({
                 <div class="mb-2 px-3 text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--color-ink-faint)]">
                   {navLabel}
                 </div>
-                <nav class="flex flex-col gap-0.5">
+                <nav class="flex flex-col gap-0.5 pr-1">
                   {nav.map((item) => {
                     const on = sideNavItemActive(item);
                     return (
@@ -186,7 +199,7 @@ function ShellInner({
                         key={item.key}
                         href={item.href}
                         class={cn(
-                          'rounded-lg px-3 py-2 text-sm transition-[background-color,color] duration-200',
+                          'rounded-lg px-3 py-2 text-sm transition-[background-color,color,transform] duration-200',
                           on
                             ? 'bg-white/5 font-medium text-[var(--color-ink)]'
                             : 'text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
@@ -201,7 +214,7 @@ function ShellInner({
             )}
           </aside>
 
-          <main class="df-page-enter min-w-0 flex-1 overflow-x-hidden py-2">
+          <main class="df-page-enter min-w-0 flex-1 py-2 lg:pl-1">
             <AppHeader worker={isWorker} />
             {(title || actions) && (
               <div class="mb-4 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-end sm:justify-between">

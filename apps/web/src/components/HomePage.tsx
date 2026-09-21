@@ -28,8 +28,8 @@ function AppCard({
   return (
     <a
       href={`/app/projects/view?uuid=${encodeURIComponent(project.uuid)}`}
-      class="group flex aspect-square h-full w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl bg-[#1c1c1e] px-3 py-4"
-      animate={motion(enterUp(Math.min(index * 0.04, 0.28)), interactiveLift())}
+      class="group flex aspect-square h-full w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl bg-[#1c1c1e] px-3 py-4 ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)]"
+      animate={motion(enterUp(Math.min(index * 0.05, 0.35)), interactiveLift())}
     >
         <div class="relative">
           <AppIcon project={project} statusTone={status.tone} class="group-hover:scale-[1.03]" />

@@ -16,15 +16,15 @@ export function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
-/** Entrée douce (opacity + translateY). */
+/** Entrée bien visible (opacity + translateY). */
 export function enterUp(delay = 0): AnimateLifecycleProps | undefined {
   if (prefersReducedMotion()) return undefined;
   return {
-    initial: { opacity: '0', transform: 'translateY(18px)' },
+    initial: { opacity: '0', transform: 'translateY(28px)' },
     enter: {
       opacity: 1,
       transform: 'translateY(0px)',
-      duration: 0.5,
+      duration: 0.55,
       delay,
       ease: EASE_OUT,
     },
@@ -36,12 +36,12 @@ export function interactiveLift(): AnimateLifecycleProps | undefined {
   if (prefersReducedMotion()) return undefined;
   return {
     whileHover: {
-      transform: 'translateY(-4px) scale(1.01)',
-      duration: 0.22,
+      transform: 'translateY(-8px) scale(1.02)',
+      duration: 0.25,
       ease: EASE_OUT,
     },
     whilePress: {
-      transform: 'translateY(0px) scale(0.98)',
+      transform: 'translateY(-2px) scale(0.97)',
       duration: 0.12,
       ease: EASE_OUT,
     },
@@ -53,12 +53,12 @@ export function pressScale(): AnimateLifecycleProps | undefined {
   if (prefersReducedMotion()) return undefined;
   return {
     whileHover: {
-      transform: 'scale(1.02)',
-      duration: 0.18,
+      transform: 'scale(1.04)',
+      duration: 0.2,
       ease: EASE_OUT,
     },
     whilePress: {
-      transform: 'scale(0.97)',
+      transform: 'scale(0.96)',
       duration: 0.1,
       ease: EASE_OUT,
     },
@@ -69,16 +69,16 @@ export function pressScale(): AnimateLifecycleProps | undefined {
 export function productShowcase(): AnimateLifecycleProps | undefined {
   if (prefersReducedMotion()) return undefined;
   return {
-    initial: { opacity: '0', transform: 'translateY(28px) scale(0.98)' },
+    initial: { opacity: '0', transform: 'translateY(36px) scale(0.97)' },
     enter: {
       opacity: 1,
       transform: 'translateY(0px) scale(1)',
-      duration: 0.65,
-      delay: 0.22,
+      duration: 0.7,
+      delay: 0.18,
       ease: EASE_OUT,
     },
     whileHover: {
-      transform: 'translateY(-6px) scale(1.01)',
+      transform: 'translateY(-10px) scale(1.015)',
       duration: 0.35,
       ease: EASE_OUT,
     },

@@ -490,22 +490,24 @@ function ProjectOverview({
     <FadeIn>
       <div class="space-y-6">
         {/* En-tête compact avec statut et actions rapides */}
-        <div class="flex flex-wrap items-center justify-between gap-4">
-          <div class="flex items-center gap-3">
+        <div
+          class="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]/70 px-4 py-4 backdrop-blur-sm sm:px-5"
+        >
+          <div class="flex min-w-0 items-center gap-3">
             <StatusGlyph
               project={project}
               tone={statusMeta.tone}
               busy={deployBusy || !!lifeBusy}
               label={statusMeta.label}
             />
-            <div>
+            <div class="min-w-0">
               <h2 class="text-lg font-medium">{statusMeta.label}</h2>
               {project.production_url && (
                 <a
                   href={project.production_url}
                   target="_blank"
                   rel="noreferrer"
-                  class="mt-0.5 block text-sm text-[var(--color-accent)] hover:underline"
+                  class="mt-0.5 block truncate text-sm text-[var(--color-accent)] hover:underline"
                 >
                   {project.production_url.replace(/^https?:\/\//, '')}
                 </a>
