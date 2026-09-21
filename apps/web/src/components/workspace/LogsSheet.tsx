@@ -130,12 +130,12 @@ export function LogsSheet({ open, onClose, projectUuid, variant = 'sheet' }: Pro
       <button
         type="button"
         aria-label="Fermer"
-        class="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        class="df-modal-backdrop absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={onClose}
       />
       <div
         class={cn(
-          'relative z-10 flex w-full flex-col overflow-hidden border border-[var(--color-line)] bg-[var(--color-card)] shadow-2xl',
+          'df-modal-panel relative z-10 flex w-full flex-col overflow-hidden border border-[var(--color-line)] bg-[var(--color-card)] shadow-2xl',
           'max-h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom,0px))] sm:max-h-[80dvh]',
           'rounded-t-2xl border-b-0 sm:rounded-2xl sm:border',
           'max-w-2xl sm:max-w-3xl',

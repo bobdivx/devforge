@@ -65,8 +65,14 @@ export function ProjectRulesModal({
   if (!open) return null;
 
   return (
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div class="relative flex w-full max-w-3xl flex-col rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] shadow-2xl overflow-hidden max-h-[90vh]">
+    <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Fermer"
+        class="df-modal-backdrop absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div class="df-modal-panel relative flex w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] shadow-2xl max-h-[90vh]">
         {/* Header */}
         <div class="flex items-center justify-between border-b border-[var(--color-line)] px-5 py-4">
           <div class="flex items-center gap-3">

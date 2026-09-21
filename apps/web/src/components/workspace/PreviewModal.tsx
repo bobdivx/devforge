@@ -31,13 +31,13 @@ export function PreviewModal({ open, onClose, previewUrl, isProduction }: Props)
   const targetUrl = `${previewUrl}${previewUrl.includes('?') ? '&' : '?'}_df=${nonce}`;
 
   return (
-    <div class="fixed inset-0 z-50 flex flex-col bg-black">
+    <div class="df-preview-enter fixed inset-0 z-50 flex flex-col bg-black">
       <div class="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-[var(--color-card)] px-4">
         <div class="flex min-w-0 items-center gap-3">
           <button
             type="button"
             onClick={onClose}
-            class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]"
+            class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-[var(--color-ink-muted)] transition duration-200 hover:bg-white/5 hover:text-[var(--color-ink)] active:scale-[0.98]"
             aria-label="Fermer"
           >
             <ArrowLeft size={16} strokeWidth={2} aria-hidden />

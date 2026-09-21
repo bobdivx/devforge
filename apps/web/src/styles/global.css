@@ -262,6 +262,10 @@ pre {
   animation: df-fade-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+.df-preview-enter {
+  animation: df-modal-backdrop 0.22s ease-out both;
+}
+
 .df-nav-active-indicator {
   position: relative;
 }
@@ -413,6 +417,7 @@ pre {
   .df-sheet-panel,
   .df-menu-enter,
   .df-page-enter,
+  .df-preview-enter,
   .df-toast-in,
   .df-step-in,
   .df-orbit,

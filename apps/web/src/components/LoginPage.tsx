@@ -117,10 +117,14 @@ export function LoginPage() {
         : 'Heureux de te revoir.';
 
   return (
-    <div class="flex min-h-screen items-center justify-center px-4 py-12">
-      <FadeIn class="w-full max-w-md">
+    <div class="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12">
+      <div class="pointer-events-none absolute inset-0" aria-hidden>
+        <div class="absolute left-1/2 top-[18%] h-56 w-[28rem] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgb(167_139_250/0.2),transparent_70%)] blur-2xl" />
+        <div class="absolute bottom-[12%] right-[18%] h-36 w-36 rounded-full bg-[radial-gradient(circle,rgb(232_121_249/0.12),transparent_70%)] blur-xl df-float" />
+      </div>
+      <FadeIn class="relative w-full max-w-md">
         <div class="mb-8 text-center">
-          <div class="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
+          <div class="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition-transform duration-200 hover:scale-105">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
               <path d="M13 2 4 14h7l-1 8 10-14h-7l1-6z" />
             </svg>
@@ -129,7 +133,7 @@ export function LoginPage() {
           <p class="mt-2 text-sm text-[var(--color-ink-muted)]">{subtitle}</p>
         </div>
 
-        <Card>
+        <Card class="shadow-[0_24px_80px_rgb(0_0_0/0.35)]">
           {error && (
             <Alert tone="danger" class="mb-4">
               {error}

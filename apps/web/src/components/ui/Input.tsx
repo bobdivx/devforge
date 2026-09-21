@@ -14,7 +14,7 @@ export function Input({ label, hint, class: className, id, ...rest }: Props) {
       <input
         id={inputId}
         class={cn(
-          'h-11 w-full min-w-0 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 text-base text-[var(--color-ink)] outline-none sm:h-10 sm:text-sm',
+          'h-11 w-full min-w-0 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 text-base text-[var(--color-ink)] outline-none transition-[border-color,box-shadow] duration-200 sm:h-10 sm:text-sm',
           'placeholder:text-[var(--color-ink-faint)] focus:border-[var(--color-accent)]/50 focus:ring-2 focus:ring-[var(--color-accent-soft)]',
           className as string,
         )}

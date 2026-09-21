@@ -45,11 +45,11 @@ export function WorkspaceTopBar({
           <>
             <h1 class="truncate text-sm font-medium tracking-tight sm:text-base">{project.name}</h1>
             {statusMeta && (
-              <Badge tone={statusMeta.tone} class="hidden shrink-0 sm:inline-flex">
+              <Badge tone={statusMeta.tone} class="hidden shrink-0 transition-opacity duration-200 sm:inline-flex">
                 {statusMeta.label}
               </Badge>
             )}
-            <Badge tone={serverBadge.tone} class="hidden shrink-0 sm:inline-flex" title="Serveur npm run dev (atelier)">
+            <Badge tone={serverBadge.tone} class="hidden shrink-0 transition-opacity duration-200 sm:inline-flex" title="Serveur npm run dev (atelier)">
               {serverBadge.label}
             </Badge>
           </>

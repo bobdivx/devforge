@@ -18,7 +18,7 @@ export function Card({ class: className, children, padding = 'md' }: Props) {
   return (
     <div
       class={cn(
-        'min-w-0 overflow-x-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]',
+        'min-w-0 overflow-x-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] transition-[border-color,box-shadow] duration-200',
         pads[padding],
         className,
       )}
