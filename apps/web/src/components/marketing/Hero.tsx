@@ -1,31 +1,38 @@
 import { Button, ChartCanvas, Container } from '../ui';
+import { enterUp, motion, productShowcase } from '../../lib/motion';
 
 export function Hero() {
   return (
-    <section class="relative overflow-hidden pb-8 pt-16 md:pb-12 md:pt-24">
-      <div
-        class="pointer-events-none absolute inset-x-0 top-0 h-[28rem] opacity-70"
-        aria-hidden
-      >
-        <div class="absolute left-1/2 top-8 h-64 w-[36rem] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgb(167_139_250/0.22),transparent_70%)] blur-2xl" />
-        <div class="absolute right-[12%] top-24 h-40 w-40 rounded-full bg-[radial-gradient(circle,rgb(232_121_249/0.16),transparent_70%)] blur-xl df-float" />
+    <section class="relative overflow-hidden pb-10 pt-16 md:pb-16 md:pt-28">
+      <div class="pointer-events-none absolute inset-x-0 top-0 h-[32rem]" aria-hidden>
+        <div class="absolute left-1/2 top-6 h-72 w-[40rem] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgb(167_139_250/0.24),transparent_68%)] blur-3xl" />
+        <div class="absolute right-[10%] top-28 h-44 w-44 rounded-full bg-[radial-gradient(circle,rgb(232_121_249/0.14),transparent_70%)] blur-2xl" />
       </div>
 
       <Container>
         <div class="relative mx-auto max-w-3xl text-center">
-          <p class="df-fade-up mb-5 text-sm font-medium tracking-wide text-[var(--color-accent)]">
+          <p
+            class="mb-5 text-sm font-medium tracking-[0.2em] uppercase text-[var(--color-accent)]"
+            animate={enterUp(0)}
+          >
             DevForge
           </p>
-          <h1 class="df-fade-up-delay text-4xl font-semibold leading-[1.08] tracking-tight md:text-6xl">
+          <h1
+            class="text-4xl font-semibold leading-[1.06] tracking-tight md:text-6xl lg:text-[4.25rem]"
+            animate={enterUp(0.08)}
+          >
             Deploy with agents
             <br />
             <span class="df-gradient-text">built for shipping</span>
           </h1>
-          <p class="df-fade-up-delay-2 mx-auto mt-5 max-w-xl text-base leading-relaxed text-[var(--color-ink-muted)] md:text-lg">
+          <p
+            class="mx-auto mt-6 max-w-xl text-base leading-relaxed text-[var(--color-ink-muted)] md:text-lg"
+            animate={enterUp(0.16)}
+          >
             Plateforme claire pour déployer vos apps. Agents attachés à chaque project — tests, PRs,
             Actions.
           </p>
-          <div class="df-fade-up-delay-2 mt-8 flex flex-wrap items-center justify-center gap-3">
+          <div class="mt-9 flex flex-wrap items-center justify-center gap-3" animate={enterUp(0.24)}>
             <Button href="/login" size="lg">
               Commencer
             </Button>
@@ -35,9 +42,12 @@ export function Hero() {
           </div>
         </div>
 
-        <div class="df-fade-up-delay-3 relative mx-auto mt-14 max-w-5xl">
-          <div class="pointer-events-none absolute -inset-px rounded-2xl df-shimmer-border opacity-40" aria-hidden />
-          <div class="df-glow-ring relative overflow-hidden rounded-2xl border border-[var(--color-line-strong)] bg-[var(--color-bg-elevated)]">
+        <div class="relative mx-auto mt-16 max-w-5xl" animate={productShowcase()}>
+          <div
+            class="pointer-events-none absolute -inset-px rounded-2xl opacity-50 df-shimmer-border"
+            aria-hidden
+          />
+          <div class="df-glow-ring relative overflow-hidden rounded-2xl border border-[var(--color-line-strong)] bg-[var(--color-bg-elevated)]/90 backdrop-blur-sm">
             <div class="flex items-center gap-2 border-b border-[var(--color-line)] px-4 py-3">
               <span class="h-2.5 w-2.5 rounded-full bg-white/15" />
               <span class="h-2.5 w-2.5 rounded-full bg-white/15" />
@@ -55,6 +65,16 @@ export function Hero() {
                         ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
                         : 'text-[var(--color-ink-muted)]'
                     }`}
+                    animate={
+                      i === 0
+                        ? motion({
+                            whileHover: {
+                              transform: 'translateX(2px)',
+                              duration: 0.18,
+                            },
+                          })
+                        : undefined
+                    }
                   >
                     {item}
                   </div>

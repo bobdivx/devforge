@@ -1,4 +1,5 @@
 import { ChartCanvas, Container, Reveal, Section } from '../ui';
+import { enterUp, interactiveLift, motion } from '../../lib/motion';
 
 export function MetricsStrip() {
   return (
@@ -11,9 +12,9 @@ export function MetricsStrip() {
           </p>
         </Reveal>
         <div class="grid gap-4 lg:grid-cols-3">
-          <Reveal
-            delay={80}
-            class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-5 transition duration-300 hover:border-[var(--color-line-strong)] lg:col-span-2"
+          <div
+            class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]/90 p-5 backdrop-blur-sm lg:col-span-2"
+            animate={motion(enterUp(0.06), interactiveLift())}
           >
             <div class="mb-4 text-sm font-medium">Builds réussis</div>
             <ChartCanvas
@@ -22,10 +23,10 @@ export function MetricsStrip() {
               labels={['W1', 'W2', 'W3', 'W4', 'W5', 'W6']}
               datasets={[{ label: 'OK', data: [12, 18, 15, 22, 19, 27] }]}
             />
-          </Reveal>
-          <Reveal
-            delay={160}
-            class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-5 transition duration-300 hover:border-[var(--color-line-strong)]"
+          </div>
+          <div
+            class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]/90 p-5 backdrop-blur-sm"
+            animate={motion(enterUp(0.14), interactiveLift())}
           >
             <div class="mb-4 text-sm font-medium">Répartition</div>
             <ChartCanvas
@@ -35,7 +36,7 @@ export function MetricsStrip() {
               labels={['Deploys', 'Tests', 'PRs', 'Idle']}
               datasets={[{ label: 'Share', data: [42, 28, 18, 12] }]}
             />
-          </Reveal>
+          </div>
         </div>
       </Container>
     </Section>

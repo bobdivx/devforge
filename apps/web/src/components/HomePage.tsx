@@ -4,7 +4,8 @@ import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { cn } from '../lib/cn';
 import { AppShell } from './AppShell';
 import { AppIcon, statusDotClass } from './AppIcon';
-import { Alert, FadeIn, HubAddTile, HubGrid, Skeleton } from './ui';
+import { Alert, HubAddTile, HubGrid, Skeleton } from './ui';
+import { enterUp, interactiveLift, motion } from '../lib/motion';
 import { useEffect, useState } from 'preact/hooks';
 import { NewGithubAppWizard } from './NewGithubAppWizard';
 import { NewBuilderWizard } from './NewBuilderWizard';
@@ -25,11 +26,11 @@ function AppCard({
   const node = nodeShortLabel(nodes, project.server_id);
 
   return (
-    <FadeIn delay={Math.min(index * 40, 280)} class="h-full w-full">
-      <a
-        href={`/app/projects/view?uuid=${encodeURIComponent(project.uuid)}`}
-        class="group flex aspect-square h-full w-full flex-col items-center justify-center gap-3 rounded-2xl bg-[#1c1c1e] px-3 py-4 transition-[transform,background-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:bg-[#252528] hover:ring-1 hover:ring-white/10 active:scale-[0.98]"
-      >
+    <a
+      href={`/app/projects/view?uuid=${encodeURIComponent(project.uuid)}`}
+      class="group flex aspect-square h-full w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl bg-[#1c1c1e] px-3 py-4"
+      animate={motion(enterUp(Math.min(index * 0.04, 0.28)), interactiveLift())}
+    >
         <div class="relative">
           <AppIcon project={project} statusTone={status.tone} class="group-hover:scale-[1.03]" />
 
@@ -68,8 +69,7 @@ function AppCard({
           </div>
           <div class="mt-0.5 truncate text-[10px] text-[var(--color-ink-faint)]">{node}</div>
         </div>
-      </a>
-    </FadeIn>
+    </a>
   );
 }
 

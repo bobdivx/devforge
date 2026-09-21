@@ -1,9 +1,9 @@
 import type { ComponentChildren, JSX } from 'preact';
 import { cn } from '../../lib/cn';
-import { FadeIn } from './Motion';
+import { enterUp, interactiveLift, motion } from '../../lib/motion';
 
 const TILE_CLASS =
-  'group flex min-h-[8.75rem] flex-col items-center justify-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 text-center transition-[transform,background-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:bg-[#252528] hover:ring-1 hover:ring-white/10 active:scale-[0.98] sm:aspect-square sm:min-h-0 sm:gap-3 sm:px-3 sm:py-4';
+  'group flex min-h-[8.75rem] cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 text-center sm:aspect-square sm:min-h-0 sm:gap-3 sm:px-3 sm:py-4';
 
 const ICON_WRAP =
   'relative flex h-16 w-16 items-center justify-center rounded-[1.15rem] bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition-transform duration-200 ease-out group-hover:scale-[1.04] sm:h-[4.5rem] sm:w-[4.5rem]';
@@ -77,19 +77,16 @@ export function HubTile({
   );
 
   const shared = cn(TILE_CLASS, className);
+  const animate = motion(enterUp(Math.min(index * 0.04, 0.28)), interactiveLift());
 
-  return (
-    <FadeIn delay={Math.min(index * 40, 280)}>
-      {href ? (
-        <a href={href} onClick={onClick} class={shared}>
-          {body}
-        </a>
-      ) : (
-        <button type="button" onClick={onClick} class={cn(shared, 'w-full')}>
-          {body}
-        </button>
-      )}
-    </FadeIn>
+  return href ? (
+    <a href={href} onClick={onClick} class={shared} animate={animate}>
+      {body}
+    </a>
+  ) : (
+    <button type="button" onClick={onClick} class={cn(shared, 'w-full')} animate={animate}>
+      {body}
+    </button>
   );
 }
 
@@ -104,27 +101,26 @@ export function HubAddTile({
   onClick: () => void;
 }) {
   return (
-    <FadeIn delay={Math.min(index * 40, 280)} class="h-full w-full">
-      <button
-        type="button"
-        onClick={onClick}
-        class="group flex min-h-[8.75rem] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-white/15 bg-[#1c1c1e] px-2.5 py-3 transition-[transform,background-color,border-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:border-white/25 hover:bg-[#252528] hover:ring-1 hover:ring-white/10 active:scale-[0.98] sm:aspect-square sm:min-h-0 sm:gap-3 sm:px-3 sm:py-4"
-      >
-        <div class="flex h-16 w-16 items-center justify-center rounded-[1.15rem] border border-dashed border-white/20 text-[var(--color-ink-muted)] transition group-hover:scale-[1.03] group-hover:border-white/30 group-hover:text-white sm:h-[4.5rem] sm:w-[4.5rem]">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden>
-            <path d="M12 5v14M5 12h14" stroke-linecap="round" />
-          </svg>
+    <button
+      type="button"
+      onClick={onClick}
+      class="group flex min-h-[8.75rem] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-white/15 bg-[#1c1c1e] px-2.5 py-3 sm:aspect-square sm:min-h-0 sm:gap-3 sm:px-3 sm:py-4"
+      animate={motion(enterUp(Math.min(index * 0.04, 0.28)), interactiveLift())}
+    >
+      <div class="flex h-16 w-16 items-center justify-center rounded-[1.15rem] border border-dashed border-white/20 text-[var(--color-ink-muted)] transition group-hover:scale-[1.03] group-hover:border-white/30 group-hover:text-white sm:h-[4.5rem] sm:w-[4.5rem]">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden>
+          <path d="M12 5v14M5 12h14" stroke-linecap="round" />
+        </svg>
+      </div>
+      <div class="w-full text-center">
+        <div class="text-sm font-medium text-[var(--color-ink-muted)] group-hover:text-white">
+          {label}
         </div>
-        <div class="w-full text-center">
-          <div class="text-sm font-medium text-[var(--color-ink-muted)] group-hover:text-white">
-            {label}
-          </div>
-          <div class="mt-1 text-[11px] font-medium text-transparent" aria-hidden>
-            &nbsp;
-          </div>
+        <div class="mt-1 text-[11px] font-medium text-transparent" aria-hidden>
+          &nbsp;
         </div>
-      </button>
-    </FadeIn>
+      </div>
+    </button>
   );
 }
 

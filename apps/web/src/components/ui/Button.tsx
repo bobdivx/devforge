@@ -1,12 +1,13 @@
 import type { ComponentChildren, JSX } from 'preact';
 import { cn } from '../../lib/cn';
+import { pressScale } from '../../lib/motion';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'outline';
 type Size = 'sm' | 'md' | 'lg';
 
 const variants: Record<Variant, string> = {
   primary:
-    'bg-[var(--color-accent)] text-zinc-950 hover:brightness-110 active:brightness-95',
+    'bg-[var(--color-accent)] text-zinc-950 hover:brightness-110 active:brightness-95 shadow-[0_0_0_0_rgb(167_139_250/0)] hover:shadow-[0_8px_28px_rgb(167_139_250/0.28)]',
   secondary:
     'bg-[var(--color-surface-2)] text-[var(--color-ink)] ring-1 ring-inset ring-[var(--color-line-strong)] hover:bg-[var(--color-surface)]',
   ghost: 'bg-transparent text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
@@ -50,20 +51,35 @@ export function Button({
   onClick,
 }: Props) {
   const cls = cn(
-    'inline-flex items-center justify-center gap-2 font-medium tracking-tight transition-[transform,filter,background-color,color,opacity,box-shadow] duration-200 ease-out active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100',
+    'inline-flex cursor-pointer items-center justify-center gap-2 font-medium tracking-tight transition-[filter,background-color,color,opacity,box-shadow] duration-200 ease-out disabled:pointer-events-none disabled:opacity-50',
     variants[variant],
     sizes[size],
     className,
   );
+  const animate = disabled ? undefined : pressScale();
+
   if (href) {
     return (
-      <a href={href} class={cls} target={target} rel={rel ?? (target === '_blank' ? 'noreferrer' : undefined)}>
+      <a
+        href={href}
+        class={cls}
+        target={target}
+        rel={rel ?? (target === '_blank' ? 'noreferrer' : undefined)}
+        animate={animate}
+      >
         {children}
       </a>
     );
   }
   return (
-    <button type={type} form={form} class={cls} disabled={disabled} onClick={onClick}>
+    <button
+      type={type}
+      form={form}
+      class={cls}
+      disabled={disabled}
+      onClick={onClick}
+      animate={animate}
+    >
       {children}
     </button>
   );
