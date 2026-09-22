@@ -6,6 +6,31 @@ import 'preact-in-motion';
 
 import type { AnimateLifecycleProps, AnimateProp } from 'preact-in-motion';
 
+/**
+ * Motion appelle Animation.commitStyles() dans stop() dès qu’un élément est
+ * encore connecté. Pendant une view transition Astro, l’élément est connecté
+ * mais plus « rendered » : le navigateur lève InvalidStateError, la promesse
+ * reste non gérée, et le diff Preact qui suivait peut casser (insertBefore).
+ * On avale uniquement ce cas ; cancel() dans stop() s’exécute ensuite.
+ */
+if (typeof Animation !== 'undefined') {
+  const proto = Animation.prototype as Animation & {
+    __dfCommitStyles?: boolean;
+    commitStyles: () => void;
+  };
+  const nativeCommit = proto.commitStyles;
+  if (nativeCommit && !proto.__dfCommitStyles) {
+    proto.commitStyles = function commitStyles() {
+      try {
+        nativeCommit.call(this);
+      } catch (err) {
+        if (!(err instanceof DOMException) || err.name !== 'InvalidStateError') throw err;
+      }
+    };
+    proto.__dfCommitStyles = true;
+  }
+}
+
 export { AnimatePresence } from 'preact-in-motion';
 export type { AnimateProp, AnimateLifecycleProps };
 

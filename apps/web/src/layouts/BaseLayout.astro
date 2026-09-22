@@ -25,6 +25,43 @@ const { title = 'DevForge', description = 'Deploy with clarity. Agents that work
       rel="stylesheet"
     />
     <ClientRouter />
+    <script is:inline>
+      (function () {
+        if (window.__dfViewTransitionGuard) return;
+        window.__dfViewTransitionGuard = true;
+
+        var proto = Animation.prototype;
+        if (proto.commitStyles && !proto.__dfCommitStyles) {
+          var nativeCommit = proto.commitStyles;
+          proto.commitStyles = function () {
+            try {
+              return nativeCommit.apply(this, arguments);
+            } catch (err) {
+              if (!err || err.name !== 'InvalidStateError') throw err;
+            }
+          };
+          proto.__dfCommitStyles = true;
+        }
+
+        // Démonte les îlots tant que l’arbre DOM est encore en place.
+        // Sinon astro:unmount arrive après le swap, sur un nœud détaché,
+        // et Preact lève insertBefore.
+        document.addEventListener('astro:before-swap', function () {
+          document.querySelectorAll('astro-island:not([data-astro-transition-persist])').forEach(function (el) {
+            if (typeof el.getAnimations === 'function') {
+              el.getAnimations({ subtree: true }).forEach(function (animation) {
+                try {
+                  animation.cancel();
+                } catch (e) {}
+              });
+            }
+            try {
+              el.dispatchEvent(new CustomEvent('astro:unmount'));
+            } catch (e) {}
+          });
+        });
+      })();
+    </script>
     <title>{title}</title>
   </head>
   <body>
