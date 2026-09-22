@@ -113,7 +113,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     worker::maybe_reclaim_preferred(&state).await;
+    worker::spawn_fence_watch(state.clone());
     cluster_routes::spawn_snapshot_loop(state.clone());
+    cluster_routes::spawn_evacuate_watch(state.clone());
 
     // Ensure Traefik reverse proxy is running (durable fix for outage 2026-09-11).
     // If the container was deleted/stopped, recreate/start it before accepting requests.
@@ -143,9 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     crate::dns::spawn_dns_loop(state.clone());
-    if let Err(e) = crate::deploy_queue::recover_interrupted_deploys(&state.pool).await {
-        tracing::error!(error = %e, "clôture des déploiements interrompus");
-    }
+    routes::resume_deploy_queue(state.clone());
     routes::resume_agent_runs(state.clone());
 
     // Background sync for GitHub runners (Docker + Actions status → SQLite snapshot).
@@ -212,6 +212,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(middleware::from_fn_with_state(
             state.clone(),
             token_routes::enforce_api_token_write,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            cluster_routes::replicate_writes,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            worker::fence_stale_leader,
         ))
         .layer(security::cors_layer())
         .layer(TraceLayer::new_for_http())

@@ -134,6 +134,23 @@ fn worker_eligible(node: &ClusterNode) -> bool {
         && !is_loopback_advertise_url(&node.advertise_url)
 }
 
+/// Workers en ligne qui peuvent recevoir une copie du journal SQLite.
+pub fn replication_peers<'a>(nodes: &'a [ClusterNode], self_id: &str) -> Vec<&'a ClusterNode> {
+    nodes
+        .iter()
+        .filter(|n| n.id != self_id && worker_eligible(n))
+        .collect()
+}
+
+/// Nœuds hors ligne dont les applications doivent partir.
+/// Un nœud en cours de join n’est pas hors ligne. On ne s’évacue pas soi-même.
+pub fn nodes_to_evacuate<'a>(nodes: &'a [ClusterNode], self_id: &str) -> Vec<&'a ClusterNode> {
+    nodes
+        .iter()
+        .filter(|n| n.id != self_id && n.status == NodeStatus::Offline)
+        .collect()
+}
+
 /// Choisit le meilleur `server_id`, ou `None` si aucun candidat.
 pub fn pick_placement(
     nodes: &[ClusterNode],
@@ -248,6 +265,36 @@ mod tests {
         let counts = std::collections::HashMap::new();
         let (id, _) = pick_placement(&nodes, &counts, &PlacementWeights::default()).unwrap();
         assert_eq!(id, "default");
+    }
+
+    #[test]
+    fn evacuate_only_other_offline_nodes() {
+        let nodes = vec![
+            node("default", NodeRole::Leader, "http://10.0.0.1:8000", NodeStatus::Online, false, None),
+            node("down", NodeRole::Worker, "http://10.0.0.2:8000", NodeStatus::Offline, false, None),
+            node("up", NodeRole::Worker, "http://10.0.0.3:8000", NodeStatus::Online, false, None),
+            node("join", NodeRole::Worker, "http://10.0.0.4:8000", NodeStatus::Joining, false, None),
+            node("self-off", NodeRole::Worker, "http://10.0.0.5:8000", NodeStatus::Offline, false, None),
+        ];
+        let ids: Vec<_> = nodes_to_evacuate(&nodes, "self-off")
+            .into_iter()
+            .map(|n| n.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["down"]);
+    }
+
+    #[test]
+    fn replication_skips_drained_offline_and_the_leader() {
+        let nodes = vec![
+            node("default", NodeRole::Leader, "http://10.0.0.1:8000", NodeStatus::Online, false, None),
+            node("off", NodeRole::Worker, "http://10.0.0.2:8000", NodeStatus::Offline, false, None),
+            node("drain", NodeRole::Worker, "http://10.0.0.3:8000", NodeStatus::Online, true, None),
+            node("loop", NodeRole::Worker, "http://127.0.0.1:8000", NodeStatus::Online, false, None),
+            node("ok", NodeRole::Worker, "http://10.0.0.4:8000", NodeStatus::Online, false, None),
+        ];
+        let peers = replication_peers(&nodes, "default");
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].id, "ok");
     }
 
     #[test]

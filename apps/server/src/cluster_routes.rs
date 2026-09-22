@@ -1,8 +1,11 @@
 //! Cluster HTTP API — invitations, join, heartbeat, add-via-SSH.
 
 use axum::{
-    extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    body::Bytes,
+    extract::{DefaultBodyLimit, Path, Query, Request, State},
+    http::{HeaderMap, HeaderValue, Method, StatusCode},
+    middleware::Next,
+    response::Response,
     routing::{delete, get, patch, post},
     Json, Router,
 };
@@ -51,9 +54,13 @@ pub fn router() -> Router<AppState> {
 
 pub fn internal_cluster_routes() -> Router<AppState> {
     Router::new()
-        .route("/internal/cluster-snapshot", get(cluster_snapshot))
+        .route(
+            "/internal/cluster-snapshot",
+            get(cluster_snapshot).post(accept_cluster_snapshot),
+        )
         .route("/internal/failover/status", get(failover_status))
         .route("/internal/failover/demote", post(failover_demote))
+        .layer(DefaultBodyLimit::max(512 * 1024 * 1024))
 }
 
 async fn require_admin(
@@ -737,6 +744,111 @@ pub async fn ensure_live_server_id(state: &AppState, current: &str) -> String {
     sid
 }
 
+/// Après le délai stale, les apps d’un nœud muet partent sur un nœud vivant
+/// et y sont redéployées. Le premier passage attend les heartbeats de boot.
+pub fn spawn_evacuate_watch(state: AppState) {
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(50)).await;
+        loop {
+            evacuate_stale_nodes(&state).await;
+            tokio::time::sleep(Duration::from_secs(15)).await;
+        }
+    });
+}
+
+async fn evacuate_stale_nodes(state: &AppState) {
+    let local = match state.cluster.local().await {
+        Ok(l) => l,
+        Err(_) => return,
+    };
+    if local.writes_fenced || local.role != NodeRole::Leader {
+        return;
+    }
+    let nodes = match state.cluster.list_nodes().await {
+        Ok(n) => n,
+        Err(_) => return,
+    };
+    let dead = devforge_cluster::nodes_to_evacuate(&nodes, &local.node_id);
+    if dead.is_empty() {
+        return;
+    }
+    let weights = devforge_cluster::PlacementWeights::default();
+    let counts_i64 = project_counts_by_node(state).await;
+    let mut counts: HashMap<String, u32> = counts_i64
+        .into_iter()
+        .map(|(k, v)| (k, v.max(0) as u32))
+        .collect();
+
+    for node in dead {
+        let from = normalize_server_id(&node.id);
+        let projects = sqlx::query_as::<_, crate::state::Project>(
+            r#"SELECT * FROM projects
+               WHERE COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = ?
+                 AND status IN ('live', 'unhealthy', 'failed')"#,
+        )
+        .bind(&from)
+        .fetch_all(&state.pool)
+        .await
+        .unwrap_or_default();
+
+        for mut project in projects {
+            if project_deploy_in_flight(state, project.id).await {
+                continue;
+            }
+            let repo = project.git_repository.as_deref().unwrap_or("").trim();
+            let workdir = project.workdir.as_deref().unwrap_or("").trim();
+            if repo.is_empty() && workdir.is_empty() {
+                continue;
+            }
+            *counts.entry(from.clone()).or_insert(0) =
+                counts.get(&from).copied().unwrap_or(0).saturating_sub(1);
+            let Some((to, _)) = devforge_cluster::pick_placement(&nodes, &counts, &weights) else {
+                *counts.entry(from.clone()).or_insert(0) += 1;
+                continue;
+            };
+            let to = normalize_server_id(&to);
+            if to == from {
+                *counts.entry(from.clone()).or_insert(0) += 1;
+                continue;
+            }
+            *counts.entry(to.clone()).or_insert(0) += 1;
+            let now = Utc::now().to_rfc3339();
+            if sqlx::query("UPDATE projects SET server_id = ?, updated_at = ? WHERE uuid = ?")
+                .bind(&to)
+                .bind(&now)
+                .bind(&project.uuid)
+                .execute(&state.pool)
+                .await
+                .is_err()
+            {
+                continue;
+            }
+            project.server_id = Some(to.clone());
+            crate::dns::sync_project(state, &project.uuid).await;
+            tracing::info!(
+                project = %project.uuid,
+                from = %from,
+                to = %to,
+                "nœud muet : application replacée"
+            );
+            let message = format!("Reprise : le nœud {} ne répond plus", node.name);
+            crate::auto_deploy::deploy_project(state, &project, &message).await;
+        }
+    }
+}
+
+async fn project_deploy_in_flight(state: &AppState, project_id: i64) -> bool {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT COUNT(*) FROM deployments WHERE project_id = ? AND status IN ('running', 'queued', 'building')",
+    )
+    .bind(project_id)
+    .fetch_optional(&state.pool)
+    .await
+    .ok()
+    .flatten();
+    row.map(|(c,)| c > 0).unwrap_or(false)
+}
+
 async fn cluster_settings(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1330,7 +1442,156 @@ async fn cluster_snapshot(
     Ok(bytes)
 }
 
+async fn accept_cluster_snapshot(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let mut local = state.cluster.local().await.map_err(map_err)?;
+    let secret = bearer(&headers).unwrap_or_default();
+    if !cluster_auth_ok(&local, &secret) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "secret invalide"})),
+        ));
+    }
+    if local.role != NodeRole::Worker {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(json!({"error": "seul un worker reçoit le journal"})),
+        ));
+    }
+    if body.len() < 100 || !body.starts_with(b"SQLite format 3\0") {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "snapshot SQLite invalide"})),
+        ));
+    }
+    let dest = devforge_cluster::snapshot_path();
+    if let Some(parent) = dest.parent() {
+        let _ = tokio::fs::create_dir_all(parent).await;
+    }
+    let tmp = dest.with_extension("db.partial");
+    tokio::fs::write(&tmp, &body).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("écriture snapshot: {e}")})),
+        )
+    })?;
+    tokio::fs::rename(&tmp, &dest).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("renommage snapshot: {e}")})),
+        )
+    })?;
+    let gen = headers
+        .get("x-devforge-generation")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    if gen > local.snapshot_generation {
+        local.snapshot_generation = gen;
+        state.cluster.set_local(&local).await.map_err(map_err)?;
+    }
+    Ok(Json(json!({
+        "ok": true,
+        "generation": local.snapshot_generation,
+    })))
+}
+
+/// Après une écriture réussie, copie le SQLite sur un worker avant de répondre.
+pub async fn replicate_writes(
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    let mut res = next.run(req).await;
+    if matches!(
+        method,
+        Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE
+    ) || !res.status().is_success()
+        || skip_replication(&path)
+    {
+        return res;
+    }
+    let durability = replicate_to_one_peer(&state).await;
+    if let Ok(value) = HeaderValue::from_str(durability) {
+        res.headers_mut().insert("x-devforge-durability", value);
+    }
+    res
+}
+
+fn skip_replication(path: &str) -> bool {
+    matches!(
+        path,
+        "/api/v1/cluster/heartbeat"
+            | "/internal/cluster-snapshot"
+            | "/internal/failover/demote"
+            | "/internal/failover/status"
+            | "/internal/exec"
+            | "/internal/update/start"
+            | "/internal/update/status"
+    )
+}
+
+fn replicate_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+async fn replicate_to_one_peer(state: &AppState) -> &'static str {
+    let _guard = replicate_lock().lock().await;
+    let local = match state.cluster.local().await {
+        Ok(l) => l,
+        Err(_) => return "local",
+    };
+    if local.writes_fenced || local.failover_secret.is_empty() {
+        return "local";
+    }
+    let nodes = match state.cluster.list_nodes().await {
+        Ok(n) => n,
+        Err(_) => return "local",
+    };
+    let peers = devforge_cluster::replication_peers(&nodes, &local.node_id);
+    if peers.is_empty() {
+        return "local";
+    }
+    if write_cluster_snapshot(state).await.is_err() {
+        return "local";
+    }
+    let local = match state.cluster.local().await {
+        Ok(l) => l,
+        Err(_) => return "local",
+    };
+    let bytes = match tokio::fs::read(devforge_cluster::snapshot_path()).await {
+        Ok(b) => b,
+        Err(_) => return "local",
+    };
+    for peer in peers {
+        let client = LeaderClient::new(&peer.advertise_url);
+        if client
+            .push_snapshot(&local.failover_secret, local.snapshot_generation, &bytes)
+            .await
+            .is_ok()
+        {
+            tracing::info!(peer = %peer.id, generation = local.snapshot_generation, "journal copié");
+            return "replicated";
+        }
+    }
+    tracing::warn!("aucun worker n’a reçu le journal — écriture locale seulement");
+    "local"
+}
+
 pub async fn refresh_cluster_snapshot(
+    state: &AppState,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    let _guard = replicate_lock().lock().await;
+    write_cluster_snapshot(state).await
+}
+
+async fn write_cluster_snapshot(
     state: &AppState,
 ) -> Result<(), (StatusCode, Json<Value>)> {
     let bytes = devforge_backup::snapshot_sqlite_pool(&state.pool)
@@ -1345,10 +1606,17 @@ pub async fn refresh_cluster_snapshot(
     if let Some(parent) = dest.parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
     }
-    tokio::fs::write(&dest, &bytes).await.map_err(|e| {
+    let tmp = dest.with_extension("db.partial");
+    tokio::fs::write(&tmp, &bytes).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("écriture snapshot: {e}")})),
+        )
+    })?;
+    tokio::fs::rename(&tmp, &dest).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("renommage snapshot: {e}")})),
         )
     })?;
     let mut local = state.cluster.local().await.map_err(map_err)?;
@@ -1387,6 +1655,7 @@ async fn failover_status(
         "ok": true,
         "role": local.role,
         "acting_leader": local.acting_leader,
+        "leader_term": local.leader_term,
         "node_id": local.node_id,
         "advertise_url": local.advertise_url,
         "preferred_leader_id": local.preferred_leader_id,

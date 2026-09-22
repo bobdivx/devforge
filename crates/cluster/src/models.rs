@@ -138,6 +138,16 @@ pub struct LocalClusterState {
     pub snapshot_generation: i64,
     #[serde(default)]
     pub acting_leader: bool,
+    /// Terme du control plane. Une promotion l’incrémente. Un terme plus bas n’écrit plus.
+    #[serde(default = "default_leader_term")]
+    pub leader_term: i64,
+    /// Vrai dès qu’un intérim plus récent a pris la main, jusqu’au redémarrage de reprise.
+    #[serde(default)]
+    pub writes_fenced: bool,
+}
+
+fn default_leader_term() -> i64 {
+    1
 }
 
 fn default_preferred_leader_id() -> String {
@@ -158,6 +168,8 @@ impl Default for LocalClusterState {
             failover_secret: String::new(),
             snapshot_generation: 0,
             acting_leader: false,
+            leader_term: 1,
+            writes_fenced: false,
         }
     }
 }
@@ -232,6 +244,8 @@ pub struct HeartbeatAck {
     #[serde(default)]
     pub acting_node_id: String,
     #[serde(default)]
+    pub leader_term: i64,
+    #[serde(default)]
     pub roster: Vec<RosterEntry>,
 }
 
@@ -253,6 +267,8 @@ pub struct FailoverStatus {
     pub preferred_leader_url: String,
     #[serde(default)]
     pub generation: i64,
+    #[serde(default)]
+    pub leader_term: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

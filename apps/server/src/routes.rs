@@ -1841,6 +1841,136 @@ async fn load_agent_context(
 }
 
 /// Reprend les tours coupés par un redémarrage. Appelé une fois au boot du leader.
+/// Reprend la file SQLite après le boot, seulement si ce processus peut écrire.
+/// Un claim par déploiement : le second leader, ou un second passage, ne relance pas le build.
+pub fn resume_deploy_queue(state: AppState) {
+    tokio::spawn(async move {
+        let writable = match state.cluster.local().await {
+            Ok(local) => !local.writes_fenced && local.role == devforge_cluster::NodeRole::Leader,
+            Err(e) => {
+                tracing::error!(error = %e, "file de déploiement : état cluster illisible");
+                false
+            }
+        };
+        if !writable {
+            tracing::info!("file de déploiement laissée en attente : écritures closes");
+            return;
+        }
+        if let Err(e) = crate::deploy_queue::requeue_interrupted(&state.pool).await {
+            tracing::error!(error = %e, "reprise de la file de déploiement");
+            return;
+        }
+        let queued = match crate::deploy_queue::list_queued_deployments(&state.pool).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::error!(error = %e, "liste de la file de déploiement");
+                return;
+            }
+        };
+        if queued.is_empty() {
+            return;
+        }
+        tracing::info!(count = queued.len(), "reprise des déploiements en file");
+        for uuid in queued {
+            let fenced = state
+                .cluster
+                .local()
+                .await
+                .map(|l| l.writes_fenced)
+                .unwrap_or(true);
+            if fenced {
+                tracing::info!("reprise des déploiements arrêtée : écritures closes");
+                break;
+            }
+            let claimed = crate::deploy_queue::try_claim_deployment(&state.pool, &uuid)
+                .await
+                .unwrap_or(false);
+            if !claimed {
+                continue;
+            }
+            let project = sqlx::query_as::<_, Project>(
+                r#"SELECT p.* FROM projects p
+                   JOIN deployments d ON d.project_id = p.id
+                   WHERE d.uuid = ?"#,
+            )
+            .bind(&uuid)
+            .fetch_optional(&state.pool)
+            .await;
+            let project = match project {
+                Ok(Some(p)) => p,
+                Ok(None) => {
+                    let now = now_str();
+                    let _ = sqlx::query(
+                        r#"UPDATE deployments
+                           SET status = 'failed', error_summary = ?, finished_at = ?, updated_at = ?
+                           WHERE uuid = ?"#,
+                    )
+                    .bind("Projet introuvable")
+                    .bind(&now)
+                    .bind(&now)
+                    .bind(&uuid)
+                    .execute(&state.pool)
+                    .await;
+                    continue;
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, deployment = %uuid, "lecture du projet à reprendre");
+                    continue;
+                }
+            };
+            let result = run_real_deploy(&state, &project, &uuid).await;
+            persist_resumed_deploy(&state, &project, &uuid, &result).await;
+        }
+    });
+}
+
+async fn persist_resumed_deploy(
+    state: &AppState,
+    project: &Project,
+    deployment_uuid: &str,
+    result: &devforge_deploy::DeployResult,
+) {
+    let finished = now_str();
+    let status = if result.ok { "success" } else { "failed" };
+    let sha = result.git_sha.clone().unwrap_or_else(|| "unknown".into());
+    let (error_summary, error_hint) = if result.ok {
+        (None, None)
+    } else {
+        match devforge_deploy::parse_deploy_error_fr(&result.logs) {
+            Some(err) => (Some(err.summary), err.hint),
+            None => (Some("Échec du déploiement".into()), None),
+        }
+    };
+    let _ = sqlx::query(
+        r#"UPDATE deployments
+           SET status = ?, git_sha = ?, logs = ?, error_summary = ?, error_hint = ?,
+               finished_at = ?, updated_at = ?
+           WHERE uuid = ?"#,
+    )
+    .bind(status)
+    .bind(&sha)
+    .bind(&result.logs)
+    .bind(&error_summary)
+    .bind(&error_hint)
+    .bind(&finished)
+    .bind(&finished)
+    .bind(deployment_uuid)
+    .execute(&state.pool)
+    .await;
+    let project_status = if result.ok { "live" } else { "failed" };
+    let _ = sqlx::query("UPDATE projects SET status = ?, updated_at = ? WHERE id = ?")
+        .bind(project_status)
+        .bind(&finished)
+        .bind(project.id)
+        .execute(&state.pool)
+        .await;
+    if result.ok {
+        if let Err(e) = state.proxy.ensure_traefik().await {
+            tracing::error!(error = %e, project = %project.uuid, "reprise : Traefik");
+        }
+    }
+}
+
 pub fn resume_agent_runs(state: AppState) {
     tokio::spawn(async move {
         if let Err(e) = crate::agent_runs::reopen_interrupted(&state.pool).await {

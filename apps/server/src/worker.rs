@@ -1,8 +1,10 @@
 //! Worker boot: pending join file, heartbeat, /internal/exec, UI statut.
 
 use axum::{
-    extract::State,
-    http::{HeaderMap, StatusCode},
+    extract::{Request, State},
+    http::{HeaderMap, Method, StatusCode},
+    middleware::Next,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -389,6 +391,8 @@ pub async fn apply_promote_flag(state: &AppState) {
     let mut local = ident;
     local.role = NodeRole::Leader;
     local.acting_leader = true;
+    local.writes_fenced = false;
+    local.leader_term = local.leader_term.saturating_add(1).max(1);
     local.leader_url = local.advertise_url.clone();
     if let Err(e) = state.cluster.set_local(&local).await {
         tracing::error!(error = %e, "échec promotion intérim");
@@ -413,6 +417,7 @@ pub async fn apply_reclaim_flag(state: &AppState) {
     };
     ident.role = NodeRole::Leader;
     ident.acting_leader = false;
+    ident.writes_fenced = false;
     if !ident.advertise_url.trim().is_empty() {
         ident.leader_url = ident.advertise_url.clone();
     }
@@ -512,6 +517,9 @@ async fn persist_ack(state: &AppState, local: &LocalClusterState, ack: &devforge
     if !ack.failover_secret.is_empty() {
         n.failover_secret = ack.failover_secret.clone();
     }
+    if ack.leader_term > n.leader_term {
+        n.leader_term = ack.leader_term;
+    }
     n.snapshot_generation = ack.generation;
     let _ = state.cluster.set_local(&n).await;
     if !ack.roster.is_empty() {
@@ -602,10 +610,25 @@ pub async fn maybe_reclaim_preferred(state: &AppState) {
         let Ok(st) = c.failover_status(&local.failover_secret).await else {
             continue;
         };
-        if !st.acting_leader {
+        if !devforge_cluster::must_yield_to_interim(
+            &local.node_id,
+            local.leader_term,
+            &st.node_id,
+            st.acting_leader,
+            st.leader_term,
+        ) {
             continue;
         }
-        tracing::warn!(interim = %n.id, "récupération du control plane auprès de l’intérim");
+        let mut fenced = local.clone();
+        fenced.writes_fenced = true;
+        if st.leader_term > fenced.leader_term {
+            fenced.leader_term = st.leader_term;
+        }
+        if let Err(e) = state.cluster.set_local(&fenced).await {
+            tracing::error!(error = %e, "fence des écritures");
+            continue;
+        }
+        tracing::warn!(interim = %n.id, term = fenced.leader_term, "écritures refusées, récupération auprès de l’intérim");
         let secret = if local.failover_secret.is_empty() {
             local.node_secret.clone()
         } else {
@@ -624,7 +647,11 @@ pub async fn maybe_reclaim_preferred(state: &AppState) {
             tracing::error!(error = %e, "écriture pending-restore");
             continue;
         }
-        if let Ok(json) = serde_json::to_string_pretty(&local) {
+        let mut resumed = fenced.clone();
+        resumed.writes_fenced = false;
+        resumed.acting_leader = false;
+        resumed.role = NodeRole::Leader;
+        if let Ok(json) = serde_json::to_string_pretty(&resumed) {
             let _ = tokio::fs::write(devforge_cluster::reclaim_flag_path(), json).await;
         }
         let pref_url = if local.advertise_url.is_empty() {
@@ -636,4 +663,44 @@ pub async fn maybe_reclaim_preferred(state: &AppState) {
         tracing::info!("restauration snapshot intérim, redémarrage");
         devforge_cluster::restart_current_process();
     }
+}
+
+/// Tant que `writes_fenced` est vrai, seules les lectures passent.
+pub async fn fence_stale_leader(
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    if matches!(
+        *req.method(),
+        Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE
+    ) {
+        return next.run(req).await;
+    }
+    let fenced = state
+        .cluster
+        .local()
+        .await
+        .map(|l| l.writes_fenced)
+        .unwrap_or(false);
+    if !fenced {
+        return next.run(req).await;
+    }
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": "Control plane cédé à un leader intérimaire. Ce nœud n’accepte plus d’écritures.",
+            "hint": "La reprise restaure le snapshot de l’intérim puis redémarre ce processus."
+        })),
+    )
+        .into_response()
+}
+
+pub fn spawn_fence_watch(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            maybe_reclaim_preferred(&state).await;
+        }
+    });
 }

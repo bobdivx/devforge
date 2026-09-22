@@ -32,6 +32,10 @@ struct LocalRow {
     snapshot_generation: i64,
     #[sqlx(default)]
     acting_leader: i64,
+    #[sqlx(default)]
+    leader_term: i64,
+    #[sqlx(default)]
+    writes_fenced: i64,
 }
 
 #[derive(FromRow)]
@@ -127,7 +131,8 @@ impl ClusterStore for SqliteClusterStore {
     async fn get_local(&self) -> DfResult<LocalClusterState> {
         let row: Option<LocalRow> = sqlx::query_as(
             "SELECT role, leader_url, node_id, node_secret, node_name, advertise_url,
-                    preferred_leader_id, preferred_leader_url, failover_secret, snapshot_generation, acting_leader
+                    preferred_leader_id, preferred_leader_url, failover_secret, snapshot_generation, acting_leader,
+                    leader_term, writes_fenced
              FROM cluster_local WHERE id = 1",
         )
         .fetch_optional(&self.pool)
@@ -150,6 +155,8 @@ impl ClusterStore for SqliteClusterStore {
                 failover_secret: r.failover_secret,
                 snapshot_generation: r.snapshot_generation,
                 acting_leader: r.acting_leader != 0,
+                leader_term: if r.leader_term < 1 { 1 } else { r.leader_term },
+                writes_fenced: r.writes_fenced != 0,
             })
             .unwrap_or_default())
     }
@@ -158,8 +165,9 @@ impl ClusterStore for SqliteClusterStore {
         let now = Utc::now().to_rfc3339();
         sqlx::query(
             r#"INSERT INTO cluster_local (id, role, leader_url, node_id, node_secret, node_name, advertise_url,
-                    preferred_leader_id, preferred_leader_url, failover_secret, snapshot_generation, acting_leader, updated_at)
-               VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    preferred_leader_id, preferred_leader_url, failover_secret, snapshot_generation, acting_leader,
+                    leader_term, writes_fenced, updated_at)
+               VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                  role=excluded.role,
                  leader_url=excluded.leader_url,
@@ -172,6 +180,8 @@ impl ClusterStore for SqliteClusterStore {
                  failover_secret=excluded.failover_secret,
                  snapshot_generation=excluded.snapshot_generation,
                  acting_leader=excluded.acting_leader,
+                 leader_term=excluded.leader_term,
+                 writes_fenced=excluded.writes_fenced,
                  updated_at=excluded.updated_at"#,
         )
         .bind(state.role.as_str())
@@ -185,6 +195,8 @@ impl ClusterStore for SqliteClusterStore {
         .bind(&state.failover_secret)
         .bind(state.snapshot_generation)
         .bind(if state.acting_leader { 1 } else { 0 })
+        .bind(if state.leader_term < 1 { 1 } else { state.leader_term })
+        .bind(if state.writes_fenced { 1 } else { 0 })
         .bind(&now)
         .execute(&self.pool)
         .await

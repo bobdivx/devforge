@@ -22,12 +22,13 @@ pub use crypto::{
 pub use executor::ClusterAwareExecutor;
 pub use facade::{bootstrap_script, ClusterFacade};
 pub use failover::{
-    earlier_candidates, i_am_failover_winner, pick_failover_winner, FAILOVER_FAIL_STREAK,
+    earlier_candidates, i_am_failover_winner, must_yield_to_interim, pick_failover_winner,
+    FAILOVER_FAIL_STREAK,
 };
 pub use metrics::{collect_node_metrics, diagnostic_command};
 pub use models::*;
 pub use placement::{
-    is_loopback_advertise_url, pick_placement, score_node, validate_worker_advertise_url,
-    PlacementWeights,
+    is_loopback_advertise_url, nodes_to_evacuate, pick_placement, replication_peers, score_node,
+    validate_worker_advertise_url, PlacementWeights,
 };
 pub use store::{ClusterStore, MemoryClusterStore};

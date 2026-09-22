@@ -151,7 +151,7 @@ async fn project_is_behind(state: &AppState, project: &Project) -> Option<(u64, 
     }
 }
 
-async fn deploy_project(state: &AppState, project: &Project, message: &str) {
+pub(crate) async fn deploy_project(state: &AppState, project: &Project, message: &str) {
     let dep_uuid = new_uuid();
     let now = now_str();
 
@@ -164,7 +164,7 @@ async fn deploy_project(state: &AppState, project: &Project, message: &str) {
     .bind(project.id)
     .bind("pending")
     .bind(message)
-    .bind("[devforge] auto-deploy (poll)…\n")
+    .bind(format!("[devforge] {message}\n"))
     .bind(&now)
     .bind(&now)
     .execute(&state.pool)

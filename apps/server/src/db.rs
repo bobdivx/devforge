@@ -761,6 +761,16 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await;
     let _ = sqlx::query(
+        "ALTER TABLE cluster_local ADD COLUMN leader_term INTEGER NOT NULL DEFAULT 1",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE cluster_local ADD COLUMN writes_fenced INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
         "ALTER TABLE cluster_nodes ADD COLUMN drained INTEGER NOT NULL DEFAULT 0",
     )
     .execute(pool)

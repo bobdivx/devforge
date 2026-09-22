@@ -19,6 +19,14 @@ pub fn i_am_failover_winner(my_id: &str, candidates: &[RosterEntry]) -> bool {
     pick_failover_winner(candidates).is_some_and(|w| w.id == my_id)
 }
 
+/// Un autre nœud est l’écrivain. On cède si son terme est inconnu, égal ou plus haut.
+pub fn must_yield_to_interim(my_id: &str, my_term: i64, remote_id: &str, remote_acting: bool, remote_term: i64) -> bool {
+    if !remote_acting || remote_id.is_empty() || remote_id == my_id {
+        return false;
+    }
+    remote_term == 0 || remote_term >= my_term
+}
+
 /// Workers à essayer avant soi (ids plus petits) — s’ils sont déjà intérim, on les suit.
 pub fn earlier_candidates<'a>(my_id: &str, candidates: &'a [RosterEntry]) -> Vec<&'a RosterEntry> {
     let mut v: Vec<_> = candidates
@@ -65,6 +73,16 @@ mod tests {
             w("node_ccc", "http://c:8000", false),
         ];
         assert_eq!(pick_failover_winner(&c).unwrap().id, "node_ccc");
+    }
+
+    #[test]
+    fn yield_when_interim_term_is_newer_or_unknown() {
+        assert!(must_yield_to_interim("default", 1, "node_a", true, 2));
+        assert!(must_yield_to_interim("default", 2, "node_a", true, 2));
+        assert!(must_yield_to_interim("default", 3, "node_a", true, 0));
+        assert!(!must_yield_to_interim("default", 3, "node_a", true, 2));
+        assert!(!must_yield_to_interim("default", 1, "default", true, 9));
+        assert!(!must_yield_to_interim("default", 1, "node_a", false, 9));
     }
 
     #[test]

@@ -174,6 +174,27 @@ impl LeaderClient {
         Ok(bytes.to_vec())
     }
 
+    pub async fn push_snapshot(&self, secret: &str, generation: i64, bytes: &[u8]) -> Result<()> {
+        let url = format!("{}/internal/cluster-snapshot", self.origin);
+        let res = self
+            .http
+            .post(&url)
+            .bearer_auth(secret)
+            .header("x-devforge-generation", generation.to_string())
+            .header("content-type", "application/octet-stream")
+            .body(bytes.to_vec())
+            .timeout(std::time::Duration::from_secs(20))
+            .send()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("push snapshot: {e}")))?;
+        if !res.status().is_success() {
+            let status = res.status();
+            let text = res.text().await.unwrap_or_default();
+            return Err(DevForgeError::Message(parse_error(&text, status.as_u16())));
+        }
+        Ok(())
+    }
+
     pub async fn failover_status(&self, failover_secret: &str) -> Result<FailoverStatus> {
         let url = format!("{}/internal/failover/status", self.origin);
         let res = self

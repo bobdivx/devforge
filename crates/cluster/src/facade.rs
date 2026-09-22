@@ -375,6 +375,7 @@ impl ClusterFacade {
             failover_secret: local.failover_secret,
             acting_leader: local.acting_leader,
             acting_node_id: local.node_id.clone(),
+            leader_term: local.leader_term,
             roster: nodes
                 .into_iter()
                 .map(|n| crate::models::RosterEntry {

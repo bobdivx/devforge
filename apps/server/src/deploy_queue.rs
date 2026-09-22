@@ -38,7 +38,9 @@ impl DeployQueue {
     }
 }
 
-/// Passe le déploiement en file, attend le nœud, puis le marque `running` le temps du travail.
+/// Attend le nœud, puis marque `running` le temps du travail.
+/// La ligne est déjà `queued` (ou déjà claimée `running` par la reprise).
+/// On ne repasse pas à `queued` : ça rouvrirrait un claim et lancerait deux builds.
 pub async fn run_in_node_slot<T, F, Fut>(
     queue: &DeployQueue,
     pool: &SqlitePool,
@@ -50,7 +52,6 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = T>,
 {
-    mark_status(pool, deployment_uuid, "queued").await;
     let _guard = queue.acquire(server_id).await;
     mark_status(pool, deployment_uuid, "running").await;
     work().await
@@ -66,60 +67,46 @@ async fn mark_status(pool: &SqlitePool, deployment_uuid: &str, status: &str) {
         .await;
 }
 
-/// Un redémarrage coupe les requêtes qui tenaient la file. Ces lignes resteraient
-/// `queued` ou `running` pour toujours : on les clôt pour que l'utilisateur puisse relancer.
-pub async fn recover_interrupted_deploys(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
-    let rows: Vec<(String, i64, String)> = sqlx::query_as(
-        r#"SELECT d.uuid, d.project_id, p.uuid
-           FROM deployments d
-           JOIN projects p ON p.id = d.project_id
-           WHERE d.status IN ('queued', 'running', 'building')"#,
+/// Un build coupé par l’arrêt du processus redevient `queued`.
+/// La ligne SQLite est la file : le leader la reprend au boot.
+pub async fn requeue_interrupted(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
+    let now = now_str();
+    let note = "\n[devforge] repris après un redémarrage.\n";
+    let res = sqlx::query(
+        r#"UPDATE deployments
+           SET status = 'queued',
+               logs = COALESCE(logs, '') || ?,
+               finished_at = NULL,
+               updated_at = ?
+           WHERE status IN ('running', 'building')"#,
+    )
+    .bind(note)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected())
+}
+
+pub async fn list_queued_deployments(pool: &SqlitePool) -> Result<Vec<String>, sqlx::Error> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT uuid FROM deployments WHERE status = 'queued' ORDER BY created_at, uuid",
     )
     .fetch_all(pool)
     .await?;
-    if rows.is_empty() {
-        return Ok(0);
-    }
+    Ok(rows.into_iter().map(|(u,)| u).collect())
+}
+
+/// Un seul processus gagne la ligne. Le second appel laisse le build déjà pris.
+pub async fn try_claim_deployment(pool: &SqlitePool, deployment_uuid: &str) -> Result<bool, sqlx::Error> {
     let now = now_str();
-    let note = "\n[devforge] interrompu par un redémarrage. Relance le déploiement.\n";
-    for (uuid, project_id, project_uuid) in &rows {
-        sqlx::query(
-            r#"UPDATE deployments
-               SET status = 'failed',
-                   logs = COALESCE(logs, '') || ?,
-                   error_summary = ?,
-                   error_hint = ?,
-                   finished_at = ?,
-                   updated_at = ?
-               WHERE uuid = ? AND status IN ('queued', 'running', 'building')"#,
-        )
-        .bind(note)
-        .bind("Interrompu par un redémarrage")
-        .bind("Relance le déploiement depuis le projet.")
-        .bind(&now)
-        .bind(&now)
-        .bind(uuid)
-        .execute(pool)
-        .await?;
-        sqlx::query(
-            "UPDATE projects SET status = 'failed', updated_at = ? WHERE id = ? AND status = 'deploying'",
-        )
-        .bind(&now)
-        .bind(project_id)
-        .execute(pool)
-        .await?;
-        record_event(
-            pool,
-            project_uuid,
-            "deploy",
-            "failed",
-            uuid,
-            "interrompu par un redémarrage",
-        )
-        .await;
-    }
-    tracing::warn!(count = rows.len(), "déploiements interrompus clos après redémarrage");
-    Ok(rows.len() as u64)
+    let res = sqlx::query(
+        "UPDATE deployments SET status = 'running', updated_at = ? WHERE uuid = ? AND status = 'queued'",
+    )
+    .bind(&now)
+    .bind(deployment_uuid)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() == 1)
 }
 
 pub async fn record_event(
@@ -268,7 +255,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restart_closes_queued_and_running_deploys() {
+    async fn restart_requeues_running_and_claims_once() {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .connect("sqlite::memory:")
             .await
@@ -336,8 +323,8 @@ mod tests {
         .await
         .unwrap();
 
-        let n = recover_interrupted_deploys(&pool).await.unwrap();
-        assert_eq!(n, 2);
+        let n = requeue_interrupted(&pool).await.unwrap();
+        assert_eq!(n, 1);
         let left: Vec<(String, String)> =
             sqlx::query_as("SELECT uuid, status FROM deployments ORDER BY uuid")
                 .fetch_all(&pool)
@@ -347,14 +334,16 @@ mod tests {
             left,
             vec![
                 ("dep-ok".into(), "success".into()),
-                ("dep-q".into(), "failed".into()),
-                ("dep-r".into(), "failed".into()),
+                ("dep-q".into(), "queued".into()),
+                ("dep-r".into(), "queued".into()),
             ]
         );
         let project: (String,) = sqlx::query_as("SELECT status FROM projects WHERE id = 1")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(project.0, "failed");
+        assert_eq!(project.0, "deploying");
+        assert!(try_claim_deployment(&pool, "dep-q").await.unwrap());
+        assert!(!try_claim_deployment(&pool, "dep-q").await.unwrap());
     }
 }
