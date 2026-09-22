@@ -36,6 +36,7 @@ pub fn router() -> Router<AppState> {
             "/api/v1/projects/{uuid}/deployments",
             get(list_deployments).post(create_deployment),
         )
+        .route("/api/v1/projects/{uuid}/trace", get(project_trace))
         .route("/api/v1/deployments/{uuid}", get(get_deployment))
         .route("/api/v1/deployments/{uuid}/logs", get(deployment_logs))
         .route("/api/v1/deployments/{uuid}/request-repair", post(request_repair))
@@ -953,6 +954,36 @@ async fn list_deployments(
     Ok(Json(json!({"data": rows})))
 }
 
+async fn project_trace(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let (_user, _ws, _project) = auth_project(&state, &headers, &uuid).await?;
+    let rows: Vec<(i64, String, String, Option<String>, String, String)> = sqlx::query_as(
+        r#"SELECT id, kind, status, ref_id, detail, created_at
+           FROM builder_events WHERE project_uuid = ? ORDER BY id DESC LIMIT 40"#,
+    )
+    .bind(&uuid)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+    let data: Vec<Value> = rows
+        .into_iter()
+        .map(|(id, kind, status, ref_id, detail, created_at)| {
+            json!({
+                "id": id,
+                "kind": kind,
+                "status": status,
+                "ref_id": ref_id,
+                "detail": detail,
+                "created_at": created_at,
+            })
+        })
+        .collect();
+    Ok(Json(json!({"data": data})))
+}
+
 #[derive(Deserialize)]
 pub struct CreateDeployment {
     pub git_sha: Option<String>,
@@ -1001,7 +1032,7 @@ async fn create_deployment(
     sqlx::query(
         r#"INSERT INTO deployments (
             uuid, project_id, status, git_sha, git_message, logs, finished_at, created_at, updated_at
-        ) VALUES (?, ?, 'running', ?, ?, ?, NULL, ?, ?)"#,
+        ) VALUES (?, ?, 'queued', ?, ?, ?, NULL, ?, ?)"#,
     )
     .bind(&dep_uuid)
     .bind(project.id)
@@ -1032,7 +1063,7 @@ async fn create_deployment(
     .flatten()
     .map(|(sha,)| sha);
 
-    let result = run_real_deploy(&state, &project).await;
+    let result = run_real_deploy(&state, &project, &dep_uuid).await;
     let finished = now_str();
     let status = if result.ok { "success" } else { "failed" };
     let sha = result
@@ -1122,6 +1153,7 @@ async fn create_deployment(
 pub(crate) async fn run_real_deploy(
     state: &AppState,
     project: &Project,
+    deployment_uuid: &str,
 ) -> devforge_deploy::DeployResult {
     let token: Option<String> =
         sqlx::query_as::<_, (String,)>("SELECT github_token FROM instance_settings WHERE id = 1")
@@ -1188,7 +1220,28 @@ pub(crate) async fn run_real_deploy(
         env_file,
         proxy_labels: proxy_labels_for_project(state, project).await,
     };
-    let result = state.deploy.deploy(&req).await;
+    let deploy = state.deploy.clone();
+    let slot_server = server_id.clone();
+    let result = crate::deploy_queue::run_in_node_slot(
+        &state.deploy_queue,
+        &state.pool,
+        &slot_server,
+        deployment_uuid,
+        move || {
+            let deploy = deploy.clone();
+            async move { deploy.deploy(&req).await }
+        },
+    )
+    .await;
+    crate::deploy_queue::record_event(
+        &state.pool,
+        &project.uuid,
+        "deploy",
+        if result.ok { "success" } else { "failed" },
+        deployment_uuid,
+        result.git_sha.as_deref().unwrap_or(""),
+    )
+    .await;
     if result.ok {
         crate::sso::sync_project_proxy(state, project).await;
         crate::dns::sync_project(state, &project.uuid).await;

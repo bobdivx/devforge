@@ -168,6 +168,7 @@ pub async fn save_assistant_and_finish(
     .bind(&now)
     .execute(pool)
     .await?;
+    crate::deploy_queue::record_tool_trace(pool, project_uuid, tools_json).await;
     finish(pool, run_uuid, "completed", None).await?;
     let _ = sqlx::query(
         "UPDATE project_agents SET status = 'idle', updated_at = ? WHERE uuid = ?",

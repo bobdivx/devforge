@@ -1760,7 +1760,7 @@ async fn github_webhook(
         let _ = sqlx::query(
             r#"INSERT INTO deployments (
                 uuid, project_id, status, git_sha, git_message, logs, finished_at, created_at, updated_at
-            ) VALUES (?, ?, 'running', ?, ?, ?, NULL, ?, ?)"#,
+            ) VALUES (?, ?, 'queued', ?, ?, ?, NULL, ?, ?)"#,
         )
         .bind(&dep_uuid)
         .bind(project.id)
@@ -1815,7 +1815,28 @@ async fn github_webhook(
             env_file,
             proxy_labels: crate::routes::proxy_labels_for_project(&state, &project).await,
         };
-        let result = state.deploy.deploy(&req).await;
+        let deploy = state.deploy.clone();
+        let slot_server = req.server_id.clone();
+        let result = crate::deploy_queue::run_in_node_slot(
+            &state.deploy_queue,
+            &state.pool,
+            &slot_server,
+            &dep_uuid,
+            move || {
+                let deploy = deploy.clone();
+                async move { deploy.deploy(&req).await }
+            },
+        )
+        .await;
+        crate::deploy_queue::record_event(
+            &state.pool,
+            &project.uuid,
+            "deploy",
+            if result.ok { "success" } else { "failed" },
+            &dep_uuid,
+            result.git_sha.as_deref().unwrap_or(""),
+        )
+        .await;
         let finished = crate::state::now_str();
         // Align with manual deploy status so sync/UI treat webhook deploys as success.
         let status = if result.ok { "success" } else { "failed" };

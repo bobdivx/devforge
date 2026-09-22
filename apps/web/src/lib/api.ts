@@ -408,6 +408,17 @@ export const api = {
   templates: () => request<{ data: ProjectTemplate[] }>('/templates'),
   deployments: (projectUuid: string) =>
     request<{ data: Deployment[] }>(`/projects/${projectUuid}/deployments`),
+  projectTrace: (projectUuid: string) =>
+    request<{
+      data: Array<{
+        id: number;
+        kind: string;
+        status: string;
+        ref_id?: string | null;
+        detail: string;
+        created_at: string;
+      }>;
+    }>(`/projects/${projectUuid}/trace`),
   createDeployment: (projectUuid: string, body?: { git_message?: string }) =>
     request<{ data: Deployment; ok?: boolean }>(`/projects/${projectUuid}/deployments`, {
       method: 'POST',

@@ -1,9 +1,10 @@
-//! Persistance SQLite pour ports / domains / proxy (survie au restart).
+//! Persistance SQLite pour ports, domaines, proxy et WireGuard (survie au restart).
 
 use async_trait::async_trait;
 use devforge_domain::{DomainRecord, DomainStore};
 use devforge_ports::{PortMapping, PortStore};
 use devforge_proxy::{ProxyRoute, ProxyStore};
+use devforge_wireguard::{WireguardStore, WgNetwork, WgPeer};
 use devforge_shared::{DevForgeError, Result as DfResult};
 use sqlx::SqlitePool;
 use uuid::Uuid;
@@ -234,5 +235,235 @@ impl ProxyStore for SqliteProxyStore {
             .await
             .map_err(|e| DevForgeError::Message(e.to_string()))?;
         Ok(res.rows_affected() > 0)
+    }
+}
+
+pub struct SqliteWireguardStore {
+    pub pool: SqlitePool,
+}
+
+#[async_trait]
+impl WireguardStore for SqliteWireguardStore {
+    async fn list_networks(&self) -> DfResult<Vec<WgNetwork>> {
+        let rows: Vec<(String, String, String, i64, String)> = sqlx::query_as(
+            "SELECT id, name, subnet, listen_port, interface FROM wg_networks ORDER BY name",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DevForgeError::Message(e.to_string()))?;
+        let mut nets = Vec::with_capacity(rows.len());
+        for (id, name, subnet, listen_port, interface) in rows {
+            let peers = self.peers_of(&id).await?;
+            nets.push(WgNetwork {
+                id,
+                name,
+                subnet,
+                listen_port: listen_port as u16,
+                peers,
+                interface,
+            });
+        }
+        Ok(nets)
+    }
+
+    async fn create_network(
+        &self,
+        name: &str,
+        subnet: &str,
+        listen_port: u16,
+    ) -> DfResult<WgNetwork> {
+        if name.trim().is_empty() {
+            return Err(DevForgeError::Message("name requis".into()));
+        }
+        let id = format!("wg_{}", &Uuid::new_v4().to_string()[..8]);
+        let interface = format!("wg-{}", &id[3..]);
+        let subnet = if subnet.is_empty() {
+            "10.10.0.0/24".to_string()
+        } else {
+            subnet.to_string()
+        };
+        let listen_port = if listen_port == 0 { 51820 } else { listen_port };
+        sqlx::query(
+            "INSERT INTO wg_networks (id, name, subnet, listen_port, interface) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&id)
+        .bind(name)
+        .bind(&subnet)
+        .bind(listen_port as i64)
+        .bind(&interface)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DevForgeError::Message(e.to_string()))?;
+        Ok(WgNetwork {
+            id,
+            name: name.into(),
+            subnet,
+            listen_port,
+            peers: vec![],
+            interface,
+        })
+    }
+
+    async fn add_peer(&self, network_id: &str, mut peer: WgPeer) -> DfResult<WgPeer> {
+        let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM wg_networks WHERE id = ?")
+            .bind(network_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| DevForgeError::Message(e.to_string()))?;
+        if exists.is_none() {
+            return Err(DevForgeError::NotFound(format!("network {network_id}")));
+        }
+        if peer.id.is_empty() {
+            peer.id = format!("peer_{}", &Uuid::new_v4().to_string()[..8]);
+        }
+        if peer.status.is_empty() {
+            peer.status = "pending".into();
+        }
+        sqlx::query(
+            r#"INSERT INTO wg_peers (id, network_id, name, public_key, allowed_ips, endpoint, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+        )
+        .bind(&peer.id)
+        .bind(network_id)
+        .bind(&peer.name)
+        .bind(&peer.public_key)
+        .bind(&peer.allowed_ips)
+        .bind(&peer.endpoint)
+        .bind(&peer.status)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DevForgeError::Message(e.to_string()))?;
+        Ok(peer)
+    }
+
+    async fn remove_peer(&self, network_id: &str, peer_id: &str) -> DfResult<bool> {
+        let res = sqlx::query("DELETE FROM wg_peers WHERE network_id = ? AND id = ?")
+            .bind(network_id)
+            .bind(peer_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| DevForgeError::Message(e.to_string()))?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    async fn get_network(&self, network_id: &str) -> DfResult<Option<WgNetwork>> {
+        let row: Option<(String, String, String, i64, String)> = sqlx::query_as(
+            "SELECT id, name, subnet, listen_port, interface FROM wg_networks WHERE id = ?",
+        )
+        .bind(network_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| DevForgeError::Message(e.to_string()))?;
+        let Some((id, name, subnet, listen_port, interface)) = row else {
+            return Ok(None);
+        };
+        let peers = self.peers_of(&id).await?;
+        Ok(Some(WgNetwork {
+            id,
+            name,
+            subnet,
+            listen_port: listen_port as u16,
+            peers,
+            interface,
+        }))
+    }
+
+    async fn set_peer_status(
+        &self,
+        network_id: &str,
+        peer_id: &str,
+        status: &str,
+    ) -> DfResult<()> {
+        sqlx::query("UPDATE wg_peers SET status = ? WHERE network_id = ? AND id = ?")
+            .bind(status)
+            .bind(network_id)
+            .bind(peer_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| DevForgeError::Message(e.to_string()))?;
+        Ok(())
+    }
+}
+
+impl SqliteWireguardStore {
+    async fn peers_of(&self, network_id: &str) -> DfResult<Vec<WgPeer>> {
+        let rows: Vec<(String, String, String, String, Option<String>, String)> = sqlx::query_as(
+            r#"SELECT id, name, public_key, allowed_ips, endpoint, status
+               FROM wg_peers WHERE network_id = ? ORDER BY name"#,
+        )
+        .bind(network_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DevForgeError::Message(e.to_string()))?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(id, name, public_key, allowed_ips, endpoint, status)| WgPeer {
+                    id,
+                    name,
+                    public_key,
+                    allowed_ips,
+                    endpoint,
+                    status,
+                },
+            )
+            .collect())
+    }
+}
+
+#[cfg(test)]
+mod wg_tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    #[tokio::test]
+    async fn network_and_peer_survive_a_new_store() {
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"CREATE TABLE wg_networks (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, subnet TEXT NOT NULL,
+                listen_port INTEGER NOT NULL, interface TEXT NOT NULL
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"CREATE TABLE wg_peers (
+                id TEXT PRIMARY KEY, network_id TEXT NOT NULL, name TEXT NOT NULL,
+                public_key TEXT NOT NULL, allowed_ips TEXT NOT NULL,
+                endpoint TEXT, status TEXT NOT NULL DEFAULT 'pending'
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let store = SqliteWireguardStore { pool: pool.clone() };
+        let net = store
+            .create_network("edge", "10.8.0.0/24", 51820)
+            .await
+            .unwrap();
+        store
+            .add_peer(
+                &net.id,
+                WgPeer {
+                    id: String::new(),
+                    name: "worker".into(),
+                    public_key: "pk".into(),
+                    allowed_ips: "10.8.0.2/32".into(),
+                    endpoint: Some("1.2.3.4:51820".into()),
+                    status: String::new(),
+                },
+            )
+            .await
+            .unwrap();
+        let reloaded = SqliteWireguardStore { pool };
+        let again = reloaded.get_network(&net.id).await.unwrap().unwrap();
+        assert_eq!(again.peers.len(), 1);
+        assert_eq!(again.peers[0].status, "pending");
+        assert_eq!(again.subnet, "10.8.0.0/24");
     }
 }

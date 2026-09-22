@@ -1,4 +1,5 @@
 mod agent_runs;
+mod deploy_queue;
 mod dns;
 mod cluster_routes;
 mod cluster_store;

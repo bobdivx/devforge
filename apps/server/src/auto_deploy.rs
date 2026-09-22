@@ -158,7 +158,7 @@ async fn deploy_project(state: &AppState, project: &Project, message: &str) {
     if let Err(e) = sqlx::query(
         r#"INSERT INTO deployments (
             uuid, project_id, status, git_sha, git_message, logs, finished_at, created_at, updated_at
-        ) VALUES (?, ?, 'running', ?, ?, ?, NULL, ?, ?)"#,
+        ) VALUES (?, ?, 'queued', ?, ?, ?, NULL, ?, ?)"#,
     )
     .bind(&dep_uuid)
     .bind(project.id)
@@ -187,7 +187,7 @@ async fn deploy_project(state: &AppState, project: &Project, message: &str) {
         "Auto-deploy poll: déploiement démarré"
     );
 
-    let result = crate::routes::run_real_deploy(state, project).await;
+    let result = crate::routes::run_real_deploy(state, project, &dep_uuid).await;
     let finished = now_str();
     let status = if result.ok { "success" } else { "failed" };
     let sha = result.git_sha.as_deref().unwrap_or("unknown");

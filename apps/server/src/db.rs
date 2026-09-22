@@ -177,6 +177,28 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     sqlx::query(
         r#"
+        CREATE TABLE IF NOT EXISTS builder_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_uuid TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            ref_id TEXT,
+            detail TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_builder_events_project ON builder_events(project_uuid, id)",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
         CREATE TABLE IF NOT EXISTS agent_conversation_shares (
             token TEXT PRIMARY KEY,
             project_uuid TEXT NOT NULL,
@@ -499,6 +521,36 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             public_port INTEGER,
             protocol TEXT NOT NULL DEFAULT 'tcp',
             public INTEGER NOT NULL DEFAULT 1
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS wg_networks (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            subnet TEXT NOT NULL,
+            listen_port INTEGER NOT NULL,
+            interface TEXT NOT NULL
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS wg_peers (
+            id TEXT PRIMARY KEY,
+            network_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            public_key TEXT NOT NULL,
+            allowed_ips TEXT NOT NULL,
+            endpoint TEXT,
+            status TEXT NOT NULL DEFAULT 'pending'
         );
         "#,
     )

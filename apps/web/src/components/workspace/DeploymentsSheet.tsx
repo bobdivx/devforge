@@ -27,14 +27,32 @@ function formatWhen(iso?: string | null) {
 }
 
 function deployTone(status: string): 'ok' | 'warn' | 'danger' | 'neutral' {
-  if (status === 'deployed' || status === 'running' || status === 'success') return 'ok';
+  if (status === 'deployed' || status === 'success' || status === 'ok') return 'ok';
   if (status === 'failed' || status === 'error') return 'danger';
-  if (status === 'deploying' || status === 'building' || status === 'pending') return 'warn';
+  if (
+    status === 'deploying' ||
+    status === 'building' ||
+    status === 'pending' ||
+    status === 'queued' ||
+    status === 'running'
+  ) {
+    return 'warn';
+  }
   return 'neutral';
 }
 
+type TraceEvent = {
+  id: number;
+  kind: string;
+  status: string;
+  ref_id?: string | null;
+  detail: string;
+  created_at: string;
+};
+
 export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet' }: Props) {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [trace, setTrace] = useState<TraceEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'timeline' | 'raw'>('timeline');
@@ -57,7 +75,9 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
   useEffect(() => {
     if (!open) return;
     const selected = deployments.find((d) => d.uuid === selectedUuid);
-    const isRunning = selected && (selected.status === 'deploying' || selected.status === 'building' || selected.status === 'pending');
+    const isRunning =
+      selected &&
+      ['deploying', 'building', 'pending', 'queued', 'running'].includes(selected.status);
     if (!isRunning) return;
 
     const interval = setInterval(() => {
@@ -74,6 +94,12 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
       if (!selectedUuid && r.data?.[0]) setSelectedUuid(r.data[0].uuid);
     } catch {
       setDeployments([]);
+    }
+    try {
+      const t = await api.projectTrace(projectUuid);
+      setTrace(t.data ?? []);
+    } catch {
+      setTrace([]);
     } finally {
       if (showSpinner) setLoading(false);
     }
@@ -110,6 +136,26 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
           isPanel ? 'h-full p-3 sm:p-4' : 'px-4 py-3 sm:px-5',
         )}
       >
+        {trace.length > 0 && (
+          <ol class="mb-4 space-y-1.5">
+            <li class="text-[11px] font-medium uppercase tracking-wide text-[var(--color-ink-faint)]">
+              Trace agent · déploiement · smoke
+            </li>
+            {trace.slice(0, 8).map((event) => (
+              <li
+                key={event.id}
+                class="flex items-baseline gap-2 text-xs text-[var(--color-ink-muted)]"
+              >
+                <Badge tone={deployTone(event.status)}>{event.kind}</Badge>
+                <span class="min-w-0 flex-1 truncate">{event.detail || event.ref_id || event.status}</span>
+                <span class="shrink-0 text-[10px] text-[var(--color-ink-faint)]">
+                  {formatWhen(event.created_at)}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+
         {loading && deployments.length === 0 ? (
           <div class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)]">
             <Spinner /> Chargement…

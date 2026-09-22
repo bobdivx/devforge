@@ -12,7 +12,7 @@ use devforge_proxy::ProxyFacade;
 use devforge_runner::RunnerFacade;
 use devforge_cluster::{ClusterAwareExecutor, ClusterFacade, ClusterStore};
 use devforge_shared::{ProjectTestContext, Result as DfResult};
-use devforge_wireguard::{MemoryWireguardStore, WireguardFacade};
+use devforge_wireguard::WireguardFacade;
 use devforge_storage::StorageFacade;
 use devforge_backup::{BackupFacade, InstanceBackupService, MemoryBackupStore};
 use devforge_update::UpdateFacade;
@@ -44,6 +44,8 @@ pub struct AppState {
     pub runners: Arc<RunnerFacade>,
     pub cluster: Arc<ClusterFacade>,
     pub cron_scheduler: Arc<devforge_cron::CronScheduler>,
+    /// Un slot de build par nœud.
+    pub deploy_queue: Arc<crate::deploy_queue::DeployQueue>,
     /// Active backends: executor / github / storage / llm.
     pub backends: Arc<BackendModes>,
 }
@@ -148,6 +150,7 @@ pub struct Deployment {
 pub(crate) struct SqliteProjectStore {
     pub(crate) pool: SqlitePool,
     pub(crate) deploy: Arc<DeployFacade>,
+    pub(crate) deploy_queue: Arc<crate::deploy_queue::DeployQueue>,
 }
 
 #[async_trait]
@@ -301,7 +304,7 @@ impl ProjectStore for SqliteProjectStore {
         sqlx::query(
             r#"INSERT INTO deployments (
                 uuid, project_id, status, git_sha, git_message, logs, finished_at, created_at, updated_at
-            ) VALUES (?, ?, 'running', ?, ?, ?, NULL, ?, ?)"#,
+            ) VALUES (?, ?, 'queued', ?, ?, ?, NULL, ?, ?)"#,
         )
         .bind(&dep_uuid)
         .bind(project.id)
@@ -364,8 +367,28 @@ impl ProjectStore for SqliteProjectStore {
             proxy_labels: None,
         };
 
-        // Exécuter le déploiement
-        let result = self.deploy.deploy(&req).await;
+        let server_id = req.server_id.clone();
+        let deploy = self.deploy.clone();
+        let result = crate::deploy_queue::run_in_node_slot(
+            &self.deploy_queue,
+            &self.pool,
+            &server_id,
+            &dep_uuid,
+            move || {
+                let deploy = deploy.clone();
+                async move { deploy.deploy(&req).await }
+            },
+        )
+        .await;
+        crate::deploy_queue::record_event(
+            &self.pool,
+            &project.uuid,
+            "deploy",
+            if result.ok { "success" } else { "failed" },
+            &dep_uuid,
+            result.git_sha.as_deref().unwrap_or(""),
+        )
+        .await;
         let finished = now_str();
         let status = if result.ok { "success" } else { "failed" };
         let final_sha = result.git_sha.unwrap_or_else(|| "unknown".into());
@@ -584,7 +607,9 @@ impl AppState {
         let mut proxy = ProxyFacade::new(Arc::new(crate::infra_sqlite::SqliteProxyStore {
             pool: pool.clone(),
         }));
-        let mut wireguard = WireguardFacade::new(Arc::new(MemoryWireguardStore::new()));
+        let mut wireguard = WireguardFacade::new(Arc::new(crate::infra_sqlite::SqliteWireguardStore {
+            pool: pool.clone(),
+        }));
         if executor_mode != "stub" {
             domains = domains.with_executor(executor.clone(), apply_server.clone());
             proxy = proxy.with_executor(executor.clone(), apply_server.clone());
@@ -593,9 +618,11 @@ impl AppState {
         let domains = Arc::new(domains);
         let proxy = Arc::new(proxy);
         let wireguard = Arc::new(wireguard);
+        let deploy_queue = Arc::new(crate::deploy_queue::DeployQueue::new());
         let store: Arc<dyn ProjectStore> = Arc::new(SqliteProjectStore {
             pool: pool.clone(),
             deploy: deploy.clone(),
+            deploy_queue: deploy_queue.clone(),
         });
         let registry = Arc::new(build_core_registry(
             deploy.clone(),
@@ -650,6 +677,7 @@ impl AppState {
             runners,
             cluster,
             cron_scheduler,
+            deploy_queue,
             backends,
         };
 
