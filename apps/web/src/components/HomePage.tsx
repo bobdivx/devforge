@@ -4,7 +4,7 @@ import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { cn } from '../lib/cn';
 import { AppShell } from './AppShell';
 import { AppIcon, statusDotClass } from './AppIcon';
-import { Alert, HubAddTile, HubGrid, Skeleton } from './ui';
+import { Alert, BetaBadge, HubAddTile, HubGrid, Skeleton } from './ui';
 import { enterUp, interactiveLift, motion } from '../lib/motion';
 import { useEffect, useState } from 'preact/hooks';
 import { NewGithubAppWizard } from './NewGithubAppWizard';
@@ -14,10 +14,12 @@ function AppCard({
   project,
   index,
   nodes,
+  showNode,
 }: {
   project: Project;
   index: number;
   nodes: ClusterNode[];
+  showNode: boolean;
 }) {
   const status = projectStatusMeta(project.status);
   const sync = projectSyncMeta(project.sync);
@@ -67,7 +69,9 @@ function AppCard({
           >
             {status.label}
           </div>
-          <div class="mt-0.5 truncate text-[10px] text-[var(--color-ink-faint)]">{node}</div>
+          {showNode && (
+            <div class="mt-0.5 truncate text-[10px] text-[var(--color-ink-faint)]">{node}</div>
+          )}
         </div>
     </a>
   );
@@ -80,16 +84,22 @@ export function HomePage() {
   const [loading, setLoading] = useState(true);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardMode, setWizardMode] = useState<'choice' | 'github' | 'builder'>('choice');
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [agentBuilder, setAgentBuilder] = useState(true);
 
   // Fonction pour charger les projets
   async function loadProjects() {
     try {
+      const boot = await api.bootstrap().catch(() => null);
+      const admin = boot?.user?.role === 'instance_admin';
+      setIsAdmin(admin);
+      setAgentBuilder(boot?.features?.agent_builder !== false);
       const [r, n] = await Promise.all([
         api.projects(),
-        api.clusterNodes().catch(() => null),
+        admin ? api.clusterNodes().catch(() => null) : Promise.resolve(null),
       ]);
       setProjects(r.data);
-      if (n?.nodes) setNodes(n.nodes);
+      if (admin && n?.nodes) setNodes(n.nodes);
       setError(null);
     } catch (e: unknown) {
       // Soft-fail: ne pas écraser les projets existants en cas d'erreur pendant le polling
@@ -197,7 +207,7 @@ export function HomePage() {
       ) : (
         <HubGrid cols={5}>
           {projects.map((p, i) => (
-            <AppCard key={p.uuid} project={p} index={i} nodes={nodes} />
+            <AppCard key={p.uuid} project={p} index={i} nodes={nodes} showNode={isAdmin} />
           ))}
 
           <HubAddTile index={projects.length} label="Ajouter" onClick={openWizard} />
@@ -242,6 +252,7 @@ export function HomePage() {
 
             {wizardMode === 'choice' && (
               <div class="space-y-3">
+                {agentBuilder && (
                 <button
                   type="button"
                   onClick={() => setWizardMode('builder')}
@@ -254,11 +265,13 @@ export function HomePage() {
                       </svg>
                     </div>
                     <span class="font-semibold">Créer avec un agent</span>
+                    <BetaBadge />
                   </div>
                   <p class="text-sm text-[var(--color-ink-muted)]">
                     Décris ton app en français, l'agent DevForge scaffold le projet et configure le build.
                   </p>
                 </button>
+                )}
 
                 <button
                   type="button"

@@ -147,6 +147,7 @@ export function ProjectAgentsPanel({
   const [llmError, setLlmError] = useState<string | null>(null);
   const [pollEnabled, setPollEnabled] = useState(builderMode || false);
   const [sharing, setSharing] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const bootstrapped = useRef(false);
 
@@ -371,6 +372,13 @@ export function ProjectAgentsPanel({
     }, 1000);
     return () => clearInterval(interval);
   }, [pollEnabled, selected, projectUuid, busy]);
+
+  useEffect(() => {
+    api
+      .bootstrap()
+      .then((b) => setIsAdmin(b.user?.role === 'instance_admin'))
+      .catch(() => setIsAdmin(false));
+  }, []);
 
   useEffect(() => {
     if (selected) {
@@ -731,19 +739,36 @@ export function ProjectAgentsPanel({
             <Alert tone="warn" class="m-3 mb-0">
               {llmError ? (
                 <>
-                  LLM configuré mais erreur : <strong>{llmError}</strong> —{' '}
-                  <a class="underline" href="/app/settings?tab=llm">
-                    corrige dans Settings → Agents / LLM
-                  </a>
-                  .
+                  LLM configuré mais erreur : <strong>{llmError}</strong>
+                  {isAdmin ? (
+                    <>
+                      {' '}
+                      —{' '}
+                      <a class="underline" href="/app/settings?tab=llm">
+                        corrige dans Paramètres → Agents / LLM
+                      </a>
+                      .
+                    </>
+                  ) : (
+                    <> — demande à l’admin instance de corriger le modèle.</>
+                  )}
                 </>
               ) : (
                 <>
-                  Aucun LLM prêt — configure Ollama / Gemini dans{' '}
-                  <a class="underline" href="/app/settings?tab=llm">
-                    Settings → Agents / LLM
-                  </a>
-                  . Les agents répondront dès qu'un modèle est actif.
+                  Aucun LLM prêt.
+                  {isAdmin ? (
+                    <>
+                      {' '}
+                      Configure Ollama / Gemini dans{' '}
+                      <a class="underline" href="/app/settings?tab=llm">
+                        Paramètres → Agents / LLM
+                      </a>
+                      .
+                    </>
+                  ) : (
+                    <> Demande à l’admin instance d’activer un modèle.</>
+                  )}{' '}
+                  Les agents répondront dès qu'un modèle est actif.
                 </>
               )}
             </Alert>

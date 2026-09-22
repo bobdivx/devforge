@@ -1,6 +1,6 @@
 import { useEffect, useId } from 'preact/hooks';
 import { cn } from '../lib/cn';
-import { globalNavForRole } from '../lib/nav';
+import { mobileSheetNav } from '../lib/nav';
 
 type Props = {
   open: boolean;
@@ -8,42 +8,6 @@ type Props = {
   active?: string;
   userRole?: string | null;
 };
-
-type MenuSection = {
-  title: string;
-  items: Array<{ href: string; label: string; key: string; adminOnly?: boolean }>;
-};
-
-function buildSections(role?: string | null): MenuSection[] {
-  const isAdmin = role === 'instance_admin';
-
-  return [
-    {
-      title: 'Outils',
-      items: [
-        { href: '/app/mcp', label: 'MCP', key: 'mcp' },
-        { href: '/app/tokens', label: 'Tokens', key: 'tokens' },
-      ],
-    },
-    {
-      title: 'Compte',
-      items: [{ href: '/app/team', label: 'Compte / équipe', key: 'team' }],
-    },
-    {
-      title: 'Instance',
-      items: [
-        { href: '/app/settings', label: 'Paramètres', key: 'settings' },
-        { href: '/app/settings?tab=update', label: 'Mise à jour', key: 'update' },
-        ...(isAdmin
-          ? [
-              { href: '/app/cluster', label: 'Cluster', key: 'cluster', adminOnly: true },
-              { href: '/app/admin', label: 'Admin', key: 'admin', adminOnly: true },
-            ]
-          : []),
-      ],
-    },
-  ];
-}
 
 export function MobileMenuSheet({ open, onClose, active, userRole }: Props) {
   const titleId = useId();
@@ -64,7 +28,7 @@ export function MobileMenuSheet({ open, onClose, active, userRole }: Props) {
 
   if (!open) return null;
 
-  const sections = buildSections(userRole);
+  const items = mobileSheetNav(userRole);
 
   return (
     <div
@@ -100,42 +64,32 @@ export function MobileMenuSheet({ open, onClose, active, userRole }: Props) {
           </button>
         </div>
 
-        <div
-          class="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 py-4"
+        <nav
+          class="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-4 py-4"
           style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))' }}
         >
-          {sections.map((section) => (
-            <div key={section.title}>
-              <h3 class="mb-2 px-2 text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--color-ink-faint)]">
-                {section.title}
-              </h3>
-              <nav class="space-y-1">
-                {section.items.map((item) => {
-                  const isCurrent = active === item.key;
-                  return (
-                    <a
-                      key={item.key}
-                      href={item.href}
-                      class={cn(
-                        'flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-[background-color,color,transform] duration-200 active:scale-[0.98]',
-                        isCurrent
-                          ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                          : 'text-[var(--color-ink-muted)] active:bg-white/5 active:text-[var(--color-ink)]',
-                      )}
-                      onClick={() => {
-                        // Ferme après un petit délai pour permettre la navigation visuelle
-                        setTimeout(onClose, 100);
-                      }}
-                      aria-current={isCurrent ? 'page' : undefined}
-                    >
-                      {item.label}
-                    </a>
-                  );
-                })}
-              </nav>
-            </div>
-          ))}
-        </div>
+          {items.map((item) => {
+            const isCurrent = active === item.key;
+            return (
+              <a
+                key={item.key}
+                href={item.href}
+                class={cn(
+                  'flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-[background-color,color,transform] duration-200 active:scale-[0.98]',
+                  isCurrent
+                    ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                    : 'text-[var(--color-ink-muted)] active:bg-white/5 active:text-[var(--color-ink)]',
+                )}
+                onClick={() => {
+                  setTimeout(onClose, 100);
+                }}
+                aria-current={isCurrent ? 'page' : undefined}
+              >
+                {item.label}
+              </a>
+            );
+          })}
+        </nav>
       </div>
     </div>
   );

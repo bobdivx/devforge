@@ -57,6 +57,10 @@ function OnboardingWizard() {
 
   useEffect(() => {
     api.bootstrap().then((b) => {
+      if (b.user && b.user.role !== 'instance_admin') {
+        window.location.replace('/app');
+        return;
+      }
       setBoot(b);
       setInstanceName(b.settings.instance_name || 'DevForge');
       setInstanceUrl(b.settings.instance_url || 'http://localhost:8000');

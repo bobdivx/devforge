@@ -147,19 +147,12 @@ export function AgentPage() {
             <>
               {llmError ? (
                 <p class="text-sm text-[var(--color-ink-muted)]">
-                  LLM configuré mais erreur : <strong>{llmError}</strong> —{' '}
-                  <a class="underline" href="/app/settings?tab=llm">
-                    corrige dans Settings
-                  </a>
-                  .
+                  LLM configuré mais erreur : <strong>{llmError}</strong>. Demande à l’admin
+                  instance si le modèle ne répond pas.
                 </p>
               ) : (
                 <p class="text-sm text-[var(--color-ink-muted)]">
-                  « liste les projets », « smoke », ou configure Ollama / Gemini dans{' '}
-                  <a class="underline" href="/app/settings?tab=llm">
-                    Settings
-                  </a>
-                  .
+                  « liste les projets », « smoke ». Le modèle est configuré par l’admin instance.
                 </p>
               )}
             </>

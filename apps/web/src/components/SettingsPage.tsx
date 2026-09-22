@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, type DnsRuntimeStatus, type DnsSettingsPublic } from '../lib/api';
 import { AppShell } from './AppShell';
+import { InstanceAdminGate } from './InstanceAdminGate';
 import { BackupSettingsPanel } from './BackupSettingsPanel';
 import { DnsEntrypointPanel } from './DnsEntrypointPanel';
 import { DockerEngineAlert } from './DockerEngineAlert';
@@ -147,6 +148,14 @@ function SettingCard({ card, index }: { card: SettingCardMeta; index: number }) 
 }
 
 export function SettingsPage() {
+  return (
+    <InstanceAdminGate active="settings" title="Paramètres">
+      <SettingsPageInner />
+    </InstanceAdminGate>
+  );
+}
+
+function SettingsPageInner() {
   const section = readSection();
   const [health, setHealth] = useState<Health | null>(null);
   const [loading, setLoading] = useState(true);

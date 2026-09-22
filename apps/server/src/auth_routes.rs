@@ -64,6 +64,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/settings/ssh/generate-key", post(generate_ssh_key))
         .route("/api/v1/admin/overview", get(admin_overview))
         .route("/api/v1/admin/workspaces/{uuid}", patch(admin_update_workspace))
+        .route("/api/v1/admin/features", patch(admin_update_features))
 }
 
 pub fn bearer_from(headers: &HeaderMap) -> Option<String> {
@@ -81,6 +82,28 @@ async fn user_count(state: &AppState) -> Result<i64, (axum::http::StatusCode, Js
         .await
         .map_err(internal)?;
     Ok(n)
+}
+
+/// Flags bêta instance. Défaut : activés (affichés avec le badge Bêta).
+pub async fn load_beta_features(state: &AppState) -> (bool, bool) {
+    let row = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT COALESCE(beta_workspace, 1), COALESCE(beta_agent_builder, 1) FROM instance_settings WHERE id = 1",
+    )
+    .fetch_optional(&state.pool)
+    .await
+    .ok()
+    .flatten();
+    match row {
+        Some((workspace, agent_builder)) => (workspace != 0, agent_builder != 0),
+        None => (true, true),
+    }
+}
+
+fn features_json(workspace: bool, agent_builder: bool) -> Value {
+    json!({
+        "workspace": workspace,
+        "agent_builder": agent_builder,
+    })
 }
 
 async fn load_settings(
@@ -304,6 +327,22 @@ async fn bootstrap(
         .local()
         .await
         .unwrap_or_default();
+    let is_admin = user
+        .as_ref()
+        .is_some_and(|u| u.role == ROLE_INSTANCE_ADMIN);
+    let (beta_workspace, beta_agent_builder) = load_beta_features(&state).await;
+
+    let mut settings_json = json!({
+        "instance_name": settings.instance_name,
+        "instance_url": settings.instance_url,
+        "wildcard_domain": settings.wildcard_domain,
+        "github_connected": !settings.github_token.is_empty(),
+    });
+    if is_admin {
+        settings_json["ssh_host"] = json!(settings.ssh_host);
+        settings_json["ssh_user"] = json!(settings.ssh_user);
+        settings_json["dns"] = crate::dns::public_json(&crate::dns::load(&state).await);
+    }
 
     Ok(Json(json!({
         "ok": true,
@@ -317,15 +356,8 @@ async fn bootstrap(
             "required": show_boarding,
             "steps": steps_json(&steps),
         },
-        "settings": {
-            "instance_name": settings.instance_name,
-            "instance_url": settings.instance_url,
-            "wildcard_domain": settings.wildcard_domain,
-            "github_connected": !settings.github_token.is_empty(),
-            "ssh_host": settings.ssh_host,
-            "ssh_user": settings.ssh_user,
-            "dns": crate::dns::public_json(&crate::dns::load(&state).await),
-        },
+        "features": features_json(beta_workspace, beta_agent_builder),
+        "settings": settings_json,
         "sso": {
             "enabled": sso_settings.platform_login_effective(),
             "oidc_configured": sso_settings.oidc_configured(),
@@ -1308,6 +1340,41 @@ async fn admin_update_workspace(
         "ok": true,
         "uuid": uuid,
         "plan": plan,
+    })))
+}
+
+#[derive(Deserialize)]
+struct AdminFeaturesBody {
+    workspace: Option<bool>,
+    agent_builder: Option<bool>,
+}
+
+async fn admin_update_features(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<AdminFeaturesBody>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let _admin = require_instance_admin(&state, &headers).await?;
+    let (mut workspace, mut agent_builder) = load_beta_features(&state).await;
+    if let Some(v) = body.workspace {
+        workspace = v;
+    }
+    if let Some(v) = body.agent_builder {
+        agent_builder = v;
+    }
+    let now = now_str();
+    sqlx::query(
+        "UPDATE instance_settings SET beta_workspace = ?, beta_agent_builder = ?, updated_at = ? WHERE id = 1",
+    )
+    .bind(if workspace { 1i64 } else { 0 })
+    .bind(if agent_builder { 1i64 } else { 0 })
+    .bind(&now)
+    .execute(&state.pool)
+    .await
+    .map_err(internal)?;
+    Ok(Json(json!({
+        "ok": true,
+        "features": features_json(workspace, agent_builder),
     })))
 }
 

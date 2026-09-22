@@ -62,9 +62,6 @@ function StatChip({
 
 export function AppHeader({ worker = false }: { worker?: boolean }) {
   const [boot, setBoot] = useState<Bootstrap | null>(null);
-  const [ghLogin, setGhLogin] = useState<string | null>(null);
-  const [ghAvatar, setGhAvatar] = useState<string | null>(null);
-  const [ghUrl, setGhUrl] = useState<string | null>(null);
   const [stats, setStats] = useState<ProjectStats | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -80,18 +77,12 @@ export function AppHeader({ worker = false }: { worker?: boolean }) {
           setBoot(b);
           return;
         }
-        const [b, gh, projects] = await Promise.all([
+        const [b, projects] = await Promise.all([
           api.bootstrap(),
-          api.githubStatus().catch(() => null),
           api.projects().catch(() => null),
         ]);
         if (cancelled) return;
         setBoot(b);
-        if (gh?.connected && gh.user) {
-          setGhLogin(gh.user.login);
-          setGhAvatar(gh.user.avatar_url ?? null);
-          setGhUrl(gh.user.html_url ?? `https://github.com/${gh.user.login}`);
-        }
         if (projects?.data) setStats(computeStats(projects.data));
       } catch {
         /* AuthGate gère déjà les erreurs auth */
@@ -127,18 +118,15 @@ export function AppHeader({ worker = false }: { worker?: boolean }) {
     }
   }
 
-  const isAdmin = boot?.user?.role === 'instance_admin';
   const nodeName = boot?.cluster?.node_name || boot?.settings?.instance_name || 'Nœud';
-  const displayName = worker
-    ? nodeName
-    : ghLogin
-      ? `@${ghLogin}`
-      : boot?.user?.name || boot?.user?.email || 'Compte';
+  const accountName = boot?.user?.name?.trim() || '';
+  const accountEmail = boot?.user?.email?.trim() || '';
+  const displayName = worker ? nodeName : accountName || accountEmail || 'Compte';
   const subtitle = worker
     ? boot?.cluster?.leader_url?.replace(/^https?:\/\//, '') || 'Worker'
-    : ghLogin
-      ? boot?.user?.email || boot?.user?.name || 'GitHub'
-      : boot?.user?.email || boot?.team?.name || boot?.workspace?.name || '';
+    : accountName
+      ? accountEmail
+      : boot?.team?.name || boot?.workspace?.name || '';
 
   return (
     <header class="mb-6 flex flex-col gap-3 border-b border-[var(--color-line)] pb-4 sm:flex-row sm:items-center sm:justify-between">
@@ -184,18 +172,9 @@ export function AppHeader({ worker = false }: { worker?: boolean }) {
           aria-haspopup="menu"
           onClick={() => setMenuOpen((o) => !o)}
         >
-          {ghAvatar ? (
-            <img
-              src={ghAvatar}
-              alt=""
-              class="h-8 w-8 shrink-0 rounded-full object-cover"
-              referrerpolicy="no-referrer"
-            />
-          ) : (
-            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-xs font-semibold text-[var(--color-accent)]">
-              {initials(boot?.user?.name || boot?.user?.email || 'DF')}
-            </span>
-          )}
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-xs font-semibold text-[var(--color-accent)]">
+            {initials(accountName || accountEmail || 'DF')}
+          </span>
           <span class="min-w-0 flex-1 truncate text-left sm:max-w-[10rem]">
             <span class="block truncate text-sm font-medium leading-tight text-[var(--color-ink)]">
               {displayName}
@@ -234,80 +213,12 @@ export function AppHeader({ worker = false }: { worker?: boolean }) {
             </div>
             <a
               role="menuitem"
-              href="/app/mcp"
-              class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
-              onClick={() => setMenuOpen(false)}
-            >
-              MCP
-            </a>
-            <a
-              role="menuitem"
-              href="/app/tokens"
-              class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
-              onClick={() => setMenuOpen(false)}
-            >
-              Tokens
-            </a>
-            <div class="my-1 border-t border-[var(--color-line)]" />
-            <a
-              role="menuitem"
               href="/app/team"
               class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
               onClick={() => setMenuOpen(false)}
             >
-              Compte
+              Mon compte
             </a>
-            <a
-              role="menuitem"
-              href="/app/settings"
-              class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
-              onClick={() => setMenuOpen(false)}
-            >
-              Paramètres
-            </a>
-            {isAdmin && (
-              <a
-                role="menuitem"
-                href="/app/cluster"
-                class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
-                onClick={() => setMenuOpen(false)}
-              >
-                Cluster
-              </a>
-            )}
-            {isAdmin && (
-              <a
-                role="menuitem"
-                href="/app/admin"
-                class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
-                onClick={() => setMenuOpen(false)}
-              >
-                Admin
-              </a>
-            )}
-            {ghUrl && (
-              <a
-                role="menuitem"
-                href={ghUrl}
-                target="_blank"
-                rel="noreferrer"
-                class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
-                onClick={() => setMenuOpen(false)}
-              >
-                Profil GitHub
-              </a>
-            )}
-            {!ghLogin && (
-              <a
-                role="menuitem"
-                href="/app/settings?tab=github"
-                class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
-                onClick={() => setMenuOpen(false)}
-              >
-                Connecter GitHub
-              </a>
-            )}
-            <div class="my-1 border-t border-[var(--color-line)]" />
             <button
               type="button"
               role="menuitem"

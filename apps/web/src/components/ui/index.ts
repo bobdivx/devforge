@@ -2,7 +2,7 @@ export { Button } from './Button';
 export { Card, CardHeader } from './Card';
 export { HubGrid, HubTile, HubIcon, HubAddTile } from './HubTile';
 export { Input } from './Input';
-export { Badge } from './Badge';
+export { Badge, BetaBadge } from './Badge';
 export { Alert } from './Alert';
 export { Modal } from './Modal';
 export { Table, Tr, Td } from './Table';

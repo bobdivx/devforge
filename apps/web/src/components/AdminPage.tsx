@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api } from '../lib/api';
 import { AppShell } from './AppShell';
+import { InstanceAdminGate } from './InstanceAdminGate';
 import {
   Alert,
   Badge,
@@ -59,12 +60,17 @@ type Health = {
   };
 };
 
-type AdminSection = 'hub' | 'workspaces' | 'proxy' | 'sante';
+type AdminSection = 'hub' | 'workspaces' | 'proxy' | 'sante' | 'beta';
+
+type BetaFeatures = {
+  workspace: boolean;
+  agent_builder: boolean;
+};
 
 function readSection(): AdminSection {
   if (typeof window === 'undefined') return 'hub';
   const tab = new URLSearchParams(window.location.search).get('tab');
-  if (tab === 'workspaces' || tab === 'proxy' || tab === 'sante') return tab;
+  if (tab === 'workspaces' || tab === 'proxy' || tab === 'sante' || tab === 'beta') return tab;
   return 'hub';
 }
 
@@ -164,6 +170,14 @@ function AdminHub() {
         description={`${stats?.workspaces ?? 0} clients, ${stats?.users ?? 0} utilisateurs`}
         icon={<HubIcon name="users" />}
         badge={stats?.plan_pro ? <Badge tone="accent">{stats.plan_pro} Pro</Badge> : undefined}
+      />
+      <HubTile
+        index={3}
+        href="/app/admin?tab=beta"
+        title="Fonctionnalités bêta"
+        description="Workspace et création d’app par agent"
+        icon={<HubIcon name="brain" />}
+        badge={<Badge tone="warn">Bêta</Badge>}
       />
     </HubGrid>
   );
@@ -624,9 +638,133 @@ function AdminSante() {
   );
 }
 
+function FeatureSwitch({
+  checked,
+  disabled,
+  label,
+  onToggle,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  label: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onToggle}
+      class={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 focus:ring-offset-[var(--color-bg)] disabled:cursor-not-allowed disabled:opacity-50 ${
+        checked ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-line)]'
+      }`}
+    >
+      <span
+        aria-hidden="true"
+        class={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
+          checked ? 'translate-x-5' : 'translate-x-0'
+        }`}
+      />
+    </button>
+  );
+}
+
+function AdminBeta() {
+  const toast = useToast();
+  const [features, setFeatures] = useState<BetaFeatures | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .bootstrap()
+      .then((b) => {
+        setFeatures({
+          workspace: b.features?.workspace !== false,
+          agent_builder: b.features?.agent_builder !== false,
+        });
+      })
+      .catch((err) => {
+        toast.push({ title: 'Erreur', detail: String(err), tone: 'danger' });
+      });
+  }, []);
+
+  async function toggle(key: keyof BetaFeatures) {
+    if (!features) return;
+    const next = { ...features, [key]: !features[key] };
+    setBusy(key);
+    try {
+      const r = await api.adminUpdateFeatures(next);
+      setFeatures(r.features);
+      toast.push({
+        title: next[key] ? 'Fonctionnalité affichée' : 'Fonctionnalité masquée',
+        tone: 'ok',
+      });
+    } catch (err) {
+      toast.push({ title: 'Échec', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div class="space-y-4">
+      <Alert tone="info">
+        Les fonctionnalités activées restent visibles pour tous les comptes, avec un badge Bêta.
+        Désactivées, elles disparaissent des menus et l’API refuse la création par agent.
+      </Alert>
+      <Card>
+        <div class="flex items-center justify-between gap-4 border-b border-[var(--color-line)] py-4 first:pt-0">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <h3 class="text-sm font-medium">Workspace</h3>
+              <Badge tone="warn">Bêta</Badge>
+            </div>
+            <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
+              Onglet atelier dans chaque application (chat agent, aperçu, fichiers).
+            </p>
+          </div>
+          <FeatureSwitch
+            checked={!!features?.workspace}
+            disabled={!features || busy === 'workspace'}
+            label="Workspace bêta"
+            onToggle={() => void toggle('workspace')}
+          />
+        </div>
+        <div class="flex items-center justify-between gap-4 py-4">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <h3 class="text-sm font-medium">Créer avec un agent</h3>
+              <Badge tone="warn">Bêta</Badge>
+            </div>
+            <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
+              Option « Créer avec un agent » dans Nouvelle application.
+            </p>
+          </div>
+          <FeatureSwitch
+            checked={!!features?.agent_builder}
+            disabled={!features || busy === 'agent_builder'}
+            label="Création par agent"
+            onToggle={() => void toggle('agent_builder')}
+          />
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 // ========== MAIN ==========
 
 export function AdminPage() {
+  return (
+    <InstanceAdminGate active="admin" title="Admin">
+      <AdminPageInner />
+    </InstanceAdminGate>
+  );
+}
+
+function AdminPageInner() {
   const section = readSection();
 
   return (
@@ -656,7 +794,9 @@ export function AdminPage() {
                 ? 'Workspaces'
                 : section === 'proxy'
                   ? 'Proxy / Traefik'
-                  : 'Santé plateforme'}
+                  : section === 'beta'
+                    ? 'Fonctionnalités bêta'
+                    : 'Santé plateforme'}
             </span>
           </div>
         ) : (
@@ -672,6 +812,7 @@ export function AdminPage() {
         {section === 'workspaces' && <AdminWorkspaces />}
         {section === 'proxy' && <AdminProxy />}
         {section === 'sante' && <AdminSante />}
+        {section === 'beta' && <AdminBeta />}
       </FadeIn>
     </AppShell>
   );

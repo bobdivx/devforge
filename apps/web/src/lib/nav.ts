@@ -1,48 +1,65 @@
-export type NavItem = { href: string; label: string; key: string };
+export type NavItem = { href: string; label: string; key: string; beta?: boolean };
 
-/** Nav globale : pas d’entrée Agent — les agents vivent dans le project. */
-export const GLOBAL_NAV: NavItem[] = [
+/** Navigation produit, visible pour chaque compte. */
+const USER_NAV: NavItem[] = [
+  { href: '/app', label: 'Apps', key: 'home' },
+  { href: '/app/mcp', label: 'MCP', key: 'mcp' },
+  { href: '/app/tokens', label: 'Tokens', key: 'tokens' },
+  { href: '/app/team', label: 'Compte', key: 'team' },
+];
+
+/** Infra et opérateur — `instance_admin` uniquement. */
+const ADMIN_NAV: NavItem[] = [
   { href: '/app', label: 'Apps', key: 'home' },
   { href: '/app/runners', label: 'Runners', key: 'runners' },
   { href: '/app/cluster', label: 'Cluster', key: 'cluster' },
   { href: '/app/mcp', label: 'MCP', key: 'mcp' },
   { href: '/app/tokens', label: 'Tokens', key: 'tokens' },
   { href: '/app/team', label: 'Compte', key: 'team' },
-  { href: '/app/settings', label: 'Settings', key: 'settings' },
+  { href: '/app/settings', label: 'Paramètres', key: 'settings' },
+  { href: '/app/admin', label: 'Admin', key: 'admin' },
 ];
-
-/** Visible uniquement pour `instance_admin` (opérateur SaaS). */
-export const ADMIN_NAV_ITEM: NavItem = {
-  href: '/app/admin',
-  label: 'Admin',
-  key: 'admin',
-};
 
 /** Nav du worker : pas d’UI produit, uniquement la fiche nœud. */
 export const WORKER_NAV: NavItem[] = [{ href: '/app/node', label: 'Nœud', key: 'node' }];
 
 export function globalNavForRole(role?: string | null): NavItem[] {
-  if (role === 'instance_admin') return GLOBAL_NAV;
-  return GLOBAL_NAV.filter((item) => item.key !== 'cluster');
+  if (role === 'instance_admin') return ADMIN_NAV;
+  return USER_NAV;
 }
 
 /**
- * Nav mobile bottom dock : Apps · Plus · Runners.
- * "Plus" ouvre un sheet avec MCP, Tokens, Compte, Paramètres, Admin.
+ * Barre du bas mobile.
+ * Utilisateur : Apps · Plus · Compte.
+ * Admin : Apps · Plus · Runners.
+ * Le sheet « Plus » porte le reste, sans recopier ces entrées.
  */
-export function mobileBottomNav(): NavItem[] {
+export function mobileBottomNav(role?: string | null): NavItem[] {
+  if (role === 'instance_admin') {
+    return [
+      { href: '/app', label: 'Apps', key: 'home' },
+      { href: '#plus', label: 'Plus', key: 'plus' },
+      { href: '/app/runners', label: 'Runners', key: 'runners' },
+    ];
+  }
   return [
     { href: '/app', label: 'Apps', key: 'home' },
     { href: '#plus', label: 'Plus', key: 'plus' },
-    { href: '/app/runners', label: 'Runners', key: 'runners' },
+    { href: '/app/team', label: 'Compte', key: 'team' },
   ];
 }
 
-export function projectNav(uuid: string): NavItem[] {
+/** Entrées du sheet mobile qui ne sont pas déjà dans la barre du bas. */
+export function mobileSheetNav(role?: string | null): NavItem[] {
+  const bottom = new Set(mobileBottomNav(role).map((item) => item.key));
+  return globalNavForRole(role).filter((item) => !bottom.has(item.key));
+}
+
+export function projectNav(uuid: string, opts?: { workspace?: boolean }): NavItem[] {
   const base = `/app/projects/view?uuid=${encodeURIComponent(uuid)}`;
-  return [
+  const items: NavItem[] = [
     { href: `${base}&tab=overview`, label: 'Overview', key: 'overview' },
-    { href: `${base}&tab=workspace`, label: 'Workspace', key: 'workspace' },
+    { href: `${base}&tab=workspace`, label: 'Workspace', key: 'workspace', beta: true },
     { href: `${base}&tab=deployments`, label: 'Deployments', key: 'deployments' },
     { href: `${base}&tab=git`, label: 'Git', key: 'git' },
     { href: `${base}&tab=actions`, label: 'Actions', key: 'actions' },
@@ -53,9 +70,11 @@ export function projectNav(uuid: string): NavItem[] {
     { href: `${base}&tab=backups`, label: 'Backups', key: 'backups' },
     { href: `${base}&tab=settings`, label: 'Settings', key: 'settings' },
   ];
+  if (opts?.workspace === false) return items.filter((item) => item.key !== 'workspace');
+  return items;
 }
 
-/** Sous-nav Settings — affichée sous la nav globale, comme la nav projet. */
+/** Sous-nav Settings — admin instance uniquement. */
 export const SETTINGS_NAV: NavItem[] = [
   { href: '/app/settings', label: 'Général', key: 'general' },
   { href: '/app/settings?tab=domaine', label: 'Domaine', key: 'domaine' },

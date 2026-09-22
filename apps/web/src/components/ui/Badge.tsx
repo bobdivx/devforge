@@ -11,6 +11,19 @@ const tones: Record<Tone, string> = {
   danger: 'border border-red-500/20 bg-red-500/10 text-[var(--color-danger)]',
 };
 
+export function BetaBadge({ class: className }: { class?: string }) {
+  return (
+    <span
+      class={cn(
+        'inline-flex items-center rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-warn)]',
+        className,
+      )}
+    >
+      Bêta
+    </span>
+  );
+}
+
 export function Badge({
   children,
   tone = 'neutral',

@@ -1,11 +1,20 @@
 import { useEffect, useState } from 'preact/hooks';
 import { SETTINGS_NAV } from '../lib/nav';
 import { AppShell } from './AppShell';
+import { InstanceAdminGate } from './InstanceAdminGate';
 import { BackupSettingsPanel } from './BackupSettingsPanel';
 import { api } from '../lib/api';
 
 /** Redirect legacy /app/storage → Settings Sauvegardes. */
 export function StoragePage() {
+  return (
+    <InstanceAdminGate active="settings" title="Sauvegardes">
+      <StoragePageInner />
+    </InstanceAdminGate>
+  );
+}
+
+function StoragePageInner() {
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {

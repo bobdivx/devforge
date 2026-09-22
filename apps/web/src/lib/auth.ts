@@ -31,6 +31,11 @@ export type Bootstrap = {
     show_boarding: boolean;
     plan?: string;
   } | null;
+  /** Interrupteurs bêta de l’instance. Absents = activés. */
+  features?: {
+    workspace: boolean;
+    agent_builder: boolean;
+  };
   onboarding: {
     required: boolean;
     steps: {
@@ -46,8 +51,8 @@ export type Bootstrap = {
     instance_url: string;
     wildcard_domain: string;
     github_connected: boolean;
-    ssh_host: string;
-    ssh_user: string;
+    ssh_host?: string;
+    ssh_user?: string;
     dns?: {
       provider: string;
       zone: string;

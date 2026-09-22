@@ -24,12 +24,16 @@ export function NewBuilderWizard({
   const [templatesLoaded, setTemplatesLoaded] = useState(false);
   const [nodes, setNodes] = useState<ClusterNode[]>([]);
   const [serverId, setServerId] = useState('default');
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     api
-      .clusterNodes()
-      .then((r) => {
-        setNodes(r.nodes ?? []);
+      .bootstrap()
+      .then((b) => {
+        const admin = b.user?.role === 'instance_admin';
+        setIsAdmin(admin);
+        if (!admin) return;
+        return api.clusterNodes().then((r) => setNodes(r.nodes ?? []));
       })
       .catch(() => {});
   }, []);
@@ -71,7 +75,7 @@ export function NewBuilderWizard({
         title: cleanTitle,
         prompt: cleanPrompt,
         template,
-        server_id: serverId || 'default',
+        ...(isAdmin ? { server_id: serverId || 'default' } : {}),
       });
 
       toast.push({
@@ -150,6 +154,7 @@ export function NewBuilderWizard({
         </label>
       )}
 
+      {isAdmin && (
       <NodeSelect
         nodes={nodes}
         value={serverId}
@@ -157,6 +162,7 @@ export function NewBuilderWizard({
         disabled={busy}
         hint="La forge tourne uniquement sur ce nœud."
       />
+      )}
 
       <div class="flex flex-wrap justify-between gap-2">
         {onClose && (

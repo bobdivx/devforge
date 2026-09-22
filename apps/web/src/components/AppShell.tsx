@@ -1,6 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { globalNavForRole, mobileBottomNav, WORKER_NAV, type NavItem } from '../lib/nav';
+import { BetaBadge } from './ui';
 import { api } from '../lib/api';
 import { cn } from '../lib/cn';
 import { ToastProvider } from './ui';
@@ -182,7 +183,10 @@ function ShellInner({
                       : 'text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
                   )}
                 >
-                  {item.label}
+                  <span class="flex items-center justify-between gap-2">
+                    <span>{item.label}</span>
+                    {item.beta && <BetaBadge />}
+                  </span>
                 </a>
               ))}
             </nav>
@@ -205,7 +209,10 @@ function ShellInner({
                             : 'text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
                         )}
                       >
-                        {item.label}
+                        <span class="flex items-center justify-between gap-2">
+                          <span>{item.label}</span>
+                          {item.beta && <BetaBadge />}
+                        </span>
                       </a>
                     );
                   })}
@@ -253,7 +260,10 @@ function ShellInner({
                               : 'bg-white/[0.03] text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
                           )}
                         >
-                          {item.label}
+                          <span class="inline-flex items-center gap-1.5">
+                            {item.label}
+                            {item.beta && <BetaBadge />}
+                          </span>
                         </a>
                       );
                     })}
@@ -272,7 +282,7 @@ function ShellInner({
           aria-label="Navigation principale"
         >
           <div class="mx-auto flex max-w-lg justify-around gap-0.5 px-1 py-1.5">
-            {(isWorker ? WORKER_NAV : mobileBottomNav()).map((item) => {
+            {(isWorker ? WORKER_NAV : mobileBottomNav(userRole)).map((item) => {
               const isPlusButton = item.key === 'plus';
               if (isPlusButton) {
                 return (

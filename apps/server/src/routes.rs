@@ -278,7 +278,7 @@ async fn create_project(
     headers: HeaderMap,
     Json(body): Json<CreateProject>,
 ) -> Result<(axum::http::StatusCode, Json<Value>), ApiError> {
-    let (_user, workspace) = crate::auth_routes::current_workspace(&state, &headers)
+    let (user, workspace) = crate::auth_routes::current_workspace(&state, &headers)
         .await
         .map_err(|(status, Json(v))| ApiError {
             status,
@@ -328,8 +328,13 @@ async fn create_project(
         })
     };
 
+    let requested_server = if user.role == "instance_admin" {
+        body.server_id.as_deref()
+    } else {
+        None
+    };
     let server_id =
-        crate::cluster_routes::resolve_server_id(&state, body.server_id.as_deref()).await;
+        crate::cluster_routes::resolve_server_id(&state, requested_server).await;
 
     sqlx::query(
         r#"INSERT INTO projects (
@@ -442,7 +447,7 @@ async fn scaffold_project(
     headers: HeaderMap,
     Json(body): Json<ScaffoldProject>,
 ) -> Result<(axum::http::StatusCode, Json<Value>), ApiError> {
-    let (_user, workspace) = crate::auth_routes::current_workspace(&state, &headers)
+    let (user, workspace) = crate::auth_routes::current_workspace(&state, &headers)
         .await
         .map_err(|(status, Json(v))| ApiError {
             status,
@@ -452,6 +457,12 @@ async fn scaffold_project(
                 .unwrap_or("auth")
                 .to_string(),
         })?;
+    let (_workspace_beta, agent_builder) = crate::auth_routes::load_beta_features(&state).await;
+    if !agent_builder {
+        return Err(ApiError::forbidden(
+            "La création d’application par agent est désactivée",
+        ));
+    }
 
     let uuid = new_uuid();
     let slug = format!(
@@ -461,8 +472,13 @@ async fn scaffold_project(
     );
     let now = now_str();
 
+    let requested_server = if user.role == "instance_admin" {
+        body.server_id.as_deref()
+    } else {
+        None
+    };
     let server_id =
-        crate::cluster_routes::resolve_server_id(&state, body.server_id.as_deref()).await;
+        crate::cluster_routes::resolve_server_id(&state, requested_server).await;
 
     // Create minimal project
     sqlx::query(
@@ -681,7 +697,7 @@ async fn update_project(
     Path(uuid): Path<String>,
     Json(body): Json<UpdateProject>,
 ) -> Result<Json<Value>, ApiError> {
-    let (_user, _ws, existing) = auth_project(&state, &headers, &uuid).await?;
+    let (user, _ws, existing) = auth_project(&state, &headers, &uuid).await?;
     let previous_production_url = existing.production_url.clone();
     let now = now_str();
     let is_static = body
@@ -734,7 +750,11 @@ async fn update_project(
     .bind(body.status.unwrap_or(existing.status))
     .bind(body.git_repository.or(existing.git_repository))
     .bind(body.git_branch.or(existing.git_branch))
-    .bind(body.server_id.or(existing.server_id))
+    .bind(if user.role == "instance_admin" {
+        body.server_id.or(existing.server_id)
+    } else {
+        existing.server_id
+    })
     .bind(body.workdir.or(existing.workdir))
     .bind(body.test_command.or(existing.test_command))
     .bind(body.production_url.or(existing.production_url))

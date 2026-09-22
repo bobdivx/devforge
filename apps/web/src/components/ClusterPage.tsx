@@ -3,6 +3,7 @@ import { api, type ClusterInvite, type ClusterNode, type Project } from '../lib/
 import { nodeRoleLabel, resolveNode } from '../lib/cluster-display';
 import { projectStatusMeta } from '../lib/status';
 import { AppShell } from './AppShell';
+import { InstanceAdminGate } from './InstanceAdminGate';
 import {
   Alert,
   Badge,
@@ -201,6 +202,14 @@ function inviteState(inv: ClusterInvite): { label: string; tone: 'ok' | 'warn' |
 }
 
 export function ClusterPage() {
+  return (
+    <InstanceAdminGate active="cluster" title="Cluster">
+      <ClusterPageInner />
+    </InstanceAdminGate>
+  );
+}
+
+function ClusterPageInner() {
   return (
     <ToastProvider>
       <ClusterInner />

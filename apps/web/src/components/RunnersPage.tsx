@@ -8,6 +8,7 @@ import {
   type RunnerLogs,
 } from '../lib/api';
 import { AppShell } from './AppShell';
+import { InstanceAdminGate } from './InstanceAdminGate';
 import {
   Alert,
   Badge,
@@ -118,6 +119,14 @@ function statusDotClass(tone: 'ok' | 'warn' | 'danger' | 'neutral' | 'accent') {
 }
 
 export function RunnersPage() {
+  return (
+    <InstanceAdminGate active="runners" title="Runners">
+      <RunnersPageInner />
+    </InstanceAdminGate>
+  );
+}
+
+function RunnersPageInner() {
   const toast = useToast();
   const [runners, setRunners] = useState<ManagedRunner[]>([]);
   const [error, setError] = useState<string | null>(null);

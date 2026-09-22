@@ -29,7 +29,7 @@ pub fn router() -> Router<AppState> {
 }
 
 async fn require_ws(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
-    let _ = current_workspace(state, headers)
+    let (user, _) = current_workspace(state, headers)
         .await
         .map_err(|(status, Json(v))| ApiError {
             status,
@@ -39,6 +39,9 @@ async fn require_ws(state: &AppState, headers: &HeaderMap) -> Result<(), ApiErro
                 .unwrap_or("auth")
                 .to_string(),
         })?;
+    if user.role != "instance_admin" {
+        return Err(ApiError::forbidden("Réservé à l’admin instance"));
+    }
     Ok(())
 }
 

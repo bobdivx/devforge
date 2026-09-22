@@ -107,6 +107,20 @@ export function ProjectDetailPage(props: Props) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [rulesModalOpen, setRulesModalOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [workspaceBeta, setWorkspaceBeta] = useState(true);
+
+  useEffect(() => {
+    api
+      .bootstrap()
+      .then((b) => {
+        setIsAdmin(b.user?.role === 'instance_admin');
+        setWorkspaceBeta(b.features?.workspace !== false);
+      })
+      .catch(() => {
+        setIsAdmin(false);
+      });
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -137,7 +151,7 @@ export function ProjectDetailPage(props: Props) {
   return (
     <AppShell
       active="projects"
-      projectNav={projectNav(uuid)}
+      projectNav={projectNav(uuid, { workspace: workspaceBeta })}
       title={tab === 'workspace' ? undefined : titles[tab]}
       actions={
         tab === 'overview' && project ? (
@@ -180,10 +194,14 @@ export function ProjectDetailPage(props: Props) {
           uuid={uuid}
           project={project}
           deployments={deployments}
+          isAdmin={isAdmin}
           onDeployments={(d) => setDeployments(d)}
         />
       )}
-      {tab === 'workspace' && (
+      {tab === 'workspace' && !workspaceBeta && (
+        <Alert tone="warn">Le workspace est une fonctionnalité bêta désactivée sur cette instance.</Alert>
+      )}
+      {tab === 'workspace' && workspaceBeta && (
         <ProjectWorkspace
           projectUuid={uuid}
           project={project}
@@ -226,7 +244,7 @@ export function ProjectDetailPage(props: Props) {
         />
       )}
       {tab === 'settings' && project && (
-        <ProjectSettingsPanel project={project} onSaved={(p) => setProject(p)} />
+        <ProjectSettingsPanel project={project} isAdmin={isAdmin} onSaved={(p) => setProject(p)} />
       )}
       {tab === 'settings' && !project && !error && (
         <Card>
@@ -255,11 +273,13 @@ function ProjectOverview({
   uuid,
   project,
   deployments,
+  isAdmin,
   onDeployments,
 }: {
   uuid: string;
   project: Project;
   deployments: Deployment[];
+  isAdmin: boolean;
   onDeployments: (d: Deployment[]) => void;
 }) {
   const toast = useToast();
@@ -291,7 +311,7 @@ function ProjectOverview({
       api.projectResources(uuid),
       api.domains(uuid),
       api.projectGit(uuid),
-      api.clusterNodes(),
+      isAdmin ? api.clusterNodes() : Promise.resolve(null),
     ]).then(([envR, resR, domR, gitR, nodesR]) => {
       if (envR.status === 'fulfilled') {
         const rows = envR.value.data ?? [];
@@ -311,11 +331,11 @@ function ProjectOverview({
       if (gitR.status === 'fulfilled' && gitR.value.sync) {
         setGitSync(gitR.value.sync);
       }
-      if (nodesR.status === 'fulfilled') {
-        setNodes(nodesR.value.nodes ?? []);
+      if (nodesR.status === 'fulfilled' && nodesR.value?.nodes) {
+        setNodes(nodesR.value.nodes);
       }
     });
-  }, [uuid]);
+  }, [uuid, isAdmin]);
 
   const hasDbEnv =
     envKeys.some((k) =>
@@ -547,7 +567,7 @@ function ProjectOverview({
 
         {/* Grid de cartes HubTile (style MCP/Home) */}
         <HubGrid cols={4}>
-          {health.map((h, i) => (
+          {(isAdmin ? health : health.filter((h) => h.key !== 'node')).map((h, i) => (
             <HubTile
               key={h.key}
               index={i}
@@ -1803,9 +1823,11 @@ function parseGithubOwnerRepo(url: string): { owner: string; repo: string } | nu
 
 function ProjectSettingsPanel({
   project,
+  isAdmin,
   onSaved,
 }: {
   project: Project;
+  isAdmin: boolean;
   onSaved: (p: Project) => void;
 }) {
   const toast = useToast();
@@ -1887,6 +1909,7 @@ function ProjectSettingsPanel({
   }, [repo]);
 
   useEffect(() => {
+    if (!isAdmin) return;
     let cancelled = false;
     api
       .clusterNodes()
@@ -1899,7 +1922,7 @@ function ProjectSettingsPanel({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAdmin]);
 
   async function save(e: Event) {
     e.preventDefault();
@@ -1918,7 +1941,7 @@ function ProjectSettingsPanel({
         base_directory: baseDir.trim() || '/',
         docker_compose_location: composePath.trim() || null,
         workdir: workdir.trim() || null,
-        server_id: serverId.trim() || 'default',
+        ...(isAdmin ? { server_id: serverId.trim() || 'default' } : {}),
         production_url: prodUrl.trim() || null,
         test_command: testCmd.trim() || null,
       });
@@ -2025,6 +2048,7 @@ function ProjectSettingsPanel({
               onInput={(e) => setRepo((e.target as HTMLInputElement).value)}
             />
           </div>
+          {isAdmin && (
           <div class="md:col-span-2">
             <NodeSelect
               nodes={clusterNodes}
@@ -2033,6 +2057,7 @@ function ProjectSettingsPanel({
               hint="Un seul nœud par forge. Changer ici n’applique qu’au prochain déploiement — les conteneurs déjà lancés restent où ils sont."
             />
           </div>
+          )}
           <label class="flex flex-col gap-1.5 text-sm">
             <span class="font-medium">Build pack</span>
             <select

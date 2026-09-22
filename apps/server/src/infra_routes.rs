@@ -1358,11 +1358,12 @@ async fn gh_status(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    let (_user, _ws) = crate::auth_routes::current_workspace(&state, &headers).await?;
+    let (caller, _ws) = crate::auth_routes::current_workspace(&state, &headers).await?;
     let mode = state.github.mode();
     let connected = mode == "http";
+    let is_admin = caller.role == "instance_admin";
     let mut user = Value::Null;
-    if connected {
+    if connected && is_admin {
         if let Ok(u) = state.github.current_user().await {
             user = json!({
                 "login": u.login,
@@ -1377,7 +1378,11 @@ async fn gh_status(
         "connected": connected,
         "mode": mode,
         "user": user,
-        "hint": "Colle un Personal Access Token (classic) avec scopes repo + read:org, ou un fine-grained token avec Contents: Read."
+        "hint": if is_admin {
+            "Colle un Personal Access Token (classic) avec scopes repo + read:org, ou un fine-grained token avec Contents: Read."
+        } else {
+            ""
+        }
     })))
 }
 

@@ -77,6 +77,7 @@ export function ProjectActionsPanel({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [lastResult, setLastResult] = useState<{
     title: string;
     detail: string;
@@ -99,6 +100,10 @@ export function ProjectActionsPanel({
   }
 
   useEffect(() => {
+    api
+      .bootstrap()
+      .then((b) => setIsAdmin(b.user?.role === 'instance_admin'))
+      .catch(() => setIsAdmin(false));
     void load();
     const t = setInterval(() => void load(), 20000);
     return () => clearInterval(t);
@@ -227,7 +232,9 @@ export function ProjectActionsPanel({
             description={
               data?.owner && data?.repo
                 ? `${data.owner}/${data.repo}${data.branch ? ` @ ${data.branch}` : ''}`
-                : 'Détection workflows + runners DevForge'
+                : isAdmin
+                  ? 'Détection workflows + runners DevForge'
+                  : 'Détection des workflows GitHub'
             }
           />
           {!hasWf ? (
@@ -240,19 +247,23 @@ export function ProjectActionsPanel({
                 {workflows.length} workflow{workflows.length > 1 ? 's' : ''}
                 {data?.needs_patch ? ' · à adapter' : ' · DevForge OK'}
               </Badge>
+              {isAdmin && (
               <Badge tone={runners.length > 0 ? 'ok' : 'warn'}>
                 {runners.length > 0
                   ? `${runners.length} runner${runners.length > 1 ? 's' : ''}`
                   : 'pas de runner'}
               </Badge>
+              )}
             </div>
           )}
 
           <div class="mt-4 flex flex-wrap gap-2">
+            {isAdmin && (
             <Button size="sm" disabled={busy || !hasWf} onClick={() => void ensureRunner()}>
               {runners.length > 0 ? 'Runner prêt' : 'Créer le runner'}
             </Button>
-            {hasWf && data?.needs_patch && (
+            )}
+            {isAdmin && hasWf && data?.needs_patch && (
               <>
                 <Button
                   size="sm"
@@ -270,12 +281,14 @@ export function ProjectActionsPanel({
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => void load()}>
               Rafraîchir
             </Button>
+            {isAdmin && (
             <a
               href="/app/runners"
               class="inline-flex items-center rounded-lg px-3 py-1.5 text-sm text-[var(--color-accent)] hover:underline"
             >
               Voir tous les runners →
             </a>
+            )}
           </div>
         </Card>
       </FadeIn>

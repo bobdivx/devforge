@@ -209,12 +209,20 @@ pub fn patch_runs_on_yaml(yaml: &str) -> (String, usize) {
     (joined, changed)
 }
 
+async fn caller_is_admin(state: &AppState, headers: &HeaderMap) -> Result<bool, ApiError> {
+    let (user, _) = crate::auth_routes::current_workspace(state, headers)
+        .await
+        .map_err(ApiError::from_auth)?;
+    Ok(user.role == "instance_admin")
+}
+
 async fn actions_summary(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(uuid): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let project = auth_project(&state, &headers, &uuid).await?;
+    let is_admin = caller_is_admin(&state, &headers).await?;
     let Ok((owner, repo, branch)) = project_repo(&project) else {
         return Ok(Json(json!({
             "ok": true,
@@ -232,21 +240,25 @@ async fn actions_summary(
         .list_workflow_runs(&owner, &repo, Some(&branch))
         .await
         .unwrap_or_default();
-    let all_runners = state.runners.list().await.map_err(map_gh)?;
-    let runners = all_runners
-        .get("runners")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|r| {
-            let pu = r.get("project_uuid").and_then(|x| x.as_str());
-            let o = r.get("owner").and_then(|x| x.as_str()).unwrap_or("");
-            let rp = r.get("repo").and_then(|x| x.as_str()).unwrap_or("");
-            pu == Some(uuid.as_str())
-                || (o.eq_ignore_ascii_case(&owner) && rp.eq_ignore_ascii_case(&repo))
-        })
-        .collect::<Vec<_>>();
+    let runners = if is_admin {
+        let all_runners = state.runners.list().await.map_err(map_gh)?;
+        all_runners
+            .get("runners")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|r| {
+                let pu = r.get("project_uuid").and_then(|x| x.as_str());
+                let o = r.get("owner").and_then(|x| x.as_str()).unwrap_or("");
+                let rp = r.get("repo").and_then(|x| x.as_str()).unwrap_or("");
+                pu == Some(uuid.as_str())
+                    || (o.eq_ignore_ascii_case(&owner) && rp.eq_ignore_ascii_case(&repo))
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
 
     let needs_patch = workflows.iter().any(|w| !w.uses_devforge && !w.skipped_dynamic);
     let has_workflows = !workflows.is_empty();
@@ -318,6 +330,9 @@ async fn ensure_runner(
     Path(uuid): Path<String>,
     body: Option<Json<EnsureRunnerBody>>,
 ) -> Result<(axum::http::StatusCode, Json<Value>), ApiError> {
+    if !caller_is_admin(&state, &headers).await? {
+        return Err(ApiError::forbidden("Réservé à l’admin instance"));
+    }
     let project = auth_project(&state, &headers, &uuid).await?;
     let (owner, repo, _branch) = project_repo(&project)?;
     let body = body.map(|j| j.0).unwrap_or(EnsureRunnerBody {
@@ -397,6 +412,9 @@ async fn patch_workflows(
     Path(uuid): Path<String>,
     body: Option<Json<PatchBody>>,
 ) -> Result<Json<Value>, ApiError> {
+    if !caller_is_admin(&state, &headers).await? {
+        return Err(ApiError::forbidden("Réservé à l’admin instance"));
+    }
     let project = auth_project(&state, &headers, &uuid).await?;
     let (owner, repo, branch) = project_repo(&project)?;
     let dry = body.and_then(|j| j.0.dry_run).unwrap_or(false);

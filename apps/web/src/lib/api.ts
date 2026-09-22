@@ -364,6 +364,14 @@ export const api = {
         owner: { uuid: string; email: string; name: string; role: string };
       }>;
     }>('/admin/overview'),
+  adminUpdateFeatures: (body: { workspace: boolean; agent_builder: boolean }) =>
+    request<{
+      ok: boolean;
+      features: { workspace: boolean; agent_builder: boolean };
+    }>('/admin/features', {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
   adminUpdateWorkspace: (uuid: string, body: { plan: string }) =>
     request<{ ok: boolean; uuid: string; plan: string }>(
       `/admin/workspaces/${encodeURIComponent(uuid)}`,

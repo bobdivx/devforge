@@ -101,6 +101,7 @@ export function NewGithubAppWizard({
   const [customFqdn, setCustomFqdn] = useState('');
   const [nodes, setNodes] = useState<ClusterNode[]>([]);
   const [serverId, setServerId] = useState('default');
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const idx = STEPS.indexOf(step);
   const projectNamePreview = name.trim() || (selected ? selected.name : 'app');
@@ -130,9 +131,11 @@ export function NewGithubAppWizard({
           api.bootstrap(),
           api.clusterNodes().catch(() => null),
         ]);
+        const admin = boot.user?.role === 'instance_admin';
+        setIsAdmin(admin);
         setWildcardDomain(boot.settings?.wildcard_domain || '');
         setConnected(s.connected);
-        if (cluster?.nodes?.length) {
+        if (admin && cluster?.nodes?.length) {
           setNodes(cluster.nodes);
         }
         if (s.connected) {
@@ -234,7 +237,7 @@ export function NewGithubAppWizard({
         base_directory: baseDir.trim() || '/',
         docker_compose_location:
           buildPack === 'dockercompose' ? composePath.trim() || '/docker-compose.yaml' : null,
-        server_id: serverId || 'default',
+        ...(isAdmin ? { server_id: serverId || 'default' } : {}),
         test_command: testCommand || 'npm test --if-present',
         production_url: productionUrl,
       });
@@ -307,11 +310,17 @@ export function NewGithubAppWizard({
   if (!connected) {
     return (
       <Alert tone="warn">
-        GitHub non connecté — configure un token dans{' '}
-        <a class="underline" href="/app/settings">
-          Settings
-        </a>{' '}
-        avant d’ajouter une app.
+        {isAdmin ? (
+          <>
+            GitHub non connecté — configure un token dans{' '}
+            <a class="underline" href="/app/settings?tab=github">
+              Paramètres → GitHub
+            </a>{' '}
+            avant d’ajouter une app.
+          </>
+        ) : (
+          <>GitHub n’est pas connecté sur cette instance. Demande à l’admin.</>
+        )}
       </Alert>
     );
   }
@@ -453,12 +462,14 @@ export function NewGithubAppWizard({
             placeholder="/"
             onInput={(e) => setBaseDir((e.target as HTMLInputElement).value)}
           />
+          {isAdmin && (
           <NodeSelect
             nodes={nodes}
             value={serverId}
             onChange={setServerId}
             hint="La forge tourne uniquement sur ce nœud. Pas de copie automatique sur les autres."
           />
+          )}
           {buildPack === 'dockercompose' && (
             <Input
               label="Chemin docker-compose"
@@ -561,14 +572,17 @@ export function NewGithubAppWizard({
             >
               <div class="font-medium">Sous-domaine auto</div>
               <div class="mt-0.5 text-xs text-[var(--color-ink-muted)]">
-                {autoUrl || (
-                  <>
-                    Wildcard manquant —{' '}
-                    <a class="underline" href="/app/settings?tab=domaine">
-                      Settings → Domaine
-                    </a>
-                  </>
-                )}
+                {autoUrl ||
+                  (isAdmin ? (
+                    <>
+                      Wildcard manquant —{' '}
+                      <a class="underline" href="/app/settings?tab=domaine">
+                        Paramètres → Domaine
+                      </a>
+                    </>
+                  ) : (
+                    <>Wildcard non configuré — demande à l’admin instance.</>
+                  ))}
               </div>
             </button>
             <button
@@ -640,10 +654,12 @@ export function NewGithubAppWizard({
             )}
             {domainMode === 'custom' ? ' · custom' : ' · auto'}
           </li>
+          {isAdmin && (
           <li>
             <span class="text-[var(--color-ink-muted)]">Nœud </span>
             {nodes.find((n) => n.id === serverId)?.name || serverId}
           </li>
+          )}
           <li>
             <span class="text-[var(--color-ink-muted)]">Env </span>
             {envKeyCount > 0
