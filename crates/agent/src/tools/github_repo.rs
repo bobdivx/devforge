@@ -3,14 +3,14 @@ use devforge_github::GitHubFacade;
 use devforge_mcp::McpFacade;
 use devforge_shared::{Result, Tool};
 use serde_json::{json, Value};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use std::sync::Arc;
 
 /// Tool pour créer un dépôt GitHub et l'attacher au projet DevForge.
 pub struct CreateGitHubRepoTool {
     pub github: Arc<GitHubFacade>,
     pub mcp: Arc<McpFacade>,
-    pub pool: Arc<SqlitePool>,
+    pub pool: Arc<PgPool>,
 }
 
 #[async_trait]
@@ -113,7 +113,7 @@ impl Tool for CreateGitHubRepoTool {
 
         // Vérifier que le projet existe
         let project: Option<(String, Option<String>)> = sqlx::query_as(
-            "SELECT uuid, git_repository FROM projects WHERE uuid = ?",
+            "SELECT uuid, git_repository FROM projects WHERE uuid = $1",
         )
         .bind(project_uuid)
         .fetch_optional(self.pool.as_ref())
@@ -300,7 +300,7 @@ impl Tool for CreateGitHubRepoTool {
         // Attacher le dépôt au projet DevForge
         let git_url = format!("{html_url}.git");
         sqlx::query(
-            "UPDATE projects SET git_repository = ?, git_branch = 'main' WHERE uuid = ?",
+            "UPDATE projects SET git_repository = $1, git_branch = 'main' WHERE uuid = $2",
         )
         .bind(&git_url)
         .bind(&uuid)

@@ -46,7 +46,7 @@ async fn auth_project(
                 .unwrap_or("auth")
                 .to_string(),
         })?;
-    sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ? AND workspace_uuid = ?")
+    sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1 AND workspace_uuid = $2")
         .bind(uuid)
         .bind(&workspace.uuid)
         .fetch_optional(&state.pool)
@@ -57,16 +57,14 @@ async fn auth_project(
 
 async fn latest_deploy_sha(state: &AppState, project: &Project) -> Option<String> {
     let row: Option<(Option<String>,)> = sqlx::query_as(
-        "SELECT git_sha FROM deployments WHERE project_id = ? AND status IN ('ready', 'success', 'running') ORDER BY created_at DESC LIMIT 1",
+        "SELECT git_sha FROM deployments WHERE project_id = $1 AND status IN ('ready', 'success', 'running') ORDER BY created_at DESC LIMIT 1",
     )
     .bind(project.id)
     .fetch_optional(&state.pool)
     .await
     .ok()
     .flatten();
-    row.and_then(|(sha,)| {
-        sha.filter(|s| !s.is_empty() && s != "pending" && s != "unknown")
-    })
+    row.and_then(|(sha,)| sha.filter(|s| !s.is_empty() && s != "pending" && s != "unknown"))
 }
 
 async fn any_deploy_sha(state: &AppState, project: &Project) -> Option<String> {
@@ -74,7 +72,7 @@ async fn any_deploy_sha(state: &AppState, project: &Project) -> Option<String> {
         return Some(s);
     }
     let row: Option<(Option<String>,)> = sqlx::query_as(
-        "SELECT git_sha FROM deployments WHERE project_id = ? ORDER BY created_at DESC LIMIT 1",
+        "SELECT git_sha FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1",
     )
     .bind(project.id)
     .fetch_optional(&state.pool)
@@ -135,11 +133,7 @@ fn parse_unified_diff(raw: &str) -> Vec<Value> {
                 .iter()
                 .find(|p| p.starts_with("b/"))
                 .map(|p| p.trim_start_matches("b/").to_string())
-                .or_else(|| {
-                    parts
-                        .last()
-                        .map(|p| p.trim_start_matches("b/").to_string())
-                });
+                .or_else(|| parts.last().map(|p| p.trim_start_matches("b/").to_string()));
             current_path = b;
             continue;
         }
@@ -181,11 +175,7 @@ fn parse_unified_diff(raw: &str) -> Vec<Value> {
 
 async fn workdir_status(state: &AppState, project: &Project) -> Value {
     let configured = project.workdir.as_deref().unwrap_or("").trim();
-    let server_id = project
-        .server_id
-        .as_deref()
-        .unwrap_or("default")
-        .trim();
+    let server_id = project.server_id.as_deref().unwrap_or("default").trim();
     if configured.is_empty() {
         return json!({
             "available": false,
@@ -197,9 +187,8 @@ async fn workdir_status(state: &AppState, project: &Project) -> Value {
     let workdir = devforge_deploy::resolve_project_workdir(configured, &project.uuid);
     let path = std::path::Path::new(&workdir);
     if !path.is_dir() {
-        let remote_hint = configured.starts_with('/')
-            || configured.starts_with("/data")
-            || configured != workdir;
+        let remote_hint =
+            configured.starts_with('/') || configured.starts_with("/data") || configured != workdir;
         return json!({
             "available": false,
             "dirty": false,
@@ -287,7 +276,9 @@ async fn workdir_status(state: &AppState, project: &Project) -> Value {
 
 fn friendly_exec_reason(raw: &str) -> String {
     let lower = raw.to_lowercase();
-    if lower.contains("introuvable") || lower.contains("os error 267") || lower.contains("directory")
+    if lower.contains("introuvable")
+        || lower.contains("os error 267")
+        || lower.contains("directory")
     {
         return "Clone local absent — workdir distant (NAS) non accessible ici.".into();
     }
@@ -352,7 +343,11 @@ async fn git_status(
     });
 
     if let Some(ref dep_sha) = deployed {
-        match state.github.compare(&owner, &repo, dep_sha, branch).await {
+        match crate::routes::project_github(&state, &project.workspace_uuid)
+            .await
+            .compare(&owner, &repo, dep_sha, branch)
+            .await
+        {
             Ok(c) => {
                 let state_label = if c.ahead_by == 0 && c.behind_by == 0 {
                     "up_to_date"
@@ -425,11 +420,7 @@ async fn git_diff(
 
     if source == "workdir" {
         let workdir = project_resolved_workdir(&project)?;
-        let server_id = project
-            .server_id
-            .as_deref()
-            .unwrap_or("default")
-            .trim();
+        let server_id = project.server_id.as_deref().unwrap_or("default").trim();
         let cmd = match q.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
             Some(path) => {
                 if cfg!(windows) {
@@ -548,11 +539,7 @@ async fn discard_local(
         ));
     }
     let workdir = project_resolved_workdir(&project)?;
-    let server_id = project
-        .server_id
-        .as_deref()
-        .unwrap_or("default")
-        .trim();
+    let server_id = project.server_id.as_deref().unwrap_or("default").trim();
     let discard_cmd = if cfg!(windows) {
         "git reset --hard HEAD; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git clean -fd; exit $LASTEXITCODE"
     } else {

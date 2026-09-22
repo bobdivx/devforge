@@ -1,4 +1,4 @@
-﻿//! Project infra routes: ports, domains, proxy, wireguard, deploy lifecycle, github versions.
+//! Project infra routes: ports, domains, proxy, wireguard, deploy lifecycle, github versions.
 
 use axum::{
     extract::{Path, State},
@@ -13,7 +13,10 @@ use crate::state::{AppState, Project};
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/v1/projects/{uuid}/ports", get(list_ports).post(upsert_port))
+        .route(
+            "/api/v1/projects/{uuid}/ports",
+            get(list_ports).post(upsert_port),
+        )
         .route(
             "/api/v1/projects/{uuid}/ports/{id}",
             axum::routing::delete(delete_port),
@@ -38,10 +41,7 @@ pub fn router() -> Router<AppState> {
             "/api/v1/projects/{uuid}/proxy/routes",
             get(list_proxy).post(upsert_proxy),
         )
-        .route(
-            "/api/v1/projects/{uuid}/proxy/sync",
-            post(sync_proxy),
-        )
+        .route("/api/v1/projects/{uuid}/proxy/sync", post(sync_proxy))
         .route(
             "/api/v1/projects/{uuid}/lifecycle/{action}",
             post(lifecycle),
@@ -75,14 +75,8 @@ pub fn router() -> Router<AppState> {
             get(get_shared_agent_conversation),
         )
         .route("/api/v1/wireguard/networks", get(list_wg).post(create_wg))
-        .route(
-            "/api/v1/wireguard/networks/{id}/peers",
-            post(add_wg_peer),
-        )
-        .route(
-            "/api/v1/wireguard/networks/{id}/apply",
-            post(apply_wg),
-        )
+        .route("/api/v1/wireguard/networks/{id}/peers", post(add_wg_peer))
+        .route("/api/v1/wireguard/networks/{id}/apply", post(apply_wg))
         .route("/api/v1/storage/buckets", get(list_buckets))
         .route(
             "/api/v1/storage/buckets/{bucket}/objects",
@@ -103,32 +97,20 @@ pub fn router() -> Router<AppState> {
         )
         .route("/api/v1/github/repos", get(gh_repos))
         .route("/api/v1/github/detect", post(gh_detect))
-        .route(
-            "/api/v1/github/{owner}/{repo}/branches",
-            get(gh_branches),
-        )
-        .route(
-            "/api/v1/projects/{uuid}/detect",
-            post(project_detect),
-        )
-        .route(
-            "/api/v1/github/{owner}/{repo}/tags",
-            get(gh_tags),
-        )
-        .route(
-            "/api/v1/github/{owner}/{repo}/commits",
-            get(gh_commits),
-        )
-        .route(
-            "/api/v1/github/{owner}/{repo}/releases",
-            get(gh_releases),
-        )
+        .route("/api/v1/github/{owner}/{repo}/branches", get(gh_branches))
+        .route("/api/v1/projects/{uuid}/detect", post(project_detect))
+        .route("/api/v1/github/{owner}/{repo}/tags", get(gh_tags))
+        .route("/api/v1/github/{owner}/{repo}/commits", get(gh_commits))
+        .route("/api/v1/github/{owner}/{repo}/releases", get(gh_releases))
         .route("/api/v1/webhooks/github", post(github_webhook))
 }
 
 #[allow(dead_code)]
-async fn fetch_project(state: &AppState, uuid: &str) -> Result<Project, (axum::http::StatusCode, Json<Value>)> {
-    sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ?")
+async fn fetch_project(
+    state: &AppState,
+    uuid: &str,
+) -> Result<Project, (axum::http::StatusCode, Json<Value>)> {
+    sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1")
         .bind(uuid)
         .fetch_optional(&state.pool)
         .await
@@ -152,32 +134,36 @@ async fn auth_project(
     uuid: &str,
 ) -> Result<Project, (axum::http::StatusCode, Json<Value>)> {
     let (_user, workspace) = crate::auth_routes::current_workspace(state, headers).await?;
-    sqlx::query_as::<_, Project>(
-        "SELECT * FROM projects WHERE uuid = ? AND workspace_uuid = ?",
-    )
-    .bind(uuid)
-    .bind(&workspace.uuid)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"ok": false, "error": e.to_string()})),
-        )
-    })?
-    .ok_or_else(|| {
-        (
-            axum::http::StatusCode::NOT_FOUND,
-            Json(json!({"ok": false, "error": "project not found"})),
-        )
-    })
+    sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1 AND workspace_uuid = $2")
+        .bind(uuid)
+        .bind(&workspace.uuid)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"ok": false, "error": e.to_string()})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                axum::http::StatusCode::NOT_FOUND,
+                Json(json!({"ok": false, "error": "project not found"})),
+            )
+        })
 }
 
-async fn require_auth(
+async fn require_instance_admin(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<(), (axum::http::StatusCode, Json<Value>)> {
-    let _ = crate::auth_routes::current_workspace(state, headers).await?;
+    let (user, _) = crate::auth_routes::current_workspace(state, headers).await?;
+    if user.role != "instance_admin" {
+        return Err((
+            axum::http::StatusCode::FORBIDDEN,
+            Json(json!({"error": "Réservé à l’admin instance"})),
+        ));
+    }
     Ok(())
 }
 
@@ -197,13 +183,12 @@ async fn list_ports(
     Path(uuid): Path<String>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let _ = auth_project(&state, &headers, &uuid).await?;
-    Ok(Json(
-        state
-            .ports
-            .list(&uuid)
-            .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
-    ))
+    Ok(Json(state.ports.list(&uuid).await.map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?))
 }
 
 #[derive(Deserialize)]
@@ -232,7 +217,12 @@ async fn upsert_port(
                 body.public.unwrap_or(true),
             )
             .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
+            .map_err(|e| {
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(json!({"error": e.to_string()})),
+                )
+            })?,
     ))
 }
 
@@ -242,13 +232,12 @@ async fn delete_port(
     Path((uuid, id)): Path<(String, String)>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let _ = auth_project(&state, &headers, &uuid).await?;
-    Ok(Json(
-        state
-            .ports
-            .delete(&uuid, &id)
-            .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
-    ))
+    Ok(Json(state.ports.delete(&uuid, &id).await.map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?))
 }
 
 async fn list_domains(
@@ -286,16 +275,14 @@ async fn list_domains(
         }
     }
 
-    let mut payload = state
-        .domains
-        .list(&uuid)
-        .await
-        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+    let mut payload = state.domains.list(&uuid).await.map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
 
-    let primary_fqdn = project
-        .production_url
-        .as_deref()
-        .and_then(normalize_fqdn);
+    let primary_fqdn = project.production_url.as_deref().and_then(normalize_fqdn);
     if let Some(arr) = payload.get_mut("domains").and_then(|d| d.as_array_mut()) {
         for d in arr.iter_mut() {
             let is_primary = d
@@ -356,7 +343,7 @@ async fn apply_primary_fqdn(
     })?;
     let url = format!("https://{fqdn}");
     let now = chrono::Utc::now().to_rfc3339();
-    sqlx::query("UPDATE projects SET production_url = ?, updated_at = ? WHERE uuid = ?")
+    sqlx::query("UPDATE projects SET production_url = $1, updated_at = $2 WHERE uuid = $3")
         .bind(&url)
         .bind(&now)
         .bind(&project.uuid)
@@ -399,7 +386,12 @@ async fn attach_domain(
         .domains
         .attach(&uuid, &body.fqdn, body.tls.unwrap_or(true))
         .await
-        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
 
     if as_primary {
         let fqdn = apply_primary_fqdn(&state, &project, &body.fqdn).await?;
@@ -438,46 +430,46 @@ async fn detach_domain(
         .as_ref()
         .and_then(|v| v.get("domains").and_then(|d| d.as_array()))
         .and_then(|arr| {
-            arr.iter().find(|d| d.get("id").and_then(|i| i.as_str()) == Some(id.as_str()))
+            arr.iter()
+                .find(|d| d.get("id").and_then(|i| i.as_str()) == Some(id.as_str()))
         })
-        .and_then(|d| d.get("fqdn").and_then(|f| f.as_str()).map(|s| s.to_string()));
+        .and_then(|d| {
+            d.get("fqdn")
+                .and_then(|f| f.as_str())
+                .map(|s| s.to_string())
+        });
 
-    let out = state
-        .domains
-        .detach(&uuid, &id)
-        .await
-        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+    let out = state.domains.detach(&uuid, &id).await.map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
 
     // Si on retire le principal, basculer vers un autre domaine restant (sinon clear).
-    let primary = project
-        .production_url
-        .as_deref()
-        .and_then(normalize_fqdn);
+    let primary = project.production_url.as_deref().and_then(normalize_fqdn);
     if primary
         .as_ref()
         .zip(detached_fqdn.as_ref())
         .is_some_and(|(p, d)| p.eq_ignore_ascii_case(d))
     {
-        let remaining = state
-            .domains
-            .list(&uuid)
-            .await
-            .ok()
-            .and_then(|v| {
-                v.get("domains")
-                    .and_then(|d| d.as_array())
-                    .and_then(|arr| {
-                        arr.iter()
-                            .filter_map(|d| d.get("fqdn").and_then(|f| f.as_str()).map(|s| s.to_string()))
-                            .next()
+        let remaining = state.domains.list(&uuid).await.ok().and_then(|v| {
+            v.get("domains").and_then(|d| d.as_array()).and_then(|arr| {
+                arr.iter()
+                    .filter_map(|d| {
+                        d.get("fqdn")
+                            .and_then(|f| f.as_str())
+                            .map(|s| s.to_string())
                     })
-            });
+                    .next()
+            })
+        });
         if let Some(next) = remaining {
             let _ = apply_primary_fqdn(&state, &project, &next).await;
         } else {
             let now = chrono::Utc::now().to_rfc3339();
             let _ = sqlx::query(
-                "UPDATE projects SET production_url = NULL, updated_at = ? WHERE uuid = ?",
+                "UPDATE projects SET production_url = NULL, updated_at = $1 WHERE uuid = $2",
             )
             .bind(&now)
             .bind(&uuid)
@@ -516,16 +508,18 @@ async fn set_primary_domain(
     Path((uuid, id)): Path<(String, String)>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let project = auth_project(&state, &headers, &uuid).await?;
-    let listed = state
-        .domains
-        .list(&uuid)
-        .await
-        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+    let listed = state.domains.list(&uuid).await.map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
     let fqdn = listed
         .get("domains")
         .and_then(|d| d.as_array())
         .and_then(|arr| {
-            arr.iter().find(|d| d.get("id").and_then(|i| i.as_str()) == Some(id.as_str()))
+            arr.iter()
+                .find(|d| d.get("id").and_then(|i| i.as_str()) == Some(id.as_str()))
         })
         .and_then(|d| d.get("fqdn").and_then(|f| f.as_str()))
         .ok_or_else(|| {
@@ -568,13 +562,12 @@ async fn list_proxy(
     Path(uuid): Path<String>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let _ = auth_project(&state, &headers, &uuid).await?;
-    Ok(Json(
-        state
-            .proxy
-            .list(&uuid)
-            .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
-    ))
+    Ok(Json(state.proxy.list(&uuid).await.map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?))
 }
 
 #[derive(Deserialize)]
@@ -604,7 +597,12 @@ async fn upsert_proxy(
                 https_redirect: body.https_redirect.unwrap_or(true),
             })
             .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
+            .map_err(|e| {
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(json!({"error": e.to_string()})),
+                )
+            })?,
     ))
 }
 
@@ -625,7 +623,12 @@ async fn sync_proxy(
             .proxy
             .sync_with(&uuid, addr.as_deref())
             .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
+            .map_err(|e| {
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(json!({"error": e.to_string()})),
+                )
+            })?,
     ))
 }
 
@@ -639,7 +642,12 @@ async fn preview_status(
         .registry
         .execute("local_preview_status", json!({ "project_uuid": uuid }))
         .await
-        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
     Ok(Json(json!({ "data": result })))
 }
 
@@ -663,7 +671,12 @@ async fn preview_start(
             json!({ "project_uuid": uuid, "force": force }),
         )
         .await
-        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
     Ok(Json(json!({ "data": result })))
 }
 
@@ -677,7 +690,12 @@ async fn preview_stop(
         .registry
         .execute("stop_local_preview", json!({ "project_uuid": uuid }))
         .await
-        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
     Ok(Json(json!({ "data": result })))
 }
 
@@ -708,7 +726,7 @@ async fn lifecycle(
             _ => None,
         };
         if let Some(st) = next {
-            let _ = sqlx::query("UPDATE projects SET status = ?, updated_at = ? WHERE uuid = ?")
+            let _ = sqlx::query("UPDATE projects SET status = $1, updated_at = $2 WHERE uuid = $3")
                 .bind(st)
                 .bind(chrono::Utc::now().to_rfc3339())
                 .bind(&uuid)
@@ -757,7 +775,7 @@ async fn list_agents(
         })?;
     let rows = sqlx::query_as::<_, AgentRow>(
         r#"SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status, updated_at
-           FROM project_agents WHERE project_uuid = ?
+           FROM project_agents WHERE project_uuid = $1
            ORDER BY updated_at DESC, name"#,
     )
     .bind(&uuid)
@@ -794,7 +812,12 @@ async fn create_agent(
             Json(json!({"ok": false, "error": "kind=required est rÃ©servÃ© au systÃ¨me"})),
         ));
     }
-    if kind == "subagent" && body.parent_agent_uuid.as_ref().map(|s| s.is_empty()).unwrap_or(true)
+    if kind == "subagent"
+        && body
+            .parent_agent_uuid
+            .as_ref()
+            .map(|s| s.is_empty())
+            .unwrap_or(true)
     {
         return Err((
             axum::http::StatusCode::BAD_REQUEST,
@@ -807,7 +830,7 @@ async fn create_agent(
     sqlx::query(
         r#"INSERT INTO project_agents (
             uuid, project_uuid, name, role, kind, parent_agent_uuid, status, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'idle', ?, ?)"#,
+        ) VALUES ($1, $2, $3, $4, $5, $6, 'idle', $7, $8)"#,
     )
     .bind(&agent_uuid)
     .bind(&uuid)
@@ -826,7 +849,7 @@ async fn create_agent(
         )
     })?;
     let row = sqlx::query_as::<_, AgentRow>(
-        "SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status, updated_at FROM project_agents WHERE uuid = ?",
+        "SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status, updated_at FROM project_agents WHERE uuid = $1",
     )
     .bind(&agent_uuid)
     .fetch_one(&state.pool)
@@ -862,7 +885,7 @@ async fn rename_agent(
     let name = name.chars().take(80).collect::<String>();
     let now = chrono::Utc::now().to_rfc3339();
     let res = sqlx::query(
-        "UPDATE project_agents SET name = ?, updated_at = ? WHERE uuid = ? AND project_uuid = ?",
+        "UPDATE project_agents SET name = $1, updated_at = $2 WHERE uuid = $3 AND project_uuid = $4",
     )
     .bind(&name)
     .bind(&now)
@@ -883,7 +906,7 @@ async fn rename_agent(
         ));
     }
     let row = sqlx::query_as::<_, AgentRow>(
-        "SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status, updated_at FROM project_agents WHERE uuid = ?",
+        "SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status, updated_at FROM project_agents WHERE uuid = $1",
     )
     .bind(&agent_uuid)
     .fetch_one(&state.pool)
@@ -917,7 +940,7 @@ async fn list_agent_messages(
     let _ = auth_project(&state, &headers, &uuid).await?;
     let rows = sqlx::query_as::<_, AgentMessageRow>(
         r#"SELECT uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at
-           FROM agent_messages WHERE project_uuid = ? AND agent_uuid = ?
+           FROM agent_messages WHERE project_uuid = $1 AND agent_uuid = $2
            ORDER BY id ASC LIMIT 200"#,
     )
     .bind(&uuid)
@@ -939,7 +962,7 @@ async fn clear_agent_messages(
     Path((uuid, agent_uuid)): Path<(String, String)>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let _ = auth_project(&state, &headers, &uuid).await?;
-    sqlx::query("DELETE FROM agent_messages WHERE project_uuid = ? AND agent_uuid = ?")
+    sqlx::query("DELETE FROM agent_messages WHERE project_uuid = $1 AND agent_uuid = $2")
         .bind(&uuid)
         .bind(&agent_uuid)
         .execute(&state.pool)
@@ -959,19 +982,18 @@ async fn create_agent_share(
     Path((uuid, agent_uuid)): Path<(String, String)>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let _ = auth_project(&state, &headers, &uuid).await?;
-    let exists: Option<(String,)> = sqlx::query_as(
-        "SELECT uuid FROM project_agents WHERE uuid = ? AND project_uuid = ?",
-    )
-    .bind(&agent_uuid)
-    .bind(&uuid)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
-        )
-    })?;
+    let exists: Option<(String,)> =
+        sqlx::query_as("SELECT uuid FROM project_agents WHERE uuid = $1 AND project_uuid = $2")
+            .bind(&agent_uuid)
+            .bind(&uuid)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|e| {
+                (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": e.to_string()})),
+                )
+            })?;
     if exists.is_none() {
         return Err((
             axum::http::StatusCode::NOT_FOUND,
@@ -984,7 +1006,7 @@ async fn create_agent_share(
     let expires = (chrono::Utc::now() + chrono::Duration::days(30)).to_rfc3339();
     sqlx::query(
         r#"INSERT INTO agent_conversation_shares (token, project_uuid, agent_uuid, created_at, expires_at)
-           VALUES (?, ?, ?, ?, ?)"#,
+           VALUES ($1, $2, $3, $4, $5)"#,
     )
     .bind(&token)
     .bind(&uuid)
@@ -1000,14 +1022,13 @@ async fn create_agent_share(
         )
     })?;
 
-    let instance_url: String = sqlx::query_scalar(
-        "SELECT instance_url FROM instance_settings WHERE id = 1",
-    )
-    .fetch_optional(&state.pool)
-    .await
-    .ok()
-    .flatten()
-    .unwrap_or_default();
+    let instance_url: String =
+        sqlx::query_scalar("SELECT instance_url FROM instance_settings WHERE id = 1")
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
     let base = instance_url.trim().trim_end_matches('/');
     let path = format!("/share/agent?token={token}");
     let url = if base.is_empty() {
@@ -1038,7 +1059,7 @@ async fn get_shared_agent_conversation(
     }
 
     let share: Option<(String, String, Option<String>)> = sqlx::query_as(
-        "SELECT project_uuid, agent_uuid, expires_at FROM agent_conversation_shares WHERE token = ?",
+        "SELECT project_uuid, agent_uuid, expires_at FROM agent_conversation_shares WHERE token = $1",
     )
     .bind(token)
     .fetch_optional(&state.pool)
@@ -1069,7 +1090,7 @@ async fn get_shared_agent_conversation(
     }
 
     let agent: Option<(String, String, String)> = sqlx::query_as(
-        "SELECT name, role, status FROM project_agents WHERE uuid = ? AND project_uuid = ?",
+        "SELECT name, role, status FROM project_agents WHERE uuid = $1 AND project_uuid = $2",
     )
     .bind(&agent_uuid)
     .bind(&project_uuid)
@@ -1083,7 +1104,7 @@ async fn get_shared_agent_conversation(
     })?;
 
     let project_name: Option<String> =
-        sqlx::query_scalar("SELECT name FROM projects WHERE uuid = ?")
+        sqlx::query_scalar("SELECT name FROM projects WHERE uuid = $1")
             .bind(&project_uuid)
             .fetch_optional(&state.pool)
             .await
@@ -1092,7 +1113,7 @@ async fn get_shared_agent_conversation(
 
     let rows = sqlx::query_as::<_, AgentMessageRow>(
         r#"SELECT uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at
-           FROM agent_messages WHERE project_uuid = ? AND agent_uuid = ?
+           FROM agent_messages WHERE project_uuid = $1 AND agent_uuid = $2
            ORDER BY id ASC LIMIT 500"#,
     )
     .bind(&project_uuid)
@@ -1106,9 +1127,8 @@ async fn get_shared_agent_conversation(
         )
     })?;
 
-    let (agent_name, agent_role, agent_status) = agent.unwrap_or_else(|| {
-        ("Conversation".into(), "custom".into(), "idle".into())
-    });
+    let (agent_name, agent_role, agent_status) =
+        agent.unwrap_or_else(|| ("Conversation".into(), "custom".into(), "idle".into()));
 
     Ok(Json(json!({
         "ok": true,
@@ -1125,16 +1145,17 @@ async fn get_shared_agent_conversation(
     })))
 }
 
-
-async fn list_wg(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    require_auth(&state, &headers).await?;
-    Ok(Json(
-        state
-            .wireguard
-            .list()
-            .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
-    ))
+async fn list_wg(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_instance_admin(&state, &headers).await?;
+    Ok(Json(state.wireguard.list().await.map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?))
 }
 
 #[derive(Deserialize)]
@@ -1149,13 +1170,18 @@ async fn create_wg(
     headers: HeaderMap,
     Json(body): Json<CreateWgBody>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    require_auth(&state, &headers).await?;
+    require_instance_admin(&state, &headers).await?;
     Ok(Json(
         state
             .wireguard
             .create(&body.name, body.subnet.as_deref(), body.listen_port)
             .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
+            .map_err(|e| {
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(json!({"error": e.to_string()})),
+                )
+            })?,
     ))
 }
 
@@ -1173,7 +1199,7 @@ async fn add_wg_peer(
     Path(id): Path<String>,
     Json(body): Json<AddPeerBody>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    require_auth(&state, &headers).await?;
+    require_instance_admin(&state, &headers).await?;
     Ok(Json(
         state
             .wireguard
@@ -1185,7 +1211,12 @@ async fn add_wg_peer(
                 body.endpoint,
             )
             .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
+            .map_err(|e| {
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(json!({"error": e.to_string()})),
+                )
+            })?,
     ))
 }
 
@@ -1194,28 +1225,26 @@ async fn apply_wg(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    require_auth(&state, &headers).await?;
-    Ok(Json(
-        state
-            .wireguard
-            .apply(&id)
-            .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
-    ))
+    require_instance_admin(&state, &headers).await?;
+    Ok(Json(state.wireguard.apply(&id).await.map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?))
 }
 
 async fn list_buckets(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    require_auth(&state, &headers).await?;
-    Ok(Json(
-        state
-            .storage
-            .list_buckets()
-            .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
-    ))
+    require_instance_admin(&state, &headers).await?;
+    Ok(Json(state.storage.list_buckets().await.map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?))
 }
 
 async fn list_objects(
@@ -1223,13 +1252,18 @@ async fn list_objects(
     headers: HeaderMap,
     Path(bucket): Path<String>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    require_auth(&state, &headers).await?;
+    require_instance_admin(&state, &headers).await?;
     Ok(Json(
         state
             .storage
             .list_objects(&bucket, None)
             .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
+            .map_err(|e| {
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(json!({"error": e.to_string()})),
+                )
+            })?,
     ))
 }
 
@@ -1246,7 +1280,7 @@ async fn put_object(
     Path(bucket): Path<String>,
     Json(body): Json<PutObjectBody>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    require_auth(&state, &headers).await?;
+    require_instance_admin(&state, &headers).await?;
     Ok(Json(
         state
             .storage
@@ -1257,7 +1291,12 @@ async fn put_object(
                 body.content_type.as_deref(),
             )
             .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
+            .map_err(|e| {
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(json!({"error": e.to_string()})),
+                )
+            })?,
     ))
 }
 
@@ -1267,13 +1306,12 @@ async fn list_backups(
     Path(uuid): Path<String>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let _ = auth_project(&state, &headers, &uuid).await?;
-    Ok(Json(
-        state
-            .backup
-            .list(&uuid)
-            .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
-    ))
+    Ok(Json(state.backup.list(&uuid).await.map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?))
 }
 
 #[derive(Deserialize)]
@@ -1293,7 +1331,12 @@ async fn create_backup(
             .backup
             .create(&uuid, body.kind.as_deref())
             .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
+            .map_err(|e| {
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(json!({"error": e.to_string()})),
+                )
+            })?,
     ))
 }
 
@@ -1308,7 +1351,12 @@ async fn restore_preview(
             .backup
             .restore_preview(&uuid, &id)
             .await
-            .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?,
+            .map_err(|e| {
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(json!({"error": e.to_string()})),
+                )
+            })?,
     ))
 }
 
@@ -1317,13 +1365,26 @@ async fn gh_tags(
     headers: HeaderMap,
     Path((owner, repo)): Path<(String, String)>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    require_auth(&state, &headers).await?;
-    let tags = state
-        .github
-        .list_tags(&owner, &repo)
-        .await
-        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+    let (user, _) = crate::auth_routes::current_workspace(&state, &headers).await?;
+    let gh = AppState::github_from_token(
+        &crate::user_prefs::github_token(&state.pool, &user.uuid).await,
+    );
+    let tags = gh.list_tags(&owner, &repo).await.map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
     Ok(Json(json!({"data": tags})))
+}
+
+async fn caller_github(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<std::sync::Arc<devforge_github::GitHubFacade>, (axum::http::StatusCode, Json<Value>)> {
+    let (user, _) = crate::auth_routes::current_workspace(state, headers).await?;
+    let token = crate::user_prefs::github_token(&state.pool, &user.uuid).await;
+    Ok(AppState::github_from_token(&token))
 }
 
 async fn gh_commits(
@@ -1331,12 +1392,13 @@ async fn gh_commits(
     headers: HeaderMap,
     Path((owner, repo)): Path<(String, String)>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    require_auth(&state, &headers).await?;
-    let commits = state
-        .github
-        .list_commits(&owner, &repo, None)
-        .await
-        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+    let gh = caller_github(&state, &headers).await?;
+    let commits = gh.list_commits(&owner, &repo, None).await.map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
     Ok(Json(json!({"data": commits})))
 }
 
@@ -1345,12 +1407,13 @@ async fn gh_releases(
     headers: HeaderMap,
     Path((owner, repo)): Path<(String, String)>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    require_auth(&state, &headers).await?;
-    let releases = state
-        .github
-        .list_releases(&owner, &repo)
-        .await
-        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+    let gh = caller_github(&state, &headers).await?;
+    let releases = gh.list_releases(&owner, &repo).await.map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
     Ok(Json(json!({"data": releases})))
 }
 
@@ -1359,12 +1422,12 @@ async fn gh_status(
     headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let (caller, _ws) = crate::auth_routes::current_workspace(&state, &headers).await?;
-    let mode = state.github.mode();
-    let connected = mode == "http";
-    let is_admin = caller.role == "instance_admin";
+    let token = crate::user_prefs::github_token(&state.pool, &caller.uuid).await;
+    let gh = AppState::github_from_token(&token);
+    let connected = gh.mode() == "http";
     let mut user = Value::Null;
-    if connected && is_admin {
-        if let Ok(u) = state.github.current_user().await {
+    if connected {
+        if let Ok(u) = gh.current_user().await {
             user = json!({
                 "login": u.login,
                 "name": u.name,
@@ -1376,13 +1439,9 @@ async fn gh_status(
     Ok(Json(json!({
         "ok": true,
         "connected": connected,
-        "mode": mode,
+        "mode": gh.mode(),
         "user": user,
-        "hint": if is_admin {
-            "Colle un Personal Access Token (classic) avec scopes repo + read:org, ou un fine-grained token avec Contents: Read."
-        } else {
-            ""
-        }
+        "hint": "Colle un Personal Access Token (classic) avec scopes repo + read:org, ou un fine-grained token avec Contents: Read."
     })))
 }
 
@@ -1397,28 +1456,35 @@ async fn gh_connect(
     Json(body): Json<GhConnectBody>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let (user, _ws) = crate::auth_routes::current_workspace(&state, &headers).await?;
-    if user.role != "instance_admin" {
+    let token = body.token.trim().to_string();
+    let gh = AppState::github_from_token(&token);
+    let u = gh.current_user().await.map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+    if u.login.is_empty() {
         return Err((
-            axum::http::StatusCode::FORBIDDEN,
-            Json(json!({"error": "RÃ©servÃ© Ã  lâ€™admin instance"})),
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": "token GitHub invalide"})),
         ));
     }
-    state.configure_github(&body.token).await.map_err(|e| {
-        (
-            axum::http::StatusCode::BAD_REQUEST,
-            Json(json!({"error": e.to_string()})),
-        )
-    })?;
-    let u = state.github.current_user().await.map_err(|e| {
-        (
-            axum::http::StatusCode::BAD_REQUEST,
-            Json(json!({"error": e.to_string()})),
-        )
-    })?;
+    crate::user_prefs::set_github_token(&state.pool, &user.uuid, &token)
+        .await
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+    if user.role == "instance_admin" {
+        let _ = state.configure_github(&token).await;
+    }
     Ok(Json(json!({
         "ok": true,
         "connected": true,
-        "mode": state.github.mode(),
+        "mode": "http",
         "user": {
             "login": u.login,
             "name": u.name,
@@ -1433,18 +1499,17 @@ async fn gh_disconnect(
     headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let (user, _ws) = crate::auth_routes::current_workspace(&state, &headers).await?;
-    if user.role != "instance_admin" {
-        return Err((
-            axum::http::StatusCode::FORBIDDEN,
-            Json(json!({"error": "RÃ©servÃ© Ã  lâ€™admin instance"})),
-        ));
+    crate::user_prefs::set_github_token(&state.pool, &user.uuid, "")
+        .await
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+    if user.role == "instance_admin" {
+        let _ = state.configure_github("").await;
     }
-    state.configure_github("").await.map_err(|e| {
-        (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
-        )
-    })?;
     Ok(Json(json!({"ok": true, "connected": false, "mode": "off"})))
 }
 
@@ -1452,14 +1517,16 @@ async fn gh_repos(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    let (_user, _ws) = crate::auth_routes::current_workspace(&state, &headers).await?;
-    if state.github.mode() != "http" {
+    let gh = caller_github(&state, &headers).await?;
+    if gh.mode() != "http" {
         return Err((
             axum::http::StatusCode::BAD_REQUEST,
-            Json(json!({"error": "GitHub non connectÃ© â€” configure un token dans Settings"})),
+            Json(
+                json!({"error": "GitHub non connecté — ajoute ton token dans Paramètres → GitHub"}),
+            ),
         ));
     }
-    let repos = state.github.list_repos().await.map_err(|e| {
+    let repos = gh.list_repos().await.map_err(|e| {
         (
             axum::http::StatusCode::BAD_REQUEST,
             Json(json!({"error": e.to_string()})),
@@ -1473,12 +1540,13 @@ async fn gh_branches(
     headers: HeaderMap,
     Path((owner, repo)): Path<(String, String)>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    let (_user, _ws) = crate::auth_routes::current_workspace(&state, &headers).await?;
-    let branches = state
-        .github
-        .list_branches(&owner, &repo)
-        .await
-        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()}))))?;
+    let gh = caller_github(&state, &headers).await?;
+    let branches = gh.list_branches(&owner, &repo).await.map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
     Ok(Json(json!({"data": branches})))
 }
 
@@ -1494,21 +1562,26 @@ async fn gh_detect(
     headers: HeaderMap,
     Json(body): Json<GhDetectBody>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    let (_user, _ws) = crate::auth_routes::current_workspace(&state, &headers).await?;
-    if state.github.mode() != "http" {
+    let gh = caller_github(&state, &headers).await?;
+    if gh.mode() != "http" {
         return Err((
             axum::http::StatusCode::BAD_REQUEST,
-            Json(json!({"error": "GitHub non connectÃ©"})),
+            Json(json!({"error": "GitHub non connecté"})),
         ));
     }
     let result = crate::detect_svc::detect_github_repo(
-        &state.github,
+        &gh,
         body.owner.trim(),
         body.repo.trim(),
         body.branch.as_deref(),
     )
     .await
-    .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e}))))?;
+    .map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e})),
+        )
+    })?;
     Ok(Json(json!({"ok": true, "detection": result})))
 }
 
@@ -1541,7 +1614,7 @@ async fn project_detect(
             if let Some((owner, repo)) = parse_github_owner_repo(repo_url) {
                 source = format!("github:{owner}/{repo}");
                 crate::detect_svc::detect_github_repo(
-                    &state.github,
+                    caller_github(&state, &headers).await?.as_ref(),
                     &owner,
                     &repo,
                     project.git_branch.as_deref(),
@@ -1555,9 +1628,7 @@ async fn project_detect(
                 })?
             } else {
                 source = "workdir".into();
-                crate::detect_svc::detect_workdir(
-                    project.workdir.as_deref().unwrap_or(""),
-                )
+                crate::detect_svc::detect_workdir(project.workdir.as_deref().unwrap_or(""))
             }
         } else {
             source = "workdir".into();
@@ -1573,10 +1644,10 @@ async fn project_detect(
         let now = crate::state::now_str();
         sqlx::query(
             r#"UPDATE projects SET
-                build_pack = ?, port = ?, is_static = ?, publish_directory = ?,
-                base_directory = ?, docker_compose_location = ?,
-                test_command = COALESCE(?, test_command), updated_at = ?
-               WHERE uuid = ?"#,
+                build_pack = $1, port = $2, is_static = $3, publish_directory = $4,
+                base_directory = $5, docker_compose_location = $6,
+                test_command = COALESCE($7, test_command), updated_at = $8
+               WHERE uuid = $9"#,
         )
         .bind(&detection.build_pack)
         .bind(i64::from(detection.port))
@@ -1600,14 +1671,11 @@ async fn project_detect(
             .upsert(&uuid, detection.port, None, Some("tcp"), true)
             .await;
         let project_for_url = auth_project(&state, &headers, &uuid).await?;
-        if let Ok(Some(url)) = crate::routes::ensure_production_url(&state, &project_for_url).await {
-            let _ = crate::routes::ensure_project_primary_domain(
-                &state,
-                &uuid,
-                &url,
-                detection.port,
-            )
-            .await;
+        if let Ok(Some(url)) = crate::routes::ensure_production_url(&state, &project_for_url).await
+        {
+            let _ =
+                crate::routes::ensure_project_primary_domain(&state, &uuid, &url, detection.port)
+                    .await;
         }
         applied = true;
     }
@@ -1729,7 +1797,7 @@ async fn github_webhook(
 
     let projects = sqlx::query_as::<_, Project>(
         r#"SELECT * FROM projects
-           WHERE git_repository LIKE ? OR git_repository LIKE ? OR git_repository = ?
+           WHERE git_repository LIKE $1 OR git_repository LIKE $2 OR git_repository = $3
            ORDER BY updated_at DESC"#,
     )
     .bind(format!("%{full_name}%"))
@@ -1755,7 +1823,7 @@ async fn github_webhook(
             );
             continue;
         }
-        
+
         let proj_branch = project.git_branch.as_deref().unwrap_or("main");
         if proj_branch != branch {
             continue;
@@ -1765,7 +1833,7 @@ async fn github_webhook(
         let _ = sqlx::query(
             r#"INSERT INTO deployments (
                 uuid, project_id, status, git_sha, git_message, logs, finished_at, created_at, updated_at
-            ) VALUES (?, ?, 'queued', ?, ?, ?, NULL, ?, ?)"#,
+            ) VALUES ($1, $2, 'queued', $3, $4, $5, NULL, $6, $7)"#,
         )
         .bind(&dep_uuid)
         .bind(project.id)
@@ -1788,7 +1856,7 @@ async fn github_webhook(
         .filter(|t| !t.trim().is_empty());
 
         let env_rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT key, value FROM project_env_vars WHERE project_uuid = ? ORDER BY key",
+            "SELECT key, value FROM project_env_vars WHERE project_uuid = $1 ORDER BY key",
         )
         .bind(&project.uuid)
         .fetch_all(&state.pool)
@@ -1799,10 +1867,15 @@ async fn github_webhook(
         } else {
             Some(devforge_env::serialize_docker_env_file(&env_rows))
         };
+        let (env_file, group_network, group_alias) =
+            crate::group_routes::prepare_deploy_link(&state.pool, &project.uuid, env_file).await;
 
         let req = devforge_deploy::DeployRequest {
             project_uuid: project.uuid.clone(),
-            server_id: project.server_id.clone().unwrap_or_else(|| "default".into()),
+            server_id: project
+                .server_id
+                .clone()
+                .unwrap_or_else(|| "default".into()),
             workdir: project.workdir.clone().unwrap_or_default(),
             git_repository: project.git_repository.clone().unwrap_or_default(),
             git_branch: proj_branch.into(),
@@ -1819,6 +1892,10 @@ async fn github_webhook(
             github_token: token,
             env_file,
             proxy_labels: crate::routes::proxy_labels_for_project(&state, &project).await,
+            gpu_nvidia: project.gpu_nvidia != 0,
+            gpu_dri: project.gpu_dri != 0,
+            group_network,
+            group_alias,
         };
         let deploy = state.deploy.clone();
         let slot_server = req.server_id.clone();
@@ -1846,8 +1923,8 @@ async fn github_webhook(
         // Align with manual deploy status so sync/UI treat webhook deploys as success.
         let status = if result.ok { "success" } else { "failed" };
         let _ = sqlx::query(
-            r#"UPDATE deployments SET status = ?, git_sha = ?, logs = ?, finished_at = ?, updated_at = ?
-               WHERE uuid = ?"#,
+            r#"UPDATE deployments SET status = $1, git_sha = $2, logs = $3, finished_at = $4, updated_at = $5
+               WHERE uuid = $6"#,
         )
         .bind(status)
         .bind(result.git_sha.as_deref().or(sha.as_deref()).unwrap_or("unknown"))
@@ -1857,14 +1934,14 @@ async fn github_webhook(
         .bind(&dep_uuid)
         .execute(&state.pool)
         .await;
-        
+
         // CRITICAL: Ensure Traefik after webhook deploy (same fix as manual deploy)
         if result.ok {
             if let Err(e) = state.proxy.ensure_traefik().await {
                 tracing::error!(error = %e, project_uuid = %project.uuid, "Webhook deploy: failed to ensure Traefik");
             }
         }
-        
+
         deployed.push(json!({
             "project": project.uuid,
             "deployment": dep_uuid,
@@ -1916,17 +1993,21 @@ fn insecure_webhooks_allowed() -> bool {
 
 async fn proxy_status(
     State(state): State<AppState>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_instance_admin(&state, &headers).await?;
     let executor = state.deploy.executor();
 
     let check_cmd = r#"docker inspect devforge-traefik --format '{{.State.Status}}|{{.Config.Image}}|{{.State.StartedAt}}' 2>/dev/null || echo 'missing'"#;
-    let result = executor.exec("default", "", check_cmd, 30).await.map_err(|e| {
-        (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
-        )
-    })?;
+    let result = executor
+        .exec("default", "", check_cmd, 30)
+        .await
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
 
     let output = result.output.trim();
     if output == "missing" {
@@ -1955,17 +2036,21 @@ async fn proxy_status(
 
 async fn proxy_restart(
     State(state): State<AppState>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_instance_admin(&state, &headers).await?;
     let executor = state.deploy.executor();
 
     let restart_cmd = "docker restart devforge-traefik 2>&1";
-    let result = executor.exec("default", "", restart_cmd, 60).await.map_err(|e| {
-        (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
-        )
-    })?;
+    let result = executor
+        .exec("default", "", restart_cmd, 60)
+        .await
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
 
     if result.ok {
         Ok(Json(json!({
@@ -1984,8 +2069,9 @@ async fn proxy_restart(
 
 async fn proxy_ensure(
     State(state): State<AppState>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_instance_admin(&state, &headers).await?;
     let result = state.proxy.ensure_traefik().await.map_err(|e| {
         (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -1998,10 +2084,11 @@ async fn proxy_ensure(
 
 async fn system_health(
     State(state): State<AppState>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_instance_admin(&state, &headers).await?;
     let executor = state.deploy.executor();
-    
+
     let mut health = json!({
         "ok": true,
         "timestamp": crate::state::now_str(),
@@ -2011,11 +2098,11 @@ async fn system_health(
     let traefik_check = executor.exec("default", "", 
         r#"docker inspect devforge-traefik --format '{{.State.Status}}' 2>/dev/null || echo 'missing'"#, 
         30).await;
-    
+
     let traefik_status = traefik_check
         .map(|r| r.output.trim().to_string())
         .unwrap_or_else(|_| "error".to_string());
-    
+
     let traefik_ok = traefik_status == "running";
     if !traefik_ok {
         health["ok"] = json!(false);

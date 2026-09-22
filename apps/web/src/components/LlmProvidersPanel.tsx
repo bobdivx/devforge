@@ -199,11 +199,10 @@ function CatalogPickCard({
 }
 
 export function LlmProvidersPanel({
-  isAdmin,
   activeMode,
   onModeChange,
 }: {
-  isAdmin: boolean;
+  isAdmin?: boolean;
   activeMode?: string;
   onModeChange?: (mode: string) => void;
 }) {
@@ -246,9 +245,8 @@ export function LlmProvidersPanel({
   }
 
   useEffect(() => {
-    if (isAdmin) void load();
-    else setLoading(false);
-  }, [isAdmin]);
+    void load();
+  }, []);
 
   function openCreate(item: CatalogItem) {
     setPickerOpen(false);
@@ -455,12 +453,6 @@ export function LlmProvidersPanel({
     } finally {
       setBusy(false);
     }
-  }
-
-  if (!isAdmin) {
-    return (
-      <Alert tone="warn">Réservé à l’admin d’instance. Mode actuel : {mode}</Alert>
-    );
   }
 
   const local = catalog.filter((c) => c.category === 'local');

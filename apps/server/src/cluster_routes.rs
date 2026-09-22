@@ -33,18 +33,27 @@ pub fn router() -> Router<AppState> {
             patch(patch_node).delete(remove_node),
         )
         .route("/api/v1/cluster/nodes/{id}/projects", get(node_projects))
-        .route("/api/v1/cluster/nodes/{id}/reassign", post(reassign_projects))
+        .route(
+            "/api/v1/cluster/nodes/{id}/reassign",
+            post(reassign_projects),
+        )
         .route("/api/v1/cluster/nodes/{id}/logs", get(node_logs))
         .route(
             "/api/v1/cluster/nodes/{id}/update",
             get(node_update_status).post(node_update_start),
         )
         .route("/api/v1/cluster/update-workers", post(update_workers))
-        .route("/api/v1/cluster/invites", get(list_invites).post(create_invite))
+        .route(
+            "/api/v1/cluster/invites",
+            get(list_invites).post(create_invite),
+        )
         .route("/api/v1/cluster/invites/{id}", delete(revoke_invite))
         .route("/api/v1/cluster/join", post(join_node))
         .route("/api/v1/cluster/heartbeat", post(heartbeat))
-        .route("/api/v1/cluster/local", get(local_state).post(local_join).patch(local_patch))
+        .route(
+            "/api/v1/cluster/local",
+            get(local_state).post(local_join).patch(local_patch),
+        )
         .route(
             "/api/v1/cluster/settings",
             get(cluster_settings).patch(patch_cluster_settings),
@@ -60,6 +69,8 @@ pub fn internal_cluster_routes() -> Router<AppState> {
         )
         .route("/internal/failover/status", get(failover_status))
         .route("/internal/failover/demote", post(failover_demote))
+        .route("/internal/failover/quiesce", post(failover_quiesce))
+        .route("/internal/failover/resume", post(failover_resume))
         .layer(DefaultBodyLimit::max(512 * 1024 * 1024))
 }
 
@@ -231,7 +242,9 @@ async fn patch_node(
     {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Rien à modifier (name / drained / advertise_url / ingress_host)"})),
+            Json(
+                json!({"error": "Rien à modifier (name / drained / advertise_url / ingress_host)"}),
+            ),
         ));
     }
     let node = state
@@ -248,7 +261,7 @@ async fn patch_node(
     if body.ingress_host.is_some() {
         let rows: Vec<(String,)> = sqlx::query_as(
             r#"SELECT uuid FROM projects
-               WHERE COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = ?"#,
+               WHERE COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = $1"#,
         )
         .bind(normalize_server_id(&id))
         .fetch_all(&state.pool)
@@ -271,7 +284,9 @@ async fn remove_node(
     Query(q): Query<RemoveQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     require_admin(&state, &headers).await?;
-    let count = count_projects_on_node(&state, &id).await.map_err(map_err_sql)?;
+    let count = count_projects_on_node(&state, &id)
+        .await
+        .map_err(map_err_sql)?;
     if count > 0 {
         if let Some(target) = q
             .reassign_to
@@ -379,7 +394,11 @@ async fn join_node(
         ));
     }
     let leader_url = instance_url(&state).await;
-    let joined = state.cluster.join(body, &leader_url).await.map_err(map_err)?;
+    let joined = state
+        .cluster
+        .join(body, &leader_url)
+        .await
+        .map_err(map_err)?;
     let sid = joined.node.id.clone();
     let st = state.clone();
     tokio::spawn(async move {
@@ -404,11 +423,7 @@ async fn heartbeat(
         .heartbeat_ack(&secret, body.clone())
         .await
         .map_err(map_err)?;
-    if let Some(ip) = body
-        .metrics
-        .as_ref()
-        .and_then(|m| m.public_ip.clone())
-    {
+    if let Some(ip) = body.metrics.as_ref().and_then(|m| m.public_ip.clone()) {
         crate::dns::note_public_ip(&state, &body.node_id, &ip).await;
     }
     let need = state
@@ -427,10 +442,20 @@ async fn heartbeat(
             crate::dns::provision_node(&st, &sid).await;
         });
     }
-    Ok(Json(serde_json::to_value(&ack).unwrap_or_else(|_| json!({"ok": true}))))
+    let mut value = serde_json::to_value(&ack).unwrap_or_else(|_| json!({"ok": true}));
+    if let Ok(local) = state.cluster.local().await {
+        if let Some(ad) = crate::control_pg::replication_advertisement(&local.advertise_url) {
+            value["repl_host"] = json!(ad.host);
+            value["repl_port"] = json!(ad.port);
+            value["repl_password"] = json!(ad.password);
+        }
+    }
+    Ok(Json(value))
 }
 
-async fn local_state(State(state): State<AppState>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+async fn local_state(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let local = state.cluster.local().await.map_err(map_err)?;
     Ok(Json(json!({
         "ok": true,
@@ -528,8 +553,7 @@ async fn local_join(
         u.trim_end_matches('/').to_string()
     } else {
         let from_settings = instance_url(&state).await;
-        if !from_settings.is_empty()
-            && !devforge_cluster::is_loopback_advertise_url(&from_settings)
+        if !from_settings.is_empty() && !devforge_cluster::is_loopback_advertise_url(&from_settings)
         {
             from_settings
         } else {
@@ -558,13 +582,8 @@ async fn local_join(
         }
     };
 
-    let (leader_url, token) =
-        devforge_cluster::parse_join_invite(&body.token, &body.leader_url).map_err(|msg| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": msg})),
-            )
-        })?;
+    let (leader_url, token) = devforge_cluster::parse_join_invite(&body.token, &body.leader_url)
+        .map_err(|msg| (StatusCode::BAD_REQUEST, Json(json!({"error": msg}))))?;
 
     let client = LeaderClient::new(&leader_url);
     let joined = client
@@ -714,9 +733,11 @@ pub async fn resolve_server_id(state: &AppState, requested: Option<&str>) -> Str
         .into_iter()
         .map(|(k, v)| (k, v.max(0) as u32))
         .collect();
-    if let Some((id, _)) =
-        devforge_cluster::pick_placement(&nodes, &counts, &devforge_cluster::PlacementWeights::default())
-    {
+    if let Some((id, _)) = devforge_cluster::pick_placement(
+        &nodes,
+        &counts,
+        &devforge_cluster::PlacementWeights::default(),
+    ) {
         return normalize_server_id(&id);
     }
     LEADER_NODE_ID.to_string()
@@ -783,7 +804,7 @@ async fn evacuate_stale_nodes(state: &AppState) {
         let from = normalize_server_id(&node.id);
         let projects = sqlx::query_as::<_, crate::state::Project>(
             r#"SELECT * FROM projects
-               WHERE COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = ?
+               WHERE COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = $1
                  AND status IN ('live', 'unhealthy', 'failed')"#,
         )
         .bind(&from)
@@ -812,8 +833,36 @@ async fn evacuate_stale_nodes(state: &AppState) {
                 continue;
             }
             *counts.entry(to.clone()).or_insert(0) += 1;
+            let retired = if node.status != NodeStatus::Offline {
+                match crate::project_pg::relocate_project_postgres(state, &project.uuid, &from, &to)
+                    .await
+                {
+                    Ok(instances) => instances,
+                    Err(e) => {
+                        tracing::warn!(
+                            project = %project.uuid,
+                            error = %e,
+                            "postgres non copié pendant l'évacuation"
+                        );
+                        Vec::new()
+                    }
+                }
+            } else {
+                match crate::project_pg::recover_offline_postgres(state, &project.uuid, &to).await {
+                    Ok(()) => Vec::new(),
+                    Err(e) => {
+                        tracing::warn!(
+                            project = %project.uuid,
+                            node = %node.id,
+                            error = %e,
+                            "nœud hors ligne : postgres non récupéré"
+                        );
+                        Vec::new()
+                    }
+                }
+            };
             let now = Utc::now().to_rfc3339();
-            if sqlx::query("UPDATE projects SET server_id = ?, updated_at = ? WHERE uuid = ?")
+            if sqlx::query("UPDATE projects SET server_id = $1, updated_at = $2 WHERE uuid = $3")
                 .bind(&to)
                 .bind(&now)
                 .bind(&project.uuid)
@@ -823,6 +872,7 @@ async fn evacuate_stale_nodes(state: &AppState) {
             {
                 continue;
             }
+            crate::project_pg::retire_postgres_sources(state, &from, &retired).await;
             project.server_id = Some(to.clone());
             crate::dns::sync_project(state, &project.uuid).await;
             tracing::info!(
@@ -839,7 +889,7 @@ async fn evacuate_stale_nodes(state: &AppState) {
 
 async fn project_deploy_in_flight(state: &AppState, project_id: i64) -> bool {
     let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT COUNT(*) FROM deployments WHERE project_id = ? AND status IN ('running', 'queued', 'building')",
+        "SELECT COUNT(*) FROM deployments WHERE project_id = $1 AND status IN ('running', 'queued', 'building')",
     )
     .bind(project_id)
     .fetch_optional(&state.pool)
@@ -881,7 +931,7 @@ async fn patch_cluster_settings(
     if let Some(v) = body.placement_auto {
         let now = Utc::now().to_rfc3339();
         sqlx::query(
-            "UPDATE instance_settings SET placement_auto = ?, updated_at = ? WHERE id = 1",
+            "UPDATE instance_settings SET placement_auto = $1, updated_at = $2 WHERE id = 1",
         )
         .bind(if v { 1i64 } else { 0 })
         .bind(&now)
@@ -908,12 +958,11 @@ async fn rebalance(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     require_admin(&state, &headers).await?;
     let nodes = state.cluster.list_nodes().await.map_err(map_err)?;
-    let rows: Vec<(String, Option<String>, String)> = sqlx::query_as(
-        "SELECT uuid, server_id, name FROM projects ORDER BY name",
-    )
-    .fetch_all(&state.pool)
-    .await
-    .map_err(map_err_sql)?;
+    let rows: Vec<(String, Option<String>, String)> =
+        sqlx::query_as("SELECT uuid, server_id, name FROM projects ORDER BY name")
+            .fetch_all(&state.pool)
+            .await
+            .map_err(map_err_sql)?;
 
     let mut counts: HashMap<String, u32> = HashMap::new();
     for (_, sid, _) in &rows {
@@ -929,7 +978,8 @@ async fn rebalance(
     for (uuid, sid, name) in rows {
         let from = normalize_server_id(sid.as_deref().unwrap_or(""));
         // Simuler sans ce projet pour le score cible
-        *counts.entry(from.clone()).or_insert(0) = counts.get(&from).copied().unwrap_or(0).saturating_sub(1);
+        *counts.entry(from.clone()).or_insert(0) =
+            counts.get(&from).copied().unwrap_or(0).saturating_sub(1);
         let Some((to, score)) = devforge_cluster::pick_placement(&nodes, &counts, &weights) else {
             *counts.entry(from).or_insert(0) += 1;
             continue;
@@ -947,13 +997,30 @@ async fn rebalance(
             "score": score,
         });
         if body.apply {
-            sqlx::query("UPDATE projects SET server_id = ?, updated_at = ? WHERE uuid = ?")
+            let retired =
+                match crate::project_pg::relocate_project_postgres(&state, &uuid, &from, &to).await
+                {
+                    Ok(instances) => instances,
+                    Err(e) => {
+                        suggestions.push(json!({
+                            "project_uuid": uuid,
+                            "name": name,
+                            "from": from,
+                            "to": to,
+                            "score": score,
+                            "error": e,
+                        }));
+                        continue;
+                    }
+                };
+            sqlx::query("UPDATE projects SET server_id = $1, updated_at = $2 WHERE uuid = $3")
                 .bind(&to)
                 .bind(&now)
                 .bind(&uuid)
                 .execute(&state.pool)
                 .await
                 .map_err(map_err_sql)?;
+            crate::project_pg::retire_postgres_sources(&state, &from, &retired).await;
             moved += 1;
             crate::dns::sync_project(&state, &uuid).await;
         }
@@ -972,7 +1039,7 @@ async fn count_projects_on_node(state: &AppState, node_id: &str) -> Result<i64, 
     let key = normalize_server_id(node_id);
     let row: (i64,) = sqlx::query_as(
         r#"SELECT COUNT(*) FROM projects
-           WHERE COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = ?"#,
+           WHERE COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = $1"#,
     )
     .bind(&key)
     .fetch_one(&state.pool)
@@ -1017,18 +1084,39 @@ async fn reassign_all_from(
             Json(json!({"error": format!("Le nœud {} est en drain", node.name)})),
         ));
     }
-    let now = Utc::now().to_rfc3339();
-    let r = sqlx::query(
-        r#"UPDATE projects SET server_id = ?, updated_at = ?
-           WHERE COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = ?"#,
+    let uuids: Vec<(String,)> = sqlx::query_as(
+        r#"SELECT uuid FROM projects
+           WHERE COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = $1"#,
     )
-    .bind(&target)
-    .bind(&now)
     .bind(&from)
-    .execute(&state.pool)
+    .fetch_all(&state.pool)
     .await
     .map_err(map_err_sql)?;
-    Ok(r.rows_affected())
+    let now = Utc::now().to_rfc3339();
+    let mut moved = 0u64;
+    for (uuid,) in uuids {
+        let retired = crate::project_pg::relocate_project_postgres(state, &uuid, &from, &target)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({
+                        "error": format!("{uuid} : {e}"),
+                        "moved": moved,
+                    })),
+                )
+            })?;
+        sqlx::query("UPDATE projects SET server_id = $1, updated_at = $2 WHERE uuid = $3")
+            .bind(&target)
+            .bind(&now)
+            .bind(&uuid)
+            .execute(&state.pool)
+            .await
+            .map_err(map_err_sql)?;
+        crate::project_pg::retire_postgres_sources(state, &from, &retired).await;
+        moved += 1;
+    }
+    Ok(moved)
 }
 
 async fn node_projects(
@@ -1041,7 +1129,7 @@ async fn node_projects(
     let key = normalize_server_id(&id);
     let rows: Vec<(String, String, String, Option<String>)> = sqlx::query_as(
         r#"SELECT uuid, name, status, server_id FROM projects
-           WHERE COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = ?
+           WHERE COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = $1
            ORDER BY name"#,
     )
     .bind(&key)
@@ -1100,10 +1188,13 @@ async fn reassign_projects(
                 )
             })?;
         let from = normalize_server_id(&id);
+        let retired = crate::project_pg::relocate_project_postgres(&state, uuid, &from, &target)
+            .await
+            .map_err(|e| (StatusCode::BAD_GATEWAY, Json(json!({"error": e}))))?;
         let r = sqlx::query(
-            r#"UPDATE projects SET server_id = ?, updated_at = ?
-               WHERE uuid = ?
-                 AND COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = ?"#,
+            r#"UPDATE projects SET server_id = $1, updated_at = $2
+               WHERE uuid = $3
+                 AND COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = $4"#,
         )
         .bind(&target)
         .bind(&now)
@@ -1118,11 +1209,12 @@ async fn reassign_projects(
                 Json(json!({"error": "Projet introuvable sur ce nœud"})),
             ));
         }
+        crate::project_pg::retire_postgres_sources(&state, &from, &retired).await;
         1
     };
     if body.all {
         let rows: Vec<(String,)> = sqlx::query_as(
-            "SELECT uuid FROM projects WHERE updated_at = ? AND COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = ?",
+            "SELECT uuid FROM projects WHERE updated_at = $1 AND COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = $2",
         )
         .bind(&now)
         .bind(&target)
@@ -1138,7 +1230,7 @@ async fn reassign_projects(
     Ok(Json(json!({
         "ok": true,
         "moved": n,
-        "hint": "Le prochain déploiement ira sur le nœud cible. Les conteneurs déjà lancés restent où ils sont.",
+        "hint": "Le prochain déploiement ira sur le nœud cible. Les instances PostgreSQL du projet sont copiées avant le déplacement. Les autres conteneurs déjà lancés restent où ils sont.",
     })))
 }
 
@@ -1246,11 +1338,7 @@ async fn node_update_start(
     require_admin(&state, &headers).await?;
     let target = resolve_update_target(&state, body.target_version).await?;
     let (node, client, secret) = worker_remote(&state, &id).await?;
-    let current = node
-        .metrics
-        .software_version
-        .clone()
-        .unwrap_or_default();
+    let current = node.metrics.software_version.clone().unwrap_or_default();
     if !current.is_empty() && !devforge_update::version_gt(&target, &current) {
         return Ok(Json(json!({
             "ok": true,
@@ -1433,7 +1521,7 @@ async fn cluster_snapshot(
             Json(json!({"error": format!("snapshot: {e}")})),
         )
     })?;
-    if bytes.len() < 100 || !bytes.starts_with(b"SQLite format 3\0") {
+    if bytes.len() < 100 || !crate::control_pg::snapshot_is_postgres(&bytes) {
         return Err((
             StatusCode::NOT_FOUND,
             Json(json!({"error": "snapshot indisponible"})),
@@ -1461,10 +1549,10 @@ async fn accept_cluster_snapshot(
             Json(json!({"error": "seul un worker reçoit le journal"})),
         ));
     }
-    if body.len() < 100 || !body.starts_with(b"SQLite format 3\0") {
+    if body.len() < 100 || !crate::control_pg::snapshot_is_postgres(&body) {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "snapshot SQLite invalide"})),
+            Json(json!({"error": "snapshot Postgres invalide"})),
         ));
     }
     let dest = devforge_cluster::snapshot_path();
@@ -1500,11 +1588,7 @@ async fn accept_cluster_snapshot(
 }
 
 /// Après une écriture réussie, copie le SQLite sur un worker avant de répondre.
-pub async fn replicate_writes(
-    State(state): State<AppState>,
-    req: Request,
-    next: Next,
-) -> Response {
+pub async fn replicate_writes(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let method = req.method().clone();
     let path = req.uri().path().to_string();
     let mut res = next.run(req).await;
@@ -1529,6 +1613,8 @@ fn skip_replication(path: &str) -> bool {
         "/api/v1/cluster/heartbeat"
             | "/internal/cluster-snapshot"
             | "/internal/failover/demote"
+            | "/internal/failover/quiesce"
+            | "/internal/failover/resume"
             | "/internal/failover/status"
             | "/internal/exec"
             | "/internal/update/start"
@@ -1549,6 +1635,9 @@ async fn replicate_to_one_peer(state: &AppState) -> &'static str {
     };
     if local.writes_fenced || local.failover_secret.is_empty() {
         return "local";
+    }
+    if crate::control_pg::wait_replica(Duration::from_secs(3)).await {
+        return "replicated";
     }
     let nodes = match state.cluster.list_nodes().await {
         Ok(n) => n,
@@ -1584,24 +1673,15 @@ async fn replicate_to_one_peer(state: &AppState) -> &'static str {
     "local"
 }
 
-pub async fn refresh_cluster_snapshot(
-    state: &AppState,
-) -> Result<(), (StatusCode, Json<Value>)> {
+pub async fn refresh_cluster_snapshot(state: &AppState) -> Result<(), (StatusCode, Json<Value>)> {
     let _guard = replicate_lock().lock().await;
     write_cluster_snapshot(state).await
 }
 
-async fn write_cluster_snapshot(
-    state: &AppState,
-) -> Result<(), (StatusCode, Json<Value>)> {
-    let bytes = devforge_backup::snapshot_sqlite_pool(&state.pool)
+async fn write_cluster_snapshot(state: &AppState) -> Result<(), (StatusCode, Json<Value>)> {
+    let bytes = crate::control_pg::dump_snapshot()
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": e.to_string()})),
-            )
-        })?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
     let dest = devforge_cluster::snapshot_path();
     if let Some(parent) = dest.parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
@@ -1626,6 +1706,12 @@ async fn write_cluster_snapshot(
 }
 
 pub fn spawn_snapshot_loop(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            crate::control_pg::tune_durability().await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    });
     tokio::spawn(async move {
         loop {
             if let Err((_, Json(err))) = refresh_cluster_snapshot(&state).await {
@@ -1670,6 +1756,69 @@ struct DemoteBody {
     preferred_leader_url: String,
 }
 
+async fn failover_quiesce(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let mut local = state.cluster.local().await.map_err(map_err)?;
+    let secret = bearer(&headers).unwrap_or_default();
+    if !cluster_auth_ok(&local, &secret) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "secret invalide"})),
+        ));
+    }
+    if !local.acting_leader && local.role != NodeRole::Leader {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(json!({"error": "pas le control plane"})),
+        ));
+    }
+    crate::control_pg::quiesce_for_clone()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
+    local.writes_fenced = true;
+    state.cluster.set_local(&local).await.map_err(map_err)?;
+    let st = state.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(120)).await;
+        let Ok(mut current) = st.cluster.local().await else {
+            return;
+        };
+        if current.writes_fenced && current.acting_leader {
+            let _ = crate::control_pg::resume_after_clone().await;
+            current.writes_fenced = false;
+            let _ = st.cluster.set_local(&current).await;
+            tracing::warn!("quiesce expiré, écritures rouvertes");
+        }
+    });
+    let ad = crate::control_pg::replication_advertisement(&local.advertise_url);
+    Ok(Json(json!({
+        "ok": true,
+        "repl_host": ad.as_ref().map(|a| a.host.clone()).unwrap_or_default(),
+        "repl_port": ad.as_ref().map(|a| a.port).unwrap_or(0),
+        "repl_password": ad.as_ref().map(|a| a.password.clone()).unwrap_or_default(),
+    })))
+}
+
+async fn failover_resume(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let mut local = state.cluster.local().await.map_err(map_err)?;
+    let secret = bearer(&headers).unwrap_or_default();
+    if !cluster_auth_ok(&local, &secret) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "secret invalide"})),
+        ));
+    }
+    let _ = crate::control_pg::resume_after_clone().await;
+    local.writes_fenced = false;
+    state.cluster.set_local(&local).await.map_err(map_err)?;
+    Ok(Json(json!({"ok": true})))
+}
+
 async fn failover_demote(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1696,7 +1845,11 @@ async fn failover_demote(
     }
     local.role = NodeRole::Worker;
     local.acting_leader = false;
+    local.writes_fenced = false;
     state.cluster.set_local(&local).await.map_err(map_err)?;
+    if let Ok(json) = serde_json::to_string_pretty(&local) {
+        let _ = tokio::fs::write(devforge_cluster::failover_identity_path(), json).await;
+    }
     tokio::spawn(async {
         tokio::time::sleep(Duration::from_millis(400)).await;
         devforge_cluster::restart_current_process();

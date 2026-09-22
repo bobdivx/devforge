@@ -1,6 +1,6 @@
 use crate::service::CronService;
 use devforge_deploy::RemoteExecutor;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
@@ -8,11 +8,11 @@ use tracing::{error, info, warn};
 pub struct CronScheduler {
     service: Arc<CronService>,
     executor: Arc<dyn RemoteExecutor>,
-    pool: SqlitePool,
+    pool: PgPool,
 }
 
 impl CronScheduler {
-    pub fn new(pool: SqlitePool, executor: Arc<dyn RemoteExecutor>) -> Self {
+    pub fn new(pool: PgPool, executor: Arc<dyn RemoteExecutor>) -> Self {
         let service = Arc::new(CronService::new(pool.clone()));
         Self {
             service,
@@ -130,7 +130,7 @@ impl CronScheduler {
 
     async fn get_project_container_name(&self, project_uuid: &str) -> devforge_shared::Result<String> {
         let row: Option<(String,)> = sqlx::query_as(
-            "SELECT slug FROM projects WHERE uuid = ?",
+            "SELECT slug FROM projects WHERE uuid = $1",
         )
         .bind(project_uuid)
         .fetch_optional(&self.pool)
@@ -145,7 +145,7 @@ impl CronScheduler {
 
     async fn get_server_id(&self, project_uuid: &str) -> devforge_shared::Result<String> {
         let row: Option<(Option<String>,)> = sqlx::query_as(
-            "SELECT server_id FROM projects WHERE uuid = ?",
+            "SELECT server_id FROM projects WHERE uuid = $1",
         )
         .bind(project_uuid)
         .fetch_optional(&self.pool)

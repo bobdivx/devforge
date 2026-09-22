@@ -7,10 +7,10 @@ use devforge_cluster::{
 };
 use devforge_shared::{DevForgeError, Result as DfResult};
 use serde_json::Value;
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, PgPool};
 
 pub struct SqliteClusterStore {
-    pub pool: SqlitePool,
+    pub pool: PgPool,
 }
 
 #[derive(FromRow)]
@@ -167,7 +167,7 @@ impl ClusterStore for SqliteClusterStore {
             r#"INSERT INTO cluster_local (id, role, leader_url, node_id, node_secret, node_name, advertise_url,
                     preferred_leader_id, preferred_leader_url, failover_secret, snapshot_generation, acting_leader,
                     leader_term, writes_fenced, updated_at)
-               VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                ON CONFLICT(id) DO UPDATE SET
                  role=excluded.role,
                  leader_url=excluded.leader_url,
@@ -216,7 +216,7 @@ impl ClusterStore for SqliteClusterStore {
 
     async fn get_node(&self, id: &str) -> DfResult<Option<ClusterNode>> {
         let row: Option<NodeRow> = sqlx::query_as(&format!(
-            "SELECT {NODE_COLS} FROM cluster_nodes WHERE id = ?"
+            "SELECT {NODE_COLS} FROM cluster_nodes WHERE id = $1"
         ))
         .bind(id)
         .fetch_optional(&self.pool)
@@ -232,7 +232,7 @@ impl ClusterStore for SqliteClusterStore {
             r#"INSERT INTO cluster_nodes (
                 id, name, role, advertise_url, status, os, arch, capabilities_json,
                 ssh_host, ssh_user, ssh_port, last_seen_at, last_error, drained, ingress_host, metrics_json, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
             ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name,
                 role=excluded.role,
@@ -276,7 +276,7 @@ impl ClusterStore for SqliteClusterStore {
     }
 
     async fn delete_node(&self, id: &str) -> DfResult<bool> {
-        let r = sqlx::query("DELETE FROM cluster_nodes WHERE id = ?")
+        let r = sqlx::query("DELETE FROM cluster_nodes WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
             .await
@@ -287,7 +287,7 @@ impl ClusterStore for SqliteClusterStore {
     async fn insert_token(&self, token: &JoinTokenRow) -> DfResult<()> {
         sqlx::query(
             r#"INSERT INTO cluster_join_tokens (id, token_hash, expires_at, revoked_at, created_by, created_at)
-               VALUES (?,?,?,?,?,?)
+               VALUES ($1,$2,$3,$4,$5,$6)
                ON CONFLICT(id) DO UPDATE SET
                  token_hash=excluded.token_hash,
                  expires_at=excluded.expires_at,
@@ -307,7 +307,7 @@ impl ClusterStore for SqliteClusterStore {
 
     async fn get_token_by_hash(&self, hash: &str) -> DfResult<Option<JoinTokenRow>> {
         let row: Option<TokenRow> = sqlx::query_as(
-            "SELECT id, token_hash, expires_at, revoked_at, created_by, created_at FROM cluster_join_tokens WHERE token_hash = ?",
+            "SELECT id, token_hash, expires_at, revoked_at, created_by, created_at FROM cluster_join_tokens WHERE token_hash = $1",
         )
         .bind(hash)
         .fetch_optional(&self.pool)
@@ -318,7 +318,7 @@ impl ClusterStore for SqliteClusterStore {
 
     async fn get_token(&self, id: &str) -> DfResult<Option<JoinTokenRow>> {
         let row: Option<TokenRow> = sqlx::query_as(
-            "SELECT id, token_hash, expires_at, revoked_at, created_by, created_at FROM cluster_join_tokens WHERE id = ?",
+            "SELECT id, token_hash, expires_at, revoked_at, created_by, created_at FROM cluster_join_tokens WHERE id = $1",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -340,7 +340,7 @@ impl ClusterStore for SqliteClusterStore {
     async fn revoke_token(&self, id: &str) -> DfResult<bool> {
         let now = Utc::now().to_rfc3339();
         let r = sqlx::query(
-            "UPDATE cluster_join_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+            "UPDATE cluster_join_tokens SET revoked_at = $1 WHERE id = $2 AND revoked_at IS NULL",
         )
         .bind(&now)
         .bind(id)
@@ -352,7 +352,7 @@ impl ClusterStore for SqliteClusterStore {
 
     async fn get_node_secret(&self, node_id: &str) -> DfResult<Option<String>> {
         let row: Option<(String,)> =
-            sqlx::query_as("SELECT secret FROM cluster_node_secrets WHERE node_id = ?")
+            sqlx::query_as("SELECT secret FROM cluster_node_secrets WHERE node_id = $1")
                 .bind(node_id)
                 .fetch_optional(&self.pool)
                 .await
@@ -364,7 +364,7 @@ impl ClusterStore for SqliteClusterStore {
         let now = Utc::now().to_rfc3339();
         sqlx::query(
             r#"INSERT INTO cluster_node_secrets (node_id, secret, secret_hash, created_at)
-               VALUES (?,?,?,?)
+               VALUES ($1,$2,$3,$4)
                ON CONFLICT(node_id) DO UPDATE SET secret=excluded.secret, secret_hash=excluded.secret_hash"#,
         )
         .bind(node_id)
@@ -378,7 +378,7 @@ impl ClusterStore for SqliteClusterStore {
     }
 
     async fn delete_node_secret(&self, node_id: &str) -> DfResult<()> {
-        sqlx::query("DELETE FROM cluster_node_secrets WHERE node_id = ?")
+        sqlx::query("DELETE FROM cluster_node_secrets WHERE node_id = $1")
             .bind(node_id)
             .execute(&self.pool)
             .await

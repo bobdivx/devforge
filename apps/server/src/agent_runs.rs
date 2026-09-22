@@ -1,7 +1,7 @@
 //! Tours d'agent persistés. Un redémarrage reprend les runs `running` / `pending`.
 
 use serde_json::Value;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 /// Marqueur du tour automatique quand la preview publique est rouge.
 pub const PREVIEW_REPAIR_PREFIX: &str = "[réparation preview]";
@@ -18,7 +18,7 @@ pub struct RunRow {
 }
 
 pub async fn record_user_turn(
-    pool: &SqlitePool,
+    pool: &PgPool,
     project_uuid: &str,
     agent_uuid: &str,
     content: &str,
@@ -28,7 +28,7 @@ pub async fn record_user_turn(
     sqlx::query(
         r#"INSERT INTO agent_messages (
             uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at
-        ) VALUES (?, ?, ?, 'user', ?, '[]', '', ?)"#,
+        ) VALUES ($1, $2, $3, 'user', $4, '[]', '', $5)"#,
     )
     .bind(&message_uuid)
     .bind(project_uuid)
@@ -39,7 +39,7 @@ pub async fn record_user_turn(
     .await
     .map_err(|e| e.to_string())?;
     let _ = sqlx::query(
-        "UPDATE project_agents SET status = 'working', updated_at = ? WHERE uuid = ?",
+        "UPDATE project_agents SET status = 'working', updated_at = $1 WHERE uuid = $2",
     )
     .bind(&now)
     .bind(agent_uuid)
@@ -50,18 +50,17 @@ pub async fn record_user_turn(
 
 /// Idempotent sur `message_uuid` : le message utilisateur existe déjà.
 pub async fn enqueue(
-    pool: &SqlitePool,
+    pool: &PgPool,
     project_uuid: &str,
     agent_uuid: &str,
     message_uuid: &str,
 ) -> Result<String, String> {
-    if let Some((uuid,)) = sqlx::query_as::<_, (String,)>(
-        "SELECT uuid FROM agent_runs WHERE message_uuid = ?",
-    )
-    .bind(message_uuid)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| e.to_string())?
+    if let Some((uuid,)) =
+        sqlx::query_as::<_, (String,)>("SELECT uuid FROM agent_runs WHERE message_uuid = $1")
+            .bind(message_uuid)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?
     {
         return Ok(uuid);
     }
@@ -70,7 +69,7 @@ pub async fn enqueue(
     sqlx::query(
         r#"INSERT INTO agent_runs (
             uuid, project_uuid, agent_uuid, message_uuid, status, error, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'pending', NULL, ?, ?)"#,
+        ) VALUES ($1, $2, $3, $4, 'pending', NULL, $5, $6)"#,
     )
     .bind(&uuid)
     .bind(project_uuid)
@@ -84,10 +83,10 @@ pub async fn enqueue(
     Ok(uuid)
 }
 
-pub async fn try_claim(pool: &SqlitePool, run_uuid: &str) -> Result<bool, sqlx::Error> {
+pub async fn try_claim(pool: &PgPool, run_uuid: &str) -> Result<bool, sqlx::Error> {
     let now = now_str();
     let res = sqlx::query(
-        "UPDATE agent_runs SET status = 'running', updated_at = ?, error = NULL WHERE uuid = ? AND status = 'pending'",
+        "UPDATE agent_runs SET status = 'running', updated_at = $1, error = NULL WHERE uuid = $2 AND status = 'pending'",
     )
     .bind(&now)
     .bind(run_uuid)
@@ -97,10 +96,10 @@ pub async fn try_claim(pool: &SqlitePool, run_uuid: &str) -> Result<bool, sqlx::
 }
 
 /// Au boot, un `running` est un tour coupé par l'arrêt du processus.
-pub async fn reopen_interrupted(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
+pub async fn reopen_interrupted(pool: &PgPool) -> Result<u64, sqlx::Error> {
     let now = now_str();
     let res = sqlx::query(
-        "UPDATE agent_runs SET status = 'pending', updated_at = ? WHERE status = 'running'",
+        "UPDATE agent_runs SET status = 'pending', updated_at = $1 WHERE status = 'running'",
     )
     .bind(&now)
     .execute(pool)
@@ -108,7 +107,7 @@ pub async fn reopen_interrupted(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
     Ok(res.rows_affected())
 }
 
-pub async fn list_pending(pool: &SqlitePool) -> Result<Vec<RunRow>, sqlx::Error> {
+pub async fn list_pending(pool: &PgPool) -> Result<Vec<RunRow>, sqlx::Error> {
     let rows = sqlx::query_as::<_, (String, String, String, String, String)>(
         r#"SELECT r.uuid, r.project_uuid, r.agent_uuid, r.message_uuid, m.content
            FROM agent_runs r
@@ -121,25 +120,27 @@ pub async fn list_pending(pool: &SqlitePool) -> Result<Vec<RunRow>, sqlx::Error>
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(uuid, project_uuid, agent_uuid, message_uuid, content)| RunRow {
-            uuid,
-            project_uuid,
-            agent_uuid,
-            message_uuid,
-            content,
-        })
+        .map(
+            |(uuid, project_uuid, agent_uuid, message_uuid, content)| RunRow {
+                uuid,
+                project_uuid,
+                agent_uuid,
+                message_uuid,
+                content,
+            },
+        )
         .collect())
 }
 
 pub async fn assistant_already_replied(
-    pool: &SqlitePool,
+    pool: &PgPool,
     agent_uuid: &str,
     message_uuid: &str,
 ) -> Result<bool, sqlx::Error> {
     let row: (i64,) = sqlx::query_as(
         r#"SELECT COUNT(*) FROM agent_messages
-           WHERE agent_uuid = ? AND role = 'assistant'
-             AND id > COALESCE((SELECT id FROM agent_messages WHERE uuid = ?), 0)"#,
+           WHERE agent_uuid = $1 AND role = 'assistant'
+             AND id > COALESCE((SELECT id FROM agent_messages WHERE uuid = $2), 0)"#,
     )
     .bind(agent_uuid)
     .bind(message_uuid)
@@ -149,7 +150,7 @@ pub async fn assistant_already_replied(
 }
 
 pub async fn save_assistant_and_finish(
-    pool: &SqlitePool,
+    pool: &PgPool,
     run_uuid: &str,
     project_uuid: &str,
     agent_uuid: &str,
@@ -161,7 +162,7 @@ pub async fn save_assistant_and_finish(
     sqlx::query(
         r#"INSERT INTO agent_messages (
             uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at
-        ) VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?)"#,
+        ) VALUES ($1, $2, $3, 'assistant', $4, $5, $6, $7)"#,
     )
     .bind(new_uuid())
     .bind(project_uuid)
@@ -174,36 +175,31 @@ pub async fn save_assistant_and_finish(
     .await?;
     crate::deploy_queue::record_tool_trace(pool, project_uuid, tools_json).await;
     finish(pool, run_uuid, "completed", None).await?;
-    let _ = sqlx::query(
-        "UPDATE project_agents SET status = 'idle', updated_at = ? WHERE uuid = ?",
-    )
-    .bind(&now)
-    .bind(agent_uuid)
-    .execute(pool)
-    .await;
+    let _ =
+        sqlx::query("UPDATE project_agents SET status = 'idle', updated_at = $1 WHERE uuid = $2")
+            .bind(&now)
+            .bind(agent_uuid)
+            .execute(pool)
+            .await;
     Ok(())
 }
 
-pub async fn fail_run(pool: &SqlitePool, run_uuid: &str, agent_uuid: &str, error: &str) {
+pub async fn fail_run(pool: &PgPool, run_uuid: &str, agent_uuid: &str, error: &str) {
     let now = now_str();
     let _ = finish(pool, run_uuid, "failed", Some(error)).await;
-    let _ = sqlx::query(
-        "UPDATE project_agents SET status = 'idle', updated_at = ? WHERE uuid = ?",
-    )
-    .bind(&now)
-    .bind(agent_uuid)
-    .execute(pool)
-    .await;
+    let _ =
+        sqlx::query("UPDATE project_agents SET status = 'idle', updated_at = $1 WHERE uuid = $2")
+            .bind(&now)
+            .bind(agent_uuid)
+            .execute(pool)
+            .await;
 }
 
 /// Derniers messages, avec un extrait des outils sur les réponses assistant.
-pub async fn recent_history(
-    pool: &SqlitePool,
-    agent_uuid: &str,
-) -> Vec<(String, String)> {
+pub async fn recent_history(pool: &PgPool, agent_uuid: &str) -> Vec<(String, String)> {
     let Ok(rows) = sqlx::query_as::<_, (String, String, String)>(
         r#"SELECT role, content, COALESCE(tool_calls_json, '[]')
-           FROM agent_messages WHERE agent_uuid = ? ORDER BY id DESC LIMIT 20"#,
+           FROM agent_messages WHERE agent_uuid = $1 ORDER BY id DESC LIMIT 20"#,
     )
     .bind(agent_uuid)
     .fetch_all(pool)
@@ -241,9 +237,10 @@ pub fn preview_repair_prompt(user_message: &str, tools_json: &str) -> Option<Str
         return None;
     }
     let calls: Vec<Value> = serde_json::from_str(tools_json).ok()?;
-    let last = calls.iter().rev().find(|call| {
-        call.get("name").and_then(|v| v.as_str()) == Some("start_local_preview")
-    })?;
+    let last = calls
+        .iter()
+        .rev()
+        .find(|call| call.get("name").and_then(|v| v.as_str()) == Some("start_local_preview"))?;
     let result = last.get("result")?;
     if result.get("needs_user_action").and_then(|v| v.as_bool()) == Some(true) {
         return None;
@@ -289,7 +286,9 @@ fn tool_excerpt(tools_json: &str) -> String {
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let ok = result.and_then(|r| r.get("ok")).and_then(|v| v.as_bool());
-        let public_ok = result.and_then(|r| r.get("public_ok")).and_then(|v| v.as_bool());
+        let public_ok = result
+            .and_then(|r| r.get("public_ok"))
+            .and_then(|v| v.as_bool());
         let err = result
             .and_then(|r| r.get("error"))
             .and_then(|v| v.as_str())
@@ -342,37 +341,31 @@ fn clip(s: &str, max: usize) -> String {
 }
 
 pub async fn finish(
-    pool: &SqlitePool,
+    pool: &PgPool,
     run_uuid: &str,
     status: &str,
     error: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     let now = now_str();
-    sqlx::query(
-        "UPDATE agent_runs SET status = ?, error = ?, updated_at = ? WHERE uuid = ?",
-    )
-    .bind(status)
-    .bind(error)
-    .bind(&now)
-    .bind(run_uuid)
-    .execute(pool)
-    .await?;
+    sqlx::query("UPDATE agent_runs SET status = $1, error = $2, updated_at = $3 WHERE uuid = $4")
+        .bind(status)
+        .bind(error)
+        .bind(&now)
+        .bind(run_uuid)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
 
-    async fn pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
+    async fn pool() -> PgPool {
+        let pool = devforge_database::ephemeral_pg().await;
         sqlx::query(
             r#"CREATE TABLE agent_messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
                 uuid TEXT NOT NULL UNIQUE,
                 project_uuid TEXT NOT NULL,
                 agent_uuid TEXT NOT NULL,
@@ -439,13 +432,14 @@ mod tests {
     #[tokio::test]
     async fn enqueue_is_idempotent_per_message() {
         let pool = pool().await;
-        let run = record_user_turn(&pool, "proj", "agent-1", "hello").await.unwrap();
-        let msg: (String,) =
-            sqlx::query_as("SELECT message_uuid FROM agent_runs WHERE uuid = ?")
-                .bind(&run)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let run = record_user_turn(&pool, "proj", "agent-1", "hello")
+            .await
+            .unwrap();
+        let msg: (String,) = sqlx::query_as("SELECT message_uuid FROM agent_runs WHERE uuid = $1")
+            .bind(&run)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         let again = enqueue(&pool, "proj", "agent-1", &msg.0).await.unwrap();
         assert_eq!(run, again);
     }

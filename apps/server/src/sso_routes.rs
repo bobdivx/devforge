@@ -1,11 +1,6 @@
 //! Settings SSO instance (OIDC générique / Pocket ID + ForwardAuth).
 
-use axum::{
-    extract::State,
-    http::HeaderMap,
-    routing::get,
-    Json, Router,
-};
+use axum::{extract::State, http::HeaderMap, routing::get, Json, Router};
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -52,7 +47,7 @@ fn view(cfg: &SsoSettings) -> Value {
     })
 }
 
-async fn load_instance_urls(pool: &sqlx::SqlitePool) -> (String, String) {
+async fn load_instance_urls(pool: &sqlx::PgPool) -> (String, String) {
     let row: Option<(String, String)> = sqlx::query_as(
         "SELECT COALESCE(wildcard_domain,''), COALESCE(instance_url,'') FROM instance_settings WHERE id = 1",
     )
@@ -263,17 +258,17 @@ async fn put_sso(
     let now = Utc::now().to_rfc3339();
     sqlx::query(
         r#"UPDATE instance_settings SET
-            sso_protect_apps_by_default = ?,
-            sso_forward_auth_address = ?,
-            sso_hide_local_login = ?,
-            sso_enable_platform_login = ?,
-            sso_pocket_id_url = ?,
-            sso_oauth2_proxy_url = ?,
-            sso_apps_client_id = ?,
-            sso_apps_client_secret = ?,
-            sso_pocket_id_api_token = ?,
-            sso_oidc_provider = ?,
-            updated_at = ?
+            sso_protect_apps_by_default = $1,
+            sso_forward_auth_address = $2,
+            sso_hide_local_login = $3,
+            sso_enable_platform_login = $4,
+            sso_pocket_id_url = $5,
+            sso_oauth2_proxy_url = $6,
+            sso_apps_client_id = $7,
+            sso_apps_client_secret = $8,
+            sso_pocket_id_api_token = $9,
+            sso_oidc_provider = $10,
+            updated_at = $11
          WHERE id = 1"#,
     )
     .bind(protect)

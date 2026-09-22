@@ -247,6 +247,25 @@ pub struct HeartbeatAck {
     pub leader_term: i64,
     #[serde(default)]
     pub roster: Vec<RosterEntry>,
+    /// Hôte du Postgres primaire (réplication physique). Vide si pas de conteneur local.
+    #[serde(default)]
+    pub repl_host: String,
+    #[serde(default)]
+    pub repl_port: u16,
+    #[serde(default)]
+    pub repl_password: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct QuiesceAck {
+    #[serde(default)]
+    pub ok: bool,
+    #[serde(default)]
+    pub repl_host: String,
+    #[serde(default)]
+    pub repl_port: u16,
+    #[serde(default)]
+    pub repl_password: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

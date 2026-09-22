@@ -35,11 +35,7 @@ pub fn collect_build_envs(env_file: Option<&str>) -> Vec<(String, String)> {
             if k.is_empty() || !is_build_env_key(k) {
                 continue;
             }
-            let v = v
-                .trim()
-                .trim_matches('"')
-                .trim_matches('\'')
-                .to_string();
+            let v = v.trim().trim_matches('"').trim_matches('\'').to_string();
             if k == "PUPPETEER_SKIP_DOWNLOAD" || k == "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD" {
                 has_puppeteer_skip = true;
             }
@@ -64,7 +60,11 @@ fn format_nixpacks_env_flags(build_envs: &[(String, String)]) -> String {
     let mut env_flags = String::new();
     for (k, v) in build_envs {
         env_flags.push_str(" --env ");
-        env_flags.push_str(&format!("{}={}", shell_escape_token(k), shell_escape_token(v)));
+        env_flags.push_str(&format!(
+            "{}={}",
+            shell_escape_token(k),
+            shell_escape_token(v)
+        ));
     }
     env_flags
 }

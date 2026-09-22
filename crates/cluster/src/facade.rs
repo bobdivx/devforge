@@ -386,6 +386,7 @@ impl ClusterFacade {
                     drained: n.drained,
                 })
                 .collect(),
+            ..Default::default()
         })
     }
 

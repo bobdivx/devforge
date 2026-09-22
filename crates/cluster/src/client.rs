@@ -1,5 +1,6 @@
 use crate::models::{
     FailoverStatus, HeartbeatAck, HeartbeatPayload, JoinRequest, JoinResponse, PendingJoin,
+    QuiesceAck,
 };
 use devforge_shared::{DevForgeError, Result};
 use std::path::{Path, PathBuf};
@@ -20,6 +21,13 @@ pub fn roster_path() -> PathBuf {
 
 pub fn snapshot_path() -> PathBuf {
     data_dir().join("cluster-snapshot.db")
+}
+
+/// Dump Postgres courant, ou ancien fichier SQLite encore en transit.
+pub fn snapshot_acceptable(bytes: &[u8]) -> bool {
+    bytes.len() >= 100
+        && (bytes.starts_with(b"-- DevForge postgres snapshot\n")
+            || bytes.starts_with(b"SQLite format 3\0"))
 }
 
 pub fn failover_identity_path() -> PathBuf {
@@ -168,8 +176,8 @@ impl LeaderClient {
             .bytes()
             .await
             .map_err(|e| DevForgeError::Message(format!("snapshot body: {e}")))?;
-        if bytes.len() < 100 || !bytes.starts_with(b"SQLite format 3\0") {
-            return Err(DevForgeError::Message("snapshot SQLite invalide".into()));
+        if !snapshot_acceptable(&bytes) {
+            return Err(DevForgeError::Message("snapshot invalide".into()));
         }
         Ok(bytes.to_vec())
     }
@@ -212,6 +220,45 @@ impl LeaderClient {
         }
         serde_json::from_str(&text)
             .map_err(|e| DevForgeError::Message(format!("failover JSON: {e}")))
+    }
+
+    pub async fn failover_quiesce(&self, failover_secret: &str) -> Result<QuiesceAck> {
+        let url = format!("{}/internal/failover/quiesce", self.origin);
+        let res = self
+            .http
+            .post(&url)
+            .bearer_auth(failover_secret)
+            .json(&serde_json::json!({}))
+            .timeout(std::time::Duration::from_secs(20))
+            .send()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("failover quiesce: {e}")))?;
+        let status = res.status();
+        let text = res.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(DevForgeError::Message(parse_error(&text, status.as_u16())));
+        }
+        serde_json::from_str(&text)
+            .map_err(|e| DevForgeError::Message(format!("quiesce JSON: {e}")))
+    }
+
+    pub async fn failover_resume(&self, failover_secret: &str) -> Result<()> {
+        let url = format!("{}/internal/failover/resume", self.origin);
+        let res = self
+            .http
+            .post(&url)
+            .bearer_auth(failover_secret)
+            .json(&serde_json::json!({}))
+            .timeout(std::time::Duration::from_secs(15))
+            .send()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("failover resume: {e}")))?;
+        if !res.status().is_success() {
+            let status = res.status();
+            let text = res.text().await.unwrap_or_default();
+            return Err(DevForgeError::Message(parse_error(&text, status.as_u16())));
+        }
+        Ok(())
     }
 
     pub async fn failover_demote(&self, failover_secret: &str, preferred_url: &str) -> Result<()> {
@@ -315,5 +362,16 @@ mod tests {
             normalize_api_base("http://10.1.0.88:8000/api/v1/"),
             "http://10.1.0.88:8000/api/v1"
         );
+    }
+
+    #[test]
+    fn snapshot_accepts_postgres_and_legacy_sqlite() {
+        let mut pg = b"-- DevForge postgres snapshot\n".to_vec();
+        pg.extend(std::iter::repeat(b'x').take(80));
+        assert!(snapshot_acceptable(&pg));
+        let mut sqlite = b"SQLite format 3\0".to_vec();
+        sqlite.extend(std::iter::repeat(b'y').take(90));
+        assert!(snapshot_acceptable(&sqlite));
+        assert!(!snapshot_acceptable(b"-- DevForge postgres snapshot\nshort"));
     }
 }

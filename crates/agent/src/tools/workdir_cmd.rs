@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use devforge_shared::{Result, Tool};
 use serde_json::{json, Value};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
@@ -9,7 +9,7 @@ use std::time::Duration;
 
 /// Commandes shell allowlistées dans le workdir projet (pas de shell libre).
 pub struct RunWorkdirCommandTool {
-    pub pool: Arc<SqlitePool>,
+    pub pool: Arc<PgPool>,
 }
 
 const ALLOWED_BINS: &[&str] = &[

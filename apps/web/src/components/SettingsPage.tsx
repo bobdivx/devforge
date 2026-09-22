@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, type DnsRuntimeStatus, type DnsSettingsPublic } from '../lib/api';
 import { AppShell } from './AppShell';
-import { InstanceAdminGate } from './InstanceAdminGate';
 import { BackupSettingsPanel } from './BackupSettingsPanel';
+import { PostgresAdminPanel } from './PostgresAdminPanel';
 import { DnsEntrypointPanel } from './DnsEntrypointPanel';
 import { DockerEngineAlert } from './DockerEngineAlert';
 import { LlmProvidersPanel } from './LlmProvidersPanel';
@@ -46,7 +46,16 @@ type GhUser = {
   avatar_url?: string | null;
 };
 
-type SettingsSection = 'general' | 'domaine' | 'github' | 'serveur' | 'llm' | 'sso' | 'backup' | 'update';
+type SettingsSection =
+  | 'general'
+  | 'domaine'
+  | 'github'
+  | 'serveur'
+  | 'llm'
+  | 'sso'
+  | 'backup'
+  | 'postgres'
+  | 'update';
 
 const SECTION_KEYS: SettingsSection[] = [
   'general',
@@ -56,6 +65,7 @@ const SECTION_KEYS: SettingsSection[] = [
   'llm',
   'sso',
   'backup',
+  'postgres',
   'update',
 ];
 
@@ -110,6 +120,12 @@ const SETTINGS_CARDS: SettingCardMeta[] = [
     icon: 'archive',
   },
   {
+    key: 'postgres',
+    title: 'Postgres',
+    description: 'Base du control plane, port et répliques',
+    icon: 'server',
+  },
+  {
     key: 'update',
     title: 'Mise à jour',
     description: 'Mise à jour de DevForge vers la dernière version',
@@ -132,6 +148,7 @@ const SECTION_TITLES: Record<SettingsSection, string> = {
   llm: 'Agents / LLM',
   sso: 'SSO / OIDC',
   backup: 'Sauvegardes',
+  postgres: 'Postgres',
   update: 'Mise à jour',
 };
 
@@ -147,12 +164,11 @@ function SettingCard({ card, index }: { card: SettingCardMeta; index: number }) 
   );
 }
 
+const USER_SETTING_KEYS = new Set(['domaine', 'github', 'llm']);
+const ADMIN_SETTING_KEYS = new Set(['general', 'serveur', 'sso', 'backup', 'postgres', 'update']);
+
 export function SettingsPage() {
-  return (
-    <InstanceAdminGate active="settings" title="Paramètres">
-      <SettingsPageInner />
-    </InstanceAdminGate>
-  );
+  return <SettingsPageInner />;
 }
 
 function SettingsPageInner() {
@@ -168,6 +184,8 @@ function SettingsPageInner() {
   const [ghBusy, setGhBusy] = useState(false);
   const [ghError, setGhError] = useState<string | null>(null);
   const [wildcard, setWildcard] = useState('');
+  const [wildcardOwn, setWildcardOwn] = useState('');
+  const [wildcardFallback, setWildcardFallback] = useState('');
   const [instanceName, setInstanceName] = useState('');
   const [domainBusy, setDomainBusy] = useState(false);
   const [dnsProvider, setDnsProvider] = useState('');
@@ -271,7 +289,9 @@ function SettingsPageInner() {
         .catch(() => setHealth({ ok: false })),
       api.bootstrap().then((b) => {
         setIsAdmin(b.user?.role === 'instance_admin');
-        setWildcard(b.settings?.wildcard_domain || '');
+        setWildcardOwn(b.settings?.wildcard_own || '');
+        setWildcardFallback(b.settings?.wildcard_fallback || b.settings?.wildcard_domain || '');
+        setWildcard(b.settings?.wildcard_fallback || b.settings?.wildcard_domain || '');
         setInstanceName(b.settings?.instance_name || '');
       }),
       loadGh(),
@@ -356,7 +376,7 @@ function SettingsPageInner() {
     return (
       <AppShell active="settings" title="Paramètres">
         <HubGrid>
-          {SETTINGS_CARDS.map((card, i) => (
+          {SETTINGS_CARDS.filter((card) => isAdmin || USER_SETTING_KEYS.has(card.key)).map((card, i) => (
             <SettingCard key={card.key} card={card} index={i} />
           ))}
         </HubGrid>
@@ -383,7 +403,11 @@ function SettingsPageInner() {
         </div>
       }
     >
-      {section === 'general' && (
+      {section && ADMIN_SETTING_KEYS.has(section) && !isAdmin && (
+        <Alert tone="warn">Réservé à l’admin instance.</Alert>
+      )}
+
+      {section === 'general' && isAdmin && (
         <FadeIn>
           <div class="space-y-4">
             <div class="grid gap-4 md:grid-cols-2">
@@ -449,72 +473,130 @@ function SettingsPageInner() {
         <FadeIn>
           <Card>
             <CardHeader
-              title="Domaine principal"
+              title="Ton domaine"
               action={
-                wildcard ? (
-                  <Badge tone="ok">{wildcard}</Badge>
+                wildcardOwn ? (
+                  <Badge tone="ok">{wildcardOwn}</Badge>
+                ) : wildcardFallback ? (
+                  <Badge tone="accent">repli {wildcardFallback}</Badge>
                 ) : (
                   <Badge tone="warn">non configuré</Badge>
                 )
               }
             />
             <p class="mb-3 break-words text-sm text-[var(--color-ink-muted)]">
-              Chaque app reçoit un sous-domaine{' '}
-              <code class="break-all">nom-app.{wildcard || 'ton-domaine'}</code> au déploiement.
+              Tes apps reçoivent un sous-domaine{' '}
+              <code class="break-all">
+                nom-app.{wildcardOwn || wildcardFallback || 'ton-domaine'}
+              </code>
+              . Laisse vide pour utiliser le domaine de l’admin
+              {wildcardFallback ? ` (${wildcardFallback})` : ''}.
             </p>
-            {isAdmin ? (
-              <form
-                class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end"
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  const d = wildcard.trim().replace(/^\.+/, '').toLowerCase();
-                  if (!d.includes('.')) {
-                    toast.push({
-                      title: 'Domaine invalide',
-                      detail: 'Ex. jeser.app',
-                      tone: 'warn',
-                    });
-                    return;
-                  }
-                  setDomainBusy(true);
-                  try {
-                    await api.saveOnboarding({
-                      wildcard_domain: d,
-                      instance_name: instanceName || undefined,
-                    });
-                    setWildcard(d);
-                    toast.push({
-                      title: 'Domaine enregistré',
-                      detail: `Apps → *.${d}`,
-                      tone: 'ok',
-                    });
-                  } catch (err) {
-                    toast.push({
-                      title: 'Échec',
-                      detail: String((err as Error).message || err),
-                      tone: 'danger',
-                    });
-                  } finally {
-                    setDomainBusy(false);
-                  }
-                }}
-              >
-                <div class="min-w-0 w-full flex-1">
-                  <Input
-                    label="Wildcard / domaine racine"
-                    placeholder="jeser.app"
-                    value={wildcard}
-                    onInput={(e) => setWildcard((e.target as HTMLInputElement).value)}
-                  />
-                </div>
-                <Button type="submit" size="sm" class="w-full sm:w-auto" disabled={domainBusy}>
-                  Enregistrer
-                </Button>
-              </form>
-            ) : (
-              <Alert tone="warn">Réservé à l’admin instance.</Alert>
-            )}
+            <form
+              class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const d = wildcardOwn.trim().replace(/^\.+/, '').toLowerCase();
+                if (d && !d.includes('.')) {
+                  toast.push({
+                    title: 'Domaine invalide',
+                    detail: 'Ex. jeser.app',
+                    tone: 'warn',
+                  });
+                  return;
+                }
+                setDomainBusy(true);
+                try {
+                  const r = await api.saveMyDomain(d);
+                  setWildcardOwn(r.wildcard_own);
+                  setWildcardFallback(r.wildcard_fallback);
+                  toast.push({
+                    title: d ? 'Domaine enregistré' : 'Domaine personnel retiré',
+                    detail: `Apps → *.${r.wildcard_domain || '—'}`,
+                    tone: 'ok',
+                  });
+                } catch (err) {
+                  toast.push({
+                    title: 'Échec',
+                    detail: String((err as Error).message || err),
+                    tone: 'danger',
+                  });
+                } finally {
+                  setDomainBusy(false);
+                }
+              }}
+            >
+              <div class="min-w-0 w-full flex-1">
+                <Input
+                  label="Wildcard personnel"
+                  placeholder={wildcardFallback || 'jeser.app'}
+                  value={wildcardOwn}
+                  onInput={(e) => setWildcardOwn((e.target as HTMLInputElement).value)}
+                />
+              </div>
+              <Button type="submit" size="sm" class="w-full sm:w-auto" disabled={domainBusy}>
+                Enregistrer
+              </Button>
+            </form>
           </Card>
+          {isAdmin && (
+          <Card>
+            <CardHeader title="Domaine de repli (instance)" />
+            <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
+              Utilisé pour les comptes qui n’ont pas défini leur propre domaine.
+            </p>
+            <form
+              class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const d = wildcard.trim().replace(/^\.+/, '').toLowerCase();
+                if (!d.includes('.')) {
+                  toast.push({
+                    title: 'Domaine invalide',
+                    detail: 'Ex. jeser.app',
+                    tone: 'warn',
+                  });
+                  return;
+                }
+                setDomainBusy(true);
+                try {
+                  await api.saveOnboarding({
+                    wildcard_domain: d,
+                    instance_name: instanceName || undefined,
+                  });
+                  setWildcard(d);
+                  setWildcardFallback(d);
+                  toast.push({
+                    title: 'Domaine d’instance enregistré',
+                    detail: `Repli → *.${d}`,
+                    tone: 'ok',
+                  });
+                } catch (err) {
+                  toast.push({
+                    title: 'Échec',
+                    detail: String((err as Error).message || err),
+                    tone: 'danger',
+                  });
+                } finally {
+                  setDomainBusy(false);
+                }
+              }}
+            >
+              <div class="min-w-0 w-full flex-1">
+                <Input
+                  label="Wildcard / domaine racine"
+                  placeholder="jeser.app"
+                  value={wildcard}
+                  onInput={(e) => setWildcard((e.target as HTMLInputElement).value)}
+                />
+              </div>
+              <Button type="submit" size="sm" class="w-full sm:w-auto" disabled={domainBusy}>
+                Enregistrer
+              </Button>
+            </form>
+          </Card>
+          )}
+          {isAdmin && (
           <DnsEntrypointPanel
             isAdmin={isAdmin}
             serverVersion={health?.version}
@@ -546,6 +628,7 @@ function SettingsPageInner() {
             setClearOnSwitch={setClearOnSwitch}
             confirmProviderSwitch={confirmProviderSwitch}
           />
+          )}
         </FadeIn>
       )}
 
@@ -565,12 +648,6 @@ function SettingsPageInner() {
             {ghError && (
               <Alert tone="danger" class="mb-3">
                 {ghError}
-              </Alert>
-            )}
-            {!isAdmin && !ghConnected && (
-              <Alert tone="warn" class="mb-3">
-                Seul l’admin instance peut connecter GitHub. Recharge la page si ton rôle vient
-                d’être mis à jour.
               </Alert>
             )}
             {ghConnected && ghUser ? (
@@ -598,22 +675,20 @@ function SettingsPageInner() {
                       Profil
                     </Button>
                   )}
-                  {isAdmin && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={ghBusy}
-                      onClick={disconnectGithub}
-                    >
-                      Déconnecter
-                    </Button>
-                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={ghBusy}
+                    onClick={disconnectGithub}
+                  >
+                    Déconnecter
+                  </Button>
                 </div>
                 <p class="text-xs text-[var(--color-ink-faint)]">
                   Mode API : {ghMode}. Les projets peuvent importer tes repos.
                 </p>
               </div>
-            ) : isAdmin ? (
+            ) : (
               <form class="space-y-3" onSubmit={connectGithub}>
                 <p class="text-sm text-[var(--color-ink-muted)]">
                   {ghHint ||
@@ -641,12 +716,12 @@ function SettingsPageInner() {
                   </Button>
                 </div>
               </form>
-            ) : null}
+            )}
           </Card>
         </FadeIn>
       )}
 
-      {section === 'serveur' && (
+      {section === 'serveur' && isAdmin && (
         <FadeIn>
           <Card>
             <CardHeader
@@ -802,9 +877,10 @@ function SettingsPageInner() {
         </FadeIn>
       )}
 
-      {section === 'sso' && <SsoSettingsPanel isAdmin={isAdmin} />}
-      {section === 'backup' && <BackupSettingsPanel isAdmin={isAdmin} />}
-      {section === 'update' && <UpdateSettingsPanel isAdmin={isAdmin} />}
+      {section === 'sso' && isAdmin && <SsoSettingsPanel isAdmin={isAdmin} />}
+      {section === 'backup' && isAdmin && <BackupSettingsPanel isAdmin={isAdmin} />}
+      {section === 'postgres' && isAdmin && <PostgresAdminPanel />}
+      {section === 'update' && isAdmin && <UpdateSettingsPanel isAdmin={isAdmin} />}
     </AppShell>
   );
 }

@@ -7,14 +7,14 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{Duration, Utc};
-use serde::{Deserialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
-use sha2::{Sha256, Digest};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
 use crate::auth_routes;
 use crate::sso::{load_sso_settings, SsoSettings};
@@ -55,10 +55,7 @@ fn login_error(err: (StatusCode, Json<Value>)) -> Redirect {
         .get("error")
         .and_then(|v| v.as_str())
         .unwrap_or("Connexion impossible");
-    Redirect::to(&format!(
-        "/login?sso_error={}",
-        urlencoding::encode(msg)
-    ))
+    Redirect::to(&format!("/login?sso_error={}", urlencoding::encode(msg)))
 }
 
 async fn authorize_page(state: State<AppState>) -> Response {
@@ -76,16 +73,18 @@ async fn callback_page(state: State<AppState>, query: Query<CallbackQuery>) -> R
 }
 
 /// Génère le state CSRF + nonce et redirige vers l'IdP.
-async fn authorize(State(state): State<AppState>) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+async fn authorize(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     let cfg = load_sso_settings(&state.pool).await;
-    
+
     if !cfg.platform_login_effective() {
         return Err((
             StatusCode::FORBIDDEN,
             Json(json!({"error": "SSO plateforme non activé"})),
         ));
     }
-    
+
     if !cfg.oidc_configured() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -97,14 +96,14 @@ async fn authorize(State(state): State<AppState>) -> Result<impl IntoResponse, (
     let nonce = generate_nonce();
     let code_verifier = generate_code_verifier();
     let code_challenge = compute_code_challenge(&code_verifier);
-    
+
     // Stockage temporaire du state/nonce/verifier (15 min expiration)
     let now = now_str();
     let expires = (Utc::now() + Duration::minutes(15)).to_rfc3339();
     sqlx::query(
         r#"INSERT INTO oidc_states (state, nonce, code_verifier, expires_at, created_at)
-           VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(state) DO UPDATE SET nonce = ?, code_verifier = ?, expires_at = ?"#
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT(state) DO UPDATE SET nonce = $6, code_verifier = $7, expires_at = $8"#,
     )
     .bind(&state_token)
     .bind(&nonce)
@@ -120,8 +119,15 @@ async fn authorize(State(state): State<AppState>) -> Result<impl IntoResponse, (
 
     let redirect_uri = platform_redirect_uri(&state).await?;
     let endpoints = resolve_oidc_endpoints(&cfg).await;
-    let auth_url = build_authorization_url(&cfg, &endpoints, &state_token, &nonce, &redirect_uri, &code_challenge);
-    
+    let auth_url = build_authorization_url(
+        &cfg,
+        &endpoints,
+        &state_token,
+        &nonce,
+        &redirect_uri,
+        &code_challenge,
+    );
+
     Ok(Redirect::to(&auth_url))
 }
 
@@ -139,7 +145,7 @@ async fn callback(
     Query(query): Query<CallbackQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     let cfg = load_sso_settings(&state.pool).await;
-    
+
     if !cfg.platform_login_effective() {
         return Err((
             StatusCode::FORBIDDEN,
@@ -149,7 +155,9 @@ async fn callback(
 
     // Gestion des erreurs OIDC
     if let Some(err) = query.error {
-        let desc = query.error_description.unwrap_or_else(|| "Erreur OIDC".to_string());
+        let desc = query
+            .error_description
+            .unwrap_or_else(|| "Erreur OIDC".to_string());
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({"error": format!("OIDC: {} - {}", err, desc)})),
@@ -172,7 +180,7 @@ async fn callback(
 
     // Vérification du state CSRF
     let nonce_row: Option<(String, String, String)> = sqlx::query_as(
-        r#"SELECT nonce, code_verifier, expires_at FROM oidc_states WHERE state = ?"#
+        r#"SELECT nonce, code_verifier, expires_at FROM oidc_states WHERE state = $1"#,
     )
     .bind(&state_param)
     .fetch_optional(&state.pool)
@@ -195,7 +203,7 @@ async fn callback(
     }
 
     // Suppression du state après validation
-    let _ = sqlx::query("DELETE FROM oidc_states WHERE state = ?")
+    let _ = sqlx::query("DELETE FROM oidc_states WHERE state = $1")
         .bind(&state_param)
         .execute(&state.pool)
         .await;
@@ -203,18 +211,19 @@ async fn callback(
     // Échange du code contre un token
     let redirect_uri = platform_redirect_uri(&state).await?;
     let endpoints = resolve_oidc_endpoints(&cfg).await;
-    let token_response = exchange_code_for_token(&cfg, &endpoints, &code, &redirect_uri, &code_verifier).await?;
-    
+    let token_response =
+        exchange_code_for_token(&cfg, &endpoints, &code, &redirect_uri, &code_verifier).await?;
+
     // Récupération des infos utilisateur
     let user_info = fetch_user_info(&cfg, &endpoints, &token_response.access_token, &nonce).await?;
-    
+
     // Mapping de l'utilisateur IdP vers DevForge.
     // Pocket ID : tout compte de l'IdP peut entrer (création si l'email est nouveau).
     let user_uuid = map_or_create_user(&state, &user_info, cfg.is_pocket_id()).await?;
-    
+
     // Création de la session DevForge
     let session_token = auth_routes::create_session(&state, &user_uuid).await?;
-    
+
     // Redirection vers l'application avec le token en paramètre (sera stocké par le frontend)
     let redirect_url = format!("/login?sso_token={}", urlencoding::encode(&session_token));
     Ok(Redirect::to(&redirect_url))
@@ -247,13 +256,12 @@ pub(crate) fn compute_code_challenge(verifier: &str) -> String {
 }
 
 async fn platform_redirect_uri(state: &AppState) -> Result<String, (StatusCode, Json<Value>)> {
-    let row: Option<(String,)> = sqlx::query_as(
-        "SELECT instance_url FROM instance_settings WHERE id = 1"
-    )
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(internal)?;
-    
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT instance_url FROM instance_settings WHERE id = 1")
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(internal)?;
+
     let instance_url = row
         .map(|(url,)| url)
         .filter(|url| !url.trim().is_empty())
@@ -263,14 +271,17 @@ async fn platform_redirect_uri(state: &AppState) -> Result<String, (StatusCode, 
                 Json(json!({"error": "URL instance non configurée"})),
             )
         })?;
-    
-    Ok(format!("{}/api/v1/auth/sso/callback", instance_url.trim_end_matches('/')))
+
+    Ok(format!(
+        "{}/api/v1/auth/sso/callback",
+        instance_url.trim_end_matches('/')
+    ))
 }
 
 /// Résout les endpoints OIDC via découverte, avec fallbacks.
 pub(crate) async fn resolve_oidc_endpoints(cfg: &SsoSettings) -> OidcEndpoints {
     let issuer = cfg.issuer().to_string();
-    
+
     // Vérifier le cache d'abord
     if let Some(cached) = get_cached_discovery(&issuer) {
         return OidcEndpoints {
@@ -279,7 +290,7 @@ pub(crate) async fn resolve_oidc_endpoints(cfg: &SsoSettings) -> OidcEndpoints {
             userinfo_endpoint: cached.userinfo_endpoint.clone(),
         };
     }
-    
+
     // Tentative de découverte OIDC
     if let Some(discovered) = discover_oidc_endpoints(&issuer).await {
         // Mise en cache
@@ -289,14 +300,14 @@ pub(crate) async fn resolve_oidc_endpoints(cfg: &SsoSettings) -> OidcEndpoints {
             userinfo_endpoint: discovered.userinfo_endpoint.clone(),
             cached_at: Instant::now(),
         };
-        
+
         if let Ok(mut cache) = OIDC_DISCOVERY_CACHE.write() {
             cache.insert(issuer.clone(), cached);
         }
-        
+
         return discovered;
     }
-    
+
     // Fallback selon le provider
     if cfg.is_pocket_id() {
         OidcEndpoints {
@@ -318,7 +329,7 @@ pub(crate) async fn resolve_oidc_endpoints(cfg: &SsoSettings) -> OidcEndpoints {
 fn get_cached_discovery(issuer: &str) -> Option<CachedDiscovery> {
     let cache = OIDC_DISCOVERY_CACHE.read().ok()?;
     let cached = cache.get(issuer)?;
-    
+
     // Vérifier la durée de vie
     if cached.cached_at.elapsed().as_secs() < DISCOVERY_CACHE_TTL_SECS {
         Some(cached.clone())
@@ -330,24 +341,24 @@ fn get_cached_discovery(issuer: &str) -> Option<CachedDiscovery> {
 /// Tente de découvrir les endpoints OIDC via /.well-known/openid-configuration.
 async fn discover_oidc_endpoints(issuer: &str) -> Option<OidcEndpoints> {
     let discovery_url = format!("{}/.well-known/openid-configuration", issuer);
-    
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .ok()?;
-    
+
     let response = client.get(&discovery_url).send().await.ok()?;
-    
+
     if !response.status().is_success() {
         return None;
     }
-    
+
     let doc: OidcDiscoveryDocument = response.json().await.ok()?;
-    
+
     // Les endpoints token et userinfo sont requis
     let token_endpoint = doc.token_endpoint?;
     let userinfo_endpoint = doc.userinfo_endpoint?;
-    
+
     Some(OidcEndpoints {
         authorization_endpoint: doc.authorization_endpoint,
         token_endpoint,
@@ -372,7 +383,7 @@ pub(crate) fn build_authorization_url(
 ) -> String {
     let issuer = cfg.issuer();
     let client_id = cfg.sso_apps_client_id.trim();
-    
+
     let params = [
         ("response_type", "code"),
         ("client_id", client_id),
@@ -383,20 +394,20 @@ pub(crate) fn build_authorization_url(
         ("code_challenge", code_challenge),
         ("code_challenge_method", "S256"),
     ];
-    
+
     let query = params
         .iter()
         .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
         .collect::<Vec<_>>()
         .join("&");
-    
+
     // Utiliser le endpoint découvert si disponible, sinon fallback
     let default_auth_endpoint = format!("{}/authorize", issuer);
     let auth_endpoint = endpoints
         .authorization_endpoint
         .as_deref()
         .unwrap_or(&default_auth_endpoint);
-    
+
     format!("{}?{}", auth_endpoint, query)
 }
 
@@ -416,7 +427,7 @@ async fn exchange_code_for_token(
     code_verifier: &str,
 ) -> Result<TokenResponse, (StatusCode, Json<Value>)> {
     let token_endpoint = &endpoints.token_endpoint;
-    
+
     let params = [
         ("grant_type", "authorization_code"),
         ("code", code),
@@ -425,7 +436,7 @@ async fn exchange_code_for_token(
         ("client_secret", cfg.sso_apps_client_secret.trim()),
         ("code_verifier", code_verifier),
     ];
-    
+
     let client = reqwest::Client::new();
     let response = client
         .post(token_endpoint)
@@ -439,7 +450,7 @@ async fn exchange_code_for_token(
                 Json(json!({"error": "Impossible de contacter le serveur d'authentification"})),
             )
         })?;
-    
+
     if !response.status().is_success() {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
@@ -449,7 +460,7 @@ async fn exchange_code_for_token(
             Json(json!({"error": "Échec de l'authentification. Vérifie tes identifiants."})),
         ));
     }
-    
+
     response.json::<TokenResponse>().await.map_err(|e| {
         tracing::error!("Erreur parsing token response: {}", e);
         (
@@ -475,7 +486,7 @@ async fn fetch_user_info(
     _nonce: &str,
 ) -> Result<UserInfo, (StatusCode, Json<Value>)> {
     let userinfo_endpoint = &endpoints.userinfo_endpoint;
-    
+
     let client = reqwest::Client::new();
     let response = client
         .get(userinfo_endpoint)
@@ -489,7 +500,7 @@ async fn fetch_user_info(
                 Json(json!({"error": "Impossible de récupérer tes informations utilisateur"})),
             )
         })?;
-    
+
     if !response.status().is_success() {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
@@ -499,7 +510,7 @@ async fn fetch_user_info(
             Json(json!({"error": "Impossible de récupérer tes informations utilisateur"})),
         ));
     }
-    
+
     response.json::<UserInfo>().await.map_err(|e| {
         tracing::error!("Erreur parsing userinfo response: {}", e);
         (
@@ -527,37 +538,36 @@ async fn map_or_create_user(
         })?
         .trim()
         .to_lowercase();
-    
+
     if email.is_empty() || !email.contains('@') {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "Email invalide"})),
         ));
     }
-    
+
     // Recherche d'un utilisateur existant par email
-    let existing: Option<(String,)> = sqlx::query_as(
-        "SELECT uuid FROM users WHERE LOWER(email) = ?"
-    )
-    .bind(&email)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(internal)?;
-    
+    let existing: Option<(String,)> =
+        sqlx::query_as("SELECT uuid FROM users WHERE LOWER(email) = $1")
+            .bind(&email)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(internal)?;
+
     if let Some((uuid,)) = existing {
         // Utilisateur existant trouvé : authentification réussie
         return Ok(uuid);
     }
-    
+
     // Politique conservatrice : pas de création automatique sauf si inscription ouverte
     // ou si c'est le premier utilisateur (admin)
     let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
         .fetch_one(&state.pool)
         .await
         .map_err(internal)?;
-    
+
     let allow_create = pocket_id || count.0 == 0 || registration_open();
-    
+
     if !allow_create {
         return Err((
             StatusCode::FORBIDDEN,
@@ -566,7 +576,7 @@ async fn map_or_create_user(
             })),
         ));
     }
-    
+
     let user_uuid = uuid::Uuid::new_v4().to_string();
     let name = user_info
         .name
@@ -575,22 +585,18 @@ async fn map_or_create_user(
         .unwrap_or(&email)
         .trim()
         .to_string();
-    
+
     let is_first = count.0 == 0;
-    let role = if is_first {
-        "instance_admin"
-    } else {
-        "user"
-    };
-    
+    let role = if is_first { "instance_admin" } else { "user" };
+
     let now = now_str();
-    
+
     // Pas de mot de passe : ce compte se connecte avec Pocket ID / OIDC.
     let dummy_hash = "$argon2id$v=19$m=19456,t=2,p=1$SSO_ONLY$SSO_ONLY";
-    
+
     sqlx::query(
         r#"INSERT INTO users (uuid, email, name, password_hash, role, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)"#
+           VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
     )
     .bind(&user_uuid)
     .bind(&email)
@@ -602,7 +608,7 @@ async fn map_or_create_user(
     .execute(&state.pool)
     .await
     .map_err(internal)?;
-    
+
     let team_uuid = uuid::Uuid::new_v4().to_string();
     let team_name = if is_first {
         "Admin".to_string()
@@ -616,10 +622,10 @@ async fn map_or_create_user(
     }
     let show_boarding = if is_first { 1 } else { 0 };
     let plan = if is_first { "pro" } else { "free" };
-    
+
     sqlx::query(
         r#"INSERT INTO teams (uuid, name, slug, show_boarding, plan, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)"#
+           VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
     )
     .bind(&team_uuid)
     .bind(&team_name)
@@ -631,10 +637,10 @@ async fn map_or_create_user(
     .execute(&state.pool)
     .await
     .map_err(internal)?;
-    
+
     sqlx::query(
         r#"INSERT INTO team_members (team_uuid, user_uuid, role, created_at)
-           VALUES (?, ?, 'owner', ?)"#
+           VALUES ($1, $2, 'owner', $3)"#,
     )
     .bind(&team_uuid)
     .bind(&user_uuid)
@@ -642,7 +648,7 @@ async fn map_or_create_user(
     .execute(&state.pool)
     .await
     .map_err(internal)?;
-    
+
     Ok(user_uuid)
 }
 

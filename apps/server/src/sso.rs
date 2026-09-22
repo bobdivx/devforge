@@ -98,7 +98,7 @@ fn normalize_forward_auth(addr: &str) -> String {
     }
 }
 
-pub async fn load_sso_settings(pool: &sqlx::SqlitePool) -> SsoSettings {
+pub async fn load_sso_settings(pool: &sqlx::PgPool) -> SsoSettings {
     let row: Option<SsoSettings> = sqlx::query_as(
         r#"SELECT sso_protect_apps_by_default, sso_forward_auth_address, sso_hide_local_login,
                   sso_pocket_id_url, sso_oauth2_proxy_url, sso_apps_client_id, sso_apps_client_secret,
@@ -140,20 +140,17 @@ pub async fn sync_project_proxy(state: &AppState, project: &Project) {
     } else {
         None
     };
-    let _ = state
-        .proxy
-        .sync_with(&project.uuid, addr.as_deref())
-        .await;
+    let _ = state.proxy.sync_with(&project.uuid, addr.as_deref()).await;
 }
 
 /// Injecte les variables OIDC manquantes.
-/// 
+///
 /// Priorise les credentials du client OIDC dédié du projet si disponibles,
 /// sinon utilise le client partagé de la plateforme.
-/// 
+///
 /// **Migration** : Pour les projets existants, remplace les anciennes valeurs
 /// du client partagé par celles du client dédié si un provisionnement a été effectué.
-pub async fn ensure_oidc_env(pool: &sqlx::SqlitePool, project: &Project) -> usize {
+pub async fn ensure_oidc_env(pool: &sqlx::PgPool, project: &Project) -> usize {
     let settings = load_sso_settings(pool).await;
     if !settings.oidc_configured() {
         return 0;
@@ -162,9 +159,9 @@ pub async fn ensure_oidc_env(pool: &sqlx::SqlitePool, project: &Project) -> usiz
     if issuer.is_empty() {
         return 0;
     }
-    
+
     let project_client = crate::project_oidc::load_project_oidc_client(pool, &project.uuid).await;
-    
+
     let (client_id, client_secret, force_update) = if let Some(pc) = project_client {
         (pc.client_id, pc.client_secret, true)
     } else {
@@ -174,7 +171,7 @@ pub async fn ensure_oidc_env(pool: &sqlx::SqlitePool, project: &Project) -> usiz
             false,
         )
     };
-    
+
     let discovery = format!("{issuer}/.well-known/openid-configuration");
 
     let mut pairs: Vec<(&str, String, bool)> = vec![
@@ -229,11 +226,11 @@ pub async fn ensure_oidc_env(pool: &sqlx::SqlitePool, project: &Project) -> usiz
         } else {
             false
         };
-        
+
         if should_update {
             let res = sqlx::query(
                 r#"INSERT INTO project_env_vars (project_uuid, key, value, secret, updated_at)
-                   VALUES (?, ?, ?, ?, ?)
+                   VALUES ($1, $2, $3, $4, $5)
                    ON CONFLICT(project_uuid, key) DO UPDATE SET
                      value = excluded.value,
                      secret = excluded.secret,
@@ -251,7 +248,7 @@ pub async fn ensure_oidc_env(pool: &sqlx::SqlitePool, project: &Project) -> usiz
             }
         } else {
             let exists: Option<(i64,)> = sqlx::query_as(
-                "SELECT 1 FROM project_env_vars WHERE project_uuid = ? AND key = ?",
+                "SELECT 1::bigint FROM project_env_vars WHERE project_uuid = $1 AND key = $2",
             )
             .bind(&project.uuid)
             .bind(key)
@@ -264,7 +261,7 @@ pub async fn ensure_oidc_env(pool: &sqlx::SqlitePool, project: &Project) -> usiz
             }
             let res = sqlx::query(
                 r#"INSERT INTO project_env_vars (project_uuid, key, value, secret, updated_at)
-                   VALUES (?, ?, ?, ?, ?)"#,
+                   VALUES ($1, $2, $3, $4, $5)"#,
             )
             .bind(&project.uuid)
             .bind(key)
@@ -327,6 +324,8 @@ mod tests {
             base_directory: "/".into(),
             docker_compose_location: None,
             auto_deploy: 1,
+            gpu_nvidia: 0,
+            gpu_dri: 0,
             created_at: "".into(),
             updated_at: "".into(),
         }

@@ -62,9 +62,7 @@ pub async fn enforce_api_token_write(
         return next.run(req).await;
     }
     match resolve_auth(&state, &token).await {
-        Ok(Some((_, abilities))) if has_ability(&abilities, ABILITY_WRITE) => {
-            next.run(req).await
-        }
+        Ok(Some((_, abilities))) if has_ability(&abilities, ABILITY_WRITE) => next.run(req).await,
         Ok(Some(_)) => (
             StatusCode::FORBIDDEN,
             Json(json!({
@@ -99,7 +97,7 @@ async fn list_tokens(
     let (user, _) = current_workspace(&state, &headers).await?;
     let rows: Vec<ApiTokenRow> = sqlx::query_as(
         r#"SELECT id, name, token_prefix, abilities, last_used_at, expires_at, created_at
-           FROM api_tokens WHERE user_uuid = ? ORDER BY created_at DESC"#,
+           FROM api_tokens WHERE user_uuid = $1 ORDER BY created_at DESC"#,
     )
     .bind(&user.uuid)
     .fetch_all(&state.pool)
@@ -135,9 +133,11 @@ async fn create_token(
             Json(json!({"error": "Nom requis"})),
         ));
     }
-    let abilities = normalize_abilities(&body.abilities.unwrap_or_else(|| {
-        vec![ABILITY_READ.to_string(), ABILITY_WRITE.to_string()]
-    }));
+    let abilities = normalize_abilities(
+        &body
+            .abilities
+            .unwrap_or_else(|| vec![ABILITY_READ.to_string(), ABILITY_WRITE.to_string()]),
+    );
     let plaintext = new_api_token();
     let id = format!("tok_{}", &new_uuid()[..10]);
     let now = now_str();
@@ -147,7 +147,7 @@ async fn create_token(
     sqlx::query(
         r#"INSERT INTO api_tokens
            (id, user_uuid, name, token_hash, token_prefix, abilities, last_used_at, expires_at, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)"#,
+           VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8)"#,
     )
     .bind(&id)
     .bind(&user.uuid)
@@ -181,7 +181,7 @@ async fn revoke_token(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let (user, _) = current_workspace(&state, &headers).await?;
-    let res = sqlx::query("DELETE FROM api_tokens WHERE id = ? AND user_uuid = ?")
+    let res = sqlx::query("DELETE FROM api_tokens WHERE id = $1 AND user_uuid = $2")
         .bind(&id)
         .bind(&user.uuid)
         .execute(&state.pool)

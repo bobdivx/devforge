@@ -132,6 +132,22 @@ pub struct DeployRequest {
     pub env_file: Option<String>,
     /// Labels Traefik (tous les hosts) appliqués au `docker run`.
     pub proxy_labels: Option<serde_json::Value>,
+    /// `docker run --gpus all`
+    pub gpu_nvidia: bool,
+    /// `docker run --device /dev/dri`
+    pub gpu_dri: bool,
+    /// Réseau Docker du groupe (`dfg-{slug}`), en plus du réseau Traefik.
+    pub group_network: Option<String>,
+    /// Alias DNS du rôle (`server`, `web`, …) posé après le basculement.
+    pub group_alias: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ContainerExtras {
+    gpu_nvidia: bool,
+    gpu_dri: bool,
+    group_network: Option<String>,
+    group_alias: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -153,8 +169,8 @@ fn data_dir_base() -> std::path::PathBuf {
 fn resolve_workdir(workdir: &str, project_uuid: &str) -> String {
     let w = workdir.trim();
     // Unix-style /data/... paths are remapped on Windows to a local data dir.
-    let needs_local = w.is_empty()
-        || (cfg!(windows) && (w.starts_with('/') || w.starts_with("/data")));
+    let needs_local =
+        w.is_empty() || (cfg!(windows) && (w.starts_with('/') || w.starts_with("/data")));
     let path = if needs_local {
         data_dir_base().join("applications").join(project_uuid)
     } else {
@@ -200,7 +216,7 @@ fn git_clone_url(repo: &str, token: Option<&str>) -> String {
 }
 
 /// Commande shell pour synchroniser Git : fetch/pull si .git existe, sinon clone.
-/// 
+///
 /// IMPORTANT : Gère le cas du workdir non-vide sans .git (issue #2) :
 /// - Si .git existe : fetch + checkout + reset
 /// - Si .git n'existe pas mais le workdir a des fichiers : clone dans .tmp puis move
@@ -262,16 +278,27 @@ fn trim_out(s: &str) -> String {
     const MAX_TOTAL: usize = 8000;
     const HEAD_CHARS: usize = 2000;
     const TAIL_CHARS: usize = 6000;
-    
+
     if s.chars().count() <= MAX_TOTAL {
         return s.to_string();
     }
-    
+
     let head: String = s.chars().take(HEAD_CHARS).collect();
-    let tail: String = s.chars().rev().take(TAIL_CHARS).collect::<Vec<_>>()
-        .into_iter().rev().collect();
-    
-    format!("{}\n…[truncated {} chars]…\n{}", head, s.chars().count() - HEAD_CHARS - TAIL_CHARS, tail)
+    let tail: String = s
+        .chars()
+        .rev()
+        .take(TAIL_CHARS)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+
+    format!(
+        "{}\n…[truncated {} chars]…\n{}",
+        head,
+        s.chars().count() - HEAD_CHARS - TAIL_CHARS,
+        tail
+    )
 }
 
 fn pid_path(build_dir: &str) -> std::path::PathBuf {
@@ -414,7 +441,10 @@ impl DeployFacade {
     }
 
     fn image_name(project_uuid: &str) -> String {
-        format!("df-{}:latest", project_uuid.chars().take(12).collect::<String>())
+        format!(
+            "df-{}:latest",
+            project_uuid.chars().take(12).collect::<String>()
+        )
     }
 
     pub async fn run_tests(&self, project: &ProjectTestContext) -> Value {
@@ -586,7 +616,12 @@ impl DeployFacade {
         // Si aucune var : supprimer un éventuel leftover (évite mélange entre projets).
         {
             let env_path = std::path::PathBuf::from(&workdir).join(".env");
-            match req.env_file.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            match req
+                .env_file
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
                 Some(env_body) => {
                     if std::fs::write(&env_path, env_body).is_ok() {
                         logs.push_str("[env] cloned project env → .env\n");
@@ -594,10 +629,9 @@ impl DeployFacade {
                         let escaped = env_body.replace('\'', "'\\''");
                         let write_cmd = format!("printf '%s' '{escaped}' > .env");
                         match self.executor.exec(server, &workdir, &write_cmd, 30).await {
-                            Ok(r) => logs.push_str(&format!(
-                                "[env] remote clone exit={}\n",
-                                r.exit_code
-                            )),
+                            Ok(r) => {
+                                logs.push_str(&format!("[env] remote clone exit={}\n", r.exit_code))
+                            }
                             Err(e) => logs.push_str(&format!("[env] write error: {e}\n")),
                         }
                     }
@@ -652,8 +686,20 @@ impl DeployFacade {
             };
         }
 
+        let extras = ContainerExtras {
+            gpu_nvidia: req.gpu_nvidia,
+            gpu_dri: req.gpu_dri,
+            group_network: req.group_network.clone(),
+            group_alias: req.group_alias.clone(),
+        };
+
         let build_ok = match req.build_pack.as_str() {
             "dockercompose" => {
+                if extras.gpu_nvidia || extras.gpu_dri || extras.group_network.is_some() {
+                    logs.push_str(
+                        "[compose] GPU et réseau de groupe non appliqués (chemin docker compose)\n",
+                    );
+                }
                 let compose = req
                     .docker_compose_location
                     .as_deref()
@@ -709,6 +755,7 @@ impl DeployFacade {
                                 80,
                                 req.proxy_labels.as_ref(),
                                 &mut logs,
+                                &extras,
                             )
                             .await
                         } else {
@@ -726,13 +773,8 @@ impl DeployFacade {
                 let cmd = if has_df {
                     docker::docker_build(".", &image, "Dockerfile")
                 } else {
-                    logs.push_str(
-                        "[dockerfile] pas de Dockerfile — fallback Node inline\n",
-                    );
-                    docker::docker_build_from_content(
-                        &image,
-                        &docker::node_inline_dockerfile(port),
-                    )
+                    logs.push_str("[dockerfile] pas de Dockerfile — fallback Node inline\n");
+                    docker::docker_build_from_content(&image, &docker::node_inline_dockerfile(port))
                 };
                 match self.executor.exec(server, &build_dir, &cmd, 900).await {
                     Ok(r) => {
@@ -751,6 +793,7 @@ impl DeployFacade {
                                 port,
                                 req.proxy_labels.as_ref(),
                                 &mut logs,
+                                &extras,
                             )
                             .await
                         } else {
@@ -769,9 +812,8 @@ impl DeployFacade {
                 let nix = builders::nixpacks_docker_build(&image, &build_envs);
                 logs.push_str(&format!(
                     "[nixpacks-docker] image={} envs={}\n",
-                    std::env::var("DEVFORGE_NIXPACKS_IMAGE").unwrap_or_else(|_| {
-                        builders::DEFAULT_NIXPACKS_IMAGE.to_string()
-                    }),
+                    std::env::var("DEVFORGE_NIXPACKS_IMAGE")
+                        .unwrap_or_else(|_| { builders::DEFAULT_NIXPACKS_IMAGE.to_string() }),
                     build_envs
                         .iter()
                         .map(|(k, _)| k.as_str())
@@ -780,10 +822,7 @@ impl DeployFacade {
                 ));
                 match self.executor.exec(server, &build_dir, &nix, 1800).await {
                     Ok(r) if r.ok => {
-                        logs.push_str(&format!(
-                            "[nixpacks-docker] {}\n",
-                            trim_out(&r.output)
-                        ));
+                        logs.push_str(&format!("[nixpacks-docker] {}\n", trim_out(&r.output)));
                         self.docker_restart_container(
                             server,
                             &build_dir,
@@ -793,6 +832,7 @@ impl DeployFacade {
                             port,
                             req.proxy_labels.as_ref(),
                             &mut logs,
+                            &extras,
                         )
                         .await
                     }
@@ -822,6 +862,7 @@ impl DeployFacade {
                                         port,
                                         req.proxy_labels.as_ref(),
                                         &mut logs,
+                                        &extras,
                                     )
                                     .await
                                 } else {
@@ -856,6 +897,7 @@ impl DeployFacade {
                                         port,
                                         req.proxy_labels.as_ref(),
                                         &mut logs,
+                                        &extras,
                                     )
                                     .await
                                 } else {
@@ -1005,7 +1047,10 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         match probe_local_http(port).await {
             Ok(code) => {
                 logs.push_str(&format!("[local-node] probe http={code}\n"));
-                matches!(code.as_str(), "200" | "301" | "302" | "307" | "308" | "alive")
+                matches!(
+                    code.as_str(),
+                    "200" | "301" | "302" | "307" | "308" | "alive"
+                )
             }
             Err(e) => {
                 logs.push_str(&format!("[local-node] probe error: {e}\n"));
@@ -1025,6 +1070,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         container_port: u16,
         proxy_labels: Option<&serde_json::Value>,
         logs: &mut String,
+        extras: &ContainerExtras,
     ) -> bool {
         // BLUE/GREEN DEPLOY STRATEGY:
         // 1. Check if old container exists and is healthy → keep as fallback
@@ -1032,20 +1078,26 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         // 3. Wait for healthcheck (HTTP probe or running state)
         // 4. If new is healthy: stop old, rename new → production name
         // 5. If new fails: stop new, keep old running
-        
+
         let old_exists = self.container_exists(server, workdir, name).await;
         let old_is_healthy = if old_exists {
             self.container_is_healthy(server, workdir, name, logs).await
         } else {
             false
         };
-        
+
         if old_is_healthy {
-            logs.push_str(&format!("[blue-green] Ancien conteneur {} en production (healthy) — protection activée\n", name));
+            logs.push_str(&format!(
+                "[blue-green] Ancien conteneur {} en production (healthy) — protection activée\n",
+                name
+            ));
         } else if old_exists {
-            logs.push_str(&format!("[blue-green] Ancien conteneur {} existe mais pas healthy\n", name));
+            logs.push_str(&format!(
+                "[blue-green] Ancien conteneur {} existe mais pas healthy\n",
+                name
+            ));
         }
-        
+
         // Free the host port if needed (only kill containers publishing same port, not our production container yet)
         let prepare = docker::docker_prepare_run_except(name, host_port);
         match self.executor.exec(server, workdir, &prepare, 60).await {
@@ -1056,7 +1108,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             }
             Err(e) => logs.push_str(&format!("[prepare] warn: {e}\n")),
         }
-        
+
         // Vérifier `.env` via l’executor (local ou remote), pas seulement le FS local.
         let env_file = {
             let local = std::path::Path::new(&format!("{workdir}/.env")).exists();
@@ -1073,16 +1125,18 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
                 }
             }
         };
-        
+
         // Try to get network from env, then auto-detect if Traefik labels are present
         let mut network = std::env::var("DEVFORGE_DOCKER_NETWORK")
             .ok()
             .filter(|s| !s.trim().is_empty());
-        
+
         let has_traefik_labels = proxy_labels.is_some();
-        
+
         if has_traefik_labels && network.is_none() {
-            logs.push_str("[start] DEVFORGE_DOCKER_NETWORK not set, attempting auto-detection...\n");
+            logs.push_str(
+                "[start] DEVFORGE_DOCKER_NETWORK not set, attempting auto-detection...\n",
+            );
             let detect_cmd = docker::docker_detect_traefik_network();
             match self.executor.exec(server, workdir, &detect_cmd, 20).await {
                 Ok(r) if r.ok && !r.output.trim().is_empty() => {
@@ -1090,17 +1144,26 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
                     if detected == "host-network-detected" {
                         logs.push_str("[start] ✓ Detected host-network proxy\n");
                     } else {
-                        logs.push_str(&format!("[start] ✓ Detected Traefik network: {}\n", detected));
+                        logs.push_str(&format!(
+                            "[start] ✓ Detected Traefik network: {}\n",
+                            detected
+                        ));
                         network = Some(detected);
                     }
                 }
                 _ => {
                     logs.push_str("[start] Auto-detection failed, trying fallback networks...\n");
                     for candidate in ["devforge-net", "traefik-public", "traefik"] {
-                        let check = format!("docker network inspect {} >/dev/null 2>&1 && echo {}", candidate, candidate);
+                        let check = format!(
+                            "docker network inspect {} >/dev/null 2>&1 && echo {}",
+                            candidate, candidate
+                        );
                         if let Ok(r) = self.executor.exec(server, workdir, &check, 5).await {
                             if r.ok && !r.output.trim().is_empty() {
-                                logs.push_str(&format!("[start] Using fallback network: {}\n", candidate));
+                                logs.push_str(&format!(
+                                    "[start] Using fallback network: {}\n",
+                                    candidate
+                                ));
                                 network = Some(candidate.to_string());
                                 break;
                             }
@@ -1109,29 +1172,32 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
                 }
             }
         }
-        
+
         let ports = if has_traefik_labels && network.is_some() {
             vec![]
         } else {
             vec![(host_port, container_port)]
         };
-        
+
         // Start NEW container with temporary name (blue/green)
         let new_name = format!("{}-new", name);
-        
+
         // Remove any leftover -new container from previous failed deploy
         let cleanup_new = format!("docker rm -f {} 2>/dev/null || true", new_name);
         let _ = self.executor.exec(server, workdir, &cleanup_new, 10).await;
-        
+
         if has_traefik_labels {
             logs.push_str("[start] Traefik labels will be applied AFTER healthcheck (prevent Host theft #106)\n");
             if network.is_some() {
                 logs.push_str("[start] Routing via Docker network (no host port)\n");
             }
         }
-        
-        logs.push_str(&format!("[blue-green] Starting new container: {} ...\n", new_name));
-        
+
+        logs.push_str(&format!(
+            "[blue-green] Starting new container: {} ...\n",
+            new_name
+        ));
+
         // CRITICAL: Start new container WITHOUT Traefik labels first (prevent Host theft #106)
         // Labels will be applied only after healthcheck passes
         let run_no_labels = docker::docker_run_ex(
@@ -1141,11 +1207,21 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             env_file,
             network.as_deref(),
             None, // NO proxy labels yet
+            extras.gpu_nvidia,
+            extras.gpu_dri,
         );
-        
-        let new_started = match self.executor.exec(server, workdir, &run_no_labels, 120).await {
+
+        let new_started = match self
+            .executor
+            .exec(server, workdir, &run_no_labels, 120)
+            .await
+        {
             Ok(r) => {
-                logs.push_str(&format!("[start] exit={} {}\n", r.exit_code, trim_out(&r.output)));
+                logs.push_str(&format!(
+                    "[start] exit={} {}\n",
+                    r.exit_code,
+                    trim_out(&r.output)
+                ));
                 r.ok
             }
             Err(e) => {
@@ -1153,7 +1229,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
                 false
             }
         };
-        
+
         if !new_started {
             logs.push_str("[blue-green] ❌ Échec démarrage nouveau conteneur\n");
             if old_is_healthy {
@@ -1161,62 +1237,110 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             }
             return false;
         }
-        
+
+        if let Some(net) = extras.group_network.as_deref().filter(|s| !s.is_empty()) {
+            logs.push_str(&format!("[group] réseau {net}\n"));
+            let cmd = docker::docker_network_attach(net, &new_name, None);
+            match self.executor.exec(server, workdir, &cmd, 30).await {
+                Ok(r) if r.ok => logs.push_str("[group] conteneur relié au réseau du groupe\n"),
+                Ok(r) => logs.push_str(&format!("[group] warn: {}\n", trim_out(&r.output))),
+                Err(e) => logs.push_str(&format!("[group] warn: {e}\n")),
+            }
+        }
+
         // Wait for new container healthcheck
         logs.push_str("[blue-green] Attente healthcheck nouveau conteneur...\n");
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-        
-        let new_is_healthy = self.container_is_healthy(server, workdir, &new_name, logs).await;
-        
+
+        let new_is_healthy = self
+            .container_is_healthy(server, workdir, &new_name, logs)
+            .await;
+
         if !new_is_healthy {
             logs.push_str("[blue-green] ❌ Nouveau conteneur failed healthcheck\n");
-            let _ = self.executor.exec(server, workdir, &format!("docker rm -f {}", new_name), 30).await;
+            let _ = self
+                .executor
+                .exec(server, workdir, &format!("docker rm -f {}", new_name), 30)
+                .await;
             if old_is_healthy {
                 logs.push_str(&format!("[blue-green] ✅ Ancien conteneur {} reste en production (déploiement annulé, pas d'interruption)\n", name));
             }
             return false;
         }
-        
+
         logs.push_str("[blue-green] ✅ Nouveau conteneur healthy\n");
-        
+
         // NOW apply Traefik labels (only after healthcheck passed) — prevents Host theft #106
         if has_traefik_labels {
             logs.push_str("[blue-green] Application des labels Traefik au nouveau conteneur (après healthcheck)...\n");
             let update_labels = docker::docker_update_labels(&new_name, proxy_labels.unwrap());
-            match self.executor.exec(server, workdir, &update_labels, 60).await {
+            match self
+                .executor
+                .exec(server, workdir, &update_labels, 60)
+                .await
+            {
                 Ok(r) if r.ok => {
                     logs.push_str("[blue-green] ✅ Labels Traefik appliqués\n");
                 }
                 Ok(r) => {
-                    logs.push_str(&format!("[blue-green] ⚠️ Erreur application labels: {}\n", trim_out(&r.output)));
+                    logs.push_str(&format!(
+                        "[blue-green] ⚠️ Erreur application labels: {}\n",
+                        trim_out(&r.output)
+                    ));
                 }
                 Err(e) => {
-                    logs.push_str(&format!("[blue-green] ⚠️ Erreur application labels: {}\n", e));
+                    logs.push_str(&format!(
+                        "[blue-green] ⚠️ Erreur application labels: {}\n",
+                        e
+                    ));
                 }
             }
         }
-        
+
         // Cutover: stop old, rename new → production
         if old_exists {
-            logs.push_str(&format!("[blue-green] Arrêt ancien conteneur {} ...\n", name));
+            logs.push_str(&format!(
+                "[blue-green] Arrêt ancien conteneur {} ...\n",
+                name
+            ));
             let stop_old = format!("docker stop {} && docker rm -f {}", name, name);
             let _ = self.executor.exec(server, workdir, &stop_old, 30).await;
         }
-        
-        logs.push_str(&format!("[blue-green] Renommage {} → {} (production)\n", new_name, name));
+
+        logs.push_str(&format!(
+            "[blue-green] Renommage {} → {} (production)\n",
+            new_name, name
+        ));
         let rename = format!("docker rename {} {}", new_name, name);
-        let success = match self.executor.exec(server, workdir, &rename, 10).await {
+        let renamed = match self.executor.exec(server, workdir, &rename, 10).await {
             Ok(_) => {
                 logs.push_str("[blue-green] ✅ Basculement terminé (zero-downtime deploy)\n");
                 true
             }
             Err(e) => {
                 logs.push_str(&format!("[blue-green] ⚠️ Erreur renommage: {}\n", e));
-                logs.push_str(&format!("[blue-green] Conteneur {} actif mais nom temporaire\n", new_name));
-                true // Le conteneur tourne quand même
+                logs.push_str(&format!(
+                    "[blue-green] Conteneur {} actif mais nom temporaire\n",
+                    new_name
+                ));
+                false
             }
         };
-        
+        let success = true;
+        if let Some(net) = extras.group_network.as_deref().filter(|s| !s.is_empty()) {
+            let live = if renamed { name } else { new_name.as_str() };
+            let cmd = docker::docker_network_attach(net, live, extras.group_alias.as_deref());
+            match self.executor.exec(server, workdir, &cmd, 30).await {
+                Ok(r) if r.ok => logs.push_str(&format!(
+                    "[group] alias {} sur {}\n",
+                    extras.group_alias.as_deref().unwrap_or("—"),
+                    live
+                )),
+                Ok(r) => logs.push_str(&format!("[group] alias warn: {}\n", trim_out(&r.output))),
+                Err(e) => logs.push_str(&format!("[group] alias warn: {e}\n")),
+            }
+        }
+
         // CRITICAL: Ensure Traefik is still running after app deploy (fix for recurring disappearance)
         // Traefik can be stopped/removed as a side effect of network operations or container recreation.
         // Always verify and restart Traefik at the end of each successful deploy.
@@ -1232,30 +1356,46 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
                     // Note: ensure_traefik sera appelé par ProxyFacade après ce deploy via callbacks
                 }
                 Ok(r) => {
-                    logs.push_str(&format!("[post-deploy] ⚠️ Traefik état: {} — vérification requise\n", r.output.trim()));
+                    logs.push_str(&format!(
+                        "[post-deploy] ⚠️ Traefik état: {} — vérification requise\n",
+                        r.output.trim()
+                    ));
                 }
                 Err(e) => {
-                    logs.push_str(&format!("[post-deploy] ⚠️ Échec vérification Traefik: {}\n", e));
+                    logs.push_str(&format!(
+                        "[post-deploy] ⚠️ Échec vérification Traefik: {}\n",
+                        e
+                    ));
                 }
             }
         }
-        
+
         success
     }
-    
+
     async fn container_exists(&self, server: &str, workdir: &str, name: &str) -> bool {
-        let cmd = format!("docker ps -a --filter name=^{}$ --format '{{{{.ID}}}}'", name);
-        self.executor.exec(server, workdir, &cmd, 10)
+        let cmd = format!(
+            "docker ps -a --filter name=^{}$ --format '{{{{.ID}}}}'",
+            name
+        );
+        self.executor
+            .exec(server, workdir, &cmd, 10)
             .await
             .ok()
             .map(|r| r.ok && !r.output.trim().is_empty())
             .unwrap_or(false)
     }
-    
-    async fn container_is_healthy(&self, server: &str, workdir: &str, name: &str, logs: &mut String) -> bool {
+
+    async fn container_is_healthy(
+        &self,
+        server: &str,
+        workdir: &str,
+        name: &str,
+        logs: &mut String,
+    ) -> bool {
         let status_cmd = format!("docker inspect {} --format '{{{{.State.Status}}}}'", name);
         let status = self.executor.exec(server, workdir, &status_cmd, 10).await;
-        
+
         match status {
             Ok(r) if r.ok => {
                 let state = r.output.trim();
@@ -1263,12 +1403,12 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
                 if state != "running" {
                     return false;
                 }
-                
+
                 // Simple running check is enough for now
                 // Future: add HTTP probe on container_port if available
                 true
             }
-            _ => false
+            _ => false,
         }
     }
 
@@ -1311,7 +1451,11 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
                 let healthy = r.ok && !msg.is_empty() && !msg.to_lowercase().contains("exited");
                 DeployStatus {
                     project_uuid: project.project_uuid.clone(),
-                    phase: if healthy { "running".into() } else { "stopped".into() },
+                    phase: if healthy {
+                        "running".into()
+                    } else {
+                        "stopped".into()
+                    },
                     healthy,
                     message: if msg.is_empty() {
                         "aucun conteneur".into()
@@ -1374,12 +1518,12 @@ mod tests {
     fn trim_out_preserves_head_and_tail() {
         let long = format!("{}MIDDLE{}", "A".repeat(2000), "Z".repeat(6000));
         let result = trim_out(&long);
-        
+
         assert!(result.starts_with("AAAA"));
         assert!(result.ends_with("ZZZZ"));
         assert!(result.contains("…[truncated"));
         assert!(result.contains("chars]…"));
-        
+
         let truncated_msg_count = result.matches("…[truncated").count();
         assert_eq!(truncated_msg_count, 1);
     }
@@ -1390,9 +1534,9 @@ mod tests {
         let middle = "M".repeat(5000);
         let tail = "Z".repeat(6000);
         let full = format!("{}{}{}", head, middle, tail);
-        
+
         let result = trim_out(&full);
-        
+
         assert!(result.contains("5000 chars"));
     }
 

@@ -84,7 +84,7 @@ pub fn build_core_registry(
     store: Arc<dyn ProjectStore>,
     mcp: Arc<McpFacade>,
     env: Arc<EnvFacade>,
-    pool: Arc<sqlx::SqlitePool>,
+    pool: Arc<sqlx::PgPool>,
 ) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     registry.register(Arc::new(ListProjectsTool {
@@ -297,7 +297,25 @@ impl AgentRunner {
         ctx: AgentChatContext,
         progress: Option<AgentProgressTx>,
     ) -> Result<AgentReply> {
-        let provider = self.provider_mode().await;
+        self.handle_with_provider(message, force_tool, force_args, ctx, progress, None)
+            .await
+    }
+
+    /// Tour d’agent avec le LLM du compte (évite de partager la chaîne globale).
+    pub async fn handle_with_provider(
+        &self,
+        message: &str,
+        force_tool: Option<&str>,
+        force_args: Option<Value>,
+        ctx: AgentChatContext,
+        progress: Option<AgentProgressTx>,
+        llm: Option<(Arc<dyn LlmProvider>, String)>,
+    ) -> Result<AgentReply> {
+        let provider = if let Some((_, mode)) = &llm {
+            mode.clone()
+        } else {
+            self.provider_mode().await
+        };
         if let Some(tool) = force_tool.filter(|t| !t.is_empty()) {
             emit(
                 &progress,
@@ -319,7 +337,7 @@ impl AgentRunner {
                 provider,
             });
         }
-        self.run_loop(message, ctx, progress).await
+        self.run_loop(message, ctx, progress, llm).await
     }
 
     async fn run_loop(
@@ -327,6 +345,7 @@ impl AgentRunner {
         message: &str,
         ctx: AgentChatContext,
         progress: Option<AgentProgressTx>,
+        llm_override: Option<(Arc<dyn LlmProvider>, String)>,
     ) -> Result<AgentReply> {
         let mut messages = vec![ChatMessage::system(system_prompt(&ctx, message))];
         if let Some(brief) = &ctx.project_brief {
@@ -345,7 +364,9 @@ impl AgentRunner {
         messages.push(ChatMessage::user(message));
         let tools = self.registry.definitions();
         let mut records = Vec::new();
-        let (llm, provider) = {
+        let (llm, provider) = if let Some(pair) = llm_override {
+            pair
+        } else {
             let g = self.llm.read().await;
             (g.0.clone(), g.1.clone())
         };

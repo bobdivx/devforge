@@ -26,12 +26,12 @@ pub struct ProvisionProjectResult {
 }
 
 pub async fn load_project_oidc_client(
-    pool: &sqlx::SqlitePool,
+    pool: &sqlx::PgPool,
     project_uuid: &str,
 ) -> Option<ProjectOidcClient> {
     sqlx::query_as::<_, ProjectOidcClient>(
         "SELECT project_uuid, client_id, client_secret, created_at, updated_at 
-         FROM project_oidc_clients WHERE project_uuid = ?",
+         FROM project_oidc_clients WHERE project_uuid = $1",
     )
     .bind(project_uuid)
     .fetch_optional(pool)
@@ -53,7 +53,7 @@ pub fn derive_client_id(project_slug: &str) -> String {
 /// Inclut les variantes hostname (*.briseteia.me legacy, www.) pour couvrir les routes Traefik.
 pub fn project_callback_urls(project: &Project) -> Vec<String> {
     let mut urls = Vec::new();
-    
+
     if let Some(prod_url) = project.production_url.as_deref() {
         let origin = normalize_origin(prod_url);
         if !origin.is_empty() {
@@ -68,13 +68,16 @@ pub fn project_callback_urls(project: &Project) -> Vec<String> {
             }
         }
     }
-    
+
     urls
 }
 
 /// Origine de la preview atelier : `https://dev-{8 premiers caractères uuid}.{wildcard}`.
 pub fn preview_origin(project_uuid: &str, wildcard_domain: &str) -> Option<String> {
-    let domain = wildcard_domain.trim().trim_start_matches('.').to_lowercase();
+    let domain = wildcard_domain
+        .trim()
+        .trim_start_matches('.')
+        .to_lowercase();
     if domain.is_empty() || project_uuid.len() < 8 {
         return None;
     }
@@ -96,24 +99,12 @@ pub fn preview_callback_urls(project_uuid: &str, wildcard_domain: &str) -> Vec<S
     ]
 }
 
-async fn wildcard_domain(pool: &sqlx::SqlitePool) -> Option<String> {
-    let row: (String,) = sqlx::query_as("SELECT wildcard_domain FROM instance_settings WHERE id = 1")
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten()?;
-    let domain = row.0.trim().trim_start_matches('.').to_lowercase();
-    if domain.is_empty() {
-        None
-    } else {
-        Some(domain)
-    }
-}
-
 /// Callbacks production + preview atelier.
-pub async fn all_callback_urls(pool: &sqlx::SqlitePool, project: &Project) -> Vec<String> {
+pub async fn all_callback_urls(pool: &sqlx::PgPool, project: &Project) -> Vec<String> {
     let mut urls = project_callback_urls(project);
-    if let Some(domain) = wildcard_domain(pool).await {
+    let domain =
+        crate::user_prefs::effective_wildcard_for_workspace(pool, &project.workspace_uuid).await;
+    if !domain.is_empty() {
         urls.extend(preview_callback_urls(&project.uuid, &domain));
     }
     urls
@@ -123,7 +114,7 @@ pub async fn all_callback_urls(pool: &sqlx::SqlitePool, project: &Project) -> Ve
 /// `refresh_callbacks` force la mise à jour des URLs (deploy, changement d'URL).
 /// Retourne true si un appel Pocket ID a eu lieu.
 pub async fn sync_project_oidc_client(
-    pool: &sqlx::SqlitePool,
+    pool: &sqlx::PgPool,
     project: &Project,
     refresh_callbacks: bool,
 ) -> Result<bool, String> {
@@ -147,7 +138,7 @@ pub async fn sync_project_oidc_client(
 /// Dérive les origines alternatives pour callbacks OIDC (legacy *.briseteia.me, www.).
 fn derive_callback_origins(origin: &str) -> Vec<String> {
     let mut origins = vec![origin.to_string()];
-    
+
     if let Some(host) = extract_host(origin) {
         // Si *.jeser.app → ajouter *.briseteia.me legacy
         if host.ends_with(".jeser.app") {
@@ -156,7 +147,7 @@ fn derive_callback_origins(origin: &str) -> Vec<String> {
                 origins.push(legacy);
             }
         }
-        
+
         // Si domaine apex (pas de sous-domaine sauf www) → ajouter variante www.
         if !host.starts_with("www.") && is_apex_domain(&host) {
             let with_www = origin.replace(&format!("://{}", host), &format!("://www.{}", host));
@@ -172,7 +163,7 @@ fn derive_callback_origins(origin: &str) -> Vec<String> {
             }
         }
     }
-    
+
     origins
 }
 
@@ -194,7 +185,7 @@ fn normalize_origin(url: &str) -> String {
     if raw.is_empty() {
         return String::new();
     }
-    
+
     let (scheme, rest) = if let Some(r) = raw.strip_prefix("https://") {
         ("https", r)
     } else if let Some(r) = raw.strip_prefix("http://") {
@@ -202,7 +193,7 @@ fn normalize_origin(url: &str) -> String {
     } else {
         ("https", raw)
     };
-    
+
     let hostport = rest
         .split('/')
         .next()
@@ -211,29 +202,29 @@ fn normalize_origin(url: &str) -> String {
         .next()
         .unwrap_or("")
         .trim();
-    
+
     if hostport.is_empty() {
         return String::new();
     }
-    
+
     format!("{}://{}", scheme, hostport)
 }
 
 /// Provisionne ou met à jour le client OIDC dédié pour ce projet.
 pub async fn provision_project_oidc_client(
-    pool: &sqlx::SqlitePool,
+    pool: &sqlx::PgPool,
     project: &Project,
     force_new_secret: bool,
 ) -> Result<ProvisionProjectResult, pocket_id::PocketIdError> {
     let settings = load_sso_settings(pool).await;
-    
+
     if !settings.is_pocket_id() {
         return Err(pocket_id::PocketIdError {
             message: "Le provider OIDC doit être pocket_id".into(),
             status: None,
         });
     }
-    
+
     let issuer = settings.issuer();
     if issuer.is_empty() {
         return Err(pocket_id::PocketIdError {
@@ -241,7 +232,7 @@ pub async fn provision_project_oidc_client(
             status: None,
         });
     }
-    
+
     let api_token = settings.sso_pocket_id_api_token.trim();
     if api_token.is_empty() {
         return Err(pocket_id::PocketIdError {
@@ -249,24 +240,28 @@ pub async fn provision_project_oidc_client(
             status: None,
         });
     }
-    
+
     let client_id = derive_client_id(&project.slug);
     let callbacks = all_callback_urls(pool, project).await;
-    
+
     if callbacks.is_empty() {
         return Err(pocket_id::PocketIdError {
-            message: "URL de production ou domaine wildcard requis pour générer les callbacks".into(),
+            message: "URL de production ou domaine wildcard requis pour générer les callbacks"
+                .into(),
             status: None,
         });
     }
-    
+
     let existing_client = load_project_oidc_client(pool, &project.uuid).await;
     let need_secret = force_new_secret || existing_client.is_none();
-    
+
     let production_origin = normalize_origin(project.production_url.as_deref().unwrap_or(""));
-    let preview = match wildcard_domain(pool).await {
-        Some(domain) => preview_origin(&project.uuid, &domain).unwrap_or_default(),
-        None => String::new(),
+    let domain =
+        crate::user_prefs::effective_wildcard_for_workspace(pool, &project.workspace_uuid).await;
+    let preview = if domain.is_empty() {
+        String::new()
+    } else {
+        preview_origin(&project.uuid, &domain).unwrap_or_default()
     };
     let launch_owned = if !production_origin.is_empty() {
         production_origin.clone()
@@ -278,7 +273,7 @@ pub async fn provision_project_oidc_client(
     } else {
         Some(launch_owned.as_str())
     };
-    
+
     let logo = if !production_origin.is_empty() {
         Some(format!("{}/favicon.ico", production_origin))
     } else {
@@ -291,10 +286,10 @@ pub async fn provision_project_oidc_client(
         email_logo_url: logo.clone(),
         default_profile_picture_url: logo,
     };
-    
+
     let client_name = &project.name;
     let client_description = format!("OIDC client for {}", project.name);
-    
+
     let result = pocket_id::provision_oidc_client(
         issuer,
         api_token,
@@ -308,7 +303,7 @@ pub async fn provision_project_oidc_client(
         existing_client.is_none(),
     )
     .await?;
-    
+
     let client_secret = if let Some(secret) = result.client_secret {
         secret
     } else if let Some(existing) = existing_client {
@@ -319,13 +314,13 @@ pub async fn provision_project_oidc_client(
             status: None,
         });
     };
-    
+
     let now = Utc::now().to_rfc3339();
-    
+
     sqlx::query(
         r#"INSERT INTO project_oidc_clients 
            (project_uuid, client_id, client_secret, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?)
+           VALUES ($1, $2, $3, $4, $5)
            ON CONFLICT(project_uuid) DO UPDATE SET
              client_id = excluded.client_id,
              client_secret = excluded.client_secret,
@@ -342,7 +337,7 @@ pub async fn provision_project_oidc_client(
         message: format!("Erreur DB: {}", e),
         status: None,
     })?;
-    
+
     Ok(ProvisionProjectResult {
         client_id: result.client_id,
         created_client: result.created_client,
@@ -350,7 +345,6 @@ pub async fn provision_project_oidc_client(
         callbacks,
     })
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -401,6 +395,8 @@ mod tests {
             base_directory: "/".into(),
             docker_compose_location: None,
             auto_deploy: 1,
+            gpu_nvidia: 0,
+            gpu_dri: 0,
             created_at: "".into(),
             updated_at: "".into(),
         };
@@ -413,9 +409,8 @@ mod tests {
     #[test]
     fn test_preview_callback_urls() {
         let urls = preview_callback_urls("abcdef12-3456-7890", "apps.example.com");
-        assert!(urls.contains(
-            &"https://dev-abcdef12.apps.example.com/api/auth/callback/pocket-id".into()
-        ));
+        assert!(urls
+            .contains(&"https://dev-abcdef12.apps.example.com/api/auth/callback/pocket-id".into()));
         assert!(preview_callback_urls("short", "apps.example.com").is_empty());
         assert!(preview_origin("abcdef12-3456", "").is_none());
     }
@@ -447,9 +442,18 @@ mod tests {
     #[test]
     fn test_extract_host() {
         assert_eq!(extract_host("https://example.com"), Some("example.com"));
-        assert_eq!(extract_host("https://sub.example.com"), Some("sub.example.com"));
-        assert_eq!(extract_host("https://example.com/path"), Some("example.com"));
-        assert_eq!(extract_host("http://localhost:3000"), Some("localhost:3000"));
+        assert_eq!(
+            extract_host("https://sub.example.com"),
+            Some("sub.example.com")
+        );
+        assert_eq!(
+            extract_host("https://example.com/path"),
+            Some("example.com")
+        );
+        assert_eq!(
+            extract_host("http://localhost:3000"),
+            Some("localhost:3000")
+        );
     }
 
     #[test]

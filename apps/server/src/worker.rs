@@ -17,7 +17,25 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tower_http::services::{ServeDir, ServeFile};
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use crate::state::AppState;
+
+fn spawn_standby_sync(host: String, port: u16, password: String) {
+    static BUSY: AtomicBool = AtomicBool::new(false);
+    if BUSY
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return;
+    }
+    tokio::spawn(async move {
+        if let Err(e) = crate::control_pg::ensure_standby(&host, port, &password).await {
+            tracing::warn!(error = %e, "réplique control plane");
+        }
+        BUSY.store(false, Ordering::Release);
+    });
+}
 
 pub async fn consume_pending_join(state: &AppState) -> Result<(), Box<dyn std::error::Error>> {
     let local = state.cluster.local().await?;
@@ -361,9 +379,8 @@ pub fn with_static_fallback(mut app: Router) -> Router {
     if let Some(root) = crate::paths::web_dir() {
         let index = root.join("index.html");
         if index.is_file() {
-            app = app.fallback_service(
-                ServeDir::new(&root).not_found_service(ServeFile::new(index)),
-            );
+            app =
+                app.fallback_service(ServeDir::new(&root).not_found_service(ServeFile::new(index)));
         } else {
             app = app.fallback_service(ServeDir::new(&root));
         }
@@ -398,6 +415,9 @@ pub async fn apply_promote_flag(state: &AppState) {
         tracing::error!(error = %e, "échec promotion intérim");
         return;
     }
+    if let Ok(json) = serde_json::to_string_pretty(&local) {
+        let _ = tokio::fs::write(devforge_cluster::failover_identity_path(), json).await;
+    }
     let _ = tokio::fs::remove_file(&flag).await;
     tracing::warn!(node = %local.node_id, "leader intérimaire — en attendant le leader d’origine");
 }
@@ -424,6 +444,9 @@ pub async fn apply_reclaim_flag(state: &AppState) {
     if let Err(e) = state.cluster.set_local(&ident).await {
         tracing::error!(error = %e, "échec restauration identité leader d’origine");
         return;
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&ident) {
+        let _ = tokio::fs::write(devforge_cluster::failover_identity_path(), json).await;
     }
     let _ = tokio::fs::remove_file(&flag).await;
     tracing::info!(node = %ident.node_id, "leader d’origine repris après intérim");
@@ -461,14 +484,25 @@ fn spawn_worker_loop(state: AppState) {
                     let need_snap = ack.generation > local.snapshot_generation
                         || last_snap.elapsed() > std::time::Duration::from_secs(60);
                     persist_ack(&state, &local, &ack).await;
-                    if need_snap {
+                    if !ack.repl_host.is_empty()
+                        && ack.repl_port > 0
+                        && !ack.repl_password.is_empty()
+                    {
+                        spawn_standby_sync(
+                            ack.repl_host.clone(),
+                            ack.repl_port,
+                            ack.repl_password.clone(),
+                        );
+                    }
+                    if need_snap && !crate::control_pg::standby_streaming().await {
                         let secret = if ack.failover_secret.is_empty() {
                             local.node_secret.clone()
                         } else {
                             ack.failover_secret.clone()
                         };
                         if let Ok(bytes) = client.fetch_snapshot(&secret).await {
-                            if bytes.len() >= 100 && bytes.starts_with(b"SQLite format 3\0") {
+                            if bytes.len() >= 100 && crate::control_pg::snapshot_is_postgres(&bytes)
+                            {
                                 let dest = devforge_cluster::snapshot_path();
                                 if let Some(parent) = dest.parent() {
                                     let _ = tokio::fs::create_dir_all(parent).await;
@@ -506,7 +540,11 @@ fn spawn_worker_loop(state: AppState) {
     });
 }
 
-async fn persist_ack(state: &AppState, local: &LocalClusterState, ack: &devforge_cluster::HeartbeatAck) {
+async fn persist_ack(
+    state: &AppState,
+    local: &LocalClusterState,
+    ack: &devforge_cluster::HeartbeatAck,
+) {
     let mut n = local.clone();
     if !ack.preferred_leader_id.is_empty() {
         n.preferred_leader_id = ack.preferred_leader_id.clone();
@@ -559,11 +597,18 @@ async fn try_elect(state: &AppState, local: &LocalClusterState) {
     if !devforge_cluster::i_am_failover_winner(&local.node_id, &roster) {
         return;
     }
+    let standby = crate::control_pg::standby_streaming().await;
     let snap = devforge_cluster::snapshot_path();
-    if !snap.is_file() {
-        tracing::warn!("élection gagnée mais pas de snapshot SQLite — impossible de promouvoir");
+    let mode = if standby {
+        "standby"
+    } else if snap.is_file() {
+        "snapshot"
+    } else {
+        tracing::warn!(
+            "élection gagnée mais ni réplique ni snapshot Postgres — impossible de promouvoir"
+        );
         return;
-    }
+    };
     if let Ok(json) = serde_json::to_string_pretty(local) {
         if let Err(e) = tokio::fs::write(devforge_cluster::failover_identity_path(), json).await {
             tracing::error!(error = %e, "écriture identité failover");
@@ -572,12 +617,14 @@ async fn try_elect(state: &AppState, local: &LocalClusterState) {
     } else {
         return;
     }
-    let pending = format!("{}.pending-restore", state.db_path.display());
-    if let Err(e) = tokio::fs::copy(&snap, &pending).await {
-        tracing::error!(error = %e, "copie snapshot failover");
-        return;
+    if mode == "snapshot" {
+        let pending = format!("{}.pending-restore", state.db_path.display());
+        if let Err(e) = tokio::fs::copy(&snap, &pending).await {
+            tracing::error!(error = %e, "copie snapshot failover");
+            return;
+        }
     }
-    if let Err(e) = tokio::fs::write(devforge_cluster::promote_flag_path(), "1").await {
+    if let Err(e) = tokio::fs::write(devforge_cluster::promote_flag_path(), mode).await {
         tracing::error!(error = %e, "écriture flag promotion");
         return;
     }
@@ -634,18 +681,46 @@ pub async fn maybe_reclaim_preferred(state: &AppState) {
         } else {
             local.failover_secret.clone()
         };
-        let Ok(bytes) = c.fetch_snapshot(&secret).await else {
-            tracing::error!(interim = %n.id, "snapshot intérim injoignable — pas de démotion");
-            continue;
+        let cloned = match c.failover_quiesce(&secret).await {
+            Ok(q) if !q.repl_host.is_empty() && q.repl_port > 0 => {
+                match crate::control_pg::stage_clone_from(
+                    &q.repl_host,
+                    q.repl_port,
+                    &q.repl_password,
+                )
+                .await
+                {
+                    Ok(()) => crate::control_pg::arm_staged_clone().is_ok(),
+                    Err(e) => {
+                        tracing::error!(error = %e, interim = %n.id, "copie physique de l’intérim impossible");
+                        let _ = c.failover_resume(&secret).await;
+                        false
+                    }
+                }
+            }
+            Ok(_) => {
+                let _ = c.failover_resume(&secret).await;
+                false
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "quiesce intérim indisponible, repli sur le dump");
+                false
+            }
         };
-        if bytes.len() < 100 || !bytes.starts_with(b"SQLite format 3\0") {
-            tracing::error!(interim = %n.id, "snapshot intérim invalide — pas de démotion");
-            continue;
-        }
-        let pending = format!("{}.pending-restore", state.db_path.display());
-        if let Err(e) = tokio::fs::write(&pending, &bytes).await {
-            tracing::error!(error = %e, "écriture pending-restore");
-            continue;
+        if !cloned {
+            let Ok(bytes) = c.fetch_snapshot(&secret).await else {
+                tracing::error!(interim = %n.id, "snapshot intérim injoignable — pas de démotion");
+                continue;
+            };
+            if !crate::control_pg::snapshot_is_postgres(&bytes) {
+                tracing::error!(interim = %n.id, "snapshot intérim invalide — pas de démotion");
+                continue;
+            }
+            let pending = format!("{}.pending-restore", state.db_path.display());
+            if let Err(e) = tokio::fs::write(&pending, &bytes).await {
+                tracing::error!(error = %e, "écriture pending-restore");
+                continue;
+            }
         }
         let mut resumed = fenced.clone();
         resumed.writes_fenced = false;

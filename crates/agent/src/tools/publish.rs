@@ -3,7 +3,7 @@ use devforge_deploy::DeployFacade;
 use devforge_github::GitHubFacade;
 use devforge_shared::{Result, Tool};
 use serde_json::{json, Value};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -12,7 +12,7 @@ use std::sync::Arc;
 pub struct PublishToGitHubTool {
     pub github: Arc<GitHubFacade>,
     pub deploy: Arc<DeployFacade>,
-    pub pool: Arc<SqlitePool>,
+    pub pool: Arc<PgPool>,
 }
 
 #[async_trait]
@@ -101,7 +101,7 @@ impl Tool for PublishToGitHubTool {
 
         // Vérifier que le projet existe
         let project: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT uuid, workdir, git_repository FROM projects WHERE uuid = ?",
+            "SELECT uuid, workdir, git_repository FROM projects WHERE uuid = $1",
         )
         .bind(project_uuid)
         .fetch_optional(self.pool.as_ref())
@@ -207,7 +207,7 @@ impl Tool for PublishToGitHubTool {
         // Attacher le dépôt au projet
         let git_url = format!("{html_url}.git");
         sqlx::query(
-            "UPDATE projects SET git_repository = ?, git_branch = 'main' WHERE uuid = ?",
+            "UPDATE projects SET git_repository = $1, git_branch = 'main' WHERE uuid = $2",
         )
         .bind(&git_url)
         .bind(&uuid)

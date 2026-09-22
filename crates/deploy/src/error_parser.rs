@@ -46,7 +46,8 @@ pub fn parse_deploy_error_fr(logs: &str) -> Option<DeployError> {
     // Dockerfile RUN exit code != 0
     if (logs_lower.contains("dockerfile") || logs_lower.contains("docker build"))
         && (logs_lower.contains("error") && logs_lower.contains("run")
-            || logs_lower.contains("the command") && logs_lower.contains("returned a non-zero code")
+            || logs_lower.contains("the command")
+                && logs_lower.contains("returned a non-zero code")
             || logs_lower.contains("exited with code"))
     {
         return Some(DeployError {

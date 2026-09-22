@@ -502,6 +502,24 @@ pub fn client_from_token(token: &str) -> (Arc<dyn GitHubClient>, &'static str) {
     (Arc::new(HttpGitHubClient::new(t)), "http")
 }
 
+tokio::task_local! {
+    static TOKEN_OVERRIDE: String;
+}
+
+/// Exécute `fut` avec le token GitHub du compte courant.
+/// Les appels `GitHubFacade` sur cette tâche utilisent ce token à la place du client d’instance.
+pub async fn with_token<F, T>(token: &str, fut: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    TOKEN_OVERRIDE.scope(token.trim().to_string(), fut).await
+}
+
+/// `Some` dès qu’un override est posé, y compris une chaîne vide (pas de token → client off).
+fn token_override() -> Option<String> {
+    TOKEN_OVERRIDE.try_with(|t| t.clone()).ok()
+}
+
 /// Hot-swappable facade — token sauvé en DB peut recharger le client sans restart.
 pub struct GitHubFacade {
     client: RwLock<Arc<dyn GitHubClient>>,
@@ -520,6 +538,9 @@ impl GitHubFacade {
     }
 
     pub fn mode(&self) -> String {
+        if let Some(token) = token_override() {
+            return if token.is_empty() { "off".into() } else { "http".into() };
+        }
         self.mode.read().map(|m| m.clone()).unwrap_or_else(|_| "off".into())
     }
 
@@ -539,6 +560,9 @@ impl GitHubFacade {
     }
 
     pub fn instance_token(&self) -> Option<String> {
+        if let Some(token) = token_override() {
+            return if token.is_empty() { None } else { Some(token) };
+        }
         self.token
             .read()
             .ok()
@@ -546,6 +570,12 @@ impl GitHubFacade {
     }
 
     fn client(&self) -> Arc<dyn GitHubClient> {
+        if let Some(token) = token_override() {
+            if token.is_empty() {
+                return Arc::new(StubGitHubClient);
+            }
+            return Arc::new(HttpGitHubClient::new(token));
+        }
         self.client
             .read()
             .map(|c| c.clone())

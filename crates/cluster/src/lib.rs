@@ -13,7 +13,7 @@ mod store;
 pub use client::{
     clear_pending_join, data_dir, failover_identity_path, load_pending_join, normalize_api_base,
     pending_join_path, promote_flag_path, reclaim_flag_path, restart_current_process, roster_path,
-    snapshot_path, write_pending_join_sync, LeaderClient,
+    snapshot_acceptable, snapshot_path, write_pending_join_sync, LeaderClient,
 };
 pub use crypto::{
     extract_join_token, format_join_code, hash_secret, new_join_token, new_node_id, new_node_secret,

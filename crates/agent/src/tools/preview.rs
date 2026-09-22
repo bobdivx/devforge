@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use devforge_deploy::docker::dev_container_name;
 use devforge_shared::{Result, Tool};
 use serde_json::{json, Value};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -10,17 +10,17 @@ use std::time::Duration;
 
 /// Tool pour démarrer un serveur de développement local (preview workdir).
 pub struct StartLocalPreviewTool {
-    pub pool: Arc<SqlitePool>,
+    pub pool: Arc<PgPool>,
 }
 
 /// Arrête le serveur de dev atelier (process local, pas de conteneur df-dev-*).
 pub struct StopLocalPreviewTool {
-    pub pool: Arc<SqlitePool>,
+    pub pool: Arc<PgPool>,
 }
 
 /// État du serveur de dev atelier (port, pid, URL).
 pub struct LocalPreviewStatusTool {
-    pub pool: Arc<SqlitePool>,
+    pub pool: Arc<PgPool>,
 }
 
 /// Plage dédiée aux ateliers. Un port stable par projet, puis le suivant s’il est pris.
@@ -431,7 +431,7 @@ impl Tool for LocalPreviewStatusTool {
 }
 
 async fn resolve_preview_context(
-    pool: &SqlitePool,
+    pool: &PgPool,
     arguments: &Value,
 ) -> Result<PreviewContext> {
     let project_uuid = arguments
@@ -446,7 +446,7 @@ async fn resolve_preview_context(
     }
 
     let project: Option<(String, Option<String>, i64, String)> = sqlx::query_as(
-        "SELECT uuid, workdir, port, name FROM projects WHERE uuid = ?",
+        "SELECT uuid, workdir, port, name FROM projects WHERE uuid = $1",
     )
     .bind(project_uuid)
     .fetch_optional(pool)
@@ -462,7 +462,7 @@ async fn resolve_preview_context(
     let mut workdir_raw = workdir_opt.as_deref().unwrap_or("").trim().to_string();
     if workdir_raw.is_empty() {
         workdir_raw = format!("/data/devforge/applications/{uuid}");
-        let _ = sqlx::query("UPDATE projects SET workdir = ?, updated_at = datetime('now') WHERE uuid = ?")
+        let _ = sqlx::query("UPDATE projects SET workdir = $1, updated_at = to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') WHERE uuid = $2")
             .bind(&workdir_raw)
             .bind(&uuid)
             .execute(pool)
@@ -498,7 +498,7 @@ async fn resolve_preview_context(
     })
 }
 
-async fn resolve_dev_url(pool: &SqlitePool, project_uuid: &str) -> Result<Option<String>> {
+async fn resolve_dev_url(pool: &PgPool, project_uuid: &str) -> Result<Option<String>> {
     let domain: Option<(String,)> =
         sqlx::query_as("SELECT wildcard_domain FROM instance_settings WHERE id = 1")
             .fetch_optional(pool)
@@ -1140,9 +1140,9 @@ fn project_env_for_preview(vars: &[(String, String)]) -> Vec<(String, String)> {
         .collect()
 }
 
-async fn load_project_env_vars(pool: &SqlitePool, project_uuid: &str) -> Vec<(String, String)> {
+async fn load_project_env_vars(pool: &PgPool, project_uuid: &str) -> Vec<(String, String)> {
     sqlx::query_as(
-        "SELECT key, value FROM project_env_vars WHERE project_uuid = ? ORDER BY key",
+        "SELECT key, value FROM project_env_vars WHERE project_uuid = $1 ORDER BY key",
     )
     .bind(project_uuid)
     .fetch_all(pool)

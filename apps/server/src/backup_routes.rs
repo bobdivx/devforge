@@ -26,13 +26,17 @@ pub fn router() -> Router<AppState> {
             "/api/v1/settings/backup-auto",
             get(get_backup_auto).put(put_backup_auto),
         )
+        .route("/api/v1/settings/postgres", get(get_postgres_status))
         .route(
             "/api/v1/instance/backups",
             get(list_instance_backups).post(create_instance_backup),
         )
         .route("/api/v1/instance/backups/local", get(list_local_backups))
         .route("/api/v1/instance/backups/remote", post(list_remote_backups))
-        .route("/api/v1/instance/backups/restore", post(restore_instance_backup))
+        .route(
+            "/api/v1/instance/backups/restore",
+            post(restore_instance_backup),
+        )
 }
 
 async fn require_admin(
@@ -81,7 +85,7 @@ impl S3Row {
     }
 }
 
-pub async fn load_s3_config(pool: &sqlx::SqlitePool) -> S3Config {
+pub async fn load_s3_config(pool: &sqlx::PgPool) -> S3Config {
     let row: Option<S3Row> = sqlx::query_as(
         r#"SELECT backup_s3_enabled, backup_s3_name, backup_s3_key, backup_s3_secret,
                   backup_s3_bucket, backup_s3_region, backup_s3_endpoint
@@ -185,14 +189,14 @@ async fn put_backup_s3(
     let now = Utc::now().to_rfc3339();
     sqlx::query(
         r#"UPDATE instance_settings SET
-            backup_s3_enabled = ?,
-            backup_s3_name = ?,
-            backup_s3_key = ?,
-            backup_s3_secret = ?,
-            backup_s3_bucket = ?,
-            backup_s3_region = ?,
-            backup_s3_endpoint = ?,
-            updated_at = ?
+            backup_s3_enabled = $1,
+            backup_s3_name = $2,
+            backup_s3_key = $3,
+            backup_s3_secret = $4,
+            backup_s3_bucket = $5,
+            backup_s3_region = $6,
+            backup_s3_endpoint = $7,
+            updated_at = $8
          WHERE id = 1"#,
     )
     .bind(if cfg.enabled { 1 } else { 0 })
@@ -312,8 +316,9 @@ async fn create_instance_backup(
     headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     require_admin(&state, &headers).await?;
+    let bytes = crate::control_pg::dump_snapshot().await.map_err(err_map)?;
     let svc = InstanceBackupService::new(state.storage.clone(), state.db_path.clone());
-    let result = svc.create().await.map_err(err_map)?;
+    let result = svc.create_from_bytes(bytes).await.map_err(err_map)?;
     if let Some(backup) = result.get("backup") {
         let id = backup
             .get("id")
@@ -327,16 +332,13 @@ async fn create_instance_backup(
             .get("size_bytes")
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as i64;
-        let message = backup
-            .get("message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let message = backup.get("message").and_then(|v| v.as_str()).unwrap_or("");
         let created = backup
             .get("created_at")
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let _ = sqlx::query(
-            "INSERT INTO instance_backups (id, storage_key, size_bytes, status, message, created_at) VALUES (?, ?, ?, 'completed', ?, ?)",
+            "INSERT INTO instance_backups (id, storage_key, size_bytes, status, message, created_at) VALUES ($1, $2, $3, 'completed', $4, $5)",
         )
         .bind(id)
         .bind(key)
@@ -374,9 +376,7 @@ async fn list_remote_backups(
             key: body.key.unwrap_or_default(),
             secret: body.secret.unwrap_or_default(),
             bucket: body.bucket.unwrap_or_default(),
-            region: body
-                .region
-                .unwrap_or_else(|| "fr-par".into()),
+            region: body.region.unwrap_or_else(|| "fr-par".into()),
             endpoint: body.endpoint.unwrap_or_default(),
         })
     } else {
@@ -413,9 +413,7 @@ async fn restore_instance_backup(
             key: body.key.unwrap_or_default(),
             secret: body.secret.unwrap_or_default(),
             bucket: body.bucket.unwrap_or_default(),
-            region: body
-                .region
-                .unwrap_or_else(|| "fr-par".into()),
+            region: body.region.unwrap_or_else(|| "fr-par".into()),
             endpoint: body.endpoint.unwrap_or_default(),
         })
     } else {
@@ -438,6 +436,17 @@ async fn list_local_backups(
     Ok(Json(json!({
         "ok": true,
         "backups": backups,
+    })))
+}
+
+async fn get_postgres_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    Ok(Json(json!({
+        "ok": true,
+        "postgres": crate::control_pg::admin_status().await,
     })))
 }
 
@@ -502,10 +511,10 @@ async fn put_backup_auto(
     let now = Utc::now().to_rfc3339();
     sqlx::query(
         r#"UPDATE instance_settings SET
-            backup_auto_enabled = ?,
-            backup_auto_interval_hours = ?,
-            backup_auto_retention_count = ?,
-            updated_at = ?
+            backup_auto_enabled = $1,
+            backup_auto_interval_hours = $2,
+            backup_auto_retention_count = $3,
+            updated_at = $4
          WHERE id = 1"#,
     )
     .bind(enabled)

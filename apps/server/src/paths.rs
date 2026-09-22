@@ -40,17 +40,11 @@ pub fn apply_install_layout() {
     let _ = std::fs::create_dir_all(&data);
     set_if_unset("DEVFORGE_DATA_DIR", &data.to_string_lossy());
     set_if_unset("DATABASE_URL", &sqlite_url(&data.join("devforge.db")));
-    set_if_unset(
-        "DEVFORGE_STATIC_DIR",
-        &root.join("web").to_string_lossy(),
-    );
+    set_if_unset("DEVFORGE_STATIC_DIR", &root.join("web").to_string_lossy());
 
     let templates = root.join("templates");
     if templates.is_dir() {
-        set_if_unset(
-            "DEVFORGE_TEMPLATES_DIR",
-            &templates.to_string_lossy(),
-        );
+        set_if_unset("DEVFORGE_TEMPLATES_DIR", &templates.to_string_lossy());
     }
     set_if_unset("DEVFORGE_UPDATE_MODE", "binary");
     tracing::info!(root = %root.display(), "installation packagée (UI + data à côté du binaire)");

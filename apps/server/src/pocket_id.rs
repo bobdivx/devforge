@@ -121,9 +121,7 @@ pub fn default_callback_urls(wildcard_domain: &str, instance_url: &str) -> Vec<S
         .trim_start_matches('.')
         .to_lowercase();
     if !domain.is_empty() {
-        urls.push(format!(
-            "https://*.{domain}/api/auth/callback/pocket-id"
-        ));
+        urls.push(format!("https://*.{domain}/api/auth/callback/pocket-id"));
         urls.push(format!("https://*.{domain}/oauth2/callback"));
         urls.push(format!("https://*.{domain}/oauth2/callback/"));
     }
@@ -397,7 +395,8 @@ async fn upload_logo_light_from_url(
     api_key: &str,
     image_url: &str,
 ) -> Result<(), PocketIdError> {
-    upload_application_image_from_url(base, api_key, image_url, "logo", Some(&[("light", "true")])).await
+    upload_application_image_from_url(base, api_key, image_url, "logo", Some(&[("light", "true")]))
+        .await
 }
 
 /// Télécharge une image puis l'upload en logo dark Pocket ID (multipart).
@@ -406,7 +405,14 @@ async fn upload_logo_dark_from_url(
     api_key: &str,
     image_url: &str,
 ) -> Result<(), PocketIdError> {
-    upload_application_image_from_url(base, api_key, image_url, "logo", Some(&[("light", "false")])).await
+    upload_application_image_from_url(
+        base,
+        api_key,
+        image_url,
+        "logo",
+        Some(&[("light", "false")]),
+    )
+    .await
 }
 
 /// Télécharge une image puis l'upload en favicon Pocket ID (multipart).
@@ -433,10 +439,15 @@ async fn upload_default_profile_picture_from_url(
     api_key: &str,
     image_url: &str,
 ) -> Result<(), PocketIdError> {
-    upload_application_image_from_url(base, api_key, image_url, "default-profile-picture", None).await
+    upload_application_image_from_url(base, api_key, image_url, "default-profile-picture", None)
+        .await
 }
 
-async fn create_secret(base: &str, api_key: &str, client_id: &str) -> Result<String, PocketIdError> {
+async fn create_secret(
+    base: &str,
+    api_key: &str,
+    client_id: &str,
+) -> Result<String, PocketIdError> {
     // Pocket ID récent : /secrets ; versions plus anciennes : /secret
     for path in [
         format!("{base}/api/oidc/clients/{client_id}/secrets"),
@@ -455,9 +466,8 @@ async fn create_secret(base: &str, api_key: &str, client_id: &str) -> Result<Str
                 return Ok(s.to_string());
             }
         }
-        let parsed: SecretCreatedDto = serde_json::from_value(val.clone()).unwrap_or(SecretCreatedDto {
-            secret: None,
-        });
+        let parsed: SecretCreatedDto =
+            serde_json::from_value(val.clone()).unwrap_or(SecretCreatedDto { secret: None });
         if let Some(s) = parsed.secret.filter(|s| !s.is_empty()) {
             return Ok(s);
         }
@@ -705,33 +715,39 @@ mod tests {
 
     #[test]
     fn filename_extraction_from_url() {
-        let fname = filename_from_url_and_ctype(
-            "https://example.com/logo.png",
-            "image/png"
-        );
+        let fname = filename_from_url_and_ctype("https://example.com/logo.png", "image/png");
         assert_eq!(fname, "logo.png");
 
-        let fname2 = filename_from_url_and_ctype(
-            "https://example.com/path/image",
-            "image/svg+xml"
-        );
+        let fname2 = filename_from_url_and_ctype("https://example.com/path/image", "image/svg+xml");
         assert_eq!(fname2, "background.svg");
     }
 
     #[test]
     fn application_image_endpoint_construction() {
         let base = "https://id.example.com";
-        
+
         let logo_light_url = format!("{}/api/application-images/logo?light=true", base);
-        assert_eq!(logo_light_url, "https://id.example.com/api/application-images/logo?light=true");
-        
+        assert_eq!(
+            logo_light_url,
+            "https://id.example.com/api/application-images/logo?light=true"
+        );
+
         let logo_dark_url = format!("{}/api/application-images/logo?light=false", base);
-        assert_eq!(logo_dark_url, "https://id.example.com/api/application-images/logo?light=false");
-        
+        assert_eq!(
+            logo_dark_url,
+            "https://id.example.com/api/application-images/logo?light=false"
+        );
+
         let email_url = format!("{}/api/application-images/email", base);
-        assert_eq!(email_url, "https://id.example.com/api/application-images/email");
-        
+        assert_eq!(
+            email_url,
+            "https://id.example.com/api/application-images/email"
+        );
+
         let profile_url = format!("{}/api/application-images/default-profile-picture", base);
-        assert_eq!(profile_url, "https://id.example.com/api/application-images/default-profile-picture");
+        assert_eq!(
+            profile_url,
+            "https://id.example.com/api/application-images/default-profile-picture"
+        );
     }
 }

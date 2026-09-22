@@ -72,7 +72,7 @@ pub async fn load(state: &AppState) -> DnsSettings {
         dns.cf_token = dns.api_key.clone();
         dns.api_key.clear();
         let _ = sqlx::query(
-            "UPDATE instance_settings SET cloudflare_api_token = ?, porkbun_api_key = '' WHERE id = 1",
+            "UPDATE instance_settings SET cloudflare_api_token = $1, porkbun_api_key = '' WHERE id = 1",
         )
         .bind(&dns.cf_token)
         .execute(&state.pool)
@@ -203,10 +203,13 @@ pub async fn provision_node(state: &AppState, server_id: &str) {
     }
 }
 
-async fn docker_running(state: &AppState, server_id: &str, container: &str) -> Result<bool, String> {
-    let cmd = format!(
-        "docker inspect -f '{{{{.State.Running}}}}' {container} 2>/dev/null || echo false"
-    );
+async fn docker_running(
+    state: &AppState,
+    server_id: &str,
+    container: &str,
+) -> Result<bool, String> {
+    let cmd =
+        format!("docker inspect -f '{{{{.State.Running}}}}' {container} 2>/dev/null || echo false");
     let res = state
         .deploy
         .exec(server_id, "", &cmd, 8)
@@ -396,13 +399,12 @@ pub async fn remove_fqdn(state: &AppState, fqdn: &str) {
 
 /// Retourne une entrée par FQDN synchronisé : `{ fqdn, ok, error? }`.
 pub async fn sync_project(state: &AppState, project_uuid: &str) -> Vec<Value> {
-    let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT server_id, production_url FROM projects WHERE uuid = ?",
-    )
-    .fetch_optional(&state.pool)
-    .await
-    .ok()
-    .flatten();
+    let row: Option<(Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT server_id, production_url FROM projects WHERE uuid = $1")
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten();
     let Some((server_id, production_url)) = row else {
         return vec![];
     };
@@ -463,12 +465,11 @@ pub async fn note_public_ip(state: &AppState, node_id: &str, ip: &str) {
 }
 
 async fn list_managed_domains(state: &AppState) -> Vec<Value> {
-    let rows: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT uuid, name, server_id, production_url FROM projects ORDER BY name",
-    )
-    .fetch_all(&state.pool)
-    .await
-    .unwrap_or_default();
+    let rows: Vec<(String, String, Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT uuid, name, server_id, production_url FROM projects ORDER BY name")
+            .fetch_all(&state.pool)
+            .await
+            .unwrap_or_default();
     let mut out = Vec::new();
     for (uuid, name, server_id, production_url) in rows {
         let sid = server_id
@@ -510,7 +511,9 @@ async fn list_managed_domains(state: &AppState) -> Vec<Value> {
 }
 
 fn same_dns_target(a: &str, b: &str) -> bool {
-    a.trim().trim_end_matches('.').eq_ignore_ascii_case(b.trim().trim_end_matches('.'))
+    a.trim()
+        .trim_end_matches('.')
+        .eq_ignore_ascii_case(b.trim().trim_end_matches('.'))
 }
 
 async fn enrich_live_records(dns: &DnsSettings, domains: &mut [Value]) {
@@ -541,9 +544,8 @@ async fn enrich_live_records(dns: &DnsSettings, domains: &mut [Value]) {
                         d["live"] = json!(content);
                         d["in_sync"] = json!(synced);
                         if !synced {
-                            d["error"] = json!(format!(
-                                "Porkbun a {kind} {content}, attendu {target}"
-                            ));
+                            d["error"] =
+                                json!(format!("Porkbun a {kind} {content}, attendu {target}"));
                         }
                     }
                     Ok(None) => {
@@ -590,7 +592,8 @@ async fn enrich_live_records(dns: &DnsSettings, domains: &mut [Value]) {
                     }
                     Ok(None) => {
                         d["in_sync"] = json!(false);
-                        d["error"] = json!(format!("CNAME absent chez Cloudflare (zone {})", cf.zone));
+                        d["error"] =
+                            json!(format!("CNAME absent chez Cloudflare (zone {})", cf.zone));
                     }
                     Err(e) => {
                         d["in_sync"] = json!(false);
@@ -643,7 +646,9 @@ pub async fn collect_status(state: &AppState) -> Value {
     }
 
     let listed = state.cluster.list_nodes().await.unwrap_or_default();
-    let ids = node_ids(state).await.unwrap_or_else(|_| vec![LEADER_NODE_ID.into()]);
+    let ids = node_ids(state)
+        .await
+        .unwrap_or_else(|_| vec![LEADER_NODE_ID.into()]);
     let mut nodes_out = Vec::new();
     for id in ids {
         let meta = listed.iter().find(|n| n.id == id);
@@ -693,8 +698,7 @@ pub async fn collect_status(state: &AppState) -> Value {
             );
         } else if let Some(e) = traefik_err {
             let msg = if e.contains("pas un nœud worker") {
-                "worker injoignable (rôle / secret) — vérifie advertise_url et le join"
-                    .to_string()
+                "worker injoignable (rôle / secret) — vérifie advertise_url et le join".to_string()
             } else {
                 format!("nœud injoignable ({e})")
             };
@@ -713,9 +717,8 @@ pub async fn collect_status(state: &AppState) -> Value {
         match dns.provider.as_str() {
             "cloudflare" => {
                 if !ingress.ends_with("cfargotunnel.com") {
-                    node_error = Some(
-                        node_error.unwrap_or_else(|| "tunnel Cloudflare non créé".into()),
-                    );
+                    node_error =
+                        Some(node_error.unwrap_or_else(|| "tunnel Cloudflare non créé".into()));
                 } else if !agent_ok && node_error.is_none() {
                     node_error = Some("cloudflared n’est pas démarré".into());
                 } else if !traefik_ok && node_error.is_none() {
@@ -743,9 +746,7 @@ pub async fn collect_status(state: &AppState) -> Value {
             && traefik_ok
             && match dns.provider.as_str() {
                 "cloudflare" => agent_ok && ingress.ends_with("cfargotunnel.com"),
-                "porkbun" => {
-                    !ingress.is_empty() && !ingress.ends_with("cfargotunnel.com")
-                }
+                "porkbun" => !ingress.is_empty() && !ingress.ends_with("cfargotunnel.com"),
                 _ => true,
             };
         nodes_out.push(json!({
@@ -766,7 +767,8 @@ pub async fn collect_status(state: &AppState) -> Value {
 
     let mut domains = list_managed_domains(state).await;
     enrich_live_records(&dns, &mut domains).await;
-    let nodes_ok = !nodes_out.is_empty() && nodes_out.iter().all(|n| n["ok"].as_bool() == Some(true));
+    let nodes_ok =
+        !nodes_out.is_empty() && nodes_out.iter().all(|n| n["ok"].as_bool() == Some(true));
     let domains_ok = domains.iter().all(|d| {
         if d["out_of_zone"].as_bool() == Some(true) {
             return true;
@@ -879,8 +881,8 @@ pub async fn clear_credentials(state: &AppState, which: &str) -> Result<DnsSetti
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         r#"UPDATE instance_settings SET
-            dns_provider = ?, porkbun_api_key = ?, porkbun_secret = ?,
-            cloudflare_api_token = ?, updated_at = ?
+            dns_provider = $1, porkbun_api_key = $2, porkbun_secret = $3,
+            cloudflare_api_token = $4, updated_at = $5
            WHERE id = 1"#,
     )
     .bind(&dns.provider)

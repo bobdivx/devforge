@@ -35,8 +35,8 @@ export function AgentPage() {
   useEffect(() => {
     async function checkLlm() {
       try {
-        const h = await api.health();
-        const mode = h.backends?.llm ?? 'stub';
+        const status = await api.llmStatus();
+        const mode = status.mode || 'stub';
         setLlm(mode);
 
         if (mode === 'stub') {
@@ -147,12 +147,19 @@ export function AgentPage() {
             <>
               {llmError ? (
                 <p class="text-sm text-[var(--color-ink-muted)]">
-                  LLM configuré mais erreur : <strong>{llmError}</strong>. Demande à l’admin
-                  instance si le modèle ne répond pas.
+                  LLM configuré mais erreur : <strong>{llmError}</strong>. Corrige-le dans{' '}
+                  <a class="underline" href="/app/settings?tab=llm">
+                    Paramètres → Agents / LLM
+                  </a>
+                  .
                 </p>
               ) : (
                 <p class="text-sm text-[var(--color-ink-muted)]">
-                  « liste les projets », « smoke ». Le modèle est configuré par l’admin instance.
+                  « liste les projets », « smoke ». Le modèle se configure dans{' '}
+                  <a class="underline" href="/app/settings?tab=llm">
+                    Paramètres → Agents / LLM
+                  </a>
+                  .
                 </p>
               )}
             </>

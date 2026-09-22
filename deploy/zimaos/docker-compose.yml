@@ -16,6 +16,9 @@ services:
       - target: 8000
         published: "8000"
         protocol: tcp
+      - target: 5433
+        published: "5433"
+        protocol: tcp
     volumes:
       - type: bind
         source: /DATA/AppData/devforge
@@ -49,6 +52,10 @@ services:
           description:
             en_US: Web UI + API
             fr_FR: Interface web + API
+        - container: "5433"
+          description:
+            en_US: Postgres replication between cluster nodes
+            fr_FR: Postgres, réplication entre les nœuds du cluster
 
 x-casaos:
   id: com.bobdivx.devforge

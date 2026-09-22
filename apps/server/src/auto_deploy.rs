@@ -6,7 +6,7 @@
 //! 2. Assure (si possible) un webhook push vers `/api/v1/webhooks/github`
 
 use crate::infra_routes::parse_github_owner_repo;
-use crate::state::{now_str, new_uuid, AppState, Project};
+use crate::state::{new_uuid, now_str, AppState, Project};
 
 fn poll_interval_secs() -> u64 {
     std::env::var("DEVFORGE_AUTO_DEPLOY_POLL_SECS")
@@ -93,7 +93,7 @@ pub async fn ensure_project_webhook(state: &AppState, project: &Project) -> Opti
 
 async fn has_running_deploy(state: &AppState, project_id: i64) -> bool {
     let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT COUNT(*) FROM deployments WHERE project_id = ? AND status IN ('running', 'queued', 'building')",
+        "SELECT COUNT(*) FROM deployments WHERE project_id = $1 AND status IN ('running', 'queued', 'building')",
     )
     .bind(project_id)
     .fetch_optional(&state.pool)
@@ -105,16 +105,14 @@ async fn has_running_deploy(state: &AppState, project_id: i64) -> bool {
 
 async fn latest_success_sha(state: &AppState, project_id: i64) -> Option<String> {
     let row: Option<(Option<String>,)> = sqlx::query_as(
-        "SELECT git_sha FROM deployments WHERE project_id = ? AND status IN ('success', 'ready') ORDER BY created_at DESC LIMIT 1",
+        "SELECT git_sha FROM deployments WHERE project_id = $1 AND status IN ('success', 'ready') ORDER BY created_at DESC LIMIT 1",
     )
     .bind(project_id)
     .fetch_optional(&state.pool)
     .await
     .ok()
     .flatten();
-    row.and_then(|(sha,)| {
-        sha.filter(|s| !s.is_empty() && s != "pending" && s != "unknown")
-    })
+    row.and_then(|(sha,)| sha.filter(|s| !s.is_empty() && s != "pending" && s != "unknown"))
 }
 
 async fn project_is_behind(state: &AppState, project: &Project) -> Option<(u64, String)> {
@@ -130,12 +128,22 @@ async fn project_is_behind(state: &AppState, project: &Project) -> Option<(u64, 
         .unwrap_or("main");
     let dep_sha = latest_success_sha(state, project.id).await?;
 
-    match state.github.compare(&owner, &repo, &dep_sha, branch).await {
+    match crate::routes::project_github(state, &project.workspace_uuid)
+        .await
+        .compare(&owner, &repo, &dep_sha, branch)
+        .await
+    {
         Ok(c) if c.ahead_by > 0 => {
             let tip = c
                 .commits
                 .last()
-                .map(|c| c.message.lines().next().unwrap_or("Auto-deploy").to_string())
+                .map(|c| {
+                    c.message
+                        .lines()
+                        .next()
+                        .unwrap_or("Auto-deploy")
+                        .to_string()
+                })
                 .unwrap_or_else(|| "Auto-deploy (poll)".into());
             Some((c.ahead_by, tip))
         }
@@ -158,7 +166,7 @@ pub(crate) async fn deploy_project(state: &AppState, project: &Project, message:
     if let Err(e) = sqlx::query(
         r#"INSERT INTO deployments (
             uuid, project_id, status, git_sha, git_message, logs, finished_at, created_at, updated_at
-        ) VALUES (?, ?, 'queued', ?, ?, ?, NULL, ?, ?)"#,
+        ) VALUES ($1, $2, 'queued', $3, $4, $5, NULL, $6, $7)"#,
     )
     .bind(&dep_uuid)
     .bind(project.id)
@@ -174,7 +182,7 @@ pub(crate) async fn deploy_project(state: &AppState, project: &Project, message:
         return;
     }
 
-    let _ = sqlx::query("UPDATE projects SET status = 'deploying', updated_at = ? WHERE id = ?")
+    let _ = sqlx::query("UPDATE projects SET status = 'deploying', updated_at = $1 WHERE id = $2")
         .bind(&now)
         .bind(project.id)
         .execute(&state.pool)
@@ -193,8 +201,8 @@ pub(crate) async fn deploy_project(state: &AppState, project: &Project, message:
     let sha = result.git_sha.as_deref().unwrap_or("unknown");
 
     let _ = sqlx::query(
-        r#"UPDATE deployments SET status = ?, git_sha = ?, logs = ?, finished_at = ?, updated_at = ?
-           WHERE uuid = ?"#,
+        r#"UPDATE deployments SET status = $1, git_sha = $2, logs = $3, finished_at = $4, updated_at = $5
+           WHERE uuid = $6"#,
     )
     .bind(status)
     .bind(sha)
@@ -206,7 +214,7 @@ pub(crate) async fn deploy_project(state: &AppState, project: &Project, message:
     .await;
 
     let project_status = if result.ok { "live" } else { "failed" };
-    let _ = sqlx::query("UPDATE projects SET status = ?, updated_at = ? WHERE id = ?")
+    let _ = sqlx::query("UPDATE projects SET status = $1, updated_at = $2 WHERE id = $3")
         .bind(project_status)
         .bind(&finished)
         .bind(project.id)
@@ -228,10 +236,6 @@ pub(crate) async fn deploy_project(state: &AppState, project: &Project, message:
 }
 
 async fn tick(state: &AppState, ensure_webhooks: bool) {
-    if state.github.mode() == "off" {
-        return;
-    }
-
     let projects = sqlx::query_as::<_, Project>(
         r#"SELECT * FROM projects
            WHERE auto_deploy != 0

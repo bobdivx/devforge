@@ -8,9 +8,9 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use devforge_auth::{
-    hash_password, new_session_token, new_uuid, slugify, verify_password, AuthTeam, AuthUser,
-    OnboardingSteps, PLAN_FREE, PLAN_PRO, ROLE_INSTANCE_ADMIN, ROLE_USER, ABILITY_READ,
-    ABILITY_WRITE, hash_api_token, parse_abilities_csv,
+    hash_api_token, hash_password, new_session_token, new_uuid, parse_abilities_csv, slugify,
+    verify_password, AuthTeam, AuthUser, OnboardingSteps, ABILITY_READ, ABILITY_WRITE, PLAN_FREE,
+    PLAN_PRO, ROLE_INSTANCE_ADMIN, ROLE_USER,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -53,17 +53,27 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/auth/login", post(login))
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/me", get(me))
-        .route("/api/v1/onboarding", get(onboarding_status).post(save_onboarding))
+        .route("/api/v1/me/domain", post(save_my_domain))
+        .route(
+            "/api/v1/onboarding",
+            get(onboarding_status).post(save_onboarding),
+        )
         .route("/api/v1/onboarding/complete", post(complete_onboarding))
         .route("/api/v1/settings/dns", get(get_dns).post(save_dns))
         .route("/api/v1/settings/dns/status", get(dns_status))
         .route("/api/v1/settings/dns/test", post(test_dns))
         .route("/api/v1/settings/dns/resync", post(resync_dns))
-        .route("/api/v1/settings/dns/clear-credentials", post(clear_dns_credentials))
+        .route(
+            "/api/v1/settings/dns/clear-credentials",
+            post(clear_dns_credentials),
+        )
         .route("/api/v1/settings/ssh", get(ssh_status).post(save_ssh))
         .route("/api/v1/settings/ssh/generate-key", post(generate_ssh_key))
         .route("/api/v1/admin/overview", get(admin_overview))
-        .route("/api/v1/admin/workspaces/{uuid}", patch(admin_update_workspace))
+        .route(
+            "/api/v1/admin/workspaces/{uuid}",
+            patch(admin_update_workspace),
+        )
         .route("/api/v1/admin/features", patch(admin_update_features))
 }
 
@@ -132,7 +142,7 @@ pub async fn resolve_auth(
 ) -> Result<Option<(UserRow, Vec<String>)>, (axum::http::StatusCode, Json<Value>)> {
     let now = Utc::now().to_rfc3339();
     let row: Option<(String,)> = sqlx::query_as(
-        "SELECT user_uuid FROM sessions WHERE token = ? AND expires_at > ? LIMIT 1",
+        "SELECT user_uuid FROM sessions WHERE token = $1 AND expires_at > $2 LIMIT 1",
     )
     .bind(token)
     .bind(&now)
@@ -141,18 +151,13 @@ pub async fn resolve_auth(
     .map_err(internal)?;
     if let Some((user_uuid,)) = row {
         let user = sqlx::query_as::<_, UserRow>(
-            "SELECT uuid, email, name, password_hash, role FROM users WHERE uuid = ?",
+            "SELECT uuid, email, name, password_hash, role FROM users WHERE uuid = $1",
         )
         .bind(user_uuid)
         .fetch_optional(&state.pool)
         .await
         .map_err(internal)?;
-        return Ok(user.map(|u| {
-            (
-                u,
-                vec![ABILITY_READ.to_string(), ABILITY_WRITE.to_string()],
-            )
-        }));
+        return Ok(user.map(|u| (u, vec![ABILITY_READ.to_string(), ABILITY_WRITE.to_string()])));
     }
 
     if !token.starts_with("dfat_") {
@@ -161,7 +166,7 @@ pub async fn resolve_auth(
     let hash = hash_api_token(token);
     let tok: Option<(String, String, Option<String>, String)> = sqlx::query_as(
         r#"SELECT id, user_uuid, expires_at, abilities FROM api_tokens
-           WHERE token_hash = ? LIMIT 1"#,
+           WHERE token_hash = $1 LIMIT 1"#,
     )
     .bind(&hash)
     .fetch_optional(&state.pool)
@@ -175,13 +180,13 @@ pub async fn resolve_auth(
             return Ok(None);
         }
     }
-    let _ = sqlx::query("UPDATE api_tokens SET last_used_at = ? WHERE id = ?")
+    let _ = sqlx::query("UPDATE api_tokens SET last_used_at = $1 WHERE id = $2")
         .bind(&now)
         .bind(&id)
         .execute(&state.pool)
         .await;
     let user = sqlx::query_as::<_, UserRow>(
-        "SELECT uuid, email, name, password_hash, role FROM users WHERE uuid = ?",
+        "SELECT uuid, email, name, password_hash, role FROM users WHERE uuid = $1",
     )
     .bind(user_uuid)
     .fetch_optional(&state.pool)
@@ -199,7 +204,7 @@ pub async fn user_team(
         SELECT t.uuid, t.name, t.slug, t.show_boarding, t.plan
         FROM teams t
         JOIN team_members m ON m.team_uuid = t.uuid
-        WHERE m.user_uuid = ?
+        WHERE m.user_uuid = $1
         LIMIT 1
         "#,
     )
@@ -218,14 +223,12 @@ pub async fn current_workspace(
     let user = session_user(state, &token)
         .await?
         .ok_or_else(unauthorized)?;
-    let team = user_team(state, &user.uuid)
-        .await?
-        .ok_or_else(|| {
-            (
-                axum::http::StatusCode::FORBIDDEN,
-                Json(json!({"error": "Aucun workspace"})),
-            )
-        })?;
+    let team = user_team(state, &user.uuid).await?.ok_or_else(|| {
+        (
+            axum::http::StatusCode::FORBIDDEN,
+            Json(json!({"error": "Aucun workspace"})),
+        )
+    })?;
     Ok((user, team))
 }
 
@@ -236,14 +239,16 @@ pub async fn create_session(
     let token = new_session_token();
     let now = now_str();
     let expires = (Utc::now() + Duration::days(30)).to_rfc3339();
-    sqlx::query("INSERT INTO sessions (token, user_uuid, expires_at, created_at) VALUES (?, ?, ?, ?)")
-        .bind(&token)
-        .bind(user_uuid)
-        .bind(&expires)
-        .bind(&now)
-        .execute(&state.pool)
-        .await
-        .map_err(internal)?;
+    sqlx::query(
+        "INSERT INTO sessions (token, user_uuid, expires_at, created_at) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(&token)
+    .bind(user_uuid)
+    .bind(&expires)
+    .bind(&now)
+    .execute(&state.pool)
+    .await
+    .map_err(internal)?;
     Ok(token)
 }
 
@@ -322,21 +327,31 @@ async fn bootstrap(
         sso_settings.hide_local_login()
     };
 
-    let cluster_local = state
-        .cluster
-        .local()
-        .await
-        .unwrap_or_default();
-    let is_admin = user
-        .as_ref()
-        .is_some_and(|u| u.role == ROLE_INSTANCE_ADMIN);
+    let cluster_local = state.cluster.local().await.unwrap_or_default();
+    let is_admin = user.as_ref().is_some_and(|u| u.role == ROLE_INSTANCE_ADMIN);
     let (beta_workspace, beta_agent_builder) = load_beta_features(&state).await;
 
+    let (wildcard_own, wildcard_fallback, github_connected) = if let Some(u) = user.as_ref() {
+        let own = crate::user_prefs::wildcard_own(&state.pool, &u.uuid).await;
+        let gh = !crate::user_prefs::github_token(&state.pool, &u.uuid)
+            .await
+            .is_empty();
+        (own, settings.wildcard_domain.clone(), gh)
+    } else {
+        (String::new(), settings.wildcard_domain.clone(), false)
+    };
+    let wildcard_effective = if wildcard_own.is_empty() {
+        wildcard_fallback.clone()
+    } else {
+        wildcard_own.clone()
+    };
     let mut settings_json = json!({
         "instance_name": settings.instance_name,
         "instance_url": settings.instance_url,
-        "wildcard_domain": settings.wildcard_domain,
-        "github_connected": !settings.github_token.is_empty(),
+        "wildcard_domain": wildcard_effective,
+        "wildcard_own": wildcard_own,
+        "wildcard_fallback": wildcard_fallback,
+        "github_connected": github_connected,
     });
     if is_admin {
         settings_json["ssh_host"] = json!(settings.ssh_host);
@@ -442,7 +457,7 @@ async fn register(
     }
     let now = now_str();
 
-    let existing: Option<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE email = ?")
+    let existing: Option<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE email = $1")
         .bind(&email)
         .fetch_optional(&state.pool)
         .await
@@ -455,7 +470,7 @@ async fn register(
     }
 
     sqlx::query(
-        "INSERT INTO users (uuid, email, name, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO users (uuid, email, name, password_hash, role, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(&user_uuid)
     .bind(&email)
@@ -469,7 +484,7 @@ async fn register(
     .map_err(internal)?;
 
     sqlx::query(
-        "INSERT INTO teams (uuid, name, slug, show_boarding, plan, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO teams (uuid, name, slug, show_boarding, plan, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(&team_uuid)
     .bind(&team_name)
@@ -483,7 +498,7 @@ async fn register(
     .map_err(internal)?;
 
     sqlx::query(
-        "INSERT INTO team_members (team_uuid, user_uuid, role, created_at) VALUES (?, ?, 'owner', ?)",
+        "INSERT INTO team_members (team_uuid, user_uuid, role, created_at) VALUES ($1, $2, 'owner', $3)",
     )
     .bind(&team_uuid)
     .bind(&user_uuid)
@@ -528,7 +543,7 @@ async fn login(
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let email = body.email.trim().to_lowercase();
     let user = sqlx::query_as::<_, UserRow>(
-        "SELECT uuid, email, name, password_hash, role FROM users WHERE email = ?",
+        "SELECT uuid, email, name, password_hash, role FROM users WHERE email = $1",
     )
     .bind(&email)
     .fetch_optional(&state.pool)
@@ -573,7 +588,7 @@ async fn logout(
     headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     if let Some(token) = bearer_from(&headers) {
-        sqlx::query("DELETE FROM sessions WHERE token = ?")
+        sqlx::query("DELETE FROM sessions WHERE token = $1")
             .bind(token)
             .execute(&state.pool)
             .await
@@ -582,19 +597,57 @@ async fn logout(
     Ok(Json(json!({"ok": true})))
 }
 
+#[derive(Deserialize)]
+struct MyDomainBody {
+    wildcard_domain: Option<String>,
+}
+
+async fn save_my_domain(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<MyDomainBody>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let (user, _) = current_workspace(&state, &headers).await?;
+    let domain = body
+        .wildcard_domain
+        .unwrap_or_default()
+        .trim()
+        .trim_start_matches('.')
+        .to_lowercase();
+    if !domain.is_empty() && !domain.contains('.') {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Domaine invalide"})),
+        ));
+    }
+    crate::user_prefs::set_wildcard(&state.pool, &user.uuid, &domain)
+        .await
+        .map_err(internal)?;
+    let fallback = crate::user_prefs::instance_wildcard(&state.pool).await;
+    let effective = if domain.is_empty() {
+        fallback.clone()
+    } else {
+        domain.clone()
+    };
+    Ok(Json(json!({
+        "ok": true,
+        "wildcard_own": domain,
+        "wildcard_fallback": fallback,
+        "wildcard_domain": effective,
+    })))
+}
+
 async fn me(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let token = bearer_from(&headers).ok_or_else(unauthorized)?;
-    let user = session_user(&state, &token)
-        .await?
-        .ok_or_else(|| {
-            (
-                axum::http::StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "Session expirée"})),
-            )
-        })?;
+    let user = session_user(&state, &token).await?.ok_or_else(|| {
+        (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Session expirée"})),
+        )
+    })?;
     let team = user_team(&state, &user.uuid).await?;
     Ok(Json(json!({
         "ok": true,
@@ -608,7 +661,9 @@ async fn onboarding_status(
     headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let token = bearer_from(&headers).ok_or_else(unauthorized)?;
-    let user = session_user(&state, &token).await?.ok_or_else(unauthorized)?;
+    let user = session_user(&state, &token)
+        .await?
+        .ok_or_else(unauthorized)?;
     let team = user_team(&state, &user.uuid).await?;
     let settings = load_settings(&state).await?;
     let steps = OnboardingSteps::from_settings(
@@ -650,7 +705,9 @@ async fn save_onboarding(
     Json(body): Json<OnboardingSaveBody>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let token = bearer_from(&headers).ok_or_else(unauthorized)?;
-    let user = session_user(&state, &token).await?.ok_or_else(unauthorized)?;
+    let user = session_user(&state, &token)
+        .await?
+        .ok_or_else(unauthorized)?;
     if user.role != ROLE_INSTANCE_ADMIN {
         return Err((
             axum::http::StatusCode::FORBIDDEN,
@@ -692,8 +749,8 @@ async fn save_onboarding(
     sqlx::query(
         r#"
         UPDATE instance_settings SET
-            instance_name = ?, instance_url = ?, wildcard_domain = ?,
-            ssh_host = ?, ssh_user = ?, updated_at = ?
+            instance_name = $1, instance_url = $2, wildcard_domain = $3,
+            ssh_host = $4, ssh_user = $5, updated_at = $6
         WHERE id = 1
         "#,
     )
@@ -753,7 +810,9 @@ async fn get_dns(
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     require_instance_admin(&state, &headers).await?;
     let dns = crate::dns::load(&state).await;
-    Ok(Json(json!({ "ok": true, "dns": crate::dns::public_json(&dns) })))
+    Ok(Json(
+        json!({ "ok": true, "dns": crate::dns::public_json(&dns) }),
+    ))
 }
 
 async fn save_dns(
@@ -824,7 +883,9 @@ async fn save_dns(
                     if ps.is_empty() {
                         return Err((
                             axum::http::StatusCode::BAD_REQUEST,
-                            Json(json!({"error": "Porkbun : renseigne la clé API et le Secret API (deux champs)"})),
+                            Json(
+                                json!({"error": "Porkbun : renseigne la clé API et le Secret API (deux champs)"}),
+                            ),
                         ));
                     }
                     k = Some(pk);
@@ -856,7 +917,9 @@ async fn save_dns(
     if dns.provider == "porkbun" && (dns.api_key.is_empty() || dns.secret.is_empty()) {
         return Err((
             axum::http::StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Porkbun : renseigne la clé API et le Secret API (ce ne sont pas le token Cloudflare)"})),
+            Json(
+                json!({"error": "Porkbun : renseigne la clé API et le Secret API (ce ne sont pas le token Cloudflare)"}),
+            ),
         ));
     }
     if dns.provider == "cloudflare" {
@@ -876,8 +939,8 @@ async fn save_dns(
     let now = now_str();
     sqlx::query(
         r#"UPDATE instance_settings SET
-            dns_provider = ?, porkbun_zone = ?, porkbun_api_key = ?, porkbun_secret = ?,
-            cloudflare_api_token = ?, updated_at = ?
+            dns_provider = $1, porkbun_zone = $2, porkbun_api_key = $3, porkbun_secret = $4,
+            cloudflare_api_token = $5, updated_at = $6
            WHERE id = 1"#,
     )
     .bind(&dns.provider)
@@ -926,9 +989,12 @@ async fn test_dns(
     headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     require_instance_admin(&state, &headers).await?;
-    crate::dns::ping_configured(&state)
-        .await
-        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e}))))?;
+    crate::dns::ping_configured(&state).await.map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e})),
+        )
+    })?;
     Ok(Json(json!({
         "ok": true,
         "status": crate::dns::collect_status(&state).await,
@@ -975,7 +1041,12 @@ async fn clear_dns_credentials(
     require_instance_admin(&state, &headers).await?;
     let dns = crate::dns::clear_credentials(&state, &body.which)
         .await
-        .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": e}))))?;
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({"error": e})),
+            )
+        })?;
     Ok(Json(json!({
         "ok": true,
         "dns": crate::dns::public_json(&dns),
@@ -988,21 +1059,21 @@ async fn complete_onboarding(
     headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let token = bearer_from(&headers).ok_or_else(unauthorized)?;
-    let user = session_user(&state, &token).await?.ok_or_else(unauthorized)?;
+    let user = session_user(&state, &token)
+        .await?
+        .ok_or_else(unauthorized)?;
     if user.role != ROLE_INSTANCE_ADMIN {
         return Err((
             axum::http::StatusCode::FORBIDDEN,
             Json(json!({"error": "Réservé à l’admin instance"})),
         ));
     }
-    let team = user_team(&state, &user.uuid)
-        .await?
-        .ok_or_else(|| {
-            (
-                axum::http::StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Aucune équipe"})),
-            )
-        })?;
+    let team = user_team(&state, &user.uuid).await?.ok_or_else(|| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Aucune équipe"})),
+        )
+    })?;
     let settings = load_settings(&state).await?;
     let steps = OnboardingSteps::from_settings(
         true,
@@ -1022,7 +1093,7 @@ async fn complete_onboarding(
         ));
     }
     let now = now_str();
-    sqlx::query("UPDATE teams SET show_boarding = 0, updated_at = ? WHERE uuid = ?")
+    sqlx::query("UPDATE teams SET show_boarding = 0, updated_at = $1 WHERE uuid = $2")
         .bind(&now)
         .bind(&team.uuid)
         .execute(&state.pool)
@@ -1057,7 +1128,9 @@ async fn require_admin_from_headers(
     headers: &HeaderMap,
 ) -> Result<(), (axum::http::StatusCode, Json<Value>)> {
     let token = bearer_from(headers).ok_or_else(unauthorized)?;
-    let user = session_user(state, &token).await?.ok_or_else(unauthorized)?;
+    let user = session_user(state, &token)
+        .await?
+        .ok_or_else(unauthorized)?;
     if user.role != ROLE_INSTANCE_ADMIN {
         return Err((
             axum::http::StatusCode::FORBIDDEN,
@@ -1117,7 +1190,7 @@ async fn save_ssh(
     }
     let now = now_str();
     sqlx::query(
-        "UPDATE instance_settings SET ssh_host = ?, ssh_user = ?, updated_at = ? WHERE id = 1",
+        "UPDATE instance_settings SET ssh_host = $1, ssh_user = $2, updated_at = $3 WHERE id = 1",
     )
     .bind(&s.ssh_host)
     .bind(&s.ssh_user)
@@ -1212,7 +1285,9 @@ async fn require_instance_admin(
     headers: &HeaderMap,
 ) -> Result<UserRow, (axum::http::StatusCode, Json<Value>)> {
     let token = bearer_from(headers).ok_or_else(unauthorized)?;
-    let user = session_user(state, &token).await?.ok_or_else(unauthorized)?;
+    let user = session_user(state, &token)
+        .await?
+        .ok_or_else(unauthorized)?;
     if user.role != ROLE_INSTANCE_ADMIN {
         return Err((
             axum::http::StatusCode::FORBIDDEN,
@@ -1323,7 +1398,7 @@ async fn admin_update_workspace(
         ));
     }
     let now = now_str();
-    let res = sqlx::query("UPDATE teams SET plan = ?, updated_at = ? WHERE uuid = ?")
+    let res = sqlx::query("UPDATE teams SET plan = $1, updated_at = $2 WHERE uuid = $3")
         .bind(&plan)
         .bind(&now)
         .bind(&uuid)
@@ -1364,7 +1439,7 @@ async fn admin_update_features(
     }
     let now = now_str();
     sqlx::query(
-        "UPDATE instance_settings SET beta_workspace = ?, beta_agent_builder = ?, updated_at = ? WHERE id = 1",
+        "UPDATE instance_settings SET beta_workspace = $1, beta_agent_builder = $2, updated_at = $3 WHERE id = 1",
     )
     .bind(if workspace { 1i64 } else { 0 })
     .bind(if agent_builder { 1i64 } else { 0 })

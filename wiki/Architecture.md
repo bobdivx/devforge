@@ -11,11 +11,11 @@
 
 ```
 apps/web      Astro + Preact + Tailwind 4
-apps/server   Axum + Tokio + SQLx (SQLite)
+apps/server   Axum + Tokio + SQLx (PostgreSQL)
 crates/*      agent, deploy, github, env, mcp, cluster, …
 ```
 
-DB défaut : `sqlite:devforge.db?mode=rwc`. Turso/libSQL = option HA plus tard (même SQL).
+DB défaut : conteneur PostgreSQL `devforge-pg`. Un ancien fichier `sqlite:devforge.db` est importé au premier démarrage.
 
 ## Runtime agent
 
@@ -29,7 +29,7 @@ UI → POST /api/v1/agent/chat
 
 ## Cluster
 
-Leader SQLite + workers HTTP exec. `node.id` = `server_id`. Détail : [[Cluster]].
+Leader Postgres, réplique physique sur chaque worker, workers HTTP exec. `node.id` = `server_id`. Détail : [[Cluster]].
 
 ## Crates (état)
 
@@ -50,7 +50,7 @@ Leader SQLite + workers HTTP exec. `node.id` = `server_id`. Détail : [[Cluster]
 | `update` | Self-update |
 | `mcp` | Serveur + client |
 | `cluster` | Nœuds, invites, exec HTTP |
-| `database` | Provision Postgres — **non implémenté** (erreur explicite) |
+| `database` | Postgres par projet (conteneur) + copie du SQLite |
 | `runner` | GitHub runners |
 | `cron` | Crons projet |
 

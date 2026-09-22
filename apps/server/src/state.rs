@@ -1,30 +1,33 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use devforge_agent::{build_core_registry, AgentRunner, ProjectStore, ToolRegistry};
+use devforge_backup::{BackupFacade, InstanceBackupService, MemoryBackupStore};
+use devforge_cluster::{ClusterAwareExecutor, ClusterFacade, ClusterStore};
 use devforge_database::DatabaseFacade;
 use devforge_deploy::{executor_from_env, DeployFacade};
 use devforge_domain::DomainFacade;
 use devforge_env::{EnvFacade, EnvStore, EnvVar, MemoryEnvStore};
-use devforge_github::{client_from_env, client_from_token, GitHubClient, GitHubFacade, HttpGitHubClient};
+use devforge_github::{
+    client_from_env, client_from_token, GitHubClient, GitHubFacade, HttpGitHubClient,
+};
 use devforge_mcp::McpFacade;
 use devforge_ports::PortsFacade;
 use devforge_proxy::ProxyFacade;
 use devforge_runner::RunnerFacade;
-use devforge_cluster::{ClusterAwareExecutor, ClusterFacade, ClusterStore};
 use devforge_shared::{ProjectTestContext, Result as DfResult};
-use devforge_wireguard::WireguardFacade;
 use devforge_storage::StorageFacade;
-use devforge_backup::{BackupFacade, InstanceBackupService, MemoryBackupStore};
 use devforge_update::UpdateFacade;
+use devforge_wireguard::WireguardFacade;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sqlx::{sqlite::SqlitePoolOptions, FromRow, SqlitePool};
+use sqlx::{postgres::PgPoolOptions, FromRow, PgPool};
+use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub pool: SqlitePool,
+    pub pool: PgPool,
     /// Filesystem path of the SQLite DB (for instance backup/restore).
     pub db_path: std::path::PathBuf,
     pub registry: Arc<ToolRegistry>,
@@ -126,6 +129,10 @@ pub struct Project {
     pub docker_compose_location: Option<String>,
     /// 1 (default) = auto-deploy on push ; 0 = manual only.
     pub auto_deploy: i64,
+    /// 1 = `docker run --gpus all` au prochain déploiement.
+    pub gpu_nvidia: i64,
+    /// 1 = `docker run --device /dev/dri` au prochain déploiement.
+    pub gpu_dri: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -148,7 +155,7 @@ pub struct Deployment {
 }
 
 pub(crate) struct SqliteProjectStore {
-    pub(crate) pool: SqlitePool,
+    pub(crate) pool: PgPool,
     pub(crate) deploy: Arc<DeployFacade>,
     pub(crate) deploy_queue: Arc<crate::deploy_queue::DeployQueue>,
 }
@@ -177,7 +184,7 @@ impl ProjectStore for SqliteProjectStore {
     }
 
     async fn get_project(&self, uuid: &str) -> DfResult<Option<Value>> {
-        let row = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ?")
+        let row = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1")
             .bind(uuid)
             .fetch_optional(&self.pool)
             .await
@@ -188,7 +195,7 @@ impl ProjectStore for SqliteProjectStore {
         let deps: Vec<(String, String, Option<String>, Option<String>, String)> = sqlx::query_as(
             r#"SELECT d.uuid, d.status, d.git_sha, d.git_message, d.created_at
                FROM deployments d
-               WHERE d.project_id = ?
+               WHERE d.project_id = $1
                ORDER BY d.id DESC LIMIT 5"#,
         )
         .bind(p.id)
@@ -225,7 +232,7 @@ impl ProjectStore for SqliteProjectStore {
     }
 
     async fn resolve_project(&self, uuid: &str) -> DfResult<Option<ProjectTestContext>> {
-        let row = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ?")
+        let row = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1")
             .bind(uuid)
             .fetch_optional(&self.pool)
             .await
@@ -240,7 +247,7 @@ impl ProjectStore for SqliteProjectStore {
     }
 
     async fn deployment_logs(&self, uuid: &str) -> DfResult<Value> {
-        let row = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = ?")
+        let row = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = $1")
             .bind(uuid)
             .fetch_optional(&self.pool)
             .await
@@ -265,7 +272,7 @@ impl ProjectStore for SqliteProjectStore {
         use devforge_deploy::DeployRequest;
 
         // Récupérer le projet
-        let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ?")
+        let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1")
             .bind(project_uuid)
             .fetch_optional(&self.pool)
             .await
@@ -304,7 +311,7 @@ impl ProjectStore for SqliteProjectStore {
         sqlx::query(
             r#"INSERT INTO deployments (
                 uuid, project_id, status, git_sha, git_message, logs, finished_at, created_at, updated_at
-            ) VALUES (?, ?, 'queued', ?, ?, ?, NULL, ?, ?)"#,
+            ) VALUES ($1, $2, 'queued', $3, $4, $5, NULL, $6, $7)"#,
         )
         .bind(&dep_uuid)
         .bind(project.id)
@@ -318,7 +325,7 @@ impl ProjectStore for SqliteProjectStore {
         .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
         // Mettre à jour le statut du projet
-        sqlx::query("UPDATE projects SET status = 'deploying', updated_at = ? WHERE id = ?")
+        sqlx::query("UPDATE projects SET status = 'deploying', updated_at = $1 WHERE id = $2")
             .bind(&now)
             .bind(project.id)
             .execute(&self.pool)
@@ -338,11 +345,16 @@ impl ProjectStore for SqliteProjectStore {
 
         // Charger le fichier .env (même pattern que run_real_deploy)
         let env_file = crate::routes::load_env_file_content(&self.pool, &project.uuid).await;
+        let (env_file, group_network, group_alias) =
+            crate::group_routes::prepare_deploy_link(&self.pool, &project.uuid, env_file).await;
 
         // Construire la DeployRequest (même pattern que run_real_deploy)
         let req = DeployRequest {
             project_uuid: project.uuid.clone(),
-            server_id: project.server_id.clone().unwrap_or_else(|| "default".into()),
+            server_id: project
+                .server_id
+                .clone()
+                .unwrap_or_else(|| "default".into()),
             workdir: project.workdir.clone().unwrap_or_default(),
             git_repository: project.git_repository.clone().unwrap_or_default(),
             git_branch: project.git_branch.clone().unwrap_or_else(|| "main".into()),
@@ -365,6 +377,10 @@ impl ProjectStore for SqliteProjectStore {
             // proxy_labels sera configuré ultérieurement si nécessaire
             // Pour le déploiement initial via agent, on peut utiliser None
             proxy_labels: None,
+            gpu_nvidia: project.gpu_nvidia != 0,
+            gpu_dri: project.gpu_dri != 0,
+            group_network,
+            group_alias,
         };
 
         let server_id = req.server_id.clone();
@@ -395,8 +411,8 @@ impl ProjectStore for SqliteProjectStore {
 
         // Mettre à jour le déploiement avec le résultat
         sqlx::query(
-            r#"UPDATE deployments SET status = ?, git_sha = ?, logs = ?, finished_at = ?, updated_at = ?
-               WHERE uuid = ?"#,
+            r#"UPDATE deployments SET status = $1, git_sha = $2, logs = $3, finished_at = $4, updated_at = $5
+               WHERE uuid = $6"#,
         )
         .bind(status)
         .bind(&final_sha)
@@ -410,7 +426,7 @@ impl ProjectStore for SqliteProjectStore {
 
         // Mettre à jour le statut du projet
         let project_status = if result.ok { "live" } else { "failed" };
-        sqlx::query("UPDATE projects SET status = ?, updated_at = ? WHERE id = ?")
+        sqlx::query("UPDATE projects SET status = $1, updated_at = $2 WHERE id = $3")
             .bind(project_status)
             .bind(&finished)
             .bind(project.id)
@@ -435,14 +451,14 @@ impl ProjectStore for SqliteProjectStore {
 
 /// SQLite-backed env store for project variables.
 pub struct SqliteEnvStore {
-    pool: SqlitePool,
+    pool: PgPool,
 }
 
 #[async_trait]
 impl EnvStore for SqliteEnvStore {
     async fn list(&self, project_uuid: &str) -> DfResult<Vec<EnvVar>> {
         let rows: Vec<(String, String, i64)> = sqlx::query_as(
-            "SELECT key, value, secret FROM project_env_vars WHERE project_uuid = ? ORDER BY key",
+            "SELECT key, value, secret FROM project_env_vars WHERE project_uuid = $1 ORDER BY key",
         )
         .bind(project_uuid)
         .fetch_all(&self.pool)
@@ -460,7 +476,7 @@ impl EnvStore for SqliteEnvStore {
 
     async fn get(&self, project_uuid: &str, key: &str) -> DfResult<Option<EnvVar>> {
         let row: Option<(String, String, i64)> = sqlx::query_as(
-            "SELECT key, value, secret FROM project_env_vars WHERE project_uuid = ? AND key = ?",
+            "SELECT key, value, secret FROM project_env_vars WHERE project_uuid = $1 AND key = $2",
         )
         .bind(project_uuid)
         .bind(key)
@@ -484,7 +500,7 @@ impl EnvStore for SqliteEnvStore {
         let now = Utc::now().to_rfc3339();
         sqlx::query(
             r#"INSERT INTO project_env_vars (project_uuid, key, value, secret, updated_at)
-               VALUES (?, ?, ?, ?, ?)
+               VALUES ($1, $2, $3, $4, $5)
                ON CONFLICT(project_uuid, key) DO UPDATE SET
                  value = excluded.value,
                  secret = excluded.secret,
@@ -506,7 +522,7 @@ impl EnvStore for SqliteEnvStore {
     }
 
     async fn delete(&self, project_uuid: &str, key: &str) -> DfResult<bool> {
-        let res = sqlx::query("DELETE FROM project_env_vars WHERE project_uuid = ? AND key = ?")
+        let res = sqlx::query("DELETE FROM project_env_vars WHERE project_uuid = $1 AND key = $2")
             .bind(project_uuid)
             .bind(key)
             .execute(&self.pool)
@@ -519,21 +535,48 @@ impl EnvStore for SqliteEnvStore {
 impl AppState {
     pub async fn new(database_url: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let db_path = devforge_backup::sqlite_path_from_url(database_url);
-        if let Err(e) = InstanceBackupService::apply_pending_restore(&db_path) {
-            tracing::warn!(error = %e, "échec application pending restore");
+        if let Err(e) = crate::control_pg::adopt_staged_clone_if_armed().await {
+            tracing::error!(error = %e, "copie de reprise du control plane inutilisable");
         }
+        let promote =
+            std::fs::read_to_string(devforge_cluster::promote_flag_path()).unwrap_or_default();
+        if promote.trim() == "standby" {
+            crate::control_pg::takeover_from_standby().await?;
+        }
+        let pending = PathBuf::from(format!("{}.pending-restore", db_path.display()));
+        let pending_pg = std::fs::read(&pending)
+            .ok()
+            .is_some_and(|b| crate::control_pg::snapshot_is_postgres(&b));
+        let restored_sqlite = if pending_pg {
+            false
+        } else {
+            InstanceBackupService::apply_pending_restore(&db_path).unwrap_or(false)
+        };
 
-        let pool = SqlitePoolOptions::new()
-            .max_connections(5)
-            .connect(database_url)
+        let pg_url = crate::control_pg::ensure(database_url).await?;
+        let restored_pg = if pending_pg {
+            let bytes = std::fs::read(&pending)?;
+            crate::control_pg::restore_snapshot(&bytes).await?;
+            let _ = std::fs::remove_file(&pending);
+            true
+        } else {
+            false
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(10)
+            .connect(&pg_url)
             .await?;
+
+        if restored_sqlite {
+            crate::control_pg::replace_from_sqlite(&pool, &db_path).await?;
+        } else if !restored_pg {
+            crate::control_pg::import_legacy_sqlite(&pool, &db_path).await?;
+        }
 
         crate::db::migrate(&pool).await?;
 
         let cluster_store: Arc<dyn ClusterStore> =
-            Arc::new(crate::cluster_store::SqliteClusterStore {
-                pool: pool.clone(),
-            });
+            Arc::new(crate::cluster_store::SqliteClusterStore { pool: pool.clone() });
         let cluster = Arc::new(ClusterFacade::new(cluster_store.clone()));
         {
             let instance_url: String = sqlx::query_as::<_, (String,)>(
@@ -556,9 +599,8 @@ impl AppState {
         }
 
         let (inner_executor, executor_mode) = executor_from_env();
-        let executor: Arc<dyn devforge_deploy::RemoteExecutor> = Arc::new(
-            ClusterAwareExecutor::new(inner_executor, cluster_store),
-        );
+        let executor: Arc<dyn devforge_deploy::RemoteExecutor> =
+            Arc::new(ClusterAwareExecutor::new(inner_executor, cluster_store));
         let (gh_client, github_mode, github_token) = resolve_github_client(&pool).await;
         let storage = Arc::new(StorageFacade::memory());
         let s3_cfg = crate::backup_routes::load_s3_config(&pool).await;
@@ -568,13 +610,14 @@ impl AppState {
             Arc::new(MemoryBackupStore::new()),
             storage.clone(),
         ));
-        let (_, llm_mode) = resolve_llm_provider(&pool).await;
+        let (_, llm_mode) = devforge_llm::provider_from_env();
+        let llm_mode = llm_mode.to_string();
 
         let backends = Arc::new(BackendModes {
             executor: executor_mode,
             github: std::sync::RwLock::new(github_mode.to_string()),
             storage: std::sync::RwLock::new(storage_mode.clone()),
-            database: "sqlite",
+            database: "postgres",
             llm: std::sync::RwLock::new(llm_mode.clone()),
         });
         tracing::info!(
@@ -595,11 +638,11 @@ impl AppState {
         let env = Arc::new(EnvFacade::new(Arc::new(SqliteEnvStore {
             pool: pool.clone(),
         })));
-        let ports = Arc::new(PortsFacade::new(Arc::new(crate::infra_sqlite::SqlitePortStore {
-            pool: pool.clone(),
-        })));
-        let apply_server = std::env::var("DEVFORGE_DEFAULT_SERVER_ID")
-            .unwrap_or_else(|_| "default".into());
+        let ports = Arc::new(PortsFacade::new(Arc::new(
+            crate::infra_sqlite::SqlitePortStore { pool: pool.clone() },
+        )));
+        let apply_server =
+            std::env::var("DEVFORGE_DEFAULT_SERVER_ID").unwrap_or_else(|_| "default".into());
 
         let mut domains = DomainFacade::new(Arc::new(crate::infra_sqlite::SqliteDomainStore {
             pool: pool.clone(),
@@ -607,9 +650,10 @@ impl AppState {
         let mut proxy = ProxyFacade::new(Arc::new(crate::infra_sqlite::SqliteProxyStore {
             pool: pool.clone(),
         }));
-        let mut wireguard = WireguardFacade::new(Arc::new(crate::infra_sqlite::SqliteWireguardStore {
-            pool: pool.clone(),
-        }));
+        let mut wireguard =
+            WireguardFacade::new(Arc::new(crate::infra_sqlite::SqliteWireguardStore {
+                pool: pool.clone(),
+            }));
         if executor_mode != "stub" {
             domains = domains.with_executor(executor.clone(), apply_server.clone());
             proxy = proxy.with_executor(executor.clone(), apply_server.clone());
@@ -633,21 +677,10 @@ impl AppState {
             Arc::new(pool.clone()),
         ));
         let agent = Arc::new(AgentRunner::new(registry.clone()));
-        // Prefer DB/Settings LLM over plain env when configured.
-        {
-            let (llm, mode) = resolve_llm_provider(&pool).await;
-            agent.set_llm(llm, mode.clone()).await;
-            backends.set_llm_mode(mode);
-        }
-        let updater = Arc::new(UpdateFacade::from_env(
-            github.clone(),
-            deploy.executor(),
-        ));
+        let updater = Arc::new(UpdateFacade::from_env(github.clone(), deploy.executor()));
 
         let runners = Arc::new(RunnerFacade::new(
-            Arc::new(crate::runner_store::SqliteRunnerStore {
-                pool: pool.clone(),
-            }),
+            Arc::new(crate::runner_store::SqliteRunnerStore { pool: pool.clone() }),
             deploy.executor(),
             github.clone(),
         ));
@@ -688,6 +721,17 @@ impl AppState {
         Ok(state)
     }
 
+    /// Client GitHub isolé, sans toucher au token d’instance.
+    pub fn github_from_token(token: &str) -> Arc<GitHubFacade> {
+        let (client, mode) = client_from_token(token);
+        let gh = Arc::new(GitHubFacade::new(client, mode));
+        let t = token.trim();
+        if !t.is_empty() {
+            gh.set_token(Some(t.to_string()));
+        }
+        gh
+    }
+
     /// Persist + hot-reload GitHub HTTP client (PAT). Empty token → off.
     pub async fn configure_github(
         &self,
@@ -695,7 +739,7 @@ impl AppState {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let t = token.trim().to_string();
         let now = now_str();
-        sqlx::query("UPDATE instance_settings SET github_token = ?, updated_at = ? WHERE id = 1")
+        sqlx::query("UPDATE instance_settings SET github_token = $1, updated_at = $2 WHERE id = 1")
             .bind(&t)
             .bind(&now)
             .execute(&self.pool)
@@ -750,7 +794,7 @@ impl AppState {
         let base_url = base_url.trim().to_string();
         let now = now_str();
         sqlx::query(
-            "UPDATE instance_settings SET llm_provider = ?, llm_api_key = ?, llm_model = ?, llm_base_url = ?, updated_at = ? WHERE id = 1",
+            "UPDATE instance_settings SET llm_provider = $1, llm_api_key = $2, llm_model = $3, llm_base_url = $4, updated_at = $5 WHERE id = 1",
         )
         .bind(&provider)
         .bind(&api_key)
@@ -771,14 +815,16 @@ impl AppState {
         self.reload_llm_chain().await
     }
 
-    /// Recharge la chaîne LLM depuis `llm_providers` (priority ASC, enabled).
-    pub async fn reload_llm_chain(
-        &self,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let (llm, mode) = resolve_llm_provider(&self.pool).await;
-        self.agent.set_llm(llm, mode.clone()).await;
-        self.backends.set_llm_mode(mode);
+    /// La chaîne LLM est résolue par compte au moment du chat. Plus de client global partagé.
+    pub async fn reload_llm_chain(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
+    }
+
+    pub async fn llm_for_user(
+        &self,
+        user_uuid: &str,
+    ) -> (Arc<dyn devforge_llm::LlmProvider>, String) {
+        resolve_llm_provider(&self.pool, user_uuid).await
     }
 }
 
@@ -801,14 +847,18 @@ fn normalize_chat_base(provider: &str, base_url: &str) -> String {
     clean
 }
 
-async fn resolve_llm_provider(pool: &SqlitePool) -> (Arc<dyn devforge_llm::LlmProvider>, String) {
-    // 1) Chaîne multi-providers (priorité) — probe chat avant activation
+async fn resolve_llm_provider(
+    pool: &PgPool,
+    user_uuid: &str,
+) -> (Arc<dyn devforge_llm::LlmProvider>, String) {
+    // Chaîne du compte uniquement — probe chat avant usage.
     let rows: Vec<(String, String, String, String, String, String)> = sqlx::query_as(
         r#"SELECT id, name, provider, api_key, base_url, model
            FROM llm_providers
-           WHERE enabled = 1
+           WHERE enabled = 1 AND user_uuid = $1
            ORDER BY priority ASC, name ASC"#,
     )
+    .bind(user_uuid)
     .fetch_all(pool)
     .await
     .unwrap_or_default();
@@ -828,8 +878,8 @@ async fn resolve_llm_provider(pool: &SqlitePool) -> (Arc<dyn devforge_llm::LlmPr
 
             let _ = sqlx::query(
                 r#"UPDATE llm_providers
-                   SET healthy = ?, last_probe_at = ?, last_probe_error = ?, resolved_model = ?
-                   WHERE id = ?"#,
+                   SET healthy = $1, last_probe_at = $2, last_probe_error = $3, resolved_model = $4
+                   WHERE id = $5"#,
             )
             .bind(if probe.ok { 1i64 } else { 0i64 })
             .bind(&now)
@@ -883,48 +933,21 @@ async fn resolve_llm_provider(pool: &SqlitePool) -> (Arc<dyn devforge_llm::LlmPr
             let resilient = Arc::new(devforge_llm::ResilientLlmProvider::new(chain));
             return (resilient, mode);
         }
-        tracing::warn!("aucun LLM healthy — fallback stub");
+        tracing::warn!(user = %user_uuid, "aucun LLM healthy pour ce compte — stub");
     }
 
-    // 2) Legacy instance_settings
-    let row: Option<(String, String, String, String)> = sqlx::query_as(
-        "SELECT llm_provider, llm_api_key, llm_model, llm_base_url FROM instance_settings WHERE id = 1",
-    )
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten();
-
-    if let Some((provider, key, model, base)) = row {
-        let has_db = !key.trim().is_empty()
-            || provider == "ollama"
-            || provider == "stub"
-            || (provider != "auto" && !provider.is_empty());
-        if has_db && (provider != "auto" || !key.trim().is_empty()) {
-            return devforge_llm::provider_from_config(
-                &provider,
-                &key,
-                &model,
-                if base.trim().is_empty() {
-                    None
-                } else {
-                    Some(base.as_str())
-                },
-            );
-        }
-        if !key.trim().is_empty() {
-            return devforge_llm::provider_from_config("openai", &key, &model, None);
-        }
-    }
-
-    let (p, m) = devforge_llm::provider_from_env();
-    (p, m.to_string())
+    devforge_llm::provider_from_config("stub", "", "gpt-4o-mini", None)
 }
 
 async fn resolve_github_client(
-    pool: &SqlitePool,
-) -> (Arc<dyn devforge_github::GitHubClient>, &'static str, Option<String>) {
-    if let Ok(token) = std::env::var("DEVFORGE_GITHUB_TOKEN").or_else(|_| std::env::var("GITHUB_TOKEN"))
+    pool: &PgPool,
+) -> (
+    Arc<dyn devforge_github::GitHubClient>,
+    &'static str,
+    Option<String>,
+) {
+    if let Ok(token) =
+        std::env::var("DEVFORGE_GITHUB_TOKEN").or_else(|_| std::env::var("GITHUB_TOKEN"))
     {
         if !token.trim().is_empty() {
             let (c, m) = client_from_token(&token);

@@ -1,19 +1,19 @@
 use crate::models::*;
 use devforge_shared::Result;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 pub struct CronService {
-    pool: SqlitePool,
+    pool: PgPool,
 }
 
 impl CronService {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
     pub async fn list(&self, project_uuid: &str) -> Result<Vec<ProjectCron>> {
         let rows = sqlx::query_as::<_, ProjectCron>(
-            "SELECT * FROM project_crons WHERE project_uuid = ? ORDER BY name",
+            "SELECT * FROM project_crons WHERE project_uuid = $1 ORDER BY name",
         )
         .bind(project_uuid)
         .fetch_all(&self.pool)
@@ -23,7 +23,7 @@ impl CronService {
     }
 
     pub async fn get(&self, id: &str) -> Result<Option<ProjectCron>> {
-        let row = sqlx::query_as::<_, ProjectCron>("SELECT * FROM project_crons WHERE id = ?")
+        let row = sqlx::query_as::<_, ProjectCron>("SELECT * FROM project_crons WHERE id = $1")
             .bind(id)
             .fetch_optional(&self.pool)
             .await
@@ -49,7 +49,7 @@ impl CronService {
             r#"INSERT INTO project_crons (
                 id, project_uuid, name, cron_expression, command, enabled, timezone,
                 last_status, last_run_at, next_run_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)"#,
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, $8, $9, $10)"#,
         )
         .bind(&id)
         .bind(project_uuid)
@@ -97,9 +97,9 @@ impl CronService {
 
         sqlx::query(
             r#"UPDATE project_crons SET
-                name = ?, cron_expression = ?, command = ?, enabled = ?, timezone = ?,
-                next_run_at = ?, updated_at = ?
-            WHERE id = ?"#,
+                name = $1, cron_expression = $2, command = $3, enabled = $4, timezone = $5,
+                next_run_at = $6, updated_at = $7
+            WHERE id = $8"#,
         )
         .bind(&name)
         .bind(&cron_expression)
@@ -121,13 +121,13 @@ impl CronService {
     }
 
     pub async fn delete(&self, id: &str) -> Result<bool> {
-        sqlx::query("DELETE FROM project_cron_runs WHERE cron_id = ?")
+        sqlx::query("DELETE FROM project_cron_runs WHERE cron_id = $1")
             .bind(id)
             .execute(&self.pool)
             .await
             .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
-        let res = sqlx::query("DELETE FROM project_crons WHERE id = ?")
+        let res = sqlx::query("DELETE FROM project_crons WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
             .await
@@ -140,7 +140,7 @@ impl CronService {
         let now = chrono::Utc::now().to_rfc3339();
         let val = if enabled { 1 } else { 0 };
 
-        sqlx::query("UPDATE project_crons SET enabled = ?, updated_at = ? WHERE id = ?")
+        sqlx::query("UPDATE project_crons SET enabled = $1, updated_at = $2 WHERE id = $3")
             .bind(val)
             .bind(&now)
             .bind(id)
@@ -157,7 +157,7 @@ impl CronService {
 
     pub async fn list_runs(&self, cron_id: &str, limit: i64) -> Result<Vec<CronRun>> {
         let rows = sqlx::query_as::<_, CronRun>(
-            "SELECT * FROM project_cron_runs WHERE cron_id = ? ORDER BY started_at DESC LIMIT ?",
+            "SELECT * FROM project_cron_runs WHERE cron_id = $1 ORDER BY started_at DESC LIMIT $2",
         )
         .bind(cron_id)
         .bind(limit)
@@ -174,7 +174,7 @@ impl CronService {
         sqlx::query(
             r#"INSERT INTO project_cron_runs (
                 id, cron_id, project_uuid, status, output, exit_code, started_at, finished_at
-            ) VALUES (?, ?, ?, 'running', NULL, NULL, ?, NULL)"#,
+            ) VALUES ($1, $2, $3, 'running', NULL, NULL, $4, NULL)"#,
         )
         .bind(&run_id)
         .bind(&cron.id)
@@ -198,8 +198,8 @@ impl CronService {
 
         sqlx::query(
             r#"UPDATE project_cron_runs SET
-                status = ?, output = ?, exit_code = ?, finished_at = ?
-            WHERE id = ?"#,
+                status = $1, output = $2, exit_code = $3, finished_at = $4
+            WHERE id = $5"#,
         )
         .bind(status)
         .bind(output)
@@ -223,8 +223,8 @@ impl CronService {
 
         sqlx::query(
             r#"UPDATE project_crons SET
-                last_status = ?, last_run_at = ?, next_run_at = ?, updated_at = ?
-            WHERE id = ?"#,
+                last_status = $1, last_run_at = $2, next_run_at = $3, updated_at = $4
+            WHERE id = $5"#,
         )
         .bind(status)
         .bind(&now)
@@ -244,7 +244,7 @@ impl CronService {
         let rows = sqlx::query_as::<_, ProjectCron>(
             r#"SELECT * FROM project_crons 
                WHERE enabled = 1 
-               AND (next_run_at IS NULL OR next_run_at <= ?)
+               AND (next_run_at IS NULL OR next_run_at <= $1)
                ORDER BY next_run_at"#,
         )
         .bind(&now)

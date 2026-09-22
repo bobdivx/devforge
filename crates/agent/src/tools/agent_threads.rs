@@ -1,22 +1,22 @@
 use async_trait::async_trait;
 use devforge_shared::{Result, Tool};
 use serde_json::{json, Value};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use std::sync::Arc;
 
 /// Liste les agents / fils d’un projet.
 pub struct ListProjectAgentsTool {
-    pub pool: Arc<SqlitePool>,
+    pub pool: Arc<PgPool>,
 }
 
 /// Lit les messages d’un fil agent.
 pub struct ListAgentMessagesTool {
-    pub pool: Arc<SqlitePool>,
+    pub pool: Arc<PgPool>,
 }
 
 /// Extrait les appels d’outils en échec d’un fil.
 pub struct ListAgentToolFailuresTool {
-    pub pool: Arc<SqlitePool>,
+    pub pool: Arc<PgPool>,
 }
 
 #[async_trait]
@@ -47,7 +47,7 @@ impl Tool for ListProjectAgentsTool {
         }
         let rows: Vec<(String, String, String, String, String, String)> = sqlx::query_as(
             r#"SELECT uuid, name, role, kind, status, updated_at
-               FROM project_agents WHERE project_uuid = ?
+               FROM project_agents WHERE project_uuid = $1
                ORDER BY updated_at DESC, name"#,
         )
         .bind(project_uuid)
@@ -120,9 +120,9 @@ impl Tool for ListAgentMessagesTool {
         let rows: Vec<(String, String, String, String, String, String)> = sqlx::query_as(
             r#"SELECT uuid, role, content, tool_calls_json, provider, created_at
                FROM agent_messages
-               WHERE project_uuid = ? AND agent_uuid = ?
+               WHERE project_uuid = $1 AND agent_uuid = $2
                ORDER BY id ASC
-               LIMIT ?"#,
+               LIMIT $3"#,
         )
         .bind(project_uuid)
         .bind(agent_uuid)
@@ -199,9 +199,9 @@ impl Tool for ListAgentToolFailuresTool {
         let rows: Vec<(String, String, String)> = sqlx::query_as(
             r#"SELECT uuid, tool_calls_json, created_at
                FROM agent_messages
-               WHERE project_uuid = ? AND agent_uuid = ? AND role = 'assistant'
+               WHERE project_uuid = $1 AND agent_uuid = $2 AND role = 'assistant'
                ORDER BY id DESC
-               LIMIT ?"#,
+               LIMIT $3"#,
         )
         .bind(project_uuid)
         .bind(agent_uuid)

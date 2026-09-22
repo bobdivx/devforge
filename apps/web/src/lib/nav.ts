@@ -6,6 +6,7 @@ const USER_NAV: NavItem[] = [
   { href: '/app/mcp', label: 'MCP', key: 'mcp' },
   { href: '/app/tokens', label: 'Tokens', key: 'tokens' },
   { href: '/app/team', label: 'Compte', key: 'team' },
+  { href: '/app/settings', label: 'Paramètres', key: 'settings' },
 ];
 
 /** Infra et opérateur — `instance_admin` uniquement. */
@@ -74,7 +75,7 @@ export function projectNav(uuid: string, opts?: { workspace?: boolean }): NavIte
   return items;
 }
 
-/** Sous-nav Settings — admin instance uniquement. */
+/** Sous-nav Settings. Les comptes voient domaine, GitHub et LLM ; le reste est admin. */
 export const SETTINGS_NAV: NavItem[] = [
   { href: '/app/settings', label: 'Général', key: 'general' },
   { href: '/app/settings?tab=domaine', label: 'Domaine', key: 'domaine' },
@@ -83,8 +84,16 @@ export const SETTINGS_NAV: NavItem[] = [
   { href: '/app/settings?tab=llm', label: 'Agents / LLM', key: 'llm' },
   { href: '/app/settings?tab=sso', label: 'SSO / OIDC', key: 'sso' },
   { href: '/app/settings?tab=backup', label: 'Sauvegardes', key: 'backup' },
+  { href: '/app/settings?tab=postgres', label: 'Postgres', key: 'postgres' },
   { href: '/app/settings?tab=update', label: 'Mise à jour', key: 'update' },
 ];
+
+const USER_SETTINGS_KEYS = new Set(['domaine', 'github', 'llm']);
+
+export function settingsNavForRole(role?: string | null): NavItem[] {
+  if (role === 'instance_admin') return SETTINGS_NAV;
+  return SETTINGS_NAV.filter((item) => USER_SETTINGS_KEYS.has(item.key));
+}
 
 export function projectAgentsHref(uuid: string): string {
   return `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=agents`;

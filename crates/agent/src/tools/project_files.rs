@@ -3,7 +3,7 @@ use devforge_github::GitHubFacade;
 use devforge_mcp::McpFacade;
 use devforge_shared::{Result, Tool};
 use serde_json::{json, Value};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -27,7 +27,7 @@ const MAX_READ_BYTES: usize = 150_000;
 pub struct WriteProjectFileTool {
     pub github: Arc<GitHubFacade>,
     pub mcp: Arc<McpFacade>,
-    pub pool: Arc<SqlitePool>,
+    pub pool: Arc<PgPool>,
 }
 
 #[async_trait]
@@ -156,7 +156,7 @@ impl Tool for WriteProjectFileTool {
 
         // Récupérer le projet
         let project: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT uuid, workdir, git_repository FROM projects WHERE uuid = ?",
+            "SELECT uuid, workdir, git_repository FROM projects WHERE uuid = $1",
         )
         .bind(project_uuid)
         .fetch_optional(self.pool.as_ref())
@@ -200,7 +200,7 @@ impl WriteProjectFileTool {
         if workdir_raw.is_empty() {
             workdir_raw = format!("/data/devforge/applications/{project_uuid}");
             let _ = sqlx::query(
-                "UPDATE projects SET workdir = ?, updated_at = datetime('now') WHERE uuid = ?",
+                "UPDATE projects SET workdir = $1, updated_at = to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') WHERE uuid = $2",
             )
             .bind(&workdir_raw)
             .bind(project_uuid)
@@ -426,7 +426,7 @@ impl WriteProjectFileTool {
 
 /// Lit un fichier du workdir local (pas GitHub).
 pub struct ReadProjectFileTool {
-    pub pool: Arc<SqlitePool>,
+    pub pool: Arc<PgPool>,
 }
 
 #[async_trait]
@@ -521,7 +521,7 @@ impl Tool for ReadProjectFileTool {
 
 /// Liste les fichiers du workdir local.
 pub struct ListProjectFilesTool {
-    pub pool: Arc<SqlitePool>,
+    pub pool: Arc<PgPool>,
 }
 
 #[async_trait]
@@ -600,7 +600,7 @@ struct ResolvedWorkdirFile {
 }
 
 async fn resolve_workdir_file(
-    pool: &SqlitePool,
+    pool: &PgPool,
     project_uuid: &str,
     rel: &str,
 ) -> std::result::Result<ResolvedWorkdirFile, Value> {
@@ -618,7 +618,7 @@ async fn resolve_workdir_file(
     }
 
     let project: Option<(String, Option<String>)> =
-        sqlx::query_as("SELECT uuid, workdir FROM projects WHERE uuid = ?")
+        sqlx::query_as("SELECT uuid, workdir FROM projects WHERE uuid = $1")
             .bind(project_uuid)
             .fetch_optional(pool)
             .await

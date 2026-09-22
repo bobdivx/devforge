@@ -32,7 +32,7 @@ Les tuiles affichent CPU, version DevForge, nombre d’apps, last_seen. Fiche n�
 - **Apps** — liste des projets (`server_id`) + réassignation (le prochain deploy va sur la cible ; les conteneurs déjà lancés restent)
 - **Diagnostic** — `uptime` / `free` / `df` / `docker ps` via exec
 
-Si le **leader** tombe : après ~1 min sans heartbeat, le worker au plus petit `id` (non drainé, URL connue) **est élu** et restaure la dernière copie SQLite. L’UI/API reviennent sur cet intérim (perte max ~30–60 s). Les apps Docker déjà lancées **continuent**. Quand le leader d’origine revient, il reprend la base de l’intérim puis redevient le control plane.
+Si le **leader** tombe : après ~1 min sans heartbeat, le worker au plus petit `id` (non drainé, URL connue) **est élu** et promeut sa réplique Postgres (déjà alimentée en continu). Les écritures confirmées pendant qu’une réplique streame attendent que ce WAL soit rejoué. Sans réplique encore prête, l’élu recharge le dernier `pg_dump`. Les apps Docker déjà lancées **continuent**. Quand le leader d’origine revient, il reprend une copie physique de l’intérim puis redevient le control plane.
 
 Un tunnel Cloudflare **uniquement sur le leader** est un point unique : les domaines publics meurent avec lui. Settings → Domaine → **Entrée publique** : un token (et le domaine si besoin).
 
@@ -45,15 +45,16 @@ Si un **worker** tombe : seules les apps de ce nœud s’arrêtent. Réassigne +
 
 ## Bases de données
 
-Trois couches distinctes :
+Quatre couches distinctes :
 
 | Quoi | Où | Si le nœud change / tombe |
 |------|----|---------------------------|
-| SQLite DevForge (control plane) | Fichier `/data` **sur le leader**, copie récente sur chaque worker | Leader down → élection + restauration de la copie (~30–60 s). Relancer la machine d’origine pour reprendre. Sauvegarde instance. |
+| Postgres DevForge (control plane) | Conteneur `devforge-pg` sur le nœud qui écrit, publié sur le port `5433` | Chaque worker tient `devforge-pg-ha`, réplique physique. Leader down → promotion de cette réplique. Le port 5433 doit être joignable entre les nœuds (mot de passe, pas d’accès public). Un fichier SQLite encore présent est importé une fois. |
+| **PostgreSQL** du projet | Conteneur `df-pg-…` sur le nœud de la forge, volume Docker, port hôte pour la réplication | Une réplique `-ha` vit sur un autre nœud en ligne. Réassignation : copie puis retrait de la source. Nœud déjà hors ligne : la réplique est promue (ou copiée vers la cible). `DATABASE_URL` ne change pas (le nom du conteneur suit). |
 | **Turso** liée au projet | Cloud (libSQL) | Les env `DATABASE_URL` / `TURSO_*` suivent le projet. La forge peut bouger de nœud, les données restent. |
-| SQLite **dans le conteneur** de l’app | Disque du nœud qui run le container | Perdue au redéploy (nouveau conteneur). Inaccessible si ce worker est down. |
+| SQLite **dans le conteneur** de l’app | Disque du nœud qui run le container | Perdue au redéploy (nouveau conteneur). L’onglet Database peut la copier dans une instance PostgreSQL (`data/app.db` ou `DATABASE_URL=sqlite:…`). |
 
-L’onglet projet **Database** ne provisionne pas de Postgres. Il lie une base Turso (MCP) et injecte les secrets dans Env, donc dans le conteneur au prochain deploy.
+L’onglet projet **Database** crée une instance PostgreSQL (`postgres:16-alpine`, réseau Docker `devforge`) et peut y copier le SQLite du workdir. Turso reste disponible via MCP.
 
 ## Rejoindre depuis une machine neuve
 
@@ -85,7 +86,6 @@ Rate-limit join : 20 tentatives / IP / minute.
 
 ## Hors v1
 
-- Réplication synchrone du control plane (Turso / libSQL)
 - Mesh WireGuard entre nœuds
 
 Le crate `crates/cluster` + tables SQLite `cluster_*` portent le v1.

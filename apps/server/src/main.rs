@@ -1,37 +1,42 @@
+mod actions_routes;
 mod agent_runs;
-mod deploy_queue;
-mod dns;
+mod auth_routes;
+mod auto_deploy;
+mod backup_routes;
 mod cluster_routes;
 mod cluster_store;
-mod db;
-mod paths;
-mod worker;
-mod actions_routes;
-mod auto_deploy;
-mod auth_routes;
-mod backup_routes;
+mod control_pg;
 mod cron_routes;
+mod db;
+mod deploy_queue;
 mod detect_svc;
+mod dns;
 mod git_routes;
+mod group_routes;
 mod infra_routes;
 mod infra_sqlite;
 mod llm_routes;
 mod mcp_routes;
+mod paths;
 mod platform_sso;
 #[cfg(test)]
 mod platform_sso_tests;
+mod pocket_id;
+mod project_oidc;
+mod project_oidc_routes;
+mod project_pg;
+mod project_pg_routes;
 mod routes;
 mod runner_routes;
 mod runner_store;
 mod security;
-mod pocket_id;
-mod project_oidc;
-mod project_oidc_routes;
 mod sso;
 mod sso_routes;
 mod state;
 mod token_routes;
 mod update_routes;
+mod user_prefs;
+mod worker;
 
 use axum::{middleware, routing::get, Json, Router};
 use serde_json::{json, Value};
@@ -50,9 +55,10 @@ async fn api_root() -> Json<Value> {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
     tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            "devforge_server=debug,tower_http=info".into()
-        }))
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "devforge_server=debug,tower_http=info".into()),
+        )
         .with(tracing_subscriber::fmt::layer())
         .init();
     paths::apply_install_layout();
@@ -116,6 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     worker::spawn_fence_watch(state.clone());
     cluster_routes::spawn_snapshot_loop(state.clone());
     cluster_routes::spawn_evacuate_watch(state.clone());
+    project_pg::spawn_standby_loop(state.clone());
 
     // Ensure Traefik reverse proxy is running (durable fix for outage 2026-09-11).
     // If the container was deleted/stopped, recreate/start it before accepting requests.
@@ -164,7 +171,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.db_path.clone(),
         ));
         tokio::spawn(async move {
-            scheduler.run_loop().await;
+            scheduler
+                .run_loop(|| crate::control_pg::dump_snapshot())
+                .await;
         });
     }
 
@@ -200,11 +209,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(backup_routes::router())
         .merge(sso_routes::router())
         .merge(project_oidc_routes::router())
+        .merge(project_pg_routes::router())
         .merge(llm_routes::router())
         .merge(mcp_routes::router())
         .merge(runner_routes::router())
         .merge(actions_routes::router())
         .merge(git_routes::router())
+        .merge(group_routes::router())
         .merge(update_routes::router())
         .merge(cron_routes::router())
         .merge(cluster_routes::router())
@@ -232,9 +243,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!(path = %root.display(), "serving static web assets");
         serving_web = true;
         if index.is_file() {
-            app = app.fallback_service(
-                ServeDir::new(&root).not_found_service(ServeFile::new(index)),
-            );
+            app =
+                app.fallback_service(ServeDir::new(&root).not_found_service(ServeFile::new(index)));
         } else {
             app = app.fallback_service(ServeDir::new(&root));
         }

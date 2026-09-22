@@ -5,19 +5,19 @@ use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
+use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
 use devforge_auth::{has_ability, ABILITY_READ, ABILITY_WRITE};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
-use base64::{Engine as _, engine::general_purpose};
 
 /// Résout l'URL publique de l'instance dans cet ordre :
 /// 1. `instance_url` depuis DB (settings)
 /// 2. Dérivé depuis request headers (Host + X-Forwarded-Proto/Forwarded)
 /// 3. APP_URL env (fallback optionnel)
-/// 
+///
 /// Retourne une erreur seulement si aucune source ne fournit une URL HTTPS valide
 /// (ou localhost pour dev).
 async fn resolve_public_base_url(
@@ -25,21 +25,27 @@ async fn resolve_public_base_url(
     headers: &HeaderMap,
 ) -> Result<String, ApiError> {
     // 1. Essayer instance_url depuis DB
-    if let Ok(row) = sqlx::query_as::<_, (String,)>(
-        "SELECT instance_url FROM instance_settings WHERE id = 1"
-    )
-    .fetch_one(&state.pool)
-    .await
+    if let Ok(row) =
+        sqlx::query_as::<_, (String,)>("SELECT instance_url FROM instance_settings WHERE id = 1")
+            .fetch_one(&state.pool)
+            .await
     {
         let url = row.0.trim().trim_end_matches('/');
-        if !url.is_empty() && (url.starts_with("https://") || url.starts_with("http://localhost") || url.starts_with("http://127.0.0.1")) {
+        if !url.is_empty()
+            && (url.starts_with("https://")
+                || url.starts_with("http://localhost")
+                || url.starts_with("http://127.0.0.1"))
+        {
             return Ok(url.to_string());
         }
     }
 
     // 2. Dériver depuis Host + X-Forwarded-Proto/Forwarded
     if let Some(host) = headers.get("host").and_then(|h| h.to_str().ok()) {
-        let scheme = if let Some(proto) = headers.get("x-forwarded-proto").and_then(|p| p.to_str().ok()) {
+        let scheme = if let Some(proto) = headers
+            .get("x-forwarded-proto")
+            .and_then(|p| p.to_str().ok())
+        {
             proto
         } else if let Some(fwd) = headers.get("forwarded").and_then(|f| f.to_str().ok()) {
             // Parser "Forwarded: proto=https;host=..."
@@ -56,8 +62,11 @@ async fn resolve_public_base_url(
 
         let derived = format!("{}://{}", scheme, host);
         let trimmed = derived.trim_end_matches('/');
-        
-        if trimmed.starts_with("https://") || trimmed.starts_with("http://localhost") || trimmed.starts_with("http://127.0.0.1") {
+
+        if trimmed.starts_with("https://")
+            || trimmed.starts_with("http://localhost")
+            || trimmed.starts_with("http://127.0.0.1")
+        {
             return Ok(trimmed.to_string());
         }
     }
@@ -65,7 +74,11 @@ async fn resolve_public_base_url(
     // 3. Fallback APP_URL (optionnel)
     if let Ok(app_url) = std::env::var("APP_URL") {
         let url = app_url.trim().trim_end_matches('/');
-        if !url.is_empty() && (url.starts_with("https://") || url.starts_with("http://localhost") || url.starts_with("http://127.0.0.1")) {
+        if !url.is_empty()
+            && (url.starts_with("https://")
+                || url.starts_with("http://localhost")
+                || url.starts_with("http://127.0.0.1"))
+        {
             return Ok(url.to_string());
         }
     }
@@ -102,12 +115,21 @@ pub fn router() -> Router<AppState> {
             delete(unlink_project_resource),
         )
         // OAuth MCP routes
-        .route("/api/v1/mcp/servers/{id}/oauth/start", post(start_oauth_flow))
+        .route(
+            "/api/v1/mcp/servers/{id}/oauth/start",
+            post(start_oauth_flow),
+        )
         .route("/api/v1/mcp/oauth/callback", get(oauth_callback))
-        .route("/api/v1/mcp/servers/{id}/oauth/disconnect", post(disconnect_oauth))
+        .route(
+            "/api/v1/mcp/servers/{id}/oauth/disconnect",
+            post(disconnect_oauth),
+        )
         // Client ID Metadata Document (CIMD)
         .route("/.well-known/oauth-client", get(oauth_client_metadata))
-        .route("/api/v1/mcp/oauth/client-metadata.json", get(oauth_client_metadata))
+        .route(
+            "/api/v1/mcp/oauth/client-metadata.json",
+            get(oauth_client_metadata),
+        )
 }
 
 async fn workspace_uuid(state: &AppState, headers: &HeaderMap) -> Result<String, ApiError> {
@@ -301,7 +323,7 @@ async fn delete_mcp_server(
         }
     }
     let ok = state.mcp.clients.remove(&id).await;
-    sqlx::query("DELETE FROM mcp_servers WHERE id = ?")
+    sqlx::query("DELETE FROM mcp_servers WHERE id = $1")
         .bind(&id)
         .execute(&state.pool)
         .await
@@ -327,7 +349,9 @@ async fn list_local_mcp_tools(
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
     let _ = workspace_uuid(&state, &headers).await?;
-    Ok(Json(json!({ "data": state.mcp.server.tools_list_payload().await })))
+    Ok(Json(
+        json!({ "data": state.mcp.server.tools_list_payload().await }),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -486,10 +510,16 @@ async fn list_mcp_resources(
     if catalog == "turso" {
         // Essayer d'abord via MCP tools OAuth (préféré)
         if !server.oauth_access_token.is_empty() {
-            match state.mcp.clients.call_remote_tool(&id, "list_databases", json!({})).await {
+            match state
+                .mcp
+                .clients
+                .call_remote_tool(&id, "list_databases", json!({}))
+                .await
+            {
                 Ok(result) => {
                     // Le tool list_databases retourne { "databases": [...] }
-                    let databases = result.get("databases")
+                    let databases = result
+                        .get("databases")
                         .or_else(|| result.get("content"))
                         .and_then(|c| {
                             if c.is_array() {
@@ -500,7 +530,11 @@ async fn list_mcp_resources(
                                 // Peut-être du JSON stringifié
                                 serde_json::from_str::<Value>(s).ok().and_then(|v| {
                                     v.get("databases").or(Some(&v)).and_then(|d| {
-                                        if d.is_array() { Some(d.clone()) } else { None }
+                                        if d.is_array() {
+                                            Some(d.clone())
+                                        } else {
+                                            None
+                                        }
                                     })
                                 })
                             } else {
@@ -509,39 +543,67 @@ async fn list_mcp_resources(
                         })
                         .or_else(|| {
                             // Si result est directement un array
-                            if result.is_array() { Some(result.clone()) } else { None }
+                            if result.is_array() {
+                                Some(result.clone())
+                            } else {
+                                None
+                            }
                         })
                         .unwrap_or_else(|| json!([]));
-                    
+
                     // Extraire org si présent (top-level ou dans chaque db)
-                    let org_from_response = result.get("organization")
+                    let org_from_response = result
+                        .get("organization")
                         .or_else(|| result.get("org"))
                         .or_else(|| result.get("organizationSlug"))
                         .and_then(|o| o.as_str())
                         .map(|s| s.to_string());
-                    
+
                     // Convertir en format attendu par le frontend
                     let dbs: Vec<Value> = databases
                         .as_array()
                         .unwrap_or(&vec![])
                         .iter()
                         .filter_map(|db| {
-                            let name = db.get("name").or_else(|| db.get("Name")).and_then(|n| n.as_str())?.to_string();
-                            let hostname = db.get("hostname").or_else(|| db.get("Hostname")).and_then(|h| h.as_str()).unwrap_or("").to_string();
-                            if hostname.is_empty() { return None; }
-                            let db_id = db.get("dbId").or_else(|| db.get("DbId")).or_else(|| db.get("id")).and_then(|i| i.as_str()).map(str::to_string);
-                            let regions = db.get("regions").and_then(|r| r.as_array()).map(|arr| {
-                                arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()
-                            }).unwrap_or_else(|| Vec::new());
-                            
+                            let name = db
+                                .get("name")
+                                .or_else(|| db.get("Name"))
+                                .and_then(|n| n.as_str())?
+                                .to_string();
+                            let hostname = db
+                                .get("hostname")
+                                .or_else(|| db.get("Hostname"))
+                                .and_then(|h| h.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            if hostname.is_empty() {
+                                return None;
+                            }
+                            let db_id = db
+                                .get("dbId")
+                                .or_else(|| db.get("DbId"))
+                                .or_else(|| db.get("id"))
+                                .and_then(|i| i.as_str())
+                                .map(str::to_string);
+                            let regions = db
+                                .get("regions")
+                                .and_then(|r| r.as_array())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|v| v.as_str().map(str::to_string))
+                                        .collect()
+                                })
+                                .unwrap_or_else(|| Vec::new());
+
                             // Extraire org de chaque db si pas au top-level
-                            let org = db.get("organization")
+                            let org = db
+                                .get("organization")
                                 .or_else(|| db.get("org"))
                                 .or_else(|| db.get("organizationSlug"))
                                 .and_then(|o| o.as_str())
                                 .map(|s| s.to_string())
                                 .or_else(|| org_from_response.clone());
-                            
+
                             let mut obj = json!({
                                 "name": name,
                                 "hostname": hostname,
@@ -556,23 +618,30 @@ async fn list_mcp_resources(
                             Some(obj)
                         })
                         .collect();
-                    
+
                     return Ok(Json(json!({
                         "ok": true,
                         "kind": "database",
                         "provider": "turso",
                         "data": dbs,
                     })));
-                },
+                }
                 Err(e) => {
                     // Si erreur OAuth, fallback vers Platform API si disponible
-                    tracing::warn!("MCP OAuth list_databases failed, trying Platform API fallback: {}", e);
+                    tracing::warn!(
+                        "MCP OAuth list_databases failed, trying Platform API fallback: {}",
+                        e
+                    );
                 }
             }
         }
-        
+
         // Fallback: Platform API (ancien mode)
-        let token = server.secrets.get("api_token").map(String::as_str).unwrap_or("");
+        let token = server
+            .secrets
+            .get("api_token")
+            .map(String::as_str)
+            .unwrap_or("");
         let org = server.meta.get("org").map(String::as_str).unwrap_or("");
         if token.is_empty() || org.is_empty() {
             return Err(ApiError::message(
@@ -622,12 +691,23 @@ async fn link_project_resource(
             "Lien ressources supporté pour Turso pour l’instant",
         ));
     }
-    
-    let db_name = body.resource_name.clone().unwrap_or_else(|| body.resource_id.clone());
-    
+
+    let db_name = body
+        .resource_name
+        .clone()
+        .unwrap_or_else(|| body.resource_id.clone());
+
     // Essayer d'abord via MCP tools OAuth (préféré)
     let (hostname, jwt, org_for_meta) = if !server.oauth_access_token.is_empty() {
-        match link_turso_via_mcp(&state, &body.server_id, &db_name, body.hostname.as_deref(), body.org.as_deref()).await {
+        match link_turso_via_mcp(
+            &state,
+            &body.server_id,
+            &db_name,
+            body.hostname.as_deref(),
+            body.org.as_deref(),
+        )
+        .await
+        {
             Ok((h, j)) => (h, j, String::new()),
             Err(e) => {
                 tracing::warn!("MCP OAuth link failed, trying Platform API fallback: {}", e);
@@ -637,7 +717,7 @@ async fn link_project_resource(
     } else {
         link_turso_via_platform_api(&state, &server, &db_name, &body).await?
     };
-    
+
     let libsql = devforge_mcp::libsql_url(&hostname);
 
     let env_pairs = [
@@ -686,7 +766,7 @@ async fn link_project_resource(
     sqlx::query(
         r#"
         INSERT INTO project_resource_links (id, project_uuid, provider, server_id, resource_id, resource_name, meta_json, created_at)
-        VALUES (?, ?, 'turso', ?, ?, ?, ?, ?)
+        VALUES ($1, $2, 'turso', $3, $4, $5, $6, $7)
         ON CONFLICT(project_uuid, provider, resource_id) DO UPDATE SET
             server_id = excluded.server_id,
             resource_name = excluded.resource_name,
@@ -721,7 +801,7 @@ async fn list_project_resources(
     let ws = workspace_uuid(&state, &headers).await?;
     let _ = fetch_project_ws(&state, &uuid, &ws).await?;
     let rows: Vec<(String, String, String, String, String, String, String)> = sqlx::query_as(
-        "SELECT id, provider, server_id, resource_id, resource_name, meta_json, created_at FROM project_resource_links WHERE project_uuid = ? ORDER BY created_at DESC",
+        "SELECT id, provider, server_id, resource_id, resource_name, meta_json, created_at FROM project_resource_links WHERE project_uuid = $1 ORDER BY created_at DESC",
     )
     .bind(&uuid)
     .fetch_all(&state.pool)
@@ -729,18 +809,24 @@ async fn list_project_resources(
     .map_err(ApiError::from)?;
     let data: Vec<Value> = rows
         .into_iter()
-        .map(|(id, provider, server_id, resource_id, resource_name, meta_json, created_at)| {
-            let meta: Value = serde_json::from_str(&meta_json).unwrap_or(json!({}));
-            json!({
-                "id": id,
-                "provider": provider,
-                "server_id": server_id,
-                "resource_id": resource_id,
-                "resource_name": resource_name,
-                "meta": meta,
-                "created_at": created_at,
-            })
-        })
+        .map(
+            |(id, provider, server_id, resource_id, resource_name, meta_json, created_at)| {
+                let mut meta: Value = serde_json::from_str(&meta_json).unwrap_or(json!({}));
+                if let Some(obj) = meta.as_object_mut() {
+                    obj.remove("password");
+                    obj.remove("replication_password");
+                }
+                json!({
+                    "id": id,
+                    "provider": provider,
+                    "server_id": server_id,
+                    "resource_id": resource_id,
+                    "resource_name": resource_name,
+                    "meta": meta,
+                    "created_at": created_at,
+                })
+            },
+        )
         .collect();
     Ok(Json(json!({ "data": data })))
 }
@@ -752,7 +838,7 @@ async fn unlink_project_resource(
 ) -> Result<Json<Value>, ApiError> {
     let ws = workspace_uuid(&state, &headers).await?;
     let _ = fetch_project_ws(&state, &uuid, &ws).await?;
-    let res = sqlx::query("DELETE FROM project_resource_links WHERE id = ? AND project_uuid = ?")
+    let res = sqlx::query("DELETE FROM project_resource_links WHERE id = $1 AND project_uuid = $2")
         .bind(&link_id)
         .bind(&uuid)
         .execute(&state.pool)
@@ -766,7 +852,7 @@ async fn fetch_project_ws(
     uuid: &str,
     workspace_uuid: &str,
 ) -> Result<Project, ApiError> {
-    let p = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ?")
+    let p = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1")
         .bind(uuid)
         .fetch_optional(&state.pool)
         .await
@@ -812,7 +898,7 @@ async fn start_oauth_flow(
             .secrets
             .get("client_id")
             .or_else(|| server.meta.get("client_id"));
-        
+
         let client_secret_opt = server.secrets.get("client_secret");
 
         if client_id_opt.is_none() || client_secret_opt.is_none() {
@@ -879,7 +965,7 @@ async fn start_oauth_flow(
         sqlx::query(
             r#"
             INSERT INTO mcp_oauth_pending (state, server_id, workspace_uuid, code_verifier, redirect_uri, auth_url, created_at, expires_at, token_endpoint)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             "#,
         )
         .bind(&state_param)
@@ -953,7 +1039,7 @@ async fn start_oauth_flow(
     sqlx::query(
         r#"
         INSERT INTO mcp_oauth_pending (state, server_id, workspace_uuid, code_verifier, redirect_uri, auth_url, created_at, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         "#,
     )
     .bind(&state_param)
@@ -988,7 +1074,7 @@ async fn oauth_callback(
 ) -> Result<axum::response::Html<String>, ApiError> {
     // Récupérer l'état pending
     let row: Option<(String, String, String, String, String, String, String)> = sqlx::query_as(
-        "SELECT server_id, workspace_uuid, code_verifier, redirect_uri, auth_url, expires_at, token_endpoint FROM mcp_oauth_pending WHERE state = ?",
+        "SELECT server_id, workspace_uuid, code_verifier, redirect_uri, auth_url, expires_at, token_endpoint FROM mcp_oauth_pending WHERE state = $1",
     )
     .bind(&params.state)
     .fetch_optional(&state.pool)
@@ -1001,7 +1087,7 @@ async fn oauth_callback(
     // Vérifier expiration
     if let Ok(exp) = chrono::DateTime::parse_from_rfc3339(&expires_at) {
         if exp.timestamp() < chrono::Utc::now().timestamp() {
-            let _ = sqlx::query("DELETE FROM mcp_oauth_pending WHERE state = ?")
+            let _ = sqlx::query("DELETE FROM mcp_oauth_pending WHERE state = $1")
                 .bind(&params.state)
                 .execute(&state.pool)
                 .await;
@@ -1022,7 +1108,7 @@ async fn oauth_callback(
     }
 
     let catalog = server.catalog_id.as_deref().unwrap_or("");
-    
+
     // === CAS SPÉCIAL SLACK : OAuth avec client_secret ===
     if catalog == "slack" {
         let client_id = server
@@ -1074,7 +1160,7 @@ async fn oauth_callback(
         persist_mcp(&state, &server).await?;
 
         // Supprimer l'état pending
-        let _ = sqlx::query("DELETE FROM mcp_oauth_pending WHERE state = ?")
+        let _ = sqlx::query("DELETE FROM mcp_oauth_pending WHERE state = $1")
             .bind(&params.state)
             .execute(&state.pool)
             .await;
@@ -1098,10 +1184,10 @@ async fn oauth_callback(
         .token_endpoint
         .as_deref()
         .ok_or_else(|| ApiError::message("token_endpoint manquant"))?;
-    
+
     // Résoudre URL publique (DB settings, headers, ou APP_URL fallback)
     let app_url = resolve_public_base_url(&state, &headers).await?;
-    
+
     let client_id = if doc.client_id_metadata_document_supported {
         format!("{}/.well-known/oauth-client", app_url)
     } else {
@@ -1136,7 +1222,7 @@ async fn oauth_callback(
     persist_mcp(&state, &server).await?;
 
     // Supprimer l'état pending
-    let _ = sqlx::query("DELETE FROM mcp_oauth_pending WHERE state = ?")
+    let _ = sqlx::query("DELETE FROM mcp_oauth_pending WHERE state = $1")
         .bind(&params.state)
         .execute(&state.pool)
         .await;
@@ -1245,8 +1331,8 @@ async fn exchange_code_with_secret(
         )));
     }
 
-    let token: devforge_mcp::TokenResponse = serde_json::from_str(&text)
-        .map_err(|e| ApiError::message(format!("Token parse: {e}")))?;
+    let token: devforge_mcp::TokenResponse =
+        serde_json::from_str(&text).map_err(|e| ApiError::message(format!("Token parse: {e}")))?;
 
     Ok(token)
 }
@@ -1317,7 +1403,7 @@ async fn persist_mcp(
         r#"
         INSERT INTO mcp_servers (id, workspace_uuid, name, url, enabled, catalog_id, headers_json, meta_json, secrets_json, 
                                   oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_scopes, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         ON CONFLICT(id) DO UPDATE SET
             workspace_uuid = excluded.workspace_uuid,
             name = excluded.name,
@@ -1380,7 +1466,22 @@ pub async fn load_mcp_from_db(state: &AppState) -> Result<(), sqlx::Error> {
     )
     .fetch_all(&state.pool)
     .await?;
-    for (id, ws, name, url, enabled, catalog_id, headers_json, meta_json, secrets_json, oauth_access, oauth_refresh, oauth_expires, oauth_scopes) in rows {
+    for (
+        id,
+        ws,
+        name,
+        url,
+        enabled,
+        catalog_id,
+        headers_json,
+        meta_json,
+        secrets_json,
+        oauth_access,
+        oauth_refresh,
+        oauth_expires,
+        oauth_scopes,
+    ) in rows
+    {
         let headers: HashMap<String, String> =
             serde_json::from_str(&headers_json).unwrap_or_default();
         let meta: HashMap<String, String> = serde_json::from_str(&meta_json).unwrap_or_default();
@@ -1415,17 +1516,19 @@ fn extract_org_from_jwt(token: &str) -> Option<String> {
     if parts.len() != 3 {
         return None;
     }
-    
+
     // Décoder le payload (segment du milieu) - essayer URL_SAFE_NO_PAD puis STANDARD
     let payload_b64 = parts[1];
-    let decoded = general_purpose::URL_SAFE_NO_PAD.decode(payload_b64)
+    let decoded = general_purpose::URL_SAFE_NO_PAD
+        .decode(payload_b64)
         .or_else(|_| general_purpose::STANDARD.decode(payload_b64))
         .ok()?;
-    
+
     let payload: Value = serde_json::from_slice(&decoded).ok()?;
-    
+
     // Chercher org claim (différents champs possibles)
-    payload.get("org")
+    payload
+        .get("org")
         .or_else(|| payload.get("organization"))
         .or_else(|| payload.get("org_slug"))
         .and_then(|o| o.as_str())
@@ -1441,20 +1544,26 @@ async fn link_turso_via_mcp(
     org_hint: Option<&str>,
 ) -> Result<(String, String), String> {
     // 1. Récupérer le serveur pour avoir oauth_access_token
-    let server = state.mcp.clients.get(server_id).await
+    let server = state
+        .mcp
+        .clients
+        .get(server_id)
+        .await
         .ok_or_else(|| "Server not found for OAuth token".to_string())?;
-    
+
     let oauth_token = server.oauth_access_token.clone();
     if oauth_token.is_empty() {
         return Err("OAuth access token missing".to_string());
     }
-    
+
     // 2. TOUJOURS lister pour découvrir hostname + org (même si hostname fourni)
-    let list_result = state.mcp.clients
+    let list_result = state
+        .mcp
+        .clients
         .call_remote_tool(server_id, "list_databases", json!({}))
         .await
         .map_err(|e| format!("list_databases MCP failed: {}", e))?;
-    
+
     // Extraire databases en gérant différents formats de réponse
     let databases = if let Some(dbs) = list_result.get("databases").and_then(|d| d.as_array()) {
         dbs.clone()
@@ -1481,14 +1590,18 @@ async fn link_turso_via_mcp(
     } else {
         return Err("list_databases response invalid".to_string());
     };
-    
+
     // 3. Extraire hostname (préférer hint si fourni, sinon chercher dans list)
     let hostname = if let Some(h) = hostname_hint.filter(|h| !h.is_empty()) {
         h.to_string()
     } else {
-        databases.iter()
+        databases
+            .iter()
             .find(|db| {
-                db.get("name").or_else(|| db.get("Name")).and_then(|n| n.as_str()) == Some(db_name)
+                db.get("name")
+                    .or_else(|| db.get("Name"))
+                    .and_then(|n| n.as_str())
+                    == Some(db_name)
             })
             .and_then(|db| {
                 db.get("hostname")
@@ -1498,28 +1611,30 @@ async fn link_turso_via_mcp(
             })
             .ok_or_else(|| format!("DB {} not found in list_databases", db_name))?
     };
-    
+
     // 4. Résoudre org avec fallbacks multiples
     let mut org = String::new();
-    
+
     // Fallback 0: org_hint from frontend
     if let Some(hint) = org_hint.filter(|h| !h.is_empty()) {
         org = hint.to_string();
     }
-    
+
     // Fallback 1: Top-level dans list_result
     if org.is_empty() {
-        org = list_result.get("organization")
+        org = list_result
+            .get("organization")
             .or_else(|| list_result.get("org"))
             .or_else(|| list_result.get("organizationSlug"))
             .and_then(|o| o.as_str())
             .unwrap_or("")
             .to_string();
     }
-    
+
     // Fallback 2: Dans chaque objet database
     if org.is_empty() {
-        org = databases.iter()
+        org = databases
+            .iter()
             .find_map(|db| {
                 db.get("organization")
                     .or_else(|| db.get("org"))
@@ -1529,47 +1644,50 @@ async fn link_turso_via_mcp(
             })
             .unwrap_or_default();
     }
-    
+
     // Fallback 3: server.meta.org
     if org.is_empty() {
         org = server.meta.get("org").cloned().unwrap_or_default();
     }
-    
+
     // Fallback 4: Décoder JWT OAuth pour extraire org claim
     if org.is_empty() {
         org = extract_org_from_jwt(&oauth_token).unwrap_or_default();
     }
-    
+
     if org.is_empty() {
-        return Err("Organization slug missing (tried list_databases response, server.meta, JWT decode)".to_string());
+        return Err(
+            "Organization slug missing (tried list_databases response, server.meta, JWT decode)"
+                .to_string(),
+        );
     }
-    
+
     // 5. Persister org dans server.meta si découvert et pas déjà là
     if !org.is_empty() && server.meta.get("org").map(|s| s.as_str()) != Some(org.as_str()) {
         let mut updated_server = server.clone();
         updated_server.meta.insert("org".to_string(), org.clone());
         state.mcp.clients.upsert(updated_server.clone()).await;
-        
+
         // Persister en DB
         let meta_json = serde_json::to_string(&updated_server.meta).unwrap_or_default();
-        let _ = sqlx::query("UPDATE mcp_servers SET meta_json = ? WHERE id = ?")
+        let _ = sqlx::query("UPDATE mcp_servers SET meta_json = $1 WHERE id = $2")
             .bind(&meta_json)
             .bind(server_id)
             .execute(&state.pool)
             .await;
     }
-    
+
     // 3. Générer JWT via Platform REST API en utilisant OAuth token comme Bearer
     let url = format!(
         "https://api.turso.tech/v1/organizations/{}/databases/{}/auth/tokens",
         org, db_name
     );
-    
+
     let http_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(25))
         .build()
         .map_err(|e| format!("HTTP client failed: {}", e))?;
-    
+
     let res = http_client
         .post(&url)
         .bearer_auth(&oauth_token)
@@ -1577,22 +1695,29 @@ async fn link_turso_via_mcp(
         .send()
         .await
         .map_err(|e| format!("Platform API token request failed: {}", e))?;
-    
+
     let status = res.status();
     if !status.is_success() {
         let text = res.text().await.unwrap_or_default();
-        return Err(format!("Platform API HTTP {}: {}", status, text.chars().take(280).collect::<String>()));
+        return Err(format!(
+            "Platform API HTTP {}: {}",
+            status,
+            text.chars().take(280).collect::<String>()
+        ));
     }
-    
-    let response: Value = res.json().await
+
+    let response: Value = res
+        .json()
+        .await
         .map_err(|e| format!("Platform API response parse failed: {}", e))?;
-    
-    let jwt = response.get("jwt")
+
+    let jwt = response
+        .get("jwt")
         .or_else(|| response.get("token"))
         .and_then(|t| t.as_str())
         .ok_or_else(|| "Platform API response missing jwt".to_string())?
         .to_string();
-    
+
     Ok((hostname, jwt))
 }
 
@@ -1605,9 +1730,10 @@ async fn link_turso_via_platform_api(
 ) -> Result<(String, String, String), ApiError> {
     let token = server.secrets.get("api_token")
         .ok_or_else(|| ApiError::message("Turso: Connecte-toi via OAuth (MCP → Turso → Se connecter) OU configure Platform API Token + org dans Avancé."))?;
-    let org = server.meta.get("org")
-        .ok_or_else(|| ApiError::message("Turso: org slug requis. Configure-le dans MCP → Turso → Avancé."))?;
-    
+    let org = server.meta.get("org").ok_or_else(|| {
+        ApiError::message("Turso: org slug requis. Configure-le dans MCP → Turso → Avancé.")
+    })?;
+
     let hostname = if let Some(h) = body.hostname.as_ref().filter(|h| !h.is_empty()) {
         h.clone()
     } else {
@@ -1619,10 +1745,10 @@ async fn link_turso_via_platform_api(
             .map(|d| d.hostname)
             .ok_or_else(|| ApiError::message(format!("DB Turso introuvable: {db_name}")))?
     };
-    
+
     let jwt = devforge_mcp::create_db_token(token, org, db_name)
         .await
         .map_err(|e| ApiError::message(e.to_string()))?;
-    
+
     Ok((hostname, jwt, org.clone()))
 }

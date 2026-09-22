@@ -11,9 +11,9 @@ use axum::{
 use futures_util::stream::{self, StreamExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::{convert::Infallible, time::Duration};
 use std::fs;
 use std::path::Path as FsPath;
+use std::{convert::Infallible, time::Duration};
 
 use crate::state::{new_uuid, now_str, AppState, Deployment, Project};
 use devforge_shared::ProjectTestContext;
@@ -26,7 +26,9 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/templates", get(list_templates))
         .route(
             "/api/v1/projects/{uuid}",
-            get(get_project).patch(update_project).delete(delete_project),
+            get(get_project)
+                .patch(update_project)
+                .delete(delete_project),
         )
         .route(
             "/api/v1/projects/{uuid}/rules",
@@ -39,7 +41,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/projects/{uuid}/trace", get(project_trace))
         .route("/api/v1/deployments/{uuid}", get(get_deployment))
         .route("/api/v1/deployments/{uuid}/logs", get(deployment_logs))
-        .route("/api/v1/deployments/{uuid}/request-repair", post(request_repair))
+        .route(
+            "/api/v1/deployments/{uuid}/request-repair",
+            post(request_repair),
+        )
         .route("/api/v1/agent/tools", get(agent_tools))
         .route("/api/v1/agent/chat", post(agent_chat))
         .route("/api/v1/agent/tools/{tool}", post(agent_execute_tool))
@@ -50,10 +55,7 @@ pub fn router() -> Router<AppState> {
             "/api/v1/projects/{uuid}/env",
             get(list_env).post(upsert_env),
         )
-        .route(
-            "/api/v1/projects/{uuid}/env/import",
-            post(import_env),
-        )
+        .route("/api/v1/projects/{uuid}/env/import", post(import_env))
         .route(
             "/api/v1/projects/{uuid}/env/sync-workdir",
             post(sync_env_from_workdir),
@@ -64,7 +66,18 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-async fn health(State(state): State<AppState>) -> Json<Value> {
+async fn health(State(state): State<AppState>, headers: HeaderMap) -> Json<Value> {
+    let is_admin = crate::auth_routes::current_workspace(&state, &headers)
+        .await
+        .ok()
+        .is_some_and(|(user, _)| user.role == "instance_admin");
+    if !is_admin {
+        return Json(json!({
+            "ok": true,
+            "service": "devforge-server",
+            "version": state.updater.current_version(),
+        }));
+    }
     let cluster = state.cluster.summary().await.ok();
     Json(json!({
         "ok": true,
@@ -102,7 +115,7 @@ async fn list_projects(
                 .to_string(),
         })?;
     let mut rows = sqlx::query_as::<_, Project>(
-        "SELECT * FROM projects WHERE workspace_uuid = ? ORDER BY updated_at DESC",
+        "SELECT * FROM projects WHERE workspace_uuid = $1 ORDER BY updated_at DESC",
     )
     .bind(&workspace.uuid)
     .fetch_all(&state.pool)
@@ -121,7 +134,7 @@ async fn list_projects(
 
 async fn project_list_card(state: &AppState, project: &Project) -> Value {
     let latest: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT status, git_sha, git_message FROM deployments WHERE project_id = ? ORDER BY created_at DESC LIMIT 1",
+        "SELECT status, git_sha, git_message FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1",
     )
     .bind(project.id)
     .fetch_optional(&state.pool)
@@ -179,63 +192,57 @@ async fn project_list_card(state: &AppState, project: &Project) -> Value {
                     "deployed_sha": null,
                     "head_sha": null,
                 });
-            } else if state.github.mode() == "off" {
-                sync = json!({
-                    "state": "unknown",
-                    "behind_by": 0,
-                    "deployed_sha": dep_sha,
-                    "head_sha": null,
-                });
             } else {
-                match state
-                    .github
-                    .compare(&owner, &repo, &dep_sha, branch)
-                    .await
-                {
-                    Ok(c) => {
-                        let state_label = if c.ahead_by == 0 && c.behind_by == 0 {
-                            "up_to_date"
-                        } else if c.ahead_by > 0 {
-                            "behind"
-                        } else {
-                            "ahead"
-                        };
-                        sync = json!({
-                            "state": state_label,
-                            "behind_by": c.ahead_by,
-                            "deployed_sha": c.base_sha,
-                            "head_sha": c.head_sha,
-                        });
-                    }
-                    Err(_) => {
-                        // Fallback: tip de branche vs sha déployé
-                        let tip = state
-                            .github
-                            .list_branches(&owner, &repo)
-                            .await
-                            .ok()
-                            .and_then(|bs| {
+                let gh = project_github(state, &project.workspace_uuid).await;
+                if gh.mode() == "off" {
+                    sync = json!({
+                        "state": "unknown",
+                        "behind_by": 0,
+                        "deployed_sha": dep_sha,
+                        "head_sha": null,
+                    });
+                } else {
+                    match gh.compare(&owner, &repo, &dep_sha, branch).await {
+                        Ok(c) => {
+                            let state_label = if c.ahead_by == 0 && c.behind_by == 0 {
+                                "up_to_date"
+                            } else if c.ahead_by > 0 {
+                                "behind"
+                            } else {
+                                "ahead"
+                            };
+                            sync = json!({
+                                "state": state_label,
+                                "behind_by": c.ahead_by,
+                                "deployed_sha": c.base_sha,
+                                "head_sha": c.head_sha,
+                            });
+                        }
+                        Err(_) => {
+                            // Fallback: tip de branche vs sha déployé
+                            let tip = gh.list_branches(&owner, &repo).await.ok().and_then(|bs| {
                                 bs.into_iter()
                                     .find(|b| b.name == branch)
                                     .map(|b| b.commit_sha)
                             });
-                        let behind = tip
-                            .as_ref()
-                            .map(|t| !dep_sha.starts_with(t) && !t.starts_with(&dep_sha))
-                            .unwrap_or(true);
-                        sync = json!({
-                            "state": if behind { "behind" } else { "up_to_date" },
-                            "behind_by": if behind { 1 } else { 0 },
-                            "deployed_sha": dep_sha,
-                            "head_sha": tip,
-                        });
+                            let behind = tip
+                                .as_ref()
+                                .map(|t| !dep_sha.starts_with(t) && !t.starts_with(&dep_sha))
+                                .unwrap_or(true);
+                            sync = json!({
+                                "state": if behind { "behind" } else { "up_to_date" },
+                                "behind_by": if behind { 1 } else { 0 },
+                                "deployed_sha": dep_sha,
+                                "head_sha": tip,
+                            });
+                        }
                     }
                 }
             }
         }
     }
 
-    json!({
+    let mut card = json!({
         "uuid": project.uuid,
         "name": project.name,
         "slug": project.slug,
@@ -253,7 +260,12 @@ async fn project_list_card(state: &AppState, project: &Project) -> Value {
             "message": if dep_message.is_empty() { Value::Null } else { json!(dep_message) },
         },
         "sync": sync,
-    })
+    });
+    if let Some(obj) = card.as_object_mut() {
+        let membership = crate::group_routes::membership(&state.pool, &project.uuid).await;
+        crate::group_routes::write_group_fields(obj, membership.as_ref());
+    }
+    card
 }
 
 #[derive(Deserialize)]
@@ -289,11 +301,7 @@ async fn create_project(
                 .to_string(),
         })?;
     let uuid = new_uuid();
-    let slug = format!(
-        "{}-{}",
-        slugify(&body.name),
-        &uuid.replace('-', "")[..4]
-    );
+    let slug = format!("{}-{}", slugify(&body.name), &uuid.replace('-', "")[..4]);
     let now = now_str();
     let build_pack = body
         .build_pack
@@ -305,21 +313,15 @@ async fn create_project(
     } else {
         0
     };
-    let base_directory = body
-        .base_directory
-        .unwrap_or_else(|| "/".into());
+    let base_directory = body.base_directory.unwrap_or_else(|| "/".into());
     let app_host = slugify(&body.name);
     let production_url = if let Some(url) = body.production_url {
         Some(url)
     } else {
         // Derive from instance wildcard: {app}.{wildcard}
-        let domain: Option<(String,)> =
-            sqlx::query_as("SELECT wildcard_domain FROM instance_settings WHERE id = 1")
-                .fetch_optional(&state.pool)
-                .await
-                .map_err(ApiError::from)?;
-        domain.and_then(|(d,)| {
-            let d = d.trim().trim_start_matches('.').to_string();
+        let d = crate::user_prefs::effective_wildcard_for_user(&state.pool, &user.uuid).await;
+        let domain = if d.is_empty() { None } else { Some(d) };
+        domain.and_then(|d| {
             if d.is_empty() || app_host.is_empty() {
                 None
             } else {
@@ -333,8 +335,7 @@ async fn create_project(
     } else {
         None
     };
-    let server_id =
-        crate::cluster_routes::resolve_server_id(&state, requested_server).await;
+    let server_id = crate::cluster_routes::resolve_server_id(&state, requested_server).await;
 
     sqlx::query(
         r#"INSERT INTO projects (
@@ -342,7 +343,7 @@ async fn create_project(
             server_id, workdir, test_command, production_url, workspace_uuid,
             build_pack, port, is_static, publish_directory, base_directory, docker_compose_location,
             created_at, updated_at
-        ) VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+        ) VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)"#,
     )
     .bind(&uuid)
     .bind(&body.name)
@@ -386,21 +387,18 @@ async fn create_project(
     if let Some(repo_url) = body.git_repository.as_deref() {
         if let Some((owner, repo)) = crate::infra_routes::parse_github_owner_repo(repo_url) {
             let branch = body.git_branch.as_deref().unwrap_or("main");
-            if let Ok(detection) = crate::detect_svc::detect_github_repo(
-                &state.github,
-                &owner,
-                &repo,
-                Some(branch),
-            )
-            .await
+            let token = crate::user_prefs::github_token(&state.pool, &user.uuid).await;
+            let gh = AppState::github_from_token(&token);
+            if let Ok(detection) =
+                crate::detect_svc::detect_github_repo(&gh, &owner, &repo, Some(branch)).await
             {
                 let now2 = now_str();
                 let _ = sqlx::query(
                     r#"UPDATE projects SET
-                        build_pack = ?, port = ?, is_static = ?, publish_directory = ?,
-                        base_directory = ?, docker_compose_location = ?,
-                        test_command = COALESCE(?, test_command), updated_at = ?
-                       WHERE uuid = ?"#,
+                        build_pack = $1, port = $2, is_static = $3, publish_directory = $4,
+                        base_directory = $5, docker_compose_location = $6,
+                        test_command = COALESCE($7, test_command), updated_at = $8
+                       WHERE uuid = $9"#,
                 )
                 .bind(&detection.build_pack)
                 .bind(i64::from(detection.port))
@@ -418,20 +416,22 @@ async fn create_project(
                     .upsert(&uuid, detection.port, None, Some("tcp"), true)
                     .await;
                 if let Some(ref url) = production_url {
-                    let _ =
-                        ensure_project_primary_domain(&state, &uuid, url, detection.port).await;
+                    let _ = ensure_project_primary_domain(&state, &uuid, url, detection.port).await;
                 }
             }
         }
     }
 
-    let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ?")
+    let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1")
         .bind(&uuid)
         .fetch_one(&state.pool)
         .await
         .map_err(ApiError::from)?;
 
-    Ok((axum::http::StatusCode::CREATED, Json(json!({"data": project}))))
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(json!({"data": project})),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -465,11 +465,7 @@ async fn scaffold_project(
     }
 
     let uuid = new_uuid();
-    let slug = format!(
-        "{}-{}",
-        slugify(&body.title),
-        &uuid.replace('-', "")[..4]
-    );
+    let slug = format!("{}-{}", slugify(&body.title), &uuid.replace('-', "")[..4]);
     let now = now_str();
 
     let requested_server = if user.role == "instance_admin" {
@@ -477,8 +473,7 @@ async fn scaffold_project(
     } else {
         None
     };
-    let server_id =
-        crate::cluster_routes::resolve_server_id(&state, requested_server).await;
+    let server_id = crate::cluster_routes::resolve_server_id(&state, requested_server).await;
 
     // Create minimal project
     sqlx::query(
@@ -487,7 +482,7 @@ async fn scaffold_project(
             server_id, workdir, test_command, production_url, workspace_uuid,
             build_pack, port, is_static, publish_directory, base_directory, docker_compose_location,
             created_at, updated_at
-        ) VALUES (?, ?, ?, 'draft', '', 'main', ?, ?, '', '', ?, 'nixpacks', 3000, 0, '', '/', '', ?, ?)"#,
+        ) VALUES ($1, $2, $3, 'draft', '', 'main', $4, $5, '', '', $6, 'nixpacks', 3000, 0, '', '/', '', $7, $8)"#,
     )
     .bind(&uuid)
     .bind(&body.title)
@@ -508,7 +503,7 @@ async fn scaffold_project(
 
     // Get the deploy agent UUID to seed the prompt
     let agent_uuid_row: Option<(String,)> = sqlx::query_as(
-        "SELECT uuid FROM project_agents WHERE project_uuid = ? AND role = 'deploy' LIMIT 1",
+        "SELECT uuid FROM project_agents WHERE project_uuid = $1 AND role = 'deploy' LIMIT 1",
     )
     .bind(&uuid)
     .fetch_optional(&state.pool)
@@ -523,7 +518,7 @@ async fn scaffold_project(
         sqlx::query(
             r#"INSERT INTO project_agents (
                 uuid, project_uuid, name, role, kind, parent_agent_uuid, status, created_at, updated_at
-            ) VALUES (?, ?, 'Builder', 'deploy', 'custom', NULL, 'idle', ?, ?)"#,
+            ) VALUES ($1, $2, 'Builder', 'deploy', 'custom', NULL, 'idle', $3, $4)"#,
         )
         .bind(&new_id)
         .bind(&uuid)
@@ -537,16 +532,22 @@ async fn scaffold_project(
 
     // Seed first message with the user prompt
     let msg_uuid = new_uuid();
-    
+
     // Apply template if provided
     let template_name = body.template.as_deref().unwrap_or("astro-preact-sqlite");
-    let template_applied = if let Err(e) = apply_template(template_name, &format!("/data/devforge/applications/{uuid}")) {
-        eprintln!("[scaffold] Erreur lors de l'application du template {} : {}", template_name, e);
+    let template_applied = if let Err(e) = apply_template(
+        template_name,
+        &format!("/data/devforge/applications/{uuid}"),
+    ) {
+        eprintln!(
+            "[scaffold] Erreur lors de l'application du template {} : {}",
+            template_name, e
+        );
         false
     } else {
         true
     };
-    
+
     let seed_content = if template_applied {
         format!(
             "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\n✅ Template {} déjà appliqué (Astro + Preact + Tailwind + DaisyUI + SQLite).\nLa connexion Pocket ID est déjà dans le template (`/api/auth/login`, callback `/api/auth/callback/pocket-id`). Ne supprime pas ces routes : un compte Pocket ID doit pouvoir entrer dans l'app.\n\n🎯 TON RÔLE : Prépare une preview atelier testable.\n\n🚨 WORKFLOW OBLIGATOIRE :\n1. Le template est déjà dans le workdir — NE réécris PAS les fichiers de base\n2. Customisations : write_project_file mode='local'\n3. Appelle TOUJOURS start_local_preview (outil) pour exposer https://dev-…. Ne lance PAS npm à la main.\n\n❌ INTERDIT (l'utilisateur n'a PAS encore validé) :\n- create_github_repo / sync_workdir_to_github / trigger_deploy\n\n✅ APRÈS validation utilisateur : publication GitHub + deploy via le bouton Publier.",
@@ -562,7 +563,7 @@ async fn scaffold_project(
     sqlx::query(
         r#"INSERT INTO agent_messages (
             uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at
-        ) VALUES (?, ?, ?, 'user', ?, '[]', 'system', ?)"#,
+        ) VALUES ($1, $2, $3, 'user', $4, '[]', 'system', $5)"#,
     )
     .bind(&msg_uuid)
     .bind(&uuid)
@@ -573,7 +574,7 @@ async fn scaffold_project(
     .await
     .map_err(ApiError::from)?;
 
-    let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ?")
+    let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1")
         .bind(&uuid)
         .fetch_one(&state.pool)
         .await
@@ -606,7 +607,7 @@ async fn scaffold_project(
     }
 
     // Le prompt est déjà en base : le tour part tout de suite (fichiers locaux + preview).
-    sqlx::query("UPDATE project_agents SET status = 'working', updated_at = ? WHERE uuid = ?")
+    sqlx::query("UPDATE project_agents SET status = 'working', updated_at = $1 WHERE uuid = $2")
         .bind(&now)
         .bind(&agent_uuid)
         .execute(&state.pool)
@@ -617,13 +618,12 @@ async fn scaffold_project(
         let project_uuid = uuid.clone();
         let agent_uuid_clone = agent_uuid.clone();
         tokio::spawn(async move {
-            if let Err(e) =
-                trigger_agent_turn(&state_clone, &project_uuid, &agent_uuid_clone).await
+            if let Err(e) = trigger_agent_turn(&state_clone, &project_uuid, &agent_uuid_clone).await
             {
                 eprintln!("[scaffold] tour agent : {e}");
                 let now = now_str();
                 let _ = sqlx::query(
-                    "UPDATE project_agents SET status = 'idle', updated_at = ? WHERE uuid = ? AND status = 'working'",
+                    "UPDATE project_agents SET status = 'idle', updated_at = $1 WHERE uuid = $2 AND status = 'working'",
                 )
                 .bind(&now)
                 .bind(&agent_uuid_clone)
@@ -647,7 +647,7 @@ async fn get_project(
     let (_user, _ws, mut project) = auth_project(&state, &headers, &uuid).await?;
     project.status = resolve_project_status(&state, &project).await?;
     let deployments = sqlx::query_as::<_, Deployment>(
-        "SELECT * FROM deployments WHERE project_id = ? ORDER BY created_at DESC LIMIT 10",
+        "SELECT * FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 10",
     )
     .bind(project.id)
     .fetch_all(&state.pool)
@@ -664,9 +664,13 @@ async fn get_project(
         if let Some(deploy) = card.get("deploy") {
             obj.insert("deploy".into(), deploy.clone());
         }
+        let membership = crate::group_routes::membership(&state.pool, &project.uuid).await;
+        crate::group_routes::write_group_fields(obj, membership.as_ref());
     }
 
-    Ok(Json(json!({"data": {"project": project_json, "deployments": deployments}})))
+    Ok(Json(
+        json!({"data": {"project": project_json, "deployments": deployments}}),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -689,6 +693,8 @@ pub struct UpdateProject {
     pub base_directory: Option<String>,
     pub docker_compose_location: Option<String>,
     pub auto_deploy: Option<bool>,
+    pub gpu_nvidia: Option<bool>,
+    pub gpu_dri: Option<bool>,
 }
 
 async fn update_project(
@@ -731,30 +737,51 @@ async fn update_project(
     } else {
         is_sso_protected
     };
-    
+
     let auto_deploy = body
         .auto_deploy
         .map(|v| if v { 1i64 } else { 0 })
         .unwrap_or(existing.auto_deploy);
+    let gpu_nvidia = body
+        .gpu_nvidia
+        .map(|v| if v { 1i64 } else { 0 })
+        .unwrap_or(existing.gpu_nvidia);
+    let gpu_dri = body
+        .gpu_dri
+        .map(|v| if v { 1i64 } else { 0 })
+        .unwrap_or(existing.gpu_dri);
+
+    let next_server = if user.role == "instance_admin" {
+        body.server_id.clone().or(existing.server_id.clone())
+    } else {
+        existing.server_id.clone()
+    };
+    let norm = |id: &Option<String>| {
+        id.as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("default")
+            .to_string()
+    };
+    if norm(&next_server) != norm(&existing.server_id) {
+        crate::group_routes::ensure_same_node(&state.pool, &uuid, next_server.as_deref()).await?;
+    }
 
     sqlx::query(
         r#"UPDATE projects SET
-            name = ?, status = ?, git_repository = ?, git_branch = ?,
-            server_id = ?, workdir = ?, test_command = ?, production_url = ?,
-            build_pack = ?, port = ?, is_static = ?, publish_directory = ?,
-            base_directory = ?, docker_compose_location = ?,
-            is_sso_protected = ?, has_own_user_system = ?, auto_deploy = ?, updated_at = ?
-        WHERE uuid = ?"#,
+            name = $1, status = $2, git_repository = $3, git_branch = $4,
+            server_id = $5, workdir = $6, test_command = $7, production_url = $8,
+            build_pack = $9, port = $10, is_static = $11, publish_directory = $12,
+            base_directory = $13, docker_compose_location = $14,
+            is_sso_protected = $15, has_own_user_system = $16, auto_deploy = $17,
+            gpu_nvidia = $18, gpu_dri = $19, updated_at = $20
+        WHERE uuid = $21"#,
     )
     .bind(body.name.unwrap_or(existing.name))
     .bind(body.status.unwrap_or(existing.status))
     .bind(body.git_repository.or(existing.git_repository))
     .bind(body.git_branch.or(existing.git_branch))
-    .bind(if user.role == "instance_admin" {
-        body.server_id.or(existing.server_id)
-    } else {
-        existing.server_id
-    })
+    .bind(next_server)
     .bind(body.workdir.or(existing.workdir))
     .bind(body.test_command.or(existing.test_command))
     .bind(body.production_url.or(existing.production_url))
@@ -763,10 +790,15 @@ async fn update_project(
     .bind(is_static)
     .bind(body.publish_directory.or(existing.publish_directory))
     .bind(body.base_directory.unwrap_or(existing.base_directory))
-    .bind(body.docker_compose_location.or(existing.docker_compose_location))
+    .bind(
+        body.docker_compose_location
+            .or(existing.docker_compose_location),
+    )
     .bind(is_sso_protected)
     .bind(has_own_user_system)
     .bind(auto_deploy)
+    .bind(gpu_nvidia)
+    .bind(gpu_dri)
     .bind(&now)
     .bind(&uuid)
     .execute(&state.pool)
@@ -801,7 +833,12 @@ async fn update_project(
         });
     }
 
-    Ok(Json(json!({"data": project})))
+    let mut data = serde_json::to_value(&project).unwrap_or_else(|_| json!({}));
+    if let Some(obj) = data.as_object_mut() {
+        let membership = crate::group_routes::membership(&state.pool, &project.uuid).await;
+        crate::group_routes::write_group_fields(obj, membership.as_ref());
+    }
+    Ok(Json(json!({"data": data})))
 }
 
 async fn delete_project(
@@ -814,48 +851,56 @@ async fn delete_project(
     // Best-effort stop container before delete
     let ctx = ProjectTestContext {
         project_uuid: project.uuid.clone(),
-        server_id: project.server_id.clone().unwrap_or_else(|| "default".into()),
+        server_id: project
+            .server_id
+            .clone()
+            .unwrap_or_else(|| "default".into()),
         workdir: project.workdir.clone().unwrap_or_default(),
         test_command: String::new(),
         timeout: None,
     };
     let _ = state.deploy.stop(&ctx).await;
 
-    sqlx::query("DELETE FROM project_env_vars WHERE project_uuid = ?")
+    sqlx::query("DELETE FROM project_env_vars WHERE project_uuid = $1")
         .bind(&uuid)
         .execute(&state.pool)
         .await
         .map_err(ApiError::from)?;
-    sqlx::query("DELETE FROM project_agents WHERE project_uuid = ?")
+    sqlx::query("DELETE FROM project_agents WHERE project_uuid = $1")
         .bind(&uuid)
         .execute(&state.pool)
         .await
         .map_err(ApiError::from)?;
-    sqlx::query("DELETE FROM project_ports WHERE project_uuid = ?")
+    sqlx::query("DELETE FROM project_ports WHERE project_uuid = $1")
         .bind(&uuid)
         .execute(&state.pool)
         .await
         .map_err(ApiError::from)?;
-    sqlx::query("DELETE FROM project_domains WHERE project_uuid = ?")
+    sqlx::query("DELETE FROM project_domains WHERE project_uuid = $1")
         .bind(&uuid)
         .execute(&state.pool)
         .await
         .map_err(ApiError::from)?;
-    sqlx::query("DELETE FROM project_proxy_routes WHERE project_uuid = ?")
+    sqlx::query("DELETE FROM project_proxy_routes WHERE project_uuid = $1")
         .bind(&uuid)
         .execute(&state.pool)
         .await
         .map_err(ApiError::from)?;
 
     // Purge le `.env` workdir pour éviter qu’un futur projet hérite des secrets.
-    if let Some(raw) = project.workdir.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(raw) = project
+        .workdir
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         let workdir = devforge_deploy::resolve_project_workdir(raw, &project.uuid);
         let env_path = std::path::Path::new(&workdir).join(".env");
         let _ = fs::remove_file(&env_path);
     }
 
     // deployments cascade via FK on project_id
-    let res = sqlx::query("DELETE FROM projects WHERE uuid = ? AND workspace_uuid = ?")
+    let res = sqlx::query("DELETE FROM projects WHERE uuid = $1 AND workspace_uuid = $2")
         .bind(&uuid)
         .bind(&project.workspace_uuid)
         .execute(&state.pool)
@@ -873,7 +918,7 @@ async fn delete_project(
 
 fn default_project_rules_template(project_name: &str) -> String {
     format!(
-r#"# Directives Projet & Agent — {project_name}
+        r#"# Directives Projet & Agent — {project_name}
 
 ## Development
 
@@ -926,7 +971,8 @@ async fn get_project_rules(
     let path_opt = resolve_project_agents_md_path(&project);
     let (content, exists) = match path_opt {
         Some(ref p) if p.is_file() => {
-            let s = fs::read_to_string(p).unwrap_or_else(|_| default_project_rules_template(&project.name));
+            let s = fs::read_to_string(p)
+                .unwrap_or_else(|_| default_project_rules_template(&project.name));
             (s, true)
         }
         _ => (default_project_rules_template(&project.name), false),
@@ -960,11 +1006,13 @@ async fn update_project_rules(
     let mut raw_workdir = project.workdir.as_deref().unwrap_or("").trim().to_string();
     if raw_workdir.is_empty() {
         raw_workdir = format!("/data/devforge/applications/{}", project.uuid);
-        let _ = sqlx::query("UPDATE projects SET workdir = ?, updated_at = datetime('now') WHERE uuid = ?")
-            .bind(&raw_workdir)
-            .bind(&project.uuid)
-            .execute(&state.pool)
-            .await;
+        let _ = sqlx::query(
+            "UPDATE projects SET workdir = $1, updated_at = to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') WHERE uuid = $2",
+        )
+        .bind(&raw_workdir)
+        .bind(&project.uuid)
+        .execute(&state.pool)
+        .await;
         project.workdir = Some(raw_workdir.clone());
     }
 
@@ -977,9 +1025,8 @@ async fn update_project_rules(
     }
 
     let file_path = workdir_path.join("AGENTS.md");
-    fs::write(&file_path, &body.rules).map_err(|e| {
-        ApiError::message(format!("Impossible d'écrire AGENTS.md : {e}"))
-    })?;
+    fs::write(&file_path, &body.rules)
+        .map_err(|e| ApiError::message(format!("Impossible d'écrire AGENTS.md : {e}")))?;
 
     Ok(Json(json!({
         "ok": true,
@@ -1000,7 +1047,7 @@ async fn list_deployments(
 ) -> Result<Json<Value>, ApiError> {
     let (_user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
     let rows = sqlx::query_as::<_, Deployment>(
-        "SELECT * FROM deployments WHERE project_id = ? ORDER BY created_at DESC LIMIT 50",
+        "SELECT * FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 50",
     )
     .bind(project.id)
     .fetch_all(&state.pool)
@@ -1017,7 +1064,7 @@ async fn project_trace(
     let (_user, _ws, _project) = auth_project(&state, &headers, &uuid).await?;
     let rows: Vec<(i64, String, String, Option<String>, String, String)> = sqlx::query_as(
         r#"SELECT id, kind, status, ref_id, detail, created_at
-           FROM builder_events WHERE project_uuid = ? ORDER BY id DESC LIMIT 40"#,
+           FROM builder_events WHERE project_uuid = $1 ORDER BY id DESC LIMIT 40"#,
     )
     .bind(&uuid)
     .fetch_all(&state.pool)
@@ -1079,15 +1126,13 @@ async fn create_deployment(
 
     let dep_uuid = new_uuid();
     let now = now_str();
-    let message = body
-        .git_message
-        .unwrap_or_else(|| "Manual deploy".into());
+    let message = body.git_message.unwrap_or_else(|| "Manual deploy".into());
 
     // Mark queued first
     sqlx::query(
         r#"INSERT INTO deployments (
             uuid, project_id, status, git_sha, git_message, logs, finished_at, created_at, updated_at
-        ) VALUES (?, ?, 'queued', ?, ?, ?, NULL, ?, ?)"#,
+        ) VALUES ($1, $2, 'queued', $3, $4, $5, NULL, $6, $7)"#,
     )
     .bind(&dep_uuid)
     .bind(project.id)
@@ -1100,7 +1145,7 @@ async fn create_deployment(
     .await
     .map_err(ApiError::from)?;
 
-    sqlx::query("UPDATE projects SET status = 'deploying', updated_at = ? WHERE id = ?")
+    sqlx::query("UPDATE projects SET status = 'deploying', updated_at = $1 WHERE id = $2")
         .bind(&now)
         .bind(project.id)
         .execute(&state.pool)
@@ -1109,7 +1154,7 @@ async fn create_deployment(
 
     // Charger le SHA de la révision actuellement en production avant le deploy
     let live_revision_sha: Option<String> = sqlx::query_as(
-        "SELECT git_sha FROM deployments WHERE project_id = ? AND status = 'success' ORDER BY created_at DESC LIMIT 1",
+        "SELECT git_sha FROM deployments WHERE project_id = $1 AND status = 'success' ORDER BY created_at DESC LIMIT 1",
     )
     .bind(project.id)
     .fetch_optional(&state.pool)
@@ -1138,8 +1183,8 @@ async fn create_deployment(
     };
 
     sqlx::query(
-        r#"UPDATE deployments SET status = ?, git_sha = ?, logs = ?, error_summary = ?, error_hint = ?, live_revision_sha = ?, finished_at = ?, updated_at = ?
-           WHERE uuid = ?"#,
+        r#"UPDATE deployments SET status = $1, git_sha = $2, logs = $3, error_summary = $4, error_hint = $5, live_revision_sha = $6, finished_at = $7, updated_at = $8
+           WHERE uuid = $9"#,
     )
     .bind(status)
     .bind(&sha)
@@ -1155,7 +1200,7 @@ async fn create_deployment(
     .map_err(ApiError::from)?;
 
     let project_status = if result.ok { "live" } else { "failed" };
-    sqlx::query("UPDATE projects SET status = ?, updated_at = ? WHERE id = ?")
+    sqlx::query("UPDATE projects SET status = $1, updated_at = $2 WHERE id = $3")
         .bind(project_status)
         .bind(&finished)
         .bind(project.id)
@@ -1163,7 +1208,7 @@ async fn create_deployment(
         .await
         .map_err(ApiError::from)?;
 
-    let dep = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = ?")
+    let dep = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = $1")
         .bind(&dep_uuid)
         .fetch_one(&state.pool)
         .await
@@ -1184,7 +1229,7 @@ async fn create_deployment(
             .ok()
             .and_then(|v| v.parse::<bool>().ok())
             .unwrap_or(true); // Default ON
-        
+
         if auto_repair_enabled {
             // Trigger repair async (don't block response)
             let state_clone = state.clone();
@@ -1220,16 +1265,25 @@ pub(crate) async fn run_real_deploy(
             .filter(|t| !t.trim().is_empty());
 
     match crate::project_oidc::sync_project_oidc_client(&state.pool, project, true).await {
-        Ok(true) => tracing::info!(project = %project.uuid, "client OIDC Pocket ID synchronisé avant deploy"),
+        Ok(true) => {
+            tracing::info!(project = %project.uuid, "client OIDC Pocket ID synchronisé avant deploy")
+        }
         Ok(false) => {}
         Err(e) => tracing::warn!(project = %project.uuid, error = %e, "sync client OIDC Pocket ID"),
     }
     let _ = crate::sso::ensure_oidc_env(&state.pool, project).await;
 
-    let env_vars = state.env.list_public(&project.uuid).await.ok().unwrap_or_default();
+    let env_vars = state
+        .env
+        .list_public(&project.uuid)
+        .await
+        .ok()
+        .unwrap_or_default();
     // Need raw values for .env — list from store via upsert path; use facade list that masks.
     // Fetch unmasked from SQLite directly for deploy.
     let env_file = load_env_file_content(&state.pool, &project.uuid).await;
+    let (env_file, group_network, group_alias) =
+        crate::group_routes::prepare_deploy_link(&state.pool, &project.uuid, env_file).await;
 
     let current = project
         .server_id
@@ -1238,7 +1292,7 @@ pub(crate) async fn run_real_deploy(
     let server_id = crate::cluster_routes::ensure_live_server_id(state, &current).await;
     if server_id != crate::cluster_routes::normalize_server_id(&current) {
         let now = now_str();
-        let _ = sqlx::query("UPDATE projects SET server_id = ?, updated_at = ? WHERE uuid = ?")
+        let _ = sqlx::query("UPDATE projects SET server_id = $1, updated_at = $2 WHERE uuid = $3")
             .bind(&server_id)
             .bind(&now)
             .bind(&project.uuid)
@@ -1258,10 +1312,7 @@ pub(crate) async fn run_real_deploy(
         server_id: server_id.clone(),
         workdir: project.workdir.clone().unwrap_or_default(),
         git_repository: project.git_repository.clone().unwrap_or_default(),
-        git_branch: project
-            .git_branch
-            .clone()
-            .unwrap_or_else(|| "main".into()),
+        git_branch: project.git_branch.clone().unwrap_or_else(|| "main".into()),
         build_pack: if project.build_pack.is_empty() {
             "nixpacks".into()
         } else {
@@ -1279,6 +1330,10 @@ pub(crate) async fn run_real_deploy(
         github_token: token,
         env_file,
         proxy_labels: proxy_labels_for_project(state, project).await,
+        gpu_nvidia: project.gpu_nvidia != 0,
+        gpu_dri: project.gpu_dri != 0,
+        group_network,
+        group_alias,
     };
     let deploy = state.deploy.clone();
     let slot_server = server_id.clone();
@@ -1310,11 +1365,11 @@ pub(crate) async fn run_real_deploy(
 }
 
 pub(crate) async fn load_env_file_content(
-    pool: &sqlx::SqlitePool,
+    pool: &sqlx::PgPool,
     project_uuid: &str,
 ) -> Option<String> {
     let rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT key, value FROM project_env_vars WHERE project_uuid = ? ORDER BY key",
+        "SELECT key, value FROM project_env_vars WHERE project_uuid = $1 ORDER BY key",
     )
     .bind(project_uuid)
     .fetch_all(pool)
@@ -1328,7 +1383,7 @@ pub(crate) async fn load_env_file_content(
 
 /// Clone les env du projet vers `{workdir}/.env` (ou purge si vide).
 pub(crate) async fn materialize_project_env_to_workdir(
-    pool: &sqlx::SqlitePool,
+    pool: &sqlx::PgPool,
     project: &Project,
 ) -> Result<String, ApiError> {
     let raw = project.workdir.as_deref().unwrap_or("").trim();
@@ -1345,17 +1400,18 @@ pub(crate) async fn materialize_project_env_to_workdir(
         })?;
     }
     let rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT key, value FROM project_env_vars WHERE project_uuid = ? ORDER BY key",
+        "SELECT key, value FROM project_env_vars WHERE project_uuid = $1 ORDER BY key",
     )
     .bind(&project.uuid)
     .fetch_all(pool)
     .await
     .map_err(ApiError::from)?;
-    let outcome = devforge_env::materialize_dotenv_file(path, &rows).map_err(|e| {
-        ApiError::message(format!("materialize .env dans {workdir} : {e}"))
-    })?;
+    let outcome = devforge_env::materialize_dotenv_file(path, &rows)
+        .map_err(|e| ApiError::message(format!("materialize .env dans {workdir} : {e}")))?;
     Ok(match outcome {
-        devforge_env::MaterializeOutcome::Written => format!("cloned {} keys → {workdir}/.env", rows.len()),
+        devforge_env::MaterializeOutcome::Written => {
+            format!("cloned {} keys → {workdir}/.env", rows.len())
+        }
         devforge_env::MaterializeOutcome::Removed => format!("cleared stale .env in {workdir}"),
         devforge_env::MaterializeOutcome::Absent => format!("no .env (empty env) in {workdir}"),
     })
@@ -1393,7 +1449,14 @@ fn extract_meaningful_error_logs(raw_logs: &str, max_lines: usize, max_chars: us
     if lines.len() <= max_lines {
         let joined = lines.join("\n");
         if joined.len() > max_chars {
-            joined.chars().rev().take(max_chars).collect::<String>().chars().rev().collect()
+            joined
+                .chars()
+                .rev()
+                .take(max_chars)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect()
         } else {
             joined
         }
@@ -1401,7 +1464,14 @@ fn extract_meaningful_error_logs(raw_logs: &str, max_lines: usize, max_chars: us
         let tail_lines = &lines[lines.len() - max_lines..];
         let joined = tail_lines.join("\n");
         if joined.len() > max_chars {
-            joined.chars().rev().take(max_chars).collect::<String>().chars().rev().collect()
+            joined
+                .chars()
+                .rev()
+                .take(max_chars)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect()
         } else {
             joined
         }
@@ -1434,49 +1504,50 @@ async fn request_repair(
     Path(uuid): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let (_user, _ws, dep) = auth_deployment(&state, &headers, &uuid).await?;
-    
+
     if dep.status != "failed" {
         return Err(ApiError::message(
             "Seuls les déploiements 'failed' peuvent être réparés",
         ));
     }
-    
+
     // Trouver le projet
-    let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE id = ?")
+    let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE id = $1")
         .bind(dep.project_id)
         .fetch_optional(&state.pool)
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::not_found("project"))?;
-    
+
     // Trouver l'agent deploy du projet
     let agent_uuid: Option<(String,)> = sqlx::query_as(
-        "SELECT uuid FROM project_agents WHERE project_uuid = ? AND role = 'deploy' LIMIT 1",
+        "SELECT uuid FROM project_agents WHERE project_uuid = $1 AND role = 'deploy' LIMIT 1",
     )
     .bind(&project.uuid)
     .fetch_optional(&state.pool)
     .await
     .map_err(ApiError::from)?;
-    
+
     let Some((agent_uuid,)) = agent_uuid else {
-        return Err(ApiError::message("Aucun agent deploy trouvé pour ce projet"));
+        return Err(ApiError::message(
+            "Aucun agent deploy trouvé pour ce projet",
+        ));
     };
-    
-    let summary = dep.error_summary.as_deref().unwrap_or("Échec du déploiement");
+
+    let summary = dep
+        .error_summary
+        .as_deref()
+        .unwrap_or("Échec du déploiement");
     let hint = dep.error_hint.as_deref().unwrap_or("");
-    let repair_prompt = build_repair_prompt(
-        &dep.uuid,
-        summary,
-        hint,
-        dep.logs.as_deref().unwrap_or(""),
-    );
-    
+    let repair_prompt =
+        build_repair_prompt(&dep.uuid, summary, hint, dep.logs.as_deref().unwrap_or(""));
+
     let now = now_str();
     let msg_uuid = new_uuid();
-    
+
     sqlx::query(
         r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
-           VALUES (?, ?, ?, 'user', ?, '[]', 'system', ?)"#,
+           VALUES ($1, $2, $3, 'user', $4, '[]', 'system', $5)"#,
     )
     .bind(&msg_uuid)
     .bind(&project.uuid)
@@ -1486,17 +1557,15 @@ async fn request_repair(
     .execute(&state.pool)
     .await
     .map_err(ApiError::from)?;
-    
+
     // Marquer l'agent comme working
-    sqlx::query(
-        "UPDATE project_agents SET status = 'working', updated_at = ? WHERE uuid = ?",
-    )
-    .bind(&now)
-    .bind(&agent_uuid)
-    .execute(&state.pool)
-    .await
-    .map_err(ApiError::from)?;
-    
+    sqlx::query("UPDATE project_agents SET status = 'working', updated_at = $1 WHERE uuid = $2")
+        .bind(&now)
+        .bind(&agent_uuid)
+        .execute(&state.pool)
+        .await
+        .map_err(ApiError::from)?;
+
     // Kick the agent asynchronously
     let state_clone = state.clone();
     let project_uuid = project.uuid.clone();
@@ -1504,7 +1573,7 @@ async fn request_repair(
     tokio::spawn(async move {
         let _ = trigger_agent_turn(&state_clone, &project_uuid, &agent_uuid_clone).await;
     });
-    
+
     Ok(Json(json!({
         "ok": true,
         "message": "Agent de réparation lancé",
@@ -1542,7 +1611,7 @@ async fn build_project_agent_brief(
     state: &AppState,
     project_uuid: &str,
 ) -> Result<ProjectAgentBrief, ApiError> {
-    let p = sqlx::query_as::<_, crate::state::Project>("SELECT * FROM projects WHERE uuid = ?")
+    let p = sqlx::query_as::<_, crate::state::Project>("SELECT * FROM projects WHERE uuid = $1")
         .bind(project_uuid)
         .fetch_optional(&state.pool)
         .await
@@ -1551,7 +1620,7 @@ async fn build_project_agent_brief(
 
     let deps: Vec<(String, String, Option<String>, Option<String>, String)> = sqlx::query_as(
         r#"SELECT uuid, status, git_sha, git_message, created_at
-           FROM deployments WHERE project_id = ? ORDER BY id DESC LIMIT 5"#,
+           FROM deployments WHERE project_id = $1 ORDER BY id DESC LIMIT 5"#,
     )
     .bind(p.id)
     .fetch_all(&state.pool)
@@ -1592,7 +1661,12 @@ async fn build_project_agent_brief(
         lines.push("- derniers déploiements:".into());
         for (uuid, status, sha, msg, created) in &deps {
             let sha_s = sha.as_deref().unwrap_or("?");
-            let msg_s = msg.as_deref().unwrap_or("").chars().take(80).collect::<String>();
+            let msg_s = msg
+                .as_deref()
+                .unwrap_or("")
+                .chars()
+                .take(80)
+                .collect::<String>();
             lines.push(format!(
                 "  · {status} · {sha_s} · {msg_s} · {created} ({uuid})"
             ));
@@ -1610,7 +1684,10 @@ async fn build_project_agent_brief(
         lines.push(rules);
         lines.push("--- FIN DES RÈGLES PROJET ---\n".into());
     } else {
-        lines.push(format!("\n--- DIRECTIVES PAR DÉFAUT ---\n{}\n--- FIN DIRECTIVES ---\n", default_project_rules_template(&p.name)));
+        lines.push(format!(
+            "\n--- DIRECTIVES PAR DÉFAUT ---\n{}\n--- FIN DIRECTIVES ---\n",
+            default_project_rules_template(&p.name)
+        ));
     }
 
     lines.push(
@@ -1631,7 +1708,7 @@ async fn build_project_agent_brief(
 async fn auto_trigger_repair(state: &AppState, dep_uuid: &str) -> Result<(), String> {
     // Check if repair already attempted for this deployment
     let already_attempted: Option<(i64,)> = sqlx::query_as(
-        "SELECT COUNT(*) FROM agent_messages WHERE content LIKE ? AND content LIKE ?",
+        "SELECT COUNT(*) FROM agent_messages WHERE content LIKE $1 AND content LIKE $2",
     )
     .bind(format!("%AUTO-RÉPARATION%{}%", dep_uuid))
     .bind("%AUTO-RÉPARATION DÉPLOIEMENT%")
@@ -1639,55 +1716,54 @@ async fn auto_trigger_repair(state: &AppState, dep_uuid: &str) -> Result<(), Str
     .await
     .ok()
     .flatten();
-    
+
     if let Some((count,)) = already_attempted {
         if count > 0 {
             tracing::info!("Auto-repair déjà tenté pour {}, skip", dep_uuid);
             return Ok(());
         }
     }
-    
-    let dep = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = ?")
+
+    let dep = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = $1")
         .bind(dep_uuid)
         .fetch_optional(&state.pool)
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Deployment not found".to_string())?;
-    
-    let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE id = ?")
+
+    let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE id = $1")
         .bind(dep.project_id)
         .fetch_optional(&state.pool)
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Project not found".to_string())?;
-    
+
     let agent_uuid: Option<(String,)> = sqlx::query_as(
-        "SELECT uuid FROM project_agents WHERE project_uuid = ? AND role = 'deploy' LIMIT 1",
+        "SELECT uuid FROM project_agents WHERE project_uuid = $1 AND role = 'deploy' LIMIT 1",
     )
     .bind(&project.uuid)
     .fetch_optional(&state.pool)
     .await
     .map_err(|e| e.to_string())?;
-    
+
     let Some((agent_uuid,)) = agent_uuid else {
         return Err("No deploy agent found".to_string());
     };
-    
-    let summary = dep.error_summary.as_deref().unwrap_or("Échec du déploiement");
+
+    let summary = dep
+        .error_summary
+        .as_deref()
+        .unwrap_or("Échec du déploiement");
     let hint = dep.error_hint.as_deref().unwrap_or("");
-    let repair_prompt = build_repair_prompt(
-        &dep.uuid,
-        summary,
-        hint,
-        dep.logs.as_deref().unwrap_or(""),
-    );
-    
+    let repair_prompt =
+        build_repair_prompt(&dep.uuid, summary, hint, dep.logs.as_deref().unwrap_or(""));
+
     let now = now_str();
     let msg_uuid = new_uuid();
-    
+
     sqlx::query(
         r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
-           VALUES (?, ?, ?, 'user', ?, '[]', 'system', ?)"#,
+           VALUES ($1, $2, $3, 'user', $4, '[]', 'system', $5)"#,
     )
     .bind(&msg_uuid)
     .bind(&project.uuid)
@@ -1697,18 +1773,16 @@ async fn auto_trigger_repair(state: &AppState, dep_uuid: &str) -> Result<(), Str
     .execute(&state.pool)
     .await
     .map_err(|e| e.to_string())?;
-    
-    sqlx::query(
-        "UPDATE project_agents SET status = 'working', updated_at = ? WHERE uuid = ?",
-    )
-    .bind(&now)
-    .bind(&agent_uuid)
-    .execute(&state.pool)
-    .await
-    .map_err(|e| e.to_string())?;
-    
+
+    sqlx::query("UPDATE project_agents SET status = 'working', updated_at = $1 WHERE uuid = $2")
+        .bind(&now)
+        .bind(&agent_uuid)
+        .execute(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
     let _ = trigger_agent_turn(state, &project.uuid, &agent_uuid).await;
-    
+
     tracing::info!("Auto-repair lancé pour déploiement {}", dep_uuid);
     Ok(())
 }
@@ -1721,7 +1795,7 @@ async fn trigger_agent_turn(
     agent_uuid: &str,
 ) -> Result<(), String> {
     let last_user_msg = sqlx::query_as::<_, (String, String)>(
-        "SELECT uuid, content FROM agent_messages WHERE agent_uuid = ? AND role = 'user' ORDER BY id DESC LIMIT 1",
+        "SELECT uuid, content FROM agent_messages WHERE agent_uuid = $1 AND role = 'user' ORDER BY id DESC LIMIT 1",
     )
     .bind(agent_uuid)
     .fetch_optional(&state.pool)
@@ -1732,8 +1806,8 @@ async fn trigger_agent_turn(
         return Err("Aucun message utilisateur trouvé pour cet agent".to_string());
     };
 
-    let run_uuid = crate::agent_runs::enqueue(&state.pool, project_uuid, agent_uuid, &message_uuid)
-        .await?;
+    let run_uuid =
+        crate::agent_runs::enqueue(&state.pool, project_uuid, agent_uuid, &message_uuid).await?;
     if crate::agent_runs::assistant_already_replied(&state.pool, agent_uuid, &message_uuid)
         .await
         .unwrap_or(false)
@@ -1771,18 +1845,51 @@ async fn execute_claimed_run(
     }
     let now = now_str();
     let _ = sqlx::query(
-        "UPDATE project_agents SET status = 'working', updated_at = ? WHERE uuid = ?",
+        "UPDATE project_agents SET status = 'working', updated_at = $1 WHERE uuid = $2",
     )
     .bind(&now)
     .bind(&run.agent_uuid)
     .execute(&state.pool)
     .await;
 
-    let result = match state
-        .agent
-        .handle_with_context(&run.content, None, None, ctx)
-        .await
-    {
+    let owner = {
+        let ws: Option<(String,)> =
+            sqlx::query_as("SELECT workspace_uuid FROM projects WHERE uuid = $1")
+                .bind(&run.project_uuid)
+                .fetch_optional(&state.pool)
+                .await
+                .ok()
+                .flatten();
+        match ws {
+            Some((ws,)) => crate::user_prefs::workspace_owner(&state.pool, &ws).await,
+            None => None,
+        }
+    };
+    let result = match owner {
+        Some(uuid) => {
+            let (llm, mode) = state.llm_for_user(&uuid).await;
+            let token = crate::user_prefs::github_token(&state.pool, &uuid).await;
+            devforge_github::with_token(
+                &token,
+                state.agent.handle_with_provider(
+                    &run.content,
+                    None,
+                    None,
+                    ctx,
+                    None,
+                    Some((llm, mode)),
+                ),
+            )
+            .await
+        }
+        None => {
+            state
+                .agent
+                .handle_with_context(&run.content, None, None, ctx)
+                .await
+        }
+    };
+    let result = match result {
         Ok(result) => result,
         Err(e) => {
             crate::agent_runs::fail_run(&state.pool, &run.uuid, &run.agent_uuid, &e.to_string())
@@ -1853,7 +1960,7 @@ async fn load_agent_context(
         history: vec![],
     };
     if let Ok(Some((name, role))) = sqlx::query_as::<_, (String, String)>(
-        "SELECT name, role FROM project_agents WHERE uuid = ?",
+        "SELECT name, role FROM project_agents WHERE uuid = $1",
     )
     .bind(agent_uuid)
     .fetch_optional(&state.pool)
@@ -1923,7 +2030,7 @@ pub fn resume_deploy_queue(state: AppState) {
             let project = sqlx::query_as::<_, Project>(
                 r#"SELECT p.* FROM projects p
                    JOIN deployments d ON d.project_id = p.id
-                   WHERE d.uuid = ?"#,
+                   WHERE d.uuid = $1"#,
             )
             .bind(&uuid)
             .fetch_optional(&state.pool)
@@ -1934,8 +2041,8 @@ pub fn resume_deploy_queue(state: AppState) {
                     let now = now_str();
                     let _ = sqlx::query(
                         r#"UPDATE deployments
-                           SET status = 'failed', error_summary = ?, finished_at = ?, updated_at = ?
-                           WHERE uuid = ?"#,
+                           SET status = 'failed', error_summary = $1, finished_at = $2, updated_at = $3
+                           WHERE uuid = $4"#,
                     )
                     .bind("Projet introuvable")
                     .bind(&now)
@@ -1975,9 +2082,9 @@ async fn persist_resumed_deploy(
     };
     let _ = sqlx::query(
         r#"UPDATE deployments
-           SET status = ?, git_sha = ?, logs = ?, error_summary = ?, error_hint = ?,
-               finished_at = ?, updated_at = ?
-           WHERE uuid = ?"#,
+           SET status = $1, git_sha = $2, logs = $3, error_summary = $4, error_hint = $5,
+               finished_at = $6, updated_at = $7
+           WHERE uuid = $8"#,
     )
     .bind(status)
     .bind(&sha)
@@ -1990,7 +2097,7 @@ async fn persist_resumed_deploy(
     .execute(&state.pool)
     .await;
     let project_status = if result.ok { "live" } else { "failed" };
-    let _ = sqlx::query("UPDATE projects SET status = ?, updated_at = ? WHERE id = ?")
+    let _ = sqlx::query("UPDATE projects SET status = $1, updated_at = $2 WHERE id = $3")
         .bind(project_status)
         .bind(&finished)
         .bind(project.id)
@@ -2074,7 +2181,7 @@ async fn agent_chat(
     headers: HeaderMap,
     Json(body): Json<ChatBody>,
 ) -> Result<axum::response::Response, ApiError> {
-    let (_user, workspace) = require_auth(&state, &headers).await?;
+    let (user, workspace) = require_auth(&state, &headers).await?;
     let mut ctx = devforge_agent::AgentChatContext {
         project_uuid: body.project_uuid.clone().filter(|s| !s.is_empty()),
         agent_uuid: body.agent_uuid.clone().filter(|s| !s.is_empty()),
@@ -2113,7 +2220,7 @@ async fn agent_chat(
 
     if let Some(agent_uuid) = &ctx.agent_uuid {
         if let Ok(Some((name, role))) = sqlx::query_as::<_, (String, String)>(
-            "SELECT name, role FROM project_agents WHERE uuid = ?",
+            "SELECT name, role FROM project_agents WHERE uuid = $1",
         )
         .bind(agent_uuid)
         .fetch_optional(&state.pool)
@@ -2145,31 +2252,36 @@ async fn agent_chat(
     let force_args = body.arguments.clone();
     let want_stream = body.stream.unwrap_or(false);
     let run_uuid = match (project_uuid.as_ref(), agent_uuid.as_ref()) {
-        (Some(project_uuid), Some(agent_uuid)) => Some(
-            begin_agent_run(&state, project_uuid, agent_uuid, &user_message).await?,
-        ),
+        (Some(project_uuid), Some(agent_uuid)) => {
+            Some(begin_agent_run(&state, project_uuid, agent_uuid, &user_message).await?)
+        }
         _ => None,
     };
+
+    let (llm, llm_mode) = state.llm_for_user(&user.uuid).await;
+    let gh_token = crate::user_prefs::github_token(&state.pool, &user.uuid).await;
 
     if want_stream {
         let agent = state.agent.clone();
         let pool = state.pool.clone();
         let repair_state = state.clone();
-        let (ev_tx, ev_rx) =
-            tokio::sync::mpsc::unbounded_channel::<devforge_agent::AgentEvent>();
+        let (ev_tx, ev_rx) = tokio::sync::mpsc::unbounded_channel::<devforge_agent::AgentEvent>();
         let progress_tx = ev_tx.clone();
         let run_uuid_stream = run_uuid.clone();
 
         tokio::spawn(async move {
-            let result = agent
-                .handle_with_progress(
+            let result = devforge_github::with_token(
+                &gh_token,
+                agent.handle_with_provider(
                     &user_message,
                     force_tool.as_deref(),
                     force_args,
                     ctx,
                     Some(progress_tx),
-                )
-                .await;
+                    Some((llm, llm_mode)),
+                ),
+            )
+            .await;
             match result {
                 Ok(result) => {
                     let _ = ev_tx.send(devforge_agent::AgentEvent::Reply {
@@ -2242,27 +2354,24 @@ async fn agent_chat(
             .into_response());
     }
 
-    let result = match state
-        .agent
-        .handle_with_context(
+    let result = match devforge_github::with_token(
+        &gh_token,
+        state.agent.handle_with_provider(
             &user_message,
             force_tool.as_deref(),
             force_args,
             ctx,
-        )
-        .await
+            None,
+            Some((llm, llm_mode)),
+        ),
+    )
+    .await
     {
         Ok(result) => result,
         Err(e) => {
-            if let (Some(run_uuid), Some(agent_uuid)) = (run_uuid.as_ref(), agent_uuid.as_ref())
-            {
-                crate::agent_runs::fail_run(
-                    &state.pool,
-                    run_uuid,
-                    agent_uuid,
-                    &e.to_string(),
-                )
-                .await;
+            if let (Some(run_uuid), Some(agent_uuid)) = (run_uuid.as_ref(), agent_uuid.as_ref()) {
+                crate::agent_runs::fail_run(&state.pool, run_uuid, agent_uuid, &e.to_string())
+                    .await;
             }
             return Err(ApiError::message(e.to_string()));
         }
@@ -2271,8 +2380,7 @@ async fn agent_chat(
     if let (Some(project_uuid), Some(agent_uuid), Some(run_uuid)) =
         (project_uuid, agent_uuid, run_uuid)
     {
-        let tools_json =
-            serde_json::to_string(&result.tool_calls).unwrap_or_else(|_| "[]".into());
+        let tools_json = serde_json::to_string(&result.tool_calls).unwrap_or_else(|_| "[]".into());
         crate::agent_runs::save_assistant_and_finish(
             &state.pool,
             &run_uuid,
@@ -2442,9 +2550,7 @@ async fn upsert_env(
         .get(&uuid, body.key.trim())
         .await
         .map_err(|e| ApiError::message(e.to_string()))?;
-    let unchanged = existing
-        .as_ref()
-        .is_some_and(|v| v.value == body.value);
+    let unchanged = existing.as_ref().is_some_and(|v| v.value == body.value);
     if unchanged {
         let _ = materialize_project_env_to_workdir(&state.pool, &project).await;
         return Ok(Json(json!({
@@ -2580,16 +2686,18 @@ async fn publish_project(
         // Nettoyer le slug : retirer le suffixe -xxxx
         let slug = &project.slug;
         if let Some(idx) = slug.rfind('-') {
-            if slug[idx + 1..].len() == 4 && slug[idx + 1..].chars().all(|c| c.is_ascii_alphanumeric()) {
+            if slug[idx + 1..].len() == 4
+                && slug[idx + 1..].chars().all(|c| c.is_ascii_alphanumeric())
+            {
                 return slug[..idx].to_string();
             }
         }
         slug.clone()
     });
 
-    let description = body.description.unwrap_or_else(|| {
-        format!("Application {} générée par DevForge", project.name)
-    });
+    let description = body
+        .description
+        .unwrap_or_else(|| format!("Application {} générée par DevForge", project.name));
     let private = body.private.unwrap_or(true);
 
     // Vérifier si déjà publié
@@ -2633,7 +2741,7 @@ async fn publish_project(
 
 #[allow(dead_code)]
 async fn fetch_project(state: &AppState, uuid: &str) -> Result<Project, ApiError> {
-    sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ?")
+    sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1")
         .bind(uuid)
         .fetch_optional(&state.pool)
         .await
@@ -2646,12 +2754,19 @@ pub(crate) async fn auth_project(
     state: &AppState,
     headers: &HeaderMap,
     uuid: &str,
-) -> Result<(crate::auth_routes::UserRow, crate::auth_routes::TeamRow, Project), ApiError> {
+) -> Result<
+    (
+        crate::auth_routes::UserRow,
+        crate::auth_routes::TeamRow,
+        Project,
+    ),
+    ApiError,
+> {
     let (user, workspace) = crate::auth_routes::current_workspace(state, headers)
         .await
         .map_err(ApiError::from_auth)?;
     let project = sqlx::query_as::<_, Project>(
-        "SELECT * FROM projects WHERE uuid = ? AND workspace_uuid = ?",
+        "SELECT * FROM projects WHERE uuid = $1 AND workspace_uuid = $2",
     )
     .bind(uuid)
     .bind(&workspace.uuid)
@@ -2675,12 +2790,19 @@ async fn auth_deployment(
     state: &AppState,
     headers: &HeaderMap,
     dep_uuid: &str,
-) -> Result<(crate::auth_routes::UserRow, crate::auth_routes::TeamRow, Deployment), ApiError> {
+) -> Result<
+    (
+        crate::auth_routes::UserRow,
+        crate::auth_routes::TeamRow,
+        Deployment,
+    ),
+    ApiError,
+> {
     let (user, workspace) = require_auth(state, headers).await?;
     let dep = sqlx::query_as::<_, Deployment>(
         r#"SELECT d.* FROM deployments d
            JOIN projects p ON p.id = d.project_id
-           WHERE d.uuid = ? AND p.workspace_uuid = ?"#,
+           WHERE d.uuid = $1 AND p.workspace_uuid = $2"#,
     )
     .bind(dep_uuid)
     .bind(&workspace.uuid)
@@ -2700,7 +2822,7 @@ async fn check_production_url_health(url: &str) -> Result<bool, String> {
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()
         .map_err(|e| format!("client: {}", e))?;
-    
+
     match client.get(url).send().await {
         Ok(resp) => {
             let status = resp.status();
@@ -2728,7 +2850,7 @@ async fn check_production_url_health(url: &str) -> Result<bool, String> {
 /// Statut réel : basé sur le dernier déploiement, pas sur le flag « ready » à la création.
 async fn resolve_project_status(state: &AppState, project: &Project) -> Result<String, ApiError> {
     let latest: Option<(String,)> = sqlx::query_as(
-        "SELECT status FROM deployments WHERE project_id = ? ORDER BY created_at DESC LIMIT 1",
+        "SELECT status FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1",
     )
     .bind(project.id)
     .fetch_optional(&state.pool)
@@ -2771,7 +2893,7 @@ async fn resolve_project_status(state: &AppState, project: &Project) -> Result<S
             "draft" | "live" | "failed" | "deploying" | "stopped" | "unhealthy"
         )
     {
-        let _ = sqlx::query("UPDATE projects SET status = ? WHERE id = ?")
+        let _ = sqlx::query("UPDATE projects SET status = $1 WHERE id = $2")
             .bind(&derived)
             .bind(project.id)
             .execute(&state.pool)
@@ -2795,21 +2917,20 @@ async fn list_templates() -> Json<Value> {
 }
 
 fn apply_template(template_id: &str, dest_dir: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let templates_root = crate::paths::templates_dir().unwrap_or_else(|| {
-        FsPath::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/templates")
-    });
-    
+    let templates_root = crate::paths::templates_dir()
+        .unwrap_or_else(|| FsPath::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/templates"));
+
     let template_base = templates_root.join(template_id);
-    
+
     if !template_base.exists() {
         return Err(format!("Template {} not found at {:?}", template_id, template_base).into());
     }
-    
+
     let dest_path = FsPath::new(dest_dir);
     fs::create_dir_all(dest_path)?;
-    
+
     copy_dir_recursive(&template_base, dest_path)?;
-    
+
     Ok(())
 }
 
@@ -2817,24 +2938,24 @@ fn copy_dir_recursive(src: &FsPath, dst: &FsPath) -> Result<(), Box<dyn std::err
     if !dst.exists() {
         fs::create_dir_all(dst)?;
     }
-    
+
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let path = entry.path();
         let file_name = entry.file_name();
         let dest_path = dst.join(&file_name);
-        
+
         if path.is_dir() {
             copy_dir_recursive(&path, &dest_path)?;
         } else {
             fs::copy(&path, &dest_path)?;
         }
     }
-    
+
     Ok(())
 }
 
-fn slugify(s: &str) -> String {
+pub(crate) fn slugify(s: &str) -> String {
     s.chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() {
@@ -2857,15 +2978,24 @@ pub(crate) fn fqdn_from_url(url: &str) -> Option<String> {
         .filter(|s| s.contains('.'))
 }
 
+pub(crate) async fn project_github(
+    state: &AppState,
+    workspace_uuid: &str,
+) -> std::sync::Arc<devforge_github::GitHubFacade> {
+    let owner = crate::user_prefs::workspace_owner(&state.pool, workspace_uuid).await;
+    let token = match owner.as_deref() {
+        Some(uuid) => crate::user_prefs::github_token(&state.pool, uuid).await,
+        None => String::new(),
+    };
+    AppState::github_from_token(&token)
+}
+
 async fn wildcard_domain(state: &AppState) -> Result<String, ApiError> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT wildcard_domain FROM instance_settings WHERE id = 1")
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(ApiError::from)?;
-    Ok(row
-        .map(|(d,)| d.trim().trim_start_matches('.').to_lowercase())
-        .unwrap_or_default())
+    Ok(crate::user_prefs::instance_wildcard(&state.pool).await)
+}
+
+async fn wildcard_for_project(state: &AppState, project: &Project) -> String {
+    crate::user_prefs::effective_wildcard_for_workspace(&state.pool, &project.workspace_uuid).await
 }
 
 pub(crate) async fn ensure_project_primary_domain(
@@ -2883,16 +3013,14 @@ pub(crate) async fn ensure_project_primary_domain(
         .await
         .ok()
         .and_then(|v| {
-            v.get("domains")
-                .and_then(|d| d.as_array())
-                .map(|arr| {
-                    arr.iter().any(|d| {
-                        d.get("fqdn")
-                            .and_then(|f| f.as_str())
-                            .map(|f| f.eq_ignore_ascii_case(&fqdn))
-                            .unwrap_or(false)
-                    })
+            v.get("domains").and_then(|d| d.as_array()).map(|arr| {
+                arr.iter().any(|d| {
+                    d.get("fqdn")
+                        .and_then(|f| f.as_str())
+                        .map(|f| f.eq_ignore_ascii_case(&fqdn))
+                        .unwrap_or(false)
                 })
+            })
         })
         .unwrap_or(false);
     if !existing {
@@ -2900,7 +3028,7 @@ pub(crate) async fn ensure_project_primary_domain(
     }
     // Primary + tous les alias : chaque domaine du projet doit avoir une route Traefik.
     ensure_all_domain_proxy_routes(state, project_uuid, &fqdn, port.max(1)).await;
-    if let Ok(project) = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ?")
+    if let Ok(project) = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1")
         .bind(project_uuid)
         .fetch_one(&state.pool)
         .await
@@ -2968,10 +3096,7 @@ pub(crate) async fn ensure_all_domain_proxy_routes(
                 let Some(id) = r.get("id").and_then(|i| i.as_str()) else {
                     continue;
                 };
-                if !hosts
-                    .iter()
-                    .any(|(h, _)| h.eq_ignore_ascii_case(host))
-                {
+                if !hosts.iter().any(|(h, _)| h.eq_ignore_ascii_case(host)) {
                     let _ = state.proxy.delete(project_uuid, id).await;
                 }
             }
@@ -2996,7 +3121,17 @@ pub(crate) async fn ensure_all_domain_proxy_routes(
 /// Génère une URL d’atelier isolée pour le workspace (process npm run dev + Traefik file).
 /// Format: `https://dev-{short-uuid}.{wildcard_domain}`
 async fn generate_dev_url(state: &AppState, project_uuid: &str) -> Option<String> {
-    let domain = wildcard_domain(state).await.ok()?;
+    let workspace: Option<(String,)> =
+        sqlx::query_as("SELECT workspace_uuid FROM projects WHERE uuid = $1")
+            .bind(project_uuid)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten();
+    let domain = match workspace {
+        Some((ws,)) => crate::user_prefs::effective_wildcard_for_workspace(&state.pool, &ws).await,
+        None => wildcard_domain(state).await.ok()?,
+    };
     if domain.is_empty() {
         return None;
     }
@@ -3012,11 +3147,11 @@ async fn generate_preview_url(state: &AppState, project_uuid: &str) -> Option<St
 /// Extrait tous les FQDNs de production d'un projet (production_url + domaines attachés).
 async fn get_production_fqdns(state: &AppState, project: &Project) -> Vec<String> {
     let mut fqdns = Vec::new();
-    
+
     if let Some(url) = project.production_url.as_deref().and_then(fqdn_from_url) {
         fqdns.push(url.to_lowercase());
     }
-    
+
     if let Ok(listed) = state.domains.list(&project.uuid).await {
         if let Some(arr) = listed.get("domains").and_then(|d| d.as_array()) {
             for d in arr {
@@ -3029,7 +3164,7 @@ async fn get_production_fqdns(state: &AppState, project: &Project) -> Vec<String
             }
         }
     }
-    
+
     fqdns
 }
 
@@ -3052,7 +3187,7 @@ pub(crate) async fn proxy_labels_for_project(
 ) -> Option<serde_json::Value> {
     let uuid = &project.uuid;
     let port = project.port.clamp(1, 65535) as u16;
-    
+
     // Ensure all production domains have proxy routes
     if let Some(url) = project.production_url.as_deref().and_then(fqdn_from_url) {
         ensure_all_domain_proxy_routes(state, uuid, &url, port).await;
@@ -3074,10 +3209,7 @@ pub(crate) async fn proxy_labels_for_project(
         let Some(host) = r.get("host").and_then(|h| h.as_str()) else {
             continue;
         };
-        let path = r
-            .get("path_prefix")
-            .and_then(|p| p.as_str())
-            .unwrap_or("/");
+        let path = r.get("path_prefix").and_then(|p| p.as_str()).unwrap_or("/");
         let target = r
             .get("target_port")
             .and_then(|p| p.as_u64())
@@ -3110,7 +3242,7 @@ pub(crate) async fn ensure_production_url(
             return Ok(Some(url.clone()));
         }
     }
-    let domain = wildcard_domain(state).await?;
+    let domain = wildcard_for_project(state, project).await;
     if domain.is_empty() {
         return Ok(None);
     }
@@ -3120,7 +3252,7 @@ pub(crate) async fn ensure_production_url(
     }
     let url = format!("https://{host}.{domain}");
     let now = now_str();
-    sqlx::query("UPDATE projects SET production_url = ?, updated_at = ? WHERE id = ?")
+    sqlx::query("UPDATE projects SET production_url = $1, updated_at = $2 WHERE id = $3")
         .bind(&url)
         .bind(&now)
         .bind(project.id)
@@ -3181,4 +3313,3 @@ impl IntoResponse for ApiError {
             .into_response()
     }
 }
-

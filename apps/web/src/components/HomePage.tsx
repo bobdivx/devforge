@@ -4,7 +4,7 @@ import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { cn } from '../lib/cn';
 import { AppShell } from './AppShell';
 import { AppIcon, statusDotClass } from './AppIcon';
-import { Alert, BetaBadge, HubAddTile, HubGrid, Skeleton } from './ui';
+import { Alert, BetaBadge, Button, HubAddTile, HubGrid, Input, Skeleton } from './ui';
 import { enterUp, interactiveLift, motion } from '../lib/motion';
 import { useEffect, useState } from 'preact/hooks';
 import { NewGithubAppWizard } from './NewGithubAppWizard';
@@ -77,6 +77,57 @@ function AppCard({
   );
 }
 
+function aggregateStatus(members: Project[]): string {
+  if (members.some((p) => ['deploying', 'building', 'queued'].includes(p.status))) return 'deploying';
+  if (members.some((p) => ['failed', 'error', 'unhealthy'].includes(p.status))) return 'unhealthy';
+  if (members.some((p) => p.status === 'live' || p.status === 'running')) return 'live';
+  return members[0]?.status || 'ready';
+}
+
+function GroupCard({
+  uuid,
+  name,
+  roles,
+  status,
+  index,
+}: {
+  uuid: string;
+  name: string;
+  roles: string[];
+  status: string;
+  index: number;
+}) {
+  const meta = projectStatusMeta(status);
+  return (
+    <a
+      href={`/app/groups/view?uuid=${encodeURIComponent(uuid)}`}
+      class="group flex aspect-square h-full w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl bg-[#1c1c1e] px-3 py-4 ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)]"
+      animate={motion(enterUp(Math.min(index * 0.05, 0.35)), interactiveLift())}
+    >
+      <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 text-lg font-semibold text-white">
+        {name.slice(0, 1).toUpperCase()}
+      </div>
+      <div class="w-full text-center">
+        <div class="truncate text-sm font-medium text-white">{name}</div>
+        <div class="mt-1 truncate text-[11px] text-[var(--color-ink-faint)]">
+          {roles.length ? roles.join(' · ') : 'Groupe'}
+        </div>
+        <div
+          class={cn(
+            'mt-1 text-[11px] font-medium',
+            meta.tone === 'ok' && 'text-[var(--color-ok)]',
+            meta.tone === 'warn' && 'text-[var(--color-warn)]',
+            meta.tone === 'danger' && 'text-[var(--color-danger)]',
+            meta.tone === 'neutral' && 'text-[var(--color-ink-faint)]',
+          )}
+        >
+          {meta.label}
+        </div>
+      </div>
+    </a>
+  );
+}
+
 export function HomePage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [nodes, setNodes] = useState<ClusterNode[]>([]);
@@ -86,6 +137,10 @@ export function HomePage() {
   const [wizardMode, setWizardMode] = useState<'choice' | 'github' | 'builder'>('choice');
   const [isAdmin, setIsAdmin] = useState(false);
   const [agentBuilder, setAgentBuilder] = useState(true);
+  const [groupOpen, setGroupOpen] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [groupBusy, setGroupBusy] = useState(false);
+  const [groupError, setGroupError] = useState<string | null>(null);
 
   // Fonction pour charger les projets
   async function loadProjects() {
@@ -190,6 +245,39 @@ export function HomePage() {
     setWizardOpen(false);
   }
 
+  async function createGroup(e: Event) {
+    e.preventDefault();
+    const name = groupName.trim();
+    if (!name) return;
+    setGroupBusy(true);
+    try {
+      const r = await api.createGroup({ name });
+      window.location.href = `/app/groups/view?uuid=${encodeURIComponent(r.data.uuid)}`;
+    } catch (err) {
+      setGroupError(String((err as Error).message || err));
+      setGroupBusy(false);
+    }
+  }
+
+  const grouped = new Map<string, { uuid: string; name: string; roles: string[]; members: Project[] }>();
+  const solo: Project[] = [];
+  for (const p of projects) {
+    if (!p.group_uuid) {
+      solo.push(p);
+      continue;
+    }
+    const bucket = grouped.get(p.group_uuid) ?? {
+      uuid: p.group_uuid,
+      name: p.group_name || 'Groupe',
+      roles: [],
+      members: [],
+    };
+    bucket.members.push(p);
+    if (p.role) bucket.roles.push(p.role);
+    grouped.set(p.group_uuid, bucket);
+  }
+  const groups = [...grouped.values()];
+
   return (
     <AppShell active="home" title="Applications">
       {error && (
@@ -205,16 +293,79 @@ export function HomePage() {
           ))}
         </HubGrid>
       ) : (
-        <HubGrid cols={5}>
-          {projects.map((p, i) => (
-            <AppCard key={p.uuid} project={p} index={i} nodes={nodes} showNode={isAdmin} />
-          ))}
+        <>
+          <div class="mb-4 flex justify-end">
+            <Button size="sm" variant="outline" onClick={() => setGroupOpen(true)}>
+              Nouveau groupe
+            </Button>
+          </div>
+          <HubGrid cols={5}>
+            {groups.map((g, i) => (
+              <GroupCard
+                key={g.uuid}
+                uuid={g.uuid}
+                name={g.name}
+                roles={g.roles}
+                status={aggregateStatus(g.members)}
+                index={i}
+              />
+            ))}
+            {solo.map((p, i) => (
+              <AppCard
+                key={p.uuid}
+                project={p}
+                index={groups.length + i}
+                nodes={nodes}
+                showNode={isAdmin}
+              />
+            ))}
 
-          <HubAddTile index={projects.length} label="Ajouter" onClick={openWizard} />
-        </HubGrid>
+            <HubAddTile index={groups.length + solo.length} label="Ajouter" onClick={openWizard} />
+          </HubGrid>
+        </>
       )}
 
-      {!loading && !error && projects.length === 0 && (
+      {groupOpen && (
+        <div class="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
+          <button
+            type="button"
+            aria-label="Fermer"
+            class="df-modal-backdrop absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setGroupOpen(false)}
+          />
+          <form
+            class="df-modal-panel relative z-10 w-full max-w-md rounded-t-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-6 shadow-2xl sm:rounded-2xl"
+            onSubmit={createGroup}
+          >
+            <h2 class="text-xl font-semibold">Nouveau groupe</h2>
+            <p class="mt-1 text-sm text-[var(--color-ink-muted)]">
+              Regroupe plusieurs repos (site, client, serveur) sur un réseau commun.
+            </p>
+            <div class="mt-4">
+              <Input
+                label="Nom"
+                value={groupName}
+                onInput={(e) => setGroupName((e.target as HTMLInputElement).value)}
+              />
+            </div>
+            {groupError && (
+              <Alert tone="warn" class="mt-3">
+                {groupError}
+              </Alert>
+            )}
+            <div class="mt-4 flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setGroupOpen(false)}>
+                Annuler
+              </Button>
+              <Button type="submit" disabled={groupBusy || !groupName.trim()}>
+                {groupBusy ? 'Création…' : 'Créer'}
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {!loading && !error && projects.length === 0 && groups.length === 0 && (
         <p class="mt-6 text-center text-sm text-[var(--color-ink-muted)]">
           Aucune application pour l'instant. Crée-en une pour commencer.
         </p>

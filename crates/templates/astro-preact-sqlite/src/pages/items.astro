@@ -2,14 +2,14 @@
 import Layout from '../layouts/Layout.astro';
 import { getAllItems } from '../lib/db';
 
-const items = getAllItems();
+const items = await getAllItems();
 ---
 
-<Layout title="Données SQLite">
+<Layout title="Données">
   <div class="container mx-auto px-4 py-8">
     <div class="mb-8">
-      <h1 class="text-4xl font-bold mb-2">Données depuis SQLite</h1>
-      <p class="text-base-content/70">Voici les éléments stockés dans la base de données locale.</p>
+      <h1 class="text-4xl font-bold mb-2">Données</h1>
+      <p class="text-base-content/70">Éléments stockés dans la base du projet (SQLite en local, PostgreSQL dès qu’une instance est liée).</p>
     </div>
 
     <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

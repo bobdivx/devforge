@@ -44,7 +44,7 @@ async fn auth_project(
                 .unwrap_or("auth")
                 .to_string(),
         })?;
-    sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = ? AND workspace_uuid = ?")
+    sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1 AND workspace_uuid = $2")
         .bind(uuid)
         .bind(&workspace.uuid)
         .fetch_optional(&state.pool)
@@ -156,7 +156,8 @@ fn analyze_runs_on(yaml: &str) -> (bool, Vec<String>, bool) {
         }
         values.push(rest.to_string());
         let lower = rest.to_lowercase();
-        if lower.contains("devforge") || (lower.contains("self-hosted") && lower.contains("devforge"))
+        if lower.contains("devforge")
+            || (lower.contains("self-hosted") && lower.contains("devforge"))
         {
             uses = true;
         }
@@ -260,7 +261,9 @@ async fn actions_summary(
         Vec::new()
     };
 
-    let needs_patch = workflows.iter().any(|w| !w.uses_devforge && !w.skipped_dynamic);
+    let needs_patch = workflows
+        .iter()
+        .any(|w| !w.uses_devforge && !w.skipped_dynamic);
     let has_workflows = !workflows.is_empty();
 
     Ok(Json(json!({
@@ -500,7 +503,11 @@ async fn patch_workflows(
 
     let commit_urls: Vec<String> = patched
         .iter()
-        .filter_map(|p| p.get("html_url").and_then(|u| u.as_str()).map(str::to_string))
+        .filter_map(|p| {
+            p.get("html_url")
+                .and_then(|u| u.as_str())
+                .map(str::to_string)
+        })
         .collect();
 
     Ok(Json(json!({
@@ -533,7 +540,8 @@ mod tests {
 
     #[test]
     fn patches_ubuntu_latest() {
-        let yaml = "jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n";
+        let yaml =
+            "jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n";
         let (out, n) = patch_runs_on_yaml(yaml);
         assert_eq!(n, 1);
         assert!(out.contains("runs-on: [self-hosted, linux, x64, devforge]"));

@@ -5,10 +5,10 @@ use devforge_runner::{
     decode_extra_env, decode_volumes, encode_extra_env, encode_volumes, ManagedRunner, RunnerStore,
 };
 use devforge_shared::{DevForgeError, Result as DfResult};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, PgPool};
 
 pub struct SqliteRunnerStore {
-    pub pool: SqlitePool,
+    pub pool: PgPool,
 }
 
 #[derive(FromRow)]
@@ -100,7 +100,7 @@ impl RunnerStore for SqliteRunnerStore {
 
     async fn get(&self, id: &str) -> DfResult<Option<ManagedRunner>> {
         let row: Option<RunnerRow> = sqlx::query_as(&format!(
-            "SELECT {SELECT_COLS} FROM managed_runners WHERE id = ?"
+            "SELECT {SELECT_COLS} FROM managed_runners WHERE id = $1"
         ))
         .bind(id)
         .fetch_optional(&self.pool)
@@ -115,7 +115,7 @@ impl RunnerStore for SqliteRunnerStore {
         container_name: &str,
     ) -> DfResult<Option<ManagedRunner>> {
         let row: Option<RunnerRow> = sqlx::query_as(&format!(
-            "SELECT {SELECT_COLS} FROM managed_runners WHERE server_id = ? AND container_name = ?"
+            "SELECT {SELECT_COLS} FROM managed_runners WHERE server_id = $1 AND container_name = $2"
         ))
         .bind(server_id)
         .bind(container_name)
@@ -133,7 +133,7 @@ impl RunnerStore for SqliteRunnerStore {
                 volumes_json, extra_env_json, auth_mode, enabled, project_uuid,
                 live_state, live_status, container_id, github_status, github_busy,
                 github_runner_id, last_synced_at, last_error, op_status, created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
             ON CONFLICT(id) DO UPDATE SET
                 server_id=excluded.server_id,
                 container_name=excluded.container_name,
@@ -200,7 +200,7 @@ impl RunnerStore for SqliteRunnerStore {
     }
 
     async fn delete(&self, id: &str) -> DfResult<bool> {
-        let res = sqlx::query("DELETE FROM managed_runners WHERE id = ?")
+        let res = sqlx::query("DELETE FROM managed_runners WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
             .await
@@ -222,10 +222,10 @@ impl RunnerStore for SqliteRunnerStore {
     ) -> DfResult<()> {
         sqlx::query(
             r#"UPDATE managed_runners SET
-                live_state = ?, live_status = ?, container_id = ?,
-                github_status = ?, github_busy = ?, github_runner_id = ?,
-                last_synced_at = ?, last_error = ?, updated_at = ?
-               WHERE id = ?"#,
+                live_state = $1, live_status = $2, container_id = $3,
+                github_status = $4, github_busy = $5, github_runner_id = $6,
+                last_synced_at = $7, last_error = $8, updated_at = $9
+               WHERE id = $10"#,
         )
         .bind(live_state)
         .bind(live_status)
@@ -252,7 +252,7 @@ impl RunnerStore for SqliteRunnerStore {
         let now = chrono::Utc::now().to_rfc3339();
         if let Some(err) = last_error {
             sqlx::query(
-                "UPDATE managed_runners SET op_status = ?, last_error = ?, updated_at = ? WHERE id = ?",
+                "UPDATE managed_runners SET op_status = $1, last_error = $2, updated_at = $3 WHERE id = $4",
             )
             .bind(op_status)
             .bind(err)
@@ -263,7 +263,7 @@ impl RunnerStore for SqliteRunnerStore {
             .map_err(|e| DevForgeError::Message(e.to_string()))?;
         } else if op_status == "idle" {
             sqlx::query(
-                "UPDATE managed_runners SET op_status = ?, last_error = NULL, updated_at = ? WHERE id = ?",
+                "UPDATE managed_runners SET op_status = $1, last_error = NULL, updated_at = $2 WHERE id = $3",
             )
             .bind(op_status)
             .bind(&now)
@@ -272,15 +272,13 @@ impl RunnerStore for SqliteRunnerStore {
             .await
             .map_err(|e| DevForgeError::Message(e.to_string()))?;
         } else {
-            sqlx::query(
-                "UPDATE managed_runners SET op_status = ?, updated_at = ? WHERE id = ?",
-            )
-            .bind(op_status)
-            .bind(&now)
-            .bind(id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| DevForgeError::Message(e.to_string()))?;
+            sqlx::query("UPDATE managed_runners SET op_status = $1, updated_at = $2 WHERE id = $3")
+                .bind(op_status)
+                .bind(&now)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| DevForgeError::Message(e.to_string()))?;
         }
         Ok(())
     }

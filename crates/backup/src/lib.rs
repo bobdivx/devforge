@@ -197,7 +197,7 @@ impl BackupFacade {
     }
 }
 
-/// Platform (DevForge itself) SQLite backup → S3.
+/// Sauvegarde de la base DevForge (dump Postgres, ou ancien fichier SQLite).
 pub struct InstanceBackupService {
     storage: Arc<StorageFacade>,
     db_path: PathBuf,
@@ -261,15 +261,26 @@ impl InstanceBackupService {
     }
 
     pub async fn create(&self) -> Result<Value> {
+        let bytes = snapshot_sqlite(&self.db_path).await?;
+        self.create_from_bytes(bytes).await
+    }
+
+    /// Enregistre un dump déjà produit (`pg_dump` ou ancien SQLite).
+    pub async fn create_from_bytes(&self, bytes: Vec<u8>) -> Result<Value> {
+        if !snapshot_ok(&bytes) {
+            return Err(DevForgeError::Message(
+                "snapshot invalide (dump Postgres ou base SQLite attendu)".into(),
+            ));
+        }
         let cfg = self.storage.config().await;
         if cfg.is_ready() {
-            return self.create_s3().await;
+            self.store_s3(bytes).await
         } else {
-            return self.create_local().await;
+            self.store_local(bytes).await
         }
     }
 
-    async fn create_s3(&self) -> Result<Value> {
+    async fn store_s3(&self, bytes: Vec<u8>) -> Result<Value> {
         let cfg = self.storage.config().await;
         if !cfg.is_ready() {
             return Err(DevForgeError::Message(
@@ -279,14 +290,18 @@ impl InstanceBackupService {
 
         let id = format!("ib_{}", &Uuid::new_v4().to_string()[..8]);
         let stamp = Utc::now().format("%Y%m%d-%H%M%S");
-        let key = format!("{}devforge-{stamp}-{id}.db", Self::PREFIX);
-
-        let bytes = snapshot_sqlite(&self.db_path).await?;
+        let ext = snapshot_ext(&bytes);
+        let key = format!("{}devforge-{stamp}-{id}.{ext}", Self::PREFIX);
         let size = bytes.len() as u64;
+        let message = if snapshot_is_postgres(&bytes) {
+            "Dump Postgres envoyé vers S3"
+        } else {
+            "Base DevForge envoyée vers S3"
+        };
 
         match self
             .storage
-            .put_bytes(&cfg.bucket, &key, bytes, "application/x-sqlite3")
+            .put_bytes(&cfg.bucket, &key, bytes, snapshot_mime(ext))
             .await
         {
             Ok(obj) => Ok(json!({
@@ -297,26 +312,31 @@ impl InstanceBackupService {
                     size_bytes: size,
                     created_at: Utc::now().to_rfc3339(),
                     status: "completed".into(),
-                    message: "Base DevForge envoyée vers S3".into(),
+                    message: message.into(),
                 }
             })),
             Err(e) => Err(e),
         }
     }
 
-    async fn create_local(&self) -> Result<Value> {
+    async fn store_local(&self, bytes: Vec<u8>) -> Result<Value> {
         let id = format!("ib_{}", &Uuid::new_v4().to_string()[..8]);
         let stamp = Utc::now().format("%Y%m%d-%H%M%S");
-        let filename = format!("devforge-{stamp}-{id}.db");
-        
+        let ext = snapshot_ext(&bytes);
+        let filename = format!("devforge-{stamp}-{id}.{ext}");
+
         let backup_dir = self.local_backup_dir();
         tokio::fs::create_dir_all(&backup_dir)
             .await
             .map_err(|e| DevForgeError::Message(format!("création répertoire backup: {e}")))?;
-        
+
         let backup_path = backup_dir.join(&filename);
-        let bytes = snapshot_sqlite(&self.db_path).await?;
         let size = bytes.len() as u64;
+        let message = if snapshot_is_postgres(&bytes) {
+            "Dump Postgres local"
+        } else {
+            "Backup local"
+        };
 
         tokio::fs::write(&backup_path, &bytes)
             .await
@@ -330,7 +350,7 @@ impl InstanceBackupService {
                 size_bytes: size,
                 created_at: Utc::now().to_rfc3339(),
                 status: "completed".into(),
-                message: "Base DevForge sauvegardée localement".into(),
+                message: message.into(),
             }
         }))
     }
@@ -398,7 +418,7 @@ impl InstanceBackupService {
                 continue;
             }
             let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !filename.ends_with(".db") {
+            if !filename.ends_with(".db") && !filename.ends_with(".sql") {
                 continue;
             }
 
@@ -416,7 +436,7 @@ impl InstanceBackupService {
 
             let id = filename
                 .strip_prefix("devforge-")
-                .and_then(|s| s.strip_suffix(".db"))
+                .and_then(|s| s.strip_suffix(".sql").or_else(|| s.strip_suffix(".db")))
                 .map(|s| {
                     if let Some(idx) = s.rfind("-ib_") {
                         s[idx + 1..].to_string()
@@ -432,7 +452,11 @@ impl InstanceBackupService {
                 size_bytes,
                 created_at,
                 status: "completed".into(),
-                message: "Backup local".into(),
+                message: if filename.ends_with(".sql") {
+                    "Dump Postgres local".into()
+                } else {
+                    "Backup local".into()
+                },
             });
         }
 
@@ -533,9 +557,9 @@ impl InstanceBackupService {
             }
         };
 
-        if bytes.len() < 100 || !looks_like_sqlite(&bytes) {
+        if !snapshot_ok(&bytes) {
             return Err(DevForgeError::Message(
-                "Le fichier téléchargé ne semble pas être une base SQLite".into(),
+                "Le fichier téléchargé n'est ni un dump Postgres ni une base SQLite".into(),
             ));
         }
 
@@ -611,6 +635,30 @@ pub async fn snapshot_sqlite(db_path: &Path) -> Result<Vec<u8>> {
 
 fn looks_like_sqlite(bytes: &[u8]) -> bool {
     bytes.starts_with(b"SQLite format 3\0")
+}
+
+pub fn snapshot_is_postgres(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"-- DevForge postgres snapshot\n")
+}
+
+fn snapshot_ok(bytes: &[u8]) -> bool {
+    bytes.len() >= 100 && (looks_like_sqlite(bytes) || snapshot_is_postgres(bytes))
+}
+
+fn snapshot_ext(bytes: &[u8]) -> &'static str {
+    if snapshot_is_postgres(bytes) {
+        "sql"
+    } else {
+        "db"
+    }
+}
+
+fn snapshot_mime(ext: &str) -> &'static str {
+    if ext == "sql" {
+        "application/sql"
+    } else {
+        "application/x-sqlite3"
+    }
 }
 
 /// Parse `sqlite:path?opts` → filesystem path.

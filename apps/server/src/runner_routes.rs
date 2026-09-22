@@ -169,22 +169,23 @@ async fn runner_events(
     require_ws(&state, &headers).await?;
     let rx = state.runners.bus().subscribe();
 
-    let ready = stream::once(async {
-        Ok::<Event, Infallible>(Event::default().event("ready").data("{}"))
-    });
+    let ready =
+        stream::once(async { Ok::<Event, Infallible>(Event::default().event("ready").data("{}")) });
 
     let events = stream::unfold(rx, |mut rx| async move {
         match rx.recv().await {
             Ok(ev) => Some((Ok::<Event, Infallible>(event_from_runner(ev)), rx)),
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => Some((
-                Ok(Event::default().event("runner.lagged").data("{}")),
-                rx,
-            )),
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                Some((Ok(Event::default().event("runner.lagged").data("{}")), rx))
+            }
             Err(tokio::sync::broadcast::error::RecvError::Closed) => None,
         }
     });
 
-    Ok(Sse::new(ready.chain(events)).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
+    Ok(
+        Sse::new(ready.chain(events))
+            .keep_alive(KeepAlive::new().interval(Duration::from_secs(15))),
+    )
 }
 
 #[derive(Deserialize)]

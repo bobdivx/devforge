@@ -1,0 +1,7 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { GroupPage } from '../../../components/GroupPage';
+---
+<BaseLayout title="Groupe · DevForge">
+  <GroupPage client:only="preact" />
+</BaseLayout>

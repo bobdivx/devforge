@@ -146,6 +146,12 @@ export type Project = {
   publish_directory?: string | null;
   base_directory?: string | null;
   docker_compose_location?: string | null;
+  gpu_nvidia?: number | boolean;
+  gpu_dri?: number | boolean;
+  group_uuid?: string | null;
+  group_name?: string | null;
+  group_slug?: string | null;
+  role?: string | null;
   created_at?: string;
   updated_at?: string;
   deploy?: {
@@ -154,6 +160,29 @@ export type Project = {
     message?: string | null;
   };
   sync?: ProjectSync;
+};
+
+export type AppGroupMember = {
+  project_uuid: string;
+  name: string;
+  role: string;
+  status: string;
+  server_id?: string | null;
+  port: number;
+  production_url?: string | null;
+  gpu_nvidia: boolean;
+  gpu_dri: boolean;
+  internal_url: string;
+};
+
+export type AppGroup = {
+  uuid: string;
+  name: string;
+  slug: string;
+  network: string;
+  created_at?: string;
+  updated_at?: string;
+  members: AppGroupMember[];
 };
 
 export type LlmProviderRow = {
@@ -261,6 +290,16 @@ export const api = {
       user: { uuid: string; name: string; email: string };
       team?: { name: string; show_boarding: boolean };
     }>('/me'),
+  saveMyDomain: (wildcard_domain: string) =>
+    request<{
+      ok: boolean;
+      wildcard_own: string;
+      wildcard_fallback: string;
+      wildcard_domain: string;
+    }>('/me/domain', {
+      method: 'POST',
+      body: JSON.stringify({ wildcard_domain }),
+    }),
   saveOnboarding: (body: Record<string, string | undefined>) =>
     request<{ ok: boolean; steps: Bootstrap['onboarding']['steps'] }>('/onboarding', {
       method: 'POST',
@@ -396,6 +435,26 @@ export const api = {
       };
     }>('/health'),
   projects: () => request<{ data: Project[] }>('/projects'),
+  groups: () => request<{ data: AppGroup[] }>('/groups'),
+  group: (uuid: string) => request<{ data: AppGroup }>(`/groups/${uuid}`),
+  createGroup: (body: { name: string }) =>
+    request<{ data: AppGroup }>('/groups', { method: 'POST', body: JSON.stringify(body) }),
+  updateGroup: (uuid: string, body: { name: string }) =>
+    request<{ data: AppGroup }>(`/groups/${uuid}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteGroup: (uuid: string) =>
+    request<{ ok: boolean }>(`/groups/${uuid}`, { method: 'DELETE' }),
+  addGroupMember: (uuid: string, body: { project_uuid: string; role: string }) =>
+    request<{ data: AppGroup }>(`/groups/${uuid}/members`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateGroupMember: (uuid: string, projectUuid: string, body: { role: string }) =>
+    request<{ data: AppGroup }>(`/groups/${uuid}/members/${projectUuid}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  removeGroupMember: (uuid: string, projectUuid: string) =>
+    request<{ data: AppGroup }>(`/groups/${uuid}/members/${projectUuid}`, { method: 'DELETE' }),
   project: async (uuid: string) => {
     const res = await request<{ data: Project | { project: Project; deployments: Deployment[] } }>(
       '/projects/' + uuid,
@@ -731,6 +790,8 @@ export const api = {
       port?: number;
       sso_protection?: 'auto' | 'on' | 'off';
       has_own_user_system?: boolean;
+      gpu_nvidia?: boolean;
+      gpu_dri?: boolean;
     },
   ) =>
     request<{ data: Project }>(`/projects/${uuid}`, {
@@ -1080,6 +1141,35 @@ export const api = {
       `/projects/${projectUuid}/resources/${encodeURIComponent(linkId)}`,
       { method: 'DELETE' },
     ),
+  createProjectDatabase: (
+    projectUuid: string,
+    body: { name: string; migrate_sqlite?: boolean },
+  ) =>
+    request<{
+      data: {
+        ok: boolean;
+        id: string;
+        container: string;
+        database: string;
+        server_id: string;
+        env_keys: string[];
+        migration: {
+          skipped?: boolean;
+          reason?: string;
+          file?: string;
+          tables?: number;
+          rows?: number;
+        };
+      };
+    }>(`/projects/${projectUuid}/databases`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteProjectDatabase: (projectUuid: string, id: string) =>
+    request<{ ok: boolean; container: string }>(
+      `/projects/${projectUuid}/databases/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    ),
   updateCheck: () =>
     request<{
       data: {
@@ -1200,6 +1290,25 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
+
+  postgresStatus: () =>
+    request<{
+      ok: boolean;
+      postgres: {
+        ready: boolean;
+        engine: string;
+        placement?: string;
+        container?: string;
+        standby_container?: string;
+        host?: string;
+        database?: string;
+        user?: string;
+        port?: number;
+        public?: boolean;
+        replicas_streaming?: number;
+        durability?: string;
+      };
+    }>('/settings/postgres'),
 
   backupS3Get: () =>
     request<{

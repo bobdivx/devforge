@@ -15,10 +15,7 @@ use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route(
-            "/api/v1/projects/{uuid}/oidc",
-            get(get_project_oidc_status),
-        )
+        .route("/api/v1/projects/{uuid}/oidc", get(get_project_oidc_status))
         .route(
             "/api/v1/projects/{uuid}/oidc/provision",
             post(provision_project_oidc),
@@ -33,7 +30,7 @@ async fn require_workspace_access(
     let (_user, workspace) = crate::auth_routes::current_workspace(state, headers).await?;
 
     let project = sqlx::query_as::<_, crate::state::Project>(
-        "SELECT * FROM projects WHERE uuid = ? AND workspace_uuid = ?",
+        "SELECT * FROM projects WHERE uuid = $1 AND workspace_uuid = $2",
     )
     .bind(project_uuid)
     .bind(&workspace.uuid)
@@ -60,9 +57,9 @@ async fn get_project_oidc_status(
     headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let project = require_workspace_access(&state, &headers, &uuid).await?;
-    
+
     let settings = sso::load_sso_settings(&state.pool).await;
-    
+
     if !settings.is_pocket_id() {
         return Ok(Json(json!({
             "ok": true,
@@ -73,10 +70,10 @@ async fn get_project_oidc_status(
     }
 
     let client = project_oidc::load_project_oidc_client(&state.pool, &project.uuid).await;
-    
+
     let derived_client_id = project_oidc::derive_client_id(&project.slug);
     let callbacks = project_oidc::all_callback_urls(&state.pool, &project).await;
-    
+
     Ok(Json(json!({
         "ok": true,
         "provider": "pocket_id",
@@ -101,9 +98,9 @@ async fn provision_project_oidc(
     Json(body): Json<ProvisionBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let project = require_workspace_access(&state, &headers, &uuid).await?;
-    
+
     let settings = sso::load_sso_settings(&state.pool).await;
-    
+
     if !settings.is_pocket_id() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -111,7 +108,10 @@ async fn provision_project_oidc(
         ));
     }
 
-    if project_oidc::all_callback_urls(&state.pool, &project).await.is_empty() {
+    if project_oidc::all_callback_urls(&state.pool, &project)
+        .await
+        .is_empty()
+    {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({
@@ -122,22 +122,19 @@ async fn provision_project_oidc(
     }
 
     let force_new_secret = body.force_new_secret.unwrap_or(false);
-    
-    let result = project_oidc::provision_project_oidc_client(
-        &state.pool,
-        &project,
-        force_new_secret,
-    )
-    .await
-    .map_err(|e| {
-        (
-            StatusCode::BAD_GATEWAY,
-            Json(json!({
-                "error": e.message,
-                "pocket_id_status": e.status,
-            })),
-        )
-    })?;
+
+    let result =
+        project_oidc::provision_project_oidc_client(&state.pool, &project, force_new_secret)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({
+                        "error": e.message,
+                        "pocket_id_status": e.status,
+                    })),
+                )
+            })?;
 
     let updated_count = sso::ensure_oidc_env(&state.pool, &project).await;
 

@@ -127,9 +127,7 @@ pub struct LocalShellExecutor;
 fn windows_docker_bin_dirs() -> Vec<String> {
     let mut dirs = Vec::new();
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
-        dirs.push(format!(
-            r"{local}\Programs\DockerDesktop\resources\bin"
-        ));
+        dirs.push(format!(r"{local}\Programs\DockerDesktop\resources\bin"));
         dirs.push(format!(r"{local}\Docker\bin"));
     }
     dirs.push(r"C:\Program Files\Docker\Docker\resources\bin".into());

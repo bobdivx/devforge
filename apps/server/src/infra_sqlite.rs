@@ -4,13 +4,13 @@ use async_trait::async_trait;
 use devforge_domain::{DomainRecord, DomainStore};
 use devforge_ports::{PortMapping, PortStore};
 use devforge_proxy::{ProxyRoute, ProxyStore};
-use devforge_wireguard::{WireguardStore, WgNetwork, WgPeer};
 use devforge_shared::{DevForgeError, Result as DfResult};
-use sqlx::SqlitePool;
+use devforge_wireguard::{WgNetwork, WgPeer, WireguardStore};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 pub struct SqlitePortStore {
-    pub pool: SqlitePool,
+    pub pool: PgPool,
 }
 
 #[async_trait]
@@ -18,7 +18,7 @@ impl PortStore for SqlitePortStore {
     async fn list(&self, project_uuid: &str) -> DfResult<Vec<PortMapping>> {
         let rows: Vec<(String, String, i64, Option<i64>, String, i64)> = sqlx::query_as(
             r#"SELECT id, project_uuid, container_port, public_port, protocol, public
-               FROM project_ports WHERE project_uuid = ? ORDER BY container_port"#,
+               FROM project_ports WHERE project_uuid = $1 ORDER BY container_port"#,
         )
         .bind(project_uuid)
         .fetch_all(&self.pool)
@@ -26,16 +26,16 @@ impl PortStore for SqlitePortStore {
         .map_err(|e| DevForgeError::Message(e.to_string()))?;
         Ok(rows
             .into_iter()
-            .map(|(id, project_uuid, container_port, public_port, protocol, public)| {
-                PortMapping {
+            .map(
+                |(id, project_uuid, container_port, public_port, protocol, public)| PortMapping {
                     id,
                     project_uuid,
                     container_port: container_port as u16,
                     public_port: public_port.map(|p| p as u16),
                     protocol,
                     public: public != 0,
-                }
-            })
+                },
+            )
             .collect())
     }
 
@@ -51,7 +51,7 @@ impl PortStore for SqlitePortStore {
         }
         sqlx::query(
             r#"INSERT INTO project_ports (id, project_uuid, container_port, public_port, protocol, public)
-               VALUES (?, ?, ?, ?, ?, ?)
+               VALUES ($1, $2, $3, $4, $5, $6)
                ON CONFLICT(id) DO UPDATE SET
                  container_port=excluded.container_port,
                  public_port=excluded.public_port,
@@ -71,7 +71,7 @@ impl PortStore for SqlitePortStore {
     }
 
     async fn delete(&self, project_uuid: &str, id: &str) -> DfResult<bool> {
-        let res = sqlx::query("DELETE FROM project_ports WHERE project_uuid = ? AND id = ?")
+        let res = sqlx::query("DELETE FROM project_ports WHERE project_uuid = $1 AND id = $2")
             .bind(project_uuid)
             .bind(id)
             .execute(&self.pool)
@@ -82,7 +82,7 @@ impl PortStore for SqlitePortStore {
 }
 
 pub struct SqliteDomainStore {
-    pub pool: SqlitePool,
+    pub pool: PgPool,
 }
 
 #[async_trait]
@@ -90,7 +90,7 @@ impl DomainStore for SqliteDomainStore {
     async fn list(&self, project_uuid: &str) -> DfResult<Vec<DomainRecord>> {
         let rows: Vec<(String, String, String, i64, String)> = sqlx::query_as(
             r#"SELECT id, project_uuid, fqdn, tls, status FROM project_domains
-               WHERE project_uuid = ? ORDER BY fqdn"#,
+               WHERE project_uuid = $1 ORDER BY fqdn"#,
         )
         .bind(project_uuid)
         .fetch_all(&self.pool)
@@ -126,7 +126,7 @@ impl DomainStore for SqliteDomainStore {
         }
         sqlx::query(
             r#"INSERT INTO project_domains (id, project_uuid, fqdn, tls, status)
-               VALUES (?, ?, ?, ?, ?)
+               VALUES ($1, $2, $3, $4, $5)
                ON CONFLICT(id) DO UPDATE SET fqdn=excluded.fqdn, tls=excluded.tls, status=excluded.status"#,
         )
         .bind(&record.id)
@@ -141,7 +141,7 @@ impl DomainStore for SqliteDomainStore {
     }
 
     async fn detach(&self, project_uuid: &str, id: &str) -> DfResult<bool> {
-        let res = sqlx::query("DELETE FROM project_domains WHERE project_uuid = ? AND id = ?")
+        let res = sqlx::query("DELETE FROM project_domains WHERE project_uuid = $1 AND id = $2")
             .bind(project_uuid)
             .bind(id)
             .execute(&self.pool)
@@ -151,7 +151,7 @@ impl DomainStore for SqliteDomainStore {
     }
 
     async fn update_status(&self, project_uuid: &str, id: &str, status: &str) -> DfResult<()> {
-        sqlx::query("UPDATE project_domains SET status = ? WHERE project_uuid = ? AND id = ?")
+        sqlx::query("UPDATE project_domains SET status = $1 WHERE project_uuid = $2 AND id = $3")
             .bind(status)
             .bind(project_uuid)
             .bind(id)
@@ -163,7 +163,7 @@ impl DomainStore for SqliteDomainStore {
 }
 
 pub struct SqliteProxyStore {
-    pub pool: SqlitePool,
+    pub pool: PgPool,
 }
 
 #[async_trait]
@@ -171,7 +171,7 @@ impl ProxyStore for SqliteProxyStore {
     async fn list(&self, project_uuid: &str) -> DfResult<Vec<ProxyRoute>> {
         let rows: Vec<(String, String, String, String, i64, i64)> = sqlx::query_as(
             r#"SELECT id, project_uuid, host, path_prefix, target_port, https_redirect
-               FROM project_proxy_routes WHERE project_uuid = ? ORDER BY host"#,
+               FROM project_proxy_routes WHERE project_uuid = $1 ORDER BY host"#,
         )
         .bind(project_uuid)
         .fetch_all(&self.pool)
@@ -208,7 +208,7 @@ impl ProxyStore for SqliteProxyStore {
         sqlx::query(
             r#"INSERT INTO project_proxy_routes
                (id, project_uuid, host, path_prefix, target_port, https_redirect)
-               VALUES (?, ?, ?, ?, ?, ?)
+               VALUES ($1, $2, $3, $4, $5, $6)
                ON CONFLICT(id) DO UPDATE SET
                  host=excluded.host,
                  path_prefix=excluded.path_prefix,
@@ -228,18 +228,19 @@ impl ProxyStore for SqliteProxyStore {
     }
 
     async fn delete(&self, project_uuid: &str, id: &str) -> DfResult<bool> {
-        let res = sqlx::query("DELETE FROM project_proxy_routes WHERE project_uuid = ? AND id = ?")
-            .bind(project_uuid)
-            .bind(id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| DevForgeError::Message(e.to_string()))?;
+        let res =
+            sqlx::query("DELETE FROM project_proxy_routes WHERE project_uuid = $1 AND id = $2")
+                .bind(project_uuid)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| DevForgeError::Message(e.to_string()))?;
         Ok(res.rows_affected() > 0)
     }
 }
 
 pub struct SqliteWireguardStore {
-    pub pool: SqlitePool,
+    pub pool: PgPool,
 }
 
 #[async_trait]
@@ -284,7 +285,7 @@ impl WireguardStore for SqliteWireguardStore {
         };
         let listen_port = if listen_port == 0 { 51820 } else { listen_port };
         sqlx::query(
-            "INSERT INTO wg_networks (id, name, subnet, listen_port, interface) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO wg_networks (id, name, subnet, listen_port, interface) VALUES ($1, $2, $3, $4, $5)",
         )
         .bind(&id)
         .bind(name)
@@ -305,11 +306,12 @@ impl WireguardStore for SqliteWireguardStore {
     }
 
     async fn add_peer(&self, network_id: &str, mut peer: WgPeer) -> DfResult<WgPeer> {
-        let exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM wg_networks WHERE id = ?")
-            .bind(network_id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| DevForgeError::Message(e.to_string()))?;
+        let exists: Option<(i64,)> =
+            sqlx::query_as("SELECT 1::bigint FROM wg_networks WHERE id = $1")
+                .bind(network_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| DevForgeError::Message(e.to_string()))?;
         if exists.is_none() {
             return Err(DevForgeError::NotFound(format!("network {network_id}")));
         }
@@ -321,7 +323,7 @@ impl WireguardStore for SqliteWireguardStore {
         }
         sqlx::query(
             r#"INSERT INTO wg_peers (id, network_id, name, public_key, allowed_ips, endpoint, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+               VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
         )
         .bind(&peer.id)
         .bind(network_id)
@@ -337,7 +339,7 @@ impl WireguardStore for SqliteWireguardStore {
     }
 
     async fn remove_peer(&self, network_id: &str, peer_id: &str) -> DfResult<bool> {
-        let res = sqlx::query("DELETE FROM wg_peers WHERE network_id = ? AND id = ?")
+        let res = sqlx::query("DELETE FROM wg_peers WHERE network_id = $1 AND id = $2")
             .bind(network_id)
             .bind(peer_id)
             .execute(&self.pool)
@@ -348,7 +350,7 @@ impl WireguardStore for SqliteWireguardStore {
 
     async fn get_network(&self, network_id: &str) -> DfResult<Option<WgNetwork>> {
         let row: Option<(String, String, String, i64, String)> = sqlx::query_as(
-            "SELECT id, name, subnet, listen_port, interface FROM wg_networks WHERE id = ?",
+            "SELECT id, name, subnet, listen_port, interface FROM wg_networks WHERE id = $1",
         )
         .bind(network_id)
         .fetch_optional(&self.pool)
@@ -368,13 +370,8 @@ impl WireguardStore for SqliteWireguardStore {
         }))
     }
 
-    async fn set_peer_status(
-        &self,
-        network_id: &str,
-        peer_id: &str,
-        status: &str,
-    ) -> DfResult<()> {
-        sqlx::query("UPDATE wg_peers SET status = ? WHERE network_id = ? AND id = ?")
+    async fn set_peer_status(&self, network_id: &str, peer_id: &str, status: &str) -> DfResult<()> {
+        sqlx::query("UPDATE wg_peers SET status = $1 WHERE network_id = $2 AND id = $3")
             .bind(status)
             .bind(network_id)
             .bind(peer_id)
@@ -389,7 +386,7 @@ impl SqliteWireguardStore {
     async fn peers_of(&self, network_id: &str) -> DfResult<Vec<WgPeer>> {
         let rows: Vec<(String, String, String, String, Option<String>, String)> = sqlx::query_as(
             r#"SELECT id, name, public_key, allowed_ips, endpoint, status
-               FROM wg_peers WHERE network_id = ? ORDER BY name"#,
+               FROM wg_peers WHERE network_id = $1 ORDER BY name"#,
         )
         .bind(network_id)
         .fetch_all(&self.pool)
@@ -414,18 +411,14 @@ impl SqliteWireguardStore {
 #[cfg(test)]
 mod wg_tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
 
     #[tokio::test]
     async fn network_and_peer_survive_a_new_store() {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
+        let pool = devforge_database::ephemeral_pg().await;
         sqlx::query(
             r#"CREATE TABLE wg_networks (
                 id TEXT PRIMARY KEY, name TEXT NOT NULL, subnet TEXT NOT NULL,
-                listen_port INTEGER NOT NULL, interface TEXT NOT NULL
+                listen_port BIGINT NOT NULL, interface TEXT NOT NULL
             )"#,
         )
         .execute(&pool)

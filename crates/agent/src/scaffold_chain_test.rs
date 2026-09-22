@@ -7,7 +7,6 @@ use devforge_github::{GitHubFacade, StubGitHubClient};
 use devforge_mcp::McpFacade;
 use devforge_shared::{ProjectTestContext, Result, Tool};
 use serde_json::{json, Value};
-use sqlx::sqlite::SqlitePoolOptions;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -80,17 +79,14 @@ async fn scaffold_write_sqlite_deploy_and_smoke() {
     let workdir = std::env::temp_dir().join(format!("df-chain-{project_uuid}"));
     std::fs::create_dir_all(&workdir).unwrap();
 
-    let pool = SqlitePoolOptions::new()
-        .connect("sqlite::memory:")
-        .await
-        .unwrap();
+    let pool = devforge_database::ephemeral_pg().await;
     sqlx::query(
         "CREATE TABLE projects (uuid TEXT PRIMARY KEY, workdir TEXT, git_repository TEXT)",
     )
     .execute(&pool)
     .await
     .unwrap();
-    sqlx::query("INSERT INTO projects (uuid, workdir, git_repository) VALUES (?, ?, '')")
+    sqlx::query("INSERT INTO projects (uuid, workdir, git_repository) VALUES ($1, $2, '')")
         .bind(&project_uuid)
         .bind(workdir.display().to_string())
         .execute(&pool)

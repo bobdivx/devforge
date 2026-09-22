@@ -18,13 +18,13 @@ Facades derrière traits ; runtime réel activé via env (sinon stubs).
 | `detect` | Détection framework (Laravel, Next, Astro, Compose…) | **OK** |
 | `llm` | Providers LLM (OpenAI-compat + stub) | **OK** |
 | `update` | Self-update versions + compose/docker/binary | **OK** |
-| `database` | Provision DB app (Postgres etc.) | **Non implémenté** (erreur explicite) |
+| `database` | Provision Postgres (conteneur par projet) + copie SQLite | **OK** |
 | `mcp` | Serveur MCP + client HTTP + catalogue (Turso, Slack…) + lien DB→projet | **OK** |
 | `cluster` | Nœuds leader/worker, invitations UX, exec HTTP | **OK** |
 
 ## Base de données DevForge (métadonnées)
 
-**Défaut : SQLite local** (`DATABASE_URL=sqlite:devforge.db?mode=rwc`).
+**Défaut : PostgreSQL** (conteneur `devforge-pg`, `127.0.0.1:5433`). Un ancien `DATABASE_URL=sqlite:…` est importé une fois dans cette base. Un `DATABASE_URL=postgres://…` externe est utilisé tel quel.
 
 - Simple en solo / CI / laptop.
 - **Turso** (libSQL) : option plus tard pour replicas HA du control plane — même schéma SQL, driver `libsql`. Pas obligatoire maintenant.

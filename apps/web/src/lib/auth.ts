@@ -50,6 +50,8 @@ export type Bootstrap = {
     instance_name: string;
     instance_url: string;
     wildcard_domain: string;
+    wildcard_own?: string;
+    wildcard_fallback?: string;
     github_connected: boolean;
     ssh_host?: string;
     ssh_user?: string;

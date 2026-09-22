@@ -264,7 +264,7 @@ export function BackupSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
         <Card>
           <CardHeader title="Backups automatiques" />
           <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
-            Sauvegarde automatique de la base DevForge selon un planning. Les backups sont envoyés
+            Sauvegarde automatique du Postgres DevForge selon un planning. Les dumps sont envoyés
             vers S3 si configuré, sinon sauvegardés localement.
           </p>
           <div class="space-y-3">
@@ -314,7 +314,7 @@ export function BackupSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
             }
           />
           <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
-            Destination pour les sauvegardes de la base DevForge (Scaleway, MinIO, AWS…). Les
+            Destination pour les dumps Postgres de DevForge (Scaleway, MinIO, AWS…). Les
             identifiants sont stockés en base, pas dans le `.env`.
           </p>
           <div class="space-y-3">

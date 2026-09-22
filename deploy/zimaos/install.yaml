@@ -11,6 +11,7 @@ services:
     network_mode: bridge
     ports:
       - "8000:8000"
+      - "5433:5433"
     volumes:
       - /DATA/AppData/devforge:/data
       - /var/run/docker.sock:/var/run/docker.sock
@@ -25,3 +26,4 @@ services:
       description: DevForge v2 — config dans l’UI, pas dans Variables
       webui: http://{{inthost}}:8000
       port.8000: Web UI + API
+      port.5433: Postgres cluster

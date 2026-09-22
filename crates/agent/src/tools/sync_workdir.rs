@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use devforge_github::GitHubFacade;
 use devforge_shared::{Result, Tool};
 use serde_json::{json, Value};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -10,7 +10,7 @@ use std::sync::Arc;
 /// Alternative robuste à 20× write_project_file.
 pub struct SyncWorkdirToGitHubTool {
     pub github: Arc<GitHubFacade>,
-    pub pool: Arc<SqlitePool>,
+    pub pool: Arc<PgPool>,
 }
 
 #[async_trait]
@@ -89,7 +89,7 @@ impl Tool for SyncWorkdirToGitHubTool {
 
         // Récupérer le projet
         let project: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT uuid, workdir, git_repository FROM projects WHERE uuid = ?",
+            "SELECT uuid, workdir, git_repository FROM projects WHERE uuid = $1",
         )
         .bind(project_uuid)
         .fetch_optional(self.pool.as_ref())

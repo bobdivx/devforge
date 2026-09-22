@@ -12,7 +12,7 @@ pub fn docker_build(workdir: &str, image: &str, dockerfile: &str) -> String {
 }
 
 pub fn docker_run(name: &str, image: &str, ports: &[(u16, u16)], env_file: Option<&str>) -> String {
-    docker_run_ex(name, image, ports, env_file, None, None)
+    docker_run_ex(name, image, ports, env_file, None, None, false, false)
 }
 
 /// Run with optional Docker network + Traefik labels.
@@ -33,6 +33,8 @@ pub fn docker_run_ex(
     env_file: Option<&str>,
     network: Option<&str>,
     labels: Option<&Value>,
+    gpu_nvidia: bool,
+    gpu_dri: bool,
 ) -> String {
     let mut args = vec![
         "docker".into(),
@@ -43,6 +45,14 @@ pub fn docker_run_ex(
         "--restart".into(),
         "unless-stopped".into(),
     ];
+    if gpu_nvidia {
+        args.push("--gpus".into());
+        args.push("all".into());
+    }
+    if gpu_dri {
+        args.push("--device".into());
+        args.push("/dev/dri".into());
+    }
     if let Some(net) = network.filter(|n| !n.is_empty()) {
         args.push("--network".into());
         args.push(shell_escape(net));
@@ -64,6 +74,24 @@ pub fn docker_run_ex(
     }
     args.push(shell_escape(image));
     args.join(" ")
+}
+
+/// Crée le réseau s'il manque et y branche le conteneur.
+/// Avec `alias`, déconnecte d'abord pour remplacer un alias déjà posé.
+pub fn docker_network_attach(network: &str, container: &str, alias: Option<&str>) -> String {
+    let net = shell_escape(network);
+    let ctr = shell_escape(container);
+    match alias.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(alias) => {
+            let alias = shell_escape(alias);
+            format!(
+                "docker network create {net} >/dev/null 2>&1 || true; docker network disconnect {net} {ctr} >/dev/null 2>&1 || true; docker network connect --alias {alias} {net} {ctr}"
+            )
+        }
+        None => format!(
+            "docker network create {net} >/dev/null 2>&1 || true; docker network connect {net} {ctr} >/dev/null 2>&1 || true"
+        ),
+    }
 }
 
 pub fn docker_compose_up(compose_file: &str) -> String {
@@ -160,10 +188,7 @@ EXPOSE 80
 
 pub fn docker_stop(name: &str) -> String {
     if cfg!(windows) {
-        format!(
-            "docker stop {n}; docker rm -f {n}",
-            n = shell_escape(name)
-        )
+        format!("docker stop {n}; docker rm -f {n}", n = shell_escape(name))
     } else {
         format!(
             "docker stop {} && docker rm -f {}",
@@ -396,7 +421,7 @@ pub fn docker_recreate_with_labels(name: &str, labels: &Value) -> String {
         }
     }
     let n = shell_escape(name);
-    
+
     format!(
         r#"sh -c 'set -e
 N={n}
@@ -490,7 +515,13 @@ pub fn traefik_labels(
     forward_auth_address: Option<&str>,
 ) -> Value {
     let short = project_uuid.chars().take(8).collect::<String>();
-    traefik_labels_for_service(&format!("df-{short}"), host, path_prefix, port, forward_auth_address)
+    traefik_labels_for_service(
+        &format!("df-{short}"),
+        host,
+        path_prefix,
+        port,
+        forward_auth_address,
+    )
 }
 
 /// Labels atelier : service `dfdev-{8}` pour ne pas collisionner avec la prod `df-{8}`.
@@ -560,7 +591,10 @@ fn traefik_labels_for_service(
         Value::String(service.to_string()),
     );
 
-    if let Some(addr) = forward_auth_address.map(str::trim).filter(|a| !a.is_empty()) {
+    if let Some(addr) = forward_auth_address
+        .map(str::trim)
+        .filter(|a| !a.is_empty())
+    {
         let mw = SSO_MIDDLEWARE_NAME;
         let headers = "X-Auth-Request-User,X-Auth-Request-Email,X-Auth-Request-Preferred-Username,X-Auth-Request-Groups,Authorization";
         map.insert(
@@ -674,13 +708,7 @@ pub fn traefik_labels_for_routes(
     let mut map = Map::new();
     map.insert("traefik.enable".into(), Value::String("true".into()));
     for (host, path, port) in routes {
-        let piece = traefik_labels(
-            project_uuid,
-            host,
-            path,
-            *port,
-            forward_auth_address,
-        );
+        let piece = traefik_labels(project_uuid, host, path, *port, forward_auth_address);
         if let Some(obj) = piece.as_object() {
             for (k, v) in obj {
                 if k == "traefik.enable" {
@@ -724,9 +752,7 @@ fn docker_bin_candidates() -> Vec<std::path::PathBuf> {
     out.push(std::path::PathBuf::from(
         r"C:\Program Files\Docker\Docker\resources\bin\docker.exe",
     ));
-    out.into_iter()
-        .filter(|p| p.is_file())
-        .collect()
+    out.into_iter().filter(|p| p.is_file()).collect()
 }
 
 /// `docker version` avec timeout court. N’embarque pas Docker : on détecte seulement.
@@ -790,27 +816,27 @@ mod tests {
         // des labels pour starbasefr.jeser.app (production), seulement pour dev-xxx
         let preview_host = "dev-fbb6a152.devforge.local";
         let _production_host = "starbasefr.jeser.app";
-        
+
         let preview_labels = traefik_labels("fbb6a152-ef01", preview_host, "/", 4321, None);
-        
+
         // Vérifier que le label atelier (dev-) existe
-        let preview_rule_key = format!(
-            "traefik.http.routers.http-df-fbb6a152-dev-fbb6a152-devforge-local.rule"
-        );
+        let preview_rule_key =
+            format!("traefik.http.routers.http-df-fbb6a152-dev-fbb6a152-devforge-local.rule");
         assert!(
             preview_labels.get(&preview_rule_key).is_some(),
             "Preview host doit avoir un router Traefik"
         );
         assert_eq!(
-            preview_labels.get(&preview_rule_key).and_then(|v| v.as_str()),
+            preview_labels
+                .get(&preview_rule_key)
+                .and_then(|v| v.as_str()),
             Some("Host(`dev-fbb6a152.devforge.local`)"),
             "Preview router doit pointer vers l’hôte dev-"
         );
-        
+
         // Vérifier qu'aucun label production n'existe dans les labels preview
-        let production_rule_key = format!(
-            "traefik.http.routers.http-df-fbb6a152-starbasefr-jeser-app.rule"
-        );
+        let production_rule_key =
+            format!("traefik.http.routers.http-df-fbb6a152-starbasefr-jeser-app.rule");
         assert!(
             preview_labels.get(&production_rule_key).is_none(),
             "Preview labels ne doivent PAS contenir les routes production"
@@ -820,13 +846,13 @@ mod tests {
     #[test]
     fn conflict_detection_command_generates_valid_shell() {
         let cmd = docker_check_host_conflicts("starbasefr.jeser.app");
-        
+
         // Vérifier syntaxe shell basique
         assert!(cmd.contains("sh -c"));
         assert!(cmd.contains("starbasefr.jeser.app"));
         assert!(cmd.contains("docker ps -q"));
         assert!(cmd.contains("Host(`"));
-        
+
         // Pas de quote mal échappées
         assert!(!cmd.contains("\"\"\""));
     }
@@ -855,6 +881,25 @@ mod tests {
             map.get("traefik.http.services.df-fbb6a152.loadbalancer.server.port"),
             Some(&json!("4321"))
         );
+    }
+
+    #[test]
+    fn docker_run_ex_adds_gpu_devices() {
+        let cmd = docker_run_ex("app", "img", &[], None, Some("devforge"), None, true, true);
+        assert!(cmd.contains("--gpus all"));
+        assert!(cmd.contains("--device /dev/dri"));
+        let plain = docker_run_ex("app", "img", &[], None, None, None, false, false);
+        assert!(!plain.contains("--gpus"));
+        assert!(!plain.contains("--device"));
+    }
+
+    #[test]
+    fn docker_network_attach_sets_role_alias() {
+        let cmd = docker_network_attach("dfg-popcorn", "df-abc", Some("server"));
+        assert!(cmd.contains("docker network create dfg-popcorn"));
+        assert!(cmd.contains("docker network connect --alias server dfg-popcorn df-abc"));
+        let plain = docker_network_attach("dfg-popcorn", "df-abc", None);
+        assert!(!plain.contains("--alias"));
     }
 
     #[test]
@@ -920,35 +965,29 @@ mod tests {
     fn docker_recreate_with_traefik_host_labels_shell_valid() {
         // Regression test: Traefik Host(`fqdn`) labels with backticks/parentheses
         // must not break POSIX shell syntax when embedded in sh -c '...'
-        let labels = traefik_labels(
-            "fbb6a152-ef01",
-            "starbasefr.jeser.app",
-            "/",
-            4321,
-            None,
-        );
+        let labels = traefik_labels("fbb6a152-ef01", "starbasefr.jeser.app", "/", 4321, None);
         let cmd = docker_recreate_with_labels("df-fbb6a152-ef0", &labels);
-        
+
         // Write the generated script to a temp file and validate with sh -n
         let temp_dir = std::env::temp_dir();
         let script_path = temp_dir.join("test_recreate_labels.sh");
         std::fs::write(&script_path, &cmd).expect("failed to write test script");
-        
+
         let output = std::process::Command::new("sh")
             .arg("-n")
             .arg(&script_path)
             .output()
             .expect("failed to run sh -n");
-        
+
         std::fs::remove_file(&script_path).ok();
-        
+
         assert!(
             output.status.success(),
             "Generated shell script has syntax errors:\n{}\n\nScript:\n{}",
             String::from_utf8_lossy(&output.stderr),
             cmd
         );
-        
+
         // Verify the script contains expected Traefik labels
         assert!(cmd.contains("starbasefr.jeser.app"));
         assert!(cmd.contains("4321"));
@@ -966,26 +1005,26 @@ mod tests {
             None,
         );
         let cmd = docker_recreate_with_labels("df-fbb6a152-ef0", &labels);
-        
+
         let temp_dir = std::env::temp_dir();
         let script_path = temp_dir.join("test_recreate_multi_labels.sh");
         std::fs::write(&script_path, &cmd).expect("failed to write test script");
-        
+
         let output = std::process::Command::new("sh")
             .arg("-n")
             .arg(&script_path)
             .output()
             .expect("failed to run sh -n");
-        
+
         std::fs::remove_file(&script_path).ok();
-        
+
         assert!(
             output.status.success(),
             "Multi-host script has syntax errors:\n{}\n\nScript:\n{}",
             String::from_utf8_lossy(&output.stderr),
             cmd
         );
-        
+
         assert!(cmd.contains("starbasefr.jeser.app"));
         assert!(cmd.contains("starbasefr.com"));
     }
@@ -1001,26 +1040,26 @@ mod tests {
             Some("http://oauth2-proxy:4180/auth"),
         );
         let cmd = docker_recreate_with_labels("df-secure", &labels);
-        
+
         let temp_dir = std::env::temp_dir();
         let script_path = temp_dir.join("test_recreate_sso_labels.sh");
         std::fs::write(&script_path, &cmd).expect("failed to write test script");
-        
+
         let output = std::process::Command::new("sh")
             .arg("-n")
             .arg(&script_path)
             .output()
             .expect("failed to run sh -n");
-        
+
         std::fs::remove_file(&script_path).ok();
-        
+
         assert!(
             output.status.success(),
             "SSO middleware script has syntax errors:\n{}\n\nScript:\n{}",
             String::from_utf8_lossy(&output.stderr),
             cmd
         );
-        
+
         assert!(cmd.contains("forwardauth.address"));
     }
 

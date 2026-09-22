@@ -18,6 +18,7 @@ Sans Compose :
 ```bash
 docker run -d --name devforge \
   -p 8000:8000 \
+  -p 5433:5433 \
   -v ./data:/data \
   -v /var/run/docker.sock:/var/run/docker.sock \
   bobdivx/devforge:latest

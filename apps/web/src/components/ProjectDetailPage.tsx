@@ -11,6 +11,7 @@ import { ProjectAgentsPanel } from './ProjectAgentsPanel';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
 import { ProjectGitPanel } from './ProjectGitPanel';
 import { ProjectOidcPanel } from './ProjectOidcPanel';
+import { ProjectGroupPanel } from './GroupPage';
 import { ProjectWorkspace } from './ProjectWorkspace';
 import { ProjectRulesModal } from './workspace/ProjectRulesModal';
 import { NodeSelect } from './NodeSelect';
@@ -557,6 +558,8 @@ function ProjectOverview({
           </div>
         </div>
 
+        <ProjectGroupPanel project={project} onChanged={() => window.location.reload()} />
+
         {(lifeBusy || lifeDetail) && (
           <LiveStatus
             busy={!!lifeBusy}
@@ -1004,6 +1007,115 @@ function BackupsPanel({ projectUuid }: { projectUuid: string }) {
   );
 }
 
+function PostgresSection({
+  uuid,
+  links,
+  busy,
+  onChanged,
+}: {
+  uuid: string;
+  links: Array<{
+    id: string;
+    resource_name: string;
+    server_id?: string;
+    meta?: Record<string, unknown>;
+  }>;
+  busy: boolean;
+  onChanged: () => Promise<void>;
+}) {
+  const toast = useToast();
+  const [name, setName] = useState('app');
+  const [migrate, setMigrate] = useState(true);
+  const [working, setWorking] = useState(false);
+  const locked = busy || working;
+
+  async function create(e: Event) {
+    e.preventDefault();
+    setWorking(true);
+    try {
+      const r = await api.createProjectDatabase(uuid, {
+        name: name.trim() || 'app',
+        migrate_sqlite: migrate,
+      });
+      const m = r.data.migration;
+      const detail =
+        m.file != null
+          ? `${m.tables ?? 0} tables, ${m.rows ?? 0} lignes depuis ${m.file}`
+          : m.reason || 'DATABASE_URL posée, sans fichier SQLite à copier';
+      toast.push({ title: `Postgres ${r.data.database} créé`, detail, tone: 'ok' });
+      await onChanged();
+    } catch (err) {
+      toast.push({ title: 'Postgres KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function remove(id: string) {
+    if (!confirm('Supprimer cette instance PostgreSQL et son volume ?')) return;
+    setWorking(true);
+    try {
+      await api.deleteProjectDatabase(uuid, id);
+      toast.push({ title: 'Instance supprimée', tone: 'info' });
+      await onChanged();
+    } catch (err) {
+      toast.push({ title: 'Suppression KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  return (
+    <section class="mb-4 rounded-xl border border-[var(--color-line)] p-4">
+      <h3 class="text-sm font-semibold text-[var(--color-ink)]">PostgreSQL</h3>
+      <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
+        Une instance par base, sur le nœud du projet. La création copie le SQLite du workdir
+        (<code>data/app.db</code> ou <code>DATABASE_URL</code>) puis pose <code>DATABASE_URL</code>.
+      </p>
+      {links.length > 0 && (
+        <ul class="mt-3 divide-y divide-[var(--color-line)] rounded-xl border border-[var(--color-line)]">
+          {links.map((l) => (
+            <li key={l.id} class="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                  <Badge tone="ok">postgres</Badge>
+                  <span class="font-medium">{l.resource_name}</span>
+                </div>
+                <p class="mt-1 truncate font-mono text-xs text-[var(--color-ink-muted)]">
+                  {String(l.meta?.container || l.meta?.database || 'instance')} · nœud {l.server_id || 'default'}
+                </p>
+              </div>
+              <Button size="sm" variant="ghost" disabled={locked} onClick={() => remove(l.id)}>
+                Supprimer
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form class="mt-3 flex flex-col gap-3" onSubmit={create}>
+        <Input
+          label="Nom de la base"
+          value={name}
+          onInput={(e) => setName((e.target as HTMLInputElement).value)}
+        />
+        <label class="flex items-center gap-2 text-sm text-[var(--color-ink)]">
+          <input
+            type="checkbox"
+            checked={migrate}
+            onChange={(e) => setMigrate((e.target as HTMLInputElement).checked)}
+          />
+          Copier les données SQLite du projet
+        </label>
+        <div>
+          <Button type="submit" size="sm" disabled={locked}>
+            {working ? 'Création…' : 'Créer l’instance'}
+          </Button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
 function DatabasePanel({ uuid }: { uuid: string }) {
   return (
     <FadeIn>
@@ -1022,7 +1134,13 @@ function DatabaseManager({ uuid }: { uuid: string }) {
     Array<{ name: string; db_id?: string | null; hostname: string }>
   >([]);
   const [links, setLinks] = useState<
-    Array<{ id: string; provider: string; resource_name: string }>
+    Array<{
+      id: string;
+      provider: string;
+      resource_name: string;
+      server_id?: string;
+      meta?: Record<string, unknown>;
+    }>
   >([]);
   const [busy, setBusy] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
@@ -1034,7 +1152,7 @@ function DatabaseManager({ uuid }: { uuid: string }) {
       const [s, l] = await Promise.all([api.mcpServers(), api.projectResources(uuid)]);
       const turso = (s.data ?? []).filter((x) => x.catalog_id === 'turso');
       setServers(turso);
-      setLinks((l.data ?? []).filter((x) => x.provider === 'turso'));
+      setLinks(l.data ?? []);
       if (turso[0] && !serverId) setServerId(turso[0].id);
       else if (turso[0] && !turso.some((t) => t.id === serverId)) setServerId(turso[0].id);
     } catch {
@@ -1114,28 +1232,31 @@ function DatabaseManager({ uuid }: { uuid: string }) {
   return (
     <>
       <Alert tone="info" class="mb-4">
-        <p class="font-medium text-[var(--color-ink)]">La DB ne se réplique pas sur le cluster</p>
+        <p class="font-medium text-[var(--color-ink)]">Où vivent les données</p>
         <ul class="mt-2 list-disc space-y-1 pl-4 text-[var(--color-ink-muted)]">
           <li>
-            <strong class="text-[var(--color-ink)]">Turso</strong> (recommandé) — base cloud. Les
-            workers et le leader y accèdent via les variables d’env. Déplacer la forge sur un autre
-            nœud <em>garde</em> les données.
+            <strong class="text-[var(--color-ink)]">PostgreSQL</strong> — une instance Docker par base,
+            sur le nœud de la forge, joignable par les conteneurs du réseau. Déplacer la forge copie
+            les données vers le nœud cible avant le changement. Un nœud déjà hors ligne ne peut pas
+            être copié : le volume reste sur cette machine.
+          </li>
+          <li>
+            <strong class="text-[var(--color-ink)]">Turso</strong> — base cloud. Les workers et le
+            leader y accèdent via les variables d’env.
           </li>
           <li>
             <strong class="text-[var(--color-ink)]">SQLite dans le conteneur</strong> — fichier local
-            sur <em>ce</em> nœud. Un redéploiement (blue/green) recrée le conteneur : les données
-            locales sont perdues. Un worker down = cette DB inaccessible.
-          </li>
-          <li>
-            La SQLite de DevForge (projets, users, cluster) vit sur le <strong class="text-[var(--color-ink)]">leader</strong>{' '}
-            (<code>/data</code>). Les workers en gardent une copie (~30–60 s) pour reprendre le panel
-            si le leader tombe. Sauvegarde : Paramètres → Sauvegardes.
+            sur <em>ce</em> nœud. Un redéploiement recrée le conteneur : ces données locales sont
+            perdues. Crée une instance PostgreSQL pour les reprendre.
           </li>
         </ul>
       </Alert>
-      {links.length > 0 ? (
+      <PostgresSection uuid={uuid} links={links.filter((l) => l.provider === 'postgres')} busy={busy} onChanged={refreshMeta} />
+      {links.filter((l) => l.provider === 'turso').length > 0 && (
         <ul class="mb-4 divide-y divide-[var(--color-line)] rounded-xl border border-[var(--color-line)]">
-          {links.map((l) => (
+          {links
+            .filter((l) => l.provider === 'turso')
+            .map((l) => (
             <li key={l.id} class="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
@@ -1150,11 +1271,6 @@ function DatabaseManager({ uuid }: { uuid: string }) {
             </li>
           ))}
         </ul>
-      ) : (
-        <p class="mb-4 rounded-xl border border-dashed border-[var(--color-line)] px-4 py-6 text-sm text-[var(--color-ink-muted)]">
-          Aucune base liée. Connecte Turso via MCP puis lie une database ici — c’est le seul moyen
-          d’avoir une DB partagée entre nœuds, indépendante du worker.
-        </p>
       )}
 
       {servers.length > 0 && servers.some(s => s.oauth_connected) && links.length === 0 && (
@@ -1856,6 +1972,8 @@ function ProjectSettingsPanel({
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [detectInfo, setDetectInfo] = useState<string | null>(null);
+  const [gpuNvidia, setGpuNvidia] = useState(project.gpu_nvidia === true || project.gpu_nvidia === 1);
+  const [gpuDri, setGpuDri] = useState(project.gpu_dri === true || project.gpu_dri === 1);
 
   useEffect(() => {
     setName(project.name);
@@ -1874,6 +1992,8 @@ function ProjectSettingsPanel({
     setServerId(project.server_id || 'default');
     setProdUrl(project.production_url || '');
     setTestCmd(project.test_command || '');
+    setGpuNvidia(project.gpu_nvidia === true || project.gpu_nvidia === 1);
+    setGpuDri(project.gpu_dri === true || project.gpu_dri === 1);
     setConfirmDelete(false);
     setDetectInfo(null);
   }, [project.uuid]);
@@ -1944,6 +2064,8 @@ function ProjectSettingsPanel({
         ...(isAdmin ? { server_id: serverId.trim() || 'default' } : {}),
         production_url: prodUrl.trim() || null,
         test_command: testCmd.trim() || null,
+        gpu_nvidia: gpuNvidia,
+        gpu_dri: gpuDri,
       });
       onSaved(r.data);
       toast.push({ title: 'Settings enregistrés', tone: 'ok' });
@@ -2085,6 +2207,22 @@ function ProjectSettingsPanel({
               onChange={(e) => setIsStatic((e.target as HTMLInputElement).checked)}
             />
             Static site
+          </label>
+          <label class="flex items-center gap-2 text-sm md:col-span-2">
+            <input
+              type="checkbox"
+              checked={gpuNvidia}
+              onChange={(e) => setGpuNvidia((e.target as HTMLInputElement).checked)}
+            />
+            NVIDIA (--gpus all) au prochain déploiement
+          </label>
+          <label class="flex items-center gap-2 text-sm md:col-span-2">
+            <input
+              type="checkbox"
+              checked={gpuDri}
+              onChange={(e) => setGpuDri((e.target as HTMLInputElement).checked)}
+            />
+            /dev/dri (VAAPI) au prochain déploiement
           </label>
           <label class="flex items-center gap-2 text-sm md:col-span-2">
             <input
