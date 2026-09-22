@@ -121,10 +121,13 @@ async fn put_sso(
         .hide_local_login
         .map(|v| if v { 1i64 } else { 0 })
         .unwrap_or(current.sso_hide_local_login);
-    let enable_platform = body
-        .enable_platform_login
-        .map(|v| if v { 1i64 } else { 0 })
-        .unwrap_or(current.sso_enable_platform_login);
+    let enable_platform = if provider == crate::sso::PROVIDER_POCKET_ID {
+        1
+    } else {
+        body.enable_platform_login
+            .map(|v| if v { 1i64 } else { 0 })
+            .unwrap_or(current.sso_enable_platform_login)
+    };
     let forward = body
         .forward_auth_address
         .map(|s| s.trim().to_string())
@@ -221,6 +224,7 @@ async fn put_sso(
             launch.as_deref(),
             need_secret,
             &branding,
+            true,
         )
         .await
         {

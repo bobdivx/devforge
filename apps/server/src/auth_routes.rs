@@ -327,7 +327,7 @@ async fn bootstrap(
             "dns": crate::dns::public_json(&crate::dns::load(&state).await),
         },
         "sso": {
-            "enabled": sso_settings.enable_platform_login(),
+            "enabled": sso_settings.platform_login_effective(),
             "oidc_configured": sso_settings.oidc_configured(),
             "hide_local_login": hide_local_login,
             "provider": sso_settings.provider(),

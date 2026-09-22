@@ -15,6 +15,17 @@ mod platform_sso_tests {
         let mut cfg = SsoSettings::default();
         cfg.sso_enable_platform_login = 1;
         assert!(cfg.enable_platform_login());
+        assert!(cfg.platform_login_effective());
+    }
+
+    #[test]
+    fn pocket_id_opens_devforge_login_without_extra_flag() {
+        let mut cfg = SsoSettings::default();
+        cfg.sso_oidc_provider = "pocket_id".into();
+        cfg.sso_pocket_id_url = "https://id.example.com".into();
+        cfg.sso_apps_client_id = "devforge".into();
+        assert!(!cfg.enable_platform_login());
+        assert!(cfg.platform_login_effective());
     }
 
     #[test]

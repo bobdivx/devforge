@@ -481,6 +481,7 @@ pub async fn provision_oidc_client(
     launch_url: Option<&str>,
     need_secret: bool,
     branding: &BrandingUrls,
+    upload_branding: bool,
 ) -> Result<ProvisionResult, PocketIdError> {
     let base = normalize_base(pocket_id_url);
     if base.is_empty() {
@@ -550,6 +551,22 @@ pub async fn provision_oidc_client(
     };
 
     let mut logo_light_uploaded = false;
+    if !upload_branding {
+        return Ok(ProvisionResult {
+            client_id: id.to_string(),
+            client_secret,
+            created_client,
+            created_secret,
+            logo_set,
+            logo_light_uploaded,
+            logo_dark_uploaded: false,
+            favicon_uploaded: false,
+            background_uploaded: false,
+            email_logo_uploaded: false,
+            profile_picture_uploaded: false,
+            branding_warnings,
+        });
+    }
     if let Some(lg) = logo {
         match upload_logo_light_from_url(&base, key, lg).await {
             Ok(()) => logo_light_uploaded = true,

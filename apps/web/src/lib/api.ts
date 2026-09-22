@@ -5,6 +5,21 @@ const SERVER_BASE =
   import.meta.env.PUBLIC_API_URL ??
   'http://127.0.0.1:8000/api/v1';
 
+/** Démarre le login OIDC de DevForge (même origine en prod, API en dev). */
+export function ssoAuthorizeUrl(): string {
+  const origin = SERVER_BASE.replace(/\/$/, '').replace(/\/api\/v1$/, '');
+  if (typeof window !== 'undefined') {
+    try {
+      if (new URL(origin).host === window.location.host) {
+        return '/api/v1/auth/sso/authorize';
+      }
+    } catch {
+      /* URL relative ou invalide : on reste sur l'origine courante */
+    }
+  }
+  return `${origin}/api/v1/auth/sso/authorize`;
+}
+
 export type ProjectTemplate = {
   id: string;
   name: string;
@@ -713,6 +728,28 @@ export const api = {
     request<{ data: Project }>(`/projects/${uuid}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
+    }),
+  projectOidc: (uuid: string) =>
+    request<{
+      ok: boolean;
+      provider: string;
+      has_dedicated_client: boolean;
+      client_id?: string | null;
+      derived_client_id?: string;
+      callbacks?: string[];
+      ready_to_provision?: boolean;
+      production_url?: string | null;
+      message?: string;
+    }>(`/projects/${uuid}/oidc`),
+  provisionProjectOidc: (uuid: string) =>
+    request<{
+      ok: boolean;
+      client_id: string;
+      created_client: boolean;
+      message: string;
+    }>(`/projects/${uuid}/oidc/provision`, {
+      method: 'POST',
+      body: '{}',
     }),
   deleteProject: (uuid: string) =>
     request<{ ok: boolean; deleted: string }>(`/projects/${uuid}`, { method: 'DELETE' }),

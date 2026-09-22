@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api } from '../lib/api';
+import { api, ssoAuthorizeUrl } from '../lib/api';
 import { setToken, type Bootstrap } from '../lib/auth';
 import { JoinClusterForm } from './JoinClusterForm';
 import { Alert, Button, Card, FadeIn, Input, Spinner } from './ui';
@@ -20,6 +20,11 @@ export function LoginPage() {
   useEffect(() => {
     // Gestion du token SSO dans l'URL après redirection
     const params = new URLSearchParams(window.location.search);
+    const ssoError = params.get('sso_error');
+    if (ssoError) {
+      setError(ssoError);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
     const ssoToken = params.get('sso_token');
     if (ssoToken) {
       setToken(ssoToken);
@@ -84,7 +89,7 @@ export function LoginPage() {
   }
 
   function handleSsoLogin() {
-    window.location.href = '/api/v1/auth/sso/authorize';
+    window.location.href = ssoAuthorizeUrl();
   }
 
   if (checking) {

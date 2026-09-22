@@ -37,6 +37,11 @@ impl SsoSettings {
         self.sso_enable_platform_login != 0
     }
 
+    /// Pocket ID configuré ouvre aussi la connexion à DevForge lui-même.
+    pub fn platform_login_effective(&self) -> bool {
+        self.enable_platform_login() || (self.is_pocket_id() && self.oidc_configured())
+    }
+
     pub fn forward_auth_configured(&self) -> bool {
         !self.sso_forward_auth_address.trim().is_empty()
     }

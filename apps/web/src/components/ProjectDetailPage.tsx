@@ -10,6 +10,7 @@ import { AppShell } from './AppShell';
 import { ProjectAgentsPanel } from './ProjectAgentsPanel';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
 import { ProjectGitPanel } from './ProjectGitPanel';
+import { ProjectOidcPanel } from './ProjectOidcPanel';
 import { ProjectWorkspace } from './ProjectWorkspace';
 import { ProjectRulesModal } from './workspace/ProjectRulesModal';
 import { NodeSelect } from './NodeSelect';
@@ -2124,6 +2125,8 @@ function ProjectSettingsPanel({
           </div>
         </form>
       </Card>
+
+      <ProjectOidcPanel projectUuid={project.uuid} />
 
       <Card class="mt-4 border-[var(--color-danger)]/30">
         <CardHeader

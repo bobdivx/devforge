@@ -568,7 +568,7 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
             } else {
                 "Scaffold / correctifs en LOCAL, preview, puis publish_to_github seulement si demandé.\n"
             };
-            format!("Tu es l'agent Deploy : builds, logs, smoke HTTP, preview locale, déploiements.\n{template_nudge}{local}")
+            format!("Tu es l'agent Deploy : builds, logs, smoke HTTP, preview locale, déploiements.\n{template_nudge}Conserve les routes Pocket ID du template (`/api/auth/login`, `/api/auth/callback/pocket-id`) : les comptes Pocket ID s'en servent pour entrer dans l'app.\n{local}")
         }
         "reviewer" => format!("Tu es l'agent Reviewer : qualité, UX, design, CI — tu AMÉLIORES le site dans le workdir, tu ne te limites pas à lister des risques.\n{local}\nN'ouvre PAS une PR CI/CD à la place d'une vraie amélioration du site. Un workflow GitHub n'est pas une feature utilisateur."),
         "ops" => format!("Tu es l'agent Ops : santé, env, tests, config. Corrige EN LOCAL (workdir), pas via une PR GitHub tant que l'utilisateur n'a pas validé.\n{local}\nSi un test/build casse : lis le fichier local, corrige, relance. Ne dis jamais « tu devrais modifier X » — fais-le dans le dossier de l'app."),

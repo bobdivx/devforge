@@ -75,7 +75,7 @@ async fn get_project_oidc_status(
     let client = project_oidc::load_project_oidc_client(&state.pool, &project.uuid).await;
     
     let derived_client_id = project_oidc::derive_client_id(&project.slug);
-    let callbacks = project_oidc::project_callback_urls(&project);
+    let callbacks = project_oidc::all_callback_urls(&state.pool, &project).await;
     
     Ok(Json(json!({
         "ok": true,
@@ -111,12 +111,12 @@ async fn provision_project_oidc(
         ));
     }
 
-    if project.production_url.is_none() || project.production_url.as_ref().unwrap().trim().is_empty() {
+    if project_oidc::all_callback_urls(&state.pool, &project).await.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({
-                "error": "production_url requis pour provisionner un client OIDC",
-                "hint": "Configure l'URL de production du projet avant le provisionnement"
+                "error": "URL de production ou domaine wildcard requis pour provisionner un client OIDC",
+                "hint": "Configure l'URL de production du projet, ou le domaine wildcard de l'instance"
             })),
         ));
     }

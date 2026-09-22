@@ -72,6 +72,78 @@ pub fn project_callback_urls(project: &Project) -> Vec<String> {
     urls
 }
 
+/// Origine de la preview atelier : `https://dev-{8 premiers caractères uuid}.{wildcard}`.
+pub fn preview_origin(project_uuid: &str, wildcard_domain: &str) -> Option<String> {
+    let domain = wildcard_domain.trim().trim_start_matches('.').to_lowercase();
+    if domain.is_empty() || project_uuid.len() < 8 {
+        return None;
+    }
+    let short: String = project_uuid.chars().take(8).collect();
+    Some(format!("https://dev-{short}.{domain}"))
+}
+
+pub fn preview_callback_urls(project_uuid: &str, wildcard_domain: &str) -> Vec<String> {
+    let Some(origin) = preview_origin(project_uuid, wildcard_domain) else {
+        return Vec::new();
+    };
+    vec![
+        format!("{origin}/api/auth/callback/pocket-id"),
+        format!("{origin}/api/auth/callback/pocket-id/"),
+        format!("{origin}/api/auth/callback/oidc"),
+        format!("{origin}/api/auth/callback/oidc/"),
+        format!("{origin}/oauth2/callback"),
+        format!("{origin}/oauth2/callback/"),
+    ]
+}
+
+async fn wildcard_domain(pool: &sqlx::SqlitePool) -> Option<String> {
+    let row: (String,) = sqlx::query_as("SELECT wildcard_domain FROM instance_settings WHERE id = 1")
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()?;
+    let domain = row.0.trim().trim_start_matches('.').to_lowercase();
+    if domain.is_empty() {
+        None
+    } else {
+        Some(domain)
+    }
+}
+
+/// Callbacks production + preview atelier.
+pub async fn all_callback_urls(pool: &sqlx::SqlitePool, project: &Project) -> Vec<String> {
+    let mut urls = project_callback_urls(project);
+    if let Some(domain) = wildcard_domain(pool).await {
+        urls.extend(preview_callback_urls(&project.uuid, &domain));
+    }
+    urls
+}
+
+/// Crée ou met à jour le client OIDC Pocket ID du projet.
+/// `refresh_callbacks` force la mise à jour des URLs (deploy, changement d'URL).
+/// Retourne true si un appel Pocket ID a eu lieu.
+pub async fn sync_project_oidc_client(
+    pool: &sqlx::SqlitePool,
+    project: &Project,
+    refresh_callbacks: bool,
+) -> Result<bool, String> {
+    let settings = load_sso_settings(pool).await;
+    if !settings.is_pocket_id() || settings.sso_pocket_id_api_token.trim().is_empty() {
+        return Ok(false);
+    }
+    if all_callback_urls(pool, project).await.is_empty() {
+        return Ok(false);
+    }
+    let existing = load_project_oidc_client(pool, &project.uuid).await;
+    if existing.is_some() && !refresh_callbacks {
+        return Ok(false);
+    }
+    provision_project_oidc_client(pool, project, false)
+        .await
+        .map(|_| true)
+        .map_err(|e| e.message)
+}
+
 /// Dérive les origines alternatives pour callbacks OIDC (legacy *.briseteia.me, www.).
 fn derive_callback_origins(origin: &str) -> Vec<String> {
     let mut origins = vec![origin.to_string()];
@@ -179,11 +251,11 @@ pub async fn provision_project_oidc_client(
     }
     
     let client_id = derive_client_id(&project.slug);
-    let callbacks = project_callback_urls(project);
+    let callbacks = all_callback_urls(pool, project).await;
     
     if callbacks.is_empty() {
         return Err(pocket_id::PocketIdError {
-            message: "production_url requis pour générer les callbacks".into(),
+            message: "URL de production ou domaine wildcard requis pour générer les callbacks".into(),
             status: None,
         });
     }
@@ -192,10 +264,19 @@ pub async fn provision_project_oidc_client(
     let need_secret = force_new_secret || existing_client.is_none();
     
     let production_origin = normalize_origin(project.production_url.as_deref().unwrap_or(""));
-    let launch_url = if !production_origin.is_empty() {
-        Some(production_origin.as_str())
+    let preview = match wildcard_domain(pool).await {
+        Some(domain) => preview_origin(&project.uuid, &domain).unwrap_or_default(),
+        None => String::new(),
+    };
+    let launch_owned = if !production_origin.is_empty() {
+        production_origin.clone()
     } else {
+        preview
+    };
+    let launch_url = if launch_owned.is_empty() {
         None
+    } else {
+        Some(launch_owned.as_str())
     };
     
     let logo = if !production_origin.is_empty() {
@@ -224,6 +305,7 @@ pub async fn provision_project_oidc_client(
         launch_url,
         need_secret,
         &branding,
+        existing_client.is_none(),
     )
     .await?;
     
@@ -326,6 +408,16 @@ mod tests {
         let urls = project_callback_urls(&project);
         assert!(urls.contains(&"https://app.example.com/api/auth/callback/pocket-id".into()));
         assert!(urls.contains(&"https://app.example.com/oauth2/callback".into()));
+    }
+
+    #[test]
+    fn test_preview_callback_urls() {
+        let urls = preview_callback_urls("abcdef12-3456-7890", "apps.example.com");
+        assert!(urls.contains(
+            &"https://dev-abcdef12.apps.example.com/api/auth/callback/pocket-id".into()
+        ));
+        assert!(preview_callback_urls("short", "apps.example.com").is_empty());
+        assert!(preview_origin("abcdef12-3456", "").is_none());
     }
 
     #[test]

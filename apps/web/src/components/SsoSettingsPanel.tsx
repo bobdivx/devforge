@@ -102,7 +102,7 @@ export function SsoSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
         ...(clientSecret.trim() ? { apps_client_secret: clientSecret.trim() } : {}),
         protect_apps_by_default: protectDefault,
         hide_local_login: hideLocal,
-        enable_platform_login: enablePlatform,
+        enable_platform_login: isPocket || enablePlatform,
         provision: isPocket && hasToken && !!issuerUrl.trim(),
         rotate_secret: isPocket && rotateSecret,
         ...(isPocket && logoUrl.trim() ? { logo_url: logoUrl.trim() } : {}),
@@ -296,10 +296,13 @@ export function SsoSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
             <label class="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
-                checked={enablePlatform}
+                checked={isPocket || enablePlatform}
+                disabled={isPocket}
                 onChange={(e) => setEnablePlatform((e.target as HTMLInputElement).checked)}
               />
-              Activer la connexion SSO à DevForge (se connecter à DevForge lui-même via OIDC)
+              {isPocket
+                ? 'Les comptes Pocket ID peuvent se connecter à DevForge'
+                : 'Activer la connexion SSO à DevForge (se connecter à DevForge lui-même via OIDC)'}
             </label>
 
             <button
@@ -329,11 +332,11 @@ export function SsoSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
                     type="checkbox"
                     checked={hideLocal}
                     onChange={(e) => setHideLocal((e.target as HTMLInputElement).checked)}
-                    disabled={!enablePlatform}
+                    disabled={!(isPocket || enablePlatform)}
                   />
                   Masquer le login local DevForge (uniquement si le SSO plateforme est activé)
                 </label>
-                {enablePlatform && hideLocal && (
+                {(isPocket || enablePlatform) && hideLocal && (
                   <p class="text-xs text-[var(--color-accent)]">
                     ⚠️ Le login par email/password sera masqué. Assure-toi que le SSO fonctionne avant !
                   </p>

@@ -533,7 +533,7 @@ async fn scaffold_project(
     
     let seed_content = if template_applied {
         format!(
-            "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\n✅ Template {} déjà appliqué (Astro + Preact + Tailwind + DaisyUI + SQLite).\n\n🎯 TON RÔLE : Prépare une preview atelier testable.\n\n🚨 WORKFLOW OBLIGATOIRE :\n1. Le template est déjà dans le workdir — NE réécris PAS les fichiers de base\n2. Customisations : write_project_file mode='local'\n3. Appelle TOUJOURS start_local_preview (outil) pour exposer https://dev-…. Ne lance PAS npm à la main.\n\n❌ INTERDIT (l'utilisateur n'a PAS encore validé) :\n- create_github_repo / sync_workdir_to_github / trigger_deploy\n\n✅ APRÈS validation utilisateur : publication GitHub + deploy via le bouton Publier.",
+            "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\n✅ Template {} déjà appliqué (Astro + Preact + Tailwind + DaisyUI + SQLite).\nLa connexion Pocket ID est déjà dans le template (`/api/auth/login`, callback `/api/auth/callback/pocket-id`). Ne supprime pas ces routes : un compte Pocket ID doit pouvoir entrer dans l'app.\n\n🎯 TON RÔLE : Prépare une preview atelier testable.\n\n🚨 WORKFLOW OBLIGATOIRE :\n1. Le template est déjà dans le workdir — NE réécris PAS les fichiers de base\n2. Customisations : write_project_file mode='local'\n3. Appelle TOUJOURS start_local_preview (outil) pour exposer https://dev-…. Ne lance PAS npm à la main.\n\n❌ INTERDIT (l'utilisateur n'a PAS encore validé) :\n- create_github_repo / sync_workdir_to_github / trigger_deploy\n\n✅ APRÈS validation utilisateur : publication GitHub + deploy via le bouton Publier.",
             body.title, body.prompt, template_name
         )
     } else {
@@ -682,6 +682,7 @@ async fn update_project(
     Json(body): Json<UpdateProject>,
 ) -> Result<Json<Value>, ApiError> {
     let (_user, _ws, existing) = auth_project(&state, &headers, &uuid).await?;
+    let previous_production_url = existing.production_url.clone();
     let now = now_str();
     let is_static = body
         .is_static
@@ -762,6 +763,12 @@ async fn update_project(
         let _ = ensure_project_primary_domain(&state, &uuid, url, port as u16).await;
     } else {
         crate::sso::sync_project_proxy(&state, &project).await;
+    }
+    let url_changed = previous_production_url != project.production_url;
+    match crate::project_oidc::sync_project_oidc_client(&state.pool, &project, url_changed).await {
+        Ok(true) => tracing::info!(project = %project.uuid, "client OIDC Pocket ID synchronisé"),
+        Ok(false) => {}
+        Err(e) => tracing::warn!(project = %project.uuid, error = %e, "sync client OIDC Pocket ID"),
     }
     let _ = crate::sso::ensure_oidc_env(&state.pool, &project).await;
 
@@ -1192,6 +1199,11 @@ pub(crate) async fn run_real_deploy(
             .map(|(t,)| t)
             .filter(|t| !t.trim().is_empty());
 
+    match crate::project_oidc::sync_project_oidc_client(&state.pool, project, true).await {
+        Ok(true) => tracing::info!(project = %project.uuid, "client OIDC Pocket ID synchronisé avant deploy"),
+        Ok(false) => {}
+        Err(e) => tracing::warn!(project = %project.uuid, error = %e, "sync client OIDC Pocket ID"),
+    }
     let _ = crate::sso::ensure_oidc_env(&state.pool, project).await;
 
     let env_vars = state.env.list_public(&project.uuid).await.ok().unwrap_or_default();

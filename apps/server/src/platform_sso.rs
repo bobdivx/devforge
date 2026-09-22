@@ -3,7 +3,7 @@
 use axum::{
     extract::{Query, State},
     http::StatusCode,
-    response::{IntoResponse, Redirect},
+    response::{IntoResponse, Redirect, Response},
     routing::get,
     Json, Router,
 };
@@ -44,15 +44,42 @@ pub(crate) struct OidcDiscoveryDocument {
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/v1/auth/sso/authorize", get(authorize))
-        .route("/api/v1/auth/sso/callback", get(callback))
+        .route("/api/v1/auth/sso/authorize", get(authorize_page))
+        .route("/api/v1/auth/sso/callback", get(callback_page))
+}
+
+fn login_error(err: (StatusCode, Json<Value>)) -> Redirect {
+    let msg = err
+        .1
+         .0
+        .get("error")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Connexion impossible");
+    Redirect::to(&format!(
+        "/login?sso_error={}",
+        urlencoding::encode(msg)
+    ))
+}
+
+async fn authorize_page(state: State<AppState>) -> Response {
+    match authorize(state).await {
+        Ok(resp) => resp.into_response(),
+        Err(err) => login_error(err).into_response(),
+    }
+}
+
+async fn callback_page(state: State<AppState>, query: Query<CallbackQuery>) -> Response {
+    match callback(state, query).await {
+        Ok(resp) => resp.into_response(),
+        Err(err) => login_error(err).into_response(),
+    }
 }
 
 /// Génère le state CSRF + nonce et redirige vers l'IdP.
 async fn authorize(State(state): State<AppState>) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     let cfg = load_sso_settings(&state.pool).await;
     
-    if !cfg.enable_platform_login() {
+    if !cfg.platform_login_effective() {
         return Err((
             StatusCode::FORBIDDEN,
             Json(json!({"error": "SSO plateforme non activé"})),
@@ -113,7 +140,7 @@ async fn callback(
 ) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     let cfg = load_sso_settings(&state.pool).await;
     
-    if !cfg.enable_platform_login() {
+    if !cfg.platform_login_effective() {
         return Err((
             StatusCode::FORBIDDEN,
             Json(json!({"error": "SSO plateforme non activé"})),
@@ -181,8 +208,9 @@ async fn callback(
     // Récupération des infos utilisateur
     let user_info = fetch_user_info(&cfg, &endpoints, &token_response.access_token, &nonce).await?;
     
-    // Mapping de l'utilisateur IdP vers DevForge
-    let user_uuid = map_or_create_user(&state, &user_info).await?;
+    // Mapping de l'utilisateur IdP vers DevForge.
+    // Pocket ID : tout compte de l'IdP peut entrer (création si l'email est nouveau).
+    let user_uuid = map_or_create_user(&state, &user_info, cfg.is_pocket_id()).await?;
     
     // Création de la session DevForge
     let session_token = auth_routes::create_session(&state, &user_uuid).await?;
@@ -482,10 +510,11 @@ async fn fetch_user_info(
 }
 
 /// Mapping de l'utilisateur IdP vers DevForge.
-/// Stratégie conservatrice : lie par email un utilisateur existant, ou refuse si aucun match.
+/// Pocket ID crée le compte s'il n'existe pas. Les autres IdP restent conservateurs.
 async fn map_or_create_user(
     state: &AppState,
     user_info: &UserInfo,
+    pocket_id: bool,
 ) -> Result<String, (StatusCode, Json<Value>)> {
     let email = user_info
         .email
@@ -527,7 +556,7 @@ async fn map_or_create_user(
         .await
         .map_err(internal)?;
     
-    let allow_create = count.0 == 0 || registration_open();
+    let allow_create = pocket_id || count.0 == 0 || registration_open();
     
     if !allow_create {
         return Err((
@@ -538,7 +567,6 @@ async fn map_or_create_user(
         ));
     }
     
-    // Création d'un nouvel utilisateur
     let user_uuid = uuid::Uuid::new_v4().to_string();
     let name = user_info
         .name
@@ -548,7 +576,8 @@ async fn map_or_create_user(
         .trim()
         .to_string();
     
-    let role = if count.0 == 0 {
+    let is_first = count.0 == 0;
+    let role = if is_first {
         "instance_admin"
     } else {
         "user"
@@ -556,7 +585,7 @@ async fn map_or_create_user(
     
     let now = now_str();
     
-    // Pas de password hash (authentification SSO uniquement)
+    // Pas de mot de passe : ce compte se connecte avec Pocket ID / OIDC.
     let dummy_hash = "$argon2id$v=19$m=19456,t=2,p=1$SSO_ONLY$SSO_ONLY";
     
     sqlx::query(
@@ -574,36 +603,45 @@ async fn map_or_create_user(
     .await
     .map_err(internal)?;
     
-    // Création d'un workspace pour le nouvel utilisateur (sauf admin)
-    if role != "instance_admin" {
-        let team_uuid = uuid::Uuid::new_v4().to_string();
-        let team_name = format!("Workspace · {}", name);
-        let team_slug = format!("{}-{}", devforge_auth::slugify(&team_name), &user_uuid[..6]);
-        
-        sqlx::query(
-            r#"INSERT INTO teams (uuid, name, slug, show_boarding, plan, created_at, updated_at)
-               VALUES (?, ?, ?, 0, 'free', ?, ?)"#
-        )
-        .bind(&team_uuid)
-        .bind(&team_name)
-        .bind(&team_slug)
-        .bind(&now)
-        .bind(&now)
-        .execute(&state.pool)
-        .await
-        .map_err(internal)?;
-        
-        sqlx::query(
-            r#"INSERT INTO team_members (team_uuid, user_uuid, role, created_at)
-               VALUES (?, ?, 'owner', ?)"#
-        )
-        .bind(&team_uuid)
-        .bind(&user_uuid)
-        .bind(&now)
-        .execute(&state.pool)
-        .await
-        .map_err(internal)?;
+    let team_uuid = uuid::Uuid::new_v4().to_string();
+    let team_name = if is_first {
+        "Admin".to_string()
+    } else {
+        format!("Workspace · {}", name)
+    };
+    let mut team_slug = devforge_auth::slugify(&team_name);
+    if !is_first {
+        let short: String = user_uuid.chars().take(6).collect();
+        team_slug = format!("{team_slug}-{short}");
     }
+    let show_boarding = if is_first { 1 } else { 0 };
+    let plan = if is_first { "pro" } else { "free" };
+    
+    sqlx::query(
+        r#"INSERT INTO teams (uuid, name, slug, show_boarding, plan, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)"#
+    )
+    .bind(&team_uuid)
+    .bind(&team_name)
+    .bind(&team_slug)
+    .bind(show_boarding)
+    .bind(plan)
+    .bind(&now)
+    .bind(&now)
+    .execute(&state.pool)
+    .await
+    .map_err(internal)?;
+    
+    sqlx::query(
+        r#"INSERT INTO team_members (team_uuid, user_uuid, role, created_at)
+           VALUES (?, ?, 'owner', ?)"#
+    )
+    .bind(&team_uuid)
+    .bind(&user_uuid)
+    .bind(&now)
+    .execute(&state.pool)
+    .await
+    .map_err(internal)?;
     
     Ok(user_uuid)
 }
