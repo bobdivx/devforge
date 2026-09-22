@@ -35,6 +35,7 @@ type Props = {
   disabled?: boolean;
   children: ComponentChildren;
   onClick?: JSX.MouseEventHandler<HTMLButtonElement>;
+  'aria-label'?: string;
 };
 
 export function Button({
@@ -49,6 +50,7 @@ export function Button({
   disabled,
   children,
   onClick,
+  'aria-label': ariaLabel,
 }: Props) {
   const cls = cn(
     'inline-flex cursor-pointer items-center justify-center gap-2 font-medium tracking-tight transition-[filter,background-color,color,opacity,box-shadow] duration-200 ease-out disabled:pointer-events-none disabled:opacity-50',
@@ -65,6 +67,7 @@ export function Button({
         class={cls}
         target={target}
         rel={rel ?? (target === '_blank' ? 'noreferrer' : undefined)}
+        aria-label={ariaLabel}
         animate={animate}
       >
         {children}
@@ -78,6 +81,7 @@ export function Button({
       class={cls}
       disabled={disabled}
       onClick={onClick}
+      aria-label={ariaLabel}
       animate={animate}
     >
       {children}

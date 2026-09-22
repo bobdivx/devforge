@@ -100,12 +100,8 @@ export function WorkspaceTopBar({
           size="sm"
           variant="secondary"
           onClick={onOpenPreview}
-          disabled={previewBusy || !previewUrl || previewStatus !== 'running'}
-          title={
-            previewStatus !== 'running'
-              ? 'Démarre le serveur de dev pour ouvrir la preview'
-              : 'Ouvrir la preview atelier (dev-…)'
-          }
+          disabled={previewBusy}
+          title="Afficher la preview atelier à côté du chat"
           aria-label="Ouvrir la preview"
         >
           <Eye size={14} strokeWidth={2} aria-hidden />

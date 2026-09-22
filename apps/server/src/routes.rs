@@ -589,6 +589,34 @@ async fn scaffold_project(
         });
     }
 
+    // Le prompt est déjà en base : le tour part tout de suite (fichiers locaux + preview).
+    sqlx::query("UPDATE project_agents SET status = 'working', updated_at = ? WHERE uuid = ?")
+        .bind(&now)
+        .bind(&agent_uuid)
+        .execute(&state.pool)
+        .await
+        .map_err(ApiError::from)?;
+    {
+        let state_clone = state.clone();
+        let project_uuid = uuid.clone();
+        let agent_uuid_clone = agent_uuid.clone();
+        tokio::spawn(async move {
+            if let Err(e) =
+                trigger_agent_turn(&state_clone, &project_uuid, &agent_uuid_clone).await
+            {
+                eprintln!("[scaffold] tour agent : {e}");
+                let now = now_str();
+                let _ = sqlx::query(
+                    "UPDATE project_agents SET status = 'idle', updated_at = ? WHERE uuid = ? AND status = 'working'",
+                )
+                .bind(&now)
+                .bind(&agent_uuid_clone)
+                .execute(&state_clone.pool)
+                .await;
+            }
+        });
+    }
+
     Ok((
         axum::http::StatusCode::CREATED,
         Json(json!({ "data": { "project": project, "agent": agent_info } })),
@@ -1742,7 +1770,38 @@ async fn execute_claimed_run(
     )
     .await
     .map_err(|e| e.to_string())?;
+    schedule_preview_repair(
+        state.clone(),
+        run.project_uuid.clone(),
+        run.agent_uuid.clone(),
+        run.content.clone(),
+        tools_json,
+    );
     Ok(())
+}
+
+fn schedule_preview_repair(
+    state: AppState,
+    project_uuid: String,
+    agent_uuid: String,
+    user_message: String,
+    tools_json: String,
+) {
+    let Some(prompt) = crate::agent_runs::preview_repair_prompt(&user_message, &tools_json) else {
+        return;
+    };
+    tokio::spawn(async move {
+        if let Err(e) =
+            crate::agent_runs::record_user_turn(&state.pool, &project_uuid, &agent_uuid, &prompt)
+                .await
+        {
+            tracing::error!(error = %e, "message de réparation preview");
+            return;
+        }
+        if let Err(e) = trigger_agent_turn(&state, &project_uuid, &agent_uuid).await {
+            tracing::error!(error = %e, "tour de réparation preview");
+        }
+    });
 }
 
 async fn load_agent_context(
@@ -1771,17 +1830,7 @@ async fn load_agent_context(
         ctx.agent_name = Some(name);
         ctx.agent_role = Some(role);
     }
-    if let Ok(rows) = sqlx::query_as::<_, (String, String)>(
-        "SELECT role, content FROM agent_messages WHERE agent_uuid = ? ORDER BY id DESC LIMIT 20",
-    )
-    .bind(agent_uuid)
-    .fetch_all(&state.pool)
-    .await
-    {
-        let mut hist = rows;
-        hist.reverse();
-        ctx.history = hist;
-    }
+    ctx.history = crate::agent_runs::recent_history(&state.pool, agent_uuid).await;
     if let Ok(brief) = build_project_agent_brief(state, project_uuid).await {
         ctx.git_owner = brief.git_owner;
         ctx.git_repo = brief.git_repo;
@@ -1912,18 +1961,7 @@ async fn agent_chat(
             ctx.agent_role = Some(role);
         }
 
-        // Last 20 turns for LLM context.
-        if let Ok(rows) = sqlx::query_as::<_, (String, String)>(
-            "SELECT role, content FROM agent_messages WHERE agent_uuid = ? ORDER BY id DESC LIMIT 20",
-        )
-        .bind(agent_uuid)
-        .fetch_all(&state.pool)
-        .await
-        {
-            let mut hist = rows;
-            hist.reverse();
-            ctx.history = hist;
-        }
+        ctx.history = crate::agent_runs::recent_history(&state.pool, agent_uuid).await;
     }
 
     if let Some(project_uuid) = &ctx.project_uuid {
@@ -1954,6 +1992,7 @@ async fn agent_chat(
     if want_stream {
         let agent = state.agent.clone();
         let pool = state.pool.clone();
+        let repair_state = state.clone();
         let (ev_tx, ev_rx) =
             tokio::sync::mpsc::unbounded_channel::<devforge_agent::AgentEvent>();
         let progress_tx = ev_tx.clone();
@@ -1995,6 +2034,14 @@ async fn agent_chat(
                         .await
                         {
                             tracing::error!(error = %e, "sauvegarde du tour d'agent");
+                        } else {
+                            schedule_preview_repair(
+                                repair_state.clone(),
+                                project_uuid.clone(),
+                                agent_uuid.clone(),
+                                user_message.clone(),
+                                tools_json,
+                            );
                         }
                     }
                 }
@@ -2075,6 +2122,13 @@ async fn agent_chat(
         )
         .await
         .map_err(|e| ApiError::message(e.to_string()))?;
+        schedule_preview_repair(
+            state.clone(),
+            project_uuid,
+            agent_uuid,
+            user_message,
+            tools_json,
+        );
     }
 
     Ok(Json(json!({"data": result})).into_response())

@@ -18,6 +18,7 @@ export type AgentToolCall = {
     settings_href?: string;
     resume_hint?: string;
     preview_url?: string;
+    public_ok?: boolean;
     previous_content?: string | null;
     unified_diff?: string;
     additions?: number;

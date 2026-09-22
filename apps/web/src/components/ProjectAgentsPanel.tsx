@@ -90,12 +90,34 @@ function titleFromMessage(text: string) {
   return `${oneLine.slice(0, 48)}…`;
 }
 
+function threadStorageKey(projectUuid: string) {
+  return `devforge.workspaceThread.${projectUuid}`;
+}
+
+function readStoredThread(projectUuid: string): string | null {
+  try {
+    return localStorage.getItem(threadStorageKey(projectUuid));
+  } catch {
+    return null;
+  }
+}
+
+function storeThread(projectUuid: string, agentUuid: string) {
+  try {
+    localStorage.setItem(threadStorageKey(projectUuid), agentUuid);
+  } catch {
+    // Navigation privée
+  }
+}
+
 type Props = {
   projectUuid: string;
   defaultAgentUuid?: string;
   builderMode?: boolean;
   /** `threads` = workspace style Cursor ; `team` = liste Ops/Deploy/Reviewer */
   mode?: 'threads' | 'team';
+  /** Remplit la colonne chat du workspace (preview et fichiers à côté). */
+  embedded?: boolean;
 };
 
 /** Chat agents projet — mode équipe ou fils de conversation. */
@@ -104,6 +126,7 @@ export function ProjectAgentsPanel({
   defaultAgentUuid,
   builderMode,
   mode = 'team',
+  embedded = false,
 }: Props) {
   const threadsMode = mode === 'threads';
   const toast = useToast();
@@ -134,18 +157,31 @@ export function ProjectAgentsPanel({
   const starters = threadsMode ? THREAD_STARTERS : currentMeta?.starters ?? [];
 
   async function resolveThreads(main: ProjectAgent[]): Promise<ProjectAgent[]> {
-    // Workspace = fils utilisateur uniquement — jamais la « team » Ops/Deploy/Reviewer.
+    // Workspace = fils de travail. Ops et Reviewer restent dans l’onglet Agents.
     const customs = main.filter((a) => a.kind === 'custom');
+    const extras: ProjectAgent[] = [];
+    const add = (agent?: ProjectAgent) => {
+      if (!agent) return;
+      if (customs.some((c) => c.uuid === agent.uuid)) return;
+      if (extras.some((e) => e.uuid === agent.uuid)) return;
+      extras.push(agent);
+    };
 
-    // Exception : l’agent du scaffold builder (historique en cours), sans afficher les 2 autres.
-    if (defaultAgentUuid) {
-      const builder = main.find((a) => a.uuid === defaultAgentUuid);
-      if (builder && builder.kind !== 'custom' && !customs.some((c) => c.uuid === builder.uuid)) {
-        return [builder, ...customs].sort(sortByRecent);
+    if (defaultAgentUuid) add(main.find((a) => a.uuid === defaultAgentUuid));
+    const remembered = readStoredThread(projectUuid);
+    if (remembered) add(main.find((a) => a.uuid === remembered));
+
+    const deploy = main.find((a) => a.role === 'deploy');
+    if (deploy) {
+      try {
+        const msgs = await api.agentMessages(projectUuid, deploy.uuid);
+        if ((msgs.data ?? []).length > 0) add(deploy);
+      } catch {
+        // Le fil deploy reste masqué si l’historique est illisible
       }
     }
 
-    return customs.sort(sortByRecent);
+    return [...extras, ...customs].sort(sortByRecent);
   }
 
   function threadLabel(a: ProjectAgent) {
@@ -178,16 +214,23 @@ export function ProjectAgentsPanel({
 
         setThreads(nextThreads);
 
+        const remembered = readStoredThread(projectUuid);
         const pick =
           (preferUuid && nextThreads.some((a) => a.uuid === preferUuid) && preferUuid) ||
           (selected && nextThreads.some((a) => a.uuid === selected) && selected) ||
+          (remembered && nextThreads.some((a) => a.uuid === remembered) ? remembered : null) ||
           nextThreads.find((a) => a.status === 'working')?.uuid ||
           (defaultAgentUuid && nextThreads.some((a) => a.uuid === defaultAgentUuid)
             ? defaultAgentUuid
             : null) ||
+          nextThreads.find((a) => a.role === 'deploy')?.uuid ||
           nextThreads[0]?.uuid ||
           null;
         setSelected(pick);
+        if (pick) storeThread(projectUuid, pick);
+        if (nextThreads.find((a) => a.uuid === pick)?.status === 'working') {
+          setPollEnabled(true);
+        }
       } else {
         const selectDefault = async (prev: string | null) => {
           if (prev && main.some((a) => a.uuid === prev)) return prev;
@@ -264,6 +307,7 @@ export function ProjectAgentsPanel({
       setAgents((prev) => [created.data, ...prev]);
       setThreads((prev) => [created.data, ...prev.filter((t) => t.uuid !== created.data.uuid)]);
       setSelected(created.data.uuid);
+      storeThread(projectUuid, created.data.uuid);
       setMessages([]);
     } catch (e: unknown) {
       toast.push({
@@ -307,6 +351,7 @@ export function ProjectAgentsPanel({
   useEffect(() => {
     if (!pollEnabled || !selected) return;
     let pollCount = 0;
+    let idleStreak = 0;
     const interval = setInterval(async () => {
       if (busy) return;
       try {
@@ -314,7 +359,9 @@ export function ProjectAgentsPanel({
         const agentsRes = await api.projectAgents(projectUuid);
         const currentAgent = agentsRes.data.find((a) => a.uuid === selected);
         pollCount++;
-        if (pollCount > 60 || (currentAgent && currentAgent.status === 'idle')) {
+        if (currentAgent?.status === 'idle') idleStreak += 1;
+        else idleStreak = 0;
+        if (pollCount > 90 || idleStreak >= 3) {
           setPollEnabled(false);
           clearInterval(interval);
         }
@@ -326,8 +373,10 @@ export function ProjectAgentsPanel({
   }, [pollEnabled, selected, projectUuid, busy]);
 
   useEffect(() => {
-    if (selected) void loadMessages(selected);
-    else setMessages([]);
+    if (selected) {
+      storeThread(projectUuid, selected);
+      void loadMessages(selected);
+    } else setMessages([]);
   }, [selected, projectUuid]);
 
   useEffect(() => {
@@ -456,6 +505,13 @@ export function ProjectAgentsPanel({
         .health()
         .then((h) => setLlmMode(h.backends?.llm ?? llmMode))
         .catch(() => undefined);
+      if (
+        tools.some(
+          (t) => t.name === 'start_local_preview' && t.result?.public_ok === false,
+        )
+      ) {
+        setPollEnabled(true);
+      }
       if (threadsMode) {
         setThreads((prev) => {
           const now = new Date().toISOString();
@@ -581,7 +637,7 @@ export function ProjectAgentsPanel({
   );
 
   const mobileThreadBar = threadsMode ? (
-    <div class="mb-3 flex items-center gap-2 lg:hidden">
+    <div class={cn('mb-2 flex shrink-0 items-center gap-2', !embedded && 'lg:hidden')}>
       <div class="min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div class="flex w-max gap-1">
           {list.map((a) => (
@@ -616,23 +672,25 @@ export function ProjectAgentsPanel({
   ) : null;
 
   return (
-    <FadeIn>
+    <FadeIn class={embedded ? 'flex h-full min-h-0 flex-col' : undefined}>
       {mobileThreadBar}
       <div
         class={cn(
-          'grid gap-4',
-          threadsMode ? 'lg:grid-cols-[200px_1fr]' : 'lg:grid-cols-[240px_1fr]',
+          'grid min-h-0 gap-4',
+          embedded ? 'h-full flex-1 grid-cols-1' : threadsMode ? 'lg:grid-cols-[200px_1fr]' : 'lg:grid-cols-[240px_1fr]',
         )}
       >
-        <div class={cn(threadsMode && 'hidden lg:block')}>{sidebar}</div>
+        <div class={cn(embedded ? 'hidden' : threadsMode && 'hidden lg:block')}>{sidebar}</div>
 
         <Card
           padding="none"
           class={cn(
-            'flex flex-col overflow-hidden',
-            threadsMode
-              ? 'h-[min(calc(100dvh-12rem),720px)] lg:h-[min(calc(100dvh-10rem),800px)]'
-              : 'h-[min(calc(100dvh-14rem),600px)] lg:h-[min(64vh,600px)]',
+            'flex min-h-0 flex-col overflow-hidden',
+            embedded
+              ? 'h-full'
+              : threadsMode
+                ? 'h-[min(calc(100dvh-12rem),720px)] lg:h-[min(calc(100dvh-10rem),800px)]'
+                : 'h-[min(calc(100dvh-14rem),600px)] lg:h-[min(64vh,600px)]',
           )}
         >
           <div class="flex items-center justify-between gap-2 border-b border-[var(--color-line)] px-4 py-3">
@@ -696,7 +754,7 @@ export function ProjectAgentsPanel({
               <div class="space-y-3">
                 <p class="text-sm text-[var(--color-ink-muted)]">
                   {threadsMode
-                    ? 'Décris ce que tu veux. L’assistant travaille dans le projet, puis tu ouvres la preview.'
+                    ? 'Décris ce que tu veux. L’assistant modifie le projet ; la preview et les fichiers sont à côté.'
                     : 'L’agent planifie, travaille dans le dossier du projet, puis lance la preview. Une PR n’est ouverte que si tu valides.'}
                 </p>
                 <div class="flex flex-wrap gap-2">

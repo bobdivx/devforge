@@ -8,6 +8,7 @@ import {
   type PreviewServerStatus,
 } from './workspace/WorkspaceTopBar';
 import { PreviewModal } from './workspace/PreviewModal';
+import { WorkspaceAtelier } from './workspace/WorkspaceAtelier';
 import { FadeIn } from './ui';
 import type { Project } from '../lib/api';
 
@@ -24,6 +25,8 @@ type Props = {
  */
 export function ProjectWorkspace({ projectUuid, project, builderMode, builderAgentUuid }: Props) {
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [mobilePane, setMobilePane] = useState<'chat' | 'atelier'>('chat');
+  const [atelierTab, setAtelierTab] = useState<'preview' | 'files'>('preview');
   const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
   const [previewStatus, setPreviewStatus] = useState<PreviewServerStatus>('stopped');
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -175,9 +178,8 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
 
   function handleOpenPreview() {
     setPreviewError(null);
-    if (localPreviewUrl && previewStatus === 'running') {
-      setPreviewOpen(true);
-    }
+    setAtelierTab('preview');
+    setMobilePane('atelier');
   }
 
   return (
@@ -210,16 +212,67 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
           </div>
         )}
 
-        <section class="min-h-0 flex-1 overflow-y-auto" aria-label="Chat agent">
-          <div class="mx-auto h-full max-w-3xl p-3 sm:p-4">
+        <div class="flex shrink-0 border-b border-[var(--color-line)] lg:hidden">
+          <button
+            type="button"
+            class={cn(
+              'flex-1 px-3 py-2 text-xs font-medium',
+              mobilePane === 'chat' ? 'text-[var(--color-accent)]' : 'text-[var(--color-ink-muted)]',
+            )}
+            onClick={() => setMobilePane('chat')}
+          >
+            Chat
+          </button>
+          <button
+            type="button"
+            class={cn(
+              'flex-1 px-3 py-2 text-xs font-medium',
+              mobilePane === 'atelier' ? 'text-[var(--color-accent)]' : 'text-[var(--color-ink-muted)]',
+            )}
+            onClick={() => setMobilePane('atelier')}
+          >
+            Atelier
+          </button>
+        </div>
+
+        <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
+          <section
+            class={cn(
+              'min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-2 sm:p-3',
+              mobilePane === 'chat' ? 'flex' : 'hidden lg:flex',
+            )}
+            aria-label="Chat agent"
+          >
             <ProjectAgentsPanel
               projectUuid={projectUuid}
               defaultAgentUuid={builderAgentUuid}
               builderMode={builderMode}
               mode="threads"
+              embedded
             />
-          </div>
-        </section>
+          </section>
+          <aside
+            class={cn(
+              'min-h-0 min-w-0 flex-1 flex-col border-[var(--color-line)] lg:max-w-[52%] lg:border-l',
+              mobilePane === 'atelier' ? 'flex' : 'hidden lg:flex',
+            )}
+            aria-label="Preview et fichiers"
+          >
+            <WorkspaceAtelier
+              projectUuid={projectUuid}
+              tab={atelierTab}
+              onTab={(tab) => {
+                setAtelierTab(tab);
+                setMobilePane('atelier');
+              }}
+              previewUrl={localPreviewUrl}
+              previewStatus={previewStatus}
+              onExpandPreview={() => {
+                if (localPreviewUrl && previewStatus === 'running') setPreviewOpen(true);
+              }}
+            />
+          </aside>
+        </div>
 
         <PreviewModal
           open={previewOpen}

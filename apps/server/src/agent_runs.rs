@@ -1,6 +1,10 @@
 //! Tours d'agent persistés. Un redémarrage reprend les runs `running` / `pending`.
 
+use serde_json::Value;
 use sqlx::SqlitePool;
+
+/// Marqueur du tour automatique quand la preview publique est rouge.
+pub const PREVIEW_REPAIR_PREFIX: &str = "[réparation preview]";
 
 use crate::state::{new_uuid, now_str};
 
@@ -192,6 +196,151 @@ pub async fn fail_run(pool: &SqlitePool, run_uuid: &str, agent_uuid: &str, error
     .await;
 }
 
+/// Derniers messages, avec un extrait des outils sur les réponses assistant.
+pub async fn recent_history(
+    pool: &SqlitePool,
+    agent_uuid: &str,
+) -> Vec<(String, String)> {
+    let Ok(rows) = sqlx::query_as::<_, (String, String, String)>(
+        r#"SELECT role, content, COALESCE(tool_calls_json, '[]')
+           FROM agent_messages WHERE agent_uuid = ? ORDER BY id DESC LIMIT 20"#,
+    )
+    .bind(agent_uuid)
+    .fetch_all(pool)
+    .await
+    else {
+        return Vec::new();
+    };
+    let mut hist = rows;
+    hist.reverse();
+    hist.into_iter()
+        .map(|(role, content, tools)| {
+            let content = if role == "assistant" {
+                assistant_content_with_tools(&content, &tools)
+            } else {
+                content
+            };
+            (role, content)
+        })
+        .collect()
+}
+
+/// Ajoute au texte assistant les fichiers touchés, l'erreur et les logs utiles.
+pub fn assistant_content_with_tools(content: &str, tools_json: &str) -> String {
+    let excerpt = tool_excerpt(tools_json);
+    if excerpt.is_empty() {
+        content.to_string()
+    } else {
+        format!("{content}\n\n[outils]\n{excerpt}")
+    }
+}
+
+/// Un seul correctif auto par demande. Rien si l'utilisateur doit agir (domaine, secret).
+pub fn preview_repair_prompt(user_message: &str, tools_json: &str) -> Option<String> {
+    if user_message.trim_start().starts_with(PREVIEW_REPAIR_PREFIX) {
+        return None;
+    }
+    let calls: Vec<Value> = serde_json::from_str(tools_json).ok()?;
+    let last = calls.iter().rev().find(|call| {
+        call.get("name").and_then(|v| v.as_str()) == Some("start_local_preview")
+    })?;
+    let result = last.get("result")?;
+    if result.get("needs_user_action").and_then(|v| v.as_bool()) == Some(true) {
+        return None;
+    }
+    let public_ok = result.get("public_ok").and_then(|v| v.as_bool());
+    let ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
+    if public_ok == Some(true) || (public_ok.is_none() && ok) {
+        return None;
+    }
+    let err = result.get("error").and_then(|v| v.as_str()).unwrap_or("");
+    let lower = err.to_lowercase();
+    if lower.contains("wildcard") || lower.contains("domaine") {
+        return None;
+    }
+    let logs = result
+        .get("logs_tail")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    Some(format!(
+        "{PREVIEW_REPAIR_PREFIX}\nLa preview n’est pas joignable. Corrige les fichiers en local puis relance start_local_preview avec force=true.\nErreur : {}\nLogs : {}",
+        clip(err, 400),
+        clip(logs, 800),
+    ))
+}
+
+fn tool_excerpt(tools_json: &str) -> String {
+    let Ok(calls) = serde_json::from_str::<Vec<Value>>(tools_json) else {
+        return String::new();
+    };
+    let start = calls.len().saturating_sub(6);
+    let mut lines = Vec::new();
+    for call in calls.iter().skip(start) {
+        let name = call.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
+        let args = call.get("arguments");
+        let result = call.get("result");
+        let path = args
+            .and_then(|a| a.get("path"))
+            .and_then(|v| v.as_str())
+            .or_else(|| result.and_then(|r| r.get("path")).and_then(|v| v.as_str()))
+            .unwrap_or("");
+        let command = args
+            .and_then(|a| a.get("command"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let ok = result.and_then(|r| r.get("ok")).and_then(|v| v.as_bool());
+        let public_ok = result.and_then(|r| r.get("public_ok")).and_then(|v| v.as_bool());
+        let err = result
+            .and_then(|r| r.get("error"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let mut line = format!("- {name}");
+        if !path.is_empty() {
+            line.push_str(&format!(" path={path}"));
+        }
+        if !command.is_empty() {
+            line.push_str(&format!(" cmd={}", clip(command, 80)));
+        }
+        if let Some(ok) = ok {
+            line.push_str(&format!(" ok={ok}"));
+        }
+        if let Some(public_ok) = public_ok {
+            line.push_str(&format!(" public_ok={public_ok}"));
+        }
+        if !err.is_empty() {
+            line.push_str(&format!(" error={}", clip(err, 180)));
+        }
+        let failed = ok == Some(false) || public_ok == Some(false);
+        if failed {
+            let logs = result
+                .and_then(|r| r.get("logs_tail"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .or_else(|| {
+                    result
+                        .and_then(|r| r.get("stderr"))
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                });
+            if let Some(logs) = logs {
+                line.push_str(&format!("\n  logs: {}", clip(logs, 400)));
+            }
+        }
+        lines.push(line);
+    }
+    clip(&lines.join("\n"), 2400)
+}
+
+fn clip(s: &str, max: usize) -> String {
+    let count = s.chars().count();
+    if count <= max {
+        s.to_string()
+    } else {
+        let t: String = s.chars().take(max).collect();
+        format!("{t}…")
+    }
+}
+
 pub async fn finish(
     pool: &SqlitePool,
     run_uuid: &str,
@@ -299,5 +448,27 @@ mod tests {
                 .unwrap();
         let again = enqueue(&pool, "proj", "agent-1", &msg.0).await.unwrap();
         assert_eq!(run, again);
+    }
+
+    #[test]
+    fn history_keeps_failed_command_and_file() {
+        let tools = r#"[{"name":"write_project_file","arguments":{"path":"src/pages/index.astro"},"result":{"ok":true}},{"name":"run_workdir_command","arguments":{"command":"npm run build"},"result":{"ok":false,"error":"exit 1","stderr":"Cannot find module"}}]"#;
+        let text = assistant_content_with_tools("J'ai modifié la page.", tools);
+        assert!(text.contains("src/pages/index.astro"));
+        assert!(text.contains("npm run build"));
+        assert!(text.contains("Cannot find module"));
+    }
+
+    #[test]
+    fn preview_repair_runs_once_and_skips_a_green_preview() {
+        let red = r#"[{"name":"start_local_preview","arguments":{},"result":{"ok":false,"public_ok":false,"error":"URL publique KO","logs_tail":"Error: astro"}}]"#;
+        let prompt = preview_repair_prompt("améliore la page", red).unwrap();
+        assert!(prompt.starts_with(PREVIEW_REPAIR_PREFIX));
+        assert!(prompt.contains("astro"));
+        assert!(preview_repair_prompt(&prompt, red).is_none());
+        let green = r#"[{"name":"start_local_preview","arguments":{},"result":{"ok":true,"public_ok":true}}]"#;
+        assert!(preview_repair_prompt("go", green).is_none());
+        let domain = r#"[{"name":"start_local_preview","arguments":{},"result":{"ok":false,"error":"Domaine wildcard manquant"}}]"#;
+        assert!(preview_repair_prompt("go", domain).is_none());
     }
 }
