@@ -551,7 +551,7 @@ impl AppState {
             executor: executor_mode,
             github: std::sync::RwLock::new(github_mode.to_string()),
             storage: std::sync::RwLock::new(storage_mode.clone()),
-            database: "sqlite-local",
+            database: "sqlite",
             llm: std::sync::RwLock::new(llm_mode.clone()),
         });
         tracing::info!(

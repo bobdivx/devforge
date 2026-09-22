@@ -210,12 +210,24 @@ impl Tool for CreateGitHubFixTool {
                 )
                 .await;
 
+            let (additions, deletions, unified_diff) =
+                super::project_files::line_diff_stats(path, "", content);
             match update_result {
-                Ok(res) => file_results.push(json!({"path": path, "ok": true, "result": res})),
+                Ok(res) => file_results.push(json!({
+                    "path": path,
+                    "ok": true,
+                    "result": res,
+                    "additions": additions,
+                    "deletions": deletions,
+                    "unified_diff": unified_diff
+                })),
                 Err(e) => file_results.push(json!({
                     "path": path,
                     "ok": false,
-                    "error": e.to_string()
+                    "error": e.to_string(),
+                    "additions": additions,
+                    "deletions": deletions,
+                    "unified_diff": unified_diff
                 })),
             }
         }
@@ -224,12 +236,14 @@ impl Tool for CreateGitHubFixTool {
             .iter()
             .all(|r| r.get("ok").and_then(|v| v.as_bool()).unwrap_or(false));
 
+        let combined_diff = combined_file_diffs(&file_results);
         if !all_files_ok {
             return Ok(json!({
                 "ok": false,
                 "error": "Certains fichiers n'ont pas pu être modifiés",
                 "step": "update_files",
-                "files": file_results
+                "files": file_results,
+                "unified_diff": combined_diff
             }));
         }
 
@@ -256,6 +270,7 @@ impl Tool for CreateGitHubFixTool {
                 "ok": true,
                 "branch": fix_branch,
                 "files": file_results,
+                "unified_diff": combined_diff,
                 "pull_request": pr_data,
                 "message": format!("✓ Branche {fix_branch} créée, {} fichier(s) modifié(s), PR ouverte", files_arr.len())
             })),
@@ -264,10 +279,20 @@ impl Tool for CreateGitHubFixTool {
                 "error": format!("Échec création PR : {e}"),
                 "step": "create_pull_request",
                 "branch": fix_branch,
-                "files": file_results
+                "files": file_results,
+                "unified_diff": combined_diff
             })),
         }
     }
+}
+
+fn combined_file_diffs(files: &[Value]) -> String {
+    files
+        .iter()
+        .filter_map(|f| f.get("unified_diff").and_then(|v| v.as_str()))
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Tool pour lire le contenu d'un fichier sur GitHub (simplifie l'accès via MCP).

@@ -7,7 +7,21 @@ if (!existsSync(dataDir)) {
   mkdirSync(dataDir, { recursive: true });
 }
 
-const dbPath = join(dataDir, 'app.db');
+/** `DATABASE_URL=sqlite:data/app.db?mode=rwc` (posé au scaffold) ou `data/app.db`. */
+function resolveDbPath(): string {
+  const fromEnv = process.env.DATABASE_URL?.trim();
+  if (fromEnv) {
+    const stripped = fromEnv.replace(/^sqlite:/i, '').split('?')[0]?.trim();
+    if (stripped) return stripped;
+  }
+  return join(dataDir, 'app.db');
+}
+
+const dbPath = resolveDbPath();
+const dbDir = join(dbPath, '..');
+if (!existsSync(dbDir)) {
+  mkdirSync(dbDir, { recursive: true });
+}
 export const db = new Database(dbPath);
 
 db.exec(`

@@ -154,6 +154,29 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     sqlx::query(
         r#"
+        CREATE TABLE IF NOT EXISTS agent_runs (
+            uuid TEXT PRIMARY KEY,
+            project_uuid TEXT NOT NULL,
+            agent_uuid TEXT NOT NULL,
+            message_uuid TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL,
+            error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status, created_at)",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        r#"
         CREATE TABLE IF NOT EXISTS agent_conversation_shares (
             token TEXT PRIMARY KEY,
             project_uuid TEXT NOT NULL,

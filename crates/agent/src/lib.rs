@@ -609,6 +609,9 @@ pub fn parse_github_repo(git_url: &str) -> Option<(String, String)> {
     None
 }
 
+#[cfg(test)]
+mod scaffold_chain_test;
+
 fn summarize(tool: &str, result: &Value) -> String {
     let pretty = serde_json::to_string_pretty(result).unwrap_or_else(|_| "{}".into());
     if result.get("ok").and_then(|v| v.as_bool()) == Some(true) {

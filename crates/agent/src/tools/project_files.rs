@@ -328,6 +328,12 @@ impl WriteProjectFileTool {
                 .await
             {
                 Ok(file) => {
+                    let previous = existing_file
+                        .as_ref()
+                        .map(|f| f.content.as_str())
+                        .unwrap_or("");
+                    let (additions, deletions, unified_diff) =
+                        line_diff_stats(path, previous, content);
                     return Ok(json!({
                         "ok": true,
                         "mode": "github",
@@ -339,6 +345,10 @@ impl WriteProjectFileTool {
                         "sha": file.sha,
                         "commit_sha": file.commit_sha,
                         "html_url": file.html_url,
+                        "created": previous.is_empty(),
+                        "additions": additions,
+                        "deletions": deletions,
+                        "unified_diff": unified_diff,
                         "message": format!("✓ Fichier écrit sur GitHub : {owner}/{repo}/{path}")
                     }));
                 }
@@ -387,17 +397,24 @@ impl WriteProjectFileTool {
             .await;
 
         match result {
-            Ok(file_data) => Ok(json!({
-                "ok": true,
-                "mode": "github",
-                "path": path,
-                "owner": owner,
-                "repo": repo,
-                "branch": branch,
-                "commit_message": message,
-                "result": file_data,
-                "message": format!("✓ Fichier écrit sur GitHub : {owner}/{repo}/{path}")
-            })),
+            Ok(file_data) => {
+                let (additions, deletions, unified_diff) = line_diff_stats(path, "", content);
+                Ok(json!({
+                    "ok": true,
+                    "mode": "github",
+                    "path": path,
+                    "owner": owner,
+                    "repo": repo,
+                    "branch": branch,
+                    "commit_message": message,
+                    "result": file_data,
+                    "created": true,
+                    "additions": additions,
+                    "deletions": deletions,
+                    "unified_diff": unified_diff,
+                    "message": format!("✓ Fichier écrit sur GitHub : {owner}/{repo}/{path}")
+                }))
+            }
             Err(e) => Ok(json!({
                 "ok": false,
                 "error": format!("Échec écriture GitHub : {e}"),
@@ -665,7 +682,7 @@ fn collect_files(root: &Path, current: &Path, out: &mut Vec<String>) {
 }
 
 /// Diff ligne-à-ligne simple (LCS) pour l’UI chat — style Cursor.
-fn line_diff_stats(path: &str, old: &str, new: &str) -> (usize, usize, String) {
+pub(crate) fn line_diff_stats(path: &str, old: &str, new: &str) -> (usize, usize, String) {
     let a: Vec<&str> = if old.is_empty() {
         Vec::new()
     } else {

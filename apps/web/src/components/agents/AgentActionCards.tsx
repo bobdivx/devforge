@@ -103,9 +103,40 @@ function filePath(call: AgentToolCall): string {
   );
 }
 
+function collectedDiff(call: AgentToolCall): string {
+  const direct = typeof call.result?.unified_diff === 'string' ? call.result.unified_diff : '';
+  if (direct.trim()) return direct;
+  const files = call.result?.files;
+  if (Array.isArray(files)) {
+    const joined = files
+      .map((f) => (f && typeof f.unified_diff === 'string' ? f.unified_diff : ''))
+      .filter((s) => s.trim())
+      .join('\n');
+    if (joined.trim()) return joined;
+  }
+  if (call.name === 'create_github_fix' && Array.isArray(call.arguments?.files)) {
+    return (call.arguments.files as unknown[])
+      .map((file) => {
+        if (!file || typeof file !== 'object') return '';
+        const row = file as { path?: string; content?: string };
+        const path = row.path || 'fichier';
+        const content = row.content || '';
+        if (!content) return '';
+        const body = content
+          .split('\n')
+          .map((line) => `+${line}`)
+          .join('\n');
+        return `--- /dev/null\n+++ b/${path}\n${body}`;
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  return '';
+}
+
 function kindOf(call: AgentToolCall): 'file' | 'shell' | 'read' | 'plan' | 'generic' {
   if (call.name === 'propose_plan') return 'plan';
-  if (call.name === 'write_project_file') return 'file';
+  if (call.name === 'write_project_file' || call.name === 'create_github_fix') return 'file';
   if (SHELL_TOOLS.has(call.name)) return 'shell';
   if (READ_TOOLS.has(call.name)) return 'read';
   return 'generic';
@@ -114,6 +145,11 @@ function kindOf(call: AgentToolCall): 'file' | 'shell' | 'read' | 'plan' | 'gene
 function headerLabel(call: AgentToolCall): string {
   const kind = kindOf(call);
   if (kind === 'file') {
+    if (call.name === 'create_github_fix') {
+      const branch = strArg(call, 'fix_branch') || 'correction';
+      const n = Array.isArray(call.arguments?.files) ? call.arguments.files.length : 0;
+      return n > 0 ? `${branch} · ${n} fichier${n > 1 ? 's' : ''}` : branch;
+    }
     const path = filePath(call) || 'fichier';
     const content = strArg(call, 'content');
     const add =
@@ -207,8 +243,7 @@ export function AgentActionCard({
   const body = useMemo(() => {
     if (kind === 'file') {
       const content = strArg(call, 'content');
-      const diff =
-        typeof call.result?.unified_diff === 'string' ? call.result.unified_diff : '';
+      const diff = collectedDiff(call);
       if (diff.trim()) {
         const lines = diff.split('\n');
         const max = 80;
@@ -306,6 +341,7 @@ export function AgentActionList({
           defaultOpen={
             a.status === 'running' ||
             a.name === 'write_project_file' ||
+            a.name === 'create_github_fix' ||
             a.name === 'start_local_preview' ||
             a.name === 'run_workdir_command' ||
             a.name === 'propose_plan' ||

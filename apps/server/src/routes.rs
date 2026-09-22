@@ -562,6 +562,10 @@ async fn scaffold_project(
         .await
         .map_err(ApiError::from)?;
 
+    if let Err(e) = attach_project_sqlite(&state, &project).await {
+        eprintln!("[scaffold] SQLite projet : {e}");
+    }
+
     // Return agent info as simple JSON value
     let agent_info = serde_json::json!({
         "uuid": agent_uuid,
@@ -1597,12 +1601,102 @@ async fn auto_trigger_repair(state: &AppState, dep_uuid: &str) -> Result<(), Str
 }
 
 /// Déclenche un tour d'agent de manière interne (sans requête HTTP).
-/// Utilisé après scaffold pour lancer automatiquement l'agent.
+/// Le message utilisateur est déjà dans `agent_messages`. Le run est repris au boot s'il est coupé.
 async fn trigger_agent_turn(
     state: &AppState,
     project_uuid: &str,
     agent_uuid: &str,
 ) -> Result<(), String> {
+    let last_user_msg = sqlx::query_as::<_, (String, String)>(
+        "SELECT uuid, content FROM agent_messages WHERE agent_uuid = ? AND role = 'user' ORDER BY id DESC LIMIT 1",
+    )
+    .bind(agent_uuid)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let Some((message_uuid, content)) = last_user_msg else {
+        return Err("Aucun message utilisateur trouvé pour cet agent".to_string());
+    };
+
+    let run_uuid = crate::agent_runs::enqueue(&state.pool, project_uuid, agent_uuid, &message_uuid)
+        .await?;
+    if crate::agent_runs::assistant_already_replied(&state.pool, agent_uuid, &message_uuid)
+        .await
+        .unwrap_or(false)
+    {
+        let _ = crate::agent_runs::finish(&state.pool, &run_uuid, "completed", None).await;
+        return Ok(());
+    }
+    let claimed = crate::agent_runs::try_claim(&state.pool, &run_uuid)
+        .await
+        .map_err(|e| e.to_string())?;
+    if !claimed {
+        return Ok(());
+    }
+    let run = crate::agent_runs::RunRow {
+        uuid: run_uuid,
+        project_uuid: project_uuid.to_string(),
+        agent_uuid: agent_uuid.to_string(),
+        message_uuid,
+        content,
+    };
+    execute_claimed_run(state, &run).await
+}
+
+async fn execute_claimed_run(
+    state: &AppState,
+    run: &crate::agent_runs::RunRow,
+) -> Result<(), String> {
+    let mut ctx = load_agent_context(state, &run.project_uuid, &run.agent_uuid).await;
+    if ctx
+        .history
+        .last()
+        .is_some_and(|(role, content)| role == "user" && content == &run.content)
+    {
+        ctx.history.pop();
+    }
+    let now = now_str();
+    let _ = sqlx::query(
+        "UPDATE project_agents SET status = 'working', updated_at = ? WHERE uuid = ?",
+    )
+    .bind(&now)
+    .bind(&run.agent_uuid)
+    .execute(&state.pool)
+    .await;
+
+    let result = match state
+        .agent
+        .handle_with_context(&run.content, None, None, ctx)
+        .await
+    {
+        Ok(result) => result,
+        Err(e) => {
+            crate::agent_runs::fail_run(&state.pool, &run.uuid, &run.agent_uuid, &e.to_string())
+                .await;
+            return Err(e.to_string());
+        }
+    };
+    let tools_json = serde_json::to_string(&result.tool_calls).unwrap_or_else(|_| "[]".into());
+    crate::agent_runs::save_assistant_and_finish(
+        &state.pool,
+        &run.uuid,
+        &run.project_uuid,
+        &run.agent_uuid,
+        &result.reply,
+        &tools_json,
+        &result.provider,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+async fn load_agent_context(
+    state: &AppState,
+    project_uuid: &str,
+    agent_uuid: &str,
+) -> devforge_agent::AgentChatContext {
     let mut ctx = devforge_agent::AgentChatContext {
         project_uuid: Some(project_uuid.to_string()),
         agent_uuid: Some(agent_uuid.to_string()),
@@ -1614,8 +1708,6 @@ async fn trigger_agent_turn(
         git_branch: None,
         history: vec![],
     };
-
-    // Charger les infos de l'agent
     if let Ok(Some((name, role))) = sqlx::query_as::<_, (String, String)>(
         "SELECT name, role FROM project_agents WHERE uuid = ?",
     )
@@ -1626,8 +1718,6 @@ async fn trigger_agent_turn(
         ctx.agent_name = Some(name);
         ctx.agent_role = Some(role);
     }
-
-    // Charger l'historique (derniers 20 messages)
     if let Ok(rows) = sqlx::query_as::<_, (String, String)>(
         "SELECT role, content FROM agent_messages WHERE agent_uuid = ? ORDER BY id DESC LIMIT 20",
     )
@@ -1639,87 +1729,79 @@ async fn trigger_agent_turn(
         hist.reverse();
         ctx.history = hist;
     }
-
-    // Charger le contexte projet
     if let Ok(brief) = build_project_agent_brief(state, project_uuid).await {
         ctx.git_owner = brief.git_owner;
         ctx.git_repo = brief.git_repo;
         ctx.git_branch = brief.git_branch;
         ctx.project_brief = Some(brief.text);
     }
+    ctx
+}
 
-    // Mettre l'agent en statut 'working'
-    let now = now_str();
-    let _ = sqlx::query(
-        "UPDATE project_agents SET status = 'working', updated_at = ? WHERE uuid = ?",
-    )
-    .bind(&now)
-    .bind(agent_uuid)
-    .execute(&state.pool)
-    .await;
+/// Reprend les tours coupés par un redémarrage. Appelé une fois au boot du leader.
+pub fn resume_agent_runs(state: AppState) {
+    tokio::spawn(async move {
+        if let Err(e) = crate::agent_runs::reopen_interrupted(&state.pool).await {
+            tracing::error!(error = %e, "reprise des tours d'agent");
+            return;
+        }
+        let runs = match crate::agent_runs::list_pending(&state.pool).await {
+            Ok(runs) => runs,
+            Err(e) => {
+                tracing::error!(error = %e, "liste des tours d'agent en attente");
+                return;
+            }
+        };
+        if runs.is_empty() {
+            return;
+        }
+        tracing::info!(count = runs.len(), "reprise des tours d'agent interrompus");
+        for run in runs {
+            let claimed = crate::agent_runs::try_claim(&state.pool, &run.uuid)
+                .await
+                .unwrap_or(false);
+            if !claimed {
+                continue;
+            }
+            if crate::agent_runs::assistant_already_replied(
+                &state.pool,
+                &run.agent_uuid,
+                &run.message_uuid,
+            )
+            .await
+            .unwrap_or(false)
+            {
+                let _ = crate::agent_runs::finish(&state.pool, &run.uuid, "completed", None).await;
+                continue;
+            }
+            let state = state.clone();
+            tokio::spawn(async move {
+                if let Err(e) = execute_claimed_run(&state, &run).await {
+                    tracing::error!(error = %e, run = %run.uuid, "échec reprise tour d'agent");
+                }
+            });
+        }
+    });
+}
 
-    // Vérifier si l'agent a déjà répondu (éviter les double-runs)
-    let has_assistant_reply = sqlx::query_as::<_, (i64,)>(
-        "SELECT COUNT(*) FROM agent_messages WHERE agent_uuid = ? AND role = 'assistant'",
-    )
-    .bind(agent_uuid)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|e| e.to_string())?;
-
-    if has_assistant_reply.0 > 0 {
-        // L'agent a déjà répondu, pas besoin de relancer
-        return Ok(());
-    }
-
-    // Le dernier message utilisateur (seed) est déjà dans agent_messages.
-    // On récupère son contenu pour le passer à l'agent.
-    let last_user_msg = sqlx::query_as::<_, (String,)>(
-        "SELECT content FROM agent_messages WHERE agent_uuid = ? AND role = 'user' ORDER BY id DESC LIMIT 1",
-    )
-    .bind(agent_uuid)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| e.to_string())?;
-
-    let Some((user_message,)) = last_user_msg else {
-        return Err("Aucun message utilisateur trouvé pour cet agent".to_string());
-    };
-
-    // Exécuter le tour de l'agent
-    let result = state
-        .agent
-        .handle_with_context(&user_message, None, None, ctx)
+async fn attach_project_sqlite(state: &AppState, project: &Project) -> Result<(), String> {
+    let raw = project.workdir.as_deref().unwrap_or("").trim();
+    let resolved = devforge_deploy::resolve_project_workdir(raw, &project.uuid);
+    let db_file = std::path::Path::new(&resolved).join("data").join("app.db");
+    let _url = devforge_database::provision_sqlite_file(&db_file).await?;
+    state
+        .env
+        .upsert(
+            &project.uuid,
+            devforge_env::EnvVar {
+                key: "DATABASE_URL".into(),
+                value: "sqlite:data/app.db?mode=rwc".into(),
+                secret: false,
+            },
+        )
         .await
         .map_err(|e| e.to_string())?;
-
-    // Sauvegarder la réponse de l'agent
-    let now = now_str();
-    let tools_json = serde_json::to_string(&result.tool_calls).unwrap_or_else(|_| "[]".into());
-
-    let _ = sqlx::query(
-        r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
-           VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?)"#,
-    )
-    .bind(new_uuid())
-    .bind(project_uuid)
-    .bind(agent_uuid)
-    .bind(&result.reply)
-    .bind(&tools_json)
-    .bind(&result.provider)
-    .bind(&now)
-    .execute(&state.pool)
-    .await;
-
-    // Marquer l'agent comme 'idle'
-    let _ = sqlx::query(
-        "UPDATE project_agents SET status = 'idle', updated_at = ? WHERE uuid = ?",
-    )
-    .bind(&now)
-    .bind(agent_uuid)
-    .execute(&state.pool)
-    .await;
-
+    let _ = materialize_project_env_to_workdir(&state.pool, project).await;
     Ok(())
 }
 
@@ -1809,6 +1891,12 @@ async fn agent_chat(
     let force_tool = body.tool.clone();
     let force_args = body.arguments.clone();
     let want_stream = body.stream.unwrap_or(false);
+    let run_uuid = match (project_uuid.as_ref(), agent_uuid.as_ref()) {
+        (Some(project_uuid), Some(agent_uuid)) => Some(
+            begin_agent_run(&state, project_uuid, agent_uuid, &user_message).await?,
+        ),
+        _ => None,
+    };
 
     if want_stream {
         let agent = state.agent.clone();
@@ -1816,6 +1904,7 @@ async fn agent_chat(
         let (ev_tx, ev_rx) =
             tokio::sync::mpsc::unbounded_channel::<devforge_agent::AgentEvent>();
         let progress_tx = ev_tx.clone();
+        let run_uuid_stream = run_uuid.clone();
 
         tokio::spawn(async move {
             let result = agent
@@ -1834,46 +1923,35 @@ async fn agent_chat(
                         provider: result.provider.clone(),
                         tool_calls: result.tool_calls.clone(),
                     });
-                    if let (Some(project_uuid), Some(agent_uuid)) =
-                        (project_uuid.as_ref(), agent_uuid.as_ref())
-                    {
-                        let now = crate::state::now_str();
+                    if let (Some(project_uuid), Some(agent_uuid), Some(run_uuid)) = (
+                        project_uuid.as_ref(),
+                        agent_uuid.as_ref(),
+                        run_uuid_stream.as_ref(),
+                    ) {
                         let tools_json = serde_json::to_string(&result.tool_calls)
                             .unwrap_or_else(|_| "[]".into());
-                        let _ = sqlx::query(
-                            r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
-                               VALUES (?, ?, ?, 'user', ?, '[]', '', ?)"#,
+                        if let Err(e) = crate::agent_runs::save_assistant_and_finish(
+                            &pool,
+                            run_uuid,
+                            project_uuid,
+                            agent_uuid,
+                            &result.reply,
+                            &tools_json,
+                            &result.provider,
                         )
-                        .bind(crate::state::new_uuid())
-                        .bind(project_uuid)
-                        .bind(agent_uuid)
-                        .bind(&user_message)
-                        .bind(&now)
-                        .execute(&pool)
-                        .await;
-                        let _ = sqlx::query(
-                            r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
-                               VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?)"#,
-                        )
-                        .bind(crate::state::new_uuid())
-                        .bind(project_uuid)
-                        .bind(agent_uuid)
-                        .bind(&result.reply)
-                        .bind(&tools_json)
-                        .bind(&result.provider)
-                        .bind(&now)
-                        .execute(&pool)
-                        .await;
-                        let _ = sqlx::query(
-                            "UPDATE project_agents SET status = 'idle', updated_at = ? WHERE uuid = ?",
-                        )
-                        .bind(&now)
-                        .bind(agent_uuid)
-                        .execute(&pool)
-                        .await;
+                        .await
+                        {
+                            tracing::error!(error = %e, "sauvegarde du tour d'agent");
+                        }
                     }
                 }
                 Err(e) => {
+                    if let (Some(run_uuid), Some(agent_uuid)) =
+                        (run_uuid_stream.as_ref(), agent_uuid.as_ref())
+                    {
+                        crate::agent_runs::fail_run(&pool, run_uuid, agent_uuid, &e.to_string())
+                            .await;
+                    }
                     let _ = ev_tx.send(devforge_agent::AgentEvent::Error {
                         message: e.to_string(),
                     });
@@ -1902,7 +1980,7 @@ async fn agent_chat(
             .into_response());
     }
 
-    let result = state
+    let result = match state
         .agent
         .handle_with_context(
             &user_message,
@@ -1911,46 +1989,63 @@ async fn agent_chat(
             ctx,
         )
         .await
-        .map_err(|e| ApiError::message(e.to_string()))?;
+    {
+        Ok(result) => result,
+        Err(e) => {
+            if let (Some(run_uuid), Some(agent_uuid)) = (run_uuid.as_ref(), agent_uuid.as_ref())
+            {
+                crate::agent_runs::fail_run(
+                    &state.pool,
+                    run_uuid,
+                    agent_uuid,
+                    &e.to_string(),
+                )
+                .await;
+            }
+            return Err(ApiError::message(e.to_string()));
+        }
+    };
 
-    if let (Some(project_uuid), Some(agent_uuid)) = (project_uuid, agent_uuid) {
-        let now = crate::state::now_str();
+    if let (Some(project_uuid), Some(agent_uuid), Some(run_uuid)) =
+        (project_uuid, agent_uuid, run_uuid)
+    {
         let tools_json =
             serde_json::to_string(&result.tool_calls).unwrap_or_else(|_| "[]".into());
-        let _ = sqlx::query(
-            r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
-               VALUES (?, ?, ?, 'user', ?, '[]', '', ?)"#,
+        crate::agent_runs::save_assistant_and_finish(
+            &state.pool,
+            &run_uuid,
+            &project_uuid,
+            &agent_uuid,
+            &result.reply,
+            &tools_json,
+            &result.provider,
         )
-        .bind(crate::state::new_uuid())
-        .bind(&project_uuid)
-        .bind(&agent_uuid)
-        .bind(&user_message)
-        .bind(&now)
-        .execute(&state.pool)
-        .await;
-        let _ = sqlx::query(
-            r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
-               VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?)"#,
-        )
-        .bind(crate::state::new_uuid())
-        .bind(&project_uuid)
-        .bind(&agent_uuid)
-        .bind(&result.reply)
-        .bind(&tools_json)
-        .bind(&result.provider)
-        .bind(&now)
-        .execute(&state.pool)
-        .await;
-        let _ = sqlx::query(
-            "UPDATE project_agents SET status = 'idle', updated_at = ? WHERE uuid = ?",
-        )
-        .bind(&now)
-        .bind(&agent_uuid)
-        .execute(&state.pool)
-        .await;
+        .await
+        .map_err(|e| ApiError::message(e.to_string()))?;
     }
 
     Ok(Json(json!({"data": result})).into_response())
+}
+
+async fn begin_agent_run(
+    state: &AppState,
+    project_uuid: &str,
+    agent_uuid: &str,
+    message: &str,
+) -> Result<String, ApiError> {
+    let run_uuid =
+        crate::agent_runs::record_user_turn(&state.pool, project_uuid, agent_uuid, message)
+            .await
+            .map_err(ApiError::message)?;
+    let claimed = crate::agent_runs::try_claim(&state.pool, &run_uuid)
+        .await
+        .map_err(|e| ApiError::message(e.to_string()))?;
+    if !claimed {
+        return Err(ApiError::message(
+            "Un tour d'agent est déjà en cours pour ce message",
+        ));
+    }
+    Ok(run_uuid)
 }
 
 #[derive(Deserialize)]
@@ -1999,7 +2094,8 @@ async fn create_database(
     let _ = require_auth(&state, &headers).await?;
     let result = state
         .databases
-        .provision(&body.name, body.engine.as_deref());
+        .provision(&body.name, body.engine.as_deref())
+        .await;
     let status = if result.get("ok").and_then(|v| v.as_bool()) == Some(true) {
         axum::http::StatusCode::CREATED
     } else {

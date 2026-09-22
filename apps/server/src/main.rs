@@ -1,3 +1,4 @@
+mod agent_runs;
 mod dns;
 mod cluster_routes;
 mod cluster_store;
@@ -141,6 +142,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     crate::dns::spawn_dns_loop(state.clone());
+    routes::resume_agent_runs(state.clone());
 
     // Background sync for GitHub runners (Docker + Actions status → SQLite snapshot).
     {
