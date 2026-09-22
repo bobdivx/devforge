@@ -192,6 +192,8 @@ export type Deployment = {
   git_sha?: string | null;
   git_message?: string | null;
   logs?: string | null;
+  error_summary?: string | null;
+  error_hint?: string | null;
   created_at?: string;
 };
 

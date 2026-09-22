@@ -143,6 +143,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     crate::dns::spawn_dns_loop(state.clone());
+    if let Err(e) = crate::deploy_queue::recover_interrupted_deploys(&state.pool).await {
+        tracing::error!(error = %e, "clôture des déploiements interrompus");
+    }
     routes::resume_agent_runs(state.clone());
 
     // Background sync for GitHub runners (Docker + Actions status → SQLite snapshot).

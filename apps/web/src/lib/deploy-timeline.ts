@@ -80,14 +80,14 @@ export function parseDeployTimeline(
   };
 
   if (!rawLogs || rawLogs.trim() === '') {
-    const isRunning = deployStatus === 'deploying' || deployStatus === 'building';
-    if (isRunning) {
+    const active = isInProgress(deployStatus);
+    if (active) {
       steps.git_sync.state = 'running';
     }
     return {
       steps: Object.values(steps),
-      currentStepId: isRunning ? 'git_sync' : null,
-      overallState: isRunning ? 'running' : deployStatus === 'failed' ? 'failed' : 'pending',
+      currentStepId: active ? 'git_sync' : null,
+      overallState: active ? 'running' : isFailed(deployStatus) ? 'failed' : 'pending',
     };
   }
 
@@ -152,14 +152,14 @@ export function parseDeployTimeline(
   }
 
   // Ajuster selon statut global
-  if (deployStatus === 'deployed' || deployStatus === 'running' || deployStatus === 'success') {
+  if (isFinishedOk(deployStatus)) {
     steps.git_sync.state = 'success';
     steps.build.state = 'success';
     steps.container_start.state = 'success';
     steps.healthcheck.state = 'success';
     steps.blue_green_switch.state = 'success';
     steps.done.state = 'success';
-  } else if (deployStatus === 'failed' || deployStatus === 'error') {
+  } else if (isFailed(deployStatus)) {
     if (steps.blue_green_switch.state === 'running') steps.blue_green_switch.state = 'failed';
     else if (steps.healthcheck.state === 'running') steps.healthcheck.state = 'failed';
     else if (steps.container_start.state === 'running') steps.container_start.state = 'failed';
@@ -174,11 +174,28 @@ export function parseDeployTimeline(
   return {
     steps: stepList,
     currentStepId: activeStep,
-    overallState:
-      deployStatus === 'deployed' || deployStatus === 'running' || deployStatus === 'success'
-        ? 'success'
-        : deployStatus === 'failed' || deployStatus === 'error'
+    overallState: isFinishedOk(deployStatus)
+      ? 'success'
+      : isFailed(deployStatus)
         ? 'failed'
         : 'running',
   };
+}
+
+function isFinishedOk(status: string): boolean {
+  return status === 'deployed' || status === 'success' || status === 'ok';
+}
+
+function isFailed(status: string): boolean {
+  return status === 'failed' || status === 'error';
+}
+
+function isInProgress(status: string): boolean {
+  return (
+    status === 'running' ||
+    status === 'queued' ||
+    status === 'building' ||
+    status === 'deploying' ||
+    status === 'pending'
+  );
 }

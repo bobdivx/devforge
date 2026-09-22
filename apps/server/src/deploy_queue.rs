@@ -66,6 +66,62 @@ async fn mark_status(pool: &SqlitePool, deployment_uuid: &str, status: &str) {
         .await;
 }
 
+/// Un redémarrage coupe les requêtes qui tenaient la file. Ces lignes resteraient
+/// `queued` ou `running` pour toujours : on les clôt pour que l'utilisateur puisse relancer.
+pub async fn recover_interrupted_deploys(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
+    let rows: Vec<(String, i64, String)> = sqlx::query_as(
+        r#"SELECT d.uuid, d.project_id, p.uuid
+           FROM deployments d
+           JOIN projects p ON p.id = d.project_id
+           WHERE d.status IN ('queued', 'running', 'building')"#,
+    )
+    .fetch_all(pool)
+    .await?;
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    let now = now_str();
+    let note = "\n[devforge] interrompu par un redémarrage. Relance le déploiement.\n";
+    for (uuid, project_id, project_uuid) in &rows {
+        sqlx::query(
+            r#"UPDATE deployments
+               SET status = 'failed',
+                   logs = COALESCE(logs, '') || ?,
+                   error_summary = ?,
+                   error_hint = ?,
+                   finished_at = ?,
+                   updated_at = ?
+               WHERE uuid = ? AND status IN ('queued', 'running', 'building')"#,
+        )
+        .bind(note)
+        .bind("Interrompu par un redémarrage")
+        .bind("Relance le déploiement depuis le projet.")
+        .bind(&now)
+        .bind(&now)
+        .bind(uuid)
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "UPDATE projects SET status = 'failed', updated_at = ? WHERE id = ? AND status = 'deploying'",
+        )
+        .bind(&now)
+        .bind(project_id)
+        .execute(pool)
+        .await?;
+        record_event(
+            pool,
+            project_uuid,
+            "deploy",
+            "failed",
+            uuid,
+            "interrompu par un redémarrage",
+        )
+        .await;
+    }
+    tracing::warn!(count = rows.len(), "déploiements interrompus clos après redémarrage");
+    Ok(rows.len() as u64)
+}
+
 pub async fn record_event(
     pool: &SqlitePool,
     project_uuid: &str,
@@ -209,5 +265,96 @@ mod tests {
             kinds.into_iter().map(|k| k.0).collect::<Vec<_>>(),
             vec!["write_project_file", "trigger_deploy", "http_smoke"]
         );
+    }
+
+    #[tokio::test]
+    async fn restart_closes_queued_and_running_deploys() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"CREATE TABLE projects (
+                id INTEGER PRIMARY KEY,
+                uuid TEXT NOT NULL,
+                status TEXT NOT NULL,
+                updated_at TEXT
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"CREATE TABLE deployments (
+                uuid TEXT PRIMARY KEY,
+                project_id INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                logs TEXT,
+                error_summary TEXT,
+                error_hint TEXT,
+                finished_at TEXT,
+                updated_at TEXT
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"CREATE TABLE builder_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_uuid TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                ref_id TEXT,
+                detail TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO projects (id, uuid, status) VALUES (1, 'proj', 'deploying')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO deployments (uuid, project_id, status, logs) VALUES ('dep-q', 1, 'queued', '')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO deployments (uuid, project_id, status, logs) VALUES ('dep-r', 1, 'running', 'build')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO deployments (uuid, project_id, status, logs) VALUES ('dep-ok', 1, 'success', 'ok')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let n = recover_interrupted_deploys(&pool).await.unwrap();
+        assert_eq!(n, 2);
+        let left: Vec<(String, String)> =
+            sqlx::query_as("SELECT uuid, status FROM deployments ORDER BY uuid")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            left,
+            vec![
+                ("dep-ok".into(), "success".into()),
+                ("dep-q".into(), "failed".into()),
+                ("dep-r".into(), "failed".into()),
+            ]
+        );
+        let project: (String,) = sqlx::query_as("SELECT status FROM projects WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(project.0, "failed");
     }
 }

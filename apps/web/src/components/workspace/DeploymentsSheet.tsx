@@ -56,6 +56,8 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
   const [loading, setLoading] = useState(false);
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'timeline' | 'raw'>('timeline');
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
   const isPanel = variant === 'panel';
 
   useEffect(() => {
@@ -74,11 +76,10 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
   // Polling automatique si un déploiement est en cours
   useEffect(() => {
     if (!open) return;
-    const selected = deployments.find((d) => d.uuid === selectedUuid);
-    const isRunning =
-      selected &&
-      ['deploying', 'building', 'pending', 'queued', 'running'].includes(selected.status);
-    if (!isRunning) return;
+    const active = deployments.some((d) =>
+      ['deploying', 'building', 'pending', 'queued', 'running'].includes(d.status),
+    );
+    if (!active) return;
 
     const interval = setInterval(() => {
       loadDeployments(false);
@@ -102,6 +103,21 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
       setTrace([]);
     } finally {
       if (showSpinner) setLoading(false);
+    }
+  }
+
+  async function retryDeploy() {
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      const r = await api.createDeployment(projectUuid, { git_message: 'Relance' });
+      const uuid = r.data?.uuid;
+      await loadDeployments(false);
+      if (uuid) setSelectedUuid(uuid);
+    } catch (err) {
+      setRetryError(String((err as Error).message || err));
+    } finally {
+      setRetrying(false);
     }
   }
 
@@ -206,6 +222,28 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
                   </div>
                   {selected.git_message && (
                     <p class="mt-2 text-sm text-[var(--color-ink)]">{selected.git_message}</p>
+                  )}
+                  {selected.status === 'queued' && (
+                    <p class="mt-2 text-sm text-[var(--color-ink-muted)]">
+                      En attente : un autre déploiement occupe déjà ce nœud.
+                    </p>
+                  )}
+                  {selected.error_summary && (
+                    <p class="mt-2 text-sm text-[var(--color-ink)]">{selected.error_summary}</p>
+                  )}
+                  {selected.error_hint && (
+                    <p class="mt-1 text-xs text-[var(--color-ink-muted)]">{selected.error_hint}</p>
+                  )}
+                  {(selected.status === 'failed' || selected.status === 'error') && (
+                    <div class="mt-3 flex flex-wrap items-center gap-2">
+                      <Button type="button" size="sm" disabled={retrying} onClick={retryDeploy}>
+                        {retrying ? <Spinner /> : null}
+                        Relancer
+                      </Button>
+                      {retryError && (
+                        <span class="text-xs text-[var(--color-danger)]">{retryError}</span>
+                      )}
+                    </div>
                   )}
                 </div>
 
