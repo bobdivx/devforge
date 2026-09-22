@@ -73,6 +73,7 @@ pub fn worker_router(state: AppState) -> Router {
             "/api/v1/cluster/local",
             get(worker_local).patch(worker_local_patch),
         )
+        .route("/api/v1/cluster/local/reset", post(worker_local_reset))
         .route("/internal/exec", post(internal_exec))
         .route("/internal/update/status", get(internal_update_status))
         .route("/internal/update/start", post(internal_update_start))
@@ -183,6 +184,60 @@ async fn worker_local_patch(
         "advertise_url": local.advertise_url,
         "node_id": local.node_id,
         "node_name": local.node_name,
+    })))
+}
+
+/// Quitte le cluster : efface l’identité worker et redémarre en instance neuve (onboarding / rejoin).
+async fn worker_local_reset(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let local = state.cluster.local().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+    if !is_worker_role(&local) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Réinitialisation réservée à un nœud worker"})),
+        ));
+    }
+    tracing::warn!(
+        node = %local.node_id,
+        name = %local.node_name,
+        "réinitialisation worker — identité effacée, redémarrage"
+    );
+    state
+        .cluster
+        .set_local(&LocalClusterState::default())
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+    let _ = clear_pending_join().await;
+    for path in [
+        devforge_cluster::roster_path(),
+        devforge_cluster::snapshot_path(),
+        devforge_cluster::promote_flag_path(),
+        devforge_cluster::reclaim_flag_path(),
+        devforge_cluster::failover_identity_path(),
+    ] {
+        if path.is_file() {
+            let _ = tokio::fs::remove_file(&path).await;
+        }
+    }
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        devforge_cluster::restart_current_process();
+    });
+    Ok(Json(json!({
+        "ok": true,
+        "restarting": true,
+        "message": "Identité worker effacée — redémarrage en cours.",
     })))
 }
 

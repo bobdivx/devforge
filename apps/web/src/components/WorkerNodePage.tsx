@@ -16,6 +16,7 @@ export function WorkerNodePage() {
   const [metrics, setMetrics] = useState<ClusterNodeMetrics | null>(null);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
 
@@ -72,6 +73,29 @@ export function WorkerNodePage() {
       setError(String((err as Error).message || err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function resetWorker() {
+    if (
+      !confirm(
+        'Réinitialiser ce nœud ? Il quitte le cluster, efface son identité worker, puis redémarre. Tu pourras rejoindre un cluster depuis l’onboarding. Les apps Docker déjà lancées sur cette machine ne sont pas arrêtées.',
+      )
+    ) {
+      return;
+    }
+    setResetting(true);
+    setError(null);
+    setSaved(null);
+    try {
+      await api.clusterResetLocal();
+      setSaved('Réinitialisation… le nœud redémarre.');
+      window.setTimeout(() => {
+        window.location.href = '/';
+      }, 2500);
+    } catch (err) {
+      setError(String((err as Error).message || err));
+      setResetting(false);
     }
   }
 
@@ -138,12 +162,26 @@ export function WorkerNodePage() {
                 onInput={(e) => setAdvertise((e.target as HTMLInputElement).value)}
                 hint="Adresse que le leader utilise pour joindre cette machine."
               />
-              <Button type="submit" disabled={busy}>
+              <Button type="submit" disabled={busy || resetting}>
                 {busy ? <Spinner /> : null}
                 Enregistrer les adresses
               </Button>
             </form>
             <p class="mt-4 font-mono text-xs text-[var(--color-ink-muted)]">ID {nodeId || '—'}</p>
+          </Card>
+
+          <Card padding="lg">
+            <h2 class="text-sm font-semibold text-[var(--color-ink)]">Danger</h2>
+            <p class="mt-1 text-sm text-[var(--color-ink-muted)]">
+              Quitte le cluster et remet cette machine en instance neuve (onboarding). Utile pour
+              rejoindre un autre leader ou corriger un join raté.
+            </p>
+            <div class="mt-4">
+              <Button variant="danger" disabled={busy || resetting} onClick={resetWorker}>
+                {resetting ? <Spinner /> : null}
+                Réinitialiser le worker
+              </Button>
+            </div>
           </Card>
         </div>
       )}

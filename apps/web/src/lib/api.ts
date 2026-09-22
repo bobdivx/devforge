@@ -1676,7 +1676,13 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
-  
+  /** Worker only — quitte le cluster et redémarre en instance neuve. */
+  clusterResetLocal: () =>
+    request<{ ok: boolean; restarting?: boolean; message?: string }>('/cluster/local/reset', {
+      method: 'POST',
+      body: '{}',
+    }),
+
   proxyStatus: () => request<ProxyStatus>('/system/proxy/status'),
   proxyRestart: () => request<{ ok: boolean; container: string; message: string; output: string }>('/system/proxy/restart', { method: 'POST', body: '{}' }),
   proxyEnsure: () => request<{ ok: boolean; status: string; container: string; message: string }>('/system/proxy/ensure', { method: 'POST', body: '{}' }),
