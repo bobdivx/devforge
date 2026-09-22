@@ -1,7 +1,7 @@
 import type { Project } from '../../lib/api';
 import { Badge, Button } from '../ui';
 import { projectStatusMeta } from '../../lib/status';
-import { ExternalLink, Eye, Play, RotateCw, Square } from 'lucide-preact';
+import { ExternalLink, Eye, Play, Rocket, RotateCw, Square } from 'lucide-preact';
 
 export type PreviewServerStatus = 'stopped' | 'running' | 'starting';
 
@@ -39,8 +39,8 @@ export function WorkspaceTopBar({
         : { tone: 'neutral' as const, label: 'Dev arrêté' };
 
   return (
-    <div class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[var(--color-line)] bg-[var(--color-card)] px-3 sm:gap-3 sm:px-4">
-      <div class="flex min-w-0 items-center gap-2">
+    <div class="flex h-12 min-w-0 shrink-0 items-center justify-between gap-2 overflow-x-auto border-b border-[var(--color-line)] bg-[var(--color-card)] px-2 sm:gap-3 sm:px-4">
+      <div class="flex min-w-0 flex-1 items-center gap-2">
         {project && (
           <>
             <h1 class="truncate text-sm font-medium tracking-tight sm:text-base">{project.name}</h1>
@@ -59,8 +59,9 @@ export function WorkspaceTopBar({
       <div class="flex shrink-0 items-center gap-1">
         {previewStatus === 'stopped' ? (
           <Button
-            size="sm"
+            size="icon"
             variant="secondary"
+            motion={false}
             onClick={onStartServer}
             disabled={previewBusy}
             title="Démarrer npm run dev (npm i au premier démarrage)"
@@ -72,8 +73,9 @@ export function WorkspaceTopBar({
         ) : (
           <>
             <Button
-              size="sm"
+              size="icon"
               variant="ghost"
+              motion={false}
               onClick={onStopServer}
               disabled={previewBusy || previewStatus === 'starting'}
               title="Arrêter le serveur de dev"
@@ -83,22 +85,24 @@ export function WorkspaceTopBar({
               <span class="hidden sm:inline">Arrêter</span>
             </Button>
             <Button
-              size="sm"
+              size="icon"
               variant="ghost"
+              motion={false}
               onClick={onRestartServer}
               disabled={previewBusy}
               title="Redémarrer npm run dev"
               aria-label="Redémarrer le serveur de dev"
             >
               <RotateCw size={14} strokeWidth={2} aria-hidden />
-              <span class="hidden md:inline">Redémarrer</span>
+              <span class="hidden sm:inline">Redémarrer</span>
             </Button>
           </>
         )}
 
         <Button
-          size="sm"
+          size="icon"
           variant="secondary"
+          motion={false}
           onClick={onOpenPreview}
           disabled={previewBusy}
           title="Afficher la preview atelier à côté du chat"
@@ -110,27 +114,30 @@ export function WorkspaceTopBar({
 
         {deploymentsHref && (
           <Button
-            size="sm"
+            size="icon"
             variant="ghost"
+            motion={false}
             href={deploymentsHref}
             title="Déploiements production (conteneur Docker séparé)"
             aria-label="Déploiements"
           >
-            <span class="hidden md:inline text-[var(--color-ink-muted)]">Déployer</span>
+            <Rocket size={14} strokeWidth={2} aria-hidden />
+            <span class="hidden sm:inline text-[var(--color-ink-muted)]">Déployer</span>
           </Button>
         )}
 
         {project?.production_url && (
           <Button
-            size="sm"
+            size="icon"
             variant="ghost"
+            motion={false}
             href={project.production_url}
             target="_blank"
             title="Ouvrir le site en production (nouvel onglet)"
             aria-label="Ouvrir en production"
           >
             <ExternalLink size={14} strokeWidth={2} aria-hidden />
-            <span class="hidden md:inline">Prod</span>
+            <span class="hidden sm:inline">Prod</span>
           </Button>
         )}
       </div>

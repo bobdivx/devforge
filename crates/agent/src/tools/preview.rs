@@ -23,10 +23,14 @@ pub struct LocalPreviewStatusTool {
     pub pool: Arc<SqlitePool>,
 }
 
+/// Plage dédiée aux ateliers. Un port stable par projet, puis le suivant s’il est pris.
+const PREVIEW_PORT_BASE: u16 = 21000;
+const PREVIEW_PORT_SPAN: u16 = 10000;
+
 struct PreviewContext {
     uuid: String,
     workdir: String,
-    /// Port du `npm run dev` (Vite 5173, Astro 4321, Next 3000) — pas le port production.
+    /// Port du `npm run dev` pour cet atelier (plage 21000–30999), pas le port production.
     port: u16,
     /// Port du conteneur production (`projects.port`, souvent 80 pour un static/nginx).
     production_port: u16,
@@ -85,10 +89,10 @@ impl Tool for StartLocalPreviewTool {
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty());
 
-        let ctx = resolve_preview_context(self.pool.as_ref(), &arguments).await?;
+        let mut ctx = resolve_preview_context(self.pool.as_ref(), &arguments).await?;
         let workdir_path = Path::new(&ctx.workdir);
 
-        let command = if let Some(cmd) = custom_command {
+        let mut command = if let Some(cmd) = custom_command {
             cmd.to_string()
         } else {
             detect_dev_command(workdir_path, ctx.port)?
@@ -104,7 +108,8 @@ impl Tool for StartLocalPreviewTool {
             }));
         };
 
-        if !force && port_is_open(ctx.port).await {
+        let owned = read_preview_pid(workdir_path).is_some_and(pid_is_alive);
+        if !force && owned && port_is_open(ctx.port).await {
             let upstream = write_dev_traefik_dynamic(&preview_url, &ctx.uuid, ctx.port)
                 .unwrap_or_else(|_| dev_preview_upstream_url(ctx.port));
             // Laisse Traefik recharger si le yaml vient d’être réécrit
@@ -165,7 +170,12 @@ impl Tool for StartLocalPreviewTool {
             }
         };
 
-        let _ = stop_preview(workdir_path, ctx.port);
+        let _ = stop_owned_preview(workdir_path, ctx.port);
+        ctx.port = allocate_preview_port(ctx.port).await;
+        let _ = write_saved_preview_port(workdir_path, ctx.port);
+        if custom_command.is_none() {
+            command = detect_dev_command(workdir_path, ctx.port)?;
+        }
 
         let pid = match spawn_preview(
             workdir_path,
@@ -476,8 +486,8 @@ async fn resolve_preview_context(
         0
     };
     // `projects.port` = port du conteneur production (80 pour nginx/static).
-    // Le serveur de dev (Vite/Astro/Next) écoute ailleurs : on le lit depuis package.json.
-    let port = resolve_preview_port(workdir_path, production_port);
+    // Chaque atelier a un port à lui dans 21000–30999, mémorisé après le premier démarrage.
+    let port = read_saved_preview_port(workdir_path).unwrap_or_else(|| stable_preview_port(&uuid));
 
     Ok(PreviewContext {
         uuid,
@@ -775,7 +785,94 @@ fn parse_port_flag(cmd: &str) -> Option<u16> {
             }
         }
     }
+    // `astro dev --port ${PORT:-3000}` — le port réel vient de l’env, le défaut est dans le script.
+    let fallback = regex::Regex::new(r"\$\{PORT:-(\d{2,5})\}").ok()?;
+    if let Some(cap) = fallback.captures(cmd) {
+        if let Ok(p) = cap[1].parse::<u16>() {
+            if p >= 1024 {
+                return Some(p);
+            }
+        }
+    }
     None
+}
+
+/// Le script laisse le port venir de l’environnement (`--port ${PORT:-3000}`).
+/// On peut alors choisir un port libre sans doubler les flags CLI.
+fn script_honors_port_env(script: &str) -> bool {
+    script.contains("${PORT") || script.contains("$PORT")
+}
+
+/// Port stable par projet, dans [21000, 30999].
+fn stable_preview_port(uuid: &str) -> u16 {
+    let mut hash: u32 = 2_166_136_261;
+    for b in uuid.as_bytes() {
+        hash ^= *b as u32;
+        hash = hash.wrapping_mul(1_677_7619);
+    }
+    PREVIEW_PORT_BASE + (hash % u32::from(PREVIEW_PORT_SPAN)) as u16
+}
+
+fn next_preview_port(port: u16) -> u16 {
+    let last = PREVIEW_PORT_BASE + PREVIEW_PORT_SPAN - 1;
+    if port < PREVIEW_PORT_BASE || port >= last {
+        PREVIEW_PORT_BASE
+    } else {
+        port + 1
+    }
+}
+
+/// Premier port libre à partir de `preferred` (lui-même, puis les suivants).
+fn pick_preview_port(preferred: u16, is_taken: impl Fn(u16) -> bool) -> u16 {
+    let mut port = if (PREVIEW_PORT_BASE..PREVIEW_PORT_BASE + PREVIEW_PORT_SPAN).contains(&preferred)
+    {
+        preferred
+    } else {
+        PREVIEW_PORT_BASE
+    };
+    for _ in 0..PREVIEW_PORT_SPAN {
+        if !is_taken(port) {
+            return port;
+        }
+        port = next_preview_port(port);
+    }
+    preferred
+}
+
+async fn allocate_preview_port(preferred: u16) -> u16 {
+    let mut port = if (PREVIEW_PORT_BASE..PREVIEW_PORT_BASE + PREVIEW_PORT_SPAN).contains(&preferred)
+    {
+        preferred
+    } else {
+        PREVIEW_PORT_BASE
+    };
+    // 64 essais : un refus TCP local est immédiat. Au-delà, on garde le dernier vu.
+    for _ in 0..64 {
+        if !port_is_open(port).await {
+            return port;
+        }
+        port = next_preview_port(port);
+    }
+    port
+}
+
+fn preview_port_file(workdir: &Path) -> PathBuf {
+    workdir.join(".devforge-preview.port")
+}
+
+fn read_saved_preview_port(workdir: &Path) -> Option<u16> {
+    let port = std::fs::read_to_string(preview_port_file(workdir))
+        .ok()
+        .and_then(|t| t.trim().parse().ok())?;
+    if (PREVIEW_PORT_BASE..PREVIEW_PORT_BASE + PREVIEW_PORT_SPAN).contains(&port) {
+        Some(port)
+    } else {
+        None
+    }
+}
+
+fn write_saved_preview_port(workdir: &Path, port: u16) -> std::io::Result<()> {
+    std::fs::write(preview_port_file(workdir), port.to_string())
 }
 
 fn detect_framework_dev_port(pkg: &Value) -> u16 {
@@ -844,13 +941,22 @@ fn detect_dev_command(workdir: &Path, port: u16) -> Result<String> {
 
     let is_next = dep_has(&pkg, "next");
     let is_astro = dep_has(&pkg, "astro");
-    let is_vite = dep_has(&pkg, "vite") || dep_has(&pkg, "@vitejs/plugin-react");
 
     if is_next {
         return Ok(format!("npx next dev -H 0.0.0.0 -p {port}"));
     }
-    if has_dev && (is_astro || is_vite) {
-        return Ok(format!("npm run dev -- --host 0.0.0.0 --port {port}"));
+    let dev_script = pkg
+        .get("scripts")
+        .and_then(|s| s.get("dev"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if has_dev && script_honors_port_env(dev_script) {
+        // PORT est injecté dans l’environnement : le script prend le port libre de l’atelier.
+        return Ok("npm run dev".into());
+    }
+    if is_astro {
+        // Un seul `--host` / `--port`. Doubler ces flags fait quitter Astro avant d’écouter.
+        return Ok(format!("npx astro dev --host --port {port}"));
     }
     if has_dev {
         return Ok(format!("npm run dev -- --host 0.0.0.0 --port {port}"));
@@ -1063,6 +1169,9 @@ fn preview_process_env(
     out.push(("PORT".into(), port.to_string()));
     out.push(("BROWSER".into(), "none".into()));
     out.push(("NODE_ENV".into(), "development".into()));
+    // Astro 5+ détache `astro dev` si le process parent ressemble à un agent, puis quitte.
+    // Une valeur non vide garde le serveur au premier plan (pid + logs).
+    out.push(("ASTRO_DEV_BACKGROUND".into(), "foreground".into()));
     out.push(("PUPPETEER_SKIP_DOWNLOAD".into(), "1".into()));
     out.push(("PUPPETEER_SKIP_CHROMIUM_DOWNLOAD".into(), "1".into()));
     if !allowed_hosts.is_empty() {
@@ -1138,6 +1247,17 @@ async fn ensure_node_modules(
 
     let _ = std::fs::write(npm_stamp_path(workdir), deps_fingerprint(workdir));
     Ok(true)
+}
+
+/// Arrête le process de cet atelier. `fuser` ne tue le port que si le pid nous appartient,
+/// pour ne pas couper l’atelier d’un autre projet.
+fn stop_owned_preview(workdir: &Path, port: u16) -> std::result::Result<(), String> {
+    let alive = read_preview_pid(workdir).is_some_and(pid_is_alive);
+    if alive {
+        return stop_preview(workdir, port);
+    }
+    let _ = std::fs::remove_file(preview_pid_path(workdir));
+    Ok(())
 }
 
 fn stop_preview(workdir: &Path, port: u16) -> std::result::Result<(), String> {
@@ -1380,6 +1500,47 @@ mod tests {
         assert_eq!(parse_port_flag("PORT=5174 vite"), Some(5174));
         assert_eq!(parse_port_flag("vite --port 80"), None);
         assert_eq!(parse_port_flag("vite"), None);
+        assert_eq!(
+            parse_port_flag("astro dev --host --port ${PORT:-3000}"),
+            Some(3000)
+        );
+    }
+
+    #[test]
+    fn astro_template_is_not_double_flagged() {
+        let dir = std::env::temp_dir().join("df-preview-astro-port-env");
+        write_pkg(
+            &dir,
+            r#"{"scripts":{"dev":"astro dev --host --port ${PORT:-3000}"},"dependencies":{"astro":"^4.16.0"}}"#,
+        );
+        assert_eq!(resolve_preview_port(&dir, 80), 3000);
+        let cmd = detect_dev_command(&dir, 3000).unwrap();
+        assert_eq!(cmd, "npm run dev");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn plain_astro_dev_uses_boolean_host() {
+        let dir = std::env::temp_dir().join("df-preview-astro-plain");
+        write_pkg(
+            &dir,
+            r#"{"scripts":{"dev":"astro dev"},"dependencies":{"astro":"^5.0.0"}}"#,
+        );
+        let cmd = detect_dev_command(&dir, 4321).unwrap();
+        assert_eq!(cmd, "npx astro dev --host --port 4321");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preview_ports_are_stable_and_skip_taken() {
+        let a = stable_preview_port("1b0e4a2f-d66a-40d8-8da0-2d960a8ff631");
+        let b = stable_preview_port("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        assert_ne!(a, b);
+        assert!(a >= PREVIEW_PORT_BASE && a < PREVIEW_PORT_BASE + PREVIEW_PORT_SPAN);
+        assert_eq!(stable_preview_port("1b0e4a2f-d66a-40d8-8da0-2d960a8ff631"), a);
+        assert_eq!(pick_preview_port(a, |p| p == a), next_preview_port(a));
+        assert_eq!(pick_preview_port(a, |_| false), a);
+        assert_eq!(pick_preview_port(80, |_| false), PREVIEW_PORT_BASE);
     }
 
     #[test]

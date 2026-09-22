@@ -3,7 +3,7 @@ import { cn } from '../../lib/cn';
 import { pressScale } from '../../lib/motion';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'outline';
-type Size = 'sm' | 'md' | 'lg';
+type Size = 'sm' | 'md' | 'lg' | 'icon';
 
 const variants: Record<Variant, string> = {
   primary:
@@ -20,6 +20,8 @@ const sizes: Record<Size, string> = {
   sm: 'h-8 px-3 text-xs rounded-lg',
   md: 'h-10 px-4 text-sm rounded-xl',
   lg: 'h-11 px-5 text-sm rounded-xl',
+  /** Carré au doigt, s’élargit quand le libellé s’affiche. */
+  icon: 'h-8 w-8 shrink-0 p-0 text-xs rounded-lg sm:w-auto sm:gap-1.5 sm:px-2.5',
 };
 
 type Props = {
@@ -33,6 +35,8 @@ type Props = {
   /** Associe un submit hors `<form>` (footer de Modal). */
   form?: string;
   disabled?: boolean;
+  /** Animation d’appui. Désactivée sur les barres étroites : le scale reste collé après le toucher. */
+  motion?: boolean;
   children: ComponentChildren;
   onClick?: JSX.MouseEventHandler<HTMLButtonElement>;
   'aria-label'?: string;
@@ -48,6 +52,7 @@ export function Button({
   type = 'button',
   form,
   disabled,
+  motion = true,
   children,
   onClick,
   'aria-label': ariaLabel,
@@ -58,7 +63,7 @@ export function Button({
     sizes[size],
     className,
   );
-  const animate = disabled ? undefined : pressScale();
+  const animate = !motion || disabled ? undefined : pressScale();
 
   if (href) {
     return (
