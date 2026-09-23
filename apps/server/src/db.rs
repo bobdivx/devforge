@@ -73,6 +73,12 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // L'import SQLite ne reprend pas les index automatiques `sqlite_autoindex_*`.
+    // Sans unicité sur projects.uuid, la clé étrangère ci-dessous est refusée.
+    sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS projects_uuid_key ON projects (uuid)")
+        .execute(pool)
+        .await?;
+
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS app_group_members (
@@ -411,6 +417,8 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         ("porkbun_zone", "TEXT NOT NULL DEFAULT ''"),
         ("cloudflare_api_token", "TEXT NOT NULL DEFAULT ''"),
         ("placement_auto", "BIGINT NOT NULL DEFAULT 1"),
+        ("update_auto_leader", "BIGINT NOT NULL DEFAULT 0"),
+        ("update_auto_worker", "BIGINT NOT NULL DEFAULT 0"),
         ("beta_workspace", "BIGINT NOT NULL DEFAULT 1"),
         ("beta_agent_builder", "BIGINT NOT NULL DEFAULT 1"),
     ] {
@@ -950,23 +958,26 @@ pub async fn purge_demo_data(pool: &PgPool) -> Result<(), sqlx::Error> {
 
 /// Agents obligatoires créés avec chaque project.
 pub async fn seed_required_agents(pool: &PgPool, project_uuid: &str) -> Result<(), sqlx::Error> {
-    let count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM project_agents WHERE project_uuid = $1 AND kind = 'required'",
-    )
-    .bind(project_uuid)
-    .fetch_one(pool)
-    .await?;
-    if count.0 > 0 {
-        return Ok(());
-    }
-
     let now = chrono::Utc::now().to_rfc3339();
     let required = [
         ("Ops", "ops"),
         ("Deploy", "deploy"),
         ("Reviewer", "reviewer"),
+        ("Runners", "runner"),
+        ("Actions", "actions"),
+        ("Crons", "crons"),
     ];
     for (name, role) in required {
+        let exists: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM project_agents WHERE project_uuid = $1 AND role = $2 AND kind = 'required'",
+        )
+        .bind(project_uuid)
+        .bind(role)
+        .fetch_one(pool)
+        .await?;
+        if exists.0 > 0 {
+            continue;
+        }
         let uuid = uuid::Uuid::new_v4().to_string();
         sqlx::query(
             r#"INSERT INTO project_agents (
