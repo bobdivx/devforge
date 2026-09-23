@@ -653,7 +653,7 @@ mod tests {
         let labels = json!({"traefik.enable": "true"});
         let cmd = docker::docker_recreate_with_labels("test-container", &labels);
         assert!(
-            cmd.contains("{{range $k, $v := .NetworkSettings.Networks}}"),
+            cmd.contains(r"{{range \$k, \$v := .NetworkSettings.Networks}}"),
             "Network template must have space after comma to avoid Docker template parse error"
         );
         assert!(

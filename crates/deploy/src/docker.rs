@@ -445,7 +445,7 @@ for cid in $(docker ps -q 2>/dev/null); do
   NAME=$(docker inspect "$cid" --format "{{{{.Name}}}}" 2>/dev/null | sed "s/^\///" || echo "")
   
   # Extraire tous les labels traefik.http.routers.*.rule
-  RULES=$(docker inspect "$cid" --format "{{{{range $k, $v := .Config.Labels}}}}{{{{if contains $k \"traefik.http.routers.\"}}}}{{{{if contains $k \".rule\"}}}}{{{{println $v}}}}{{{{end}}}}{{{{end}}}}{{{{end}}}}" 2>/dev/null || echo "")
+  RULES=$(docker inspect "$cid" --format "{{{{range \$k, \$v := .Config.Labels}}}}{{{{if contains \$k \"traefik.http.routers.\"}}}}{{{{if contains \$k \".rule\"}}}}{{{{println \$v}}}}{{{{end}}}}{{{{end}}}}{{{{end}}}}" 2>/dev/null || echo "")
   
   # Vérifier si une règle contient Host(`$HOST`)
   if echo "$RULES" | grep -qF "Host(\`$HOST\`)"; then
@@ -482,7 +482,7 @@ pub fn docker_detect_traefik_network() -> String {
 # Strategy 1: Check common proxy container name patterns
 for pattern in traefik caddy proxy devforge zima casaos; do
   for cid in $(docker ps -q --filter "name=$pattern" 2>/dev/null); do
-    NET=$(docker inspect "$cid" --format "{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
+    NET=$(docker inspect "$cid" --format "{{range \$k, \$v := .NetworkSettings.Networks}}{{println \$k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
     if [ -n "$NET" ]; then
       echo "$NET"
       exit 0
@@ -494,7 +494,7 @@ done
 for cid in $(docker ps -q 2>/dev/null); do
   IMG=$(docker inspect "$cid" --format "{{.Config.Image}}" 2>/dev/null || echo "")
   if echo "$IMG" | grep -qi "traefik"; then
-    NET=$(docker inspect "$cid" --format "{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
+    NET=$(docker inspect "$cid" --format "{{range \$k, \$v := .NetworkSettings.Networks}}{{println \$k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
     if [ -n "$NET" ]; then
       echo "$NET"
       exit 0
@@ -505,7 +505,7 @@ done
 # Strategy 3: Containers publishing port 80 or 443 (likely reverse proxy)
 for port in 80 443; do
   for cid in $(docker ps -q --filter "publish=$port" 2>/dev/null); do
-    NET=$(docker inspect "$cid" --format "{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
+    NET=$(docker inspect "$cid" --format "{{range \$k, \$v := .NetworkSettings.Networks}}{{println \$k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
     if [ -n "$NET" ]; then
       echo "$NET"
       exit 0
@@ -517,7 +517,7 @@ done
 for cid in $(docker ps -q 2>/dev/null); do
   ENABLED=$(docker inspect "$cid" --format "{{index .Config.Labels \"traefik.enable\"}}" 2>/dev/null || echo "")
   if [ "$ENABLED" = "true" ]; then
-    NET=$(docker inspect "$cid" --format "{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
+    NET=$(docker inspect "$cid" --format "{{range \$k, \$v := .NetworkSettings.Networks}}{{println \$k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
     if [ -n "$NET" ]; then
       echo "$NET"
       exit 0
@@ -541,7 +541,7 @@ done
 # Strategy 6: Networks containing DevForge apps (df- substring)
 for pattern in df-; do
   for cid in $(docker ps -q --filter "name=$pattern" 2>/dev/null); do
-    NET=$(docker inspect "$cid" --format "{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
+    NET=$(docker inspect "$cid" --format "{{range \$k, \$v := .NetworkSettings.Networks}}{{println \$k}}{{end}}" 2>/dev/null | grep -v "^bridge$" | head -n1)
     if [ -n "$NET" ]; then
       echo "$NET"
       exit 0
@@ -585,7 +585,7 @@ pub fn docker_recreate_with_labels(name: &str, labels: &Value) -> String {
 N={n}
 if ! docker inspect "$N" >/dev/null 2>&1; then echo "container $N introuvable"; exit 1; fi
 IMG=$(docker inspect -f "{{{{.Config.Image}}}}" "$N")
-NET=$(docker inspect -f "{{{{range $k, $v := .NetworkSettings.Networks}}}}{{{{println $k}}}}{{{{end}}}}" "$N" | head -n1)
+NET=$(docker inspect -f "{{{{range \$k, \$v := .NetworkSettings.Networks}}}}{{{{println \$k}}}}{{{{end}}}}" "$N" | head -n1)
 ENV_FILE=$(mktemp)
 docker inspect -f "{{{{range .Config.Env}}}}{{{{println .}}}}{{{{end}}}}" "$N" > "$ENV_FILE"
 LABEL_FILE=$(mktemp)
@@ -606,7 +606,7 @@ if [ -n "$NET" ] && [ "$NET" != "bridge" ]; then
 fi
 
 # Add port mappings
-for spec in $(docker inspect -f "{{{{range $p, $conf := .HostConfig.PortBindings}}}}{{{{range $conf}}}}{{{{.HostPort}}}}:{{{{$p}}}} {{{{end}}}}{{{{end}}}}" "$N"); do
+for spec in $(docker inspect -f "{{{{range \$p, \$conf := .HostConfig.PortBindings}}}}{{{{range \$conf}}}}{{{{.HostPort}}}}:{{\${{p}}}} {{{{end}}}}{{{{end}}}}" "$N"); do
   [ -n "$spec" ] && set -- "$@" -p "$spec"
 done
 
@@ -1227,11 +1227,11 @@ mod tests {
         let labels = json!({"traefik.enable": "true"});
         let cmd = docker_recreate_with_labels("test-container", &labels);
         assert!(
-            cmd.contains("{{range $k, $v := .NetworkSettings.Networks}}"),
+            cmd.contains(r"{{range \$k, \$v := .NetworkSettings.Networks}}"),
             "Network template must have space after comma to avoid Docker template parse error"
         );
         assert!(
-            !cmd.contains("{{range $k,$v :="),
+            !cmd.contains(r"{{range \$k,\$v :="),
             "Network template should not have comma without space"
         );
         assert!(
@@ -1241,6 +1241,14 @@ mod tests {
         assert!(
             cmd.contains("IFS=\"|\""),
             "mount parser must not break the outer sh -c quotes"
+        );
+        assert!(
+            cmd.contains(r"\$k, \$v"),
+            "docker template variables must be escaped inside double quotes"
+        );
+        assert!(
+            cmd.contains(r"\$p, \$conf"),
+            "port template variables must be escaped inside double quotes"
         );
     }
 
