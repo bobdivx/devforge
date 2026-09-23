@@ -162,15 +162,42 @@ export function ProjectDetailPage(props: Props) {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    Promise.all([api.project(uuid), api.deployments(uuid)])
-      .then(([p, d]) => {
+    // Premier paint : Postgres seul (pas de probe HTTP/Docker ni GitHub).
+    api
+      .project(uuid)
+      .then((p) => {
+        if (cancelled) return;
         setProject(p.data);
-        setDeployments(d.data ?? []);
+        if (p.deployments) {
+          setDeployments(p.deployments);
+        } else {
+          // Fallback si l’API ne renvoie pas encore les deployments inline.
+          void api.deployments(uuid).then((d) => {
+            if (!cancelled) setDeployments(d.data ?? []);
+          });
+        }
         setError(null);
+        setLoading(false);
+        // Refresh live en arrière-plan (reach + sync GitHub) sans bloquer l’UI.
+        void api
+          .project(uuid, { live: true })
+          .then((live) => {
+            if (cancelled) return;
+            setProject(live.data);
+            if (live.deployments) setDeployments(live.deployments);
+          })
+          .catch(() => {});
       })
-      .catch((e) => setError(String(e.message || e)))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (cancelled) return;
+        setError(String(e.message || e));
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [uuid]);
 
   // Garde l’Overview à jour : préférer le running courant au succès stale.
@@ -370,13 +397,14 @@ function ProjectOverview({
   }, [project.sync]);
 
   useEffect(() => {
+    // Compteurs overview : lectures Postgres (pas de GitHub/workdir ici).
+    // La sync Git arrive via project.sync (refresh ?live=1 du parent).
     Promise.allSettled([
       api.envList(uuid),
       api.projectResources(uuid),
       api.domains(uuid),
-      api.projectGit(uuid),
       isAdmin ? api.clusterNodes() : Promise.resolve(null),
-    ]).then(([envR, resR, domR, gitR, nodesR]) => {
+    ]).then(([envR, resR, domR, nodesR]) => {
       if (envR.status === 'fulfilled') {
         const rows = envR.value.data ?? [];
         setEnvCount(rows.length);
@@ -391,9 +419,6 @@ function ProjectOverview({
         setDomainCount((domR.value.domains ?? domR.value.data ?? []).length);
       } else {
         setDomainCount(0);
-      }
-      if (gitR.status === 'fulfilled' && gitR.value.sync) {
-        setGitSync(gitR.value.sync);
       }
       if (nodesR.status === 'fulfilled' && nodesR.value?.nodes) {
         setNodes(nodesR.value.nodes);

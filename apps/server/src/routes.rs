@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::HeaderMap,
     response::{
         sse::{Event, KeepAlive, Sse},
@@ -128,15 +128,16 @@ async fn list_projects(
 
     let mut out = Vec::with_capacity(rows.len());
     for p in &mut rows {
-        p.status = resolve_project_status(&state, p).await?;
-        let card = project_list_card(&state, p).await;
+        // Liste : Postgres seul (pas de probe HTTP/Docker ni compare GitHub).
+        p.status = resolve_project_status_db(&state, p).await?;
+        let card = project_list_card(&state, p, false).await;
         out.push(card);
     }
 
     Ok(Json(json!({"data": out})))
 }
 
-async fn project_list_card(state: &AppState, project: &Project) -> Value {
+async fn project_list_card(state: &AppState, project: &Project, github_sync: bool) -> Value {
     let latest: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT status, git_sha, git_message FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1",
     )
@@ -196,7 +197,7 @@ async fn project_list_card(state: &AppState, project: &Project) -> Value {
                     "deployed_sha": null,
                     "head_sha": null,
                 });
-            } else {
+            } else if github_sync {
                 let gh = project_github(state, &project.workspace_uuid).await;
                 if gh.mode() == "off" {
                     sync = json!({
@@ -242,6 +243,14 @@ async fn project_list_card(state: &AppState, project: &Project) -> Value {
                         }
                     }
                 }
+            } else {
+                // Lecture Postgres seule : sync GitHub via GET /git ou ?live=1
+                sync = json!({
+                    "state": "unknown",
+                    "behind_by": 0,
+                    "deployed_sha": dep_sha,
+                    "head_sha": null,
+                });
             }
         }
     }
@@ -650,23 +659,43 @@ async fn scaffold_project(
     ))
 }
 
+#[derive(Deserialize, Default)]
+struct GetProjectQuery {
+    /// Si true : probe HTTP/Docker + compare GitHub (lent). Défaut : Postgres seul.
+    #[serde(default)]
+    live: bool,
+}
+
 async fn get_project(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(uuid): Path<String>,
+    Query(q): Query<GetProjectQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let (_user, _ws, mut project) = auth_project(&state, &headers, &uuid).await?;
-    project.status = resolve_project_status(&state, &project).await?;
+    project.status = if q.live {
+        resolve_project_status_live(&state, &project).await?
+    } else {
+        resolve_project_status_db(&state, &project).await?
+    };
+    // Logs historiques omis (volumineux) ; en cours inclus pour le poll live.
     let deployments = sqlx::query_as::<_, Deployment>(
-        "SELECT * FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 10",
+        r#"SELECT id, uuid, project_id, status, git_sha, git_message,
+                  CASE
+                    WHEN status IN ('queued', 'running', 'building', 'pending', 'deploying') THEN logs
+                    ELSE NULL
+                  END AS logs,
+                  error_summary, error_hint, live_revision_sha,
+                  finished_at, created_at, updated_at
+           FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 10"#,
     )
     .bind(project.id)
     .fetch_all(&state.pool)
     .await
     .map_err(ApiError::from)?;
 
-    // Enrichir avec sync (commits en retard) comme la liste projets.
-    let card = project_list_card(&state, &project).await;
+    // Sync GitHub uniquement si ?live=1 ; sinon placeholder Postgres (rafraîchi via /git).
+    let card = project_list_card(&state, &project, q.live).await;
     let mut project_json = serde_json::to_value(&project).unwrap_or_else(|_| json!({}));
     if let Some(obj) = project_json.as_object_mut() {
         if let Some(sync) = card.get("sync") {
@@ -1125,8 +1154,16 @@ async fn list_deployments(
     Path(uuid): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let (_user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
+    // Logs seulement pour déploiements en cours ; historique via GET /deployments/{uuid}.
     let rows = sqlx::query_as::<_, Deployment>(
-        r#"SELECT * FROM deployments WHERE project_id = $1
+        r#"SELECT id, uuid, project_id, status, git_sha, git_message,
+                  CASE
+                    WHEN status IN ('queued', 'running', 'building', 'pending', 'deploying') THEN logs
+                    ELSE NULL
+                  END AS logs,
+                  error_summary, error_hint, live_revision_sha,
+                  finished_at, created_at, updated_at
+           FROM deployments WHERE project_id = $1
            ORDER BY CASE
              WHEN status IN ('queued', 'running', 'building', 'pending', 'deploying') THEN 0
              ELSE 1
@@ -3221,8 +3258,9 @@ async fn site_reach(state: &AppState, project: &Project) -> &'static str {
     }
 }
 
-/// Statut réel : basé sur le dernier déploiement, pas sur le flag « ready » à la création.
-async fn resolve_project_status(state: &AppState, project: &Project) -> Result<String, ApiError> {
+/// Statut depuis Postgres uniquement (dernier déploiement + status stocké).
+/// Pas de probe HTTP/Docker — pour list/get project instantanés.
+async fn resolve_project_status_db(state: &AppState, project: &Project) -> Result<String, ApiError> {
     let latest: Option<(String,)> = sqlx::query_as(
         "SELECT status FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1",
     )
@@ -3232,7 +3270,48 @@ async fn resolve_project_status(state: &AppState, project: &Project) -> Result<S
     .map_err(ApiError::from)?;
 
     let derived = match latest.as_ref().map(|(s,)| s.as_str()) {
-        Some("running") | Some("queued") | Some("building") => "deploying",
+        Some("running") | Some("queued") | Some("building") | Some("pending") | Some("deploying") => {
+            "deploying"
+        }
+        Some("failed") | Some("error") => "failed",
+        Some("ready") | Some("success") | Some("completed") | Some("live") => {
+            // Conserver le dernier statut de reach connu (live/unhealthy/unrouted/stopped).
+            match project.status.as_str() {
+                "unhealthy" | "unrouted" | "stopped" | "live" => project.status.as_str(),
+                _ => "live",
+            }
+        }
+        None => {
+            if project.status == "ready" || project.status == "live" {
+                "draft"
+            } else if project.status.is_empty() {
+                "draft"
+            } else {
+                project.status.as_str()
+            }
+        }
+        Some(_) => project.status.as_str(),
+    }
+    .to_string();
+
+    persist_derived_status(state, project, &derived).await;
+    Ok(derived)
+}
+
+/// Statut avec probe live (HTTP public ou Docker). Lent — réservé à ?live=1.
+async fn resolve_project_status_live(state: &AppState, project: &Project) -> Result<String, ApiError> {
+    let latest: Option<(String,)> = sqlx::query_as(
+        "SELECT status FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(project.id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+
+    let derived = match latest.as_ref().map(|(s,)| s.as_str()) {
+        Some("running") | Some("queued") | Some("building") | Some("pending") | Some("deploying") => {
+            "deploying"
+        }
         Some("failed") | Some("error") => "failed",
         Some("ready") | Some("success") | Some("completed") | Some("live") => {
             site_reach(state, project).await
@@ -3250,20 +3329,23 @@ async fn resolve_project_status(state: &AppState, project: &Project) -> Result<S
     }
     .to_string();
 
+    persist_derived_status(state, project, &derived).await;
+    Ok(derived)
+}
+
+async fn persist_derived_status(state: &AppState, project: &Project, derived: &str) {
     if derived != project.status
         && matches!(
-            derived.as_str(),
+            derived,
             "draft" | "live" | "failed" | "deploying" | "stopped" | "unhealthy" | "unrouted"
         )
     {
         let _ = sqlx::query("UPDATE projects SET status = $1 WHERE id = $2")
-            .bind(&derived)
+            .bind(derived)
             .bind(project.id)
             .execute(&state.pool)
             .await;
     }
-
-    Ok(derived)
 }
 
 async fn list_templates() -> Json<Value> {
