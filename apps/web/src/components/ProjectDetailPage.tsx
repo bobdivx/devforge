@@ -23,6 +23,7 @@ import {
   Card,
   CardHeader,
   FadeIn,
+  HubAddTile,
   HubGrid,
   HubIcon,
   HubTile,
@@ -1409,6 +1410,7 @@ function EnvPanel({ uuid }: { uuid: string }) {
   const [editLoading, setEditLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
 
   async function load() {
     try {
@@ -1432,6 +1434,7 @@ function EnvPanel({ uuid }: { uuid: string }) {
       await api.envUpsert(uuid, { key: key.trim(), value, secret: true });
       setKey('');
       setValue('');
+      setAdding(false);
       toast.push({ title: 'Variable ajoutée', detail: key.trim(), tone: 'ok' });
       await load();
     } catch (err) {
@@ -1562,68 +1565,72 @@ function EnvPanel({ uuid }: { uuid: string }) {
         </Alert>
       )}
       <FadeIn>
-        <Card>
-          <CardHeader
-            title="Variables"
-            description="Clique une variable pour la voir ou la modifier."
-            action={
-              <div class="flex flex-wrap gap-2">
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => void syncFromWorkdir()}>
-                  Sync depuis workdir
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
-                  Importer .env
-                </Button>
+        {adding ? (
+          <div class="space-y-4">
+            <button
+              type="button"
+              onClick={() => setAdding(false)}
+              class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)] hover:text-white"
+            >
+              <span aria-hidden>←</span>
+              Variables
+            </button>
+            <Card>
+            <CardHeader title="Ajouter une variable" description="Enregistrée tout de suite, marquée secrète." />
+            <form class="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={add}>
+              <div class="w-full sm:w-40 sm:shrink-0">
+                <Input
+                  label="Clé"
+                  placeholder="KEY"
+                  value={key}
+                  onInput={(ev) => setKey((ev.target as HTMLInputElement).value)}
+                />
               </div>
-            }
-          />
-          <form class="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end" onSubmit={add}>
-            <div class="w-full sm:w-40 sm:shrink-0">
-              <Input
-                placeholder="KEY"
-                value={key}
-                onInput={(ev) => setKey((ev.target as HTMLInputElement).value)}
-              />
-            </div>
-            <div class="min-w-0 w-full flex-1">
-              <Input
-                placeholder="value"
-                value={value}
-                onInput={(ev) => setValue((ev.target as HTMLInputElement).value)}
-              />
-            </div>
-            <Button type="submit" variant="secondary" disabled={busy} class="w-full sm:w-auto">
+              <div class="min-w-0 w-full flex-1">
+                <Input
+                  label="Valeur"
+                  placeholder="value"
+                  value={value}
+                  onInput={(ev) => setValue((ev.target as HTMLInputElement).value)}
+                />
+              </div>
+              <Button type="submit" variant="secondary" disabled={busy}>
               Ajouter
             </Button>
           </form>
-          <ul class="divide-y divide-[var(--color-line)] text-sm">
-            {rows.map((r) => (
-              <li key={r.key} class="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                <button
-                  type="button"
-                  class="min-w-0 flex-1 text-left hover:opacity-90"
-                  onClick={() => openEdit(r.key)}
-                >
-                  <span class="break-all font-mono">{r.key}</span>
-                  <span class="ml-3 break-all text-[var(--color-ink-muted)]">
-                    {r.secret ? '••••••••' : r.value}
-                  </span>
-                </button>
-                <div class="flex shrink-0 gap-1">
-                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => openEdit(r.key)}>
-                    Modifier
-                  </Button>
-                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => remove(r.key)}>
-                    Supprimer
-                  </Button>
-                </div>
-              </li>
+            </Card>
+          </div>
+        ) : (
+          <HubGrid>
+            {rows.map((r, index) => (
+              <HubTile
+                key={r.key}
+                index={index}
+                title={r.key}
+                description={r.secret ? 'Secret' : r.value || 'Vide'}
+                icon={<HubIcon name="key" />}
+                onClick={() => openEdit(r.key)}
+              />
             ))}
-            {rows.length === 0 && (
-              <li class="py-2 text-[var(--color-ink-muted)]">Aucune variable.</li>
-            )}
-          </ul>
-        </Card>
+            <HubAddTile index={rows.length} label="Ajouter" onClick={() => setAdding(true)} />
+            <HubTile
+              index={rows.length + 1}
+              title="Importer"
+              description="Fichier .env"
+              icon={<HubIcon name="folder" />}
+              onClick={() => setImportOpen(true)}
+            />
+            <HubTile
+              index={rows.length + 2}
+              title="Sync"
+              description="Depuis le workdir"
+              icon={<HubIcon name="refresh" />}
+              onClick={() => {
+                if (!busy) void syncFromWorkdir();
+              }}
+            />
+          </HubGrid>
+        )}
       </FadeIn>
 
       <Modal
@@ -1766,6 +1773,7 @@ function DomainsPanel({
   const [fqdn, setFqdn] = useState('');
   const [asPrimary, setAsPrimary] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [domainView, setDomainView] = useState<string | null>(null);
 
   async function load() {
     const r = await api.domains(uuid);
@@ -1817,6 +1825,7 @@ function DomainsPanel({
         primary: asPrimary,
       });
       setFqdn('');
+      setDomainView(null);
       toast.push({
         title: asPrimary ? 'Domaine principal défini' : 'Domaine ajouté',
         tone: 'ok',
@@ -1854,6 +1863,7 @@ function DomainsPanel({
       await api.detachDomain(uuid, id);
       const p = await api.project(uuid);
       onProjectUpdate(p.data);
+      setDomainView(null);
       await load();
     } catch (err) {
       toast.push({ title: 'Detach KO', detail: String(err), tone: 'danger' });
@@ -1862,13 +1872,26 @@ function DomainsPanel({
     }
   }
 
+  const openDomain = items.find((d) => d.id === domainView) ?? null;
+
   return (
     <FadeIn>
       <div class="space-y-4">
+        {domainView && (
+          <button
+            type="button"
+            onClick={() => setDomainView(null)}
+            class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)] hover:text-white"
+          >
+            <span aria-hidden>←</span>
+            Domaines
+          </button>
+        )}
+        {domainView === 'primary' ? (
         <Card>
           <CardHeader
             title="Domaine principal"
-            description="URL publique de l’app (production). Un FQDN saisi manuellement devient principal par défaut."
+            description="URL publique de l’app. Un FQDN saisi ici devient le domaine principal."
           />
           <form class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end" onSubmit={savePrimary}>
             <div class="min-w-0 w-full flex-1">
@@ -1889,13 +1912,13 @@ function DomainsPanel({
             </Button>
           </form>
         </Card>
-
+        ) : domainView === 'add' ? (
         <Card>
           <CardHeader
-            title="Domains"
-            description="Aliases + sous-domaine auto. L’ajout manuel est principal par défaut."
+            title="Ajouter un domaine"
+            description="L’ajout peut devenir le domaine principal."
           />
-          <form class="mb-4 space-y-3" onSubmit={attach}>
+          <form class="space-y-3" onSubmit={attach}>
             <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
               <div class="min-w-0 w-full flex-1">
                 <Input
@@ -1917,40 +1940,62 @@ function DomainsPanel({
               Définir comme domaine principal
             </label>
           </form>
-          <ul class="divide-y divide-[var(--color-line)]">
-            {items.map((d) => (
-              <li key={d.id} class="flex flex-col gap-2 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
-                <div class="min-w-0">
-                  <div class="flex flex-wrap items-center gap-2 font-medium">
-                    <span class="break-all">{d.fqdn}</span>
-                    {d.is_primary && <Badge tone="ok">Principal</Badge>}
-                  </div>
-                  <div class="text-xs text-[var(--color-ink-muted)]">
-                    {d.tls ? 'TLS' : 'HTTP'} · {d.status}
-                  </div>
-                </div>
-                <div class="flex shrink-0 gap-1">
-                  {!d.is_primary && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() => makePrimary(d.id)}
-                    >
-                      Principal
-                    </Button>
-                  )}
-                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => detach(d.id)}>
-                    Retirer
-                  </Button>
-                </div>
-              </li>
-            ))}
-            {items.length === 0 && (
-              <li class="py-2 text-sm text-[var(--color-ink-muted)]">Aucun domaine.</li>
-            )}
-          </ul>
         </Card>
+        ) : openDomain ? (
+        <Card>
+          <CardHeader
+            title={openDomain.fqdn}
+            description={`${openDomain.tls ? 'TLS' : 'HTTP'} · ${openDomain.status}${openDomain.is_primary ? ' · principal' : ''}`}
+          />
+          <div class="flex flex-wrap gap-2">
+            {!openDomain.is_primary && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => makePrimary(openDomain.id)}
+              >
+                Définir principal
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              variant="danger"
+              disabled={busy}
+              onClick={() => detach(openDomain.id)}
+            >
+              Retirer
+            </Button>
+          </div>
+        </Card>
+        ) : (
+          <HubGrid>
+            <HubTile
+              index={0}
+              title="Principal"
+              description={primaryFqdn || 'Aucun domaine'}
+              icon={<HubIcon name="globe" />}
+              onClick={() => setDomainView('primary')}
+            />
+            {items.map((d, index) => (
+              <HubTile
+                key={d.id}
+                index={index + 1}
+                title={d.fqdn}
+                description={`${d.is_primary ? 'Principal · ' : ''}${d.tls ? 'TLS' : 'HTTP'} · ${d.status}`}
+                icon={<HubIcon name="globe" />}
+                onClick={() => setDomainView(d.id)}
+              />
+            ))}
+            <HubAddTile
+              index={items.length + 1}
+              label="Ajouter"
+              onClick={() => setDomainView('add')}
+            />
+          </HubGrid>
+        )}
       </div>
     </FadeIn>
   );
@@ -1989,6 +2034,12 @@ function runtimeOf(project: Project): ProjectRuntime {
   } catch {
     return empty;
   }
+}
+
+function splitMount(spec: string): { host: string; target: string } {
+  const i = spec.indexOf(':/');
+  if (i < 0) return { host: spec, target: '' };
+  return { host: spec.slice(0, i), target: spec.slice(i + 1) };
 }
 
 function volumeMountsOf(project: Project): string[] {
@@ -2112,6 +2163,9 @@ function ProjectSettingsPanel({
   const [portHost, setPortHost] = useState('');
   const [portContainer, setPortContainer] = useState('');
   const [portProto, setPortProto] = useState<'tcp' | 'udp' | 'both'>('tcp');
+  const [portView, setPortView] = useState<string | null>(null);
+  const [volumeView, setVolumeView] = useState<string | null>(null);
+  const [runtimeView, setRuntimeView] = useState<string | null>(null);
   const [sideName, setSideName] = useState('');
   const [sideImage, setSideImage] = useState('');
   const [sidePort, setSidePort] = useState('');
@@ -2129,6 +2183,9 @@ function ProjectSettingsPanel({
     if (next) q.set('section', next);
     else q.delete('section');
     window.history.pushState({}, '', `${window.location.pathname}?${q}`);
+    setPortView(null);
+    setVolumeView(null);
+    setRuntimeView(null);
     setSection(next);
   }
 
@@ -2372,6 +2429,12 @@ function ProjectSettingsPanel({
         ? 'Accès /dev/dri'
         : 'Aucun accès';
   const extraPortCount = runtime.ports.length;
+  const publishedPorts = groupedPublishedPorts(runtime.ports);
+  const openPort =
+    publishedPorts.find((p) => `${p.host}:${p.container}` === portView) ?? null;
+  const openVolume = volumeView && volumes.includes(volumeView) ? volumeView : null;
+  const openSide =
+    runtime.sidecars.find((s) => `side:${s.name}` === runtimeView) ?? null;
   const sectionTitle: Record<SettingsSection, string> = {
     git: 'Git',
     group: 'Groupe',
@@ -2476,29 +2539,44 @@ function ProjectSettingsPanel({
     <FadeIn class="space-y-4">
         <button
           type="button"
-          onClick={() => gotoSection(null)}
+          onClick={() => {
+            if (section === 'ports' && portView) {
+              setPortView(null);
+              return;
+            }
+            if (section === 'volumes' && volumeView) {
+              setVolumeView(null);
+              return;
+            }
+            if (section === 'runtime' && runtimeView) {
+              setRuntimeView(null);
+              return;
+            }
+            gotoSection(null);
+          }}
           class="mb-4 flex items-center gap-2 text-sm text-[var(--color-ink-muted)] hover:text-white"
         >
           <span aria-hidden>←</span>
-          Paramètres
+          {(section === 'ports' && portView) ||
+          (section === 'volumes' && volumeView) ||
+          (section === 'runtime' && runtimeView)
+            ? sectionTitle[section]
+            : 'Paramètres'}
         </button>
-        {section !== 'login' && section !== 'danger' && section !== 'group' && (
+        {section !== 'login' &&
+          section !== 'danger' &&
+          section !== 'group' &&
+          section !== 'ports' &&
+          section !== 'volumes' &&
+          section !== 'runtime' && (
         <Card>
         <CardHeader
           title={sectionTitle[section]}
-          description={
-            section === 'ports'
-              ? 'Le port HTTP passe par le nom de domaine. Les autres sont publiés sur l’hôte.'
-              : 'Appliqué au prochain déploiement, sauf Git et l’URL.'
-          }
+          description="Appliqué au prochain déploiement, sauf Git et l’URL."
           action={
             section === 'build' ? (
               <Button size="sm" variant="outline" disabled={busy} onClick={runDetect}>
                 Détecter
-              </Button>
-            ) : section === 'ports' ? (
-              <Button size="sm" variant="outline" disabled={busy} onClick={runDetectPorts}>
-                Détecter les ports
               </Button>
             ) : undefined
           }
@@ -2570,14 +2648,6 @@ function ProjectSettingsPanel({
             </select>
           </label>
           )}
-          {section === 'ports' && (
-          <Input
-            label="Port HTTP"
-            type="number"
-            value={String(port)}
-            onInput={(e) => setPort(Number((e.target as HTMLInputElement).value) || 80)}
-          />
-          )}
           {section === 'build' && (
           <label class="flex items-center gap-2 text-sm md:col-span-2">
             <input
@@ -2607,325 +2677,6 @@ function ProjectSettingsPanel({
             /dev/dri (VAAPI) au prochain déploiement
           </label>
           </>
-          )}
-          {section === 'volumes' && (
-          <div class="space-y-2 md:col-span-2">
-            <div>
-              <div class="text-sm font-medium">Dossiers montés</div>
-              <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
-                Chemin du nœud vers un chemin dans le conteneur, appliqué au prochain
-                déploiement. Ex. popcorn : <span class="font-mono">/media/Docker/AppData/popcorn</span>{' '}
-                → <span class="font-mono">/app/.data</span>,{' '}
-                <span class="font-mono">/media/Media/Popcornn/media</span> →{' '}
-                <span class="font-mono">/app/downloads</span>.
-              </p>
-            </div>
-            {volumes.length > 0 && (
-              <ul class="space-y-1">
-                {volumes.map((v) => (
-                  <li
-                    key={v}
-                    class="flex items-center justify-between gap-2 rounded-xl border border-[var(--color-line)] px-3 py-2 font-mono text-xs"
-                  >
-                    <span class="min-w-0 break-all">{v}</span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setVolumes((list) => list.filter((x) => x !== v))}
-                    >
-                      Retirer
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
-              <div class="min-w-0 flex-1">
-                <Input
-                  label="Hôte"
-                  placeholder="/media/Media/Popcornn/media"
-                  value={volumeHost}
-                  onInput={(e) => setVolumeHost((e.target as HTMLInputElement).value)}
-                />
-              </div>
-              <div class="min-w-0 flex-1">
-                <Input
-                  label="Conteneur"
-                  placeholder="/app/downloads"
-                  value={volumeTarget}
-                  onInput={(e) => setVolumeTarget((e.target as HTMLInputElement).value)}
-                />
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  const host = volumeHost.trim();
-                  const target = volumeTarget.trim();
-                  if (!host.startsWith('/') || !target.startsWith('/')) {
-                    toast.push({
-                      title: 'Chemins absolus',
-                      detail: 'Les deux chemins commencent par /',
-                      tone: 'warn',
-                    });
-                    return;
-                  }
-                  const spec = `${host}:${target}`;
-                  setVolumes((list) => (list.includes(spec) ? list : [...list, spec]));
-                  setVolumeHost('');
-                  setVolumeTarget('');
-                }}
-              >
-                Ajouter
-              </Button>
-            </div>
-          </div>
-          )}
-          {(section === 'runtime' || section === 'ports') && (
-          <div class="space-y-3 rounded-xl border border-[var(--color-line)] p-3 md:col-span-2">
-            {section === 'runtime' && (
-            <>
-            <div>
-              <div class="text-sm font-medium">Runtime Docker</div>
-              <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
-                Ports publiés en plus du port HTTP, service à côté (ex. FlareSolverr), limites
-                et healthcheck. Appliqué au prochain déploiement.
-              </p>
-            </div>
-            <div class="grid gap-2 sm:grid-cols-2">
-              <Input
-                label="Mémoire"
-                placeholder="20g"
-                value={runtime.memory || ''}
-                onInput={(e) =>
-                  setRuntime((r) => ({ ...r, memory: (e.target as HTMLInputElement).value }))
-                }
-              />
-              <Input
-                label="CPUs"
-                placeholder="1"
-                value={runtime.cpus || ''}
-                onInput={(e) =>
-                  setRuntime((r) => ({ ...r, cpus: (e.target as HTMLInputElement).value }))
-                }
-              />
-            </div>
-            <Input
-              label="Healthcheck"
-              placeholder="curl -f http://localhost:3000/api/client/health || exit 1"
-              value={runtime.healthcheck?.cmd || ''}
-              onInput={(e) => {
-                const cmd = (e.target as HTMLInputElement).value;
-                setRuntime((r) => ({
-                  ...r,
-                  healthcheck: cmd.trim()
-                    ? {
-                        cmd,
-                        interval: r.healthcheck?.interval || '30s',
-                        timeout: r.healthcheck?.timeout || '10s',
-                        retries: r.healthcheck?.retries || 5,
-                        start_period: r.healthcheck?.start_period || '2m',
-                      }
-                    : null,
-                }));
-              }}
-            />
-            </>
-            )}
-            {section === 'ports' && (
-            <>
-            <p class="text-xs text-[var(--color-ink-muted)]">
-              Le port HTTP ci-dessus est celui de Traefik. Ici, les ports ouverts sur l’hôte
-              (ex. popcorn <span class="font-mono">4240</span> en tcp et udp). La détection lit le Dockerfile, le compose
-              et les variables <span class="font-mono">*_PORT</span>.
-            </p>
-            <div class="text-sm font-medium">Ports supplémentaires</div>
-            {runtime.ports.length > 0 && (
-              <ul class="space-y-1">
-                {groupedPublishedPorts(runtime.ports).map((p) => (
-                  <li
-                    key={`${p.host}:${p.container}/${p.label}`}
-                    class="flex items-center justify-between gap-2 font-mono text-xs"
-                  >
-                    <span>
-                      {p.host}:{p.container}/{p.label}
-                    </span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() =>
-                        setRuntime((r) => ({
-                          ...r,
-                          ports: r.ports.filter(
-                            (x) =>
-                              !(
-                                x.host === p.host &&
-                                x.container === p.container &&
-                                p.protocols.includes(x.protocol)
-                              ),
-                          ),
-                        }))
-                      }
-                    >
-                      Retirer
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
-              <Input
-                label="Hôte"
-                placeholder="4240"
-                value={portHost}
-                onInput={(e) => setPortHost((e.target as HTMLInputElement).value)}
-              />
-              <Input
-                label="Conteneur"
-                placeholder="4240"
-                value={portContainer}
-                onInput={(e) => setPortContainer((e.target as HTMLInputElement).value)}
-              />
-              <label class="flex flex-col gap-1.5 text-sm">
-                <span class="font-medium">Protocole</span>
-                <select
-                  class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
-                  value={portProto}
-                  onChange={(e) =>
-                    setPortProto((e.target as HTMLSelectElement).value as 'tcp' | 'udp' | 'both')
-                  }
-                >
-                  <option value="tcp">tcp</option>
-                  <option value="udp">udp</option>
-                  <option value="both">tcp et udp</option>
-                </select>
-              </label>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  const host = Number(portHost);
-                  const container = Number(portContainer);
-                  if (!host || !container || host > 65535 || container > 65535) {
-                    toast.push({ title: 'Port invalide', tone: 'warn' });
-                    return;
-                  }
-                  const protocols: Array<'tcp' | 'udp'> =
-                    portProto === 'both' ? ['tcp', 'udp'] : [portProto];
-                  setRuntime((r) => {
-                    const ports = [...r.ports];
-                    for (const protocol of protocols) {
-                      if (
-                        ports.some(
-                          (x) =>
-                            x.host === host && x.container === container && x.protocol === protocol,
-                        )
-                      ) {
-                        continue;
-                      }
-                      ports.push({ host, container, protocol });
-                    }
-                    return { ...r, ports };
-                  });
-                  setPortHost('');
-                  setPortContainer('');
-                }}
-              >
-                Ajouter le port
-              </Button>
-            </div>
-            </>
-            )}
-            {section === 'runtime' && (
-            <>
-            <div class="text-sm font-medium">Service à côté</div>
-            <p class="text-xs text-[var(--color-ink-muted)]">
-              Le nom est le DNS sur le réseau du projet. FlareSolverr : nom{' '}
-              <span class="font-mono">flaresolverr</span>, image{' '}
-              <span class="font-mono">flaresolverr/flaresolverr:latest</span>, port 9191. L’app
-              l’atteint via <span class="font-mono">http://flaresolverr:9191</span>.
-            </p>
-            {runtime.sidecars.map((s) => (
-              <div
-                key={s.name}
-                class="flex items-center justify-between gap-2 font-mono text-xs"
-              >
-                <span class="min-w-0 break-all">
-                  {s.name} · {s.image}
-                  {s.ports[0] ? ` · ${s.ports[0].host}/${s.ports[0].protocol}` : ''}
-                </span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() =>
-                    setRuntime((r) => ({
-                      ...r,
-                      sidecars: r.sidecars.filter((x) => x.name !== s.name),
-                    }))
-                  }
-                >
-                  Retirer
-                </Button>
-              </div>
-            ))}
-            <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
-              <Input
-                label="Nom DNS"
-                placeholder="flaresolverr"
-                value={sideName}
-                onInput={(e) => setSideName((e.target as HTMLInputElement).value)}
-              />
-              <Input
-                label="Image"
-                placeholder="flaresolverr/flaresolverr:latest"
-                value={sideImage}
-                onInput={(e) => setSideImage((e.target as HTMLInputElement).value)}
-              />
-              <Input
-                label="Port"
-                placeholder="9191"
-                value={sidePort}
-                onInput={(e) => setSidePort((e.target as HTMLInputElement).value)}
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  const name = sideName.trim().toLowerCase();
-                  const image = sideImage.trim();
-                  const port = Number(sidePort);
-                  if (!name || !image) {
-                    toast.push({ title: 'Nom et image requis', tone: 'warn' });
-                    return;
-                  }
-                  const ports: PublishedPort[] =
-                    port > 0 && port <= 65535
-                      ? [{ host: port, container: port, protocol: 'tcp' }]
-                      : [];
-                  setRuntime((r) => ({
-                    ...r,
-                    sidecars: [
-                      ...r.sidecars.filter((x) => x.name !== name),
-                      { name, image, ports },
-                    ],
-                  }));
-                  setSideName('');
-                  setSideImage('');
-                  setSidePort('');
-                }}
-              >
-                Ajouter le service
-              </Button>
-            </div>
-            </>
-            )}
-          </div>
           )}
           {section === 'access' && (
           <>
@@ -3003,6 +2754,540 @@ function ProjectSettingsPanel({
           )}
         </form>
       </Card>
+      )}
+
+      {section === 'ports' && (portView == null || (portView !== 'http' && portView !== 'add' && !openPort)) && (
+        <div class="space-y-4">
+          {detectInfo && <Alert tone="ok">{detectInfo}</Alert>}
+          <HubGrid>
+            <HubTile
+              index={0}
+              title="HTTP"
+              description={`Port ${port} · domaine`}
+              icon={<HubIcon name="globe" />}
+              onClick={() => setPortView('http')}
+            />
+            {publishedPorts.map((p, index) => (
+              <HubTile
+                key={`${p.host}:${p.container}`}
+                index={index + 1}
+                title={`${p.host}:${p.container}`}
+                description={p.label}
+                icon={<HubIcon name="ports" />}
+                onClick={() => setPortView(`${p.host}:${p.container}`)}
+              />
+            ))}
+            <HubTile
+              index={publishedPorts.length + 1}
+              title="Détecter"
+              description="Dockerfile, compose, *_PORT"
+              icon={<HubIcon name="refresh" />}
+              onClick={() => {
+                if (!busy) void runDetectPorts();
+              }}
+            />
+            <HubAddTile
+              index={publishedPorts.length + 2}
+              label="Ajouter"
+              onClick={() => setPortView('add')}
+            />
+          </HubGrid>
+          <Button type="button" disabled={busy} onClick={() => void save()}>
+            {busy ? 'Enregistrement…' : 'Enregistrer'}
+          </Button>
+        </div>
+      )}
+
+      {section === 'ports' && portView === 'http' && (
+        <Card>
+          <CardHeader
+            title="Port HTTP"
+            description="C’est le port que Traefik utilise. Il n’est pas publié sur l’hôte."
+          />
+          <form class="grid gap-3" onSubmit={save}>
+            <Input
+              label="Port"
+              type="number"
+              value={String(port)}
+              onInput={(e) => setPort(Number((e.target as HTMLInputElement).value) || 80)}
+            />
+            <div>
+              <Button type="submit" disabled={busy}>
+                {busy ? 'Enregistrement…' : 'Enregistrer'}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {section === 'ports' && portView === 'add' && (
+        <Card>
+          <CardHeader
+            title="Ajouter un port"
+            description="Publié sur l’hôte au prochain déploiement. TCP et UDP ouvrent les deux."
+          />
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <Input
+              label="Hôte"
+              placeholder="4240"
+              value={portHost}
+              onInput={(e) => setPortHost((e.target as HTMLInputElement).value)}
+            />
+            <Input
+              label="Conteneur"
+              placeholder="4240"
+              value={portContainer}
+              onInput={(e) => setPortContainer((e.target as HTMLInputElement).value)}
+            />
+            <label class="flex flex-col gap-1.5 text-sm">
+              <span class="font-medium">Protocole</span>
+              <select
+                class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
+                value={portProto}
+                onChange={(e) =>
+                  setPortProto((e.target as HTMLSelectElement).value as 'tcp' | 'udp' | 'both')
+                }
+              >
+                <option value="tcp">tcp</option>
+                <option value="udp">udp</option>
+                <option value="both">tcp et udp</option>
+              </select>
+            </label>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const host = Number(portHost);
+                const container = Number(portContainer);
+                if (!host || !container || host > 65535 || container > 65535) {
+                  toast.push({ title: 'Port invalide', tone: 'warn' });
+                  return;
+                }
+                const protocols: Array<'tcp' | 'udp'> =
+                  portProto === 'both' ? ['tcp', 'udp'] : [portProto];
+                setRuntime((r) => {
+                  const ports = [...r.ports];
+                  for (const protocol of protocols) {
+                    if (
+                      ports.some(
+                        (x) =>
+                          x.host === host && x.container === container && x.protocol === protocol,
+                      )
+                    ) {
+                      continue;
+                    }
+                    ports.push({ host, container, protocol });
+                  }
+                  return { ...r, ports };
+                });
+                setPortHost('');
+                setPortContainer('');
+                setPortView(null);
+                toast.push({
+                  title: 'Port ajouté',
+                  detail: 'Enregistre pour le publier au prochain déploiement.',
+                  tone: 'ok',
+                });
+              }}
+            >
+              Ajouter
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {section === 'ports' && openPort && (
+        <Card>
+          <CardHeader
+            title={`${openPort.host}:${openPort.container}`}
+            description={`Protocole ${openPort.label}. Publié sur l’hôte au prochain déploiement.`}
+          />
+          <div class="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                const current = openPort;
+                setRuntime((r) => ({
+                  ...r,
+                  ports: r.ports.filter(
+                    (x) =>
+                      !(
+                        x.host === current.host &&
+                        x.container === current.container &&
+                        current.protocols.includes(x.protocol)
+                      ),
+                  ),
+                }));
+                setPortView(null);
+                toast.push({
+                  title: 'Port retiré',
+                  detail: 'Enregistre pour appliquer.',
+                  tone: 'ok',
+                });
+              }}
+            >
+              Retirer
+            </Button>
+            <Button type="button" disabled={busy} onClick={() => void save()}>
+              {busy ? 'Enregistrement…' : 'Enregistrer'}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {section === 'volumes' && (volumeView == null || (volumeView !== 'add' && !openVolume)) && (
+        <div class="space-y-4">
+          <HubGrid>
+            {volumes.map((spec, index) => {
+              const mount = splitMount(spec);
+              return (
+                <HubTile
+                  key={spec}
+                  index={index}
+                  title={mount.target || spec}
+                  description={mount.host}
+                  icon={<HubIcon name="folder" />}
+                  onClick={() => setVolumeView(spec)}
+                />
+              );
+            })}
+            <HubAddTile
+              index={volumes.length}
+              label="Ajouter"
+              onClick={() => setVolumeView('add')}
+            />
+          </HubGrid>
+          <Button type="button" disabled={busy} onClick={() => void save()}>
+            {busy ? 'Enregistrement…' : 'Enregistrer'}
+          </Button>
+        </div>
+      )}
+
+      {section === 'volumes' && volumeView === 'add' && (
+        <Card>
+          <CardHeader
+            title="Ajouter un dossier"
+            description="Chemin du nœud vers un chemin dans le conteneur. Les deux commencent par /."
+          />
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div class="min-w-0 flex-1">
+              <Input
+                label="Hôte"
+                placeholder="/media/Media/Popcornn/media"
+                value={volumeHost}
+                onInput={(e) => setVolumeHost((e.target as HTMLInputElement).value)}
+              />
+            </div>
+            <div class="min-w-0 flex-1">
+              <Input
+                label="Conteneur"
+                placeholder="/app/downloads"
+                value={volumeTarget}
+                onInput={(e) => setVolumeTarget((e.target as HTMLInputElement).value)}
+              />
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const host = volumeHost.trim();
+                const target = volumeTarget.trim();
+                if (!host.startsWith('/') || !target.startsWith('/')) {
+                  toast.push({
+                    title: 'Chemins absolus',
+                    detail: 'Les deux chemins commencent par /',
+                    tone: 'warn',
+                  });
+                  return;
+                }
+                const spec = `${host}:${target}`;
+                setVolumes((list) => (list.includes(spec) ? list : [...list, spec]));
+                setVolumeHost('');
+                setVolumeTarget('');
+                setVolumeView(null);
+                toast.push({
+                  title: 'Dossier ajouté',
+                  detail: 'Enregistre pour le monter au prochain déploiement.',
+                  tone: 'ok',
+                });
+              }}
+            >
+              Ajouter
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {section === 'volumes' && openVolume && (
+        <Card>
+          <CardHeader
+            title={splitMount(openVolume).target || openVolume}
+            description={splitMount(openVolume).host}
+          />
+          <div class="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                const current = openVolume;
+                setVolumes((list) => list.filter((x) => x !== current));
+                setVolumeView(null);
+                toast.push({
+                  title: 'Dossier retiré',
+                  detail: 'Enregistre pour appliquer.',
+                  tone: 'ok',
+                });
+              }}
+            >
+              Retirer
+            </Button>
+            <Button type="button" disabled={busy} onClick={() => void save()}>
+              {busy ? 'Enregistrement…' : 'Enregistrer'}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {section === 'runtime' &&
+        (runtimeView == null ||
+          (runtimeView !== 'memory' &&
+            runtimeView !== 'cpus' &&
+            runtimeView !== 'health' &&
+            runtimeView !== 'add' &&
+            !openSide)) && (
+          <div class="space-y-4">
+            <HubGrid>
+              <HubTile
+                index={0}
+                title="Mémoire"
+                description={runtime.memory?.trim() || 'Sans limite'}
+                icon={<HubIcon name="server" />}
+                onClick={() => setRuntimeView('memory')}
+              />
+              <HubTile
+                index={1}
+                title="CPUs"
+                description={runtime.cpus?.trim() || 'Sans limite'}
+                icon={<HubIcon name="cpu" />}
+                onClick={() => setRuntimeView('cpus')}
+              />
+              <HubTile
+                index={2}
+                title="Healthcheck"
+                description={runtime.healthcheck?.cmd?.trim() || 'Aucun'}
+                icon={<HubIcon name="heart" />}
+                onClick={() => setRuntimeView('health')}
+              />
+              {runtime.sidecars.map((s, index) => (
+                <HubTile
+                  key={s.name}
+                  index={index + 3}
+                  title={s.name}
+                  description={
+                    s.ports[0]
+                      ? `${s.image} · ${s.ports[0].host}`
+                      : s.image
+                  }
+                  icon={<HubIcon name="server" />}
+                  onClick={() => setRuntimeView(`side:${s.name}`)}
+                />
+              ))}
+              <HubAddTile
+                index={runtime.sidecars.length + 3}
+                label="Service"
+                onClick={() => setRuntimeView('add')}
+              />
+            </HubGrid>
+            <Button type="button" disabled={busy} onClick={() => void save()}>
+              {busy ? 'Enregistrement…' : 'Enregistrer'}
+            </Button>
+          </div>
+        )}
+
+      {section === 'runtime' && runtimeView === 'memory' && (
+        <Card>
+          <CardHeader title="Mémoire" description="Limite Docker, par exemple 20g. Vide = sans limite." />
+          <form class="grid gap-3" onSubmit={save}>
+            <Input
+              label="Mémoire"
+              placeholder="20g"
+              value={runtime.memory || ''}
+              onInput={(e) =>
+                setRuntime((r) => ({ ...r, memory: (e.target as HTMLInputElement).value }))
+              }
+            />
+            <div>
+              <Button type="submit" disabled={busy}>
+                {busy ? 'Enregistrement…' : 'Enregistrer'}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {section === 'runtime' && runtimeView === 'cpus' && (
+        <Card>
+          <CardHeader title="CPUs" description="Nombre de CPU Docker. Vide = sans limite." />
+          <form class="grid gap-3" onSubmit={save}>
+            <Input
+              label="CPUs"
+              placeholder="1"
+              value={runtime.cpus || ''}
+              onInput={(e) =>
+                setRuntime((r) => ({ ...r, cpus: (e.target as HTMLInputElement).value }))
+              }
+            />
+            <div>
+              <Button type="submit" disabled={busy}>
+                {busy ? 'Enregistrement…' : 'Enregistrer'}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {section === 'runtime' && runtimeView === 'health' && (
+        <Card>
+          <CardHeader
+            title="Healthcheck"
+            description="Commande exécutée dans le conteneur. Vide = pas de healthcheck Docker."
+          />
+          <form class="grid gap-3" onSubmit={save}>
+            <Input
+              label="Commande"
+              placeholder="curl -f http://localhost:3000/api/client/health || exit 1"
+              value={runtime.healthcheck?.cmd || ''}
+              onInput={(e) => {
+                const cmd = (e.target as HTMLInputElement).value;
+                setRuntime((r) => ({
+                  ...r,
+                  healthcheck: cmd.trim()
+                    ? {
+                        cmd,
+                        interval: r.healthcheck?.interval || '30s',
+                        timeout: r.healthcheck?.timeout || '10s',
+                        retries: r.healthcheck?.retries || 5,
+                        start_period: r.healthcheck?.start_period || '2m',
+                      }
+                    : null,
+                }));
+              }}
+            />
+            <div>
+              <Button type="submit" disabled={busy}>
+                {busy ? 'Enregistrement…' : 'Enregistrer'}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {section === 'runtime' && runtimeView === 'add' && (
+        <Card>
+          <CardHeader
+            title="Service à côté"
+            description="Le nom est le DNS sur le réseau du projet. FlareSolverr : flaresolverr, image flaresolverr/flaresolverr:latest, port 9191."
+          />
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <Input
+              label="Nom DNS"
+              placeholder="flaresolverr"
+              value={sideName}
+              onInput={(e) => setSideName((e.target as HTMLInputElement).value)}
+            />
+            <Input
+              label="Image"
+              placeholder="flaresolverr/flaresolverr:latest"
+              value={sideImage}
+              onInput={(e) => setSideImage((e.target as HTMLInputElement).value)}
+            />
+            <Input
+              label="Port"
+              placeholder="9191"
+              value={sidePort}
+              onInput={(e) => setSidePort((e.target as HTMLInputElement).value)}
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const name = sideName.trim().toLowerCase();
+                const image = sideImage.trim();
+                const port = Number(sidePort);
+                if (!name || !image) {
+                  toast.push({ title: 'Nom et image requis', tone: 'warn' });
+                  return;
+                }
+                const ports: PublishedPort[] =
+                  port > 0 && port <= 65535
+                    ? [{ host: port, container: port, protocol: 'tcp' }]
+                    : [];
+                setRuntime((r) => ({
+                  ...r,
+                  sidecars: [
+                    ...r.sidecars.filter((x) => x.name !== name),
+                    { name, image, ports },
+                  ],
+                }));
+                setSideName('');
+                setSideImage('');
+                setSidePort('');
+                setRuntimeView(null);
+                toast.push({
+                  title: 'Service ajouté',
+                  detail: 'Enregistre pour le lancer au prochain déploiement.',
+                  tone: 'ok',
+                });
+              }}
+            >
+              Ajouter
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {section === 'runtime' && openSide && (
+        <Card>
+          <CardHeader
+            title={openSide.name}
+            description={
+              openSide.ports[0]
+                ? `${openSide.image} · port ${openSide.ports[0].host}`
+                : openSide.image
+            }
+          />
+          <div class="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                const name = openSide.name;
+                setRuntime((r) => ({
+                  ...r,
+                  sidecars: r.sidecars.filter((x) => x.name !== name),
+                }));
+                setRuntimeView(null);
+                toast.push({
+                  title: 'Service retiré',
+                  detail: 'Enregistre pour appliquer.',
+                  tone: 'ok',
+                });
+              }}
+            >
+              Retirer
+            </Button>
+            <Button type="button" disabled={busy} onClick={() => void save()}>
+              {busy ? 'Enregistrement…' : 'Enregistrer'}
+            </Button>
+          </div>
+        </Card>
       )}
 
       {section === 'group' && <ProjectGroupPanel project={project} onChanged={onSaved} />}
