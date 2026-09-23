@@ -53,7 +53,17 @@ jobs:
             local old="$1" new="$2"
             sed -i "s/^version = \"${old}\"/version = \"${new}\"/" Cargo.toml
             sed -i "0,/\"version\": \"${old}\"/s//\"version\": \"${new}\"/" apps/web/package.json
-            sed -i "s/^version = \"${old}\"$/version = \"${new}\"/" Cargo.lock
+            # Uniquement les crates du workspace. Un `sed` global réécrit aussi
+            # les dépendances qui ont le même numéro (ex. syn 2.0.119).
+            awk -v old="$old" -v new="$new" '
+              /^name = "devforge/ { hit = 1 }
+              hit && $0 == "version = \"" old "\"" {
+                sub(old, new)
+                hit = 0
+              }
+              { print }
+            ' Cargo.lock > Cargo.lock.tmp
+            mv Cargo.lock.tmp Cargo.lock
           }
 
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
