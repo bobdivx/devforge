@@ -45,6 +45,10 @@ pub fn router() -> Router<AppState> {
             "/api/v1/deployments/{uuid}/request-repair",
             post(request_repair),
         )
+        .route(
+            "/api/v1/deployments/{uuid}/cancel",
+            post(cancel_deployment),
+        )
         .route("/api/v1/agent/tools", get(agent_tools))
         .route("/api/v1/agent/chat", post(agent_chat))
         .route("/api/v1/agent/tools/{tool}", post(agent_execute_tool))
@@ -1122,7 +1126,13 @@ async fn list_deployments(
 ) -> Result<Json<Value>, ApiError> {
     let (_user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
     let rows = sqlx::query_as::<_, Deployment>(
-        "SELECT * FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 50",
+        r#"SELECT * FROM deployments WHERE project_id = $1
+           ORDER BY CASE
+             WHEN status IN ('queued', 'running', 'building', 'pending', 'deploying') THEN 0
+             ELSE 1
+           END,
+           created_at DESC
+           LIMIT 50"#,
     )
     .bind(project.id)
     .fetch_all(&state.pool)
@@ -1660,6 +1670,76 @@ fn build_repair_prompt(dep_uuid: &str, summary: &str, hint: &str, raw_logs: &str
         4. **Relancer & Valider** : Appelle le tool `trigger_deploy` pour relancer immédiatement le déploiement et confirmer la résolution, puis résume tes actions à l'utilisateur.",
         if hint.is_empty() { "Aucun indice spécifique" } else { hint }
     )
+}
+
+/// POST /api/v1/deployments/{uuid}/cancel
+/// Annule un déploiement encore en cours. N’arrête pas le conteneur de production :
+/// seul le token cancel + le conteneur temporaire blue-green (`-new`) sont touchés.
+async fn cancel_deployment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let (_user, _ws, dep) = auth_deployment(&state, &headers, &uuid).await?;
+
+    let in_progress = matches!(
+        dep.status.as_str(),
+        "queued" | "running" | "building" | "pending" | "deploying"
+    );
+    if !in_progress {
+        return Err(ApiError::message(
+            "Ce déploiement n’est plus en cours — annulation impossible",
+        ));
+    }
+
+    let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE id = $1")
+        .bind(dep.project_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::not_found("project"))?;
+
+    let cancelled = crate::deploy_queue::cancel_one_deployment(
+        &state.deploy_queue,
+        &state.pool,
+        &uuid,
+    )
+    .await
+    .map_err(ApiError::from)?;
+
+    if !cancelled {
+        return Err(ApiError::message(
+            "Ce déploiement n’est plus en cours — annulation impossible",
+        ));
+    }
+
+    let server = project.server_id.as_deref().unwrap_or("default");
+    state
+        .deploy
+        .abort_in_flight_swap(&project.uuid, server)
+        .await;
+
+    crate::deploy_queue::record_event(
+        &state.pool,
+        &project.uuid,
+        "deploy",
+        "cancelled",
+        &uuid,
+        "user_cancel",
+    )
+    .await;
+
+    let dep = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = $1")
+        .bind(&uuid)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(ApiError::from)?;
+
+    Ok(Json(json!({
+        "data": dep,
+        "ok": true,
+        "cancelled": true,
+    })))
 }
 
 /// POST /api/v1/deployments/{uuid}/request-repair
