@@ -16,7 +16,6 @@ import {
   Input,
   Modal,
   Skeleton,
-  Switch,
 } from './ui';
 import { useToast } from './ui/Toast';
 
@@ -39,7 +38,6 @@ function GroupBody({ uuid }: { uuid: string }) {
   const [addRole, setAddRole] = useState('server');
   const [addOpen, setAddOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
 
   async function load() {
     if (!uuid) {
@@ -99,47 +97,6 @@ function GroupBody({ uuid }: { uuid: string }) {
     }
   }
 
-  async function saveRole(projectUuid: string, role: string) {
-    if (!group) return;
-    setBusy(true);
-    try {
-      const r = await api.updateGroupMember(group.uuid, projectUuid, { role });
-      setGroup(r.data);
-      toast.push({ title: 'Rôle enregistré', detail: 'Redéploie les apps du groupe.', tone: 'ok' });
-    } catch (err) {
-      toast.push({ title: 'Rôle KO', detail: String(err), tone: 'danger' });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveGpu(projectUuid: string, gpu_nvidia: boolean, gpu_dri: boolean) {
-    setBusy(true);
-    try {
-      await api.updateProject(projectUuid, { gpu_nvidia, gpu_dri });
-      await load();
-      toast.push({ title: 'GPU enregistré', detail: 'Appliqué au prochain déploiement.', tone: 'ok' });
-    } catch (err) {
-      toast.push({ title: 'GPU KO', detail: String(err), tone: 'danger' });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function remove(projectUuid: string) {
-    if (!group) return;
-    setBusy(true);
-    try {
-      const r = await api.removeGroupMember(group.uuid, projectUuid);
-      setGroup(r.data);
-      setSelectedUuid(null);
-    } catch (err) {
-      toast.push({ title: 'Retrait KO', detail: String(err), tone: 'danger' });
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function removeGroup() {
     if (!group) return;
     setBusy(true);
@@ -153,7 +110,6 @@ function GroupBody({ uuid }: { uuid: string }) {
   }
 
   const candidates = projects.filter((p) => !p.group_uuid);
-  const selected = group?.members.find((member) => member.project_uuid === selectedUuid) ?? null;
 
   return (
     <AppShell
@@ -189,7 +145,6 @@ function GroupBody({ uuid }: { uuid: string }) {
                 member={member}
                 project={projectForMember(member, projects)}
                 index={index}
-                onOpen={() => setSelectedUuid(member.project_uuid)}
               />
             ))}
             <HubAddTile index={group.members.length} label="Ajouter" onClick={() => setAddOpen(true)} />
@@ -285,17 +240,6 @@ function GroupBody({ uuid }: { uuid: string }) {
         )}
       </Modal>
 
-      {selected && (
-        <MemberModal
-          member={selected}
-          project={projectForMember(selected, projects)}
-          busy={busy}
-          onClose={() => setSelectedUuid(null)}
-          onRole={(role) => saveRole(selected.project_uuid, role)}
-          onGpu={(nvidia, dri) => saveGpu(selected.project_uuid, nvidia, dri)}
-          onRemove={() => remove(selected.project_uuid)}
-        />
-      )}
     </AppShell>
   );
 }
@@ -337,19 +281,17 @@ function MemberTile({
   member,
   project,
   index,
-  onOpen,
 }: {
   member: AppGroup['members'][number];
   project: Project;
   index: number;
-  onOpen: () => void;
 }) {
   const status = projectStatusMeta(member.status);
   return (
     <HubTile
       index={index}
       title={member.name}
-      onClick={onOpen}
+      href={`/app/projects/view?uuid=${encodeURIComponent(member.project_uuid)}`}
       iconClass="!bg-transparent"
       icon={<AppIcon project={project} class="!h-full !w-full !rounded-[1.15rem]" />}
       badge={
@@ -380,98 +322,6 @@ function MemberTile({
         </div>
       }
     />
-  );
-}
-
-function MemberModal({
-  member,
-  project,
-  busy,
-  onClose,
-  onRole,
-  onGpu,
-  onRemove,
-}: {
-  member: AppGroup['members'][number];
-  project: Project;
-  busy: boolean;
-  onClose: () => void;
-  onRole: (role: string) => void;
-  onGpu: (nvidia: boolean, dri: boolean) => void;
-  onRemove: () => void;
-}) {
-  const [role, setRole] = useState(member.role);
-  useEffect(() => setRole(member.role), [member.role]);
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title={member.name}
-      description={`${roleLabel(member.role)} · ${member.internal_url}`}
-      size="md"
-    >
-      <div class="space-y-5">
-        <div class="flex items-center gap-3">
-          <AppIcon project={project} size="md" />
-          <Button
-            size="sm"
-            variant="outline"
-            href={`/app/projects/view?uuid=${encodeURIComponent(member.project_uuid)}`}
-          >
-            Ouvrir
-          </Button>
-        </div>
-        <div class="flex flex-wrap items-end gap-3">
-          <div class="min-w-[10rem] flex-1">
-            <Input
-              label="Rôle"
-              value={role}
-              list="group-member-roles"
-              onInput={(e) => setRole((e.target as HTMLInputElement).value)}
-            />
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy || role.trim() === member.role || !role.trim()}
-            onClick={() => onRole(role.trim())}
-          >
-            Enregistrer
-          </Button>
-          <datalist id="group-member-roles">
-            {ROLE_HINTS.map((hint) => (
-              <option key={hint} value={hint} />
-            ))}
-          </datalist>
-        </div>
-        <div class="space-y-3">
-          <div class="flex items-center justify-between gap-3">
-            <span class="text-sm">GPU NVIDIA</span>
-            <Switch
-              checked={member.gpu_nvidia}
-              disabled={busy}
-              label="GPU NVIDIA"
-              onToggle={() => onGpu(!member.gpu_nvidia, member.gpu_dri)}
-            />
-          </div>
-          <div class="flex items-center justify-between gap-3">
-            <span class="text-sm">Accès /dev/dri</span>
-            <Switch
-              checked={member.gpu_dri}
-              disabled={busy}
-              label="Accès /dev/dri"
-              onToggle={() => onGpu(member.gpu_nvidia, !member.gpu_dri)}
-            />
-          </div>
-        </div>
-        <div class="border-t border-[var(--color-line)] pt-4">
-          <Button size="sm" variant="ghost" disabled={busy} onClick={onRemove}>
-            Retirer du groupe
-          </Button>
-        </div>
-      </div>
-    </Modal>
   );
 }
 
@@ -921,6 +771,21 @@ export function ProjectGroupPanel({ project, onChanged }: { project: Project; on
     }
   }
 
+  async function leaveGroup() {
+    if (!project.group_uuid) return;
+    setBusy(true);
+    try {
+      await api.removeGroupMember(project.group_uuid, project.uuid);
+      const fresh = await api.project(project.uuid);
+      onChanged(fresh.data);
+      toast.push({ title: 'Retiré du groupe', tone: 'ok' });
+    } catch (err) {
+      toast.push({ title: 'Retrait KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Card>
       <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -936,13 +801,18 @@ export function ProjectGroupPanel({ project, onChanged }: { project: Project; on
           </div>
         </div>
         {project.group_uuid && (
-          <Button
-            size="sm"
-            variant="ghost"
-            href={`/app/groups/view?uuid=${encodeURIComponent(project.group_uuid)}`}
-          >
-            Ouvrir
-          </Button>
+          <div class="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              href={`/app/groups/view?uuid=${encodeURIComponent(project.group_uuid)}`}
+            >
+              Ouvrir le groupe
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => void leaveGroup()}>
+              Retirer du groupe
+            </Button>
+          </div>
         )}
       </div>
       <form class="space-y-3" onSubmit={save}>
