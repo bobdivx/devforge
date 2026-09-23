@@ -568,6 +568,11 @@ export const api = {
     request<{ data: { logs?: string; status?: string } } | { logs?: string }>(
       `/deployments/${uuid}/logs`,
     ),
+  cancelDeployment: (uuid: string) =>
+    request<{ data: Deployment; ok?: boolean; cancelled?: boolean }>(
+      `/deployments/${uuid}/cancel`,
+      { method: 'POST', body: '{}' },
+    ),
   projectAgents: (projectUuid: string) =>
     request<{ data: ProjectAgent[] }>(`/projects/${projectUuid}/agents`),
   agentMessages: (projectUuid: string, agentUuid: string) =>
