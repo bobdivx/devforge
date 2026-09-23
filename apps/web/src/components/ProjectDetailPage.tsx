@@ -15,7 +15,7 @@ import { ProjectGroupPanel, ProjectGroupSuggest } from './GroupPage';
 import { ProjectWorkspace } from './ProjectWorkspace';
 import { ProjectRulesModal } from './workspace/ProjectRulesModal';
 import { NodeSelect } from './NodeSelect';
-import { FileCode } from 'lucide-preact';
+import { FileCode, Square } from 'lucide-preact';
 import {
   Alert,
   Badge,
@@ -96,6 +96,26 @@ function deployTone(status: string): 'ok' | 'warn' | 'danger' | 'neutral' {
   return projectStatusMeta(status).tone;
 }
 
+
+function isDeployInProgress(status: string): boolean {
+  return ['queued', 'running', 'building', 'pending', 'deploying'].includes(status);
+}
+
+/** Prefers any in-progress deploy over a stale last-success (Overview + list). */
+function pickCurrentDeployment(deployments: Deployment[]): Deployment | null {
+  const active = deployments.find((d) => isDeployInProgress(d.status));
+  return active ?? deployments[0] ?? null;
+}
+
+function sortDeploymentsForDisplay(items: Deployment[]): Deployment[] {
+  return [...items].sort((a, b) => {
+    const ap = isDeployInProgress(a.status) ? 0 : 1;
+    const bp = isDeployInProgress(b.status) ? 0 : 1;
+    if (ap !== bp) return ap - bp;
+    return (b.created_at || '').localeCompare(a.created_at || '');
+  });
+}
+
 function formatWhen(iso?: string | null) {
   if (!iso) return '—';
   try {
@@ -110,8 +130,10 @@ function formatWhen(iso?: string | null) {
   }
 }
 
-/** Nombre d’entrées historiques affichées par défaut (tuiles / listes). */
-const DEPLOYMENTS_VISIBLE_DEFAULT = 12;
+/** Tuiles Deployments visibles par défaut (strip compact). */
+const DEPLOYMENTS_VISIBLE_DEFAULT = 5;
+/** Backups / crons : historique un peu plus large. */
+const HISTORY_VISIBLE_DEFAULT = 12;
 
 export function ProjectDetailPage(props: Props) {
   const initial = readQuery();
@@ -150,6 +172,19 @@ export function ProjectDetailPage(props: Props) {
       .catch((e) => setError(String(e.message || e)))
       .finally(() => setLoading(false));
   }, [uuid]);
+
+  // Garde l’Overview à jour : préférer le running courant au succès stale.
+  useEffect(() => {
+    const active = deployments.some((d) => isDeployInProgress(d.status));
+    if (!active) return;
+    const interval = setInterval(() => {
+      void api
+        .deployments(uuid)
+        .then((d) => setDeployments(d.data ?? []))
+        .catch(() => {});
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [uuid, deployments]);
 
   const titles: Record<string, string> = {
     overview: project?.name ?? 'Projet',
@@ -324,8 +359,9 @@ function ProjectOverview({
   const [historyShowAll, setHistoryShowAll] = useState(false);
   const [nodes, setNodes] = useState<ClusterNode[]>([]);
 
-  const latest = deployments[0] ?? null;
-  // Ne remonter une erreur que si le *dernier* déploiement a échoué (pas un vieux fail).
+  // Préférer un déploiement encore en cours (sinon le succès stale masque le running).
+  const latest = pickCurrentDeployment(deployments);
+  // Ne remonter une erreur que si le déploiement *courant* a échoué (pas un vieux fail).
   const latestFailed =
     latest && (latest.status === 'failed' || latest.status === 'error') ? latest : null;
 
@@ -434,14 +470,18 @@ function ProjectOverview({
           ? 'Traefik répond à la place du site : la route Host n’est pas branchée'
           : project.status === 'unhealthy'
             ? `Pas de réponse sur le port ${project.port || 3000}${latest ? ` · Deploy ${latest.status}` : ''}`
-            : latest
-              ? 'Dernier déploiement OK'
-              : 'En attente du premier deploy',
+            : latest && isDeployInProgress(latest.status)
+              ? `Déploiement ${latest.status}`
+              : latest
+                ? 'Dernier déploiement OK'
+                : 'En attente du premier deploy',
       tone: latestFailed || project.status === 'unhealthy' || project.status === 'unrouted'
         ? 'danger'
-        : latest
-          ? 'ok'
-          : 'neutral',
+        : latest && isDeployInProgress(latest.status)
+          ? 'warn'
+          : latest
+            ? 'ok'
+            : 'neutral',
       href: latestFailed
         ? `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`
         : undefined,
@@ -920,22 +960,76 @@ function DeploymentsPanel({
   const logsRef = useRef<HTMLPreElement>(null);
   const [items, setItems] = useState(initial);
   const [busy, setBusy] = useState(false);
-  const [openLogs, setOpenLogs] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [selectedUuid, setSelectedUuid] = useState<string | null>(
+    () => pickCurrentDeployment(initial)?.uuid ?? null,
+  );
   const [logs, setLogs] = useState('');
   const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     setItems(initial);
+    setSelectedUuid((prev) => {
+      if (prev && initial.some((d) => d.uuid === prev)) return prev;
+      return pickCurrentDeployment(initial)?.uuid ?? null;
+    });
   }, [initial]);
 
-  const visible = showAll ? items : items.slice(0, DEPLOYMENTS_VISIBLE_DEFAULT);
-  const hiddenCount = Math.max(0, items.length - DEPLOYMENTS_VISIBLE_DEFAULT);
-  const selected = items.find((d) => d.uuid === openLogs) ?? null;
+  const ordered = sortDeploymentsForDisplay(items);
+  const visible = showAll ? ordered : ordered.slice(0, DEPLOYMENTS_VISIBLE_DEFAULT);
+  const hiddenCount = Math.max(0, ordered.length - DEPLOYMENTS_VISIBLE_DEFAULT);
+  const selected = items.find((d) => d.uuid === selectedUuid) ?? null;
+  const canStop = selected ? isDeployInProgress(selected.status) : false;
 
-  async function reload() {
-    const r = await api.deployments(projectUuid);
-    setItems(r.data);
-    onRefresh(r.data);
+  useEffect(() => {
+    if (!selected) {
+      setLogs('');
+      return;
+    }
+    if (selected.logs) {
+      setLogs(selected.logs);
+      return;
+    }
+    let cancelled = false;
+    setLogs('…');
+    api
+      .deployment(selected.uuid)
+      .then((r) => {
+        if (!cancelled) setLogs(r.data.logs || '');
+      })
+      .catch(() => {
+        if (!cancelled) setLogs('(logs indisponibles)');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.uuid, selected?.logs, selected?.status]);
+
+  // Poll tant qu’un déploiement est en cours.
+  useEffect(() => {
+    const active = items.some((d) => isDeployInProgress(d.status));
+    if (!active) return;
+    const interval = setInterval(() => {
+      void reload(false);
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [items, projectUuid]);
+
+  useEffect(() => {
+    if (!logsRef.current) return;
+    logsRef.current.scrollTop = logsRef.current.scrollHeight;
+  }, [logs]);
+
+  async function reload(showToast = false) {
+    try {
+      const r = await api.deployments(projectUuid);
+      setItems(r.data ?? []);
+      onRefresh(r.data ?? []);
+    } catch (e) {
+      if (showToast) {
+        toast.push({ title: 'Refresh KO', detail: String(e), tone: 'warn' });
+      }
+    }
   }
 
   async function deploy() {
@@ -946,15 +1040,12 @@ function DeploymentsPanel({
       toast.push({
         title: r.ok === false || r.data.status === 'failed' ? 'Deploy échoué' : 'Deploy terminé',
         detail: r.data.git_sha || r.data.status,
-        tone: r.data.status === 'failed' ? 'danger' : 'ok',
+        tone: r.data.status === 'failed' ? 'danger' : r.data.status === 'cancelled' ? 'warn' : 'ok',
       });
-      setOpenLogs(r.data.uuid);
+      setSelectedUuid(r.data.uuid);
       setLogs(r.data.logs || '');
       setShowAll(false);
       await reload();
-      queueMicrotask(() =>
-        logsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }),
-      );
     } catch (e) {
       toast.push({ title: 'Deploy KO', detail: String(e), tone: 'danger' });
     } finally {
@@ -962,40 +1053,42 @@ function DeploymentsPanel({
     }
   }
 
-  async function showLogs(depUuid: string) {
-    setOpenLogs(depUuid);
-    const row = items.find((d) => d.uuid === depUuid);
-    if (row?.logs) {
-      setLogs(row.logs);
-      queueMicrotask(() =>
-        logsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }),
-      );
-      return;
-    }
-    setLogs('…');
+  async function stopSelected() {
+    if (!selected || !canStop) return;
+    setCancelling(true);
     try {
-      const r = await api.deployment(depUuid);
+      const r = await api.cancelDeployment(selected.uuid);
+      toast.push({
+        title: 'Déploiement arrêté',
+        detail: r.data.git_sha || r.data.status,
+        tone: 'warn',
+      });
+      setSelectedUuid(r.data.uuid);
       setLogs(r.data.logs || '');
-    } catch {
-      setLogs('(logs indisponibles)');
+      await reload();
+    } catch (e) {
+      toast.push({ title: 'Arrêt KO', detail: String(e), tone: 'danger' });
+    } finally {
+      setCancelling(false);
     }
-    queueMicrotask(() =>
-      logsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }),
-    );
+  }
+
+  function selectDeployment(depUuid: string) {
+    setSelectedUuid(depUuid);
   }
 
   return (
     <FadeIn>
-      <div class="space-y-4">
+      <div class="flex min-h-[28rem] flex-col gap-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="min-w-0">
-            <h2 class="text-base font-medium tracking-tight">Deployments</h2>
+            <h2 class="text-base font-medium tracking-tight">Déploiements</h2>
             <p class="mt-0.5 text-sm text-[var(--color-ink-muted)]">
               {items.length === 0
                 ? 'Aucun déploiement pour l’instant'
                 : showAll || hiddenCount === 0
-                  ? `${items.length} déploiement${items.length > 1 ? 's' : ''} · les plus récents en premier`
-                  : `${DEPLOYMENTS_VISIBLE_DEFAULT} plus récents sur ${items.length}`}
+                  ? `${items.length} déploiement${items.length > 1 ? 's' : ''} · en cours d’abord`
+                  : `${DEPLOYMENTS_VISIBLE_DEFAULT} visibles sur ${items.length} · en cours d’abord`}
             </p>
           </div>
           <Button size="sm" variant="secondary" disabled={busy} onClick={deploy}>
@@ -1011,83 +1104,119 @@ function DeploymentsPanel({
             </p>
           </Card>
         ) : (
-          <>
-            <HubGrid cols={4}>
-              {visible.map((d, index) => {
-                const tone = deployTone(d.status);
-                const sha = d.git_sha ? d.git_sha.slice(0, 7) : '—';
-                const selectedTile = openLogs === d.uuid;
-                return (
-                  <HubTile
-                    key={d.uuid}
-                    index={index}
-                    title={sha}
-                    description={`${d.git_message || 'Sans message'} · ${formatWhen(d.created_at)}`}
-                    icon={<HealthIcon kind="deploy" tone={tone} />}
-                    iconClass="!bg-transparent"
-                    class={selectedTile ? '!ring-[var(--color-accent)]' : undefined}
-                    badge={
-                      tone !== 'neutral' ? (
+          <div class="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row lg:items-stretch">
+            {/* Strip / sidebar compact — pas une grille de grosses tuiles */}
+            <aside class="flex shrink-0 flex-col gap-2 lg:w-52">
+              <div class="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-x-visible lg:overflow-y-auto lg:max-h-[32rem] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {visible.map((d, index) => {
+                  const tone = deployTone(d.status);
+                  const sha = d.git_sha ? d.git_sha.slice(0, 7) : '—';
+                  const selectedTile = selectedUuid === d.uuid;
+                  return (
+                    <button
+                      key={d.uuid}
+                      type="button"
+                      onClick={() => selectDeployment(d.uuid)}
+                      class={
+                        'flex min-w-[9.5rem] shrink-0 flex-col gap-1 rounded-xl border px-3 py-2.5 text-left transition lg:min-w-0 ' +
+                        (selectedTile
+                          ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
+                          : 'border-[var(--color-line)] bg-[#1c1c1e] hover:border-[var(--color-line-strong)] hover:bg-[#252528]')
+                      }
+                      style={{ animationDelay: `${Math.min(index * 0.04, 0.2)}s` }}
+                    >
+                      <div class="flex items-center justify-between gap-2">
+                        <span class="font-mono text-xs font-medium text-white">{sha}</span>
                         <span
-                          class={cn(
-                            'absolute -right-1 -top-1 h-3 w-3 rounded-full ring-2 ring-[#1c1c1e]',
-                            tone === 'ok' && 'bg-[var(--color-ok)]',
-                            tone === 'warn' && 'bg-[var(--color-warn)]',
-                            tone === 'danger' && 'bg-[var(--color-danger)]',
-                          )}
+                          class={
+                            'h-2 w-2 shrink-0 rounded-full ' +
+                            (tone === 'ok'
+                              ? 'bg-[var(--color-ok)]'
+                              : tone === 'warn'
+                                ? 'bg-[var(--color-warn)]'
+                                : tone === 'danger'
+                                  ? 'bg-[var(--color-danger)]'
+                                  : 'bg-[var(--color-ink-faint)]')
+                          }
                         />
-                      ) : null
-                    }
-                    subtitle={
-                      <div class="mt-1 space-y-1">
-                        <Badge tone={tone}>{d.status}</Badge>
-                        <div class="line-clamp-2 text-[11px] leading-snug text-[var(--color-ink-muted)]">
-                          {d.git_message || 'Sans message'}
-                        </div>
-                        <div class="text-[11px] text-[var(--color-ink-faint)]">
-                          {formatWhen(d.created_at)}
-                        </div>
                       </div>
-                    }
-                    onClick={() => void showLogs(d.uuid)}
-                  />
-                );
-              })}
-            </HubGrid>
-
-            {hiddenCount > 0 && (
-              <div class="flex justify-center">
-                {showAll ? (
-                  <Button size="sm" variant="ghost" onClick={() => setShowAll(false)}>
-                    Voir moins
-                  </Button>
-                ) : (
-                  <Button size="sm" variant="ghost" onClick={() => setShowAll(true)}>
-                    Voir plus ({hiddenCount})
-                  </Button>
-                )}
+                      <Badge tone={tone}>{d.status}</Badge>
+                      <div class="line-clamp-1 text-[11px] text-[var(--color-ink-muted)]">
+                        {d.git_message || 'Sans message'}
+                      </div>
+                      <div class="text-[10px] text-[var(--color-ink-faint)]">
+                        {formatWhen(d.created_at)}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-            )}
-
-            {openLogs && (
-              <Card>
-                <CardHeader
-                  title="Logs"
-                  description={
-                    selected
-                      ? `${selected.status} · ${selected.git_sha ? selected.git_sha.slice(0, 7) : '—'} · ${formatWhen(selected.created_at)}`
-                      : 'Sélectionne une tuile pour afficher les logs'
-                  }
-                />
-                <pre
-                  ref={logsRef}
-                  class="max-h-80 overflow-auto rounded-xl border border-[var(--color-line)] bg-black/40 p-3 font-mono text-xs whitespace-pre-wrap"
+              {hiddenCount > 0 && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  class="self-start"
+                  onClick={() => setShowAll((v) => !v)}
                 >
-                  {logs || '…'}
-                </pre>
-              </Card>
-            )}
-          </>
+                  {showAll ? 'Voir moins' : `Voir plus (${hiddenCount})`}
+                </Button>
+              )}
+            </aside>
+
+            {/* Détail + logs : espace vertical principal */}
+            <Card padding="none" class="flex min-h-[22rem] min-w-0 flex-1 flex-col overflow-hidden">
+              {selected ? (
+                <>
+                  <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-line)] px-4 py-3">
+                    <div class="min-w-0">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <Badge tone={deployTone(selected.status)}>{selected.status}</Badge>
+                        <span class="font-mono text-xs text-[var(--color-ink-muted)]">
+                          {selected.git_sha ? selected.git_sha.slice(0, 7) : '—'}
+                        </span>
+                        <span class="text-xs text-[var(--color-ink-faint)]">
+                          {formatWhen(selected.created_at)}
+                        </span>
+                      </div>
+                      {selected.git_message && (
+                        <p class="mt-1 truncate text-sm text-[var(--color-ink)]">
+                          {selected.git_message}
+                        </p>
+                      )}
+                      {selected.status === 'queued' && (
+                        <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
+                          En attente : un autre déploiement occupe déjà ce nœud.
+                        </p>
+                      )}
+                      {selected.error_summary && (
+                        <p class="mt-1 text-sm text-[var(--color-danger)]">{selected.error_summary}</p>
+                      )}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={!canStop || cancelling}
+                      onClick={stopSelected}
+                      aria-label="Arrêter le déploiement"
+                    >
+                      {cancelling ? <Spinner /> : <Square size={12} strokeWidth={2.5} aria-hidden />}
+                      Arrêter
+                    </Button>
+                  </div>
+                  <pre
+                    ref={logsRef}
+                    class="min-h-0 flex-1 overflow-auto bg-black/40 p-4 font-mono text-xs whitespace-pre-wrap"
+                  >
+                    {logs || 'Aucun log disponible.'}
+                  </pre>
+                </>
+              ) : (
+                <div class="flex flex-1 items-center justify-center p-6 text-sm text-[var(--color-ink-muted)]">
+                  Sélectionne un déploiement pour afficher les logs
+                </div>
+              )}
+            </Card>
+          </div>
         )}
       </div>
     </FadeIn>
@@ -1144,8 +1273,8 @@ function BackupsPanel({ projectUuid }: { projectUuid: string }) {
       tone: 'info',
     });
   }
-  const visible = showAll ? items : items.slice(0, DEPLOYMENTS_VISIBLE_DEFAULT);
-  const hiddenCount = Math.max(0, items.length - DEPLOYMENTS_VISIBLE_DEFAULT);
+  const visible = showAll ? items : items.slice(0, HISTORY_VISIBLE_DEFAULT);
+  const hiddenCount = Math.max(0, items.length - HISTORY_VISIBLE_DEFAULT);
 
   function backupTone(status: string): 'ok' | 'warn' | 'danger' | 'neutral' {
     if (status === 'completed' || status === 'ok' || status === 'success') return 'ok';
@@ -1172,7 +1301,7 @@ function BackupsPanel({ projectUuid }: { projectUuid: string }) {
                 ? 'Aucun backup pour l’instant'
                 : showAll || hiddenCount === 0
                   ? `${items.length} backup${items.length > 1 ? 's' : ''}`
-                  : `${DEPLOYMENTS_VISIBLE_DEFAULT} plus récents sur ${items.length}`}
+                  : `${HISTORY_VISIBLE_DEFAULT} plus récents sur ${items.length}`}
             </p>
           </div>
           <Button size="sm" variant="secondary" disabled={busy} onClick={create}>
@@ -3952,7 +4081,7 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
           <p class="px-4 py-8 text-sm text-[var(--color-ink-muted)] sm:px-5">Aucune exécution.</p>
         ) : (
           <ul class="divide-y divide-[var(--color-line)]">
-            {runs.slice(0, DEPLOYMENTS_VISIBLE_DEFAULT).map((r) => (
+            {runs.slice(0, HISTORY_VISIBLE_DEFAULT).map((r) => (
               <li key={r.id} class="px-4 py-3.5 sm:px-5">
                 <div class="flex flex-wrap items-center gap-2">
                   <Badge tone={r.status === 'success' ? 'ok' : r.status === 'running' ? 'warn' : 'danger'}>

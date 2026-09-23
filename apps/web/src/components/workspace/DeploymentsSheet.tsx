@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { X, ListFilter, AlignLeft } from 'lucide-preact';
+import { X, ListFilter, AlignLeft, Square } from 'lucide-preact';
 import { api, type Deployment } from '../../lib/api';
 import { Badge, Button, Portal, Spinner } from '../ui';
 import { cn } from '../../lib/cn';
@@ -13,7 +13,7 @@ type Props = {
 };
 
 /** Chips visibles par défaut dans la feuille déploiements. */
-const DEPLOYMENTS_VISIBLE_DEFAULT = 12;
+const DEPLOYMENTS_VISIBLE_DEFAULT = 5;
 
 function formatWhen(iso?: string | null) {
   if (!iso) return '—';
@@ -44,6 +44,24 @@ function deployTone(status: string): 'ok' | 'warn' | 'danger' | 'neutral' {
   return 'neutral';
 }
 
+
+function isDeployInProgress(status: string): boolean {
+  return ['queued', 'running', 'building', 'pending', 'deploying'].includes(status);
+}
+
+function pickCurrentDeployment(deployments: Deployment[]): Deployment | null {
+  return deployments.find((d) => isDeployInProgress(d.status)) ?? deployments[0] ?? null;
+}
+
+function sortDeploymentsForDisplay(items: Deployment[]): Deployment[] {
+  return [...items].sort((a, b) => {
+    const ap = isDeployInProgress(a.status) ? 0 : 1;
+    const bp = isDeployInProgress(b.status) ? 0 : 1;
+    if (ap !== bp) return ap - bp;
+    return (b.created_at || '').localeCompare(a.created_at || '');
+  });
+}
+
 type TraceEvent = {
   id: number;
   kind: string;
@@ -62,6 +80,8 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const isPanel = variant === 'panel';
 
   useEffect(() => {
@@ -95,8 +115,12 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
     if (showSpinner) setLoading(true);
     try {
       const r = await api.deployments(projectUuid);
-      setDeployments(r.data ?? []);
-      if (!selectedUuid && r.data?.[0]) setSelectedUuid(r.data[0].uuid);
+      const list = r.data ?? [];
+      setDeployments(list);
+      setSelectedUuid((prev) => {
+        if (prev && list.some((d) => d.uuid === prev)) return prev;
+        return pickCurrentDeployment(list)?.uuid ?? null;
+      });
     } catch {
       setDeployments([]);
     }
@@ -125,9 +149,26 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
     }
   }
 
+  async function stopDeploy() {
+    if (!selectedUuid) return;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      await api.cancelDeployment(selectedUuid);
+      await loadDeployments(false);
+    } catch (err) {
+      setCancelError(String((err as Error).message || err));
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   if (!open) return null;
 
   const selected = deployments.find((d) => d.uuid === selectedUuid);
+  const ordered = sortDeploymentsForDisplay(deployments);
+  const visibleChips = showAll ? ordered : ordered.slice(0, DEPLOYMENTS_VISIBLE_DEFAULT);
+  const canStop = selected ? isDeployInProgress(selected.status) : false;
 
   const body = (
     <>
@@ -185,7 +226,7 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
         ) : (
           <>
             <div class="mb-3 flex gap-1 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {(showAll ? deployments : deployments.slice(0, DEPLOYMENTS_VISIBLE_DEFAULT)).map((d) => (
+              {visibleChips.map((d) => (
                 <button
                   key={d.uuid}
                   type="button"
@@ -208,7 +249,7 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
                   </div>
                 </button>
               ))}
-              {deployments.length > DEPLOYMENTS_VISIBLE_DEFAULT && (
+              {ordered.length > DEPLOYMENTS_VISIBLE_DEFAULT && (
                 <button
                   type="button"
                   onClick={() => setShowAll((v) => !v)}
@@ -216,24 +257,41 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
                 >
                   {showAll
                     ? 'Voir moins'
-                    : `Voir plus (${deployments.length - DEPLOYMENTS_VISIBLE_DEFAULT})`}
+                    : `Voir plus (${ordered.length - DEPLOYMENTS_VISIBLE_DEFAULT})`}
                 </button>
               )}
             </div>
 
             {selected && (
-              <div class="flex-1 space-y-3">
+              <div class="flex min-h-0 flex-1 flex-col space-y-3">
                 <div class="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <Badge tone={deployTone(selected.status)}>{selected.status}</Badge>
-                    {selected.git_sha && (
-                      <span class="font-mono text-xs text-[var(--color-ink-muted)]">
-                        {selected.git_sha.slice(0, 7)}
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <Badge tone={deployTone(selected.status)}>{selected.status}</Badge>
+                      {selected.git_sha && (
+                        <span class="font-mono text-xs text-[var(--color-ink-muted)]">
+                          {selected.git_sha.slice(0, 7)}
+                        </span>
+                      )}
+                      <span class="text-xs text-[var(--color-ink-faint)]">
+                        {formatWhen(selected.created_at)}
                       </span>
-                    )}
-                    <span class="text-xs text-[var(--color-ink-faint)]">
-                      {formatWhen(selected.created_at)}
-                    </span>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="danger"
+                        disabled={!canStop || cancelling}
+                        onClick={stopDeploy}
+                      >
+                        {cancelling ? <Spinner /> : <Square size={12} strokeWidth={2.5} aria-hidden />}
+                        Arrêter
+                      </Button>
+                      {cancelError && (
+                        <span class="text-xs text-[var(--color-danger)]">{cancelError}</span>
+                      )}
+                    </div>
                   </div>
                   {selected.git_message && (
                     <p class="mt-2 text-sm text-[var(--color-ink)]">{selected.git_message}</p>
@@ -294,20 +352,22 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
                   </div>
                 </div>
 
-                {viewMode === 'timeline' ? (
-                  <DeployTimeline logs={selected.logs} status={selected.status} />
-                ) : (
-                  <div class="rounded-xl border border-[var(--color-line)] bg-black/40 p-3">
-                    <pre
-                      class={cn(
-                        'overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-[var(--color-ink-muted)]',
-                        isPanel ? 'max-h-none' : 'max-h-[40vh]',
-                      )}
-                    >
-                      {selected.logs || 'Aucun log disponible.'}
-                    </pre>
-                  </div>
-                )}
+                <div class={cn('min-h-0', isPanel ? 'flex-1' : '')}>
+                  {viewMode === 'timeline' ? (
+                    <DeployTimeline logs={selected.logs} status={selected.status} />
+                  ) : (
+                    <div class="rounded-xl border border-[var(--color-line)] bg-black/40 p-3 h-full">
+                      <pre
+                        class={cn(
+                          'overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-[var(--color-ink-muted)]',
+                          isPanel ? 'max-h-none h-full' : 'max-h-[50vh]',
+                        )}
+                      >
+                        {selected.logs || 'Aucun log disponible.'}
+                      </pre>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </>

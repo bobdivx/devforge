@@ -147,6 +147,92 @@ pub async fn supersede_in_progress(
     cancelled
 }
 
+/// Annule un déploiement précis encore en cours (queued / running / building / pending).
+/// Marque `cancelled` en base + signale le token watch. Ne touche pas au conteneur
+/// de production : l’appelant peut enchaîner `abort_in_flight_swap` (conteneur `-new` seul).
+/// Retourne `true` si la ligne a bien été annulée, `false` si déjà terminale / absente.
+pub async fn cancel_one_deployment(
+    queue: &DeployQueue,
+    pool: &PgPool,
+    deployment_uuid: &str,
+) -> Result<bool, sqlx::Error> {
+    let now = now_str();
+    let note = "\n[devforge] Déploiement annulé par l'utilisateur\n";
+    let row: Option<(i64,)> = sqlx::query_as(
+        r#"UPDATE deployments
+           SET status = 'cancelled',
+               logs = COALESCE(logs, '') || $1,
+               error_summary = COALESCE(error_summary, 'Annulé par l''utilisateur'),
+               finished_at = $2,
+               updated_at = $3
+           WHERE uuid = $4
+             AND status IN ('queued', 'running', 'building', 'pending', 'deploying')
+           RETURNING project_id"#,
+    )
+    .bind(note)
+    .bind(&now)
+    .bind(&now)
+    .bind(deployment_uuid)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some((project_id,)) = row else {
+        return Ok(false);
+    };
+
+    queue.signal_cancel(deployment_uuid).await;
+    tracing::info!(
+        deployment = %deployment_uuid,
+        project_id,
+        "Déploiement annulé par l'utilisateur"
+    );
+
+    // Si plus aucun déploiement actif sur le projet, rétablir le statut projet.
+    let active: (i64,) = sqlx::query_as(
+        r#"SELECT COUNT(*) FROM deployments
+           WHERE project_id = $1
+             AND status IN ('queued', 'running', 'building', 'pending', 'deploying')"#,
+    )
+    .bind(project_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or((0,));
+
+    if active.0 == 0 {
+        let has_success: (i64,) = sqlx::query_as(
+            r#"SELECT COUNT(*) FROM deployments
+               WHERE project_id = $1 AND status IN ('success', 'deployed', 'ok')"#,
+        )
+        .bind(project_id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or((0,));
+        let last_failed: (i64,) = sqlx::query_as(
+            r#"SELECT COUNT(*) FROM deployments
+               WHERE project_id = $1 AND status IN ('failed', 'error')"#,
+        )
+        .bind(project_id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or((0,));
+        let project_status = if has_success.0 > 0 {
+            "live"
+        } else if last_failed.0 > 0 {
+            "failed"
+        } else {
+            "idle"
+        };
+        let _ = sqlx::query("UPDATE projects SET status = $1, updated_at = $2 WHERE id = $3")
+            .bind(project_status)
+            .bind(&now)
+            .bind(project_id)
+            .execute(pool)
+            .await;
+    }
+
+    Ok(true)
+}
+
 async fn wait_cancelled(mut rx: watch::Receiver<bool>) {
     if *rx.borrow() {
         return;
@@ -649,5 +735,72 @@ mod tests {
         })
         .await;
         assert!(outcome.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn cancel_one_marks_and_signals() {
+        let pool = devforge_database::ephemeral_pg().await;
+        sqlx::query(
+            r#"CREATE TABLE projects (
+                id BIGINT PRIMARY KEY,
+                uuid TEXT NOT NULL,
+                status TEXT NOT NULL,
+                updated_at TEXT
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"CREATE TABLE deployments (
+                uuid TEXT PRIMARY KEY,
+                project_id BIGINT NOT NULL,
+                status TEXT NOT NULL,
+                logs TEXT,
+                error_summary TEXT,
+                error_hint TEXT,
+                finished_at TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO projects (id, uuid, status) VALUES (3, 'p', 'deploying')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO deployments (uuid, project_id, status, logs, created_at) VALUES ('dep-run', 3, 'running', 'x', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO deployments (uuid, project_id, status, logs, created_at) VALUES ('dep-ok', 3, 'success', 'ok', '2025-12-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let queue = DeployQueue::new();
+        let _rx = queue.register_cancel("dep-run").await;
+        assert!(cancel_one_deployment(&queue, &pool, "dep-run").await.unwrap());
+        assert!(queue.is_cancelled("dep-run").await);
+        // Already terminal → false
+        assert!(!cancel_one_deployment(&queue, &pool, "dep-ok").await.unwrap());
+        assert!(!cancel_one_deployment(&queue, &pool, "dep-run").await.unwrap());
+
+        let st: (String,) = sqlx::query_as("SELECT status FROM deployments WHERE uuid = 'dep-run'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(st.0, "cancelled");
+        let proj: (String,) = sqlx::query_as("SELECT status FROM projects WHERE id = 3")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(proj.0, "live");
     }
 }
