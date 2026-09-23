@@ -2003,8 +2003,37 @@ function volumeMountsOf(project: Project): string[] {
   }
 }
 
+function groupedPublishedPorts(ports: PublishedPort[]): Array<{
+  host: number;
+  container: number;
+  protocols: Array<'tcp' | 'udp'>;
+  label: string;
+}> {
+  const groups: Array<{
+    host: number;
+    container: number;
+    protocols: Array<'tcp' | 'udp'>;
+    label: string;
+  }> = [];
+  for (const port of ports) {
+    const protocol = port.protocol === 'udp' ? 'udp' : 'tcp';
+    const existing = groups.find((g) => g.host === port.host && g.container === port.container);
+    if (!existing) {
+      groups.push({ host: port.host, container: port.container, protocols: [protocol], label: protocol });
+      continue;
+    }
+    if (!existing.protocols.includes(protocol)) existing.protocols.push(protocol);
+    existing.label =
+      existing.protocols.includes('tcp') && existing.protocols.includes('udp')
+        ? 'tcp+udp'
+        : existing.protocols[0];
+  }
+  return groups;
+}
+
 type SettingsSection =
   | 'git'
+  | 'group'
   | 'build'
   | 'ports'
   | 'gpu'
@@ -2018,6 +2047,7 @@ type SettingsSection =
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   'git',
+  'group',
   'build',
   'ports',
   'gpu',
@@ -2081,7 +2111,7 @@ function ProjectSettingsPanel({
   const [runtime, setRuntime] = useState<ProjectRuntime>(() => runtimeOf(project));
   const [portHost, setPortHost] = useState('');
   const [portContainer, setPortContainer] = useState('');
-  const [portProto, setPortProto] = useState<'tcp' | 'udp'>('tcp');
+  const [portProto, setPortProto] = useState<'tcp' | 'udp' | 'both'>('tcp');
   const [sideName, setSideName] = useState('');
   const [sideImage, setSideImage] = useState('');
   const [sidePort, setSidePort] = useState('');
@@ -2344,6 +2374,7 @@ function ProjectSettingsPanel({
   const extraPortCount = runtime.ports.length;
   const sectionTitle: Record<SettingsSection, string> = {
     git: 'Git',
+    group: 'Groupe',
     build: 'Build',
     ports: 'Ports',
     gpu: 'GPU',
@@ -2371,6 +2402,14 @@ function ProjectSettingsPanel({
           ? repo.trim().replace(/^https?:\/\/(www\.)?github\.com\//, '')
           : 'Pas de dépôt',
         icon: 'github',
+      },
+      {
+        key: 'group',
+        title: 'Groupe',
+        description: project.group_name
+          ? `${project.group_name}${project.role ? ` · ${project.role}` : ''}`
+          : 'Aucune app liée',
+        icon: 'users',
       },
       { key: 'build', title: 'Build', description: buildPack, icon: 'settings' },
       {
@@ -2415,7 +2454,6 @@ function ProjectSettingsPanel({
     ];
     return (
       <FadeIn>
-        <ProjectGroupPanel project={project} onChanged={onSaved} />
         <HubGrid>
           {tiles
             .filter((tile) => !tile.admin || isAdmin)
@@ -2444,7 +2482,7 @@ function ProjectSettingsPanel({
           <span aria-hidden>←</span>
           Paramètres
         </button>
-        {section !== 'login' && section !== 'danger' && (
+        {section !== 'login' && section !== 'danger' && section !== 'group' && (
         <Card>
         <CardHeader
           title={sectionTitle[section]}
@@ -2700,20 +2738,19 @@ function ProjectSettingsPanel({
             <>
             <p class="text-xs text-[var(--color-ink-muted)]">
               Le port HTTP ci-dessus est celui de Traefik. Ici, les ports ouverts sur l’hôte
-              (ex. popcorn <span class="font-mono">4240/tcp</span> et{' '}
-              <span class="font-mono">4240/udp</span>). La détection lit le Dockerfile, le compose
+              (ex. popcorn <span class="font-mono">4240</span> en tcp et udp). La détection lit le Dockerfile, le compose
               et les variables <span class="font-mono">*_PORT</span>.
             </p>
             <div class="text-sm font-medium">Ports supplémentaires</div>
             {runtime.ports.length > 0 && (
               <ul class="space-y-1">
-                {runtime.ports.map((p) => (
+                {groupedPublishedPorts(runtime.ports).map((p) => (
                   <li
-                    key={`${p.host}:${p.container}/${p.protocol}`}
+                    key={`${p.host}:${p.container}/${p.label}`}
                     class="flex items-center justify-between gap-2 font-mono text-xs"
                   >
                     <span>
-                      {p.host}:{p.container}/{p.protocol}
+                      {p.host}:{p.container}/{p.label}
                     </span>
                     <Button
                       type="button"
@@ -2727,7 +2764,7 @@ function ProjectSettingsPanel({
                               !(
                                 x.host === p.host &&
                                 x.container === p.container &&
-                                x.protocol === p.protocol
+                                p.protocols.includes(x.protocol)
                               ),
                           ),
                         }))
@@ -2758,11 +2795,12 @@ function ProjectSettingsPanel({
                   class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
                   value={portProto}
                   onChange={(e) =>
-                    setPortProto((e.target as HTMLSelectElement).value as 'tcp' | 'udp')
+                    setPortProto((e.target as HTMLSelectElement).value as 'tcp' | 'udp' | 'both')
                   }
                 >
                   <option value="tcp">tcp</option>
                   <option value="udp">udp</option>
+                  <option value="both">tcp et udp</option>
                 </select>
               </label>
               <Button
@@ -2776,8 +2814,23 @@ function ProjectSettingsPanel({
                     toast.push({ title: 'Port invalide', tone: 'warn' });
                     return;
                   }
-                  const next: PublishedPort = { host, container, protocol: portProto };
-                  setRuntime((r) => ({ ...r, ports: [...r.ports, next] }));
+                  const protocols: Array<'tcp' | 'udp'> =
+                    portProto === 'both' ? ['tcp', 'udp'] : [portProto];
+                  setRuntime((r) => {
+                    const ports = [...r.ports];
+                    for (const protocol of protocols) {
+                      if (
+                        ports.some(
+                          (x) =>
+                            x.host === host && x.container === container && x.protocol === protocol,
+                        )
+                      ) {
+                        continue;
+                      }
+                      ports.push({ host, container, protocol });
+                    }
+                    return { ...r, ports };
+                  });
                   setPortHost('');
                   setPortContainer('');
                 }}
@@ -2951,6 +3004,8 @@ function ProjectSettingsPanel({
         </form>
       </Card>
       )}
+
+      {section === 'group' && <ProjectGroupPanel project={project} onChanged={onSaved} />}
 
       {section === 'login' && <ProjectOidcPanel projectUuid={project.uuid} />}
 
