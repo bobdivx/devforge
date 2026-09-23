@@ -125,6 +125,31 @@ export type ProjectSync = {
   error?: string | null;
 };
 
+export type PublishedPort = {
+  host: number;
+  container: number;
+  protocol: 'tcp' | 'udp';
+};
+
+export type ProjectRuntime = {
+  memory?: string | null;
+  cpus?: string | null;
+  healthcheck?: {
+    cmd: string;
+    interval: string;
+    timeout: string;
+    retries: number;
+    start_period: string;
+  } | null;
+  ports: PublishedPort[];
+  sidecars: Array<{
+    name: string;
+    image: string;
+    ports: PublishedPort[];
+    memory?: string | null;
+  }>;
+};
+
 export type Project = {
   uuid: string;
   name: string;
@@ -148,6 +173,10 @@ export type Project = {
   docker_compose_location?: string | null;
   gpu_nvidia?: number | boolean;
   gpu_dri?: number | boolean;
+  /** JSON `["/hôte:/conteneur"]` */
+  volumes_json?: string;
+  /** Ports extra, sidecars, limites, healthcheck */
+  runtime_json?: string;
   group_uuid?: string | null;
   group_name?: string | null;
   group_slug?: string | null;
@@ -792,6 +821,8 @@ export const api = {
       has_own_user_system?: boolean;
       gpu_nvidia?: boolean;
       gpu_dri?: boolean;
+      volumes?: string[];
+      runtime?: ProjectRuntime;
     },
   ) =>
     request<{ data: Project }>(`/projects/${uuid}`, {

@@ -133,6 +133,10 @@ pub struct Project {
     pub gpu_nvidia: i64,
     /// 1 = `docker run --device /dev/dri` au prochain déploiement.
     pub gpu_dri: i64,
+    /// Montages `source:cible[:ro]` appliqués au `docker run` (JSON).
+    pub volumes_json: String,
+    /// Ports extra, sidecars, limites, healthcheck (JSON).
+    pub runtime_json: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -381,6 +385,9 @@ impl ProjectStore for SqliteProjectStore {
             gpu_dri: project.gpu_dri != 0,
             group_network,
             group_alias,
+            volumes: devforge_deploy::docker::decode_volume_mounts(&project.volumes_json),
+            runtime: devforge_deploy::RuntimeSpec::from_json(&project.runtime_json)
+                .unwrap_or_default(),
         };
 
         let server_id = req.server_id.clone();

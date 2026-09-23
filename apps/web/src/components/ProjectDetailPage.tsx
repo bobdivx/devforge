@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { api, type ClusterNode, type Deployment, type Project } from '../lib/api';
+import { api, type ClusterNode, type Deployment, type Project, type ProjectRuntime, type PublishedPort } from '../lib/api';
 import { nodeShortLabel, resolveNode } from '../lib/cluster-display';
 import { cn } from '../lib/cn';
 import { projectNav } from '../lib/nav';
@@ -1947,6 +1947,36 @@ function parseGithubOwnerRepo(url: string): { owner: string; repo: string } | nu
   return { owner: parts[0], repo: parts[1].replace(/\.git$/i, '') };
 }
 
+function runtimeOf(project: Project): ProjectRuntime {
+  const empty: ProjectRuntime = { ports: [], sidecars: [] };
+  const raw = project.runtime_json;
+  if (!raw) return empty;
+  try {
+    const parsed = JSON.parse(raw) as Partial<ProjectRuntime>;
+    return {
+      memory: parsed.memory || '',
+      cpus: parsed.cpus || '',
+      healthcheck: parsed.healthcheck ?? null,
+      ports: Array.isArray(parsed.ports) ? parsed.ports : [],
+      sidecars: Array.isArray(parsed.sidecars) ? parsed.sidecars : [],
+    };
+  } catch {
+    return empty;
+  }
+}
+
+function volumeMountsOf(project: Project): string[] {
+  const raw = project.volumes_json;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v): v is string => typeof v === 'string' && v.includes(':'));
+  } catch {
+    return [];
+  }
+}
+
 function ProjectSettingsPanel({
   project,
   isAdmin,
@@ -1984,6 +2014,16 @@ function ProjectSettingsPanel({
   const [detectInfo, setDetectInfo] = useState<string | null>(null);
   const [gpuNvidia, setGpuNvidia] = useState(project.gpu_nvidia === true || project.gpu_nvidia === 1);
   const [gpuDri, setGpuDri] = useState(project.gpu_dri === true || project.gpu_dri === 1);
+  const [volumes, setVolumes] = useState<string[]>(() => volumeMountsOf(project));
+  const [volumeHost, setVolumeHost] = useState('');
+  const [volumeTarget, setVolumeTarget] = useState('');
+  const [runtime, setRuntime] = useState<ProjectRuntime>(() => runtimeOf(project));
+  const [portHost, setPortHost] = useState('');
+  const [portContainer, setPortContainer] = useState('');
+  const [portProto, setPortProto] = useState<'tcp' | 'udp'>('tcp');
+  const [sideName, setSideName] = useState('');
+  const [sideImage, setSideImage] = useState('');
+  const [sidePort, setSidePort] = useState('');
 
   useEffect(() => {
     setName(project.name);
@@ -2004,6 +2044,16 @@ function ProjectSettingsPanel({
     setTestCmd(project.test_command || '');
     setGpuNvidia(project.gpu_nvidia === true || project.gpu_nvidia === 1);
     setGpuDri(project.gpu_dri === true || project.gpu_dri === 1);
+    setVolumes(volumeMountsOf(project));
+    setVolumeHost('');
+    setVolumeTarget('');
+    setRuntime(runtimeOf(project));
+    setPortHost('');
+    setPortContainer('');
+    setPortProto('tcp');
+    setSideName('');
+    setSideImage('');
+    setSidePort('');
     setConfirmDelete(false);
     setDetectInfo(null);
   }, [project.uuid]);
@@ -2076,6 +2126,22 @@ function ProjectSettingsPanel({
         test_command: testCmd.trim() || null,
         gpu_nvidia: gpuNvidia,
         gpu_dri: gpuDri,
+        volumes,
+        runtime: {
+          memory: runtime.memory?.trim() || null,
+          cpus: runtime.cpus?.trim() || null,
+          healthcheck: runtime.healthcheck?.cmd?.trim()
+            ? {
+                cmd: runtime.healthcheck.cmd.trim(),
+                interval: runtime.healthcheck.interval || '30s',
+                timeout: runtime.healthcheck.timeout || '10s',
+                retries: runtime.healthcheck.retries || 5,
+                start_period: runtime.healthcheck.start_period || '2m',
+              }
+            : null,
+          ports: runtime.ports,
+          sidecars: runtime.sidecars,
+        },
       });
       onSaved(r.data);
       toast.push({ title: 'Settings enregistrés', tone: 'ok' });
@@ -2240,6 +2306,288 @@ function ProjectSettingsPanel({
             />
             /dev/dri (VAAPI) au prochain déploiement
           </label>
+          <div class="space-y-2 md:col-span-2">
+            <div>
+              <div class="text-sm font-medium">Dossiers montés</div>
+              <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
+                Chemin du nœud vers un chemin dans le conteneur, appliqué au prochain
+                déploiement. Ex. popcorn : <span class="font-mono">/media/Docker/AppData/popcorn</span>{' '}
+                → <span class="font-mono">/app/.data</span>,{' '}
+                <span class="font-mono">/media/Media/Popcornn/media</span> →{' '}
+                <span class="font-mono">/app/downloads</span>.
+              </p>
+            </div>
+            {volumes.length > 0 && (
+              <ul class="space-y-1">
+                {volumes.map((v) => (
+                  <li
+                    key={v}
+                    class="flex items-center justify-between gap-2 rounded-xl border border-[var(--color-line)] px-3 py-2 font-mono text-xs"
+                  >
+                    <span class="min-w-0 break-all">{v}</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setVolumes((list) => list.filter((x) => x !== v))}
+                    >
+                      Retirer
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div class="min-w-0 flex-1">
+                <Input
+                  label="Hôte"
+                  placeholder="/media/Media/Popcornn/media"
+                  value={volumeHost}
+                  onInput={(e) => setVolumeHost((e.target as HTMLInputElement).value)}
+                />
+              </div>
+              <div class="min-w-0 flex-1">
+                <Input
+                  label="Conteneur"
+                  placeholder="/app/downloads"
+                  value={volumeTarget}
+                  onInput={(e) => setVolumeTarget((e.target as HTMLInputElement).value)}
+                />
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const host = volumeHost.trim();
+                  const target = volumeTarget.trim();
+                  if (!host.startsWith('/') || !target.startsWith('/')) {
+                    toast.push({
+                      title: 'Chemins absolus',
+                      detail: 'Les deux chemins commencent par /',
+                      tone: 'warn',
+                    });
+                    return;
+                  }
+                  const spec = `${host}:${target}`;
+                  setVolumes((list) => (list.includes(spec) ? list : [...list, spec]));
+                  setVolumeHost('');
+                  setVolumeTarget('');
+                }}
+              >
+                Ajouter
+              </Button>
+            </div>
+          </div>
+          <div class="space-y-3 rounded-xl border border-[var(--color-line)] p-3 md:col-span-2">
+            <div>
+              <div class="text-sm font-medium">Runtime Docker</div>
+              <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
+                Ports publiés en plus du port HTTP, service à côté (ex. FlareSolverr), limites
+                et healthcheck. Appliqué au prochain déploiement.
+              </p>
+            </div>
+            <div class="grid gap-2 sm:grid-cols-2">
+              <Input
+                label="Mémoire"
+                placeholder="20g"
+                value={runtime.memory || ''}
+                onInput={(e) =>
+                  setRuntime((r) => ({ ...r, memory: (e.target as HTMLInputElement).value }))
+                }
+              />
+              <Input
+                label="CPUs"
+                placeholder="1"
+                value={runtime.cpus || ''}
+                onInput={(e) =>
+                  setRuntime((r) => ({ ...r, cpus: (e.target as HTMLInputElement).value }))
+                }
+              />
+            </div>
+            <Input
+              label="Healthcheck"
+              placeholder="curl -f http://localhost:3000/api/client/health || exit 1"
+              value={runtime.healthcheck?.cmd || ''}
+              onInput={(e) => {
+                const cmd = (e.target as HTMLInputElement).value;
+                setRuntime((r) => ({
+                  ...r,
+                  healthcheck: cmd.trim()
+                    ? {
+                        cmd,
+                        interval: r.healthcheck?.interval || '30s',
+                        timeout: r.healthcheck?.timeout || '10s',
+                        retries: r.healthcheck?.retries || 5,
+                        start_period: r.healthcheck?.start_period || '2m',
+                      }
+                    : null,
+                }));
+              }}
+            />
+            <div class="text-sm font-medium">Ports supplémentaires</div>
+            {runtime.ports.length > 0 && (
+              <ul class="space-y-1">
+                {runtime.ports.map((p) => (
+                  <li
+                    key={`${p.host}:${p.container}/${p.protocol}`}
+                    class="flex items-center justify-between gap-2 font-mono text-xs"
+                  >
+                    <span>
+                      {p.host}:{p.container}/{p.protocol}
+                    </span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        setRuntime((r) => ({
+                          ...r,
+                          ports: r.ports.filter(
+                            (x) =>
+                              !(
+                                x.host === p.host &&
+                                x.container === p.container &&
+                                x.protocol === p.protocol
+                              ),
+                          ),
+                        }))
+                      }
+                    >
+                      Retirer
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <Input
+                label="Hôte"
+                placeholder="4240"
+                value={portHost}
+                onInput={(e) => setPortHost((e.target as HTMLInputElement).value)}
+              />
+              <Input
+                label="Conteneur"
+                placeholder="4240"
+                value={portContainer}
+                onInput={(e) => setPortContainer((e.target as HTMLInputElement).value)}
+              />
+              <label class="flex flex-col gap-1.5 text-sm">
+                <span class="font-medium">Protocole</span>
+                <select
+                  class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
+                  value={portProto}
+                  onChange={(e) =>
+                    setPortProto((e.target as HTMLSelectElement).value as 'tcp' | 'udp')
+                  }
+                >
+                  <option value="tcp">tcp</option>
+                  <option value="udp">udp</option>
+                </select>
+              </label>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const host = Number(portHost);
+                  const container = Number(portContainer);
+                  if (!host || !container || host > 65535 || container > 65535) {
+                    toast.push({ title: 'Port invalide', tone: 'warn' });
+                    return;
+                  }
+                  const next: PublishedPort = { host, container, protocol: portProto };
+                  setRuntime((r) => ({ ...r, ports: [...r.ports, next] }));
+                  setPortHost('');
+                  setPortContainer('');
+                }}
+              >
+                Ajouter le port
+              </Button>
+            </div>
+            <div class="text-sm font-medium">Service à côté</div>
+            <p class="text-xs text-[var(--color-ink-muted)]">
+              Le nom est le DNS sur le réseau du projet. FlareSolverr : nom{' '}
+              <span class="font-mono">flaresolverr</span>, image{' '}
+              <span class="font-mono">flaresolverr/flaresolverr:latest</span>, port 9191. L’app
+              l’atteint via <span class="font-mono">http://flaresolverr:9191</span>.
+            </p>
+            {runtime.sidecars.map((s) => (
+              <div
+                key={s.name}
+                class="flex items-center justify-between gap-2 font-mono text-xs"
+              >
+                <span class="min-w-0 break-all">
+                  {s.name} · {s.image}
+                  {s.ports[0] ? ` · ${s.ports[0].host}/${s.ports[0].protocol}` : ''}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() =>
+                    setRuntime((r) => ({
+                      ...r,
+                      sidecars: r.sidecars.filter((x) => x.name !== s.name),
+                    }))
+                  }
+                >
+                  Retirer
+                </Button>
+              </div>
+            ))}
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <Input
+                label="Nom DNS"
+                placeholder="flaresolverr"
+                value={sideName}
+                onInput={(e) => setSideName((e.target as HTMLInputElement).value)}
+              />
+              <Input
+                label="Image"
+                placeholder="flaresolverr/flaresolverr:latest"
+                value={sideImage}
+                onInput={(e) => setSideImage((e.target as HTMLInputElement).value)}
+              />
+              <Input
+                label="Port"
+                placeholder="9191"
+                value={sidePort}
+                onInput={(e) => setSidePort((e.target as HTMLInputElement).value)}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const name = sideName.trim().toLowerCase();
+                  const image = sideImage.trim();
+                  const port = Number(sidePort);
+                  if (!name || !image) {
+                    toast.push({ title: 'Nom et image requis', tone: 'warn' });
+                    return;
+                  }
+                  const ports: PublishedPort[] =
+                    port > 0 && port <= 65535
+                      ? [{ host: port, container: port, protocol: 'tcp' }]
+                      : [];
+                  setRuntime((r) => ({
+                    ...r,
+                    sidecars: [
+                      ...r.sidecars.filter((x) => x.name !== name),
+                      { name, image, ports },
+                    ],
+                  }));
+                  setSideName('');
+                  setSideImage('');
+                  setSidePort('');
+                }}
+              >
+                Ajouter le service
+              </Button>
+            </div>
+          </div>
           <label class="flex items-center gap-2 text-sm md:col-span-2">
             <input
               type="checkbox"

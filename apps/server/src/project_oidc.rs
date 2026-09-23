@@ -397,6 +397,8 @@ mod tests {
             auto_deploy: 1,
             gpu_nvidia: 0,
             gpu_dri: 0,
+            volumes_json: "[]".into(),
+            runtime_json: "{}".into(),
             created_at: "".into(),
             updated_at: "".into(),
         };

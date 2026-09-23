@@ -695,6 +695,9 @@ pub struct UpdateProject {
     pub auto_deploy: Option<bool>,
     pub gpu_nvidia: Option<bool>,
     pub gpu_dri: Option<bool>,
+    /// Remplace la liste. `source:cible` ou `source:cible:ro`.
+    pub volumes: Option<Vec<String>>,
+    pub runtime: Option<devforge_deploy::RuntimeSpec>,
 }
 
 async fn update_project(
@@ -750,6 +753,21 @@ async fn update_project(
         .gpu_dri
         .map(|v| if v { 1i64 } else { 0 })
         .unwrap_or(existing.gpu_dri);
+    let volumes_json = match &body.volumes {
+        Some(volumes) => serde_json::to_string(
+            &devforge_deploy::docker::normalize_volume_mounts(volumes)
+                .map_err(ApiError::message)?,
+        )
+        .unwrap_or_else(|_| "[]".into()),
+        None => existing.volumes_json.clone(),
+    };
+    let runtime_json = match body.runtime {
+        Some(mut spec) => {
+            spec.normalize().map_err(ApiError::message)?;
+            serde_json::to_string(&spec).unwrap_or_else(|_| "{}".into())
+        }
+        None => existing.runtime_json.clone(),
+    };
 
     let next_server = if user.role == "instance_admin" {
         body.server_id.clone().or(existing.server_id.clone())
@@ -774,8 +792,8 @@ async fn update_project(
             build_pack = $9, port = $10, is_static = $11, publish_directory = $12,
             base_directory = $13, docker_compose_location = $14,
             is_sso_protected = $15, has_own_user_system = $16, auto_deploy = $17,
-            gpu_nvidia = $18, gpu_dri = $19, updated_at = $20
-        WHERE uuid = $21"#,
+            gpu_nvidia = $18, gpu_dri = $19, volumes_json = $20, runtime_json = $21, updated_at = $22
+        WHERE uuid = $23"#,
     )
     .bind(body.name.unwrap_or(existing.name))
     .bind(body.status.unwrap_or(existing.status))
@@ -799,6 +817,8 @@ async fn update_project(
     .bind(auto_deploy)
     .bind(gpu_nvidia)
     .bind(gpu_dri)
+    .bind(&volumes_json)
+    .bind(&runtime_json)
     .bind(&now)
     .bind(&uuid)
     .execute(&state.pool)
@@ -1334,6 +1354,8 @@ pub(crate) async fn run_real_deploy(
         gpu_dri: project.gpu_dri != 0,
         group_network,
         group_alias,
+        volumes: devforge_deploy::docker::decode_volume_mounts(&project.volumes_json),
+        runtime: devforge_deploy::RuntimeSpec::from_json(&project.runtime_json).unwrap_or_default(),
     };
     let deploy = state.deploy.clone();
     let slot_server = server_id.clone();

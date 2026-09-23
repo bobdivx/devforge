@@ -1896,6 +1896,9 @@ async fn github_webhook(
             gpu_dri: project.gpu_dri != 0,
             group_network,
             group_alias,
+            volumes: devforge_deploy::docker::decode_volume_mounts(&project.volumes_json),
+            runtime: devforge_deploy::RuntimeSpec::from_json(&project.runtime_json)
+                .unwrap_or_default(),
         };
         let deploy = state.deploy.clone();
         let slot_server = req.server_id.clone();

@@ -47,6 +47,8 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         ("auto_deploy", "BIGINT NOT NULL DEFAULT 1"),
         ("gpu_nvidia", "BIGINT NOT NULL DEFAULT 0"),
         ("gpu_dri", "BIGINT NOT NULL DEFAULT 0"),
+        ("volumes_json", "TEXT NOT NULL DEFAULT '[]'"),
+        ("runtime_json", "TEXT NOT NULL DEFAULT '{}'"),
     ] {
         let sql = format!("ALTER TABLE projects ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;

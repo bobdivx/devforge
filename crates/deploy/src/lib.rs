@@ -8,7 +8,10 @@ use std::sync::Arc;
 pub mod builders;
 pub mod docker;
 pub mod error_parser;
+pub mod runtime;
 pub mod ssh;
+
+pub use runtime::RuntimeSpec;
 
 pub use error_parser::{parse_deploy_error_fr, DeployError};
 pub use ssh::{LocalShellExecutor, SshRemoteExecutor, SshTarget};
@@ -140,6 +143,9 @@ pub struct DeployRequest {
     pub group_network: Option<String>,
     /// Alias DNS du rôle (`server`, `web`, …) posé après le basculement.
     pub group_alias: Option<String>,
+    /// Montages `source:cible[:ro]` (`docker run -v`).
+    pub volumes: Vec<String>,
+    pub runtime: RuntimeSpec,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -148,6 +154,8 @@ struct ContainerExtras {
     gpu_dri: bool,
     group_network: Option<String>,
     group_alias: Option<String>,
+    volumes: Vec<String>,
+    runtime: crate::runtime::RuntimeSpec,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -441,6 +449,10 @@ impl DeployFacade {
         format!("df-{}", project_uuid.chars().take(12).collect::<String>())
     }
 
+    fn sidecar_network(app_container: &str) -> String {
+        format!("dfside-{}", app_container.trim_start_matches("df-"))
+    }
+
     fn image_name(project_uuid: &str) -> String {
         format!(
             "df-{}:latest",
@@ -692,6 +704,8 @@ impl DeployFacade {
             gpu_dri: req.gpu_dri,
             group_network: req.group_network.clone(),
             group_alias: req.group_alias.clone(),
+            volumes: req.volumes.clone(),
+            runtime: req.runtime.clone(),
         };
 
         let build_ok = match req.build_pack.as_str() {
@@ -699,6 +713,11 @@ impl DeployFacade {
                 if extras.gpu_nvidia || extras.gpu_dri || extras.group_network.is_some() {
                     logs.push_str(
                         "[compose] GPU et réseau de groupe non appliqués (chemin docker compose)\n",
+                    );
+                }
+                if !extras.volumes.is_empty() || !extras.runtime.sidecars.is_empty() {
+                    logs.push_str(
+                        "[compose] montages, ports extra, sidecars et healthcheck du projet ne sont pas injectés — déclare-les dans le fichier compose\n",
                     );
                 }
                 let compose = req
@@ -1189,6 +1208,42 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
 
         // CRITICAL: Start new container WITHOUT Traefik labels first (prevent Host theft #106)
         // Labels will be applied only after healthcheck passes
+        if !extras.volumes.is_empty() {
+            logs.push_str(&format!(
+                "[volumes] {}\n",
+                extras.volumes.join(" ")
+            ));
+        }
+        if extras.runtime.memory.is_some() || extras.runtime.cpus.is_some() {
+            logs.push_str(&format!(
+                "[runtime] memory={} cpus={}\n",
+                extras.runtime.memory.as_deref().unwrap_or("—"),
+                extras.runtime.cpus.as_deref().unwrap_or("—"),
+            ));
+        }
+        if !extras.runtime.ports.is_empty() {
+            logs.push_str(&format!(
+                "[runtime] ports {}\n",
+                extras
+                    .runtime
+                    .ports
+                    .iter()
+                    .map(|p| p.publish_flag())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+        }
+
+        let side_net = Self::sidecar_network(name);
+        if !self
+            .start_sidecars(server, workdir, name, &side_net, extras, logs)
+            .await
+        {
+            logs.push_str("[sidecar] échec — l’app en production n’est pas remplacée\n");
+            return false;
+        }
+
+        let tune = crate::runtime::RunTune::from_runtime(&extras.runtime);
         let run_no_labels = docker::docker_run_ex(
             &new_name,
             image,
@@ -1198,6 +1253,8 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             None, // NO proxy labels yet
             extras.gpu_nvidia,
             extras.gpu_dri,
+            &extras.volumes,
+            &tune,
         );
 
         let new_started = match self
@@ -1225,6 +1282,16 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
                 logs.push_str(&format!("[blue-green] ✅ Ancien conteneur {} reste en production (aucune interruption)\n", name));
             }
             return false;
+        }
+
+        if !extras.runtime.sidecars.is_empty() {
+            logs.push_str(&format!("[sidecar] réseau {side_net}\n"));
+            let cmd = docker::docker_network_attach(&side_net, &new_name, None);
+            match self.executor.exec(server, workdir, &cmd, 30).await {
+                Ok(r) if r.ok => logs.push_str("[sidecar] app reliée aux services\n"),
+                Ok(r) => logs.push_str(&format!("[sidecar] warn: {}\n", trim_out(&r.output))),
+                Err(e) => logs.push_str(&format!("[sidecar] warn: {e}\n")),
+            }
         }
 
         if let Some(net) = extras.group_network.as_deref().filter(|s| !s.is_empty()) {
@@ -1360,6 +1427,58 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         }
 
         success
+    }
+
+    async fn start_sidecars(
+        &self,
+        server: &str,
+        workdir: &str,
+        app_name: &str,
+        network: &str,
+        extras: &ContainerExtras,
+        logs: &mut String,
+    ) -> bool {
+        if extras.runtime.sidecars.is_empty() {
+            return true;
+        }
+        for side in &extras.runtime.sidecars {
+            let cname = format!("{app_name}-{}", side.name);
+            logs.push_str(&format!("[sidecar] {cname} {}\n", side.image));
+            let run = docker::docker_run_ex(
+                &cname,
+                &side.image,
+                &[],
+                None,
+                Some(network),
+                None,
+                false,
+                false,
+                &[],
+                &crate::runtime::RunTune::for_sidecar(side),
+            );
+            let cmd = format!(
+                "docker network create {net} >/dev/null 2>&1 || true; docker rm -f {cname} >/dev/null 2>&1 || true; {run}",
+                net = network,
+                cname = cname,
+                run = run,
+            );
+            match self.executor.exec(server, workdir, &cmd, 180).await {
+                Ok(r) if r.ok => logs.push_str(&format!("[sidecar] {cname} démarré\n")),
+                Ok(r) => {
+                    logs.push_str(&format!(
+                        "[sidecar] {cname} exit={} {}\n",
+                        r.exit_code,
+                        trim_out(&r.output)
+                    ));
+                    return false;
+                }
+                Err(e) => {
+                    logs.push_str(&format!("[sidecar] {cname} error: {e}\n"));
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     async fn container_exists(&self, server: &str, workdir: &str, name: &str) -> bool {

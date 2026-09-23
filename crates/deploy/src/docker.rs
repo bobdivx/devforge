@@ -12,7 +12,74 @@ pub fn docker_build(workdir: &str, image: &str, dockerfile: &str) -> String {
 }
 
 pub fn docker_run(name: &str, image: &str, ports: &[(u16, u16)], env_file: Option<&str>) -> String {
-    docker_run_ex(name, image, ports, env_file, None, None, false, false)
+    docker_run_ex(
+        name,
+        image,
+        ports,
+        env_file,
+        None,
+        None,
+        false,
+        false,
+        &[],
+        &crate::runtime::RunTune::default(),
+    )
+}
+
+/// `source:cible` ou `source:cible:ro|rw`. Chemins absolus, pas de `..`.
+pub fn normalize_volume_mount(raw: &str) -> Result<String, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("montage vide".into());
+    }
+    if raw.chars().any(|c| {
+        c.is_whitespace() || matches!(c, ';' | '&' | '|' | '`' | '$' | '"' | '\'' | '\\' | '\n' | '\r')
+    }) {
+        return Err(format!("montage refusé ({raw}) — pas d’espace ni de caractère shell"));
+    }
+    let parts: Vec<&str> = raw.split(':').collect();
+    if parts.len() < 2 || parts.len() > 3 {
+        return Err(format!(
+            "montage invalide ({raw}) — format /hôte:/conteneur[:ro|rw]"
+        ));
+    }
+    let host = parts[0];
+    let container = parts[1];
+    if host.is_empty()
+        || container.is_empty()
+        || !host.starts_with('/')
+        || !container.starts_with('/')
+        || host.contains("..")
+        || container.contains("..")
+    {
+        return Err(format!(
+            "montage invalide ({raw}) — chemins absolus, sans « .. »"
+        ));
+    }
+    if let Some(mode) = parts.get(2) {
+        if *mode != "ro" && *mode != "rw" {
+            return Err(format!("mode de montage invalide ({raw}) — ro ou rw"));
+        }
+    }
+    Ok(raw.to_string())
+}
+
+pub fn normalize_volume_mounts(inputs: &[String]) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    for raw in inputs {
+        let mount = normalize_volume_mount(raw)?;
+        if !out.iter().any(|e| e == &mount) {
+            out.push(mount);
+        }
+    }
+    Ok(out)
+}
+
+pub fn decode_volume_mounts(raw: &str) -> Vec<String> {
+    serde_json::from_str::<Vec<String>>(raw)
+        .ok()
+        .map(|v| normalize_volume_mounts(&v).unwrap_or_default())
+        .unwrap_or_default()
 }
 
 /// Run with optional Docker network + Traefik labels.
@@ -35,6 +102,8 @@ pub fn docker_run_ex(
     labels: Option<&Value>,
     gpu_nvidia: bool,
     gpu_dri: bool,
+    volumes: &[String],
+    tune: &crate::runtime::RunTune,
 ) -> String {
     let mut args = vec![
         "docker".into(),
@@ -68,9 +137,41 @@ pub fn docker_run_ex(
         args.push("-p".into());
         args.push(format!("{host}:{container}"));
     }
+    for port in &tune.extra_ports {
+        args.push("-p".into());
+        args.push(port.publish_flag());
+    }
+    if let Some(mem) = tune.memory.as_deref().filter(|s| !s.is_empty()) {
+        args.push("--memory".into());
+        args.push(shell_escape(mem));
+    }
+    if let Some(cpus) = tune.cpus.as_deref().filter(|s| !s.is_empty()) {
+        args.push("--cpus".into());
+        args.push(shell_escape(cpus));
+    }
+    if let Some(alias) = tune.network_alias.as_deref().filter(|s| !s.is_empty()) {
+        args.push("--network-alias".into());
+        args.push(shell_escape(alias));
+    }
+    if let Some(hc) = &tune.healthcheck {
+        args.push("--health-cmd".into());
+        args.push(shell_escape(&hc.cmd));
+        args.push("--health-interval".into());
+        args.push(shell_escape(&hc.interval));
+        args.push("--health-timeout".into());
+        args.push(shell_escape(&hc.timeout));
+        args.push("--health-retries".into());
+        args.push(hc.retries.to_string());
+        args.push("--health-start-period".into());
+        args.push(shell_escape(&hc.start_period));
+    }
     if let Some(ef) = env_file {
         args.push("--env-file".into());
         args.push(shell_escape(ef));
+    }
+    for volume in volumes {
+        args.push("-v".into());
+        args.push(shell_escape(volume));
     }
     args.push(shell_escape(image));
     args.join(" ")
@@ -467,6 +568,49 @@ fi
 for spec in $(docker inspect -f "{{{{range $p, $conf := .HostConfig.PortBindings}}}}{{{{range $conf}}}}{{{{.HostPort}}}}:{{{{$p}}}} {{{{end}}}}{{{{end}}}}" "$N"); do
   [ -n "$spec" ] && set -- "$@" -p "$spec"
 done
+
+# Bind mounts and named volumes (lost otherwise: docker run is rebuilt from inspect)
+MOUNT_FILE=$(mktemp)
+docker inspect -f '{{{{range .Mounts}}}}{{{{.Type}}}}|{{{{.Source}}}}|{{{{.Destination}}}}|{{{{.RW}}}}|{{{{.Name}}}}
+{{{{end}}}}' "$N" > "$MOUNT_FILE"
+while IFS='|' read -r typ src dst rw name; do
+  spec=""
+  if [ "$typ" = "bind" ] && [ -n "$src" ] && [ -n "$dst" ]; then
+    spec="$src:$dst"
+  elif [ "$typ" = "volume" ] && [ -n "$name" ] && [ -n "$dst" ]; then
+    spec="$name:$dst"
+  fi
+  if [ -n "$spec" ]; then
+    if [ "$rw" = "false" ]; then spec="${{spec}}:ro"; fi
+    set -- "$@" -v "$spec"
+  fi
+done < "$MOUNT_FILE"
+rm -f "$MOUNT_FILE"
+
+REQ=$(docker inspect -f '{{{{json .HostConfig.DeviceRequests}}}}' "$N" 2>/dev/null || echo null)
+echo "$REQ" | grep -q gpu && set -- "$@" --gpus all
+DEV=$(docker inspect -f '{{{{json .HostConfig.Devices}}}}' "$N" 2>/dev/null || echo null)
+echo "$DEV" | grep -q '/dev/dri' && set -- "$@" --device /dev/dri
+
+MEM=$(docker inspect -f '{{{{.HostConfig.Memory}}}}' "$N" 2>/dev/null || echo 0)
+if [ -n "$MEM" ] && [ "$MEM" != "0" ] && [ "$MEM" != "<no value>" ]; then
+  set -- "$@" --memory "$MEM"
+fi
+NANO=$(docker inspect -f '{{{{.HostConfig.NanoCpus}}}}' "$N" 2>/dev/null || echo 0)
+if [ -n "$NANO" ] && [ "$NANO" != "0" ] && [ "$NANO" != "<no value>" ]; then
+  set -- "$@" --cpu-period 100000 --cpu-quota "$((NANO / 10000))"
+fi
+HC_CMD=$(docker inspect -f '{{{{if .Config.Healthcheck}}}}{{{{index .Config.Healthcheck.Test 1}}}}{{{{end}}}}' "$N" 2>/dev/null || true)
+if [ -n "$HC_CMD" ]; then
+  HC_INT=$(docker inspect -f '{{{{.Config.Healthcheck.Interval}}}}' "$N" 2>/dev/null || echo 30s)
+  HC_TO=$(docker inspect -f '{{{{.Config.Healthcheck.Timeout}}}}' "$N" 2>/dev/null || echo 10s)
+  HC_RET=$(docker inspect -f '{{{{.Config.Healthcheck.Retries}}}}' "$N" 2>/dev/null || echo 5)
+  HC_START=$(docker inspect -f '{{{{.Config.Healthcheck.StartPeriod}}}}' "$N" 2>/dev/null || echo 0s)
+  set -- "$@" --health-cmd "$HC_CMD" --health-interval "$HC_INT" --health-timeout "$HC_TO" --health-retries "$HC_RET"
+  if [ -n "$HC_START" ] && [ "$HC_START" != "0s" ]; then
+    set -- "$@" --health-start-period "$HC_START"
+  fi
+fi
 
 # Add env file
 set -- "$@" --env-file "$ENV_FILE"
@@ -900,11 +1044,107 @@ mod tests {
     }
 
     #[test]
+    fn docker_run_applies_popcorn_runtime() {
+        use crate::runtime::{HealthcheckSpec, PublishedPort, RunTune};
+        let tune = RunTune {
+            extra_ports: vec![
+                PublishedPort {
+                    host: 4240,
+                    container: 4240,
+                    protocol: "tcp".into(),
+                },
+                PublishedPort {
+                    host: 4240,
+                    container: 4240,
+                    protocol: "udp".into(),
+                },
+            ],
+            memory: Some("20g".into()),
+            cpus: Some("1".into()),
+            healthcheck: Some(HealthcheckSpec {
+                cmd: "curl -f http://localhost:3000/api/client/health || exit 1".into(),
+                interval: "30s".into(),
+                timeout: "10s".into(),
+                retries: 5,
+                start_period: "2m".into(),
+            }),
+            network_alias: None,
+        };
+        let cmd = docker_run_ex("app", "img", &[], None, None, None, true, false, &[], &tune);
+        assert!(cmd.contains("-p 4240:4240"));
+        assert!(cmd.contains("-p 4240:4240/udp"));
+        assert!(cmd.contains("--memory 20g"));
+        assert!(cmd.contains("--cpus 1"));
+        assert!(cmd.contains("--gpus all"));
+        assert!(cmd.contains("--health-cmd"));
+        assert!(cmd.contains("--health-start-period 2m"));
+    }
+
+    #[test]
+    fn docker_run_ex_mounts_host_directories() {
+        let volumes = vec![
+            "/media/Docker/AppData/popcorn:/app/.data".into(),
+            "/media/Media/Popcornn/media:/app/downloads".into(),
+            "/var/run/docker.sock:/var/run/docker.sock".into(),
+        ];
+        let cmd = docker_run_ex(
+            "app",
+            "img",
+            &[(3000, 3000)],
+            None,
+            None,
+            None,
+            false,
+            false,
+            &volumes,
+            &crate::runtime::RunTune::default(),
+        );
+        assert!(cmd.contains("-v /media/Docker/AppData/popcorn:/app/.data"));
+        assert!(cmd.contains("-v /media/Media/Popcornn/media:/app/downloads"));
+        assert!(cmd.contains("-v /var/run/docker.sock:/var/run/docker.sock"));
+    }
+
+    #[test]
+    fn volume_mount_rejects_relative_and_accepts_popcorn_binds() {
+        assert!(normalize_volume_mount("/media/Media/Popcornn/streaming:/app/downloads/transcode_cache").is_ok());
+        assert!(normalize_volume_mount("media:/app/downloads").is_err());
+        assert!(normalize_volume_mount("/media/../etc:/app").is_err());
+        let many = normalize_volume_mounts(&[
+            "/media/Docker/AppData/popcorn:/app/.data".into(),
+            "/media/Docker/AppData/popcorn:/app/.data".into(),
+        ])
+        .unwrap();
+        assert_eq!(many.len(), 1);
+    }
+
+    #[test]
     fn docker_run_ex_adds_gpu_devices() {
-        let cmd = docker_run_ex("app", "img", &[], None, Some("devforge"), None, true, true);
+        let cmd = docker_run_ex(
+            "app",
+            "img",
+            &[],
+            None,
+            Some("devforge"),
+            None,
+            true,
+            true,
+            &[],
+            &crate::runtime::RunTune::default(),
+        );
         assert!(cmd.contains("--gpus all"));
         assert!(cmd.contains("--device /dev/dri"));
-        let plain = docker_run_ex("app", "img", &[], None, None, None, false, false);
+        let plain = docker_run_ex(
+            "app",
+            "img",
+            &[],
+            None,
+            None,
+            None,
+            false,
+            false,
+            &[],
+            &crate::runtime::RunTune::default(),
+        );
         assert!(!plain.contains("--gpus"));
         assert!(!plain.contains("--device"));
     }
