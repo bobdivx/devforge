@@ -22,6 +22,8 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
             publish_directory TEXT,
             base_directory TEXT NOT NULL DEFAULT '/',
             docker_compose_location TEXT,
+            dockerfile_path TEXT,
+            docker_build_context TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -42,6 +44,8 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         ("publish_directory", "TEXT"),
         ("base_directory", "TEXT NOT NULL DEFAULT '/'"),
         ("docker_compose_location", "TEXT"),
+        ("dockerfile_path", "TEXT"),
+        ("docker_build_context", "TEXT"),
         ("is_sso_protected", "INTEGER"),
         ("has_own_user_system", "INTEGER"),
         ("auto_deploy", "BIGINT NOT NULL DEFAULT 1"),

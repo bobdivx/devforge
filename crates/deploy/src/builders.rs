@@ -206,17 +206,34 @@ pub fn fallback_image_build_cmd(image: &str, port: u16) -> (String, &'static str
     let df = docker::docker_build(".", image, "Dockerfile");
     let cmd = if cfg!(windows) {
         format!(
-            "if (Test-Path Dockerfile) {{ {df} }} elseif (Test-Path package.json) {{ {node} }} else {{ Write-Error '[fallback] ni Dockerfile ni package.json'; exit 1 }}"
+            "if ((Test-Path -LiteralPath Dockerfile -PathType Leaf) -and ((Get-Item -LiteralPath Dockerfile).Attributes -band [IO.FileAttributes]::ReparsePoint) -and -not (Test-Path -LiteralPath Dockerfile -PathType Leaf -ErrorAction SilentlyContinue)) {{ Write-Error '[error] Dockerfile est un lien symbolique casse (cible manquante)'; exit 1 }}; if (Test-Path -LiteralPath Dockerfile -PathType Leaf) {{ {df} }} elseif (Test-Path package.json) {{ {node} }} else {{ Write-Error '[fallback] ni Dockerfile ni package.json'; exit 1 }}"
         )
     } else {
         format!(
-            "if [ -f Dockerfile ]; then {df}\nelif [ -f package.json ]; then\n{node}\nelse\necho \"[fallback] ni Dockerfile ni package.json — Nixpacks est requis pour ce runtime\" >&2\nexit 1\nfi\n"
+            "if [ -L Dockerfile ] && [ ! -e Dockerfile ]; then\necho \"[error] Dockerfile est un lien symbolique casse (cible manquante)\" >&2\nexit 1\nfi\nif [ -f Dockerfile ]; then {df}\nelif [ -f package.json ]; then\n{node}\nelse\necho \"[fallback] ni Dockerfile ni package.json — Nixpacks est requis pour ce runtime\" >&2\nexit 1\nfi\n"
         )
     };
     (
         cmd,
         "Dockerfile du projet, sinon Node (build seulement si le script existe)",
     )
+}
+
+/// `docker build -f <dockerfile> <context>` with dangling-symlink / missing-file checks.
+/// Paths are relative to the executor cwd (normally the repo root).
+pub fn dockerfile_image_build_cmd(image: &str, dockerfile: &str, context: &str) -> String {
+    let build = docker::docker_build(context, image, dockerfile);
+    if cfg!(windows) {
+        let df = dockerfile.replace('\'', "''");
+        format!(
+            "$df = '{df}'; if ((Test-Path -LiteralPath $df) -and ((Get-Item -LiteralPath $df -Force).LinkType)) {{ if (-not (Test-Path -LiteralPath $df -PathType Leaf)) {{ Write-Error \"[error] Dockerfile est un lien symbolique casse: $df\"; exit 1 }} }}; if (-not (Test-Path -LiteralPath $df -PathType Leaf)) {{ Write-Error \"[error] Dockerfile introuvable: $df\"; exit 1 }}; {build}"
+        )
+    } else {
+        let df = shell_escape_token(dockerfile);
+        format!(
+            "if [ -L {df} ] && [ ! -e {df} ]; then echo \"[error] Dockerfile est un lien symbolique casse: {dockerfile} (cible manquante)\" >&2; exit 1; fi\nif [ ! -f {df} ]; then echo \"[error] Dockerfile introuvable: {dockerfile}\" >&2; exit 1; fi\n{build}"
+        )
+    }
 }
 
 fn shell_escape_token(s: &str) -> String {
@@ -310,6 +327,14 @@ mod tests {
             "script invalide: {}\n{cmd}",
             String::from_utf8_lossy(&out.stderr)
         );
+    }
+
+    #[test]
+    fn dockerfile_image_build_cmd_checks_symlink() {
+        let cmd = dockerfile_image_build_cmd("df-x:latest", "backend/Dockerfile.nvidia", ".");
+        assert!(cmd.contains("docker build"));
+        assert!(cmd.contains("backend/Dockerfile.nvidia"));
+        assert!(cmd.contains("-L") || cmd.contains("[error]"));
     }
 
     #[test]

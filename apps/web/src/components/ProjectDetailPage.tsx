@@ -2169,6 +2169,8 @@ function ProjectSettingsPanel({
   const [publishDir, setPublishDir] = useState(project.publish_directory || '');
   const [baseDir, setBaseDir] = useState(project.base_directory || '/');
   const [composePath, setComposePath] = useState(project.docker_compose_location || '');
+  const [dockerfilePath, setDockerfilePath] = useState(project.dockerfile_path || '');
+  const [dockerBuildContext, setDockerBuildContext] = useState(project.docker_build_context || '');
   const [workdir, setWorkdir] = useState(project.workdir || '');
   const [serverId, setServerId] = useState(project.server_id || 'default');
   const [clusterNodes, setClusterNodes] = useState<ClusterNode[]>([]);
@@ -2227,6 +2229,8 @@ function ProjectSettingsPanel({
     setPublishDir(project.publish_directory || '');
     setBaseDir(project.base_directory || '/');
     setComposePath(project.docker_compose_location || '');
+    setDockerfilePath(project.dockerfile_path || '');
+    setDockerBuildContext(project.docker_build_context || '');
     setWorkdir(project.workdir || '');
     setServerId(project.server_id || 'default');
     setProdUrl(project.production_url || '');
@@ -2325,6 +2329,8 @@ function ProjectSettingsPanel({
         publish_directory: publishDir.trim() || null,
         base_directory: baseDir.trim() || '/',
         docker_compose_location: composePath.trim() || null,
+        dockerfile_path: dockerfilePath.trim() || null,
+        docker_build_context: dockerBuildContext.trim() || null,
         workdir: workdir.trim() || null,
         ...(isAdmin ? { server_id: serverId.trim() || 'default' } : {}),
         domain_apex: domainApex,
@@ -2369,6 +2375,8 @@ function ProjectSettingsPanel({
       setPublishDir(d.publish_directory || '');
       setBaseDir(d.base_directory || '/');
       setComposePath(d.docker_compose_location || '');
+      setDockerfilePath('');
+      setDockerBuildContext('');
       if (d.test_command) setTestCmd(d.test_command);
       mergeDetectedPorts(d.port, d.exposed_ports);
       setDetectInfo(
@@ -2767,6 +2775,20 @@ function ProjectSettingsPanel({
             label="Docker compose path"
             value={composePath}
             onInput={(e) => setComposePath((e.target as HTMLInputElement).value)}
+          />
+          <Input
+            label="Chemin du Dockerfile"
+            hint="Relatif à la racine du dépôt. Ex. backend/Dockerfile.nvidia. Vide = Dockerfile dans le contexte de build."
+            value={dockerfilePath}
+            placeholder="backend/Dockerfile.nvidia"
+            onInput={(e) => setDockerfilePath((e.target as HTMLInputElement).value)}
+          />
+          <Input
+            label="Contexte de build Docker"
+            hint="Relatif à la racine du dépôt. / ou . ou vide = racine (ou base_directory). Séparé du chemin du Dockerfile pour les monorepos."
+            value={dockerBuildContext}
+            placeholder="/ ou . pour la racine"
+            onInput={(e) => setDockerBuildContext((e.target as HTMLInputElement).value)}
           />
           <Input
             label="Workdir"
