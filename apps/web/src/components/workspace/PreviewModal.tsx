@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { ArrowLeft, ExternalLink, RefreshCw } from 'lucide-preact';
-import { Button } from '../ui';
+import { Button, Portal } from '../ui';
 
 type Props = {
   open: boolean;
@@ -31,6 +31,7 @@ export function PreviewModal({ open, onClose, previewUrl, isProduction }: Props)
   const targetUrl = `${previewUrl}${previewUrl.includes('?') ? '&' : '?'}_df=${nonce}`;
 
   return (
+    <Portal>
     <div class="df-preview-enter fixed inset-0 z-50 flex flex-col bg-black">
       <div class="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-[var(--color-card)] px-4">
         <div class="flex min-w-0 items-center gap-3">
@@ -86,5 +87,6 @@ export function PreviewModal({ open, onClose, previewUrl, isProduction }: Props)
         />
       </div>
     </div>
+    </Portal>
   );
 }

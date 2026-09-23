@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { X, ListFilter, AlignLeft } from 'lucide-preact';
 import { api, type Deployment } from '../../lib/api';
-import { Badge, Button, Spinner } from '../ui';
+import { Badge, Button, Portal, Spinner } from '../ui';
 import { cn } from '../../lib/cn';
 import { DeployTimeline } from './DeployTimeline';
 
@@ -314,7 +314,8 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
   }
 
   return (
-    <div class="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+    <Portal>
+    <div class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto sm:items-center">
       <button
         type="button"
         aria-label="Fermer"
@@ -332,5 +333,6 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
         {body}
       </div>
     </div>
+    </Portal>
   );
 }

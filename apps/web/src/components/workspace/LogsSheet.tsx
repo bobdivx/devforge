@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { RefreshCw, X } from 'lucide-preact';
 import { api } from '../../lib/api';
-import { Button, Spinner } from '../ui';
+import { Button, Portal, Spinner } from '../ui';
 import { cn } from '../../lib/cn';
 
 type Props = {
@@ -126,7 +126,8 @@ export function LogsSheet({ open, onClose, projectUuid, variant = 'sheet' }: Pro
   }
 
   return (
-    <div class="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+    <Portal>
+    <div class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto sm:items-center">
       <button
         type="button"
         aria-label="Fermer"
@@ -144,5 +145,6 @@ export function LogsSheet({ open, onClose, projectUuid, variant = 'sheet' }: Pro
         {body}
       </div>
     </div>
+    </Portal>
   );
 }

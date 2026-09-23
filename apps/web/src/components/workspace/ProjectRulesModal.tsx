@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { FileText, Save, Check, AlertCircle, X, Sparkles, RefreshCw } from 'lucide-preact';
 import { api } from '../../lib/api';
-import { Badge, Button, Spinner } from '../ui';
+import { Badge, Button, Portal, Spinner } from '../ui';
 import { cn } from '../../lib/cn';
 
 type Props = {
@@ -65,7 +65,8 @@ export function ProjectRulesModal({
   if (!open) return null;
 
   return (
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <Portal>
+    <div class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4">
       <button
         type="button"
         aria-label="Fermer"
@@ -169,5 +170,6 @@ export function ProjectRulesModal({
         </div>
       </div>
     </div>
+    </Portal>
   );
 }

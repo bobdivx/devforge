@@ -36,8 +36,9 @@ export function FadeIn({
   return (
     <div
       class={cn(
-        'transition-[opacity,transform] duration-500 ease-out',
-        on ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0',
+        'transition-[opacity,transform,translate] duration-500 ease-out',
+        // translate-none une fois visible : translate-y-0 laisse un containing block
+        on ? 'translate-none opacity-100' : 'translate-y-2 opacity-0',
         className,
       )}
     >

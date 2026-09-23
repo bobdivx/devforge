@@ -2,6 +2,7 @@ import { createContext } from 'preact';
 import { useCallback, useContext, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { cn } from '../../lib/cn';
+import { Portal } from './Portal';
 
 export type ToastTone = 'info' | 'ok' | 'warn' | 'danger';
 
@@ -45,7 +46,8 @@ export function ToastProvider({ children }: { children: ComponentChildren }) {
   return (
     <ToastCtx.Provider value={{ push, dismiss }}>
       {children}
-      <div class="pointer-events-none fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-3 z-50 flex w-[min(calc(100%-1.5rem),20rem)] flex-col gap-2 lg:bottom-6 lg:right-4">
+      <Portal>
+      <div class="pointer-events-none fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-3 z-[80] flex w-[min(calc(100%-1.5rem),20rem)] flex-col gap-2 lg:bottom-6 lg:right-4">
         {items.map((t) => (
           <div
             key={t.id}
@@ -72,6 +74,7 @@ export function ToastProvider({ children }: { children: ComponentChildren }) {
           </div>
         ))}
       </div>
+      </Portal>
     </ToastCtx.Provider>
   );
 }

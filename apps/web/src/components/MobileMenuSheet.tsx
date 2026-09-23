@@ -1,5 +1,6 @@
 import { useEffect, useId } from 'preact/hooks';
 import { cn } from '../lib/cn';
+import { Portal } from './ui';
 import { mobileSheetNav } from '../lib/nav';
 
 type Props = {
@@ -31,6 +32,7 @@ export function MobileMenuSheet({ open, onClose, active, userRole }: Props) {
   const items = mobileSheetNav(userRole);
 
   return (
+    <Portal>
     <div
       class="fixed inset-0 z-50 flex items-end justify-center lg:hidden"
       style={{ paddingBottom: 'calc(4.5rem + env(safe-area-inset-bottom, 0px))' }}
@@ -92,5 +94,6 @@ export function MobileMenuSheet({ open, onClose, active, userRole }: Props) {
         </nav>
       </div>
     </div>
+    </Portal>
   );
 }

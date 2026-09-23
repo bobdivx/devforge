@@ -4,7 +4,7 @@ import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { cn } from '../lib/cn';
 import { AppShell } from './AppShell';
 import { AppIcon, statusDotClass } from './AppIcon';
-import { Alert, BetaBadge, Button, HubAddTile, HubGrid, Input, Skeleton } from './ui';
+import { Alert, BetaBadge, Button, HubAddTile, HubGrid, Input, Portal, Skeleton } from './ui';
 import { enterUp, interactiveLift, motion } from '../lib/motion';
 import { useEffect, useState } from 'preact/hooks';
 import { NewGithubAppWizard } from './NewGithubAppWizard';
@@ -326,7 +326,8 @@ export function HomePage() {
       )}
 
       {groupOpen && (
-        <div class="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
+        <Portal>
+        <div class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto p-0 sm:items-center sm:p-4">
           <button
             type="button"
             aria-label="Fermer"
@@ -363,6 +364,7 @@ export function HomePage() {
             </div>
           </form>
         </div>
+        </Portal>
       )}
 
       {!loading && !error && projects.length === 0 && groups.length === 0 && (
@@ -372,7 +374,8 @@ export function HomePage() {
       )}
 
       {wizardOpen && (
-        <div class="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
+        <Portal>
+        <div class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto p-0 sm:items-center sm:p-4">
           <button
             type="button"
             aria-label="Fermer"
@@ -448,6 +451,7 @@ export function HomePage() {
             {wizardMode === 'github' && <NewGithubAppWizard bare />}
           </div>
         </div>
+        </Portal>
       )}
     </AppShell>
   );

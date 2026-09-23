@@ -6,6 +6,7 @@ export { Input } from './Input';
 export { Badge, BetaBadge } from './Badge';
 export { Alert } from './Alert';
 export { Modal } from './Modal';
+export { Portal } from './Portal';
 export { Table, Tr, Td } from './Table';
 export { Container, Section, PageHeader, Separator } from './Layout';
 export { ChartCanvas } from './ChartCanvas';

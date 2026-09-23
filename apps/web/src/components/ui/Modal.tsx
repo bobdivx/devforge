@@ -1,6 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useId } from 'preact/hooks';
 import { cn } from '../../lib/cn';
+import { Portal } from './Portal';
 
 type Props = {
   open: boolean;
@@ -58,13 +59,15 @@ export function Modal({
   if (!open) return null;
 
   return (
-    <div
-      class={cn(
-        'fixed inset-0 z-50 flex justify-center',
-        // Mobile : sheet bas d’écran ; desktop : centré
-        'items-end p-0 sm:items-center sm:p-4',
-      )}
-    >
+    <Portal>
+      <div class="fixed inset-0 z-50 overflow-y-auto">
+        <div
+          class={cn(
+            'relative flex min-h-full justify-center',
+            // Mobile : sheet bas d’écran ; desktop : centré dans le viewport
+            'items-end p-0 sm:items-center sm:p-4',
+          )}
+        >
       <button
         type="button"
         aria-label="Fermer"
@@ -138,6 +141,8 @@ export function Modal({
           </div>
         )}
       </div>
-    </div>
+        </div>
+      </div>
+    </Portal>
   );
 }

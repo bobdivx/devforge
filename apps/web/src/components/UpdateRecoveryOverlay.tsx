@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { Spinner } from './ui';
+import { Portal, Spinner } from './ui';
 
 const SERVER_BASE =
   import.meta.env.PUBLIC_SERVER_URL ??
@@ -61,6 +61,7 @@ export function UpdateRecoveryOverlay({ show, onRecovered }: Props) {
   if (!show) return null;
 
   return (
+    <Portal>
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-[var(--color-bg)]/95 backdrop-blur-md"
       style={{ animation: 'fadeIn 0.3s ease-out' }}
@@ -109,5 +110,6 @@ export function UpdateRecoveryOverlay({ show, onRecovered }: Props) {
         }
       `}</style>
     </div>
+    </Portal>
   );
 }

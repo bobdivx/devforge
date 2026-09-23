@@ -74,7 +74,9 @@ pre {
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    /* `none`, pas translateY(0) : une transform résiduelle crée un containing
+       block et casse les overlays `position: fixed` descendants. */
+    transform: none;
   }
 }
 
@@ -259,7 +261,8 @@ pre {
 }
 
 .df-page-enter {
-  animation: df-fade-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* backwards seulement : `both` garde translateY(0) et casse position:fixed. */
+  animation: df-fade-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 .df-preview-enter {

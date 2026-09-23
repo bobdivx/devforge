@@ -21,6 +21,7 @@ import {
   Skeleton,
   Table,
   Td,
+  Portal,
   Tr,
   useToast,
 } from './ui';
@@ -637,7 +638,8 @@ function AdminProxy() {
       </Card>
 
       {confirmAction && (
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+        <Portal>
+        <div class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4">
           <Card class="w-full max-w-md">
             <CardHeader
               title={confirmAction === 'ensure' ? 'Réparer / Recréer ?' : 'Redémarrer ?'}
@@ -661,6 +663,7 @@ function AdminProxy() {
             </div>
           </Card>
         </div>
+        </Portal>
       )}
     </div>
   );

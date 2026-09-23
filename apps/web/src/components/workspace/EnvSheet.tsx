@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { X } from 'lucide-preact';
 import { api } from '../../lib/api';
-import { Button, Input, Spinner } from '../ui';
+import { Button, Input, Portal, Spinner } from '../ui';
 import { cn } from '../../lib/cn';
 
 type Props = {
@@ -182,7 +182,8 @@ export function EnvSheet({ open, onClose, projectUuid, variant = 'sheet' }: Prop
   }
 
   return (
-    <div class="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+    <Portal>
+    <div class="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto sm:items-center">
       <button
         type="button"
         aria-label="Fermer"
@@ -200,5 +201,6 @@ export function EnvSheet({ open, onClose, projectUuid, variant = 'sheet' }: Prop
         {body}
       </div>
     </div>
+    </Portal>
   );
 }
