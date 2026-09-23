@@ -130,8 +130,14 @@ export function LoginPage() {
       <FadeIn class="relative w-full max-w-md">
         <div class="mb-8 text-center">
           <div class="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition-transform duration-200 hover:scale-105">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-              <path d="M13 2 4 14h7l-1 8 10-14h-7l1-6z" />
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M6 21V4.5C6 4.5 8.2 3 11 3c4.2 0 6.5 2.6 6.5 5.5V16M17.5 8.5H21M17.5 12.5H20"
+                stroke="currentColor"
+                stroke-width="2.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
             </svg>
           </div>
           <h1 class="text-2xl font-semibold tracking-tight">{title}</h1>

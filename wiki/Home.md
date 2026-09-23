@@ -18,7 +18,7 @@ Pas d’Electron : tout passe par le web. Un nœud **leader** tient le control p
 | Comprendre le produit | [[Architecture]] · [[Interface]] |
 
 Images Docker : `bobdivx/devforge` (Docker Hub) et `ghcr.io/bobdivx/devforge`.  
-Binaires Linux / Windows : [GitHub Releases](https://github.com/bobdivx/devforge/releases).
+Flatpak Linux / assistant Windows : [GitHub Releases](https://github.com/bobdivx/devforge/releases) · [[Installation]].
 
 ## Navigation produit
 

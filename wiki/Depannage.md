@@ -51,3 +51,14 @@ Node/npm doivent être sur le nœud qui exécute l’atelier. Logs preview dans 
 ## Self-update
 
 Vérifie `DEVFORGE_UPDATE_MODE`, le compose monté en lecture, et que le process a le droit Docker.
+
+## Flatpak Linux
+
+| Symptôme | Piste |
+|----------|--------|
+| `flatpak: commande introuvable` | Installer le paquet `flatpak` (Arch/CachyOS : `sudo pacman -Syu && sudo pacman -S flatpak`) |
+| `pacman` 404 sur `discover` / `archlinux-appstream-data` | Bases miroir obsolètes → `sudo pacman -Syu` puis réinstaller |
+| Le `.flatpak` ouvre CachyOS Package Installer | Mauvais défaut MIME : retirer `application/vnd.flatpak=cachyos-pi.desktop` dans `~/.config/mimeapps.list`, ou installer via `flatpak install --user ./DevForge-….flatpak` |
+| Discover introuvable | Paquet `discover` non installé (`sudo pacman -S discover`) — optionnel si tu utilises le terminal |
+
+Voir [[Installation]] § Linux (Flatpak).

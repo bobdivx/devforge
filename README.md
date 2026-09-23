@@ -4,7 +4,36 @@ Plateforme de déploiement moderne, avec agents IA, GitHub et GitHub Actions.
 
 > **Greenfield v2** — monorepo Rust + Astro. Legacy archivé : [`bobdivx/devforge-alpha`](https://github.com/bobdivx/devforge-alpha).
 
-**Wiki** : [manuel produit](https://github.com/bobdivx/devforge/wiki) (source dans [`wiki/`](wiki/)).
+**Wiki** : [manuel produit](https://github.com/bobdivx/devforge/wiki) (source dans [`wiki/`](wiki/)).  
+**Brand** : [`brand/`](brand/) — logo ; URL publique : [`deploy/zimaos/icon.svg`](deploy/zimaos/icon.svg).
+
+## Installer (utilisateur)
+
+Releases : [GitHub Releases](https://github.com/bobdivx/devforge/releases) · détails : [wiki/Installation](wiki/Installation.md).
+
+| Plateforme | Comment |
+|------------|---------|
+| **Docker** | `export DEVFORGE_VERSION=…` puis `docker compose up -d` |
+| **Windows** | `DevForge-Setup-<version>-x64.exe` |
+| **Linux** | Flatpak `DevForge-<version>-x86_64.flatpak` (voir ci-dessous) |
+
+### Linux Flatpak
+
+1. Installer Flatpak si besoin (Arch / CachyOS) :
+   ```bash
+   sudo pacman -Syu
+   sudo pacman -S flatpak
+   # optionnel (KDE) : sudo pacman -S discover
+   ```
+2. Installer l’app :
+   ```bash
+   flatpak install --user ./DevForge-<version>-x86_64.flatpak
+   flatpak run io.github.bobdivx.DevForge
+   ```
+
+Le fichier `.flatpak` n’est **pas** un paquet Pacman. Sous CachyOS/KDE, ne pas l’ouvrir avec **CachyOS Package Installer** — utiliser le terminal ou **Discover**. En cas de 404 `pacman`, refaire `-Syu` avant d’installer `flatpak` / `discover`.
+
+Docker et Git doivent être présents sur la machine hôte (le Flatpak les appelle via le socket / le PATH).
 
 ## Structure
 

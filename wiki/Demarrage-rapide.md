@@ -4,14 +4,14 @@
 
 **Windows** : lance `DevForge-Setup-<version>-x64.exe`. L’assistant installe DevForge et ouvre `http://127.0.0.1:8000`.
 
-**Linux** :
+**Linux** : installe d’abord Flatpak (`sudo pacman -S flatpak` sur Arch/CachyOS, après `pacman -Syu` si besoin), puis :
 
 ```bash
 flatpak install --user ./DevForge-<version>-x86_64.flatpak
 flatpak run io.github.bobdivx.DevForge
 ```
 
-Voir [[Installation]].
+Ne pas ouvrir le `.flatpak` avec CachyOS Package Installer — utiliser le terminal ou Discover. Détails : [[Installation]].
 
 **Docker :**
 

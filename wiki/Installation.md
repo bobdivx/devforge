@@ -48,10 +48,48 @@ Pour ne pas ouvrir le navigateur : `DEVFORGE_NO_BROWSER=1`.
 
 ## Linux (Flatpak)
 
+Télécharge `DevForge-<version>-x86_64.flatpak` depuis les [releases GitHub](https://github.com/bobdivx/devforge/releases).
+
+### Prérequis : outil Flatpak
+
+Le fichier `.flatpak` n’est **pas** un paquet Pacman/AUR. Il faut le runtime Flatpak sur la machine.
+
+**Arch / CachyOS :**
+
+```bash
+sudo pacman -Syu
+sudo pacman -S flatpak
+# optionnel (UI KDE) :
+sudo pacman -S discover
+```
+
+Si `pacman` renvoie des **404** sur les miroirs, les bases sont obsolètes : refais `sudo pacman -Syu` puis réessaie.
+
+**Debian / Ubuntu :** `sudo apt install flatpak`  
+**Fedora :** `sudo dnf install flatpak`
+
+### Installer DevForge
+
+**Terminal (recommandé) :**
+
 ```bash
 flatpak install --user ./DevForge-<version>-x86_64.flatpak
 flatpak run io.github.bobdivx.DevForge
 ```
+
+**Graphique (KDE) :** ouvre le fichier avec **Discover** (« Trouver plus de logiciels dans Discover… »).  
+N’utilise **pas** « CachyOS Package Installer » / `cachyos-pi` : cet outil gère les paquets des dépôts, pas un Flatpak local.
+
+Si un double-clic ouvre le mauvais programme par défaut, retire l’association (KDE Plasma) :
+
+```bash
+# vérifie
+xdg-mime query default application/vnd.flatpak
+# si la réponse est cachyos-pi.desktop (ou autre), édite ~/.config/mimeapps.list
+# et supprime les lignes application/vnd.flatpak=...
+```
+
+Puis réassocie à Discover une fois installé, ou continue uniquement en ligne de commande.
 
 Le premier lancement télécharge le runtime Freedesktop si besoin. DevForge apparaît ensuite dans le menu des applications. Les données sont dans le dossier Flatpak de l’app (`~/.var/app/io.github.bobdivx.DevForge`).
 
