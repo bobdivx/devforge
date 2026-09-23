@@ -1238,13 +1238,40 @@ async fn create_deployment(
     .flatten()
     .map(|(sha,)| sha);
 
-    let result = run_real_deploy(&state, &project, &dep_uuid).await;
+    let outcome = run_real_deploy(&state, &project, &dep_uuid).await;
     let finished = now_str();
-    let status = if result.ok { "success" } else { "failed" };
+    let result = &outcome.result;
     let sha = result
         .git_sha
+        .clone()
         .or(body.git_sha)
         .unwrap_or_else(|| "unknown".into());
+
+    if outcome.cancelled {
+        // Statut déjà `cancelled` via supersede (ou on le pose si self-abort).
+        let _ = crate::deploy_queue::finalize_if_active(
+            &state.pool,
+            &dep_uuid,
+            "cancelled",
+            &sha,
+            &result.logs,
+            Some("Annulé : un déploiement plus récent a été lancé"),
+            None,
+            live_revision_sha.as_deref(),
+        )
+        .await;
+        let dep = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = $1")
+            .bind(&dep_uuid)
+            .fetch_one(&state.pool)
+            .await
+            .map_err(ApiError::from)?;
+        return Ok((
+            axum::http::StatusCode::OK,
+            Json(json!({"data": dep, "ok": false, "cancelled": true})),
+        ));
+    }
+
+    let status = if result.ok { "success" } else { "failed" };
 
     // Parse error if deploy failed
     let (error_summary, error_hint) = if !result.ok {
@@ -1257,22 +1284,17 @@ async fn create_deployment(
         (None, None)
     };
 
-    sqlx::query(
-        r#"UPDATE deployments SET status = $1, git_sha = $2, logs = $3, error_summary = $4, error_hint = $5, live_revision_sha = $6, finished_at = $7, updated_at = $8
-           WHERE uuid = $9"#,
+    let _ = crate::deploy_queue::finalize_if_active(
+        &state.pool,
+        &dep_uuid,
+        status,
+        &sha,
+        &result.logs,
+        error_summary.as_deref(),
+        error_hint.as_deref(),
+        live_revision_sha.as_deref(),
     )
-    .bind(status)
-    .bind(&sha)
-    .bind(&result.logs)
-    .bind(&error_summary)
-    .bind(&error_hint)
-    .bind(&live_revision_sha)
-    .bind(&finished)
-    .bind(&finished)
-    .bind(&dep_uuid)
-    .execute(&state.pool)
-    .await
-    .map_err(ApiError::from)?;
+    .await;
 
     let project_status = if result.ok { "live" } else { "failed" };
     sqlx::query("UPDATE projects SET status = $1, updated_at = $2 WHERE id = $3")
@@ -1325,11 +1347,43 @@ async fn create_deployment(
     ))
 }
 
+/// Résultat d'un run : succès/échec build, ou annulé (supersede).
+#[derive(Debug, Clone)]
+pub(crate) struct DeployRunOutcome {
+    pub result: devforge_deploy::DeployResult,
+    pub cancelled: bool,
+}
+
+impl DeployRunOutcome {
+    pub fn ok(&self) -> bool {
+        !self.cancelled && self.result.ok
+    }
+}
+
 pub(crate) async fn run_real_deploy(
     state: &AppState,
     project: &Project,
     deployment_uuid: &str,
-) -> devforge_deploy::DeployResult {
+) -> DeployRunOutcome {
+    {
+        let _start = state.deploy_queue.lock_project_start(project.id).await;
+        let _cancel_rx = state.deploy_queue.register_cancel(deployment_uuid).await;
+        let superseded = crate::deploy_queue::supersede_in_progress(
+            &state.deploy_queue,
+            &state.pool,
+            project.id,
+            deployment_uuid,
+        )
+        .await;
+        if !superseded.is_empty() {
+            let server = project.server_id.as_deref().unwrap_or("default");
+            state
+                .deploy
+                .abort_in_flight_swap(&project.uuid, server)
+                .await;
+        }
+    }
+
     let token: Option<String> =
         sqlx::query_as::<_, (String,)>("SELECT github_token FROM instance_settings WHERE id = 1")
             .fetch_optional(&state.pool)
@@ -1416,7 +1470,7 @@ pub(crate) async fn run_real_deploy(
     };
     let deploy = state.deploy.clone();
     let slot_server = server_id.clone();
-    let result = crate::deploy_queue::run_in_node_slot(
+    let outcome = crate::deploy_queue::run_in_node_slot(
         &state.deploy_queue,
         &state.pool,
         &slot_server,
@@ -1427,20 +1481,53 @@ pub(crate) async fn run_real_deploy(
         },
     )
     .await;
-    crate::deploy_queue::record_event(
-        &state.pool,
-        &project.uuid,
-        "deploy",
-        if result.ok { "success" } else { "failed" },
-        deployment_uuid,
-        result.git_sha.as_deref().unwrap_or(""),
-    )
-    .await;
-    if result.ok {
-        crate::sso::sync_project_proxy(state, project).await;
-        crate::dns::sync_project(state, &project.uuid).await;
+    state.deploy_queue.unregister_cancel(deployment_uuid).await;
+
+    match outcome {
+        crate::deploy_queue::SlotOutcome::Cancelled => {
+            crate::deploy_queue::record_event(
+                &state.pool,
+                &project.uuid,
+                "deploy",
+                "cancelled",
+                deployment_uuid,
+                "superseded",
+            )
+            .await;
+            // Best-effort cleanup if we were mid blue-green.
+            state
+                .deploy
+                .abort_in_flight_swap(&project.uuid, &slot_server)
+                .await;
+            DeployRunOutcome {
+                result: devforge_deploy::DeployResult {
+                    ok: false,
+                    git_sha: None,
+                    logs: "[devforge] Déploiement annulé : remplacé par un déploiement plus récent\n".into(),
+                },
+                cancelled: true,
+            }
+        }
+        crate::deploy_queue::SlotOutcome::Completed(result) => {
+            crate::deploy_queue::record_event(
+                &state.pool,
+                &project.uuid,
+                "deploy",
+                if result.ok { "success" } else { "failed" },
+                deployment_uuid,
+                result.git_sha.as_deref().unwrap_or(""),
+            )
+            .await;
+            if result.ok {
+                crate::sso::sync_project_proxy(state, project).await;
+                crate::dns::sync_project(state, &project.uuid).await;
+            }
+            DeployRunOutcome {
+                result,
+                cancelled: false,
+            }
+        }
     }
-    result
 }
 
 pub(crate) async fn load_env_file_content(
@@ -2136,8 +2223,8 @@ pub fn resume_deploy_queue(state: AppState) {
                     continue;
                 }
             };
-            let result = run_real_deploy(&state, &project, &uuid).await;
-            persist_resumed_deploy(&state, &project, &uuid, &result).await;
+            let outcome = run_real_deploy(&state, &project, &uuid).await;
+            persist_resumed_deploy(&state, &project, &uuid, &outcome).await;
         }
     });
 }
@@ -2146,8 +2233,12 @@ async fn persist_resumed_deploy(
     state: &AppState,
     project: &Project,
     deployment_uuid: &str,
-    result: &devforge_deploy::DeployResult,
+    outcome: &DeployRunOutcome,
 ) {
+    if outcome.cancelled {
+        return;
+    }
+    let result = &outcome.result;
     let finished = now_str();
     let status = if result.ok { "success" } else { "failed" };
     let sha = result.git_sha.clone().unwrap_or_else(|| "unknown".into());
@@ -2159,22 +2250,20 @@ async fn persist_resumed_deploy(
             None => (Some("Échec du déploiement".into()), None),
         }
     };
-    let _ = sqlx::query(
-        r#"UPDATE deployments
-           SET status = $1, git_sha = $2, logs = $3, error_summary = $4, error_hint = $5,
-               finished_at = $6, updated_at = $7
-           WHERE uuid = $8"#,
+    let wrote = crate::deploy_queue::finalize_if_active(
+        &state.pool,
+        deployment_uuid,
+        status,
+        &sha,
+        &result.logs,
+        error_summary.as_deref(),
+        error_hint.as_deref(),
+        None,
     )
-    .bind(status)
-    .bind(&sha)
-    .bind(&result.logs)
-    .bind(&error_summary)
-    .bind(&error_hint)
-    .bind(&finished)
-    .bind(&finished)
-    .bind(deployment_uuid)
-    .execute(&state.pool)
     .await;
+    if !wrote {
+        return;
+    }
     let project_status = if result.ok { "live" } else { "failed" };
     let _ = sqlx::query("UPDATE projects SET status = $1, updated_at = $2 WHERE id = $3")
         .bind(project_status)

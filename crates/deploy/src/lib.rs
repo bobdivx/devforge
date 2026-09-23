@@ -487,6 +487,39 @@ impl DeployFacade {
         self.executor.clone()
     }
 
+    /// Best-effort : arrête le conteneur blue-green temporaire (`df-…-new`)
+    /// sans toucher au conteneur de production. À appeler quand un deploy
+    /// en cours est supersédé.
+    pub async fn abort_in_flight_swap(&self, project_uuid: &str, server_id: &str) {
+        let name = Self::container_name(project_uuid);
+        let new_name = format!("{name}-new");
+        let server = if server_id.trim().is_empty() {
+            "default"
+        } else {
+            server_id.trim()
+        };
+        let cmd = format!("docker rm -f {new_name} 2>/dev/null || true");
+        match self.executor.exec(server, "", &cmd, 30).await {
+            Ok(r) => {
+                if !r.output.trim().is_empty() {
+                    tracing::info!(
+                        project = %project_uuid,
+                        container = %new_name,
+                        out = %r.output.trim(),
+                        "Conteneur blue-green temporaire nettoyé (supersede)"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::debug!(
+                    project = %project_uuid,
+                    error = %e,
+                    "Nettoyage blue-green supersede ignoré"
+                );
+            }
+        }
+    }
+
     fn container_name(project_uuid: &str) -> String {
         project_container_name(project_uuid)
     }

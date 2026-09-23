@@ -91,17 +91,6 @@ pub async fn ensure_project_webhook(state: &AppState, project: &Project) -> Opti
     }
 }
 
-async fn has_running_deploy(state: &AppState, project_id: i64) -> bool {
-    let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT COUNT(*) FROM deployments WHERE project_id = $1 AND status IN ('running', 'queued', 'building')",
-    )
-    .bind(project_id)
-    .fetch_optional(&state.pool)
-    .await
-    .ok()
-    .flatten();
-    row.map(|(c,)| c > 0).unwrap_or(false)
-}
 
 async fn latest_success_sha(state: &AppState, project_id: i64) -> Option<String> {
     let row: Option<(Option<String>,)> = sqlx::query_as(
@@ -195,23 +184,34 @@ pub(crate) async fn deploy_project(state: &AppState, project: &Project, message:
         "Auto-deploy poll: déploiement démarré"
     );
 
-    let result = crate::routes::run_real_deploy(state, project, &dep_uuid).await;
+    let outcome = crate::routes::run_real_deploy(state, project, &dep_uuid).await;
     let finished = now_str();
+    if outcome.cancelled {
+        tracing::info!(
+            project = %project.name,
+            uuid = %dep_uuid,
+            "Auto-deploy poll: annulé (supersede)"
+        );
+        return;
+    }
+    let result = &outcome.result;
     let status = if result.ok { "success" } else { "failed" };
     let sha = result.git_sha.as_deref().unwrap_or("unknown");
 
-    let _ = sqlx::query(
-        r#"UPDATE deployments SET status = $1, git_sha = $2, logs = $3, finished_at = $4, updated_at = $5
-           WHERE uuid = $6"#,
+    let wrote = crate::deploy_queue::finalize_if_active(
+        &state.pool,
+        &dep_uuid,
+        status,
+        sha,
+        &result.logs,
+        None,
+        None,
+        None,
     )
-    .bind(status)
-    .bind(sha)
-    .bind(&result.logs)
-    .bind(&finished)
-    .bind(&finished)
-    .bind(&dep_uuid)
-    .execute(&state.pool)
     .await;
+    if !wrote {
+        return;
+    }
 
     let project_status = if result.ok { "live" } else { "failed" };
     let _ = sqlx::query("UPDATE projects SET status = $1, updated_at = $2 WHERE id = $3")
@@ -252,10 +252,7 @@ async fn tick(state: &AppState, ensure_webhooks: bool) {
             let _ = ensure_project_webhook(state, &project).await;
         }
 
-        if has_running_deploy(state, project.id).await {
-            continue;
-        }
-
+        // Un deploy en cours sera annulé (supersede) par run_real_deploy.
         let Some((behind_by, tip_msg)) = project_is_behind(state, &project).await else {
             continue;
         };
