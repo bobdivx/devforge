@@ -394,11 +394,11 @@ function ProjectOverview({
     {
       key: 'errors',
       icon: 'pulse',
-      label: latestFailed ? 'Échec actif' : project.status === 'unhealthy' ? 'Site inaccessible' : 'Santé',
+      label: latestFailed ? 'Échec actif' : project.status === 'unhealthy' ? 'Injoignable' : 'Santé',
       detail: latestFailed
         ? `${latestFailed.git_message || latestFailed.status} · ${formatWhen(latestFailed.created_at)}`
         : project.status === 'unhealthy'
-          ? `URL inaccessible${latest ? ` · Deploy ${latest.status}` : ''}`
+          ? `Pas de réponse sur le port ${project.port || 3000}${latest ? ` · Deploy ${latest.status}` : ''}`
           : latest
             ? 'Dernier déploiement OK'
             : 'En attente du premier deploy',

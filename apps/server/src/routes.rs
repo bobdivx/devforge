@@ -2848,37 +2848,83 @@ async fn auth_deployment(
     Ok((user, workspace, dep))
 }
 
-async fn check_production_url_health(url: &str) -> Result<bool, String> {
+async fn fetch_http_status(url: &str) -> Result<u16, String> {
     if url.is_empty() {
-        return Ok(true);
+        return Err("empty".into());
     }
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(8))
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()
         .map_err(|e| format!("client: {}", e))?;
 
     match client.get(url).send().await {
-        Ok(resp) => {
-            let status = resp.status();
-            Ok(status.is_success() || status.is_redirection())
-        }
+        Ok(resp) => Ok(resp.status().as_u16()),
         Err(e) => {
             if e.is_timeout() {
                 Err("timeout".to_string())
             } else if e.is_connect() {
                 Err("connection".to_string())
-            } else if e.status().is_some() {
-                let code = e.status().unwrap().as_u16();
-                if code >= 500 {
-                    Err(format!("{}", code))
-                } else {
-                    Ok(false)
-                }
             } else {
                 Err("unreachable".to_string())
             }
         }
+    }
+}
+
+fn probe_url(base: &str) -> String {
+    base.trim().trim_end_matches('/').to_string()
+}
+
+fn parse_container_probe(output: &str) -> Option<u16> {
+    let line = output.lines().rev().find(|l| !l.trim().is_empty())?;
+    let line = line.trim();
+    if line == "down" {
+        return None;
+    }
+    line.parse::<u16>().ok().filter(|c| devforge_deploy::app_http_is_up(*c))
+}
+
+fn project_listen_port(project: &Project) -> u16 {
+    let port = project.port.clamp(0, 65535) as u16;
+    if port == 0 { 3000 } else { port }
+}
+
+/// Même test pour chaque projet : le port d’écoute répond-il en HTTP ?
+async fn app_listens(state: &AppState, project: &Project) -> bool {
+    let port = project_listen_port(project);
+    let mut container_code = None;
+    let server = project.server_id.as_deref().unwrap_or("").trim();
+    if !server.is_empty() {
+        let name = devforge_deploy::project_container_name(&project.uuid);
+        let cmd = devforge_deploy::docker::docker_http_probe_cmd(&name, port, "/");
+        let workdir = project
+            .workdir
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("/");
+        if let Ok(r) = state.deploy.executor().exec(server, workdir, &cmd, 12).await {
+            container_code = parse_container_probe(&r.output);
+            if container_code.is_some_and(devforge_deploy::app_http_is_up) {
+                return true;
+            }
+        }
+    }
+
+    if let Some(url) = project.production_url.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        // 502/503/504 viennent du proxy : le port de l’app n’a pas répondu.
+        if let Ok(code) = fetch_http_status(&probe_url(url)).await {
+            if devforge_deploy::app_http_is_up(code) && !matches!(code, 502 | 503 | 504) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    match container_code {
+        Some(c) => devforge_deploy::app_http_is_up(c),
+        None => true,
     }
 }
 
@@ -2896,17 +2942,10 @@ async fn resolve_project_status(state: &AppState, project: &Project) -> Result<S
         Some("running") | Some("queued") | Some("building") => "deploying",
         Some("failed") | Some("error") => "failed",
         Some("ready") | Some("success") | Some("completed") | Some("live") => {
-            if let Some(url) = project.production_url.as_deref() {
-                if !url.is_empty() {
-                    match check_production_url_health(url).await {
-                        Ok(true) => "live",
-                        Ok(false) | Err(_) => "unhealthy",
-                    }
-                } else {
-                    "live"
-                }
-            } else {
+            if app_listens(state, project).await {
                 "live"
+            } else {
+                "unhealthy"
             }
         }
         None => {

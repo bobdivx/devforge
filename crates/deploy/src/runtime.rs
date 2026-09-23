@@ -186,6 +186,12 @@ impl RuntimeSpec {
     }
 }
 
+/// `true` si ce code HTTP prouve que le port du projet a répondu.
+/// Même règle pour un site et pour un serveur : 401 ou 404 comptent.
+pub fn app_http_is_up(code: u16) -> bool {
+    (100..600).contains(&code)
+}
+
 fn normalize_port(port: &mut PublishedPort) -> Result<(), String> {
     if port.host == 0 || port.container == 0 {
         return Err("port 0 refusé".into());
@@ -302,6 +308,10 @@ mod tests {
         assert_eq!(spec.healthcheck.as_ref().unwrap().interval, "30s");
         assert_eq!(spec.ports[1].publish_flag(), "4240:4240/udp");
         assert_eq!(spec.sidecars[0].name, "flaresolverr");
+        assert!(app_http_is_up(200));
+        assert!(app_http_is_up(404));
+        assert!(app_http_is_up(401));
+        assert!(!app_http_is_up(0));
     }
 
     #[test]

@@ -11,7 +11,7 @@ pub mod error_parser;
 pub mod runtime;
 pub mod ssh;
 
-pub use runtime::RuntimeSpec;
+pub use runtime::{app_http_is_up, RuntimeSpec};
 
 pub use error_parser::{parse_deploy_error_fr, DeployError};
 pub use ssh::{LocalShellExecutor, SshRemoteExecutor, SshTarget};
@@ -432,6 +432,10 @@ async fn probe_local_http(port: u16) -> std::result::Result<String, String> {
     }
 }
 
+pub fn project_container_name(project_uuid: &str) -> String {
+    format!("df-{}", project_uuid.chars().take(12).collect::<String>())
+}
+
 pub struct DeployFacade {
     executor: Arc<dyn RemoteExecutor>,
 }
@@ -446,7 +450,7 @@ impl DeployFacade {
     }
 
     fn container_name(project_uuid: &str) -> String {
-        format!("df-{}", project_uuid.chars().take(12).collect::<String>())
+        project_container_name(project_uuid)
     }
 
     fn sidecar_network(app_container: &str) -> String {

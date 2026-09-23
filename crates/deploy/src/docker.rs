@@ -365,6 +365,42 @@ pub fn docker_restart(name: &str) -> String {
     format!("docker restart {}", shell_escape(name))
 }
 
+/// Sonde HTTP du conteneur sur son port d’écoute, depuis l’hôte Docker.
+/// Affiche un code HTTP, ou `down` si rien n’écoute.
+pub fn docker_http_probe_cmd(container: &str, port: u16, path: &str) -> String {
+    let path = if path.starts_with('/')
+        && path.len() <= 200
+        && path
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '.' | '-' | '?' | '=' | '&' | '%'))
+    {
+        path
+    } else {
+        "/"
+    };
+    let container = if container_name_ok(container) {
+        container
+    } else {
+        "invalid"
+    };
+    format!(
+        "ip=$(docker inspect --format '{{{{range .NetworkSettings.Networks}}}}{{{{.IPAddress}}}}{{{{println}}}}{{{{end}}}}' {container} | awk 'NF{{print; exit}}'); if [ -z \"$ip\" ]; then echo down; exit 0; fi; code=$(curl -sS -o /dev/null -w '%{{http_code}}' --max-time 5 --connect-timeout 3 \"http://$ip:{port}{path}\" 2>/dev/null || true); case \"$code\" in [1-5][0-9][0-9]) echo \"$code\" ;; *) echo down ;; esac"
+    )
+}
+
+fn container_name_ok(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphanumeric() => {}
+        _ => return false,
+    }
+    !name.is_empty()
+        && name.len() <= 80
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
 pub fn docker_ps_status(name: &str) -> String {
     format!(
         "docker ps -a --filter name={} --format '{{{{.Status}}}}'",
@@ -1078,6 +1114,17 @@ mod tests {
         assert!(cmd.contains("--gpus all"));
         assert!(cmd.contains("--health-cmd"));
         assert!(cmd.contains("--health-start-period 2m"));
+    }
+
+    #[test]
+    fn http_probe_targets_container_port() {
+        let cmd = docker_http_probe_cmd("df-4f6e25150269", 3000, "/api/client/health");
+        assert!(cmd.contains("{{range .NetworkSettings.Networks}}{{.IPAddress}}"));
+        assert!(cmd.contains("http://$ip:3000/api/client/health"));
+        assert!(cmd.contains("echo down"));
+        let bad = docker_http_probe_cmd("df-bad;rm", 3000, "/");
+        assert!(bad.contains(" invalid "));
+        assert!(!bad.contains("df-bad"));
     }
 
     #[test]
