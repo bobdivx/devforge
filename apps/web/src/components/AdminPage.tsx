@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api } from '../lib/api';
+import { api, type ProxyStatus } from '../lib/api';
 import { AppShell } from './AppShell';
 import { InstanceAdminGate } from './InstanceAdminGate';
 import { InstanceDomainPanel, ServerSettingsPanel } from './AdminInfraPanels';
@@ -42,16 +42,6 @@ type Stats = {
   plan_free: number;
   plan_pro: number;
   projects: number;
-};
-
-type ProxyStatus = {
-  status: 'running' | 'exited' | 'missing' | 'unknown';
-  running: boolean;
-  message?: string;
-  container?: string;
-  image?: string;
-  started_at?: string;
-  network?: string;
 };
 
 type Health = {
@@ -144,7 +134,7 @@ function AdminHub() {
   async function loadOverview() {
     try {
       const [proxyRes, healthRes, adminRes] = await Promise.allSettled([
-        fetch('/api/v1/system/proxy/status').then((r) => (r.ok ? r.json() : null)),
+        api.proxyStatus(),
         api.health(),
         api.adminOverview(),
       ]);
@@ -237,6 +227,13 @@ function AdminHub() {
         href="/app/admin?tab=serveur"
         title="Serveur"
         description="Docker local ou SSH distant, clés SSH"
+        icon={<HubIcon name="server" />}
+      />
+      <HubTile
+        index={6}
+        href="/app/runners"
+        title="Runners"
+        description="Runners GitHub self-hosted, jobs et logs"
         icon={<HubIcon name="server" />}
       />
       <HubTile
@@ -464,9 +461,7 @@ function AdminProxy() {
 
   async function loadStatus() {
     try {
-      const res = await fetch('/api/v1/system/proxy/status');
-      if (!res.ok) throw new Error('Status KO');
-      const data = await res.json();
+      const data = await api.proxyStatus();
       setStatus(data);
       // Les détails sont directement dans data (image, started_at, network)
       if (data.running) {
@@ -493,11 +488,8 @@ function AdminProxy() {
   async function handleAction(action: string) {
     setBusy(true);
     try {
-      const endpoint =
-        action === 'ensure' ? '/api/v1/system/proxy/ensure' : '/api/v1/system/proxy/restart';
-      const res = await fetch(endpoint, { method: 'POST', body: '{}' });
-      if (!res.ok) throw new Error('Action échouée');
-      const data = await res.json();
+      const data =
+        action === 'ensure' ? await api.proxyEnsure() : await api.proxyRestart();
 
       toast.push({
         title: action === 'ensure' ? 'Proxy réparé' : 'Proxy redémarré',

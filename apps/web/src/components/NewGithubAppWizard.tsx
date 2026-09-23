@@ -91,6 +91,7 @@ export function NewGithubAppWizard({
   const [composePath, setComposePath] = useState('/docker-compose.yaml');
   const [name, setName] = useState('');
   const [detectLabel, setDetectLabel] = useState<string | null>(null);
+  const [detectHints, setDetectHints] = useState<string[]>([]);
   const [dotenv, setDotenv] = useState('');
   const [envFileName, setEnvFileName] = useState<string | null>(null);
   const [manualKey, setManualKey] = useState('');
@@ -176,13 +177,15 @@ export function NewGithubAppWizard({
       setPublishDir(d.publish_directory || '');
       setBaseDir(d.base_directory || '/');
       if (d.docker_compose_location) setComposePath(d.docker_compose_location);
+      setDetectHints(d.hints ?? []);
       setDetectLabel(
-        `${d.label} · ${d.build_pack} · :${d.port}${d.is_static ? ' · static' : ''}`,
+        `${d.label} · ${d.build_pack} · :${d.port}${d.is_static ? ' · site statique' : ' · serveur'}`,
       );
       if (d.test_command) setTestCommand(d.test_command);
       toast.push({ title: 'Framework détecté', detail: d.label, tone: 'ok' });
     } catch (e) {
       setDetectLabel(null);
+      setDetectHints([]);
       toast.push({ title: 'Détection partielle', detail: String(e), tone: 'warn' });
     }
   }
@@ -409,7 +412,18 @@ export function NewGithubAppWizard({
 
       {step === 'build' && (
         <div class="space-y-3">
-          {detectLabel && <Alert tone="ok">Détecté : {detectLabel}</Alert>}
+          {detectLabel && (
+            <Alert tone="ok">
+              <div>Détecté : {detectLabel}</div>
+              {detectHints.length > 0 && (
+                <ul class="mt-2 list-disc space-y-1 pl-4 text-xs">
+                  {detectHints.map((h) => (
+                    <li key={h}>{h}</li>
+                  ))}
+                </ul>
+              )}
+            </Alert>
+          )}
           <div class="grid gap-2 sm:grid-cols-2">
             {BUILD_PACKS.map((bp) => (
               <button
@@ -432,7 +446,15 @@ export function NewGithubAppWizard({
 
       {step === 'runtime' && (
         <div class="space-y-3">
-          {(buildPack === 'nixpacks' || buildPack === 'static') && buildPack !== 'static' && (
+          {!isStatic && buildPack !== 'static' && (
+            <Alert tone="info">
+              App serveur : le proxy envoie le trafic vers le port ci-dessous. Une API sans
+              script <code class="font-mono text-xs">build</code> démarre avec{' '}
+              <code class="font-mono text-xs">npm start</code> (ou la commande du framework),
+              sans étape de compilation.
+            </Alert>
+          )}
+          {buildPack === 'nixpacks' && (
             <label class="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"

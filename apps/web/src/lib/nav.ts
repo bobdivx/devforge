@@ -29,30 +29,24 @@ export function globalNavForRole(role?: string | null): NavItem[] {
 }
 
 /**
- * Barre du bas mobile.
- * Utilisateur : Apps · Plus · Compte.
- * Admin : Apps · Plus · Runners.
- * Le sheet « Plus » porte le reste, sans recopier ces entrées.
+ * Barre du bas, sous le breakpoint desktop.
+ * Apps · Agents · Compte pour tout le monde.
+ * Le centre ouvre les agents lancés sur mobile ; tablette et desktop les ont dans le header.
+ * Runners, MCP, Tokens, Paramètres et Admin passent par la sidebar (desktop)
+ * ou le menu avatar (mobile et tablette). Runners reste aussi dans le hub Admin.
  */
-export function mobileBottomNav(role?: string | null): NavItem[] {
-  if (role === 'instance_admin') {
-    return [
-      { href: '/app', label: 'Apps', key: 'home' },
-      { href: '#plus', label: 'Plus', key: 'plus' },
-      { href: '/app/runners', label: 'Runners', key: 'runners' },
-    ];
-  }
+export function mobileBottomNav(_role?: string | null): NavItem[] {
   return [
     { href: '/app', label: 'Apps', key: 'home' },
-    { href: '#plus', label: 'Plus', key: 'plus' },
+    { href: '#agents', label: 'Agents', key: 'agents' },
     { href: '/app/team', label: 'Compte', key: 'team' },
   ];
 }
 
-/** Entrées du sheet mobile qui ne sont pas déjà dans la barre du bas. */
-export function mobileSheetNav(role?: string | null): NavItem[] {
-  const bottom = new Set(mobileBottomNav(role).map((item) => item.key));
-  return globalNavForRole(role).filter((item) => !bottom.has(item.key));
+/** Liens du menu avatar quand la sidebar est absente. Pas de Runners : trop rare sur mobile. */
+export function mobileAvatarNav(role?: string | null): NavItem[] {
+  const hidden = new Set(['home', 'team', 'runners']);
+  return globalNavForRole(role).filter((item) => !hidden.has(item.key));
 }
 
 export function projectNav(uuid: string, opts?: { workspace?: boolean }): NavItem[] {

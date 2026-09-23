@@ -1,19 +1,30 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, type AppGroup, type Project } from '../lib/api';
+import { cn } from '../lib/cn';
 import { projectStatusMeta } from '../lib/status';
+import { AppIcon, groupFaceProject, statusDotClass } from './AppIcon';
 import { AppShell } from './AppShell';
-import { Alert, Button, Card, CardHeader, FadeIn, Input, Spinner } from './ui';
+import {
+  Alert,
+  Button,
+  Card,
+  CardHeader,
+  FadeIn,
+  HubAddTile,
+  HubGrid,
+  HubTile,
+  Input,
+  Modal,
+  Skeleton,
+  Switch,
+} from './ui';
 import { useToast } from './ui/Toast';
 
 const ROLE_HINTS = ['web', 'client', 'server', 'api'];
 
 export function GroupPage() {
   const uuid = typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('uuid') || '';
-  return (
-    <AppShell active="home" title="Groupe">
-      <GroupBody uuid={uuid} />
-    </AppShell>
-  );
+  return <GroupBody uuid={uuid} />;
 }
 
 function GroupBody({ uuid }: { uuid: string }) {
@@ -26,6 +37,9 @@ function GroupBody({ uuid }: { uuid: string }) {
   const [busy, setBusy] = useState(false);
   const [addProject, setAddProject] = useState('');
   const [addRole, setAddRole] = useState('server');
+  const [addOpen, setAddOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
 
   async function load() {
     if (!uuid) {
@@ -76,6 +90,7 @@ function GroupBody({ uuid }: { uuid: string }) {
       });
       setGroup(r.data);
       setAddProject('');
+      setAddOpen(false);
       toast.push({ title: 'App reliée', detail: 'Redéploie pour appliquer le réseau et les variables.', tone: 'ok' });
     } catch (err) {
       toast.push({ title: 'Ajout KO', detail: String(err), tone: 'danger' });
@@ -117,6 +132,7 @@ function GroupBody({ uuid }: { uuid: string }) {
     try {
       const r = await api.removeGroupMember(group.uuid, projectUuid);
       setGroup(r.data);
+      setSelectedUuid(null);
     } catch (err) {
       toast.push({ title: 'Retrait KO', detail: String(err), tone: 'danger' });
     } finally {
@@ -137,165 +153,325 @@ function GroupBody({ uuid }: { uuid: string }) {
   }
 
   const candidates = projects.filter((p) => !p.group_uuid);
+  const selected = group?.members.find((member) => member.project_uuid === selectedUuid) ?? null;
 
   return (
-    <>
-      {loading && (
-        <p class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)]">
-          <Spinner /> Chargement…
+    <AppShell
+      active="home"
+      title={group?.name || 'Groupe'}
+      description={group ? `Réseau ${group.network}` : undefined}
+      actions={
+        group ? (
+          <Button size="sm" variant="outline" onClick={() => setSettingsOpen(true)}>
+            Réglages
+          </Button>
+        ) : undefined
+      }
+    >
+      {error && (
+        <Alert tone="warn" class="mb-4">
+          {error}
+        </Alert>
+      )}
+
+      {loading ? (
+        <HubGrid cols={5}>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} class="aspect-square rounded-2xl" />
+          ))}
+        </HubGrid>
+      ) : (
+        group && (
+          <HubGrid cols={5}>
+            {group.members.map((member, index) => (
+              <MemberTile
+                key={member.project_uuid}
+                member={member}
+                project={projectForMember(member, projects)}
+                index={index}
+                onOpen={() => setSelectedUuid(member.project_uuid)}
+              />
+            ))}
+            <HubAddTile index={group.members.length} label="Ajouter" onClick={() => setAddOpen(true)} />
+          </HubGrid>
+        )
+      )}
+
+      {!loading && group && group.members.length === 0 && (
+        <p class="mt-6 text-center text-sm text-[var(--color-ink-muted)]">
+          Aucune app dans ce groupe.
         </p>
       )}
-      {error && <Alert tone="warn">{error}</Alert>}
-      {group && (
-        <FadeIn>
-          <div class="space-y-4">
-            <Card>
-              <CardHeader
-                title="Groupe"
-                description={`Réseau ${group.network}. Les apps partagent ce réseau et reçoivent DF_GROUP, DF_ROLE, DF_{ROLE}_URL au déploiement. Même nœud pour tout le groupe.`}
-              />
-              <form class="flex flex-wrap items-end gap-3" onSubmit={rename}>
-                <div class="min-w-[16rem] flex-1">
-                  <Input label="Nom" value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
-                </div>
-                <Button type="submit" disabled={busy || !name.trim()}>
-                  Renommer
-                </Button>
-              </form>
-            </Card>
 
-            <Card>
-              <CardHeader title="Apps" description="Un rôle unique par app. L'alias Docker est le rôle (http://server:8080)." />
-              <ul class="divide-y divide-[var(--color-line)]">
-                {group.members.map((m) => (
-                  <MemberRow
-                    key={m.project_uuid}
-                    member={m}
-                    busy={busy}
-                    onRole={(role) => saveRole(m.project_uuid, role)}
-                    onGpu={(nvidia, dri) => saveGpu(m.project_uuid, nvidia, dri)}
-                    onRemove={() => remove(m.project_uuid)}
-                  />
-                ))}
-                {group.members.length === 0 && (
-                  <li class="py-3 text-sm text-[var(--color-ink-muted)]">Aucune app dans ce groupe.</li>
-                )}
-              </ul>
-            </Card>
+      <Modal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        title="Ajouter une app"
+        description="Projets qui ne sont pas déjà dans un groupe."
+        size="md"
+      >
+        <form class="grid gap-3" onSubmit={addMember}>
+          <label class="flex flex-col gap-1.5 text-sm">
+            <span class="font-medium">Projet</span>
+            <select
+              class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
+              value={addProject}
+              onChange={(e) => setAddProject((e.target as HTMLSelectElement).value)}
+            >
+              <option value="">Choisir…</option>
+              {candidates.map((p) => (
+                <option key={p.uuid} value={p.uuid}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {candidates.length === 0 && (
+            <p class="text-sm text-[var(--color-ink-muted)]">Tous les projets sont déjà dans un groupe.</p>
+          )}
+          <Input
+            label="Rôle"
+            value={addRole}
+            list="group-add-roles"
+            onInput={(e) => setAddRole((e.target as HTMLInputElement).value)}
+          />
+          <datalist id="group-add-roles">
+            {ROLE_HINTS.map((role) => (
+              <option key={role} value={role} />
+            ))}
+          </datalist>
+          <div class="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setAddOpen(false)}>
+              Annuler
+            </Button>
+            <Button type="submit" disabled={busy || !addProject || !addRole.trim()}>
+              Relier
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
-            <Card>
-              <CardHeader title="Ajouter une app" description="Projets qui ne sont pas déjà dans un groupe." />
-              <form class="grid gap-3 md:grid-cols-[1fr_12rem_auto] md:items-end" onSubmit={addMember}>
-                <label class="flex flex-col gap-1.5 text-sm">
-                  <span class="font-medium">Projet</span>
-                  <select
-                    class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
-                    value={addProject}
-                    onChange={(e) => setAddProject((e.target as HTMLSelectElement).value)}
-                  >
-                    <option value="">Choisir…</option>
-                    {candidates.map((p) => (
-                      <option key={p.uuid} value={p.uuid}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div>
-                  <Input
-                    label="Rôle"
-                    value={addRole}
-                    list="group-roles"
-                    onInput={(e) => setAddRole((e.target as HTMLInputElement).value)}
-                  />
-                  <datalist id="group-roles">
-                    {ROLE_HINTS.map((r) => (
-                      <option key={r} value={r} />
-                    ))}
-                  </datalist>
-                </div>
-                <Button type="submit" disabled={busy || !addProject || !addRole.trim()}>
-                  Relier
-                </Button>
-              </form>
-            </Card>
-
-            <Card class="border-[var(--color-danger)]/30">
-              <CardHeader title="Dissoudre le groupe" description="Les projets restent. Seul le lien disparaît." />
-              <Button variant="danger" disabled={busy} onClick={removeGroup}>
+      <Modal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        title="Réglages du groupe"
+        description={
+          group
+            ? `Réseau ${group.network}. Les apps reçoivent DF_GROUP, DF_ROLE et DF_{ROLE}_URL au déploiement. Même nœud pour tout le groupe.`
+            : undefined
+        }
+        size="md"
+      >
+        {group && (
+          <div class="space-y-6">
+            <form class="flex flex-wrap items-end gap-3" onSubmit={rename}>
+              <div class="min-w-[12rem] flex-1">
+                <Input label="Nom" value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
+              </div>
+              <Button type="submit" disabled={busy || !name.trim()}>
+                Renommer
+              </Button>
+            </form>
+            <div class="border-t border-[var(--color-line)] pt-4">
+              <p class="text-sm font-medium">Dissoudre le groupe</p>
+              <p class="mt-1 text-sm text-[var(--color-ink-muted)]">
+                Les projets restent. Seul le lien disparaît.
+              </p>
+              <Button class="mt-3" variant="danger" disabled={busy} onClick={removeGroup}>
                 Supprimer le groupe
               </Button>
-            </Card>
+            </div>
           </div>
-        </FadeIn>
+        )}
+      </Modal>
+
+      {selected && (
+        <MemberModal
+          member={selected}
+          project={projectForMember(selected, projects)}
+          busy={busy}
+          onClose={() => setSelectedUuid(null)}
+          onRole={(role) => saveRole(selected.project_uuid, role)}
+          onGpu={(nvidia, dri) => saveGpu(selected.project_uuid, nvidia, dri)}
+          onRemove={() => remove(selected.project_uuid)}
+        />
       )}
-    </>
+    </AppShell>
   );
 }
 
-function MemberRow({
+function projectForMember(member: AppGroup['members'][number], projects: Project[]): Project {
+  const found = projects.find((item) => item.uuid === member.project_uuid);
+  if (found) {
+    return {
+      ...found,
+      name: found.name || member.name,
+      status: found.status || member.status,
+      role: member.role || found.role,
+      production_url: found.production_url || member.production_url,
+    };
+  }
+  return {
+    uuid: member.project_uuid,
+    name: member.name,
+    slug: member.role,
+    status: member.status,
+    role: member.role,
+    production_url: member.production_url,
+    port: member.port,
+  };
+}
+
+function roleLabel(role: string): string {
+  const labels: Record<string, string> = {
+    web: 'Web',
+    client: 'Client',
+    server: 'Serveur',
+    api: 'API',
+  };
+  const key = role.trim().toLowerCase();
+  return labels[key] || role;
+}
+
+function MemberTile({
   member,
+  project,
+  index,
+  onOpen,
+}: {
+  member: AppGroup['members'][number];
+  project: Project;
+  index: number;
+  onOpen: () => void;
+}) {
+  const status = projectStatusMeta(member.status);
+  return (
+    <HubTile
+      index={index}
+      title={member.name}
+      onClick={onOpen}
+      iconClass="!bg-transparent"
+      icon={<AppIcon project={project} class="!h-full !w-full !rounded-[1.15rem]" />}
+      badge={
+        <span
+          class={cn(
+            'absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full ring-2 ring-[#1c1c1e]',
+            statusDotClass(status.tone),
+            status.tone === 'ok' || status.tone === 'warn' ? 'animate-pulse' : '',
+          )}
+          title={status.label}
+          aria-hidden
+        />
+      }
+      subtitle={
+        <div class="mt-1 space-y-0.5">
+          <div
+            class={cn(
+              'text-[11px] font-medium',
+              status.tone === 'ok' && 'text-[var(--color-ok)]',
+              status.tone === 'warn' && 'text-[var(--color-warn)]',
+              status.tone === 'danger' && 'text-[var(--color-danger)]',
+              status.tone === 'neutral' && 'text-[var(--color-ink-faint)]',
+            )}
+          >
+            {status.label}
+          </div>
+          <div class="truncate text-[10px] text-[var(--color-ink-faint)]">{roleLabel(member.role)}</div>
+        </div>
+      }
+    />
+  );
+}
+
+function MemberModal({
+  member,
+  project,
   busy,
+  onClose,
   onRole,
   onGpu,
   onRemove,
 }: {
   member: AppGroup['members'][number];
+  project: Project;
   busy: boolean;
+  onClose: () => void;
   onRole: (role: string) => void;
   onGpu: (nvidia: boolean, dri: boolean) => void;
   onRemove: () => void;
 }) {
   const [role, setRole] = useState(member.role);
-  const status = projectStatusMeta(member.status);
   useEffect(() => setRole(member.role), [member.role]);
 
   return (
-    <li class="flex flex-col gap-3 py-4">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <a
-            class="font-medium hover:underline"
+    <Modal
+      open
+      onClose={onClose}
+      title={member.name}
+      description={`${roleLabel(member.role)} · ${member.internal_url}`}
+      size="md"
+    >
+      <div class="space-y-5">
+        <div class="flex items-center gap-3">
+          <AppIcon project={project} size="md" />
+          <Button
+            size="sm"
+            variant="outline"
             href={`/app/projects/view?uuid=${encodeURIComponent(member.project_uuid)}`}
           >
-            {member.name}
-          </a>
-          <p class="text-xs text-[var(--color-ink-muted)]">
-            {status.label}
-            {member.server_id ? ` · nœud ${member.server_id}` : ''} · {member.internal_url}
-          </p>
+            Ouvrir
+          </Button>
         </div>
-        <Button size="sm" variant="ghost" disabled={busy} onClick={onRemove}>
-          Retirer
-        </Button>
-      </div>
-      <div class="flex flex-wrap items-end gap-3">
-        <div class="w-40">
-          <Input label="Rôle" value={role} list="group-roles" onInput={(e) => setRole((e.target as HTMLInputElement).value)} />
+        <div class="flex flex-wrap items-end gap-3">
+          <div class="min-w-[10rem] flex-1">
+            <Input
+              label="Rôle"
+              value={role}
+              list="group-member-roles"
+              onInput={(e) => setRole((e.target as HTMLInputElement).value)}
+            />
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || role.trim() === member.role || !role.trim()}
+            onClick={() => onRole(role.trim())}
+          >
+            Enregistrer
+          </Button>
+          <datalist id="group-member-roles">
+            {ROLE_HINTS.map((hint) => (
+              <option key={hint} value={hint} />
+            ))}
+          </datalist>
         </div>
-        <Button size="sm" variant="outline" disabled={busy || role.trim() === member.role} onClick={() => onRole(role.trim())}>
-          Rôle
-        </Button>
-        <label class="flex items-center gap-2 pb-2 text-sm">
-          <input
-            type="checkbox"
-            checked={member.gpu_nvidia}
-            disabled={busy}
-            onChange={(e) => onGpu((e.target as HTMLInputElement).checked, member.gpu_dri)}
-          />
-          NVIDIA
-        </label>
-        <label class="flex items-center gap-2 pb-2 text-sm">
-          <input
-            type="checkbox"
-            checked={member.gpu_dri}
-            disabled={busy}
-            onChange={(e) => onGpu(member.gpu_nvidia, (e.target as HTMLInputElement).checked)}
-          />
-          /dev/dri
-        </label>
+        <div class="space-y-3">
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-sm">GPU NVIDIA</span>
+            <Switch
+              checked={member.gpu_nvidia}
+              disabled={busy}
+              label="GPU NVIDIA"
+              onToggle={() => onGpu(!member.gpu_nvidia, member.gpu_dri)}
+            />
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-sm">Accès /dev/dri</span>
+            <Switch
+              checked={member.gpu_dri}
+              disabled={busy}
+              label="Accès /dev/dri"
+              onToggle={() => onGpu(member.gpu_nvidia, !member.gpu_dri)}
+            />
+          </div>
+        </div>
+        <div class="border-t border-[var(--color-line)] pt-4">
+          <Button size="sm" variant="ghost" disabled={busy} onClick={onRemove}>
+            Retirer du groupe
+          </Button>
+        </div>
       </div>
-    </li>
+    </Modal>
   );
 }
 
@@ -323,15 +499,80 @@ function nameStem(name: string): string {
   return tokens.join('-');
 }
 
+function stemsMatch(a: string, b: string): boolean {
+  if (a.length < 3 || b.length < 3) return false;
+  return a === b || a.startsWith(`${b}-`) || b.startsWith(`${a}-`);
+}
+
 function similarProjects(project: Project, all: Project[]): Project[] {
   const stem = nameStem(project.name);
   if (stem.length < 3) return [];
-  return all.filter((other) => {
-    if (other.uuid === project.uuid) return false;
-    const otherStem = nameStem(other.name);
-    if (otherStem.length < 3) return false;
-    return stem === otherStem || stem.startsWith(`${otherStem}-`) || otherStem.startsWith(`${stem}-`);
-  });
+  return all.filter((other) => other.uuid !== project.uuid && stemsMatch(stem, nameStem(other.name)));
+}
+
+type ExistingGroup = {
+  uuid: string;
+  name: string;
+  members: Project[];
+};
+
+function existingGroups(all: Project[]): ExistingGroup[] {
+  const map = new Map<string, ExistingGroup>();
+  for (const item of all) {
+    if (!item.group_uuid) continue;
+    const bucket = map.get(item.group_uuid) ?? {
+      uuid: item.group_uuid,
+      name: item.group_name || 'Groupe',
+      members: [],
+    };
+    if (item.group_name) bucket.name = item.group_name;
+    bucket.members.push(item);
+    map.set(item.group_uuid, bucket);
+  }
+  return [...map.values()];
+}
+
+type GroupSuggestion =
+  | { kind: 'join'; group: ExistingGroup }
+  | { kind: 'create'; matches: Project[] };
+
+function suggestGroup(project: Project, all: Project[]): GroupSuggestion | null {
+  const stem = nameStem(project.name);
+  if (stem.length < 3) return null;
+  const groups = existingGroups(all).filter(
+    (group) =>
+      stemsMatch(stem, nameStem(group.name)) ||
+      group.members.some((member) => stemsMatch(stem, nameStem(member.name))),
+  );
+  if (groups.length > 0) {
+    groups.sort((a, b) => {
+      const aName = stemsMatch(stem, nameStem(a.name)) ? 1 : 0;
+      const bName = stemsMatch(stem, nameStem(b.name)) ? 1 : 0;
+      if (aName !== bName) return bName - aName;
+      const aSim = a.members.filter((member) => stemsMatch(stem, nameStem(member.name))).length;
+      const bSim = b.members.filter((member) => stemsMatch(stem, nameStem(member.name))).length;
+      if (aSim !== bSim) return bSim - aSim;
+      return b.members.length - a.members.length;
+    });
+    return { kind: 'join', group: groups[0] };
+  }
+  const matches = similarProjects(project, all).filter((item) => !item.group_uuid);
+  if (matches.length === 0) return null;
+  return { kind: 'create', matches };
+}
+
+function freeRole(project: Project, members: Project[]): string {
+  const taken = new Set(
+    members.map((member) => (member.role || '').trim().toLowerCase()).filter(Boolean),
+  );
+  const tokens = project.name.toLowerCase().split(/[^a-z0-9]+/);
+  for (const token of tokens) {
+    if ((ROLE_HINTS as readonly string[]).includes(token) && !taken.has(token)) return token;
+  }
+  const free = ROLE_HINTS.find((role) => !taken.has(role));
+  if (free) return free;
+  const tail = nameStem(project.name).split('-').pop();
+  return tail && tail.length >= 2 ? tail.slice(0, 32) : 'app';
 }
 
 function isSuggestDismissed(uuid: string): boolean {
@@ -356,14 +597,22 @@ function dismissSuggest(uuid: string) {
   }
 }
 
-export function ProjectGroupSuggest({ project }: { project: Project }) {
-  const [matches, setMatches] = useState<Project[]>([]);
+export function ProjectGroupSuggest({
+  project,
+  onJoined,
+}: {
+  project: Project;
+  onJoined?: (project: Project) => void;
+}) {
+  const toast = useToast();
+  const [suggestion, setSuggestion] = useState<GroupSuggestion | null>(null);
   const [hidden, setHidden] = useState(true);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (project.group_uuid || isSuggestDismissed(project.uuid)) {
       setHidden(true);
-      setMatches([]);
+      setSuggestion(null);
       return;
     }
     let cancelled = false;
@@ -371,9 +620,9 @@ export function ProjectGroupSuggest({ project }: { project: Project }) {
       .projects()
       .then((r) => {
         if (cancelled) return;
-        const found = similarProjects(project, r.data);
-        setMatches(found);
-        setHidden(found.length === 0);
+        const found = suggestGroup(project, r.data);
+        setSuggestion(found);
+        setHidden(!found);
       })
       .catch(() => {
         if (!cancelled) setHidden(true);
@@ -383,26 +632,64 @@ export function ProjectGroupSuggest({ project }: { project: Project }) {
     };
   }, [project.uuid, project.name, project.group_uuid]);
 
-  if (hidden || matches.length === 0) return null;
+  async function join(group: ExistingGroup) {
+    setBusy(true);
+    try {
+      const role = freeRole(project, group.members);
+      await api.addGroupMember(group.uuid, { project_uuid: project.uuid, role });
+      const fresh = await api.project(project.uuid);
+      onJoined?.(fresh.data);
+      toast.push({
+        title: `Rejoint ${group.name}`,
+        detail: 'Redéploie pour appliquer le réseau et les variables.',
+        tone: 'ok',
+      });
+    } catch (err) {
+      toast.push({ title: 'Groupe KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
 
-  const names = matches.map((p) => p.name).join(', ');
+  if (hidden || !suggestion) return null;
+
+  const names =
+    suggestion.kind === 'join'
+      ? suggestion.group.members.map((item) => item.name).join(', ')
+      : suggestion.matches.map((item) => item.name).join(', ');
 
   return (
     <div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]/70 px-4 py-3">
       <p class="min-w-0 text-sm">
-        Apps au nom proche : <span class="font-medium">{names}</span>
+        {suggestion.kind === 'join' ? (
+          <>
+            Le groupe <span class="font-medium">{suggestion.group.name}</span> existe déjà
+            {names ? <> ({names})</> : null}.
+          </>
+        ) : (
+          <>
+            Apps au nom proche : <span class="font-medium">{names}</span>
+          </>
+        )}
       </p>
       <div class="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant="secondary"
-          href={`/app/projects/view?uuid=${encodeURIComponent(project.uuid)}&tab=settings`}
-        >
-          Regrouper
-        </Button>
+        {suggestion.kind === 'join' ? (
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => join(suggestion.group)}>
+            {busy ? 'Rejoindre…' : 'Rejoindre'}
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="secondary"
+            href={`/app/projects/view?uuid=${encodeURIComponent(project.uuid)}&tab=settings`}
+          >
+            Regrouper
+          </Button>
+        )}
         <Button
           size="sm"
           variant="ghost"
+          disabled={busy}
           onClick={() => {
             dismissSuggest(project.uuid);
             setHidden(true);
@@ -559,6 +846,21 @@ export function ProjectGroupPanel({ project, onChanged }: { project: Project; on
     (item) => !item.group_uuid || item.group_uuid === project.group_uuid,
   );
 
+  function rowProject(row: Assignment): Project | undefined {
+    if (!row.projectUuid) return undefined;
+    const base =
+      row.projectUuid === project.uuid
+        ? project
+        : projects.find((item) => item.uuid === row.projectUuid);
+    if (!base) return undefined;
+    const role = resolvedRole(row);
+    return role ? { ...base, role } : base;
+  }
+
+  const face = groupFaceProject(
+    rows.map(rowProject).filter((item): item is Project => Boolean(item)),
+  );
+
   function patchRow(key: string, patch: Partial<Assignment>) {
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)));
   }
@@ -621,24 +923,35 @@ export function ProjectGroupPanel({ project, onChanged }: { project: Project; on
 
   return (
     <Card>
-      <CardHeader
-        title={project.group_name ? `Groupe ${project.group_name}` : 'Groupe'}
-        description="Choisis les apps et un rôle pour chacune."
-        action={
-          project.group_uuid ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              href={`/app/groups/view?uuid=${encodeURIComponent(project.group_uuid)}`}
-            >
-              Ouvrir
-            </Button>
-          ) : undefined
-        }
-      />
+      <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div class="flex min-w-0 flex-1 items-start gap-3">
+          {face && <AppIcon project={face} size="sm" class="shrink-0" />}
+          <div class="min-w-0">
+            <h2 class="text-sm font-medium tracking-tight text-[var(--color-ink)]">
+              {project.group_name ? `Groupe ${project.group_name}` : 'Groupe'}
+            </h2>
+            <p class="mt-1 text-sm text-[var(--color-ink-muted)]">
+              Choisis les apps et un rôle pour chacune.
+            </p>
+          </div>
+        </div>
+        {project.group_uuid && (
+          <Button
+            size="sm"
+            variant="ghost"
+            href={`/app/groups/view?uuid=${encodeURIComponent(project.group_uuid)}`}
+          >
+            Ouvrir
+          </Button>
+        )}
+      </div>
       <form class="space-y-3" onSubmit={save}>
-        {rows.map((row) => (
+        {rows.map((row) => {
+          const logo = rowProject(row);
+          return (
           <div key={row.key} class="flex flex-col gap-2 sm:flex-row sm:items-start">
+            <div class="flex min-w-0 flex-1 items-center gap-2">
+              {logo && <AppIcon project={logo} size="sm" class="shrink-0" />}
             {row.locked ? (
               <div class="flex h-10 min-w-0 flex-1 items-center rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 text-sm">
                 {project.name}
@@ -660,6 +973,7 @@ export function ProjectGroupPanel({ project, onChanged }: { project: Project; on
                   ))}
               </select>
             )}
+            </div>
             <RoleMenu
               row={row}
               taken={taken}
@@ -676,7 +990,8 @@ export function ProjectGroupPanel({ project, onChanged }: { project: Project; on
               </Button>
             )}
           </div>
-        ))}
+          );
+        })}
         <div class="flex flex-wrap gap-2">
           <Button
             type="button"

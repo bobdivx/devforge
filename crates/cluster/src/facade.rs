@@ -135,9 +135,7 @@ impl ClusterFacade {
                     node.status = NodeStatus::Offline;
                     continue;
                 }
-                if !local.acting_leader
-                    && (local.node_id == node.id || node.id == LEADER_NODE_ID)
-                {
+                if !local.acting_leader && (local.node_id == node.id || node.id == LEADER_NODE_ID) {
                     node.status = NodeStatus::Online;
                     continue;
                 }
@@ -149,7 +147,10 @@ impl ClusterFacade {
                 .last_seen_at
                 .as_deref()
                 .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                .map(|t| now.signed_duration_since(t.with_timezone(&Utc)) > Duration::seconds(HEARTBEAT_STALE_SECS))
+                .map(|t| {
+                    now.signed_duration_since(t.with_timezone(&Utc))
+                        > Duration::seconds(HEARTBEAT_STALE_SECS)
+                })
                 .unwrap_or(true);
             node.status = if stale {
                 NodeStatus::Offline
@@ -201,9 +202,8 @@ impl ClusterFacade {
     }
 
     pub async fn join(&self, req: JoinRequest, leader_url: &str) -> Result<JoinResponse> {
-        let token = crate::crypto::extract_join_token(&req.token).ok_or_else(|| {
-            DevForgeError::Message("invitation invalide".into())
-        })?;
+        let token = crate::crypto::extract_join_token(&req.token)
+            .ok_or_else(|| DevForgeError::Message("invitation invalide".into()))?;
         let hash = hash_secret(&token);
         let row = self
             .store
@@ -232,7 +232,10 @@ impl ClusterFacade {
                 && (n.status == NodeStatus::Joining || n.status == NodeStatus::Offline)
                 && (n.name == name
                     || (!advertise.is_empty() && n.advertise_url == advertise)
-                    || (req.ssh_host.as_deref().is_some_and(|h| n.ssh_host.as_deref() == Some(h))))
+                    || (req
+                        .ssh_host
+                        .as_deref()
+                        .is_some_and(|h| n.ssh_host.as_deref() == Some(h))))
         });
 
         let now = Utc::now().to_rfc3339();
@@ -319,9 +322,8 @@ impl ClusterFacade {
             if !url.trim().is_empty() {
                 // Workers : pas de loopback. Leader : autorisé (exec local).
                 if updated.role == NodeRole::Worker {
-                    updated.advertise_url =
-                        crate::placement::validate_worker_advertise_url(&url)
-                            .map_err(DevForgeError::Message)?;
+                    updated.advertise_url = crate::placement::validate_worker_advertise_url(&url)
+                        .map_err(DevForgeError::Message)?;
                 } else {
                     updated.advertise_url = url.trim().trim_end_matches('/').into();
                 }
@@ -425,9 +427,8 @@ impl ClusterFacade {
         }
         if let Some(url) = advertise_url {
             if node.role == NodeRole::Worker {
-                node.advertise_url =
-                    crate::placement::validate_worker_advertise_url(&url)
-                        .map_err(DevForgeError::Message)?;
+                node.advertise_url = crate::placement::validate_worker_advertise_url(&url)
+                    .map_err(DevForgeError::Message)?;
             } else {
                 node.advertise_url = normalize_http_url(&url)?;
             }
@@ -512,13 +513,7 @@ impl ClusterFacade {
             .unwrap_or_else(|| format!("http://{host}:8000"));
 
         let invite = self.create_invite(created_by, leader_url, 24).await?;
-        let script = bootstrap_script(
-            leader_url,
-            &invite.token,
-            &name,
-            &advertise,
-            docker_image,
-        );
+        let script = bootstrap_script(leader_url, &invite.token, &name, &advertise, docker_image);
         let ssh = SshRemoteExecutor::new(SshTarget {
             host: host.into(),
             user: user.clone(),
@@ -608,6 +603,7 @@ pub fn bootstrap_script(
     } else {
         format!("{docker_image}:latest")
     };
+    let repo = image_repository(docker_image);
     format!(
         r#"set -euo pipefail
 mkdir -p /opt/devforge/data
@@ -625,13 +621,73 @@ docker run -d --name devforge-worker --restart unless-stopped \
   -e DEVFORGE_DATA_DIR=/data \
   -e HOST=0.0.0.0 \
   -e PORT=8000 \
+  -e DEVFORGE_UPDATE_MODE=docker \
+  -e DEVFORGE_SELF_CONTAINER=devforge-worker \
+  -e DEVFORGE_UPDATE_IMAGE={repo} \
   -p 8000:8000 \
   {image}
 echo BOOTSTRAP_OK
 "#,
         b64 = shell_single_quote(&b64),
         image = shell_single_quote(&image),
+        repo = shell_single_quote(&repo),
     )
+}
+
+/// Dépôt sans tag. `localhost:5000/bobdivx/devforge` n’a pas de tag.
+fn image_repository(docker_image: &str) -> String {
+    let image = docker_image.trim();
+    match image.rsplit_once(':') {
+        Some((repo, tag)) if !repo.is_empty() && !tag.is_empty() && !tag.contains('/') => {
+            repo.to_string()
+        }
+        _ => image.to_string(),
+    }
+}
+
+/// À lancer **dans** le conteneur worker (socket Docker monté), avant `/internal/update/start`.
+///
+/// L’image fixe `DEVFORGE_SELF_CONTAINER=devforge`, alors que le bootstrap nomme le
+/// conteneur `devforge-worker`. L’ancienne MAJ fait `docker rename devforge` et échoue.
+/// On aligne le nom sur la variable que le process déjà en cours va lire.
+///
+/// Un leurre sans ports évite que cette ancienne MAJ crée un Traefik sur le worker
+/// (elle le fait dès que `devforge-traefik` est absent). Le nouvel image le retire au boot.
+pub fn align_self_container_script() -> &'static str {
+    r#"want="${DEVFORGE_SELF_CONTAINER:-devforge}"
+self=""
+if [ -r /etc/hostname ]; then
+  h=$(tr -d ' \t\n\r' < /etc/hostname)
+  self=$(docker inspect -f '{{.Name}}' "$h" 2>/dev/null || true)
+  self=${self#/}
+fi
+if [ -z "$self" ]; then
+  printf '%s\n' "conteneur courant introuvable"
+  exit 0
+fi
+target="$self"
+if [ "$self" != "$want" ]; then
+  if docker inspect "$want" >/dev/null 2>&1; then
+    printf '%s\n' "le conteneur $want existe deja, impossible de renommer $self" >&2
+    exit 1
+  fi
+  docker rename "$self" "$want"
+  target="$want"
+  printf '%s\n' "renamed $self -> $want"
+else
+  printf '%s\n' "deja $self"
+fi
+if [ -f /data/cluster-identity.json ] && grep -E -q '"role": *"worker"' /data/cluster-identity.json; then
+  if ! docker inspect devforge-traefik >/dev/null 2>&1; then
+    img=$(docker inspect -f '{{.Config.Image}}' "$target" 2>/dev/null || true)
+    if [ -n "$img" ]; then
+      docker run -d --name devforge-traefik --restart no --network none \
+        --label devforge.placeholder=traefik \
+        --entrypoint /bin/sleep "$img" 7200 >/dev/null 2>&1 || true
+    fi
+  fi
+fi
+"#
 }
 
 fn normalize_http_url(raw: &str) -> Result<String> {
@@ -1039,7 +1095,41 @@ mod tests {
         );
         assert!(s.contains("cluster-pending-join.json"));
         assert!(s.contains("devforge-worker"));
+        assert!(s.contains("DEVFORGE_SELF_CONTAINER=devforge-worker"));
         assert!(!s.contains("DEVFORGE_CLUSTER"));
         assert!(!s.contains("DEVFORGE_ROLE"));
+    }
+
+    #[test]
+    fn bootstrap_pins_update_image_without_tag() {
+        let s = bootstrap_script(
+            "http://10.1.0.88:8000",
+            "dfjoin_abc",
+            "nas",
+            "http://10.1.0.58:8000",
+            "ghcr.io/bobdivx/devforge:2.0.113",
+        );
+        assert!(s.contains("DEVFORGE_UPDATE_IMAGE='ghcr.io/bobdivx/devforge'"));
+        assert!(s.contains("ghcr.io/bobdivx/devforge:2.0.113"));
+    }
+
+    #[test]
+    fn align_script_renames_worker_container() {
+        let s = align_self_container_script();
+        assert!(s.contains("docker rename"));
+        assert!(s.contains("DEVFORGE_SELF_CONTAINER"));
+        assert!(s.contains("devforge.placeholder=traefik"));
+    }
+
+    #[test]
+    fn image_repository_strips_tag_only() {
+        assert_eq!(
+            image_repository("ghcr.io/bobdivx/devforge:2.0.113"),
+            "ghcr.io/bobdivx/devforge"
+        );
+        assert_eq!(
+            image_repository("localhost:5000/bobdivx/devforge"),
+            "localhost:5000/bobdivx/devforge"
+        );
     }
 }

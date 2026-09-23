@@ -2,9 +2,13 @@
 
 use crate::docker;
 
-/// Default nixpacks builder image (override with `DEVFORGE_NIXPACKS_IMAGE`).
-/// Pinned timestamp tag from ghcr.io/railwayapp/nixpacks (not floating `latest`).
-pub const DEFAULT_NIXPACKS_IMAGE: &str = "ghcr.io/railwayapp/nixpacks:ubuntu-1788826008";
+/// Nixpacks CLI release baked into the local builder image.
+/// `ghcr.io/railwayapp/nixpacks:ubuntu-*` are provider base images (the `FROM`
+/// of generated Dockerfiles). They do not ship the `nixpacks` binary.
+pub const NIXPACKS_CLI_VERSION: &str = "1.41.0";
+
+/// Local image built on first deploy (override with `DEVFORGE_NIXPACKS_IMAGE`).
+pub const DEFAULT_NIXPACKS_IMAGE: &str = "devforge/nixpacks:1.41.0";
 
 /// Env keys passed to nixpacks `--env` (build-time).
 pub fn is_build_env_key(key: &str) -> bool {
@@ -49,11 +53,79 @@ pub fn collect_build_envs(env_file: Option<&str>) -> Vec<(String, String)> {
     out
 }
 
-fn nixpacks_image() -> String {
-    std::env::var("DEVFORGE_NIXPACKS_IMAGE")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_NIXPACKS_IMAGE.to_string())
+/// `ubuntu-*` / `debian-*` tags on ghcr.io/railwayapp/nixpacks are provider bases.
+pub fn is_provider_base_image(image: &str) -> bool {
+    let tag = image.rsplit('/').next().unwrap_or(image);
+    let tag = tag.rsplit(':').next().unwrap_or(tag);
+    tag == "ubuntu"
+        || tag == "debian"
+        || tag.starts_with("ubuntu-")
+        || tag.starts_with("debian-")
+}
+
+pub fn resolve_nixpacks_image(configured: Option<&str>) -> String {
+    match configured.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(image) if !is_provider_base_image(image) => image.to_string(),
+        _ => DEFAULT_NIXPACKS_IMAGE.to_string(),
+    }
+}
+
+pub fn nixpacks_image() -> String {
+    resolve_nixpacks_image(std::env::var("DEVFORGE_NIXPACKS_IMAGE").ok().as_deref())
+}
+
+fn is_managed_cli_image(image: &str) -> bool {
+    image == DEFAULT_NIXPACKS_IMAGE || image.starts_with("devforge/nixpacks:")
+}
+
+/// Dockerfile for a builder that actually contains `nixpacks` + the Docker CLI.
+pub fn nixpacks_cli_dockerfile() -> String {
+    format!(
+        r#"FROM docker:27-cli
+ARG TARGETARCH
+RUN apk add --no-cache ca-certificates curl tar git \
+ && case "$TARGETARCH" in \
+      amd64) ASSET=x86_64-unknown-linux-musl ;; \
+      arm64) ASSET=aarch64-unknown-linux-musl ;; \
+      *) echo "arch $TARGETARCH non supportée" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL -o /tmp/nixpacks.tgz "https://github.com/railwayapp/nixpacks/releases/download/v{ver}/nixpacks-v{ver}-${{ASSET}}.tar.gz" \
+ && tar -xzf /tmp/nixpacks.tgz -C /usr/local/bin \
+ && chmod +x /usr/local/bin/nixpacks \
+ && rm -f /tmp/nixpacks.tgz \
+ && nixpacks --version
+ENTRYPOINT ["nixpacks"]
+"#,
+        ver = NIXPACKS_CLI_VERSION
+    )
+}
+
+/// Build the CLI image once on the deploy host. Empty when `image` is a user override.
+fn nixpacks_cli_ensure(image: &str) -> String {
+    if !is_managed_cli_image(image) {
+        return String::new();
+    }
+    let df = nixpacks_cli_dockerfile();
+    let image = shell_escape_token(image);
+    if cfg!(windows) {
+        format!(
+            "if (-not (docker image inspect {image} 2>$null)) {{ \
+$ctx = Join-Path $env:TEMP 'df-nixpacks-cli'; New-Item -ItemType Directory -Force -Path $ctx | Out-Null; \
+@'\n{df}\n'@ | docker build -t {image} -f - $ctx; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }} }} "
+        )
+    } else {
+        format!(
+            r#"if ! docker image inspect {image} >/dev/null 2>&1; then \
+echo "[nixpacks-cli] construction {image}"; \
+CLI_CTX=$(mktemp -d 2>/dev/null || echo /tmp/df-nixpacks-cli-ctx); \
+mkdir -p "$CLI_CTX"; \
+docker build -t {image} -f - "$CLI_CTX" <<'NIXPACKS_CLI_EOF'
+{df}NIXPACKS_CLI_EOF
+ec=$?; rm -rf "$CLI_CTX"; \
+if [ "$ec" -ne 0 ]; then exit "$ec"; fi; \
+fi; "#
+        )
+    }
 }
 
 fn format_nixpacks_env_flags(build_envs: &[(String, String)]) -> String {
@@ -71,14 +143,23 @@ fn format_nixpacks_env_flags(build_envs: &[(String, String)]) -> String {
 
 /// Nixpacks via Docker image — no host CLI required.
 ///
-/// Forces `--entrypoint nixpacks` because some image tags have an empty
-/// ENTRYPOINT (otherwise Docker tries to exec `build` → exit 127).
+/// Forces `--entrypoint nixpacks`. The managed image is `devforge/nixpacks`
+/// (CLI + Docker client). Do not point this at `ghcr.io/railwayapp/nixpacks:ubuntu-*`:
+/// those tags are provider base images and do not contain the binary.
 ///
 /// At runtime (Unix), prefers `--volumes-from` when DevForge runs nested with a
 /// docker.sock (ZimaOS), otherwise bind-mounts `$PWD`. Decision is made on the
 /// execution host so SSH remotes do not inherit a wrong `--volumes-from`.
 pub fn nixpacks_docker_build(image: &str, build_envs: &[(String, String)]) -> String {
-    let builder = nixpacks_image();
+    nixpacks_docker_build_image(&nixpacks_image(), image, build_envs)
+}
+
+pub fn nixpacks_docker_build_image(
+    builder: &str,
+    image: &str,
+    build_envs: &[(String, String)],
+) -> String {
+    let ensure = nixpacks_cli_ensure(builder);
     let env_flags = format_nixpacks_env_flags(build_envs);
     // Hint for nested local executor (exported into the shell snippet).
     let self_hint = std::env::var("DEVFORGE_SELF_CONTAINER")
@@ -94,11 +175,11 @@ pub fn nixpacks_docker_build(image: &str, build_envs: &[(String, String)]) -> St
         env_flags = env_flags,
     );
 
-    if cfg!(windows) {
+    let run = if cfg!(windows) {
         format!(
             "docker run --rm --entrypoint nixpacks -v \"{pwd}:/app\" -w /app {builder} {nix_args}",
             pwd = "$(Get-Location)",
-            builder = shell_escape_token(&builder),
+            builder = shell_escape_token(builder),
             nix_args = nix_args,
         )
     } else {
@@ -113,26 +194,32 @@ else \
   docker run --rm --entrypoint nixpacks -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD":/app -w /app {builder} {nix_args}; \
 fi"#,
             self_hint = self_hint.replace('"', "").replace('`', "").replace('$', ""),
-            builder = shell_escape_token(&builder),
+            builder = shell_escape_token(builder),
             nix_args = nix_args,
         )
-    }
+    };
+    format!("{ensure}{run}")
 }
 
-/// Fallback when nixpacks-docker fails: project Dockerfile or hardened Node inline.
-pub fn fallback_image_build_cmd(build_dir: &str, image: &str, port: u16) -> (String, &'static str) {
-    let has_df = std::path::Path::new(&format!("{build_dir}/Dockerfile")).is_file();
-    if has_df {
-        (
-            docker::docker_build(".", image, "Dockerfile"),
-            "docker build Dockerfile",
+/// Fallback when nixpacks-docker fails.
+/// The choice runs on the deploy host: project Dockerfile, else a Node image
+/// that skips `npm run build` when the script is absent (typical API).
+pub fn fallback_image_build_cmd(image: &str, port: u16) -> (String, &'static str) {
+    let node = docker::docker_build_from_content(image, &docker::node_inline_dockerfile(port));
+    let df = docker::docker_build(".", image, "Dockerfile");
+    let cmd = if cfg!(windows) {
+        format!(
+            "if (Test-Path Dockerfile) {{ {df} }} elseif (Test-Path package.json) {{ {node} }} else {{ Write-Error '[fallback] ni Dockerfile ni package.json'; exit 1 }}"
         )
     } else {
-        (
-            docker::docker_build_from_content(image, &docker::node_inline_dockerfile(port)),
-            "docker build Node inline Dockerfile",
+        format!(
+            "if [ -f Dockerfile ]; then {df}\nelif [ -f package.json ]; then\n{node}\nelse\necho \"[fallback] ni Dockerfile ni package.json — Nixpacks est requis pour ce runtime\" >&2\nexit 1\nfi\n"
         )
-    }
+    };
+    (
+        cmd,
+        "Dockerfile du projet, sinon Node (build seulement si le script existe)",
+    )
 }
 
 fn shell_escape_token(s: &str) -> String {
@@ -169,11 +256,95 @@ mod tests {
 
     #[test]
     fn nixpacks_cmd_contains_builder_and_name() {
-        let cmd = nixpacks_docker_build("df-abc:latest", &collect_build_envs(None));
+        let cmd = nixpacks_docker_build_image(
+            DEFAULT_NIXPACKS_IMAGE,
+            "df-abc:latest",
+            &collect_build_envs(None),
+        );
+        assert!(cmd.contains("docker image inspect"));
+        assert!(cmd.contains("devforge/nixpacks:1.41.0"));
+        assert!(cmd.contains("nixpacks-v1.41.0-"));
+        assert!(!cmd.contains("ubuntu-1788826008"));
         assert!(cmd.contains("docker run"));
         assert!(cmd.contains("--entrypoint nixpacks"));
         assert!(cmd.contains("build . --name"));
         assert!(cmd.contains("df-abc:latest"));
         assert!(cmd.contains("PUPPETEER_SKIP_DOWNLOAD=1"));
+    }
+
+    #[test]
+    fn provider_base_tag_is_not_used_as_cli() {
+        assert!(is_provider_base_image(
+            "ghcr.io/railwayapp/nixpacks:ubuntu-1788826008"
+        ));
+        assert_eq!(
+            resolve_nixpacks_image(Some("ghcr.io/railwayapp/nixpacks:ubuntu-1788826008")),
+            DEFAULT_NIXPACKS_IMAGE
+        );
+        assert_eq!(
+            resolve_nixpacks_image(Some("ghcr.io/example/nixpacks:9")),
+            "ghcr.io/example/nixpacks:9"
+        );
+    }
+
+    #[test]
+    fn custom_nixpacks_image_skips_bootstrap() {
+        let cmd = nixpacks_docker_build_image(
+            "ghcr.io/example/nixpacks:9",
+            "df-abc:latest",
+            &[],
+        );
+        assert!(!cmd.contains("docker image inspect"));
+        assert!(cmd.contains("ghcr.io/example/nixpacks:9"));
+    }
+
+    #[test]
+    fn managed_nixpacks_script_is_valid_shell() {
+        if cfg!(windows) {
+            return;
+        }
+        let cmd = nixpacks_docker_build_image(DEFAULT_NIXPACKS_IMAGE, "df-abc:latest", &[]);
+        let path = std::env::temp_dir().join("df-nixpacks-cmd.sh");
+        std::fs::write(&path, &cmd).unwrap();
+        let out = std::process::Command::new("sh")
+            .arg("-n")
+            .arg(&path)
+            .output()
+            .expect("sh -n");
+        std::fs::remove_file(&path).ok();
+        assert!(
+            out.status.success(),
+            "script invalide: {}\n{cmd}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[test]
+    fn fallback_node_build_is_conditional() {
+        let (cmd, _) = fallback_image_build_cmd("df-abc:latest", 8080);
+        assert!(cmd.contains("package.json"));
+        assert!(
+            cmd.contains("scripts.build")
+                || cmd.contains("pas de script build")
+                || cmd.contains("skip build")
+        );
+        assert!(cmd.contains("Dockerfile"));
+        assert!(cmd.contains("EXPOSE 8080"));
+        if cfg!(windows) {
+            return;
+        }
+        let path = std::env::temp_dir().join("df-fallback-cmd.sh");
+        std::fs::write(&path, &cmd).unwrap();
+        let out = std::process::Command::new("sh")
+            .arg("-n")
+            .arg(&path)
+            .output()
+            .expect("sh -n");
+        std::fs::remove_file(&path).ok();
+        assert!(
+            out.status.success(),
+            "script invalide: {}\n{cmd}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 }

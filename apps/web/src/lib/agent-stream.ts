@@ -92,6 +92,26 @@ export function previewUrlFromTools(tools: AgentToolCall[]): string | undefined 
   return undefined;
 }
 
+export function humanAgentHttpError(status: number, text: string): string {
+  const trimmed = text.trim();
+  try {
+    const j = JSON.parse(trimmed) as { error?: string };
+    if (j.error) return j.error;
+  } catch {
+    /* corps HTML ou texte brut */
+  }
+  if (
+    status === 524 ||
+    trimmed.startsWith('<!DOCTYPE') ||
+    trimmed.startsWith('<html') ||
+    /A timeout occurred/i.test(trimmed) ||
+    /Error code 524/.test(trimmed)
+  ) {
+    return 'Le serveur n’a pas répondu à temps. La revue a été coupée par le délai du proxy. Réessaie.';
+  }
+  return trimmed || `Erreur HTTP ${status}`;
+}
+
 function parseSseBlock(block: string): { event: string; data: string } | null {
   const lines = block.split('\n');
   let event = 'message';
@@ -127,14 +147,7 @@ export async function streamAgentChat(
 
   if (!res.ok) {
     const text = await res.text();
-    let msg = text || res.statusText;
-    try {
-      const j = JSON.parse(text);
-      if (j.error) msg = j.error;
-    } catch {
-      /* keep */
-    }
-    throw new Error(msg);
+    throw new Error(humanAgentHttpError(res.status, text));
   }
 
   const ctype = res.headers.get('content-type') || '';

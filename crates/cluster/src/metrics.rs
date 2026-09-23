@@ -85,10 +85,7 @@ fn parse_meminfo_kb(line: &str) -> Option<u64> {
 
 fn disk_bytes() -> Option<(u64, u64)> {
     let path = std::env::var("DEVFORGE_DATA_DIR").unwrap_or_else(|_| "/".into());
-    let out = Command::new("df")
-        .args(["-Pk", &path])
-        .output()
-        .ok()?;
+    let out = Command::new("df").args(["-Pk", &path]).output().ok()?;
     if !out.status.success() {
         return None;
     }
@@ -101,7 +98,10 @@ fn disk_bytes() -> Option<(u64, u64)> {
 }
 
 fn docker_snapshot(m: &mut NodeMetrics) {
-    match Command::new("docker").args(["info", "-f", "{{.ServerVersion}}"]).output() {
+    match Command::new("docker")
+        .args(["info", "-f", "{{.ServerVersion}}"])
+        .output()
+    {
         Ok(out) => m.docker_ok = Some(out.status.success()),
         Err(_) => m.docker_ok = Some(false),
     }

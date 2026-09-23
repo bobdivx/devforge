@@ -2258,18 +2258,28 @@ async fn agent_chat(
         _ => None,
     };
 
-    let (llm, llm_mode) = state.llm_for_user(&user.uuid).await;
-    let gh_token = crate::user_prefs::github_token(&state.pool, &user.uuid).await;
+    let user_uuid = user.uuid.clone();
 
     if want_stream {
         let agent = state.agent.clone();
         let pool = state.pool.clone();
         let repair_state = state.clone();
+        let llm_state = state.clone();
         let (ev_tx, ev_rx) = tokio::sync::mpsc::unbounded_channel::<devforge_agent::AgentEvent>();
         let progress_tx = ev_tx.clone();
         let run_uuid_stream = run_uuid.clone();
 
+        // Octets tout de suite : la résolution LLM (sondes) ne doit pas retarder les en-têtes,
+        // sinon Cloudflare renvoie 524 avant le premier octet.
+        let _ = ev_tx.send(devforge_agent::AgentEvent::Thinking {
+            round: 0,
+            label: "Connexion aux modèles…".into(),
+            detail: String::new(),
+        });
+
         tokio::spawn(async move {
+            let (llm, llm_mode) = llm_state.llm_for_user(&user_uuid).await;
+            let gh_token = crate::user_prefs::github_token(&pool, &user_uuid).await;
             let result = devforge_github::with_token(
                 &gh_token,
                 agent.handle_with_provider(
@@ -2353,6 +2363,9 @@ async fn agent_chat(
             .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
             .into_response());
     }
+
+    let (llm, llm_mode) = state.llm_for_user(&user_uuid).await;
+    let gh_token = crate::user_prefs::github_token(&state.pool, &user_uuid).await;
 
     let result = match devforge_github::with_token(
         &gh_token,

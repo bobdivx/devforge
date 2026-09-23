@@ -358,6 +358,7 @@ dependencies = [
  "devforge-llm",
  "devforge-mcp",
  "devforge-shared",
+ "libc",
  "regex",
  "reqwest",
  "serde",

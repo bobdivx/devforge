@@ -68,6 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState::new(&database_url).await?;
     worker::apply_promote_flag(&state).await;
     worker::apply_reclaim_flag(&state).await;
+    worker::release_orphan_fence(&state).await;
 
     if let Err(e) = worker::consume_pending_join(&state).await {
         tracing::error!(error = %e, "échec join cluster (fichier pending)");

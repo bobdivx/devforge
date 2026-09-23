@@ -11,8 +11,9 @@ use axum::{
 };
 use chrono::Utc;
 use devforge_cluster::{
-    collect_node_metrics, diagnostic_command, AddNodeRequest, HeartbeatPayload, JoinRequest,
-    LeaderClient, LocalClusterState, NodeRole, NodeStatus, LEADER_NODE_ID,
+    align_self_container_script, collect_node_metrics, diagnostic_command, AddNodeRequest,
+    HeartbeatPayload, JoinRequest, LeaderClient, LocalClusterState, NodeRole, NodeStatus,
+    LEADER_NODE_ID,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -59,6 +60,7 @@ pub fn router() -> Router<AppState> {
             get(cluster_settings).patch(patch_cluster_settings),
         )
         .route("/api/v1/cluster/rebalance", post(rebalance))
+        .route("/api/v1/cluster/reopen-writes", post(reopen_cluster_writes))
 }
 
 pub fn internal_cluster_routes() -> Router<AppState> {
@@ -162,6 +164,7 @@ async fn list_nodes(
         "preferred_leader_url": local.preferred_leader_url,
         "acting_leader": local.acting_leader,
         "acting_node_id": local.node_id,
+        "writes_fenced": local.writes_fenced,
         "leader_version": state.updater.current_version(),
         "placement_auto": placement_auto_enabled(&state).await,
         "nodes": nodes.iter().map(|n| {
@@ -899,6 +902,36 @@ async fn project_deploy_in_flight(state: &AppState, project_id: i64) -> bool {
     row.map(|(c,)| c > 0).unwrap_or(false)
 }
 
+async fn reopen_cluster_writes(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    let mut local = state.cluster.local().await.map_err(map_err)?;
+    if local.acting_leader {
+        let _ = crate::control_pg::resume_after_clone().await;
+        local.acting_leader = false;
+    }
+    local.writes_fenced = false;
+    state.cluster.set_local(&local).await.map_err(map_err)?;
+    let path = devforge_cluster::reopen_hold_path();
+    if let Some(parent) = path.parent() {
+        let _ = tokio::fs::create_dir_all(parent).await;
+    }
+    tokio::fs::write(&path, "manual\n").await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("hold: {e}")})),
+        )
+    })?;
+    tracing::warn!(node = %local.node_id, "écritures rouvertes depuis la page Cluster");
+    Ok(Json(json!({
+        "ok": true,
+        "writes_fenced": false,
+        "acting_leader": false,
+    })))
+}
+
 async fn cluster_settings(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1329,6 +1362,43 @@ async fn resolve_update_target(
         })
 }
 
+/// Les workers déjà en ligne (image ≤ 2.0.113) cherchent le conteneur `devforge`.
+/// Le bootstrap les a nommés `devforge-worker`. On renomme avant de lancer la MAJ.
+async fn prepare_worker_update(
+    client: &LeaderClient,
+    secret: &str,
+    name: &str,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    match client
+        .exec(secret, align_self_container_script(), 40)
+        .await
+    {
+        Ok(r) if r.ok => {
+            tracing::info!(node = %name, output = %r.output.trim(), "conteneur worker aligné");
+            Ok(())
+        }
+        Ok(r) => Err((
+            StatusCode::BAD_GATEWAY,
+            Json(json!({
+                "error": format!(
+                    "{name} : impossible d’aligner le conteneur — {}",
+                    r.output.trim()
+                )
+            })),
+        )),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("404") {
+                return Ok(());
+            }
+            Err((
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"error": format!("{name} : {msg}")})),
+            ))
+        }
+    }
+}
+
 async fn node_update_start(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1349,6 +1419,7 @@ async fn node_update_start(
             "message": format!("{} est déjà en {}", node.name, current),
         })));
     }
+    prepare_worker_update(&client, &secret, &node.name).await?;
     match client.node_update_start(&secret, Some(&target)).await {
         Ok(data) => Ok(Json(json!({
             "ok": true,
@@ -1441,6 +1512,17 @@ pub async fn push_worker_updates(
         }
         match worker_remote(state, &node.id).await {
             Ok((_, client, secret)) => {
+                if let Err((_, Json(err))) =
+                    prepare_worker_update(&client, &secret, &node.name).await
+                {
+                    results.push(json!({
+                        "id": node.id,
+                        "name": node.name,
+                        "ok": false,
+                        "error": err.get("error").and_then(|v| v.as_str()).unwrap_or("alignement conteneur"),
+                    }));
+                    continue;
+                }
                 match client.node_update_start(&secret, Some(target)).await {
                     Ok(data) => results.push(json!({
                         "id": node.id,
@@ -1630,6 +1712,7 @@ fn skip_replication(path: &str) -> bool {
             | "/internal/exec"
             | "/internal/update/start"
             | "/internal/update/status"
+            | "/api/v1/cluster/reopen-writes"
     )
 }
 

@@ -27,6 +27,11 @@ const INTERESTING: &[&str] = &[
     "next.config.mjs",
     "vite.config.ts",
     "vite.config.js",
+    ".env.example",
+    ".env.sample",
+    ".env.template",
+    "Procfile",
+    "nixpacks.toml",
 ];
 
 pub async fn detect_github_repo(

@@ -7,7 +7,9 @@ import { cn } from '../lib/cn';
 import { ToastProvider } from './ui';
 import { AuthGate } from './AuthGate';
 import { AppHeader } from './AppHeader';
-import { MobileMenuSheet } from './MobileMenuSheet';
+import { LaunchedAgentsSheet } from './LaunchedAgentsSheet';
+import { useLaunchedAgents } from './LaunchedAgentsMenu';
+import { pollLaunchedAgents } from '../lib/launched-agents';
 import { UpdateRecoveryOverlay } from './UpdateRecoveryOverlay';
 
 type Props = {
@@ -68,7 +70,8 @@ function ShellInner({
     onNodePage ? WORKER_NAV : globalNavForRole(null),
   );
   const [userRole, setUserRole] = useState<string | null>(null);
-  const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
+  const [agentsSheetOpen, setAgentsSheetOpen] = useState(false);
+  const launchedAgents = useLaunchedAgents();
   const [showRecovery, setShowRecovery] = useState(false);
   const nav = sideNav ?? projectNav;
   const navLabel = sideNav ? sideNavLabel : projectNav ? 'Projet' : sideNavLabel;
@@ -92,6 +95,11 @@ function ShellInner({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (isWorker) return;
+    return pollLaunchedAgents();
+  }, [isWorker]);
 
   useEffect(() => {
     let failureCount = 0;
@@ -136,11 +144,9 @@ function ShellInner({
         onRecovered={() => setShowRecovery(false)}
       />
       {!isWorker && (
-        <MobileMenuSheet
-          open={mobileSheetOpen}
-          onClose={() => setMobileSheetOpen(false)}
-          active={active}
-          userRole={userRole}
+        <LaunchedAgentsSheet
+          open={agentsSheetOpen}
+          onClose={() => setAgentsSheetOpen(false)}
         />
       )}
       <div class="min-h-screen pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-8">
@@ -289,23 +295,35 @@ function ShellInner({
         >
           <div class="mx-auto flex max-w-lg justify-around gap-0.5 px-1 py-1.5">
             {(isWorker ? WORKER_NAV : mobileBottomNav(userRole)).map((item) => {
-              const isPlusButton = item.key === 'plus';
-              if (isPlusButton) {
+              if (item.key === 'agents') {
+                const count = launchedAgents.length;
+                const anyWorking = launchedAgents.some((agent) => agent.status === 'working');
+                const label = count === 1 ? launchedAgents[0].title : item.label;
                 return (
                   <button
                     key={item.key}
                     type="button"
                     class={cn(
-                      'flex min-h-[44px] min-w-[3.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] leading-tight transition-[background-color,color,transform] duration-200',
-                      'text-[var(--color-ink-muted)] active:scale-[0.96] active:bg-white/5',
+                      'flex min-h-[44px] min-w-[3.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] leading-tight transition-[background-color,color,transform] duration-200 md:hidden',
+                      agentsSheetOpen
+                        ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
+                        : 'text-[var(--color-ink-muted)] active:scale-[0.96] active:bg-white/5',
                     )}
-                    onClick={() => setMobileSheetOpen(true)}
-                    aria-label="Ouvrir le menu"
+                    onClick={() => setAgentsSheetOpen(true)}
+                    aria-label="Agents lancés"
+                    aria-haspopup="dialog"
+                    aria-expanded={agentsSheetOpen}
                   >
-                    <span class="text-base leading-none" aria-hidden>
-                      +
+                    <span
+                      class={cn(
+                        'text-sm font-semibold leading-none',
+                        anyWorking && 'text-[var(--color-warn)]',
+                      )}
+                      aria-hidden
+                    >
+                      {count > 0 ? count : '•'}
                     </span>
-                    <span class="max-w-full truncate">{item.label}</span>
+                    <span class="max-w-full truncate">{label}</span>
                   </button>
                 );
               }

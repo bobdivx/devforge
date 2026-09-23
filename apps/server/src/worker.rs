@@ -81,6 +81,17 @@ pub async fn maybe_start_heartbeat(state: &AppState) {
     if let Ok(local) = state.cluster.local().await {
         if local.role == NodeRole::Worker && !local.node_secret.is_empty() {
             spawn_worker_loop(state.clone());
+            tokio::spawn(async {
+                let _ = LocalShellExecutor
+                    .exec(
+                        "default",
+                        "/",
+                        r#"ids=$(docker ps -aq --filter label=devforge.placeholder=traefik 2>/dev/null || true)
+if [ -n "$ids" ]; then docker rm -f $ids >/dev/null 2>&1 || true; fi"#,
+                        20,
+                    )
+                    .await;
+            });
         }
     }
 }
@@ -647,8 +658,38 @@ pub async fn maybe_reclaim_preferred(state: &AppState) {
     }
     let nodes = match state.cluster.list_nodes().await {
         Ok(n) => n,
-        Err(_) => return,
+        Err(_) => {
+            reopen_writes(state, &local).await;
+            return;
+        }
     };
+    if devforge_cluster::reopen_hold_path().is_file() {
+        let mut still = false;
+        for n in &nodes {
+            if n.advertise_url.trim().is_empty() || n.id == local.node_id {
+                continue;
+            }
+            let c = LeaderClient::new(&n.advertise_url);
+            let Ok(st) = c.failover_status(&local.failover_secret).await else {
+                continue;
+            };
+            if devforge_cluster::must_yield_to_interim(
+                &local.node_id,
+                local.leader_term,
+                &st.node_id,
+                st.acting_leader,
+                st.leader_term,
+            ) {
+                still = true;
+                break;
+            }
+        }
+        if still {
+            reopen_writes(state, &local).await;
+            return;
+        }
+        let _ = tokio::fs::remove_file(devforge_cluster::reopen_hold_path()).await;
+    }
     for n in nodes {
         if n.advertise_url.trim().is_empty() || n.id == local.node_id {
             continue;
@@ -666,16 +707,6 @@ pub async fn maybe_reclaim_preferred(state: &AppState) {
         ) {
             continue;
         }
-        let mut fenced = local.clone();
-        fenced.writes_fenced = true;
-        if st.leader_term > fenced.leader_term {
-            fenced.leader_term = st.leader_term;
-        }
-        if let Err(e) = state.cluster.set_local(&fenced).await {
-            tracing::error!(error = %e, "fence des écritures");
-            continue;
-        }
-        tracing::warn!(interim = %n.id, term = fenced.leader_term, "écritures refusées, récupération auprès de l’intérim");
         let secret = if local.failover_secret.is_empty() {
             local.node_secret.clone()
         } else {
@@ -709,11 +740,11 @@ pub async fn maybe_reclaim_preferred(state: &AppState) {
         };
         if !cloned {
             let Ok(bytes) = c.fetch_snapshot(&secret).await else {
-                tracing::error!(interim = %n.id, "snapshot intérim injoignable — pas de démotion");
+                tracing::error!(interim = %n.id, "snapshot intérim injoignable — écritures conservées");
                 continue;
             };
             if !crate::control_pg::snapshot_is_postgres(&bytes) {
-                tracing::error!(interim = %n.id, "snapshot intérim invalide — pas de démotion");
+                tracing::error!(interim = %n.id, "snapshot intérim invalide — écritures conservées");
                 continue;
             }
             let pending = format!("{}.pending-restore", state.db_path.display());
@@ -722,10 +753,20 @@ pub async fn maybe_reclaim_preferred(state: &AppState) {
                 continue;
             }
         }
-        let mut resumed = fenced.clone();
-        resumed.writes_fenced = false;
+        // La copie est sur disque : on ferme les écritures seulement pour le redémarrage.
+        let mut resumed = local.clone();
+        if st.leader_term > resumed.leader_term {
+            resumed.leader_term = st.leader_term;
+        }
+        resumed.writes_fenced = true;
         resumed.acting_leader = false;
         resumed.role = NodeRole::Leader;
+        if let Err(e) = state.cluster.set_local(&resumed).await {
+            tracing::error!(error = %e, "fence des écritures");
+            let _ = c.failover_resume(&secret).await;
+            continue;
+        }
+        resumed.writes_fenced = false;
         if let Ok(json) = serde_json::to_string_pretty(&resumed) {
             let _ = tokio::fs::write(devforge_cluster::reclaim_flag_path(), json).await;
         }
@@ -735,9 +776,42 @@ pub async fn maybe_reclaim_preferred(state: &AppState) {
             local.advertise_url.clone()
         };
         let _ = c.failover_demote(&secret, &pref_url).await;
-        tracing::info!("restauration snapshot intérim, redémarrage");
+        tracing::info!(interim = %n.id, "restauration snapshot intérim, redémarrage");
         devforge_cluster::restart_current_process();
     }
+    reopen_writes(state, &local).await;
+}
+
+/// Un échec de copie ne doit pas laisser le leader d’origine en lecture seule.
+async fn reopen_writes(state: &AppState, local: &LocalClusterState) {
+    if !local.writes_fenced {
+        return;
+    }
+    let mut open = local.clone();
+    open.writes_fenced = false;
+    if let Err(e) = state.cluster.set_local(&open).await {
+        tracing::error!(error = %e, "réouverture des écritures");
+        return;
+    }
+    tracing::warn!("intérim injoignable — écritures rouvertes sur le leader d’origine");
+}
+
+/// Quiesce dont le délai de 120 s a disparu avec le processus.
+pub async fn release_orphan_fence(state: &AppState) {
+    let Ok(local) = state.cluster.local().await else {
+        return;
+    };
+    if !local.writes_fenced || !local.acting_leader {
+        return;
+    }
+    let _ = crate::control_pg::resume_after_clone().await;
+    let mut open = local;
+    open.writes_fenced = false;
+    if let Err(e) = state.cluster.set_local(&open).await {
+        tracing::error!(error = %e, "réouverture intérim");
+        return;
+    }
+    tracing::warn!("quiesce orphelin — écritures rouvertes sur l’intérim");
 }
 
 /// Tant que `writes_fenced` est vrai, seules les lectures passent.
@@ -749,7 +823,8 @@ pub async fn fence_stale_leader(
     if matches!(
         *req.method(),
         Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE
-    ) {
+    ) || req.uri().path() == "/api/v1/cluster/reopen-writes"
+    {
         return next.run(req).await;
     }
     let fenced = state

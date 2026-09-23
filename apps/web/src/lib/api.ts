@@ -1178,6 +1178,7 @@ export const api = {
         latest_name?: string | null;
         latest_url?: string | null;
         update_available: boolean;
+        ahead?: boolean;
         can_apply?: boolean;
         channel: string;
         mode: string;
@@ -1698,6 +1699,7 @@ export const api = {
       leader_version?: string;
       acting_leader?: boolean;
       acting_node_id?: string;
+      writes_fenced?: boolean;
       preferred_leader_id?: string;
       placement_auto?: boolean;
       nodes: ClusterNode[];
@@ -1709,6 +1711,11 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
+  clusterReopenWrites: () =>
+    request<{ ok: boolean; writes_fenced: boolean; acting_leader: boolean }>(
+      '/cluster/reopen-writes',
+      { method: 'POST', body: '{}' },
+    ),
   clusterRebalance: (body?: { apply?: boolean }) =>
     request<{
       ok: boolean;
@@ -2004,11 +2011,12 @@ export function runnersEventsUrl(): string {
 
 export type ProxyStatus = {
   status: string;
-  container: string;
+  container?: string;
   image?: string;
   started_at?: string;
   running: boolean;
   network?: string;
+  message?: string;
 };
 
 export type SystemHealth = {

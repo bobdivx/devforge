@@ -362,8 +362,9 @@ fn spawn_local_runtime(build_dir: &str, port: u16) -> std::result::Result<u32, S
         c.args(["run", "start"]);
         c
     } else {
-        let mut c = Command::new("npm");
-        c.args(["run", "start"]);
+        let mut c = Command::new("sh");
+        c.arg("-c");
+        c.arg(docker::npm_start_if_present_shell());
         c
     };
     cmd.current_dir(dir)
@@ -769,13 +770,8 @@ impl DeployFacade {
                 }
             }
             "dockerfile" => {
-                let has_df = std::path::Path::new(&format!("{build_dir}/Dockerfile")).is_file();
-                let cmd = if has_df {
-                    docker::docker_build(".", &image, "Dockerfile")
-                } else {
-                    logs.push_str("[dockerfile] pas de Dockerfile — fallback Node inline\n");
-                    docker::docker_build_from_content(&image, &docker::node_inline_dockerfile(port))
-                };
+                let (cmd, label) = builders::fallback_image_build_cmd(&image, port);
+                logs.push_str(&format!("[dockerfile] {label}\n"));
                 match self.executor.exec(server, &build_dir, &cmd, 900).await {
                     Ok(r) => {
                         logs.push_str(&format!(
@@ -812,8 +808,7 @@ impl DeployFacade {
                 let nix = builders::nixpacks_docker_build(&image, &build_envs);
                 logs.push_str(&format!(
                     "[nixpacks-docker] image={} envs={}\n",
-                    std::env::var("DEVFORGE_NIXPACKS_IMAGE")
-                        .unwrap_or_else(|_| { builders::DEFAULT_NIXPACKS_IMAGE.to_string() }),
+                    builders::nixpacks_image(),
                     build_envs
                         .iter()
                         .map(|(k, _)| k.as_str())
@@ -842,8 +837,7 @@ impl DeployFacade {
                             r.exit_code,
                             trim_out(&r.output)
                         ));
-                        let (cmd, label) =
-                            builders::fallback_image_build_cmd(&build_dir, &image, port);
+                        let (cmd, label) = builders::fallback_image_build_cmd(&image, port);
                         logs.push_str(&format!("[fallback] {label}\n"));
                         match self.executor.exec(server, &build_dir, &cmd, 900).await {
                             Ok(r2) => {
@@ -877,8 +871,7 @@ impl DeployFacade {
                     }
                     Err(e) => {
                         logs.push_str(&format!("[nixpacks-docker] error: {e}\n"));
-                        let (cmd, label) =
-                            builders::fallback_image_build_cmd(&build_dir, &image, port);
+                        let (cmd, label) = builders::fallback_image_build_cmd(&image, port);
                         logs.push_str(&format!("[fallback] {label}\n"));
                         match self.executor.exec(server, &build_dir, &cmd, 900).await {
                             Ok(r2) => {
@@ -1009,11 +1002,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             }
         }
 
-        let build = if cfg!(windows) {
-            "npm run build"
-        } else {
-            "npm run build"
-        };
+        let build = docker::npm_build_if_present_shell();
         match self.executor.exec(server, build_dir, build, 900).await {
             Ok(r) => {
                 logs.push_str(&format!(

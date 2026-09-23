@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { api, type ClusterInvite, type ClusterNode, type Project } from '../lib/api';
 import { nodeRoleLabel, resolveNode } from '../lib/cluster-display';
 import { projectStatusMeta } from '../lib/status';
@@ -256,9 +256,12 @@ function ClusterInner() {
   } | null>(null);
   const [latest, setLatest] = useState<string | null>(null);
   const [updating, setUpdating] = useState<Record<string, string>>({});
+  const updateFailed = useRef(new Set<string>());
   const [forges, setForges] = useState<Project[]>([]);
   const [actingLeader, setActingLeader] = useState(false);
   const [actingNodeId, setActingNodeId] = useState('');
+  const [writesFenced, setWritesFenced] = useState(false);
+  const [reopenBusy, setReopenBusy] = useState(false);
   const [placementAuto, setPlacementAuto] = useState(true);
   const [autoLeader, setAutoLeader] = useState(false);
   const [autoWorker, setAutoWorker] = useState(false);
@@ -284,6 +287,7 @@ function ClusterInner() {
       setNodes(n.nodes ?? []);
       setActingLeader(!!n.acting_leader);
       setActingNodeId(n.acting_node_id ?? '');
+      setWritesFenced(!!n.writes_fenced);
       if (typeof n.placement_auto === 'boolean') setPlacementAuto(n.placement_auto);
       if (upd) {
         setAutoLeader(!!upd.update_auto_leader);
@@ -322,9 +326,39 @@ function ClusterInner() {
   }, []);
 
   useEffect(() => {
-    if (!Object.keys(updating).length) return;
-    const t = window.setInterval(load, 4000);
-    return () => window.clearInterval(t);
+    const ids = Object.keys(updating);
+    if (!ids.length) return;
+    let stop = false;
+    async function tick() {
+      await load();
+      for (const id of ids) {
+        if (stop) return;
+        try {
+          const st = await api.clusterNodeUpdateStatus(id);
+          if (st.data?.status !== 'failed') continue;
+          if (updateFailed.current.has(id)) continue;
+          updateFailed.current.add(id);
+          const msg = st.data.message || 'La mise à jour a échoué.';
+          setUpdating((cur) => {
+            if (!cur[id]) return cur;
+            const next = { ...cur };
+            delete next[id];
+            return next;
+          });
+          toast.push({ title: 'Mise à jour KO', detail: msg, tone: 'danger' });
+        } catch {
+          /* nœud injoignable : redémarrage en cours */
+        }
+      }
+    }
+    void tick();
+    const t = window.setInterval(() => {
+      void tick();
+    }, 4000);
+    return () => {
+      stop = true;
+      window.clearInterval(t);
+    };
   }, [Object.keys(updating).join(',')]);
 
   useEffect(() => {
@@ -494,6 +528,7 @@ function ClusterInner() {
   async function updateNode(n: ClusterNode) {
     setBusy(true);
     try {
+      updateFailed.current.delete(n.id);
       const r = await api.clusterNodeUpdateStart(
         n.id,
         latest ? { target_version: latest } : undefined,
@@ -588,6 +623,30 @@ function ClusterInner() {
       toast.push({ title: 'Réglage KO', detail: String(err), tone: 'danger' });
     } finally {
       setAutoBusy(null);
+    }
+  }
+
+  async function reopenWrites() {
+    const ok = window.confirm(
+      'Reprendre les écritures sur ce nœud ? Les réglages redeviennent modifiables. ' +
+        'Le verrou automatique reste levé tant qu’un intérim répond encore.',
+    );
+    if (!ok) return;
+    setReopenBusy(true);
+    try {
+      await api.clusterReopenWrites();
+      setWritesFenced(false);
+      setActingLeader(false);
+      toast.push({
+        title: 'Écritures reprises',
+        detail: 'Ce nœud accepte à nouveau les modifications.',
+        tone: 'ok',
+      });
+      await load();
+    } catch (err) {
+      toast.push({ title: 'Reprise KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setReopenBusy(false);
     }
   }
 
@@ -690,6 +749,27 @@ function ClusterInner() {
       {error && (
         <Alert tone="danger" class="mb-4">
           {error}
+        </Alert>
+      )}
+
+      {writesFenced && (
+        <Alert tone="danger" class="mb-5">
+          <p class="font-medium text-[var(--color-ink)]">Écritures bloquées</p>
+          <p class="mt-1 text-[var(--color-ink-muted)]">
+            Ce nœud a cédé le control plane à un leader intérimaire. Les réglages et les autres
+            modifications sont refusés. La reprise rouvre les écritures ici, sans SQL.
+          </p>
+          <div class="mt-3">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={reopenBusy}
+              onClick={reopenWrites}
+            >
+              {reopenBusy ? 'Reprise…' : 'Reprendre les écritures'}
+            </Button>
+          </div>
         </Alert>
       )}
 

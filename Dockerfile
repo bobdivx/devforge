@@ -20,7 +20,7 @@ FROM docker:27-cli AS dockercli
 # Node 22 : atelier `npm i` + `npm run dev` dans le même conteneur que l’API.
 FROM node:22-bookworm-slim AS runtime
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git libssl3 openssh-client \
+  && apt-get install -y --no-install-recommends ca-certificates curl git libssl3 openssh-client procps psmisc \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=dockercli /usr/local/libexec/docker/cli-plugins /usr/local/libexec/docker/cli-plugins

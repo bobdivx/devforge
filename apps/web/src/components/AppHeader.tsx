@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { api, type Project } from '../lib/api';
 import type { Bootstrap } from '../lib/auth';
+import { mobileAvatarNav } from '../lib/nav';
 import { projectStatusMeta } from '../lib/status';
 import { cn } from '../lib/cn';
+import { LaunchedAgentsMenu } from './LaunchedAgentsMenu';
 
 type ProjectStats = {
   total: number;
@@ -164,7 +166,9 @@ export function AppHeader({ worker = false }: { worker?: boolean }) {
           </span>
         </div>
       ) : (
-      <div class="relative" ref={menuRef}>
+      <div class="flex w-full min-w-0 items-center gap-2 sm:w-auto">
+      <LaunchedAgentsMenu />
+      <div class="relative min-w-0 flex-1 sm:flex-none" ref={menuRef}>
         <button
           type="button"
           class="flex min-h-[44px] w-full items-center gap-2.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] py-1 pl-1 pr-3 transition-[border-color,background-color,transform] duration-200 hover:border-white/20 hover:bg-white/[0.06] active:scale-[0.99] sm:w-auto"
@@ -203,7 +207,7 @@ export function AppHeader({ worker = false }: { worker?: boolean }) {
         {menuOpen && (
           <div
             role="menu"
-            class="df-menu-enter absolute right-0 z-30 mt-2 w-full min-w-[14rem] overflow-hidden rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] py-1 shadow-xl shadow-black/40 sm:w-56"
+            class="df-menu-enter absolute right-0 z-30 mt-2 max-h-[min(70dvh,28rem)] w-full min-w-[14rem] overflow-y-auto rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] py-1 shadow-xl shadow-black/40 sm:w-56"
           >
             <div class="border-b border-[var(--color-line)] px-3 py-2.5 sm:hidden">
               <p class="truncate text-sm font-medium">{displayName}</p>
@@ -211,6 +215,18 @@ export function AppHeader({ worker = false }: { worker?: boolean }) {
                 <p class="truncate text-[11px] text-[var(--color-ink-muted)]">{subtitle}</p>
               )}
             </div>
+            {mobileAvatarNav(boot?.user?.role).map((item) => (
+              <a
+                key={item.key}
+                role="menuitem"
+                href={item.href}
+                class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)] lg:hidden"
+                onClick={() => setMenuOpen(false)}
+              >
+                {item.label}
+              </a>
+            ))}
+            <div class="my-1 border-t border-[var(--color-line)] lg:hidden" role="separator" />
             <a
               role="menuitem"
               href="/app/team"
@@ -230,6 +246,7 @@ export function AppHeader({ worker = false }: { worker?: boolean }) {
             </button>
           </div>
         )}
+      </div>
       </div>
       )}
     </header>

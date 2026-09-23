@@ -20,7 +20,13 @@ pub fn i_am_failover_winner(my_id: &str, candidates: &[RosterEntry]) -> bool {
 }
 
 /// Un autre nœud est l’écrivain. On cède si son terme est inconnu, égal ou plus haut.
-pub fn must_yield_to_interim(my_id: &str, my_term: i64, remote_id: &str, remote_acting: bool, remote_term: i64) -> bool {
+pub fn must_yield_to_interim(
+    my_id: &str,
+    my_term: i64,
+    remote_id: &str,
+    remote_acting: bool,
+    remote_term: i64,
+) -> bool {
     if !remote_acting || remote_id.is_empty() || remote_id == my_id {
         return false;
     }

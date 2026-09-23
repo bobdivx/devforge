@@ -30,8 +30,7 @@ pub fn format_join_code(leader_url: &str, token: &str) -> String {
 pub fn extract_join_token(raw: &str) -> Option<String> {
     let compact: String = raw.split_whitespace().collect();
     if let Some((tok, url)) = compact.split_once('@') {
-        if tok.starts_with("dfjoin_")
-            && (url.starts_with("http://") || url.starts_with("https://"))
+        if tok.starts_with("dfjoin_") && (url.starts_with("http://") || url.starts_with("https://"))
         {
             return Some(tok.to_string());
         }
@@ -175,15 +174,11 @@ mod tests {
 
     #[test]
     fn join_url_and_two_fields() {
-        let (url, tok) = parse_join_invite(
-            "https://web.jeser.app/join?token=dfjoin_xyz",
-            "",
-        )
-        .unwrap();
+        let (url, tok) =
+            parse_join_invite("https://web.jeser.app/join?token=dfjoin_xyz", "").unwrap();
         assert_eq!(url, "https://web.jeser.app");
         assert_eq!(tok, "dfjoin_xyz");
-        let (url2, tok2) =
-            parse_join_invite("dfjoin_zzz", "https://10.1.0.88:8000/").unwrap();
+        let (url2, tok2) = parse_join_invite("dfjoin_zzz", "https://10.1.0.88:8000/").unwrap();
         assert_eq!(url2, "https://10.1.0.88:8000");
         assert_eq!(tok2, "dfjoin_zzz");
     }

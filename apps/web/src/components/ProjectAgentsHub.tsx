@@ -1,8 +1,14 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { Activity, Clock, GitBranch, Rocket, Search, Server } from 'lucide-preact';
 import { api, type ProjectAgent } from '../lib/api';
 import { cn } from '../lib/cn';
+import {
+  launchAgent,
+  markLaunchedStatus,
+  subscribeOpenAgent,
+  syncLaunchedProjectName,
+} from '../lib/launched-agents';
 import { ProjectAgentsPanel } from './ProjectAgentsPanel';
 import { Alert, HubGrid, HubTile, Modal, Skeleton } from './ui';
 
@@ -64,11 +70,36 @@ function dotClass(tone: 'ok' | 'warn' | 'neutral') {
   return 'bg-[var(--color-ink-faint)]';
 }
 
-export function ProjectAgentsHub({ projectUuid }: { projectUuid: string }) {
+export function ProjectAgentsHub({
+  projectUuid,
+  projectName = '',
+}: {
+  projectUuid: string;
+  projectName?: string;
+}) {
   const [agents, setAgents] = useState<ProjectAgent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<ProjectAgent | null>(null);
+  const openedFromQuery = useRef(false);
+  const projectNameRef = useRef(projectName);
+  projectNameRef.current = projectName;
+
+  function remember(agent: ProjectAgent) {
+    const watcher = WATCHERS.find((item) => item.role === agent.role);
+    launchAgent({
+      uuid: agent.uuid,
+      projectUuid,
+      projectName,
+      title: watcher?.title || agent.name,
+      role: agent.role,
+      status: agent.status,
+    });
+  }
+
+  useEffect(() => {
+    syncLaunchedProjectName(projectUuid, projectName);
+  }, [projectUuid, projectName]);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,7 +108,23 @@ export function ProjectAgentsHub({ projectUuid }: { projectUuid: string }) {
       .projectAgents(projectUuid)
       .then((r) => {
         if (cancelled) return;
-        setAgents((r.data ?? []).filter((a) => a.kind !== 'subagent'));
+        const list = (r.data ?? []).filter((a) => a.kind !== 'subagent');
+        setAgents(list);
+        for (const agent of list) {
+          if (agent.status === 'working') {
+            const watcher = WATCHERS.find((item) => item.role === agent.role);
+            launchAgent({
+              uuid: agent.uuid,
+              projectUuid,
+              projectName: projectNameRef.current,
+              title: watcher?.title || agent.name,
+              role: agent.role,
+              status: agent.status,
+            });
+          } else {
+            markLaunchedStatus(agent.uuid, agent.status);
+          }
+        }
         setError(null);
       })
       .catch((e: unknown) => {
@@ -91,6 +138,25 @@ export function ProjectAgentsHub({ projectUuid }: { projectUuid: string }) {
       cancelled = true;
     };
   }, [projectUuid]);
+
+  useEffect(() => {
+    if (loading || openedFromQuery.current) return;
+    const openId = new URLSearchParams(window.location.search).get('open');
+    if (!openId) return;
+    const agent = agents.find((item) => item.uuid === openId);
+    if (!agent) return;
+    openedFromQuery.current = true;
+    setOpen(agent);
+    remember(agent);
+  }, [loading, agents, projectUuid, projectName]);
+
+  useEffect(() => {
+    return subscribeOpenAgent((launched) => {
+      if (launched.projectUuid !== projectUuid) return;
+      const agent = agents.find((item) => item.uuid === launched.uuid);
+      if (agent) setOpen(agent);
+    });
+  }, [agents, projectUuid]);
 
   const tiles = WATCHERS.flatMap((watcher) => {
     const agent = agents.find((a) => a.role === watcher.role && a.kind === 'required')
@@ -124,7 +190,10 @@ export function ProjectAgentsHub({ projectUuid }: { projectUuid: string }) {
                 key={agent.uuid}
                 index={i}
                 title={watcher.title}
-                onClick={() => setOpen(agent)}
+                onClick={() => {
+                  remember(agent);
+                  setOpen(agent);
+                }}
                 iconClass="!bg-[#2a2a2e] !text-[var(--color-ink)]"
                 icon={watcher.icon}
                 badge={

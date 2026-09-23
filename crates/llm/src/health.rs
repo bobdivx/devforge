@@ -66,8 +66,13 @@ pub async fn probe(req: &ProbeRequest) -> ProbeResult {
         };
     }
 
-    match chat_ping(llm.as_ref()).await {
-        Ok(preview) => ProbeResult {
+    let ping = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        chat_ping(llm.as_ref()),
+    )
+    .await;
+    match ping {
+        Ok(Ok(preview)) => ProbeResult {
             ok: true,
             provider: req.provider.clone(),
             resolved_model: resolved.clone(),
@@ -75,7 +80,7 @@ pub async fn probe(req: &ProbeRequest) -> ProbeResult {
             message: format!("chat OK · {resolved} · {preview}"),
             error: None,
         },
-        Err(e) => {
+        Ok(Err(e)) => {
             let raw_error = e.to_string();
             let human_error = humanize_llm_error(&raw_error);
             ProbeResult {
@@ -86,6 +91,14 @@ pub async fn probe(req: &ProbeRequest) -> ProbeResult {
                 message: "chat KO".into(),
                 error: Some(human_error),
             }
+        }
+        Err(_) => ProbeResult {
+            ok: false,
+            provider: req.provider.clone(),
+            resolved_model: resolved,
+            latency_ms: elapsed_ms(started),
+            message: "chat KO".into(),
+            error: Some("délai dépassé (20s)".into()),
         },
     }
 }

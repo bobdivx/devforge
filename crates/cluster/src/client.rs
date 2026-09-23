@@ -42,6 +42,12 @@ pub fn reclaim_flag_path() -> PathBuf {
     data_dir().join("cluster-reclaim.json")
 }
 
+/// L’admin a rouvert les écritures depuis la page Cluster.
+/// Tant que ce fichier existe et qu’un intérim répond, on ne referme pas le verrou.
+pub fn reopen_hold_path() -> PathBuf {
+    data_dir().join("cluster-reopen.hold")
+}
+
 pub fn restart_current_process() -> ! {
     #[cfg(unix)]
     {
@@ -77,8 +83,8 @@ pub async fn clear_pending_join() -> Result<()> {
 }
 
 pub fn write_pending_join_sync(path: &Path, join: &PendingJoin) -> Result<()> {
-    let json = serde_json::to_string_pretty(join)
-        .map_err(|e| DevForgeError::Message(e.to_string()))?;
+    let json =
+        serde_json::to_string_pretty(join).map_err(|e| DevForgeError::Message(e.to_string()))?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| DevForgeError::Message(format!("mkdir pending join: {e}")))?;
@@ -126,7 +132,11 @@ impl LeaderClient {
             .map_err(|e| DevForgeError::Message(format!("join JSON: {e} — {text}")))
     }
 
-    pub async fn heartbeat(&self, secret: &str, payload: &HeartbeatPayload) -> Result<HeartbeatAck> {
+    pub async fn heartbeat(
+        &self,
+        secret: &str,
+        payload: &HeartbeatPayload,
+    ) -> Result<HeartbeatAck> {
         let url = format!("{}/cluster/heartbeat", self.api_base);
         let res = self
             .http
@@ -307,6 +317,35 @@ impl LeaderClient {
         serde_json::from_str(&text).map_err(|e| DevForgeError::Message(format!("update JSON: {e}")))
     }
 
+    pub async fn exec(
+        &self,
+        secret: &str,
+        command: &str,
+        timeout_secs: u64,
+    ) -> Result<devforge_deploy::ExecResult> {
+        let url = format!("{}/internal/exec", self.origin);
+        let res = self
+            .http
+            .post(&url)
+            .bearer_auth(secret)
+            .timeout(std::time::Duration::from_secs(timeout_secs.saturating_add(15)))
+            .json(&serde_json::json!({
+                "workdir": "/",
+                "command": command,
+                "timeout_secs": timeout_secs,
+            }))
+            .send()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("exec worker: {e}")))?;
+        let status = res.status();
+        let text = res.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(DevForgeError::Message(parse_error(&text, status.as_u16())));
+        }
+        serde_json::from_str(&text)
+            .map_err(|e| DevForgeError::Message(format!("exec JSON: {e} — {text}")))
+    }
+
     pub async fn node_update_status(&self, secret: &str) -> Result<serde_json::Value> {
         let url = format!("{}/internal/update/status", self.origin);
         let res = self
@@ -372,6 +411,8 @@ mod tests {
         let mut sqlite = b"SQLite format 3\0".to_vec();
         sqlite.extend(std::iter::repeat(b'y').take(90));
         assert!(snapshot_acceptable(&sqlite));
-        assert!(!snapshot_acceptable(b"-- DevForge postgres snapshot\nshort"));
+        assert!(!snapshot_acceptable(
+            b"-- DevForge postgres snapshot\nshort"
+        ));
     }
 }

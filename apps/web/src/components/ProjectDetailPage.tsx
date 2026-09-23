@@ -202,6 +202,7 @@ export function ProjectDetailPage(props: Props) {
           deployments={deployments}
           isAdmin={isAdmin}
           onDeployments={(d) => setDeployments(d)}
+          onProject={setProject}
         />
       )}
       {tab === 'workspace' && !workspaceBeta && (
@@ -237,7 +238,9 @@ export function ProjectDetailPage(props: Props) {
           gitRepository={project?.git_repository}
         />
       )}
-      {tab === 'agents' && <ProjectAgentsHub projectUuid={uuid} />}
+      {tab === 'agents' && (
+        <ProjectAgentsHub projectUuid={uuid} projectName={project?.name ?? ''} />
+      )}
       {tab === 'database' && <DatabasePanel uuid={uuid} />}
       {tab === 'env' && <EnvPanel uuid={uuid} />}
       {tab === 'backups' && <BackupsPanel projectUuid={uuid} />}
@@ -281,12 +284,14 @@ function ProjectOverview({
   deployments,
   isAdmin,
   onDeployments,
+  onProject,
 }: {
   uuid: string;
   project: Project;
   deployments: Deployment[];
   isAdmin: boolean;
   onDeployments: (d: Deployment[]) => void;
+  onProject: (project: Project) => void;
 }) {
   const toast = useToast();
   const [envCount, setEnvCount] = useState<number | null>(null);
@@ -563,7 +568,7 @@ function ProjectOverview({
           </div>
         </div>
 
-        <ProjectGroupSuggest project={project} />
+        <ProjectGroupSuggest project={project} onJoined={onProject} />
 
         {(lifeBusy || lifeDetail) && (
           <LiveStatus
@@ -2094,7 +2099,12 @@ function ProjectSettingsPanel({
       setComposePath(d.docker_compose_location || '');
       if (d.test_command) setTestCmd(d.test_command);
       setDetectInfo(
-        `${d.label} (${Math.round(d.confidence * 100)}%) · ${d.build_pack} · port ${d.port}`,
+        [
+          `${d.label} (${Math.round(d.confidence * 100)}%) · ${d.build_pack} · port ${d.port}${
+            d.is_static ? ' · site statique' : ' · serveur'
+          }`,
+          ...(d.hints ?? []),
+        ].join(' — '),
       );
       onSaved(r.project);
       toast.push({

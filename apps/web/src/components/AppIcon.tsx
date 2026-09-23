@@ -47,6 +47,30 @@ function githubOwner(repo?: string | null): string | null {
   return owner || null;
 }
 
+const FACE_ROLES = ['web', 'client', 'frontend', 'site', 'app'];
+
+/** App dont le logo représente le groupe : rôle public, sinon URL de prod. */
+export function groupFaceProject(members: Project[]): Project | undefined {
+  let best: Project | undefined;
+  let bestRank = Number.POSITIVE_INFINITY;
+  for (const member of members) {
+    const rank = faceRank(member);
+    if (rank < bestRank) {
+      best = member;
+      bestRank = rank;
+    }
+  }
+  return best;
+}
+
+function faceRank(project: Project): number {
+  const role = (project.role || '').trim().toLowerCase();
+  const idx = FACE_ROLES.indexOf(role);
+  if (idx >= 0) return idx;
+  if (project.production_url) return FACE_ROLES.length;
+  return FACE_ROLES.length + 1;
+}
+
 /** Sources d’icône app : fichiers du site → services → avatar GitHub. */
 export function appIconCandidates(project: Project): string[] {
   const host = hostnameFromUrl(project.production_url);
@@ -98,7 +122,7 @@ export function statusDotClass(tone: 'ok' | 'warn' | 'danger' | 'neutral'): stri
 type AppIconProps = {
   project: Project;
   statusTone?: 'ok' | 'warn' | 'danger' | 'neutral';
-  size?: 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg';
   class?: string;
   ringOffset?: string;
 };
@@ -124,9 +148,11 @@ export function AppIcon({
   }, [project.uuid, project.production_url, project.git_repository]);
 
   const dim =
-    size === 'md'
-      ? 'h-12 w-12 rounded-2xl text-base'
-      : 'h-16 w-16 rounded-[1.15rem] text-xl sm:h-[4.5rem] sm:w-[4.5rem] sm:text-2xl';
+    size === 'sm'
+      ? 'h-9 w-9 rounded-xl text-xs'
+      : size === 'md'
+        ? 'h-12 w-12 rounded-2xl text-base'
+        : 'h-16 w-16 rounded-[1.15rem] text-xl sm:h-[4.5rem] sm:w-[4.5rem] sm:text-2xl';
 
   return (
     <div

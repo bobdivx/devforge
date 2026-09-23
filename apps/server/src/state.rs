@@ -847,13 +847,58 @@ fn normalize_chat_base(provider: &str, base_url: &str) -> String {
     clean
 }
 
+/// Une sonde récente reste valable : le chat ne re-ping pas Gemini puis Demeter puis Ollama
+/// avant d'ouvrir la réponse (Cloudflare coupe à 100 s sans octet).
+const LLM_PROBE_FRESH_SECS: i64 = 600;
+
+fn llm_probe_is_fresh(last_probe_at: &str, now: chrono::DateTime<chrono::Utc>) -> bool {
+    let Ok(ts) = chrono::DateTime::parse_from_rfc3339(last_probe_at.trim()) else {
+        return false;
+    };
+    let age = now.signed_duration_since(ts.with_timezone(&chrono::Utc));
+    age.num_seconds() >= 0 && age.num_seconds() < LLM_PROBE_FRESH_SECS
+}
+
+struct LlmProviderRow {
+    id: String,
+    name: String,
+    provider: String,
+    key: String,
+    base: String,
+    model: String,
+    healthy: i64,
+    last_probe_at: String,
+    resolved_model: String,
+}
+
+fn chain_entry_for(row: &LlmProviderRow, model: &str) -> Option<devforge_llm::ChainEntry> {
+    let chat_base = normalize_chat_base(&row.provider, &row.base);
+    let (provider, mode) = devforge_llm::provider_from_config(
+        &row.provider,
+        &row.key,
+        model,
+        if chat_base.is_empty() {
+            None
+        } else {
+            Some(chat_base.as_str())
+        },
+    );
+    if mode == "stub" {
+        return None;
+    }
+    Some(devforge_llm::ChainEntry {
+        label: row.name.clone(),
+        provider,
+    })
+}
+
 async fn resolve_llm_provider(
     pool: &PgPool,
     user_uuid: &str,
 ) -> (Arc<dyn devforge_llm::LlmProvider>, String) {
-    // Chaîne du compte uniquement — probe chat avant usage.
-    let rows: Vec<(String, String, String, String, String, String)> = sqlx::query_as(
-        r#"SELECT id, name, provider, api_key, base_url, model
+    let rows: Vec<(String, String, String, String, String, String, i64, String, String)> = sqlx::query_as(
+        r#"SELECT id, name, provider, api_key, base_url, model,
+                  COALESCE(healthy, 0), COALESCE(last_probe_at, ''), COALESCE(resolved_model, '')
            FROM llm_providers
            WHERE enabled = 1 AND user_uuid = $1
            ORDER BY priority ASC, name ASC"#,
@@ -863,79 +908,119 @@ async fn resolve_llm_provider(
     .await
     .unwrap_or_default();
 
-    if !rows.is_empty() {
-        let mut chain = Vec::new();
-        let mut labels = Vec::new();
-        let now = chrono::Utc::now().to_rfc3339();
-        for (id, name, provider, key, base, model) in &rows {
-            let probe = devforge_llm::probe(&devforge_llm::ProbeRequest {
-                provider: provider.clone(),
-                base_url: base.clone(),
-                api_key: key.clone(),
-                model: model.clone(),
-            })
-            .await;
+    if rows.is_empty() {
+        return devforge_llm::provider_from_config("stub", "", "gpt-4o-mini", None);
+    }
 
-            let _ = sqlx::query(
-                r#"UPDATE llm_providers
-                   SET healthy = $1, last_probe_at = $2, last_probe_error = $3, resolved_model = $4
-                   WHERE id = $5"#,
-            )
-            .bind(if probe.ok { 1i64 } else { 0i64 })
-            .bind(&now)
-            .bind(probe.error.as_deref().unwrap_or(""))
-            .bind(&probe.resolved_model)
-            .bind(id)
-            .execute(pool)
-            .await;
+    let now = chrono::Utc::now();
+    let now_str = now.to_rfc3339();
+    let rows: Vec<LlmProviderRow> = rows
+        .into_iter()
+        .map(
+            |(id, name, provider, key, base, model, healthy, last_probe_at, resolved_model)| {
+                LlmProviderRow {
+                    id,
+                    name,
+                    provider,
+                    key,
+                    base,
+                    model,
+                    healthy,
+                    last_probe_at,
+                    resolved_model,
+                }
+            },
+        )
+        .collect();
 
+    let mut slots: Vec<Option<devforge_llm::ChainEntry>> = Vec::with_capacity(rows.len());
+    let mut pending: Vec<(usize, LlmProviderRow)> = Vec::new();
+    for (i, row) in rows.into_iter().enumerate() {
+        let cached = row.healthy != 0 && llm_probe_is_fresh(&row.last_probe_at, now);
+        let model = if row.resolved_model.trim().is_empty() {
+            row.model.trim()
+        } else {
+            row.resolved_model.trim()
+        };
+        if cached && !model.is_empty() && model != "auto" {
+            if let Some(entry) = chain_entry_for(&row, model) {
+                tracing::info!(provider = %row.name, model, "LLM sonde récente — réutilisée");
+                slots.push(Some(entry));
+                continue;
+            }
+        }
+        slots.push(None);
+        pending.push((i, row));
+    }
+
+    if !pending.is_empty() {
+        let pool = pool.clone();
+        let probed = futures_util::future::join_all(pending.into_iter().map(|(i, row)| {
+            let pool = pool.clone();
+            let now_str = now_str.clone();
+            async move {
+                let probe = devforge_llm::probe(&devforge_llm::ProbeRequest {
+                    provider: row.provider.clone(),
+                    base_url: row.base.clone(),
+                    api_key: row.key.clone(),
+                    model: row.model.clone(),
+                })
+                .await;
+                let _ = sqlx::query(
+                    r#"UPDATE llm_providers
+                       SET healthy = $1, last_probe_at = $2, last_probe_error = $3, resolved_model = $4
+                       WHERE id = $5"#,
+                )
+                .bind(if probe.ok { 1i64 } else { 0i64 })
+                .bind(&now_str)
+                .bind(probe.error.as_deref().unwrap_or(""))
+                .bind(&probe.resolved_model)
+                .bind(&row.id)
+                .execute(&pool)
+                .await;
+                (i, row, probe)
+            }
+        }))
+        .await;
+
+        for (i, row, probe) in probed {
             if !probe.ok {
                 tracing::warn!(
-                    provider = %name,
+                    provider = %row.name,
                     error = %probe.error.as_deref().unwrap_or("?"),
                     "LLM health KO — exclu de la chaîne"
                 );
                 continue;
             }
-
-            let chat_base = normalize_chat_base(provider, base);
-            let (p, mode) = devforge_llm::provider_from_config(
-                provider,
-                key,
-                &probe.resolved_model,
-                if chat_base.is_empty() {
-                    None
-                } else {
-                    Some(chat_base.as_str())
-                },
-            );
-            if mode == "stub" {
+            let Some(entry) = chain_entry_for(&row, &probe.resolved_model) else {
                 continue;
-            }
+            };
             tracing::info!(
-                provider = %name,
+                provider = %row.name,
                 model = %probe.resolved_model,
                 latency_ms = probe.latency_ms,
                 "LLM health OK — dans la chaîne"
             );
-            labels.push(name.clone());
-            chain.push(devforge_llm::ChainEntry {
-                label: name.clone(),
-                provider: p,
-            });
+            slots[i] = Some(entry);
         }
-        if chain.len() == 1 {
-            let label = labels[0].clone();
-            return (chain.remove(0).provider, label);
-        }
-        if chain.len() > 1 {
-            let mode = format!("chain:{}", labels.join(">"));
-            let resilient = Arc::new(devforge_llm::ResilientLlmProvider::new(chain));
-            return (resilient, mode);
-        }
-        tracing::warn!(user = %user_uuid, "aucun LLM healthy pour ce compte — stub");
     }
 
+    let mut chain = Vec::new();
+    let mut labels = Vec::new();
+    for entry in slots.into_iter().flatten() {
+        labels.push(entry.label.clone());
+        chain.push(entry);
+    }
+    if chain.len() == 1 {
+        let label = labels[0].clone();
+        return (chain.remove(0).provider, label);
+    }
+    if chain.len() > 1 {
+        let mode = format!("chain:{}", labels.join(">"));
+        let resilient = Arc::new(devforge_llm::ResilientLlmProvider::new(chain));
+        return (resilient, mode);
+    }
+    tracing::warn!(user = %user_uuid, "aucun LLM healthy pour ce compte — stub");
     devforge_llm::provider_from_config("stub", "", "gpt-4o-mini", None)
 }
 
@@ -977,4 +1062,19 @@ pub fn now_str() -> String {
 
 pub fn new_uuid() -> String {
     Uuid::new_v4().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fresh_probe_skips_repin_within_ten_minutes() {
+        let now = Utc::now();
+        let recent = (now - chrono::Duration::seconds(30)).to_rfc3339();
+        assert!(llm_probe_is_fresh(&recent, now));
+        let stale = (now - chrono::Duration::seconds(LLM_PROBE_FRESH_SECS + 5)).to_rfc3339();
+        assert!(!llm_probe_is_fresh(&stale, now));
+        assert!(!llm_probe_is_fresh("", now));
+    }
 }

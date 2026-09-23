@@ -317,6 +317,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
         }
 
         let res = builder
+            .timeout(std::time::Duration::from_secs(90))
             .send()
             .await
             .map_err(|e| err(format!("LLM HTTP: {e}")))?;

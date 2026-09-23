@@ -579,6 +579,11 @@ impl UpdateFacade {
                 .await?;
         }
 
+        if cluster_role_is_worker() {
+            tracing::info!("nœud worker — Traefik reste sur le leader");
+            return Ok(());
+        }
+
         // CRITICAL FIX: Ensure Traefik container exists and is running after DevForge update.
         // Root cause of outage 2026-09-14: docker compose recreate / helper-container stopped Traefik
         // without restarting it, leaving all apps unreachable (502) until manual restore.
@@ -728,7 +733,12 @@ impl UpdateFacade {
     /// On planifie donc un conteneur helper (docker.sock) qui stoppe l’ancien
     /// *puis* démarre le nouveau — le process courant peut mourir sans bloquer.
     async fn recreate_docker_container(&self, target: &str) -> Result<String> {
-        let name = &self.config.container_name;
+        let configured = self.config.container_name.clone();
+        let name_owned = self
+            .running_container_name()
+            .await
+            .unwrap_or(configured);
+        let name = name_owned.as_str();
         let image_ref = format!("{}:{}", self.config.image, target);
 
         let restart = self
@@ -747,10 +757,12 @@ impl UpdateFacade {
             .docker_inspect_json(name, "{{json .HostConfig.PortBindings}}")
             .await
             .unwrap_or(Value::Null);
-        let env = self
+        let mut env = self
             .docker_inspect_json(name, "{{json .Config.Env}}")
             .await
             .unwrap_or(Value::Null);
+        upsert_env(&mut env, "DEVFORGE_SELF_CONTAINER", name);
+        upsert_env(&mut env, "DEVFORGE_VERSION", target);
         let networks = self
             .docker_inspect_json(name, "{{json .NetworkSettings.Networks}}")
             .await
@@ -840,6 +852,23 @@ impl UpdateFacade {
         Ok(format!(
             "Recreate planifié {name} ← {image_ref} (stop old puis run)"
         ))
+    }
+
+    /// Nom réel du conteneur qui exécute ce process (`hostname` = id Docker).
+    /// Le défaut `DEVFORGE_SELF_CONTAINER=devforge` ne correspond pas à `devforge-worker`.
+    async fn running_container_name(&self) -> Option<String> {
+        let host = std::fs::read_to_string("/etc/hostname").ok()?;
+        let host = host.trim();
+        if host.is_empty() || host.len() > 128 {
+            return None;
+        }
+        let raw = self.docker_inspect_str(host, "{{.Name}}").await.ok()?;
+        let name = container_name_from_inspect(&raw);
+        if name.is_empty() {
+            None
+        } else {
+            Some(name)
+        }
     }
 
     async fn docker_inspect_json(&self, name: &str, format: &str) -> Result<Value> {
@@ -1427,6 +1456,47 @@ fn shell_join(parts: &[String]) -> String {
 }
 
 /// Construit les args `docker run` à partir de l’inspect (ports / volumes / env / labels).
+fn container_name_from_inspect(raw: &str) -> String {
+    raw.trim().trim_start_matches('/').to_string()
+}
+
+fn upsert_env(env: &mut Value, key: &str, value: &str) {
+    let entry = format!("{key}={value}");
+    let prefix = format!("{key}=");
+    if let Some(arr) = env.as_array_mut() {
+        if let Some(slot) = arr
+            .iter_mut()
+            .find(|v| v.as_str().is_some_and(|s| s.starts_with(&prefix)))
+        {
+            *slot = Value::String(entry);
+        } else {
+            arr.push(Value::String(entry));
+        }
+    } else {
+        *env = json!([entry]);
+    }
+}
+
+fn cluster_role_is_worker() -> bool {
+    role_is_worker(&read_cluster_identity())
+}
+
+fn read_cluster_identity() -> String {
+    let dir = std::env::var("DEVFORGE_DATA_DIR").unwrap_or_else(|_| "/data".into());
+    std::fs::read_to_string(std::path::Path::new(&dir).join("cluster-identity.json")).unwrap_or_default()
+}
+
+fn role_is_worker(raw: &str) -> bool {
+    serde_json::from_str::<Value>(raw)
+        .ok()
+        .and_then(|v| {
+            v.get("role")
+                .and_then(|r| r.as_str())
+                .map(|s| s.eq_ignore_ascii_case("worker"))
+        })
+        .unwrap_or(false)
+}
+
 fn build_docker_run_args(
     name: &str,
     image_ref: &str,
@@ -1896,6 +1966,29 @@ mod tests {
         let s = "docker stop devforge-old\n";
         let enc = b64_encode(s.as_bytes());
         assert_eq!(enc, "ZG9ja2VyIHN0b3AgZGV2Zm9yZ2Utb2xkCg==");
+    }
+
+    #[test]
+    fn container_name_strips_docker_slash() {
+        assert_eq!(container_name_from_inspect(" /devforge-worker\n"), "devforge-worker");
+        assert_eq!(container_name_from_inspect("/devforge"), "devforge");
+    }
+
+    #[test]
+    fn upsert_env_replaces_self_container() {
+        let mut env = json!(["DEVFORGE_SELF_CONTAINER=devforge", "PORT=8000"]);
+        upsert_env(&mut env, "DEVFORGE_SELF_CONTAINER", "devforge-worker");
+        let joined = env.to_string();
+        assert!(joined.contains("DEVFORGE_SELF_CONTAINER=devforge-worker"));
+        assert!(!joined.contains("DEVFORGE_SELF_CONTAINER=devforge\""));
+        assert!(joined.contains("PORT=8000"));
+    }
+
+    #[test]
+    fn worker_role_detected_from_identity() {
+        assert!(role_is_worker(r#"{"role":"worker","node_id":"n"}"#));
+        assert!(!role_is_worker(r#"{"role":"leader"}"#));
+        assert!(!role_is_worker(""));
     }
 
     #[test]

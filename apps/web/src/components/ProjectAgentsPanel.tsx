@@ -18,6 +18,7 @@ import {
   toLiveActions,
   type LiveAction,
 } from './agents/AgentActionCards';
+import { markLaunchedStatus } from '../lib/launched-agents';
 import { Alert, Badge, Button, Card, FadeIn, Input, Spinner, useToast } from './ui';
 
 const ROLE_META: Record<string, { label: string; blurb: string; starters: string[] }> = {
@@ -428,6 +429,7 @@ export function ProjectAgentsPanel({
     const trimmed = text.trim();
     if (!trimmed || busy || !selected) return;
     setBusy(true);
+    markLaunchedStatus(selected, 'working');
     setThinking('Analyse de la demande…');
     setThinkDetail(undefined);
     setThinkStarted(Date.now());
@@ -541,6 +543,7 @@ export function ProjectAgentsPanel({
       toast.push({ title: 'Agent KO', detail: msg, tone: 'danger' });
     } finally {
       setBusy(false);
+      markLaunchedStatus(selected, 'idle');
       setThinking(null);
       setThinkDetail(undefined);
       setLiveActions([]);

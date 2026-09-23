@@ -106,9 +106,10 @@ pub fn nixpacks_build(image: &str) -> String {
     format!("nixpacks build . --name {}", shell_escape(image))
 }
 
-/// Fallback when nixpacks is unavailable: Node multi-stage Dockerfile (build + start).
-/// Skips Puppeteer/Chromium browser download during `npm ci` (apps that need Chrome
-/// at runtime should ship their own Dockerfile or nixpacks.toml).
+/// Fallback when nixpacks is unavailable: Node image.
+/// `npm run build` runs only when `package.json` defines a build script
+/// (APIs often only have `start`). Start uses `npm start`, else `server.js` / `index.js`.
+/// Skips Puppeteer/Chromium download during install.
 pub fn node_inline_dockerfile(port: u16) -> String {
     format!(
         r#"FROM node:22-bookworm-slim AS build
@@ -124,7 +125,8 @@ RUN if [ -f package-lock.json ]; then npm ci; \
   elif [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install --frozen-lockfile; \
   else npm install; fi
 COPY . .
-RUN npm run build
+RUN node -e 'const p=require("./package.json"); if(!(p.scripts&&p.scripts.build)){{console.log("skip build"); process.exit(0)}} process.exit(1)' \
+  || npm run build
 
 FROM node:22-bookworm-slim
 WORKDIR /app
@@ -136,10 +138,24 @@ ENV NODE_ENV=production HOST=0.0.0.0 PORT={port} \
     PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1
 COPY --from=build /app /app
 EXPOSE {port}
-CMD ["npm", "run", "start"]
+CMD sh -c 'if node -e "const p=require(\"./package.json\"); process.exit(p.scripts&&p.scripts.start?0:1)"; then exec npm run start; elif [ -f server.js ]; then exec node server.js; elif [ -f index.js ]; then exec node index.js; else echo "[devforge] ni script start, ni server.js, ni index.js"; exit 1; fi'
 "#,
         port = port
     )
+}
+
+/// Host shell: run `npm run build` only when the script exists.
+pub fn npm_build_if_present_shell() -> &'static str {
+    if cfg!(windows) {
+        r#"node -e "const p=require('./package.json'); process.exit(p.scripts&&p.scripts.build?1:0)"; if ($LASTEXITCODE -eq 0) { Write-Output '[node] pas de script build — skip' } else { npm run build; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }"#
+    } else {
+        r#"if node -e 'const p=require("./package.json"); process.exit(p.scripts&&p.scripts.build?1:0)'; then echo "[node] pas de script build — skip"; else npm run build; fi"#
+    }
+}
+
+/// Host shell used when Docker is unavailable: `npm start`, else a JS entrypoint.
+pub fn npm_start_if_present_shell() -> &'static str {
+    r#"if node -e 'const p=require("./package.json"); process.exit(p.scripts&&p.scripts.start?0:1)'; then exec npm run start; elif [ -f server.js ]; then exec node server.js; elif [ -f index.js ]; then exec node index.js; else echo "[devforge] ni script start, ni server.js, ni index.js"; exit 1; fi"#
 }
 
 pub fn docker_build_from_content(image: &str, dockerfile: &str) -> String {

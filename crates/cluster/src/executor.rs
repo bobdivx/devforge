@@ -62,9 +62,8 @@ impl RemoteExecutor for ClusterAwareExecutor {
                 .await;
         }
 
-        let node = node.ok_or_else(|| {
-            DevForgeError::Message(format!("Nœud inconnu: {server_id}"))
-        })?;
+        let node =
+            node.ok_or_else(|| DevForgeError::Message(format!("Nœud inconnu: {server_id}")))?;
         if node.drained {
             return Err(DevForgeError::Message(format!(
                 "Nœud {} en drain — pas de nouveaux jobs. Réassigne le projet ou désactive le drain.",
@@ -115,9 +114,10 @@ impl RemoteExecutor for ClusterAwareExecutor {
             )));
         }
 
-        let parsed: ExecResult = res.json().await.map_err(|e| {
-            DevForgeError::Message(format!("exec {} JSON: {e}", node.name))
-        })?;
+        let parsed: ExecResult = res
+            .json()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("exec {} JSON: {e}", node.name)))?;
         Ok(parsed)
     }
 }
@@ -140,10 +140,7 @@ mod tests {
         store.seed_leader("L", "http://127.0.0.1:8000").await;
         let inner = Arc::new(StubRemoteExecutor::new());
         let exec = ClusterAwareExecutor::new(inner, store);
-        let r = exec
-            .exec("default", "", "echo hi", 5)
-            .await
-            .unwrap();
+        let r = exec.exec("default", "", "echo hi", 5).await.unwrap();
         assert!(r.ok);
         assert!(r.output.contains("stub"));
     }

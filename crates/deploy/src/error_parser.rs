@@ -12,6 +12,36 @@ pub struct DeployError {
 pub fn parse_deploy_error_fr(logs: &str) -> Option<DeployError> {
     let logs_lower = logs.to_lowercase();
 
+    // ubuntu-* nixpacks tags are base images: the CLI binary is not in PATH.
+    if logs_lower.contains("exec: \"nixpacks\"")
+        || (logs_lower.contains("nixpacks") && logs_lower.contains("executable file not found"))
+    {
+        return Some(DeployError {
+            summary: "Le CLI Nixpacks est absent de l’image de build".into(),
+            hint: Some(
+                "Les tags ghcr.io/railwayapp/nixpacks:ubuntu-* sont des images de base, \
+                 pas le binaire nixpacks. Relance le déploiement : DevForge construit \
+                 l’image locale devforge/nixpacks avant le build. Une API sans script \
+                 npm build démarre ensuite directement."
+                    .into(),
+            ),
+        });
+    }
+
+    if logs_lower.contains("missing script: \"build\"")
+        || logs_lower.contains("missing script: 'build'")
+    {
+        return Some(DeployError {
+            summary: "Pas de script npm build — c’est une app serveur".into(),
+            hint: Some(
+                "Les API Node n’ont souvent que `start`. Le build pack ne doit pas être \
+                 « static », et l’étape build ne doit s’exécuter que si le script existe. \
+                 Vérifie le port exposé (souvent PORT dans .env), puis relance le déploiement."
+                    .into(),
+            ),
+        });
+    }
+
     // vite/astro/npm not found
     if logs_lower.contains("vite: not found")
         || logs_lower.contains("vite: command not found")
@@ -166,6 +196,28 @@ pub fn parse_deploy_error_fr(logs: &str) -> Option<DeployError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_nixpacks_cli_missing() {
+        let logs = r#"
+[nixpacks-docker] exit=127
+exec: "nixpacks": executable file not found in $PATH
+[devforge] deploy FAILED
+        "#;
+        let err = parse_deploy_error_fr(logs).unwrap();
+        assert!(err.summary.to_lowercase().contains("nixpacks"));
+        assert!(err.hint.as_ref().unwrap().contains("ubuntu"));
+    }
+
+    #[test]
+    fn parse_missing_build_script() {
+        let logs = r#"
+npm error Missing script: "build"
+[devforge] deploy FAILED
+        "#;
+        let err = parse_deploy_error_fr(logs).unwrap();
+        assert!(err.summary.to_lowercase().contains("serveur"));
+    }
 
     #[test]
     fn parse_vite_not_found() {

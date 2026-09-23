@@ -125,6 +125,12 @@ fn parse_dockerfile_expose(dockerfile: &str) -> Option<u16> {
 
 /// Detect framework from an in-memory file tree.
 pub fn detect(tree: &FileTree) -> DetectionResult {
+    let mut result = detect_inner(tree);
+    apply_listen_port(&mut result, tree);
+    result
+}
+
+fn detect_inner(tree: &FileTree) -> DetectionResult {
     let names: BTreeSet<String> = tree.keys().map(|k| norm_path(k).to_lowercase()).collect();
     let mut evidence = Vec::new();
 
@@ -398,8 +404,142 @@ fn dep_has(pkg: &Value, name: &str) -> bool {
             .is_some()
 }
 
+fn has_script(pkg: &Value, name: &str) -> bool {
+    pkg.get("scripts")
+        .and_then(|s| s.get(name))
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.trim().is_empty())
+}
+
+fn is_server_dep(pkg: &Value) -> bool {
+    const NAMES: &[&str] = &[
+        "express",
+        "fastify",
+        "koa",
+        "hono",
+        "@hono/node-server",
+        "elysia",
+        "polka",
+        "restify",
+        "@hapi/hapi",
+        "hapi",
+        "@nestjs/core",
+        "@adonisjs/core",
+        "@strapi/strapi",
+    ];
+    NAMES.iter().any(|n| dep_has(pkg, n))
+}
+
+/// Hints for a long-running Node server (API), including the no-build case.
+fn server_runtime_hints(pkg: &Value, base: &str) -> Vec<String> {
+    let mut hints = vec![base.to_string()];
+    if has_script(pkg, "start") && !has_script(pkg, "build") {
+        hints.push(
+            "Pas de script build — le déploiement démarre l’app directement (npm start).".into(),
+        );
+    } else if has_script(pkg, "start") {
+        hints.push("Script build présent — compilation puis npm start.".into());
+    } else {
+        hints.push(
+            "Pas de script start — ajoute \"start\" dans package.json (ex. node server.js)."
+                .into(),
+        );
+    }
+    hints
+}
+
+fn parse_port_digits(s: &str) -> Option<u16> {
+    let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let port = digits.parse::<u16>().ok()?;
+    if port == 0 { None } else { Some(port) }
+}
+
+fn port_after_key(text: &str, key: &str) -> Option<u16> {
+    let pattern = format!("{key}=");
+    let mut start = 0;
+    while let Some(rel) = text[start..].find(&pattern) {
+        let i = start + rel;
+        let boundary_ok = i == 0
+            || !text[..i]
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+        if boundary_ok {
+            let rest = &text[i + pattern.len()..];
+            let rest = rest.trim_start_matches(['"', '\'']);
+            if let Some(port) = parse_port_digits(rest) {
+                return Some(port);
+            }
+        }
+        start = i + pattern.len();
+    }
+    None
+}
+
+fn port_from_command(cmd: &str) -> Option<u16> {
+    if let Some(port) = port_after_key(cmd, "PORT") {
+        return Some(port);
+    }
+    for flag in ["--port=", "--port "] {
+        if let Some(i) = cmd.find(flag) {
+            let rest = cmd[i + flag.len()..].trim_start();
+            if let Some(port) = parse_port_digits(rest) {
+                return Some(port);
+            }
+        }
+    }
+    None
+}
+
+fn port_from_package(pkg: &Value) -> Option<u16> {
+    let scripts = pkg.get("scripts")?.as_object()?;
+    for val in scripts.values() {
+        let cmd = val.as_str()?;
+        if let Some(port) = port_from_command(cmd) {
+            return Some(port);
+        }
+    }
+    None
+}
+
+fn port_from_env_body(body: &str) -> Option<u16> {
+    for line in body.lines() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') {
+            continue;
+        }
+        let t = t.strip_prefix("export ").unwrap_or(t);
+        if let Some(port) = port_after_key(t, "PORT").or_else(|| port_after_key(t, "APP_PORT")) {
+            return Some(port);
+        }
+    }
+    None
+}
+
+fn apply_listen_port(result: &mut DetectionResult, tree: &FileTree) {
+    if result.is_static {
+        return;
+    }
+    let from_pkg = find_content(tree, "package.json")
+        .and_then(parse_json)
+        .as_ref()
+        .and_then(port_from_package);
+    let from_env = [".env.example", ".env.sample", ".env.template"]
+        .iter()
+        .find_map(|name| find_content(tree, name).and_then(port_from_env_body));
+    let Some(port) = from_pkg.or(from_env) else {
+        return;
+    };
+    if port != result.port {
+        result
+            .hints
+            .push(format!("Port {port} lu depuis la config du repo"));
+        result.evidence.push(format!("port:{port}"));
+    }
+    result.port = port;
+}
+
 fn detect_node(pkg: &Value, evidence: &mut Vec<String>) -> NodeHit {
-    let _scripts = pkg.get("scripts").cloned().unwrap_or(Value::Null);
     let test_command = Some("npm test --if-present".into());
 
     if dep_has(pkg, "next") {
@@ -482,10 +622,10 @@ fn detect_node(pkg: &Value, evidence: &mut Vec<String>) -> NodeHit {
             is_static: false,
             publish_directory: None,
             test_command,
-            hints: vec!["NestJS — port 3000".into()],
+            hints: server_runtime_hints(pkg, "NestJS — serveur, port 3000 par défaut"),
         };
     }
-    if dep_has(pkg, "express") || dep_has(pkg, "fastify") || dep_has(pkg, "koa") {
+    if is_server_dep(pkg) {
         evidence.push("dep:http-server".into());
         return NodeHit {
             framework: FrameworkKind::Express,
@@ -496,7 +636,10 @@ fn detect_node(pkg: &Value, evidence: &mut Vec<String>) -> NodeHit {
             is_static: false,
             publish_directory: None,
             test_command,
-            hints: vec!["Serveur Node détecté".into()],
+            hints: server_runtime_hints(
+                pkg,
+                "Serveur Node (Express, Fastify, Hono…) — pas un site statique",
+            ),
         };
     }
     if dep_has(pkg, "vite") || dep_has(pkg, "react-scripts") || dep_has(pkg, "vue") {
@@ -514,16 +657,25 @@ fn detect_node(pkg: &Value, evidence: &mut Vec<String>) -> NodeHit {
         };
     }
 
+    let serverish = has_script(pkg, "start") && !has_script(pkg, "build");
     NodeHit {
         framework: FrameworkKind::Node,
-        label: "Node.js".into(),
-        confidence: 0.7,
+        label: if has_script(pkg, "start") {
+            "Node.js (API)".into()
+        } else {
+            "Node.js".into()
+        },
+        confidence: if serverish { 0.8 } else { 0.7 },
         build_pack: "nixpacks".into(),
         port: 3000,
         is_static: false,
         publish_directory: None,
         test_command,
-        hints: vec!["package.json générique — nixpacks".into()],
+        hints: if has_script(pkg, "start") || serverish {
+            server_runtime_hints(pkg, "package.json serveur — nixpacks")
+        } else {
+            vec!["package.json générique — nixpacks".into()]
+        },
     }
 }
 
@@ -674,5 +826,38 @@ mod tests {
         assert_eq!(d.build_pack, "dockerfile");
         assert_eq!(d.port, 4321);
         assert!(d.label.contains("Astro"));
+    }
+
+    #[test]
+    fn detects_express_api_without_build_script() {
+        let mut tree = FileTree::new();
+        tree.insert(
+            "package.json".into(),
+            Some(
+                r#"{"dependencies":{"express":"^4.18.0"},"scripts":{"start":"node server.js"}}"#
+                    .into(),
+            ),
+        );
+        tree.insert(".env.example".into(), Some("PORT=8080\nDATABASE_URL=postgres\n".into()));
+        let d = detect(&tree);
+        assert_eq!(d.framework, FrameworkKind::Express);
+        assert!(!d.is_static);
+        assert_eq!(d.build_pack, "nixpacks");
+        assert_eq!(d.port, 8080);
+        assert!(d.hints.iter().any(|h| h.contains("Pas de script build")));
+    }
+
+    #[test]
+    fn detects_plain_node_start_without_marking_static() {
+        let mut tree = FileTree::new();
+        tree.insert(
+            "package.json".into(),
+            Some(r#"{"scripts":{"start":"node index.js","dev":"node --watch index.js"}}"#.into()),
+        );
+        let d = detect(&tree);
+        assert_eq!(d.framework, FrameworkKind::Node);
+        assert!(!d.is_static);
+        assert!(d.label.contains("API"));
+        assert!(d.hints.iter().any(|h| h.contains("Pas de script build")));
     }
 }

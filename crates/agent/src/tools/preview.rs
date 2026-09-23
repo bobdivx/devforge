@@ -713,7 +713,12 @@ fn read_preview_pid(workdir: &Path) -> Option<u32> {
 
 fn read_preview_logs(workdir: &Path, max_lines: usize) -> String {
     let mut chunks = Vec::new();
-    for path in [preview_err_path(workdir), preview_out_path(workdir)] {
+    let paths = [
+        preview_err_path(workdir),
+        preview_out_path(workdir),
+        workdir.join(".astro/dev.log"),
+    ];
+    for path in paths {
         if let Ok(txt) = std::fs::read_to_string(path) {
             let lines: Vec<&str> = txt.lines().rev().take(max_lines).collect();
             if !lines.is_empty() {
@@ -956,7 +961,9 @@ fn detect_dev_command(workdir: &Path, port: u16) -> Result<String> {
     }
     if is_astro {
         // Un seul `--host` / `--port`. Doubler ces flags fait quitter Astro avant d’écouter.
-        return Ok(format!("npx astro dev --host --port {port}"));
+        // `--force` remplace un `.astro/dev.json` laissé par un serveur détaché : sans ça,
+        // Astro 7 quitte tout de suite (« already running ») avant d’écouter.
+        return Ok(format!("npx astro dev --host --port {port} --force"));
     }
     if has_dev {
         return Ok(format!("npm run dev -- --host 0.0.0.0 --port {port}"));
@@ -1150,11 +1157,15 @@ async fn load_project_env_vars(pool: &PgPool, project_uuid: &str) -> Vec<(String
     .unwrap_or_default()
 }
 
-/// Env du process atelier : PATH OS + variables DevForge + overlay preview (HOST/PORT/NODE_ENV).
+/// Env du process atelier : PATH OS + variables DevForge + overlay preview (PORT/NODE_ENV).
+/// `bind_host` pose `HOST=0.0.0.0`. À laisser à false pour Astro : cette valeur fait
+/// écrire une URL réseau seule, et le lock file d’Astro 7 quitte alors avec `Invalid URL`
+/// avant que le port ne reste ouvert.
 fn preview_process_env(
     project_env: &[(String, String)],
     port: u16,
     allowed_hosts: &str,
+    bind_host: bool,
 ) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for key in PREVIEW_PASSTHROUGH_ENV {
@@ -1165,13 +1176,15 @@ fn preview_process_env(
         }
     }
     out.extend(project_env_for_preview(project_env));
-    out.push(("HOST".into(), "0.0.0.0".into()));
+    if bind_host {
+        out.push(("HOST".into(), "0.0.0.0".into()));
+    }
     out.push(("PORT".into(), port.to_string()));
     out.push(("BROWSER".into(), "none".into()));
     out.push(("NODE_ENV".into(), "development".into()));
-    // Astro 5+ détache `astro dev` si le process parent ressemble à un agent, puis quitte.
-    // Une valeur non vide garde le serveur au premier plan (pid + logs).
-    out.push(("ASTRO_DEV_BACKGROUND".into(), "foreground".into()));
+    // Astro 7 détache `astro dev` dès qu’`am-i-vibing` voit un agent, puis le parent quitte.
+    // `0` est l’opt-out documenté : le serveur reste au premier plan (pid + logs).
+    out.push(("ASTRO_DEV_BACKGROUND".into(), "0".into()));
     out.push(("PUPPETEER_SKIP_DOWNLOAD".into(), "1".into()));
     out.push(("PUPPETEER_SKIP_CHROMIUM_DOWNLOAD".into(), "1".into()));
     if !allowed_hosts.is_empty() {
@@ -1209,7 +1222,7 @@ async fn ensure_node_modules(
         c
     };
     cmd.env_clear();
-    for (k, v) in preview_process_env(project_env, 0, "") {
+    for (k, v) in preview_process_env(project_env, 0, "", false) {
         if k == "PORT" || k == "HOST" || k == "BROWSER" {
             continue;
         }
@@ -1261,27 +1274,31 @@ fn stop_owned_preview(workdir: &Path, port: u16) -> std::result::Result<(), Stri
 }
 
 fn stop_preview(workdir: &Path, port: u16) -> std::result::Result<(), String> {
-    let pid_file = preview_pid_path(workdir);
-    if let Ok(txt) = std::fs::read_to_string(&pid_file) {
-        if let Ok(pid) = txt.trim().parse::<u32>() {
-            #[cfg(windows)]
-            {
-                let _ = Command::new("taskkill")
-                    .args(["/PID", &pid.to_string(), "/T", "/F"])
-                    .output();
-            }
-            #[cfg(not(windows))]
-            {
-                let _ = Command::new("kill")
-                    .args(["-TERM", &pid.to_string()])
-                    .output();
-                std::thread::sleep(Duration::from_millis(300));
-                let _ = Command::new("kill")
-                    .args(["-9", &pid.to_string()])
-                    .output();
-            }
+    let mut pids = Vec::new();
+    if let Some(pid) = read_preview_pid(workdir) {
+        pids.push(pid);
+    }
+    if let Some(pid) = astro_lock_pid(workdir) {
+        pids.push(pid);
+    }
+    #[cfg(target_os = "linux")]
+    pids.extend(pids_listening_on(port));
+    pids.sort_unstable();
+    pids.dedup();
+
+    for pid in &pids {
+        signal_pid(*pid, terminate_signal());
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    for pid in &pids {
+        if pid_is_alive(*pid) {
+            signal_pid(*pid, kill_signal());
         }
-        let _ = std::fs::remove_file(&pid_file);
+    }
+
+    let _ = std::fs::remove_file(preview_pid_path(workdir));
+    if astro_lock_pid(workdir).is_none_or(|pid| !pid_is_alive(pid)) {
+        let _ = std::fs::remove_file(workdir.join(".astro/dev.json"));
     }
 
     #[cfg(windows)]
@@ -1307,6 +1324,51 @@ fn stop_preview(workdir: &Path, port: u16) -> std::result::Result<(), String> {
     Ok(())
 }
 
+fn terminate_signal() -> i32 {
+    #[cfg(unix)]
+    {
+        libc::SIGTERM
+    }
+    #[cfg(not(unix))]
+    {
+        15
+    }
+}
+
+fn kill_signal() -> i32 {
+    #[cfg(unix)]
+    {
+        libc::SIGKILL
+    }
+    #[cfg(not(unix))]
+    {
+        9
+    }
+}
+
+/// `kill(2)` direct. L’image runtime slim n’a pas le binaire `kill` (paquet procps).
+fn signal_pid(pid: u32, sig: i32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        // SAFETY: kill(2) sur un pid d’atelier que nous avons lancé.
+        unsafe { libc::kill(pid as i32, sig) == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (pid, sig);
+        Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+}
+
 fn spawn_preview(
     workdir: &Path,
     port: u16,
@@ -1330,7 +1392,9 @@ fn spawn_preview(
     // Vite/Astro bloquent les Host inconnus (DNS rebinding). Autoriser le
     // sous-domaine atelier Traefik via l’env officielle Vite.
     let allowed_hosts = vite_allowed_hosts_from_preview_url(preview_url);
-    let env = preview_process_env(project_env, port, &allowed_hosts);
+    let astro = workdir_is_astro(workdir);
+    let env = preview_process_env(project_env, port, &allowed_hosts, !astro);
+    clear_dead_astro_lock(workdir);
 
     cmd.env_clear();
     for (k, v) in &env {
@@ -1352,7 +1416,13 @@ fn spawn_preview(
     let child = cmd.spawn().map_err(|e| format!("spawn failed: {e}"))?;
     let pid = child.id();
     std::fs::write(preview_pid_path(workdir), pid.to_string()).map_err(|e| e.to_string())?;
-    std::mem::forget(child);
+    // Récolte le shell à la fin. Sans ça, un process terminé reste zombie et /proc le voit encore vivant.
+    let _ = std::thread::Builder::new()
+        .name("preview-reap".into())
+        .spawn(move || {
+            let mut child = child;
+            let _ = child.wait();
+        });
     Ok(pid)
 }
 
@@ -1392,7 +1462,24 @@ enum PreviewWait {
 }
 
 fn pid_is_alive(pid: u32) -> bool {
-    #[cfg(windows)]
+    if pid == 0 {
+        return false;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // `/proc` existe dans l’image slim ; le binaire `kill` (procps) non.
+        // Un zombie (State: Z) a déjà quitté : le traiter comme mort.
+        let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/status")) else {
+            return false;
+        };
+        for line in status.lines() {
+            if let Some(rest) = line.strip_prefix("State:") {
+                return !rest.trim().starts_with('Z');
+            }
+        }
+        true
+    }
+    #[cfg(all(windows, not(target_os = "linux")))]
     {
         Command::new("tasklist")
             .args(["/FI", &format!("PID eq {pid}"), "/NH"])
@@ -1400,42 +1487,161 @@ fn pid_is_alive(pid: u32) -> bool {
             .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
             .unwrap_or(true)
     }
-    #[cfg(not(windows))]
+    #[cfg(all(unix, not(target_os = "linux")))]
     {
-        Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+        // SAFETY: kill(pid, 0) ne signale pas, il teste l’existence.
+        unsafe { libc::kill(pid as i32, 0) == 0 }
     }
+}
+
+fn workdir_is_astro(workdir: &Path) -> bool {
+    read_package_json(workdir).is_some_and(|pkg| dep_has(&pkg, "astro"))
+}
+
+fn astro_lock_value(workdir: &Path) -> Option<Value> {
+    let raw = std::fs::read_to_string(workdir.join(".astro/dev.json")).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+fn astro_lock_pid(workdir: &Path) -> Option<u32> {
+    let pid = astro_lock_value(workdir)?.get("pid")?.as_u64()?;
+    u32::try_from(pid).ok().filter(|p| *p > 0)
+}
+
+fn astro_lock_port(workdir: &Path) -> Option<u16> {
+    let port = astro_lock_value(workdir)?.get("port")?.as_u64()?;
+    u16::try_from(port).ok().filter(|p| *p >= 1024)
+}
+
+fn clear_dead_astro_lock(workdir: &Path) {
+    let Some(pid) = astro_lock_pid(workdir) else {
+        return;
+    };
+    if !pid_is_alive(pid) {
+        let _ = std::fs::remove_file(workdir.join(".astro/dev.json"));
+    }
+}
+
+/// Inode d’un socket en écoute sur `port`, d’après une ligne de `/proc/net/tcp`.
+fn listen_inode(line: &str, port: u16) -> Option<u64> {
+    let mut cols = line.split_whitespace();
+    let _sl = cols.next()?;
+    let local = cols.next()?;
+    let _rem = cols.next()?;
+    let state = cols.next()?;
+    if !state.eq_ignore_ascii_case("0A") {
+        return None;
+    }
+    let suffix = format!(":{port:04X}");
+    if !local.to_ascii_uppercase().ends_with(&suffix) {
+        return None;
+    }
+    // sl local rem st tx:rx tr:tm retrnsmt uid timeout inode
+    let inode = cols.nth(5)?;
+    inode.parse().ok()
+}
+
+#[cfg(target_os = "linux")]
+fn pids_listening_on(port: u16) -> Vec<u32> {
+    let mut inodes = Vec::new();
+    for name in ["tcp", "tcp6"] {
+        let Ok(txt) = std::fs::read_to_string(format!("/proc/net/{name}")) else {
+            continue;
+        };
+        for line in txt.lines().skip(1) {
+            if let Some(inode) = listen_inode(line, port) {
+                inodes.push(inode);
+            }
+        }
+    }
+    if inodes.is_empty() {
+        return Vec::new();
+    }
+    let mut pids = Vec::new();
+    let Ok(proc) = std::fs::read_dir("/proc") else {
+        return pids;
+    };
+    for ent in proc.flatten() {
+        let Ok(pid) = ent.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let Ok(fds) = std::fs::read_dir(ent.path().join("fd")) else {
+            continue;
+        };
+        for fd in fds.flatten() {
+            let Ok(target) = std::fs::read_link(fd.path()) else {
+                continue;
+            };
+            let text = target.to_string_lossy();
+            let Some(rest) = text.strip_prefix("socket:[") else {
+                continue;
+            };
+            let Some(num) = rest.strip_suffix(']') else {
+                continue;
+            };
+            if let Ok(inode) = num.parse::<u64>() {
+                if inodes.contains(&inode) {
+                    pids.push(pid);
+                    break;
+                }
+            }
+        }
+    }
+    pids
 }
 
 async fn wait_for_preview(port: u16, pid: u32, workdir: &Path, timeout: Duration) -> PreviewWait {
     let start = std::time::Instant::now();
     while start.elapsed() < timeout {
-        if port_is_open(port).await {
-            return PreviewWait::Ready { port };
-        }
-        let logs = read_preview_logs(workdir, 80);
-        if let Some(actual) = parse_listening_port_from_logs(&logs) {
-            if actual != port && port_is_open(actual).await {
-                return PreviewWait::Ready { port: actual };
-            }
+        if let Some(ready) = preview_ready(port, workdir).await {
+            return PreviewWait::Ready { port: ready };
         }
         if !pid_is_alive(pid) {
+            if let Some(ready) = adopt_detached_preview(workdir, port).await {
+                return PreviewWait::Ready { port: ready };
+            }
             return PreviewWait::ProcessExited;
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
-    let logs = read_preview_logs(workdir, 80);
-    if let Some(actual) = parse_listening_port_from_logs(&logs) {
-        if port_is_open(actual).await {
-            return PreviewWait::Ready { port: actual };
-        }
+    if let Some(ready) = preview_ready(port, workdir).await {
+        return PreviewWait::Ready { port: ready };
     }
     PreviewWait::Timeout
+}
+
+async fn preview_ready(port: u16, workdir: &Path) -> Option<u16> {
+    if port_is_open(port).await {
+        return Some(port);
+    }
+    let logs = read_preview_logs(workdir, 80);
+    if let Some(actual) = parse_listening_port_from_logs(&logs) {
+        if actual != port && port_is_open(actual).await {
+            return Some(actual);
+        }
+    }
+    if let Some(locked) = astro_lock_port(workdir) {
+        if locked != port && port_is_open(locked).await {
+            if let Some(child) = astro_lock_pid(workdir) {
+                if pid_is_alive(child) {
+                    let _ = std::fs::write(preview_pid_path(workdir), child.to_string());
+                }
+            }
+            return Some(locked);
+        }
+    }
+    None
+}
+
+/// Le parent `npx`/`sh` peut quitter pendant qu’Astro 7 laisse un enfant en arrière-plan.
+async fn adopt_detached_preview(workdir: &Path, port: u16) -> Option<u16> {
+    for _ in 0..8 {
+        if let Some(ready) = preview_ready(port, workdir).await {
+            return Some(ready);
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    preview_ready(port, workdir).await
 }
 
 #[cfg(test)]
@@ -1527,7 +1733,7 @@ mod tests {
             r#"{"scripts":{"dev":"astro dev"},"dependencies":{"astro":"^5.0.0"}}"#,
         );
         let cmd = detect_dev_command(&dir, 4321).unwrap();
-        assert_eq!(cmd, "npx astro dev --host --port 4321");
+        assert_eq!(cmd, "npx astro dev --host --port 4321 --force");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1651,7 +1857,7 @@ mod tests {
             ("NODE_ENV".into(), "production".into()),
             ("FOO".into(), "bar".into()),
         ];
-        let env = preview_process_env(&vars, 5173, "dev.example.com");
+        let env = preview_process_env(&vars, 5173, "dev.example.com", true);
         assert_eq!(
             env.iter()
                 .find(|(k, _)| k == "NODE_ENV")
@@ -1666,11 +1872,45 @@ mod tests {
         );
         assert_eq!(
             env.iter()
+                .find(|(k, _)| k == "HOST")
+                .map(|(_, v)| v.as_str()),
+            Some("0.0.0.0")
+        );
+        assert_eq!(
+            env.iter()
+                .find(|(k, _)| k == "ASTRO_DEV_BACKGROUND")
+                .map(|(_, v)| v.as_str()),
+            Some("0")
+        );
+        assert_eq!(
+            env.iter()
                 .find(|(k, _)| k == "FOO")
                 .map(|(_, v)| v.as_str()),
             Some("bar")
         );
         assert!(env.iter().any(|(k, v)| k == "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS"
             && v == "dev.example.com"));
+        let astro_env = preview_process_env(&vars, 4321, "", false);
+        assert!(astro_env.iter().all(|(k, _)| k != "HOST"));
+    }
+
+    #[test]
+    fn listen_inode_matches_proc_net_tcp_listen_rows() {
+        let line = "0: 00000000:5EE7 00000000:0000 0A 00000000:00000000 00:00000000 00000000 0 0 4242 1";
+        assert_eq!(listen_inode(line, 24295), Some(4242));
+        assert_eq!(listen_inode(line, 4321), None);
+        let established = "0: 00000000:5EE7 0100007F:C3B2 01 00000000:00000000 00:00000000 00000000 0 0 99 1";
+        assert_eq!(listen_inode(established, 24295), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pid_liveness_reads_proc_status() {
+        assert!(pid_is_alive(std::process::id()));
+        assert!(!pid_is_alive(0));
+        let mut child = Command::new("true").spawn().unwrap();
+        let dead = child.id();
+        let _ = child.wait();
+        assert!(!pid_is_alive(dead));
     }
 }

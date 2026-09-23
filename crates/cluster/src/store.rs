@@ -1,6 +1,4 @@
-use crate::models::{
-    ClusterNode, JoinTokenRow, LocalClusterState, NodeRole, LEADER_NODE_ID,
-};
+use crate::models::{ClusterNode, JoinTokenRow, LocalClusterState, NodeRole, LEADER_NODE_ID};
 use async_trait::async_trait;
 use chrono::Utc;
 use devforge_shared::Result;
@@ -73,10 +71,7 @@ impl MemoryClusterStore {
             created_at: now.clone(),
             updated_at: now,
         };
-        self.nodes
-            .write()
-            .await
-            .insert(node.id.clone(), node);
+        self.nodes.write().await.insert(node.id.clone(), node);
         let mut local = self.local.write().await;
         local.role = NodeRole::Leader;
         local.node_id = LEADER_NODE_ID.into();

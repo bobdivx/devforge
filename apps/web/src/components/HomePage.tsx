@@ -3,7 +3,7 @@ import { nodeShortLabel } from '../lib/cluster-display';
 import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { cn } from '../lib/cn';
 import { AppShell } from './AppShell';
-import { AppIcon, statusDotClass } from './AppIcon';
+import { AppIcon, groupFaceProject, statusDotClass } from './AppIcon';
 import { Alert, BetaBadge, Button, HubAddTile, HubGrid, Input, Portal, Skeleton } from './ui';
 import { enterUp, interactiveLift, motion } from '../lib/motion';
 import { useEffect, useState } from 'preact/hooks';
@@ -89,12 +89,14 @@ function GroupCard({
   name,
   roles,
   status,
+  face,
   index,
 }: {
   uuid: string;
   name: string;
   roles: string[];
   status: string;
+  face?: Project;
   index: number;
 }) {
   const meta = projectStatusMeta(status);
@@ -104,9 +106,13 @@ function GroupCard({
       class="group flex aspect-square h-full w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl bg-[#1c1c1e] px-3 py-4 ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)]"
       animate={motion(enterUp(Math.min(index * 0.05, 0.35)), interactiveLift())}
     >
-      <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 text-lg font-semibold text-white">
-        {name.slice(0, 1).toUpperCase()}
-      </div>
+      {face ? (
+        <AppIcon project={face} statusTone={meta.tone} class="group-hover:scale-[1.03]" />
+      ) : (
+        <div class="flex h-16 w-16 items-center justify-center rounded-[1.15rem] bg-white/10 text-lg font-semibold text-white sm:h-[4.5rem] sm:w-[4.5rem]">
+          {name.slice(0, 1).toUpperCase()}
+        </div>
+      )}
       <div class="w-full text-center">
         <div class="truncate text-sm font-medium text-white">{name}</div>
         <div class="mt-1 truncate text-[11px] text-[var(--color-ink-faint)]">
@@ -307,6 +313,7 @@ export function HomePage() {
                 name={g.name}
                 roles={g.roles}
                 status={aggregateStatus(g.members)}
+                face={groupFaceProject(g.members)}
                 index={i}
               />
             ))}

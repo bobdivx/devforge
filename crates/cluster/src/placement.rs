@@ -4,7 +4,10 @@ use crate::models::{ClusterNode, NodeRole, NodeStatus};
 
 /// True si l’URL pointe vers une machine injoignable depuis le leader (loopback).
 pub fn is_loopback_host(host: &str) -> bool {
-    let h = host.trim().trim_matches(|c| c == '[' || c == ']').to_ascii_lowercase();
+    let h = host
+        .trim()
+        .trim_matches(|c| c == '[' || c == ']')
+        .to_ascii_lowercase();
     h == "localhost"
         || h == "127.0.0.1"
         || h == "::1"
@@ -234,7 +237,14 @@ mod tests {
     #[test]
     fn prefers_healthy_worker_over_leader() {
         let nodes = vec![
-            node("default", NodeRole::Leader, "http://127.0.0.1:8000", NodeStatus::Online, false, Some(10.0)),
+            node(
+                "default",
+                NodeRole::Leader,
+                "http://127.0.0.1:8000",
+                NodeStatus::Online,
+                false,
+                Some(10.0),
+            ),
             node(
                 "node-aaaa",
                 NodeRole::Worker,
@@ -252,7 +262,14 @@ mod tests {
     #[test]
     fn eliminates_loopback_worker() {
         let nodes = vec![
-            node("default", NodeRole::Leader, "", NodeStatus::Online, false, Some(50.0)),
+            node(
+                "default",
+                NodeRole::Leader,
+                "",
+                NodeStatus::Online,
+                false,
+                Some(50.0),
+            ),
             node(
                 "bad",
                 NodeRole::Worker,
@@ -270,11 +287,46 @@ mod tests {
     #[test]
     fn evacuate_only_other_offline_nodes() {
         let nodes = vec![
-            node("default", NodeRole::Leader, "http://10.0.0.1:8000", NodeStatus::Online, false, None),
-            node("down", NodeRole::Worker, "http://10.0.0.2:8000", NodeStatus::Offline, false, None),
-            node("up", NodeRole::Worker, "http://10.0.0.3:8000", NodeStatus::Online, false, None),
-            node("join", NodeRole::Worker, "http://10.0.0.4:8000", NodeStatus::Joining, false, None),
-            node("self-off", NodeRole::Worker, "http://10.0.0.5:8000", NodeStatus::Offline, false, None),
+            node(
+                "default",
+                NodeRole::Leader,
+                "http://10.0.0.1:8000",
+                NodeStatus::Online,
+                false,
+                None,
+            ),
+            node(
+                "down",
+                NodeRole::Worker,
+                "http://10.0.0.2:8000",
+                NodeStatus::Offline,
+                false,
+                None,
+            ),
+            node(
+                "up",
+                NodeRole::Worker,
+                "http://10.0.0.3:8000",
+                NodeStatus::Online,
+                false,
+                None,
+            ),
+            node(
+                "join",
+                NodeRole::Worker,
+                "http://10.0.0.4:8000",
+                NodeStatus::Joining,
+                false,
+                None,
+            ),
+            node(
+                "self-off",
+                NodeRole::Worker,
+                "http://10.0.0.5:8000",
+                NodeStatus::Offline,
+                false,
+                None,
+            ),
         ];
         let ids: Vec<_> = nodes_to_evacuate(&nodes, "self-off")
             .into_iter()
@@ -286,11 +338,46 @@ mod tests {
     #[test]
     fn replication_skips_drained_offline_and_the_leader() {
         let nodes = vec![
-            node("default", NodeRole::Leader, "http://10.0.0.1:8000", NodeStatus::Online, false, None),
-            node("off", NodeRole::Worker, "http://10.0.0.2:8000", NodeStatus::Offline, false, None),
-            node("drain", NodeRole::Worker, "http://10.0.0.3:8000", NodeStatus::Online, true, None),
-            node("loop", NodeRole::Worker, "http://127.0.0.1:8000", NodeStatus::Online, false, None),
-            node("ok", NodeRole::Worker, "http://10.0.0.4:8000", NodeStatus::Online, false, None),
+            node(
+                "default",
+                NodeRole::Leader,
+                "http://10.0.0.1:8000",
+                NodeStatus::Online,
+                false,
+                None,
+            ),
+            node(
+                "off",
+                NodeRole::Worker,
+                "http://10.0.0.2:8000",
+                NodeStatus::Offline,
+                false,
+                None,
+            ),
+            node(
+                "drain",
+                NodeRole::Worker,
+                "http://10.0.0.3:8000",
+                NodeStatus::Online,
+                true,
+                None,
+            ),
+            node(
+                "loop",
+                NodeRole::Worker,
+                "http://127.0.0.1:8000",
+                NodeStatus::Online,
+                false,
+                None,
+            ),
+            node(
+                "ok",
+                NodeRole::Worker,
+                "http://10.0.0.4:8000",
+                NodeStatus::Online,
+                false,
+                None,
+            ),
         ];
         let peers = replication_peers(&nodes, "default");
         assert_eq!(peers.len(), 1);
@@ -300,7 +387,14 @@ mod tests {
     #[test]
     fn respects_drain_and_load() {
         let nodes = vec![
-            node("default", NodeRole::Leader, "", NodeStatus::Online, false, Some(5.0)),
+            node(
+                "default",
+                NodeRole::Leader,
+                "",
+                NodeStatus::Online,
+                false,
+                Some(5.0),
+            ),
             node(
                 "w1",
                 NodeRole::Worker,
