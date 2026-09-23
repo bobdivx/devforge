@@ -195,6 +195,8 @@ pub struct VersionCheck {
     pub latest_name: Option<String>,
     pub latest_url: Option<String>,
     pub update_available: bool,
+    /// True si l’instance tourne une version plus récente que la release publiée.
+    pub ahead: bool,
     /// True si une MAJ peut être appliquée dans le mode courant (pas une simulation).
     pub can_apply: bool,
     pub channel: String,
@@ -248,6 +250,7 @@ impl UpdateFacade {
             Ok((tag, name, url)) => {
                 let latest = tag.trim_start_matches('v').to_string();
                 let available = version_gt(&latest, &self.config.current_version);
+                let ahead = version_gt(&self.config.current_version, &latest);
                 let can_apply = available && self.mode_ready_hint().is_none();
                 let message = if available {
                     if let Some(hint) = self.mode_ready_hint() {
@@ -255,6 +258,11 @@ impl UpdateFacade {
                     } else {
                         format!("Nouvelle version {latest} disponible.")
                     }
+                } else if ahead {
+                    format!(
+                        "Cette instance ({}) est en avance sur la dernière version publiée ({}).",
+                        self.config.current_version, latest
+                    )
                 } else {
                     "DevForge est à jour.".into()
                 };
@@ -264,6 +272,7 @@ impl UpdateFacade {
                     latest_name: Some(name),
                     latest_url: Some(url),
                     update_available: available,
+                    ahead,
                     can_apply,
                     channel: self.config.channel.clone(),
                     mode: self.config.mode.as_str().into(),
@@ -277,6 +286,7 @@ impl UpdateFacade {
                 latest_name: None,
                 latest_url: None,
                 update_available: false,
+                ahead: false,
                 can_apply: false,
                 channel: self.config.channel.clone(),
                 mode: self.config.mode.as_str().into(),
@@ -297,13 +307,26 @@ impl UpdateFacade {
     async fn fetch_latest(&self) -> Result<(String, String, String)> {
         let owner = &self.config.repo_owner;
         let name = &self.config.repo_name;
+        let mut best: Option<LatestCandidate> = None;
         if let Ok(releases) = self.github.list_releases(owner, name).await {
-            if let Some(r) = releases
-                .into_iter()
-                .find(|r| !r.draft && (self.config.channel != "stable" || !r.prerelease))
-            {
-                return Ok((r.tag, r.name, r.html_url));
+            for r in releases {
+                if r.draft || (self.config.channel == "stable" && r.prerelease) {
+                    continue;
+                }
+                consider_latest(&mut best, &r.tag, &r.name, &r.html_url);
             }
+        }
+        // L’image Docker est publiée sur le tag git, parfois sans page GitHub Release.
+        if matches!(self.config.mode, UpdateMode::Docker | UpdateMode::Compose) {
+            if let Ok(tags) = self.github.list_tags(owner, name).await {
+                for t in tags {
+                    let url = format!("https://github.com/{owner}/{name}/tree/{}", t.name);
+                    consider_latest(&mut best, &t.name, &t.name, &url);
+                }
+            }
+        }
+        if let Some(best) = best {
+            return Ok((best.tag, best.name, best.url));
         }
         let url = format!("https://api.github.com/repos/{owner}/{name}/releases/latest");
         let res = self
@@ -1701,6 +1724,50 @@ pub fn version_gt(a: &str, b: &str) -> bool {
     parse_ver(a) > parse_ver(b)
 }
 
+struct LatestCandidate {
+    tag: String,
+    name: String,
+    url: String,
+}
+
+/// Garde la plus haute version `major.minor.patch`. Une égalité conserve la première
+/// (la page GitHub Release, avant le tag git).
+fn consider_latest(best: &mut Option<LatestCandidate>, tag: &str, name: &str, url: &str) {
+    let Some(ver) = release_semver(tag) else {
+        return;
+    };
+    let replace = match best.as_ref().and_then(|b| release_semver(&b.tag)) {
+        Some(cur) => ver > cur,
+        None => true,
+    };
+    if !replace {
+        return;
+    }
+    let shown = tag.trim().trim_start_matches('v').to_string();
+    let label = if name.trim().is_empty() {
+        shown.clone()
+    } else {
+        name.trim().to_string()
+    };
+    *best = Some(LatestCandidate {
+        tag: shown,
+        name: label,
+        url: url.to_string(),
+    });
+}
+
+fn release_semver(tag: &str) -> Option<(u64, u64, u64)> {
+    let s = tag.trim().trim_start_matches('v');
+    let mut parts = s.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?;
+    if parts.next().is_some() || !patch.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    Some((major, minor, patch.parse().ok()?))
+}
+
 fn parse_ver(s: &str) -> (u64, u64, u64) {
     let s = s.trim().trim_start_matches('v');
     let mut parts = s.split(|c| c == '.' || c == '-');
@@ -1737,8 +1804,31 @@ mod tests {
     fn version_compare() {
         assert!(version_gt("2.1.0", "2.0.0"));
         assert!(version_gt("v2.0.1", "2.0.0"));
+        assert!(version_gt("2.0.109", "2.0.108"));
         assert!(!version_gt("2.0.0", "2.0.0"));
         assert!(!version_gt("1.9.9", "2.0.0"));
+    }
+
+    #[test]
+    fn highest_tag_beats_older_release() {
+        let mut best = None;
+        consider_latest(&mut best, "v2.0.108", "DevForge v2.0.108", "http://release");
+        consider_latest(&mut best, "v2.0.99", "old", "http://old");
+        consider_latest(&mut best, "v2.0.109", "v2.0.109", "http://tag");
+        consider_latest(&mut best, "v2.0.110-rc1", "rc", "http://rc");
+        let b = best.expect("candidate");
+        assert_eq!(b.tag, "2.0.109");
+        assert_eq!(b.url, "http://tag");
+    }
+
+    #[test]
+    fn equal_version_keeps_release_page() {
+        let mut best = None;
+        consider_latest(&mut best, "v2.0.109", "DevForge v2.0.109", "http://release");
+        consider_latest(&mut best, "v2.0.109", "v2.0.109", "http://tag");
+        let b = best.expect("candidate");
+        assert_eq!(b.url, "http://release");
+        assert_eq!(b.name, "DevForge v2.0.109");
     }
 
     #[test]

@@ -38,6 +38,7 @@ type VersionCheck = {
   latest_name?: string | null;
   latest_url?: string | null;
   update_available: boolean;
+  ahead?: boolean;
   can_apply?: boolean;
   channel: string;
   mode: string;
@@ -197,7 +198,7 @@ export function UpdateSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
             action={
               check ? (
                 <Badge tone={check.update_available ? 'warn' : 'ok'}>
-                  {check.update_available ? 'MAJ dispo' : 'À jour'}
+                  {check.update_available ? 'MAJ dispo' : check.ahead ? 'En avance' : 'À jour'}
                 </Badge>
               ) : null
             }
@@ -251,7 +252,9 @@ export function UpdateSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
                   <div class="mt-1 font-mono text-lg">v{check.current}</div>
                 </div>
                 <div class="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-4 py-3">
-                  <div class="text-xs text-[var(--color-ink-muted)]">Dernière</div>
+                  <div class="text-xs text-[var(--color-ink-muted)]">
+                    {check.ahead ? 'Publiée' : 'Dernière'}
+                  </div>
                   <div class="mt-1 font-mono text-lg">
                     {check.latest ? `v${check.latest}` : '—'}
                   </div>
