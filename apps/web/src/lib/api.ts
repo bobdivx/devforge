@@ -173,6 +173,10 @@ export type Project = {
   publish_directory?: string | null;
   base_directory?: string | null;
   docker_compose_location?: string | null;
+  /** Chemin du Dockerfile relatif à la racine du dépôt. Vide = Dockerfile dans le contexte. */
+  dockerfile_path?: string | null;
+  /** Contexte docker build relatif à la racine du dépôt. Vide = base_directory. */
+  docker_build_context?: string | null;
   gpu_nvidia?: number | boolean;
   gpu_dri?: number | boolean;
   /** JSON `["/hôte:/conteneur"]` */

@@ -268,6 +268,13 @@ async fn project_list_card(state: &AppState, project: &Project) -> Value {
     card
 }
 
+fn empty_to_none(v: Option<String>) -> Option<String> {
+    v.and_then(|s| {
+        let t = s.trim().to_string();
+        if t.is_empty() { None } else { Some(t) }
+    })
+}
+
 #[derive(Deserialize)]
 pub struct CreateProject {
     pub name: String,
@@ -694,6 +701,8 @@ pub struct UpdateProject {
     pub publish_directory: Option<String>,
     pub base_directory: Option<String>,
     pub docker_compose_location: Option<String>,
+    pub dockerfile_path: Option<String>,
+    pub docker_build_context: Option<String>,
     pub auto_deploy: Option<bool>,
     pub gpu_nvidia: Option<bool>,
     pub gpu_dri: Option<bool>,
@@ -832,10 +841,11 @@ async fn update_project(
             server_id = $5, workdir = $6, test_command = $7, production_url = $8,
             build_pack = $9, port = $10, is_static = $11, publish_directory = $12,
             base_directory = $13, docker_compose_location = $14,
-            is_sso_protected = $15, has_own_user_system = $16, auto_deploy = $17,
-            gpu_nvidia = $18, gpu_dri = $19, volumes_json = $20, runtime_json = $21,
-            domain_apex = $22, updated_at = $23
-        WHERE uuid = $24"#,
+            dockerfile_path = $15, docker_build_context = $16,
+            is_sso_protected = $17, has_own_user_system = $18, auto_deploy = $19,
+            gpu_nvidia = $20, gpu_dri = $21, volumes_json = $22, runtime_json = $23,
+            domain_apex = $24, updated_at = $25
+        WHERE uuid = $26"#,
     )
     .bind(body.name.unwrap_or(existing.name))
     .bind(body.status.unwrap_or(existing.status))
@@ -854,6 +864,8 @@ async fn update_project(
         body.docker_compose_location
             .or(existing.docker_compose_location),
     )
+    .bind(empty_to_none(body.dockerfile_path.or(existing.dockerfile_path)))
+    .bind(empty_to_none(body.docker_build_context.or(existing.docker_build_context)))
     .bind(is_sso_protected)
     .bind(has_own_user_system)
     .bind(auto_deploy)
@@ -1388,6 +1400,8 @@ pub(crate) async fn run_real_deploy(
             project.base_directory.clone()
         },
         docker_compose_location: project.docker_compose_location.clone(),
+        dockerfile_path: project.dockerfile_path.clone(),
+        docker_build_context: project.docker_build_context.clone(),
         publish_directory: project.publish_directory.clone(),
         is_static: project.is_static != 0,
         github_token: token,

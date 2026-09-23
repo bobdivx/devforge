@@ -127,6 +127,10 @@ pub struct Project {
     pub publish_directory: Option<String>,
     pub base_directory: String,
     pub docker_compose_location: Option<String>,
+    /// Chemin du Dockerfile relatif à la racine du dépôt. Vide/NULL = `Dockerfile` dans le contexte de build.
+    pub dockerfile_path: Option<String>,
+    /// Contexte `docker build`, relatif à la racine du dépôt. Vide/NULL = `base_directory`.
+    pub docker_build_context: Option<String>,
     /// 1 (default) = auto-deploy on push ; 0 = manual only.
     pub auto_deploy: i64,
     /// 1 = `docker run --gpus all` au prochain déploiement.
@@ -377,6 +381,8 @@ impl ProjectStore for SqliteProjectStore {
                 project.base_directory.clone()
             },
             docker_compose_location: project.docker_compose_location.clone(),
+            dockerfile_path: project.dockerfile_path.clone(),
+            docker_build_context: project.docker_build_context.clone(),
             publish_directory: project.publish_directory.clone(),
             is_static: project.is_static != 0,
             github_token: token,

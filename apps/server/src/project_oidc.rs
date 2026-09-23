@@ -394,6 +394,8 @@ mod tests {
             publish_directory: None,
             base_directory: "/".into(),
             docker_compose_location: None,
+            dockerfile_path: None,
+            docker_build_context: None,
             auto_deploy: 1,
             gpu_nvidia: 0,
             gpu_dri: 0,

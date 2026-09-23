@@ -129,6 +129,10 @@ pub struct DeployRequest {
     pub port: u16,
     pub base_directory: String,
     pub docker_compose_location: Option<String>,
+    /// Dockerfile relatif a la racine du depot. None/vide = Dockerfile dans le contexte de build.
+    pub dockerfile_path: Option<String>,
+    /// Contexte docker build, relatif a la racine du depot. None/vide = base_directory.
+    pub docker_build_context: Option<String>,
     pub publish_directory: Option<String>,
     pub is_static: bool,
     pub github_token: Option<String>,
@@ -172,6 +176,40 @@ fn data_dir_base() -> std::path::PathBuf {
     std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .join("data")
+}
+
+
+/// Join `rel` (repo-relative, `/` or `.` = root) under `workdir`.
+fn resolve_repo_subdir(workdir: &str, rel: &str) -> String {
+    let r = rel.trim();
+    if r.is_empty() || r == "/" || r == "." {
+        workdir.to_string()
+    } else {
+        let b = r.trim_start_matches("./").trim_start_matches('/');
+        format!("{workdir}/{b}")
+    }
+}
+
+fn normalize_repo_rel(rel: &str) -> String {
+    rel.trim().trim_start_matches("./").trim_start_matches('/').to_string()
+}
+
+/// Path of `abs` relative to `workdir`, or `.` when equal. Falls back to `abs`.
+fn path_relative_to(abs: &str, workdir: &str) -> String {
+    let abs = abs.trim_end_matches('/');
+    let workdir = workdir.trim_end_matches('/');
+    if abs == workdir {
+        ".".into()
+    } else if let Some(rest) = abs.strip_prefix(workdir) {
+        let rest = rest.trim_start_matches('/');
+        if rest.is_empty() {
+            ".".into()
+        } else {
+            rest.to_string()
+        }
+    } else {
+        abs.to_string()
+    }
 }
 
 fn resolve_workdir(workdir: &str, project_uuid: &str) -> String {
@@ -793,9 +831,42 @@ impl DeployFacade {
                 }
             }
             "dockerfile" => {
-                let (cmd, label) = builders::fallback_image_build_cmd(&image, port);
+                let explicit_df = req
+                    .dockerfile_path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty());
+                let explicit_ctx = req
+                    .docker_build_context
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty());
+                let context_dir = resolve_repo_subdir(
+                    &workdir,
+                    explicit_ctx.unwrap_or(req.base_directory.trim()),
+                );
+                let (cmd, label, exec_cwd) = if explicit_df.is_some() || explicit_ctx.is_some() {
+                    let df_rel = match explicit_df {
+                        Some(p) => normalize_repo_rel(p),
+                        None => {
+                            // Dockerfile par defaut dans le contexte, chemin relatif a workdir
+                            let abs = format!("{context_dir}/Dockerfile");
+                            path_relative_to(&abs, &workdir)
+                        }
+                    };
+                    let ctx_rel = path_relative_to(&context_dir, &workdir);
+                    let cmd = builders::dockerfile_image_build_cmd(&image, &df_rel, &ctx_rel);
+                    (
+                        cmd,
+                        format!("docker build -f {df_rel} {ctx_rel}"),
+                        workdir.clone(),
+                    )
+                } else {
+                    let (cmd, label) = builders::fallback_image_build_cmd(&image, port);
+                    (cmd, label.to_string(), build_dir.clone())
+                };
                 logs.push_str(&format!("[dockerfile] {label}\n"));
-                match self.executor.exec(server, &build_dir, &cmd, 900).await {
+                match self.executor.exec(server, &exec_cwd, &cmd, 900).await {
                     Ok(r) => {
                         logs.push_str(&format!(
                             "[docker-build] exit={} {}\n",

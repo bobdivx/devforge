@@ -1920,6 +1920,8 @@ async fn github_webhook(
             port: project.port.clamp(1, 65535) as u16,
             base_directory: project.base_directory.clone(),
             docker_compose_location: project.docker_compose_location.clone(),
+            dockerfile_path: project.dockerfile_path.clone(),
+            docker_build_context: project.docker_build_context.clone(),
             publish_directory: project.publish_directory.clone(),
             is_static: project.is_static != 0,
             github_token: token,
