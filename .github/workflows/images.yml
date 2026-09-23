@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: "0 4 * * *"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag de release cible (vide = dernière release)
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -21,6 +26,8 @@ jobs:
     outputs:
       build: ${{ steps.check.outputs.build }}
       tag: ${{ steps.check.outputs.tag }}
+      version: ${{ steps.check.outputs.version }}
+      ref: ${{ steps.check.outputs.ref }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,8 +39,23 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          TAG="$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)"
+          TAG="${{ inputs.tag }}"
+          if [[ -z "$TAG" ]]; then
+            TAG="$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)"
+          fi
+          VERSION="${TAG#v}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          # v2.0.108 est tagué avant les fichiers d'installeur : on compile
+          # alors le commit du workflow, et on attache quand même les fichiers
+          # à cette release.
+          REF="$TAG"
+          if ! git cat-file -e "${TAG}:deploy/windows/devforge.iss" 2>/dev/null; then
+            echo "Tag ${TAG} sans assistant — compilation depuis ${GITHUB_SHA}"
+            REF="${GITHUB_SHA}"
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             echo "Lancement manuel"
@@ -57,7 +79,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.gate.outputs.tag }}
+          ref: ${{ needs.gate.outputs.ref }}
       - name: Build UI
         env:
           PUBLIC_SERVER_URL: /api/v1
@@ -80,7 +102,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.gate.outputs.tag }}
+          ref: ${{ needs.gate.outputs.ref }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/download-artifact@v4
         with:
@@ -128,7 +150,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.gate.outputs.tag }}
+          ref: ${{ needs.gate.outputs.ref }}
       - uses: actions/download-artifact@v4
         with:
           name: web-dist
@@ -145,3 +167,21 @@ jobs:
           files: DevForge-${{ needs.gate.outputs.version }}-x86_64.flatpak
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  retire-zips:
+    needs: [gate, windows, linux]
+    if: needs.windows.result == 'success' && needs.linux.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Retirer les anciens zips
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.gate.outputs.tag }}"
+          for name in \
+            devforge-server-x86_64-unknown-linux-gnu.zip \
+            devforge-server-x86_64-pc-windows-msvc.zip
+          do
+            gh release delete-asset "$tag" "$name" --repo "$GITHUB_REPOSITORY" --yes || true
+          done
