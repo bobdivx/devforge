@@ -612,9 +612,9 @@ done
 
 # Bind mounts and named volumes (lost otherwise: docker run is rebuilt from inspect)
 MOUNT_FILE=$(mktemp)
-docker inspect -f '{{{{range .Mounts}}}}{{{{.Type}}}}|{{{{.Source}}}}|{{{{.Destination}}}}|{{{{.RW}}}}|{{{{.Name}}}}
-{{{{end}}}}' "$N" > "$MOUNT_FILE"
-while IFS='|' read -r typ src dst rw name; do
+docker inspect -f "{{{{range .Mounts}}}}{{{{.Type}}}}|{{{{.Source}}}}|{{{{.Destination}}}}|{{{{.RW}}}}|{{{{.Name}}}}
+{{{{end}}}}" "$N" > "$MOUNT_FILE"
+while IFS="|" read -r typ src dst rw name; do
   spec=""
   if [ "$typ" = "bind" ] && [ -n "$src" ] && [ -n "$dst" ]; then
     spec="$src:$dst"
@@ -628,25 +628,25 @@ while IFS='|' read -r typ src dst rw name; do
 done < "$MOUNT_FILE"
 rm -f "$MOUNT_FILE"
 
-REQ=$(docker inspect -f '{{{{json .HostConfig.DeviceRequests}}}}' "$N" 2>/dev/null || echo null)
+REQ=$(docker inspect -f "{{{{json .HostConfig.DeviceRequests}}}}" "$N" 2>/dev/null || echo null)
 echo "$REQ" | grep -q gpu && set -- "$@" --gpus all
-DEV=$(docker inspect -f '{{{{json .HostConfig.Devices}}}}' "$N" 2>/dev/null || echo null)
-echo "$DEV" | grep -q '/dev/dri' && set -- "$@" --device /dev/dri
+DEV=$(docker inspect -f "{{{{json .HostConfig.Devices}}}}" "$N" 2>/dev/null || echo null)
+echo "$DEV" | grep -q "/dev/dri" && set -- "$@" --device /dev/dri
 
-MEM=$(docker inspect -f '{{{{.HostConfig.Memory}}}}' "$N" 2>/dev/null || echo 0)
+MEM=$(docker inspect -f "{{{{.HostConfig.Memory}}}}" "$N" 2>/dev/null || echo 0)
 if [ -n "$MEM" ] && [ "$MEM" != "0" ] && [ "$MEM" != "<no value>" ]; then
   set -- "$@" --memory "$MEM"
 fi
-NANO=$(docker inspect -f '{{{{.HostConfig.NanoCpus}}}}' "$N" 2>/dev/null || echo 0)
+NANO=$(docker inspect -f "{{{{.HostConfig.NanoCpus}}}}" "$N" 2>/dev/null || echo 0)
 if [ -n "$NANO" ] && [ "$NANO" != "0" ] && [ "$NANO" != "<no value>" ]; then
   set -- "$@" --cpu-period 100000 --cpu-quota "$((NANO / 10000))"
 fi
-HC_CMD=$(docker inspect -f '{{{{if .Config.Healthcheck}}}}{{{{index .Config.Healthcheck.Test 1}}}}{{{{end}}}}' "$N" 2>/dev/null || true)
+HC_CMD=$(docker inspect -f "{{{{if .Config.Healthcheck}}}}{{{{index .Config.Healthcheck.Test 1}}}}{{{{end}}}}" "$N" 2>/dev/null || true)
 if [ -n "$HC_CMD" ]; then
-  HC_INT=$(docker inspect -f '{{{{.Config.Healthcheck.Interval}}}}' "$N" 2>/dev/null || echo 30s)
-  HC_TO=$(docker inspect -f '{{{{.Config.Healthcheck.Timeout}}}}' "$N" 2>/dev/null || echo 10s)
-  HC_RET=$(docker inspect -f '{{{{.Config.Healthcheck.Retries}}}}' "$N" 2>/dev/null || echo 5)
-  HC_START=$(docker inspect -f '{{{{.Config.Healthcheck.StartPeriod}}}}' "$N" 2>/dev/null || echo 0s)
+  HC_INT=$(docker inspect -f "{{{{.Config.Healthcheck.Interval}}}}" "$N" 2>/dev/null || echo 30s)
+  HC_TO=$(docker inspect -f "{{{{.Config.Healthcheck.Timeout}}}}" "$N" 2>/dev/null || echo 10s)
+  HC_RET=$(docker inspect -f "{{{{.Config.Healthcheck.Retries}}}}" "$N" 2>/dev/null || echo 5)
+  HC_START=$(docker inspect -f "{{{{.Config.Healthcheck.StartPeriod}}}}" "$N" 2>/dev/null || echo 0s)
   set -- "$@" --health-cmd "$HC_CMD" --health-interval "$HC_INT" --health-timeout "$HC_TO" --health-retries "$HC_RET"
   if [ -n "$HC_START" ] && [ "$HC_START" != "0s" ]; then
     set -- "$@" --health-start-period "$HC_START"
@@ -1233,6 +1233,14 @@ mod tests {
         assert!(
             !cmd.contains("{{range $k,$v :="),
             "Network template should not have comma without space"
+        );
+        assert!(
+            !cmd.contains("inspect -f '"),
+            "docker inspect templates must stay inside the outer sh -c single quotes"
+        );
+        assert!(
+            cmd.contains("IFS=\"|\""),
+            "mount parser must not break the outer sh -c quotes"
         );
     }
 
