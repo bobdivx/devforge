@@ -195,9 +195,16 @@ pub async fn upsert_primary(pool: &sqlx::PgPool, raw: &str) -> Result<String, St
 pub async fn add(pool: &sqlx::PgPool, raw: &str) -> Result<String, String> {
     let apex = normalize_apex(raw)?;
     let now = now_str();
-    let empty = list(pool).await.map_err(|e| e.to_string())?.is_empty();
-    if empty {
-        return upsert_primary(pool, &apex).await;
+    let rows = list(pool).await.map_err(|e| e.to_string())?;
+    if rows.iter().any(|row| row.apex == apex) {
+        return Ok(apex);
+    }
+    if rows.is_empty() {
+        let current = crate::user_prefs::instance_wildcard(pool).await;
+        if current.is_empty() || current == apex {
+            return upsert_primary(pool, &apex).await;
+        }
+        upsert_primary(pool, &current).await?;
     }
     sqlx::query(
         r#"INSERT INTO instance_domains (apex, is_primary, created_at)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api } from '../lib/api';
+import { api, type InstanceDomain } from '../lib/api';
 import { AppShell } from './AppShell';
 import { LlmProvidersPanel } from './LlmProvidersPanel';
 import {
@@ -9,10 +9,12 @@ import {
   Card,
   CardHeader,
   FadeIn,
+  HubAddTile,
   HubGrid,
   HubIcon,
   HubTile,
   Input,
+  Modal,
   PulseDot,
   Skeleton,
   useToast,
@@ -63,7 +65,7 @@ const SETTINGS_CARDS: SettingCardMeta[] = [
   {
     key: 'domaine',
     title: 'Domaine',
-    description: 'Sous-domaine utilisé par tes apps',
+    description: 'Autres zones. Le principal reste visible',
     icon: 'globe',
   },
   {
@@ -129,6 +131,11 @@ function SettingsPageInner() {
   const [ghError, setGhError] = useState<string | null>(null);
   const [wildcardOwn, setWildcardOwn] = useState('');
   const [wildcardFallback, setWildcardFallback] = useState('');
+  const [domains, setDomains] = useState<InstanceDomain[]>([]);
+  const [extraApex, setExtraApex] = useState('');
+  const [addOpen, setAddOpen] = useState(false);
+  const [picked, setPicked] = useState<string | null>(null);
+  const [ownOpen, setOwnOpen] = useState(false);
   const [domainBusy, setDomainBusy] = useState(false);
   const toast = useToast();
 
@@ -162,6 +169,10 @@ function SettingsPageInner() {
         setWildcardOwn(b.settings?.wildcard_own || '');
         setWildcardFallback(b.settings?.wildcard_fallback || b.settings?.wildcard_domain || '');
       }),
+      api
+        .instanceDomains()
+        .then((r) => setDomains(r.data ?? []))
+        .catch(() => setDomains([])),
       loadGh(),
     ]);
   }, []);
@@ -210,6 +221,11 @@ function SettingsPageInner() {
     }
   }
 
+  const principal =
+    domains.find((row) => row.primary)?.apex ||
+    wildcardFallback.trim().replace(/^\.+/, '').toLowerCase();
+  const extras = domains.filter((row) => row.apex !== principal);
+
   const redirecting = adminRedirectTarget();
   if (redirecting) {
     return (
@@ -232,7 +248,15 @@ function SettingsPageInner() {
             icon={<HubIcon name="user" />}
           />
           {SETTINGS_CARDS.map((card, i) => (
-            <SettingCard key={card.key} card={card} index={i + 1} />
+            <SettingCard
+              key={card.key}
+              card={
+                card.key === 'domaine' && principal
+                  ? { ...card, description: `Principal · ${principal}` }
+                  : card
+              }
+              index={i + 1}
+            />
           ))}
         </HubGrid>
       </AppShell>
@@ -260,38 +284,160 @@ function SettingsPageInner() {
     >
       {section === 'domaine' && (
         <FadeIn>
-          <Card>
-            <CardHeader
-              title="Ton domaine"
-              action={
-                wildcardOwn ? (
-                  <Badge tone="ok">{wildcardOwn}</Badge>
-                ) : wildcardFallback ? (
-                  <Badge tone="accent">repli {wildcardFallback}</Badge>
-                ) : (
-                  <Badge tone="warn">non configuré</Badge>
-                )
-              }
-            />
-            <p class="mb-3 break-words text-sm text-[var(--color-ink-muted)]">
-              Tes apps reçoivent un sous-domaine{' '}
-              <code class="break-all">
-                nom-app.{wildcardOwn || wildcardFallback || 'ton-domaine'}
-              </code>
-              . Laisse vide pour utiliser le domaine de l’admin
-              {wildcardFallback ? ` (${wildcardFallback})` : ''}.
+          <div class="space-y-3">
+            <p class="text-sm text-[var(--color-ink-muted)]">
+              Le domaine principal se règle dans Admin. Ici, tu vois ce principal et tu ajoutes les autres zones, par exemple popcornn.app.
             </p>
+            <HubGrid>
+              <HubTile
+                index={0}
+                title={principal || 'Aucun'}
+                icon={<HubIcon name="globe" />}
+                class="!ring-[var(--color-accent)]"
+                href={isAdmin ? '/app/admin?tab=domaine' : undefined}
+                subtitle={
+                  <div class="mt-1 text-[11px] font-medium text-[var(--color-ok)]">Principal</div>
+                }
+              />
+              {extras.map((row, index) => (
+                <HubTile
+                  key={row.apex}
+                  index={index + 1}
+                  title={row.apex}
+                  icon={<HubIcon name="globe" />}
+                  subtitle={
+                    <div class="mt-1 text-[11px] text-[var(--color-ink-muted)]">Autre zone</div>
+                  }
+                  onClick={() => isAdmin && setPicked(row.apex)}
+                />
+              ))}
+              {isAdmin && (
+                <HubAddTile index={extras.length + 1} label="Ajouter" onClick={() => setAddOpen(true)} />
+              )}
+              <HubTile
+                index={extras.length + 2}
+                title={wildcardOwn || 'Personnel'}
+                icon={<HubIcon name="user" />}
+                subtitle={
+                  <div class="mt-1 text-[11px] text-[var(--color-ink-muted)]">
+                    {wildcardOwn ? 'Repli de ton compte' : 'Inactif'}
+                  </div>
+                }
+                onClick={() => setOwnOpen(true)}
+              />
+            </HubGrid>
+          </div>
+          <Modal
+            open={addOpen}
+            onClose={() => setAddOpen(false)}
+            title="Ajouter une zone"
+            description="Nom de domaine seul, par exemple popcornn.app. Le principal ne change pas."
+            size="sm"
+          >
             <form
-              class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end"
+              class="space-y-4"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const d = extraApex.trim().replace(/^\*\./, '').replace(/^\.+/, '').toLowerCase();
+                if (!d.includes('.') || d === principal) {
+                  toast.push({
+                    title: 'Domaine invalide',
+                    detail: d === principal ? 'C’est déjà le principal.' : 'Ex. popcornn.app',
+                    tone: 'warn',
+                  });
+                  return;
+                }
+                setDomainBusy(true);
+                try {
+                  const r = await api.addInstanceDomain(d);
+                  setDomains(r.data ?? []);
+                  setExtraApex('');
+                  setAddOpen(false);
+                  toast.push({ title: 'Zone ajoutée', detail: d, tone: 'ok' });
+                } catch (err) {
+                  toast.push({
+                    title: 'Échec',
+                    detail: String((err as Error).message || err),
+                    tone: 'danger',
+                  });
+                } finally {
+                  setDomainBusy(false);
+                }
+              }}
+            >
+              <Input
+                label="Zone"
+                placeholder="popcornn.app"
+                value={extraApex}
+                onInput={(e) => setExtraApex((e.target as HTMLInputElement).value)}
+              />
+              <div class="flex justify-end gap-2">
+                <Button type="button" variant="ghost" onClick={() => setAddOpen(false)}>
+                  Annuler
+                </Button>
+                <Button type="submit" disabled={domainBusy || !extraApex.trim()}>
+                  Ajouter
+                </Button>
+              </div>
+            </form>
+          </Modal>
+          <Modal
+            open={picked != null}
+            onClose={() => setPicked(null)}
+            title={picked || 'Zone'}
+            description="Cette zone peut être choisie sur une app ou un groupe."
+            size="sm"
+            footer={
+              <div class="flex justify-end gap-2">
+                <Button type="button" variant="ghost" onClick={() => setPicked(null)}>
+                  Fermer
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  disabled={domainBusy || !picked}
+                  onClick={async () => {
+                    if (!picked) return;
+                    setDomainBusy(true);
+                    try {
+                      const r = await api.deleteInstanceDomain(picked);
+                      setDomains(r.data ?? []);
+                      setPicked(null);
+                      toast.push({ title: 'Zone retirée', tone: 'ok' });
+                    } catch (err) {
+                      toast.push({
+                        title: 'Retrait impossible',
+                        detail: String((err as Error).message || err),
+                        tone: 'danger',
+                      });
+                    } finally {
+                      setDomainBusy(false);
+                    }
+                  }}
+                >
+                  Retirer
+                </Button>
+              </div>
+            }
+          >
+            <p class="text-sm text-[var(--color-ink-muted)]">
+              Retirer {picked} ne change pas le domaine principal.
+            </p>
+          </Modal>
+          <Modal
+            open={ownOpen}
+            onClose={() => setOwnOpen(false)}
+            title="Repli de ton compte"
+            description="Laisse vide pour que tes apps sans zone choisie utilisent le domaine principal."
+            size="sm"
+          >
+            <form
+              class="space-y-4"
               onSubmit={async (e) => {
                 e.preventDefault();
                 const d = wildcardOwn.trim().replace(/^\.+/, '').toLowerCase();
                 if (d && !d.includes('.')) {
-                  toast.push({
-                    title: 'Domaine invalide',
-                    detail: 'Ex. jeser.app',
-                    tone: 'warn',
-                  });
+                  toast.push({ title: 'Domaine invalide', detail: 'Ex. jeser.app', tone: 'warn' });
                   return;
                 }
                 setDomainBusy(true);
@@ -299,9 +445,9 @@ function SettingsPageInner() {
                   const r = await api.saveMyDomain(d);
                   setWildcardOwn(r.wildcard_own);
                   setWildcardFallback(r.wildcard_fallback);
+                  setOwnOpen(false);
                   toast.push({
-                    title: d ? 'Domaine enregistré' : 'Domaine personnel retiré',
-                    detail: `Apps → *.${r.wildcard_domain || '—'}`,
+                    title: d ? 'Repli personnel enregistré' : 'Repli personnel retiré',
                     tone: 'ok',
                   });
                 } catch (err) {
@@ -315,19 +461,22 @@ function SettingsPageInner() {
                 }
               }}
             >
-              <div class="min-w-0 w-full flex-1">
-                <Input
-                  label="Wildcard personnel"
-                  placeholder={wildcardFallback || 'jeser.app'}
-                  value={wildcardOwn}
-                  onInput={(e) => setWildcardOwn((e.target as HTMLInputElement).value)}
-                />
+              <Input
+                label="Zone personnelle"
+                placeholder={principal || 'jeser.app'}
+                value={wildcardOwn}
+                onInput={(e) => setWildcardOwn((e.target as HTMLInputElement).value)}
+              />
+              <div class="flex justify-end gap-2">
+                <Button type="button" variant="ghost" onClick={() => setOwnOpen(false)}>
+                  Annuler
+                </Button>
+                <Button type="submit" disabled={domainBusy}>
+                  Enregistrer
+                </Button>
               </div>
-              <Button type="submit" size="sm" class="w-full sm:w-auto" disabled={domainBusy}>
-                Enregistrer
-              </Button>
             </form>
-          </Card>
+          </Modal>
         </FadeIn>
       )}
 

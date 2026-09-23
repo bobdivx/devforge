@@ -8,7 +8,6 @@ import {
   Card,
   CardHeader,
   FadeIn,
-  HubAddTile,
   HubGrid,
   HubIcon,
   HubTile,
@@ -195,9 +194,7 @@ export function InstanceDomainPanel() {
   const [serverVersion, setServerVersion] = useState<string | undefined>();
   const [wildcard, setWildcard] = useState('');
   const [domains, setDomains] = useState<InstanceDomain[]>([]);
-  const [extraApex, setExtraApex] = useState('');
-  const [addOpen, setAddOpen] = useState(false);
-  const [picked, setPicked] = useState<InstanceDomain | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
   const [instanceName, setInstanceName] = useState('');
   const [domainBusy, setDomainBusy] = useState(false);
   const [dnsProvider, setDnsProvider] = useState('');
@@ -284,150 +281,65 @@ export function InstanceDomainPanel() {
       .catch(() => setDomains([]));
   }, []);
 
+  const principal =
+    domains.find((row) => row.primary)?.apex || wildcard.trim().replace(/^\.+/, '').toLowerCase();
+
   return (
     <FadeIn>
       <div class="space-y-4">
         <div class="space-y-3">
           <p class="text-sm text-[var(--color-ink-muted)]">
-            Le domaine principal sert aux apps qui n’en choisissent pas un autre. Ajoute les autres zones ici, puis choisis-en une sur l’app ou le groupe.
+            Domaine utilisé quand une app ou un groupe n’en choisit pas un autre. Les autres zones se gèrent dans Paramètres → Domaine.
           </p>
           <HubGrid>
-            {domains.map((row, index) => (
-              <HubTile
-                key={row.apex}
-                index={index}
-                title={row.apex}
-                icon={<HubIcon name="globe" />}
-                subtitle={
-                  <div
-                    class={
-                      row.primary
-                        ? 'mt-1 text-[11px] font-medium text-[var(--color-ok)]'
-                        : 'mt-1 text-[11px] text-[var(--color-ink-muted)]'
-                    }
-                  >
-                    {row.primary ? 'Principal' : 'Zone'}
-                  </div>
-                }
-                onClick={() => setPicked(row)}
-              />
-            ))}
-            <HubAddTile index={domains.length} label="Ajouter" onClick={() => setAddOpen(true)} />
+            <HubTile
+              index={0}
+              title={principal || 'Définir'}
+              icon={<HubIcon name="globe" />}
+              class="!ring-[var(--color-accent)]"
+              subtitle={
+                <div class="mt-1 text-[11px] font-medium text-[var(--color-ok)]">
+                  {principal ? 'Principal' : 'Aucun domaine'}
+                </div>
+              }
+              onClick={() => {
+                setWildcard(principal);
+                setEditOpen(true);
+              }}
+            />
           </HubGrid>
         </div>
         <Modal
-          open={picked != null}
-          onClose={() => setPicked(null)}
-          title={picked?.apex || 'Domaine'}
-          description={
-            picked?.primary
-              ? 'Domaine par défaut. Les apps et les groupes sans choix propre l’utilisent.'
-              : 'Zone disponible pour une app ou un groupe.'
-          }
-          size="sm"
-          footer={
-            <div class="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={() => setPicked(null)}>
-                Fermer
-              </Button>
-              {picked && !picked.primary && (
-                <Button
-                  type="button"
-                  variant="danger"
-                  disabled={domainBusy}
-                  onClick={async () => {
-                    setDomainBusy(true);
-                    try {
-                      const r = await api.deleteInstanceDomain(picked.apex);
-                      setDomains(r.data ?? []);
-                      setPicked(null);
-                      toast.push({ title: 'Domaine retiré', detail: picked.apex, tone: 'ok' });
-                    } catch (err) {
-                      toast.push({
-                        title: 'Retrait impossible',
-                        detail: String((err as Error).message || err),
-                        tone: 'danger',
-                      });
-                    } finally {
-                      setDomainBusy(false);
-                    }
-                  }}
-                >
-                  Retirer
-                </Button>
-              )}
-              {picked && !picked.primary && (
-                <Button
-                  type="button"
-                  disabled={domainBusy}
-                  onClick={async () => {
-                    setDomainBusy(true);
-                    try {
-                      const r = await api.setPrimaryDomain(picked.apex);
-                      setDomains(r.data ?? []);
-                      setWildcard(picked.apex);
-                      setPicked(null);
-                      toast.push({ title: `${picked.apex} est le domaine principal`, tone: 'ok' });
-                    } catch (err) {
-                      toast.push({
-                        title: 'Échec',
-                        detail: String((err as Error).message || err),
-                        tone: 'danger',
-                      });
-                    } finally {
-                      setDomainBusy(false);
-                    }
-                  }}
-                >
-                  Rendre principal
-                </Button>
-              )}
-            </div>
-          }
-        >
-          <p class="text-sm text-[var(--color-ink-muted)]">
-            {picked?.primary
-              ? `Les nouvelles adresses sans zone choisie prennent la forme https://nom.${picked.apex}.`
-              : `Une app peut garder une adresse déjà sous ${picked?.apex || 'cette zone'}, par exemple un sous-domaine existant.`}
-          </p>
-        </Modal>
-        <Modal
-          open={addOpen}
-          onClose={() => setAddOpen(false)}
-          title="Ajouter un domaine"
-          description="Le nom de zone seul, par exemple popcornn.app. Pas de sous-domaine."
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+          title="Domaine principal"
+          description="Nom de zone seul, par exemple jeser.app."
           size="sm"
         >
           <form
             class="space-y-4"
             onSubmit={async (e) => {
               e.preventDefault();
-              const d = extraApex.trim().replace(/^\*\./, '').replace(/^\.+/, '').toLowerCase();
+              const d = wildcard.trim().replace(/^\*\./, '').replace(/^\.+/, '').toLowerCase();
               if (!d.includes('.')) {
-                toast.push({ title: 'Domaine invalide', detail: 'Ex. popcornn.app', tone: 'warn' });
+                toast.push({ title: 'Domaine invalide', detail: 'Ex. jeser.app', tone: 'warn' });
                 return;
               }
               setDomainBusy(true);
               try {
-                if (domains.length === 0) {
-                  await api.saveOnboarding({
-                    wildcard_domain: d,
-                    instance_name: instanceName || undefined,
-                  });
-                  setWildcard(d);
-                  try {
-                    const listed = await api.instanceDomains();
-                    setDomains(listed.data ?? []);
-                  } catch {
-                    setDomains([{ apex: d, primary: true }]);
-                  }
-                } else {
-                  const r = await api.addInstanceDomain(d);
-                  setDomains(r.data ?? []);
+                await api.saveOnboarding({
+                  wildcard_domain: d,
+                  instance_name: instanceName || undefined,
+                });
+                setWildcard(d);
+                try {
+                  const listed = await api.instanceDomains();
+                  setDomains(listed.data ?? []);
+                } catch {
+                  setDomains([{ apex: d, primary: true }]);
                 }
-                setExtraApex('');
-                setAddOpen(false);
-                toast.push({ title: 'Domaine ajouté', detail: d, tone: 'ok' });
+                setEditOpen(false);
+                toast.push({ title: 'Domaine principal enregistré', detail: d, tone: 'ok' });
               } catch (err) {
                 toast.push({
                   title: 'Échec',
@@ -440,17 +352,17 @@ export function InstanceDomainPanel() {
             }}
           >
             <Input
-              label="Zone"
-              placeholder="popcornn.app"
-              value={extraApex}
-              onInput={(e) => setExtraApex((e.target as HTMLInputElement).value)}
+              label="Zone principale"
+              placeholder="jeser.app"
+              value={wildcard}
+              onInput={(e) => setWildcard((e.target as HTMLInputElement).value)}
             />
             <div class="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={() => setAddOpen(false)}>
+              <Button type="button" variant="ghost" onClick={() => setEditOpen(false)}>
                 Annuler
               </Button>
-              <Button type="submit" disabled={domainBusy || !extraApex.trim()}>
-                Ajouter
+              <Button type="submit" disabled={domainBusy || !wildcard.trim()}>
+                Enregistrer
               </Button>
             </div>
           </form>
