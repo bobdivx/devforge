@@ -137,6 +137,9 @@ pub struct Project {
     pub volumes_json: String,
     /// Ports extra, sidecars, limites, healthcheck (JSON).
     pub runtime_json: String,
+    /// Zone publique de l'app. Vide = zone du groupe, sinon le domaine principal.
+    #[serde(default)]
+    pub domain_apex: String,
     pub created_at: String,
     pub updated_at: String,
 }

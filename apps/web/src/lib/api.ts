@@ -158,6 +158,8 @@ export type Project = {
   git_repository?: string | null;
   git_branch?: string | null;
   production_url?: string | null;
+  /** Zone choisie pour cette app. Vide = groupe, puis domaine principal. */
+  domain_apex?: string | null;
   workdir?: string | null;
   test_command?: string | null;
   server_id?: string | null;
@@ -204,10 +206,16 @@ export type AppGroupMember = {
   internal_url: string;
 };
 
+export type InstanceDomain = {
+  apex: string;
+  primary: boolean;
+};
+
 export type AppGroup = {
   uuid: string;
   name: string;
   slug: string;
+  domain_apex?: string;
   network: string;
   created_at?: string;
   updated_at?: string;
@@ -328,6 +336,20 @@ export const api = {
     }>('/me/domain', {
       method: 'POST',
       body: JSON.stringify({ wildcard_domain }),
+    }),
+  instanceDomains: () => request<{ data: InstanceDomain[] }>('/instance/domains'),
+  addInstanceDomain: (apex: string) =>
+    request<{ data: InstanceDomain[] }>('/instance/domains', {
+      method: 'POST',
+      body: JSON.stringify({ apex }),
+    }),
+  setPrimaryDomain: (apex: string) =>
+    request<{ data: InstanceDomain[] }>(`/instance/domains/${encodeURIComponent(apex)}/primary`, {
+      method: 'POST',
+    }),
+  deleteInstanceDomain: (apex: string) =>
+    request<{ data: InstanceDomain[] }>(`/instance/domains/${encodeURIComponent(apex)}`, {
+      method: 'DELETE',
     }),
   saveOnboarding: (body: Record<string, string | undefined>) =>
     request<{ ok: boolean; steps: Bootstrap['onboarding']['steps'] }>('/onboarding', {
@@ -468,7 +490,7 @@ export const api = {
   group: (uuid: string) => request<{ data: AppGroup }>(`/groups/${uuid}`),
   createGroup: (body: { name: string }) =>
     request<{ data: AppGroup }>('/groups', { method: 'POST', body: JSON.stringify(body) }),
-  updateGroup: (uuid: string, body: { name: string }) =>
+  updateGroup: (uuid: string, body: { name?: string; domain_apex?: string }) =>
     request<{ data: AppGroup }>(`/groups/${uuid}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteGroup: (uuid: string) =>
     request<{ ok: boolean }>(`/groups/${uuid}`, { method: 'DELETE' }),

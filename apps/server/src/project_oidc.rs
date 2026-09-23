@@ -399,6 +399,7 @@ mod tests {
             gpu_dri: 0,
             volumes_json: "[]".into(),
             runtime_json: "{}".into(),
+            domain_apex: "".into(),
             created_at: "".into(),
             updated_at: "".into(),
         };

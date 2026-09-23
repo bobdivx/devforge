@@ -81,7 +81,7 @@ const SECTION_TITLES: Record<Exclude<AdminSection, 'hub'>, string> = {
   sso: 'SSO / OIDC',
   backup: 'Sauvegardes',
   update: 'Mise à jour',
-  domaine: 'Domaine instance',
+  domaine: 'Domaines',
   cluster: 'Cluster',
 };
 
@@ -519,8 +519,8 @@ function AdminHub() {
       <HubTile
         index={7}
         href="/app/admin?tab=domaine"
-        title="Domaine instance"
-        description="Wildcard de repli et DNS automatique"
+        title="Domaines"
+        description="Domaine principal et zones des apps"
         icon={<HubIcon name="globe" />}
         badge={domaine?.badge}
         subtitle={domaine?.subtitle}

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { api, type ClusterNode, type Deployment, type Project, type ProjectRuntime, type PublishedPort } from '../lib/api';
+import { api, type ClusterNode, type Deployment, type InstanceDomain, type Project, type ProjectRuntime, type PublishedPort } from '../lib/api';
 import { nodeShortLabel, resolveNode } from '../lib/cluster-display';
 import { cn } from '../lib/cn';
 import { projectNav } from '../lib/nav';
@@ -2131,6 +2131,17 @@ function readSettingsSection(): SettingsSection | null {
     : null;
 }
 
+function urlOnZone(current: string, slug: string, zone: string): string {
+  if (!zone || !slug) return current;
+  try {
+    const host = new URL(current.startsWith('http') ? current : `https://${current}`).hostname;
+    if (host === zone || host.endsWith(`.${zone}`)) return current;
+  } catch {
+    /* URL vide ou invalide */
+  }
+  return `https://${slug}.${zone}`;
+}
+
 function ProjectSettingsPanel({
   project,
   isAdmin,
@@ -2162,6 +2173,8 @@ function ProjectSettingsPanel({
   const [serverId, setServerId] = useState(project.server_id || 'default');
   const [clusterNodes, setClusterNodes] = useState<ClusterNode[]>([]);
   const [prodUrl, setProdUrl] = useState(project.production_url || '');
+  const [domainApex, setDomainApex] = useState(project.domain_apex || '');
+  const [domains, setDomains] = useState<InstanceDomain[]>([]);
   const [testCmd, setTestCmd] = useState(project.test_command || '');
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -2217,6 +2230,7 @@ function ProjectSettingsPanel({
     setWorkdir(project.workdir || '');
     setServerId(project.server_id || 'default');
     setProdUrl(project.production_url || '');
+    setDomainApex(project.domain_apex || '');
     setTestCmd(project.test_command || '');
     setGpuNvidia(project.gpu_nvidia === true || project.gpu_nvidia === 1);
     setGpuDri(project.gpu_dri === true || project.gpu_dri === 1);
@@ -2265,6 +2279,21 @@ function ProjectSettingsPanel({
   }, [repo]);
 
   useEffect(() => {
+    let cancelled = false;
+    api
+      .instanceDomains()
+      .then((r) => {
+        if (!cancelled) setDomains(r.data ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setDomains([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.uuid]);
+
+  useEffect(() => {
     if (!isAdmin) return;
     let cancelled = false;
     api
@@ -2298,6 +2327,7 @@ function ProjectSettingsPanel({
         docker_compose_location: composePath.trim() || null,
         workdir: workdir.trim() || null,
         ...(isAdmin ? { server_id: serverId.trim() || 'default' } : {}),
+        domain_apex: domainApex,
         production_url: prodUrl.trim() || null,
         test_command: testCmd.trim() || null,
         gpu_nvidia: gpuNvidia,
@@ -2520,7 +2550,7 @@ function ProjectSettingsPanel({
       {
         key: 'url',
         title: 'URL',
-        description: prodUrl.trim().replace(/^https?:\/\//, '') || 'Pas d’URL',
+        description: domainApex || prodUrl.trim().replace(/^https?:\/\//, '') || 'Pas d’URL',
         icon: 'globe',
       },
       { key: 'node', title: 'Nœud', description: serverId || 'default', icon: 'server', admin: true },
@@ -2751,11 +2781,51 @@ function ProjectSettingsPanel({
           </>
           )}
           {section === 'url' && (
+          <>
+          <div class="md:col-span-2 space-y-3">
+            <p class="text-sm text-[var(--color-ink-muted)]">
+              Choisis la zone de cette app. Automatique reprend le groupe, puis le domaine principal.
+            </p>
+            <HubGrid>
+              <HubTile
+                index={0}
+                title="Automatique"
+                icon={<HubIcon name="globe" />}
+                class={!domainApex ? '!ring-[var(--color-accent)]' : ''}
+                subtitle={
+                  <div class={!domainApex ? 'mt-1 text-[11px] font-medium text-[var(--color-accent)]' : 'mt-1 text-[11px] text-[var(--color-ink-muted)]'}>
+                    {!domainApex ? 'Choisie' : 'Groupe, puis principal'}
+                  </div>
+                }
+                onClick={() => setDomainApex('')}
+              />
+              {domains.map((row, index) => (
+                <HubTile
+                  key={row.apex}
+                  index={index + 1}
+                  title={row.apex}
+                  icon={<HubIcon name="globe" />}
+                  class={domainApex === row.apex ? '!ring-[var(--color-accent)]' : ''}
+                  subtitle={
+                    <div class={domainApex === row.apex ? 'mt-1 text-[11px] font-medium text-[var(--color-accent)]' : 'mt-1 text-[11px] text-[var(--color-ink-muted)]'}>
+                      {domainApex === row.apex ? 'Choisie' : row.primary ? 'Principal' : 'Zone'}
+                    </div>
+                  }
+                  onClick={() => {
+                    setDomainApex(row.apex);
+                    const slug = project.slug || name.trim().toLowerCase().replace(/\s+/g, '-');
+                    setProdUrl((current) => urlOnZone(current, slug, row.apex));
+                  }}
+                />
+              ))}
+            </HubGrid>
+          </div>
           <Input
-            label="Production URL"
+            label="Adresse publique"
             value={prodUrl}
             onInput={(e) => setProdUrl((e.target as HTMLInputElement).value)}
           />
+          </>
           )}
           {section !== 'login' && section !== 'danger' && (
           <div class="md:col-span-2">

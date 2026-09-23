@@ -764,6 +764,16 @@ async fn save_onboarding(
     .await
     .map_err(internal)?;
 
+    if !s.wildcard_domain.trim().is_empty() {
+        if let Err(e) = crate::domain_catalog::upsert_primary(&state.pool, &s.wildcard_domain).await
+        {
+            return Err((
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({"error": e})),
+            ));
+        }
+    }
+
     // Reload settings after github configure (token already persisted there)
     s = load_settings(&state).await?;
 

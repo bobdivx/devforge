@@ -34,6 +34,7 @@ struct GroupRow {
     workspace_uuid: String,
     name: String,
     slug: String,
+    domain_apex: String,
     created_at: String,
     updated_at: String,
 }
@@ -271,7 +272,7 @@ async fn workspace_uuid(state: &AppState, headers: &HeaderMap) -> Result<String,
 
 async fn load_group(state: &AppState, workspace: &str, uuid: &str) -> Result<GroupRow, ApiError> {
     sqlx::query_as::<_, GroupRow>(
-        "SELECT uuid, workspace_uuid, name, slug, created_at, updated_at FROM app_groups WHERE uuid = $1 AND workspace_uuid = $2",
+        "SELECT uuid, workspace_uuid, name, slug, domain_apex, created_at, updated_at FROM app_groups WHERE uuid = $1 AND workspace_uuid = $2",
     )
     .bind(uuid)
     .bind(workspace)
@@ -302,6 +303,7 @@ fn group_json(group: &GroupRow, members: &[MemberView]) -> Value {
         "uuid": group.uuid,
         "name": group.name,
         "slug": group.slug,
+        "domain_apex": group.domain_apex,
         "network": group_network_name(&group.slug),
         "created_at": group.created_at,
         "updated_at": group.updated_at,
@@ -330,7 +332,7 @@ async fn list_groups(
 ) -> Result<Json<Value>, ApiError> {
     let workspace = workspace_uuid(&state, &headers).await?;
     let groups = sqlx::query_as::<_, GroupRow>(
-        "SELECT uuid, workspace_uuid, name, slug, created_at, updated_at FROM app_groups WHERE workspace_uuid = $1 ORDER BY name",
+        "SELECT uuid, workspace_uuid, name, slug, domain_apex, created_at, updated_at FROM app_groups WHERE workspace_uuid = $1 ORDER BY name",
     )
     .bind(&workspace)
     .fetch_all(&state.pool)
@@ -426,6 +428,53 @@ async fn get_group(
 #[derive(Deserialize)]
 struct PatchGroup {
     name: Option<String>,
+    domain_apex: Option<String>,
+}
+
+async fn retarget_inherited_members(
+    state: &AppState,
+    group_uuid: &str,
+    old_apex: &str,
+    new_apex: &str,
+) -> Result<(), ApiError> {
+    let primary = crate::domain_catalog::primary_apex(&state.pool).await;
+    let rows = sqlx::query_as::<_, (String, String, Option<String>, i64)>(
+        r#"SELECT p.uuid, p.slug, p.production_url, p.port
+           FROM projects p
+           JOIN app_group_members m ON m.project_uuid = p.uuid
+           WHERE m.group_uuid = $1 AND trim(p.domain_apex) = ''"#,
+    )
+    .bind(group_uuid)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+    let now = now_str();
+    for (uuid, slug, url, port) in rows {
+        let current = url.unwrap_or_default();
+        let inherited = current.trim().is_empty()
+            || (!old_apex.is_empty() && crate::domain_catalog::host_under_apex(&current, old_apex))
+            || (old_apex.is_empty()
+                && !primary.is_empty()
+                && crate::domain_catalog::host_under_apex(&current, &primary));
+        if !inherited {
+            continue;
+        }
+        let next = crate::domain_catalog::url_for_zone(&current, &slug, new_apex);
+        if next == current {
+            continue;
+        }
+        sqlx::query("UPDATE projects SET production_url = $1, updated_at = $2 WHERE uuid = $3")
+            .bind(&next)
+            .bind(&now)
+            .bind(&uuid)
+            .execute(&state.pool)
+            .await
+            .map_err(ApiError::from)?;
+        let _ =
+            crate::routes::ensure_project_primary_domain(state, &uuid, &next, port.max(1) as u16)
+                .await;
+    }
+    Ok(())
 }
 
 async fn update_group(
@@ -443,14 +492,33 @@ async fn update_group(
         .filter(|s| !s.is_empty())
         .unwrap_or(group.name.as_str())
         .to_string();
+    let domain_apex = match &body.domain_apex {
+        Some(raw) if raw.trim().is_empty() => String::new(),
+        Some(raw) => {
+            let apex = crate::domain_catalog::normalize_apex(raw).map_err(ApiError::message)?;
+            if !crate::domain_catalog::contains(&state.pool, &apex).await {
+                return Err(ApiError::message(
+                    "ajoute d'abord ce domaine dans les domaines de l'instance",
+                ));
+            }
+            apex
+        }
+        None => group.domain_apex.clone(),
+    };
     let now = now_str();
-    sqlx::query("UPDATE app_groups SET name = $1, updated_at = $2 WHERE uuid = $3")
-        .bind(&name)
-        .bind(&now)
-        .bind(&uuid)
-        .execute(&state.pool)
-        .await
-        .map_err(ApiError::from)?;
+    sqlx::query(
+        "UPDATE app_groups SET name = $1, domain_apex = $2, updated_at = $3 WHERE uuid = $4",
+    )
+    .bind(&name)
+    .bind(&domain_apex)
+    .bind(&now)
+    .bind(&uuid)
+    .execute(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+    if body.domain_apex.is_some() && domain_apex != group.domain_apex && !domain_apex.is_empty() {
+        retarget_inherited_members(&state, &uuid, &group.domain_apex, &domain_apex).await?;
+    }
     let group = load_group(&state, &workspace, &uuid).await?;
     let members = load_members(&state, &group.uuid).await?;
     Ok(Json(json!({ "data": group_json(&group, &members) })))

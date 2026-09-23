@@ -49,6 +49,7 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         ("gpu_dri", "BIGINT NOT NULL DEFAULT 0"),
         ("volumes_json", "TEXT NOT NULL DEFAULT '[]'"),
         ("runtime_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("domain_apex", "TEXT NOT NULL DEFAULT ''"),
     ] {
         let sql = format!("ALTER TABLE projects ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;
@@ -74,6 +75,9 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+    let _ = sqlx::query("ALTER TABLE app_groups ADD COLUMN domain_apex TEXT NOT NULL DEFAULT ''")
+        .execute(pool)
+        .await;
 
     // L'import SQLite ne reprend pas les index automatiques `sqlite_autoindex_*`.
     // Sans unicité sur projects.uuid, la clé étrangère ci-dessous est refusée.
@@ -427,6 +431,30 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         let sql = format!("ALTER TABLE instance_settings ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;
     }
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS instance_domains (
+            apex TEXT PRIMARY KEY,
+            is_primary BIGINT NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+    let _ = sqlx::query(
+        r#"
+        INSERT INTO instance_domains (apex, is_primary, created_at)
+        SELECT lower(trim(both '.' from wildcard_domain)), 1, $1
+        FROM instance_settings
+        WHERE id = 1 AND trim(wildcard_domain) <> ''
+        ON CONFLICT (apex) DO NOTHING
+        "#,
+    )
+    .bind(chrono::Utc::now().to_rfc3339())
+    .execute(pool)
+    .await;
 
     sqlx::query(
         r#"

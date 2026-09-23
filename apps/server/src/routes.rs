@@ -683,6 +683,8 @@ pub struct UpdateProject {
     pub workdir: Option<String>,
     pub test_command: Option<String>,
     pub production_url: Option<String>,
+    /// Zone de cette app. Chaîne vide = hériter du groupe, puis du domaine principal.
+    pub domain_apex: Option<String>,
     pub build_pack: Option<String>,
     pub port: Option<u16>,
     pub is_static: Option<bool>,
@@ -769,6 +771,45 @@ async fn update_project(
         None => existing.runtime_json.clone(),
     };
 
+    let domain_apex = match &body.domain_apex {
+        Some(raw) if raw.trim().is_empty() => String::new(),
+        Some(raw) => {
+            let apex = crate::domain_catalog::normalize_apex(raw).map_err(ApiError::message)?;
+            if !crate::domain_catalog::contains(&state.pool, &apex).await {
+                return Err(ApiError::message(
+                    "ajoute d'abord ce domaine dans les domaines de l'instance",
+                ));
+            }
+            apex
+        }
+        None => existing.domain_apex.clone(),
+    };
+    let slug = if existing.slug.trim().is_empty() {
+        slugify(&body.name.clone().unwrap_or(existing.name.clone()))
+    } else {
+        existing.slug.clone()
+    };
+    let production_url = if body
+        .domain_apex
+        .as_ref()
+        .is_some_and(|v| !v.trim().is_empty())
+    {
+        let current = body
+            .production_url
+            .clone()
+            .or(existing.production_url.clone())
+            .unwrap_or_default();
+        Some(crate::domain_catalog::url_for_zone(
+            &current,
+            &slug,
+            &domain_apex,
+        ))
+    } else {
+        body.production_url
+            .clone()
+            .or(existing.production_url.clone())
+    };
+
     let next_server = if user.role == "instance_admin" {
         body.server_id.clone().or(existing.server_id.clone())
     } else {
@@ -792,8 +833,9 @@ async fn update_project(
             build_pack = $9, port = $10, is_static = $11, publish_directory = $12,
             base_directory = $13, docker_compose_location = $14,
             is_sso_protected = $15, has_own_user_system = $16, auto_deploy = $17,
-            gpu_nvidia = $18, gpu_dri = $19, volumes_json = $20, runtime_json = $21, updated_at = $22
-        WHERE uuid = $23"#,
+            gpu_nvidia = $18, gpu_dri = $19, volumes_json = $20, runtime_json = $21,
+            domain_apex = $22, updated_at = $23
+        WHERE uuid = $24"#,
     )
     .bind(body.name.unwrap_or(existing.name))
     .bind(body.status.unwrap_or(existing.status))
@@ -802,7 +844,7 @@ async fn update_project(
     .bind(next_server)
     .bind(body.workdir.or(existing.workdir))
     .bind(body.test_command.or(existing.test_command))
-    .bind(body.production_url.or(existing.production_url))
+    .bind(production_url)
     .bind(body.build_pack.unwrap_or(existing.build_pack))
     .bind(port)
     .bind(is_static)
@@ -819,6 +861,7 @@ async fn update_project(
     .bind(gpu_dri)
     .bind(&volumes_json)
     .bind(&runtime_json)
+    .bind(&domain_apex)
     .bind(&now)
     .bind(&uuid)
     .execute(&state.pool)
@@ -3131,10 +3174,6 @@ async fn wildcard_domain(state: &AppState) -> Result<String, ApiError> {
     Ok(crate::user_prefs::instance_wildcard(&state.pool).await)
 }
 
-async fn wildcard_for_project(state: &AppState, project: &Project) -> String {
-    crate::user_prefs::effective_wildcard_for_workspace(&state.pool, &project.workspace_uuid).await
-}
-
 pub(crate) async fn ensure_project_primary_domain(
     state: &AppState,
     project_uuid: &str,
@@ -3379,7 +3418,7 @@ pub(crate) async fn ensure_production_url(
             return Ok(Some(url.clone()));
         }
     }
-    let domain = wildcard_for_project(state, project).await;
+    let domain = crate::domain_catalog::apex_for_project(&state.pool, project).await;
     if domain.is_empty() {
         return Ok(None);
     }

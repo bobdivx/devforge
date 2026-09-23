@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api, type AppGroup, type Project } from '../lib/api';
+import { api, type AppGroup, type InstanceDomain, type Project } from '../lib/api';
 import { cn } from '../lib/cn';
 import { projectStatusMeta } from '../lib/status';
 import { AppIcon, groupFaceProject, statusDotClass } from './AppIcon';
@@ -12,6 +12,7 @@ import {
   FadeIn,
   HubAddTile,
   HubGrid,
+  HubIcon,
   HubTile,
   Input,
   Modal,
@@ -31,6 +32,8 @@ function GroupBody({ uuid }: { uuid: string }) {
   const [group, setGroup] = useState<AppGroup | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [name, setName] = useState('');
+  const [domainApex, setDomainApex] = useState('');
+  const [domains, setDomains] = useState<InstanceDomain[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -49,6 +52,7 @@ function GroupBody({ uuid }: { uuid: string }) {
       const [g, p] = await Promise.all([api.group(uuid), api.projects()]);
       setGroup(g.data);
       setName(g.data.name);
+      setDomainApex(g.data.domain_apex || '');
       setProjects(p.data);
       setError(null);
     } catch (e) {
@@ -60,7 +64,36 @@ function GroupBody({ uuid }: { uuid: string }) {
 
   useEffect(() => {
     load();
+    api
+      .instanceDomains()
+      .then((r) => setDomains(r.data ?? []))
+      .catch(() => setDomains([]));
   }, [uuid]);
+
+  async function pickGroupDomain(next: string) {
+    if (!group || busy || next === (group.domain_apex || '')) return;
+    const previous = group.domain_apex || '';
+    setDomainApex(next);
+    setBusy(true);
+    try {
+      const r = await api.updateGroup(group.uuid, { domain_apex: next });
+      setGroup(r.data);
+      setDomainApex(r.data.domain_apex || '');
+      toast.push({
+        title: next ? `Groupe sur ${next}` : 'Le groupe utilise le domaine principal',
+        tone: 'ok',
+      });
+    } catch (err) {
+      setDomainApex(previous);
+      toast.push({
+        title: 'Domaine non enregistré',
+        detail: String(err),
+        tone: 'danger',
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function rename(e: Event) {
     e.preventDefault();
@@ -227,6 +260,40 @@ function GroupBody({ uuid }: { uuid: string }) {
                 Renommer
               </Button>
             </form>
+            <div class="space-y-3">
+              <p class="text-sm text-[var(--color-ink-muted)]">
+                Domaine du groupe. Les apps sans domaine propre utilisent cette zone.
+              </p>
+              <HubGrid cols={3}>
+                <HubTile
+                  index={0}
+                  title="Principal"
+                  icon={<HubIcon name="globe" />}
+                  class={!domainApex ? '!ring-[var(--color-accent)]' : ''}
+                  subtitle={
+                    <div class={!domainApex ? 'mt-1 text-[11px] font-medium text-[var(--color-accent)]' : 'mt-1 text-[11px] text-[var(--color-ink-muted)]'}>
+                      {!domainApex ? 'Choisie' : 'Par défaut'}
+                    </div>
+                  }
+                  onClick={() => void pickGroupDomain('')}
+                />
+                {domains.map((row, index) => (
+                  <HubTile
+                    key={row.apex}
+                    index={index + 1}
+                    title={row.apex}
+                    icon={<HubIcon name="globe" />}
+                    class={domainApex === row.apex ? '!ring-[var(--color-accent)]' : ''}
+                    subtitle={
+                      <div class={domainApex === row.apex ? 'mt-1 text-[11px] font-medium text-[var(--color-accent)]' : 'mt-1 text-[11px] text-[var(--color-ink-muted)]'}>
+                        {domainApex === row.apex ? 'Choisie' : row.primary ? 'Principal' : 'Zone'}
+                      </div>
+                    }
+                    onClick={() => void pickGroupDomain(row.apex)}
+                  />
+                ))}
+              </HubGrid>
+            </div>
             <div class="border-t border-[var(--color-line)] pt-4">
               <p class="text-sm font-medium">Dissoudre le groupe</p>
               <p class="mt-1 text-sm text-[var(--color-ink-muted)]">
