@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { api, type ClusterNode, type Deployment, type InstanceDomain, type Project, type ProjectRuntime, type PublishedPort } from '../lib/api';
+import { api, type AppGroupMember, type ClusterNode, type Deployment, type InstanceDomain, type Project, type ProjectRuntime, type PublishedPort } from '../lib/api';
 import { nodeShortLabel, resolveNode } from '../lib/cluster-display';
 import { cn } from '../lib/cn';
-import { projectNav } from '../lib/nav';
+import { projectNavMore, projectNavPrimary } from '../lib/nav';
 import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { AppIcon, statusDotClass } from './AppIcon';
 import { AppShell } from './AppShell';
@@ -15,7 +15,15 @@ import { ProjectGroupPanel, ProjectGroupSuggest } from './GroupPage';
 import { ProjectWorkspace } from './ProjectWorkspace';
 import { ProjectRulesModal } from './workspace/ProjectRulesModal';
 import { NodeSelect } from './NodeSelect';
-import { FileCode, Square } from 'lucide-preact';
+import {
+  ChevronDown,
+  Copy,
+  ExternalLink,
+  FileCode,
+  HeartPulse,
+  RotateCw,
+  Square,
+} from 'lucide-preact';
 import {
   Alert,
   Badge,
@@ -216,26 +224,53 @@ export function ProjectDetailPage(props: Props) {
   const titles: Record<string, string> = {
     overview: project?.name ?? 'Projet',
     workspace: 'Espace de travail',
-    deployments: 'Deployments',
+    deployments: 'Déploiements',
     git: 'Git',
     actions: 'Actions',
     agents: 'Agents',
-    domains: 'Domains',
+    domains: 'Domaines',
+    database: 'Base de données',
     env: 'Env',
-    backups: 'Backups',
+    backups: 'Sauvegardes',
     crons: 'Crons',
-    settings: 'Settings',
+    settings: 'Paramètres',
   };
+
+  const navOpts = { workspace: workspaceBeta };
 
   return (
     <AppShell
       active="projects"
-      projectNav={projectNav(uuid, { workspace: workspaceBeta })}
-      title={tab === 'workspace' ? undefined : titles[tab]}
+      projectNav={projectNavPrimary(uuid, navOpts)}
+      projectNavMore={projectNavMore(uuid, navOpts)}
+      sideNavLabel=""
+      title={
+        tab === 'workspace'
+          ? undefined
+          : (
+              <span class="flex flex-wrap items-center gap-2.5 sm:gap-3">
+                <span class="min-w-0 break-words">{titles[tab]}</span>
+                {project?.group_uuid ? (
+                  <GroupSiblingSwitcher
+                    projectUuid={uuid}
+                    groupUuid={project.group_uuid}
+                    groupName={project.group_name}
+                  />
+                ) : null}
+              </span>
+            )
+      }
       description={
         tab === 'agents'
           ? 'Agents qui surveillent les déploiements, les runners et le reste du projet.'
           : undefined
+      }
+      belowTitle={
+        <ProjectActivityStrip
+          uuid={uuid}
+          deployments={deployments}
+          project={project}
+        />
       }
       actions={
         tab === 'overview' && project ? (
@@ -348,6 +383,226 @@ export function ProjectDetailPage(props: Props) {
   );
 }
 
+
+function ProjectActivityStrip({
+  uuid,
+  deployments,
+  project,
+}: {
+  uuid: string;
+  deployments: Deployment[];
+  project: Project | null;
+}) {
+  const active = deployments.filter((d) => isDeployInProgress(d.status));
+  const failed = deployments.find((d) => d.status === 'failed' || d.status === 'error');
+  const unhealthy =
+    project && (project.status === 'unhealthy' || project.status === 'unrouted')
+      ? project
+      : null;
+
+  const items: Array<{
+    key: string;
+    tone: 'ok' | 'warn' | 'danger' | 'neutral';
+    label: string;
+    detail?: string;
+    href?: string;
+  }> = [];
+
+  for (const d of active.slice(0, 2)) {
+    items.push({
+      key: `deploy-${d.uuid}`,
+      tone: 'warn',
+      label: `Déploiement ${d.status}`,
+      detail: d.git_sha ? d.git_sha.slice(0, 7) : formatWhen(d.created_at),
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`,
+    });
+  }
+
+  if (!active.length && failed && pickCurrentDeployment(deployments)?.uuid === failed.uuid) {
+    items.push({
+      key: `fail-${failed.uuid}`,
+      tone: 'danger',
+      label: 'Échec de déploiement',
+      detail: failed.git_message || formatWhen(failed.created_at),
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`,
+    });
+  }
+
+  if (unhealthy) {
+    items.push({
+      key: 'health',
+      tone: 'danger',
+      label: projectStatusMeta(unhealthy.status).label,
+      detail:
+        unhealthy.status === 'unrouted'
+          ? 'Route Traefik absente'
+          : `Pas de réponse sur le port ${unhealthy.port || 3000}`,
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`,
+    });
+  }
+
+  if (items.length === 0) return null;
+
+  return (
+    <div class="mb-4 flex flex-wrap gap-2" aria-label="Activité du projet">
+      {items.map((item) => (
+        <a
+          key={item.key}
+          href={item.href}
+          class={cn(
+            'inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors',
+            item.tone === 'warn' &&
+              'border-[var(--color-warn)]/30 bg-[var(--color-warn)]/10 text-[var(--color-warn)]',
+            item.tone === 'danger' &&
+              'border-[var(--color-danger)]/30 bg-[var(--color-danger)]/10 text-[var(--color-danger)]',
+            item.tone === 'ok' &&
+              'border-[var(--color-ok)]/30 bg-[var(--color-ok)]/10 text-[var(--color-ok)]',
+            item.tone === 'neutral' &&
+              'border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)]',
+          )}
+        >
+          <span
+            class={cn(
+              'h-1.5 w-1.5 shrink-0 rounded-full',
+              item.tone === 'warn' && 'animate-pulse bg-[var(--color-warn)]',
+              item.tone === 'danger' && 'bg-[var(--color-danger)]',
+              item.tone === 'ok' && 'bg-[var(--color-ok)]',
+              item.tone === 'neutral' && 'bg-[var(--color-ink-faint)]',
+            )}
+            aria-hidden
+          />
+          <span class="font-medium">{item.label}</span>
+          {item.detail ? (
+            <span class="truncate opacity-80">{item.detail}</span>
+          ) : null}
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function GroupSiblingSwitcher({
+  projectUuid,
+  groupUuid,
+  groupName,
+}: {
+  projectUuid: string;
+  groupUuid: string;
+  groupName?: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const [members, setMembers] = useState<AppGroupMember[]>([]);
+  const [loading, setLoading] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api
+      .group(groupUuid)
+      .then((r) => {
+        if (!cancelled) setMembers(r.data?.members ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setMembers([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [groupUuid]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const siblings = members.filter((m) => m.project_uuid !== projectUuid);
+  if (!loading && siblings.length === 0 && members.length <= 1) {
+    // Still show a compact link to the group page when alone in group
+    return (
+      <a
+        href={`/app/groups/view?uuid=${encodeURIComponent(groupUuid)}`}
+        class="inline-flex max-w-[12rem] items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1 text-xs font-medium text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]"
+        title={groupName || 'Groupe'}
+      >
+        <span class="truncate">{groupName || 'Groupe'}</span>
+      </a>
+    );
+  }
+
+  return (
+    <div class="relative" ref={ref}>
+      <button
+        type="button"
+        class="inline-flex max-w-[14rem] items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1 text-xs font-medium text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onClick={() => setOpen((v) => !v)}
+        title="Apps du même groupe"
+      >
+        <span class="truncate">{groupName || 'Groupe'}</span>
+        <ChevronDown size={12} class={cn('shrink-0 opacity-70', open && 'rotate-180')} aria-hidden />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          class="absolute left-0 top-full z-30 mt-1 min-w-[14rem] max-w-[18rem] rounded-xl border border-[var(--color-line)] bg-[var(--color-card)] p-1 shadow-xl"
+        >
+          <a
+            href={`/app/groups/view?uuid=${encodeURIComponent(groupUuid)}`}
+            class="block rounded-lg px-3 py-2 text-xs font-medium text-[var(--color-accent)] hover:bg-white/5"
+            onClick={() => setOpen(false)}
+          >
+            Voir le groupe
+          </a>
+          <div class="my-1 border-t border-[var(--color-line)]" />
+          {loading ? (
+            <p class="px-3 py-2 text-xs text-[var(--color-ink-muted)]">Chargement…</p>
+          ) : (
+            members.map((m) => {
+              const current = m.project_uuid === projectUuid;
+              return (
+                <a
+                  key={m.project_uuid}
+                  role="option"
+                  aria-selected={current}
+                  href={`/app/projects/view?uuid=${encodeURIComponent(m.project_uuid)}&tab=overview`}
+                  class={cn(
+                    'flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs transition-colors',
+                    current
+                      ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
+                      : 'text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
+                  )}
+                  onClick={() => setOpen(false)}
+                >
+                  <span class="min-w-0 truncate">{m.name}</span>
+                  <span class="shrink-0 text-[10px] uppercase tracking-wide opacity-70">
+                    {m.role}
+                  </span>
+                </a>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 type HealthItem = {
   key: string;
   label: string;
@@ -384,6 +639,8 @@ function ProjectOverview({
   const [deployBusy, setDeployBusy] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyShowAll, setHistoryShowAll] = useState(false);
+  const [autresOpen, setAutresOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [nodes, setNodes] = useState<ClusterNode[]>([]);
 
   // Préférer un déploiement encore en cours (sinon le succès stale masque le running).
@@ -446,7 +703,7 @@ function ProjectOverview({
         ? 'Accès /dev/dri'
         : 'Aucun accès';
 
-  const health: Array<HealthItem & { icon: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' | 'gpu' }> = [
+  const health: Array<HealthItem & { icon: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' | 'gpu' | 'settings' }> = [
     {
       key: 'deploy',
       icon: 'deploy',
@@ -583,6 +840,14 @@ function ProjectOverview({
       tone: project.production_url || (domainCount ?? 0) > 0 ? 'ok' : 'neutral',
       href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=domains`,
     },
+    {
+      key: 'settings',
+      icon: 'settings',
+      label: 'Paramètres',
+      detail: 'Nœud, GPU, volumes, danger zone',
+      tone: 'neutral',
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=settings`,
+    },
   ];
 
   async function runLifecycle(action: string) {
@@ -630,10 +895,42 @@ function ProjectOverview({
     }
   }
 
+  async function copyUrl() {
+    const url = project.production_url;
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      toast.push({ title: 'URL copiée', detail: url.replace(/^https?:\/\//, ''), tone: 'ok' });
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      toast.push({ title: 'Copie impossible', detail: String(e), tone: 'danger' });
+    }
+  }
+
+  const visibleHealth = isAdmin ? health : health.filter((h) => h.key !== 'node');
+  const primaryKeys = new Set(['deploy', 'errors', 'domain', 'settings', 'env', 'db']);
+  const primaryTiles = visibleHealth.filter((h) => primaryKeys.has(h.key));
+  const secondaryTiles = visibleHealth.filter((h) => !primaryKeys.has(h.key));
+
+  function tileBadge(tone: HealthItem['tone']) {
+    if (tone === 'neutral') return null;
+    return (
+      <span
+        class={cn(
+          'absolute -right-1 -top-1 h-3 w-3 rounded-full ring-2 ring-[#1c1c1e]',
+          tone === 'ok' && 'bg-[var(--color-ok)]',
+          tone === 'warn' && 'bg-[var(--color-warn)]',
+          tone === 'danger' && 'bg-[var(--color-danger)]',
+        )}
+      />
+    );
+  }
+
   return (
     <FadeIn>
       <div class="space-y-6">
-        {/* En-tête compact avec statut et actions rapides */}
+        {/* En-tête compact avec statut + contrôles URL */}
         <div
           class="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]/70 px-4 py-4 backdrop-blur-sm sm:px-5"
         >
@@ -656,6 +953,58 @@ function ProjectOverview({
                   {project.production_url.replace(/^https?:\/\//, '')}
                 </a>
               )}
+              <div class="mt-2 flex flex-wrap items-center gap-1">
+                {project.production_url && (
+                  <>
+                    <button
+                      type="button"
+                      class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+                      title="Ouvrir l’app"
+                      aria-label="Ouvrir l’app"
+                      onClick={() => window.open(project.production_url!, '_blank', 'noopener,noreferrer')}
+                    >
+                      <ExternalLink size={14} aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+                      title={copied ? 'Copié' : 'Copier l’URL'}
+                      aria-label="Copier l’URL"
+                      onClick={copyUrl}
+                    >
+                      <Copy size={14} aria-hidden />
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] disabled:opacity-40"
+                  title="Redémarrer"
+                  aria-label="Redémarrer"
+                  disabled={!!lifeBusy || deployBusy}
+                  onClick={() => runLifecycle('restart')}
+                >
+                  {lifeBusy === 'restart' ? <Spinner /> : <RotateCw size={14} aria-hidden />}
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] disabled:opacity-40"
+                  title="Arrêter"
+                  aria-label="Arrêter"
+                  disabled={!!lifeBusy || deployBusy}
+                  onClick={() => runLifecycle('stop')}
+                >
+                  {lifeBusy === 'stop' ? <Spinner /> : <Square size={14} aria-hidden />}
+                </button>
+                <a
+                  href={`/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`}
+                  class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+                  title="Santé / déploiements"
+                  aria-label="Santé / déploiements"
+                >
+                  <HeartPulse size={14} aria-hidden />
+                </a>
+              </div>
             </div>
           </div>
           <div class="flex flex-wrap gap-2">
@@ -690,9 +1039,9 @@ function ProjectOverview({
           />
         )}
 
-        {/* Grid de cartes HubTile (style MCP/Home) */}
+        {/* Tuiles importantes */}
         <HubGrid cols={4}>
-          {(isAdmin ? health : health.filter((h) => h.key !== 'node')).map((h, i) => (
+          {primaryTiles.map((h, i) => (
             <HubTile
               key={h.key}
               index={i}
@@ -701,22 +1050,11 @@ function ProjectOverview({
               href={h.href}
               icon={<HealthIcon kind={h.icon} tone={h.tone} />}
               iconClass="!bg-transparent"
-              badge={
-                h.tone !== 'neutral' && (
-                  <span
-                    class={cn(
-                      'absolute -right-1 -top-1 h-3 w-3 rounded-full ring-2 ring-[#1c1c1e]',
-                      h.tone === 'ok' && 'bg-[var(--color-ok)]',
-                      h.tone === 'warn' && 'bg-[var(--color-warn)]',
-                      h.tone === 'danger' && 'bg-[var(--color-danger)]',
-                    )}
-                  />
-                )
-              }
+              badge={tileBadge(h.tone)}
             />
           ))}
           <HubTile
-            index={health.length}
+            index={primaryTiles.length}
             title="Historique"
             description={`${deployments.length} déploiement${deployments.length > 1 ? 's' : ''}`}
             icon={<HealthIcon kind="deploy" tone="neutral" />}
@@ -724,6 +1062,40 @@ function ProjectOverview({
             onClick={() => setHistoryOpen(true)}
           />
         </HubGrid>
+
+        {secondaryTiles.length > 0 && (
+          <div>
+            <button
+              type="button"
+              class="mb-3 inline-flex items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+              aria-expanded={autresOpen}
+              onClick={() => setAutresOpen((v) => !v)}
+            >
+              Autres
+              <ChevronDown
+                size={12}
+                class={cn('opacity-70 transition-transform', autresOpen && 'rotate-180')}
+                aria-hidden
+              />
+            </button>
+            {autresOpen && (
+              <HubGrid cols={4}>
+                {secondaryTiles.map((h, i) => (
+                  <HubTile
+                    key={h.key}
+                    index={i}
+                    title={h.label}
+                    description={h.detail}
+                    href={h.href}
+                    icon={<HealthIcon kind={h.icon} tone={h.tone} />}
+                    iconClass="!bg-transparent"
+                    badge={tileBadge(h.tone)}
+                  />
+                ))}
+              </HubGrid>
+            )}
+          </div>
+        )}
       </div>
 
       <Modal
@@ -888,7 +1260,7 @@ function HealthIcon({
   kind,
   tone,
 }: {
-  kind: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' | 'gpu';
+  kind: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' | 'gpu' | 'settings';
   tone: 'ok' | 'warn' | 'danger' | 'neutral';
 }) {
   const color =
@@ -949,6 +1321,12 @@ function HealthIcon({
         <rect x="4" y="4" width="16" height="16" rx="2" />
         <rect x="9" y="9" width="6" height="6" rx="1" />
         <path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" />
+      </>
+    ),
+    settings: (
+      <>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4M4.2 19.8l2.8-2.8M17 7l2.8-2.8" />
       </>
     ),
   };
