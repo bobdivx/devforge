@@ -2,7 +2,6 @@ import { useEffect, useState } from 'preact/hooks';
 import { api, type DnsRuntimeStatus, type DnsSettingsPublic } from '../lib/api';
 import { AppShell } from './AppShell';
 import { BackupSettingsPanel } from './BackupSettingsPanel';
-import { PostgresAdminPanel } from './PostgresAdminPanel';
 import { DnsEntrypointPanel } from './DnsEntrypointPanel';
 import { DockerEngineAlert } from './DockerEngineAlert';
 import { LlmProvidersPanel } from './LlmProvidersPanel';
@@ -54,7 +53,6 @@ type SettingsSection =
   | 'llm'
   | 'sso'
   | 'backup'
-  | 'postgres'
   | 'update';
 
 const SECTION_KEYS: SettingsSection[] = [
@@ -65,7 +63,6 @@ const SECTION_KEYS: SettingsSection[] = [
   'llm',
   'sso',
   'backup',
-  'postgres',
   'update',
 ];
 
@@ -120,12 +117,6 @@ const SETTINGS_CARDS: SettingCardMeta[] = [
     icon: 'archive',
   },
   {
-    key: 'postgres',
-    title: 'Postgres',
-    description: 'Base du control plane, port et répliques',
-    icon: 'server',
-  },
-  {
     key: 'update',
     title: 'Mise à jour',
     description: 'Mise à jour de DevForge vers la dernière version',
@@ -148,7 +139,6 @@ const SECTION_TITLES: Record<SettingsSection, string> = {
   llm: 'Agents / LLM',
   sso: 'SSO / OIDC',
   backup: 'Sauvegardes',
-  postgres: 'Postgres',
   update: 'Mise à jour',
 };
 
@@ -165,7 +155,7 @@ function SettingCard({ card, index }: { card: SettingCardMeta; index: number }) 
 }
 
 const USER_SETTING_KEYS = new Set(['domaine', 'github', 'llm']);
-const ADMIN_SETTING_KEYS = new Set(['general', 'serveur', 'sso', 'backup', 'postgres', 'update']);
+const ADMIN_SETTING_KEYS = new Set(['general', 'serveur', 'sso', 'backup', 'update']);
 
 export function SettingsPage() {
   return <SettingsPageInner />;
@@ -282,6 +272,13 @@ function SettingsPageInner() {
   }
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (new URLSearchParams(window.location.search).get('tab') === 'postgres') {
+      window.location.replace('/app/admin?tab=postgres');
+    }
+  }, []);
+
+  useEffect(() => {
     Promise.all([
       api
         .health()
@@ -370,6 +367,14 @@ function SettingsPageInner() {
         : 'absent',
     },
   ];
+
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('tab') === 'postgres') {
+    return (
+      <AppShell active="settings" title="Postgres">
+        <Skeleton class="h-32" />
+      </AppShell>
+    );
+  }
 
   // Grid vue si pas de section sélectionnée
   if (!section) {
@@ -879,7 +884,6 @@ function SettingsPageInner() {
 
       {section === 'sso' && isAdmin && <SsoSettingsPanel isAdmin={isAdmin} />}
       {section === 'backup' && isAdmin && <BackupSettingsPanel isAdmin={isAdmin} />}
-      {section === 'postgres' && isAdmin && <PostgresAdminPanel />}
       {section === 'update' && isAdmin && <UpdateSettingsPanel isAdmin={isAdmin} />}
     </AppShell>
   );

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { api } from '../lib/api';
 import { AppShell } from './AppShell';
 import { InstanceAdminGate } from './InstanceAdminGate';
+import { PostgresAdminPanel } from './PostgresAdminPanel';
 import {
   Alert,
   Badge,
@@ -60,7 +61,15 @@ type Health = {
   };
 };
 
-type AdminSection = 'hub' | 'workspaces' | 'proxy' | 'sante' | 'beta';
+type AdminSection = 'hub' | 'workspaces' | 'proxy' | 'sante' | 'beta' | 'postgres';
+
+const SECTION_TITLES: Record<Exclude<AdminSection, 'hub'>, string> = {
+  workspaces: 'Workspaces',
+  proxy: 'Proxy / Traefik',
+  sante: 'Santé plateforme',
+  beta: 'Fonctionnalités bêta',
+  postgres: 'Postgres',
+};
 
 type BetaFeatures = {
   workspace: boolean;
@@ -70,7 +79,7 @@ type BetaFeatures = {
 function readSection(): AdminSection {
   if (typeof window === 'undefined') return 'hub';
   const tab = new URLSearchParams(window.location.search).get('tab');
-  if (tab === 'workspaces' || tab === 'proxy' || tab === 'sante' || tab === 'beta') return tab;
+  if (tab === 'workspaces' || tab === 'proxy' || tab === 'sante' || tab === 'beta' || tab === 'postgres') return tab;
   return 'hub';
 }
 
@@ -173,6 +182,13 @@ function AdminHub() {
       />
       <HubTile
         index={3}
+        href="/app/admin?tab=postgres"
+        title="Postgres"
+        description="Base du control plane, port et répliques"
+        icon={<HubIcon name="server" />}
+      />
+      <HubTile
+        index={4}
         href="/app/admin?tab=beta"
         title="Fonctionnalités bêta"
         description="Workspace et création d’app par agent"
@@ -789,15 +805,7 @@ function AdminPageInner() {
                 <path d="M19 12H5M12 19l-7-7 7-7" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
             </a>
-            <span>
-              {section === 'workspaces'
-                ? 'Workspaces'
-                : section === 'proxy'
-                  ? 'Proxy / Traefik'
-                  : section === 'beta'
-                    ? 'Fonctionnalités bêta'
-                    : 'Santé plateforme'}
-            </span>
+            <span>{SECTION_TITLES[section]}</span>
           </div>
         ) : (
           'Admin'
@@ -813,6 +821,7 @@ function AdminPageInner() {
         {section === 'proxy' && <AdminProxy />}
         {section === 'sante' && <AdminSante />}
         {section === 'beta' && <AdminBeta />}
+        {section === 'postgres' && <PostgresAdminPanel />}
       </FadeIn>
     </AppShell>
   );
