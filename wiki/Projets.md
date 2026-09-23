@@ -45,7 +45,7 @@ Projets, env, agents, backups sont scopés `workspace_uuid`. Un user ne voit pas
 
 ## Onglets
 
-- **Overview** — statut, URLs, santé, **nœud d’hébergement**, **groupe** (rôle, lien)
+- **Overview** — statut, URLs, santé, **nœud d’hébergement**. Si d’autres apps portent un nom proche, un bouton propose de les regrouper. **Ignorer** masque cette suggestion pour ce projet.
 - **Workspace** — chat + preview atelier / prod
 - **Deployments** — historique, logs, repair
 - **Git** — statut, diff, discard local
@@ -55,4 +55,4 @@ Projets, env, agents, backups sont scopés `workspace_uuid`. Un user ne voit pas
 - **Database** — lien Turso (cloud, indépendant du nœud). Pas de Postgres provisionné. SQLite dans le conteneur = locale au nœud, perdue au redéploy.
 - **Env** — secrets, import `.env`
 - **Backups** — snapshots projet
-- **Settings** — nœud, pack, commandes, GPU (NVIDIA et `/dev/dri`), danger zone
+- **Settings** — nœud, pack, commandes, **groupe** (rôle, lien), GPU (NVIDIA et `/dev/dri`), danger zone

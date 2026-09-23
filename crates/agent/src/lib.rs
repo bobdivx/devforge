@@ -19,7 +19,8 @@ use tools::{
     ListAgentToolFailuresTool, ListEnvVarsTool, ListProjectAgentsTool, ListProjectFilesTool,
     ListProjectsTool, LocalPreviewStatusTool, McpCallTool, McpListRemoteToolsTool,
     McpListServersTool, ProposePlanTool, PublishToGitHubTool, ReadGitHubFileTool,
-    ReadProjectFileTool, RunApplicationTestsTool, RunWorkdirCommandTool, StartLocalPreviewTool,
+    ReadProjectFileTool, ReviewProjectSecurityTool, RunApplicationTestsTool, RunWorkdirCommandTool,
+    StartLocalPreviewTool,
     StopLocalPreviewTool, SyncWorkdirToGitHubTool, TriggerDeployTool, UpsertEnvVarsTool,
     WriteProjectFileTool,
 };
@@ -161,7 +162,8 @@ pub fn build_core_registry(
     registry.register(Arc::new(ListAgentMessagesTool {
         pool: pool.clone(),
     }));
-    registry.register(Arc::new(ListAgentToolFailuresTool { pool }));
+    registry.register(Arc::new(ListAgentToolFailuresTool { pool: pool.clone() }));
+    registry.register(Arc::new(ReviewProjectSecurityTool { pool }));
     registry
 }
 
@@ -558,6 +560,21 @@ fn is_execute_nudge(msg: &str) -> bool {
     matches!(normalize_user_text(msg).as_str(), "go" | "oui" | "ok" | "yes" | "vas-y" | "vas y" | "fais-le" | "fais le" | "continue" | "lance" | "go go" | "ok go")
 }
 
+fn is_security_review_request(msg: &str) -> bool {
+    let t = normalize_user_text(msg);
+    const NEEDLES: &[&str] = &[
+        "revue sécurité",
+        "revue securite",
+        "audit sécurité",
+        "audit securite",
+        "review_project_security",
+        "en-têtes de sécurité",
+        "en-tetes de securite",
+        "entêtes de sécurité",
+    ];
+    NEEDLES.iter().any(|n| t.contains(n))
+}
+
 fn is_publish_request(msg: &str) -> bool {
     let t = normalize_user_text(msg);
     const NEEDLES: &[&str] = &["crée une pr", "creer une pr", "crée la pr", "creer la pr", "ouvre une pr", "ouvrir une pr", "open a pr", "pull request", "publie", "publier", "valide et crée", "valider et créer", "valide les changements", "merge ça", "déploie en prod", "deploie en prod", "déploie en production", "create_github_fix"];
@@ -568,7 +585,7 @@ fn local_first_rules(publish_ok: bool) -> String {
     let gate = if publish_ok {
         "L'utilisateur a VALIDÉ explicitement une publication. Tu PEUX maintenant : create_github_pr, sync_workdir_to_github, publish_to_github, ou trigger_deploy. Travaille toujours depuis les fichiers locaux déjà écrits.".to_string()
     } else {
-        "❌ INTERDIT (pas de validation PR) : create_github_pr, create_pull_request, publish_to_github, sync_workdir_to_github, create_github_repo, mcp_call_tool create_pull_request / create_or_update_file / create_branch. « go », « oui », « améliore le site » NE sont PAS une validation de PR. ✅ AUTORISÉ : propose_plan, list_project_files, read_project_file, write_project_file mode=local, run_workdir_command, start_local_preview, get_project, get_deployment_logs, run_application_tests, http_smoke, list_env_vars. ❌ N’invente PAS un MCP « devforge-workdir » — shell = run_workdir_command (allowlist npm/node/astro…), fichiers = tools natifs.".to_string()
+        "❌ INTERDIT (pas de validation PR) : create_github_pr, create_pull_request, publish_to_github, sync_workdir_to_github, create_github_repo, mcp_call_tool create_pull_request / create_or_update_file / create_branch. « go », « oui », « améliore le site » NE sont PAS une validation de PR. ✅ AUTORISÉ : propose_plan, list_project_files, read_project_file, write_project_file mode=local, run_workdir_command, start_local_preview, get_project, get_deployment_logs, run_application_tests, http_smoke, list_env_vars, review_project_security (seulement si l'utilisateur demande une revue sécurité). ❌ N’invente PAS un MCP « devforge-workdir » — shell = run_workdir_command (allowlist npm/node/astro…), fichiers = tools natifs.".to_string()
     };
     format!("WORKFLOW OBLIGATOIRE (autonomie locale, PR en dernier) :\n1. PLAN : appelle propose_plan (titre + étapes) AVANT d'écrire des fichiers.\n2. EXÉCUTE EN LOCAL : list_project_files, read_project_file, write_project_file mode='local', run_workdir_command (build/test). Ne te contente pas de conseiller.\n3. PREVIEW : après des edits, appelle start_local_preview. Si public_ok=false ou logs_tail montre une erreur, corrige et relance (force=true). Ne dis jamais que la preview marche sans public_ok=true.\n4. RAPPORT : résume les fichiers touchés, puis UNE SEULE question : « Valide pour ouvrir une PR ? »\n{gate}")
 }
@@ -577,8 +594,13 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
     let role = ctx.agent_role.as_deref().unwrap_or("ops");
     let name = ctx.agent_name.as_deref().unwrap_or("Agent");
     let publish_ok = is_publish_request(latest);
+    let security_review = is_security_review_request(latest);
     let execute_nudge = is_execute_nudge(latest);
-    let local = local_first_rules(publish_ok);
+    let local = if security_review {
+        "Cette demande est une revue sécurité : n'écris pas de fichiers et n'ouvre pas de PR. Un seul appel à review_project_security, puis le rapport des findings.".to_string()
+    } else {
+        local_first_rules(publish_ok)
+    };
     let has_template_applied = ctx.history.iter().any(|(hist_role, content)| {
         hist_role == "user" && ((content.contains("Template") && content.contains("déjà appliqué")) || (content.contains("template") && content.contains("already applied")))
     });
@@ -589,13 +611,18 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
             } else {
                 "Scaffold / correctifs en LOCAL, preview, puis publish_to_github seulement si demandé.\n"
             };
-            format!("Tu es l'agent Deploy : builds, logs, smoke HTTP, preview locale, déploiements.\n{template_nudge}Conserve les routes Pocket ID du template (`/api/auth/login`, `/api/auth/callback/pocket-id`) : les comptes Pocket ID s'en servent pour entrer dans l'app.\n{local}")
+            format!("Tu es l'agent Déploiements. Priorité : statut des builds, versions en ligne, logs (get_project, get_deployment_logs, http_smoke). Ne lance un déploiement et ne modifie le code que si on te le demande clairement.\n{template_nudge}Conserve les routes Pocket ID du template (`/api/auth/login`, `/api/auth/callback/pocket-id`) : les comptes Pocket ID s'en servent pour entrer dans l'app.\n{local}")
         }
-        "reviewer" => format!("Tu es l'agent Reviewer : qualité, UX, design, CI — tu AMÉLIORES le site dans le workdir, tu ne te limites pas à lister des risques.\n{local}\nN'ouvre PAS une PR CI/CD à la place d'une vraie amélioration du site. Un workflow GitHub n'est pas une feature utilisateur."),
-        "ops" => format!("Tu es l'agent Ops : santé, env, tests, config. Corrige EN LOCAL (workdir), pas via une PR GitHub tant que l'utilisateur n'a pas validé.\n{local}\nSi un test/build casse : lis le fichier local, corrige, relance. Ne dis jamais « tu devrais modifier X » — fais-le dans le dossier de l'app."),
+        "runner" => "Tu es l'agent Runners. Tu surveilles les runners GitHub liés au dépôt (en ligne, occupés, en erreur). Rapporte les faits avec get_project et les outils GitHub disponibles. Ne modifie pas le code : le Workspace sert à ça. Si tu ne peux pas lire les runners, dis-le et oriente vers la page Runners.".into(),
+        "actions" => "Tu es l'agent Actions. Tu surveilles les workflows GitHub Actions du dépôt (succès, échec, en cours). Rapporte le dernier run utile. Ne réécris pas l'application : le Workspace sert à ça.".into(),
+        "crons" => "Tu es l'agent Crons. Tu surveilles les tâches planifiées du projet (actives, dernière exécution, échecs). Ne modifie le code que si on te le demande explicitement.".into(),
+        "reviewer" => format!("Tu es l'agent Revue : qualité, risques, CI. Tu signales ce qui cloche. Tu n'ouvres pas une PR et tu ne réécris le site que si on te le demande.\nRevue sécurité : seulement sur demande explicite, appelle review_project_security une fois. C'est une revue statique (secrets masqués, dépendances, motifs, en-têtes du projet). Rapporte les findings de l'outil. N'invente pas de faille et ne décris pas comment l'exploiter.\n{local}"),
+        "ops" => format!("Tu es l'agent Ops. Priorité : santé du projet, logs, variables d'environnement, smoke HTTP (get_project, get_deployment_logs, list_env_vars, http_smoke). Corrige le workdir seulement si on te le demande.\n{local}"),
         _ => format!("Tu es un agent DevForge : planifie, agis dans le workdir, preview, puis PR sur validation.\n{local}"),
     };
-    let nudge = if execute_nudge && !publish_ok {
+    let nudge = if security_review {
+        "\nL'utilisateur demande une revue sécurité. Appelle review_project_security maintenant, une seule fois. Résume les findings (gravité, fichier, correctif). N'invente rien. Ne décris pas d'exploit. Ne réécris pas le code.\n"
+    } else if execute_nudge && !publish_ok {
         "\nL'utilisateur a confirmé (go/oui). N'analyse PAS à nouveau. N'ouvre PAS de PR. Exécute le plan précédent EN LOCAL tout de suite (fichiers + start_local_preview).\n"
     } else if publish_ok {
         "\nL'utilisateur a demandé une PR / publication. Ouvre-la à partir des fichiers locaux déjà écrits.\n"
@@ -603,7 +630,7 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
     let scoped = if ctx.project_brief.is_some() || ctx.project_uuid.is_some() {
         "\nLe projet courant est déjà dans le contexte — ne demande pas l'UUID. Agis."
     } else { "" };
-    let mcp_guidance = "\n\nTOOLS LOCAUX (prioritaires, PAS du MCP) : propose_plan, list_project_files, read_project_file, write_project_file (mode=local), run_workdir_command, start_local_preview, local_preview_status, list_project_agents, list_agent_messages, list_agent_tool_failures.\nIl n’existe PAS de serveur MCP « devforge-workdir » / « workdir » / « atelier » — n’invente pas ce nom, ne bloque PAS en attendant un MCP manquant, et ne demande JAMAIS à l’utilisateur de le configurer. Pour npm/build/test : run_workdir_command. Pour la preview : start_local_preview (npm install inclus).\nMCP distants (mcp_list_servers / mcp_call_tool) : uniquement GitHub, Turso, Slack… après validation PR pour GitHub. Pas besoin de lister les serveurs MCP à chaque tour.";
+    let mcp_guidance = "\n\nTOOLS LOCAUX (prioritaires, PAS du MCP) : propose_plan, list_project_files, read_project_file, write_project_file (mode=local), run_workdir_command, start_local_preview, local_preview_status, list_project_agents, list_agent_messages, list_agent_tool_failures, review_project_security (revue statique, seulement si demandée).\nIl n’existe PAS de serveur MCP « devforge-workdir » / « workdir » / « atelier » — n’invente pas ce nom, ne bloque PAS en attendant un MCP manquant, et ne demande JAMAIS à l’utilisateur de le configurer. Pour npm/build/test : run_workdir_command. Pour la preview : start_local_preview (npm install inclus).\nMCP distants (mcp_list_servers / mcp_call_tool) : uniquement GitHub, Turso, Slack… après validation PR pour GitHub. Pas besoin de lister les serveurs MCP à chaque tour.";
     format!("Tu es {name} ({role}) sur DevForge. {role_focus}{nudge}{scoped}{mcp_guidance}\nRéponds en français, concret, orienté ACTION. N'invente pas de résultats. Le panneau Preview du workspace est l'endroit où l'utilisateur voit tes changements.")
 }
 

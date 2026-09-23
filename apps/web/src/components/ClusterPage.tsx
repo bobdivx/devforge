@@ -15,6 +15,7 @@ import {
   Input,
   Modal,
   Spinner,
+  Switch,
   Table,
   Td,
   ToastProvider,
@@ -259,18 +260,22 @@ function ClusterInner() {
   const [actingLeader, setActingLeader] = useState(false);
   const [actingNodeId, setActingNodeId] = useState('');
   const [placementAuto, setPlacementAuto] = useState(true);
+  const [autoLeader, setAutoLeader] = useState(false);
+  const [autoWorker, setAutoWorker] = useState(false);
+  const [autoBusy, setAutoBusy] = useState<'leader' | 'worker' | null>(null);
   const [rebalanceBusy, setRebalanceBusy] = useState(false);
   const [dnsProvider, setDnsProvider] = useState('');
   const [dnsConfigured, setDnsConfigured] = useState(false);
 
   async function load() {
     try {
-      const [n, i, chk, p, boot] = await Promise.all([
+      const [n, i, chk, p, boot, upd] = await Promise.all([
         api.clusterNodes(),
         api.clusterInvites().catch(() => null),
         api.updateCheck().catch(() => null),
         api.projects().catch(() => null),
         api.bootstrap().catch(() => null),
+        api.updateSettings().catch(() => null),
       ]);
       if (boot?.settings?.dns) {
         setDnsProvider(boot.settings.dns.provider || '');
@@ -280,6 +285,10 @@ function ClusterInner() {
       setActingLeader(!!n.acting_leader);
       setActingNodeId(n.acting_node_id ?? '');
       if (typeof n.placement_auto === 'boolean') setPlacementAuto(n.placement_auto);
+      if (upd) {
+        setAutoLeader(!!upd.update_auto_leader);
+        setAutoWorker(!!upd.update_auto_worker);
+      }
       setInvites(i?.invites ?? []);
       setForges(p?.data ?? []);
       if (chk?.data?.latest) setLatest(chk.data.latest.replace(/^v/, ''));
@@ -559,6 +568,29 @@ function ClusterInner() {
     }
   }
 
+  async function toggleAuto(kind: 'leader' | 'worker') {
+    const next = kind === 'leader' ? !autoLeader : !autoWorker;
+    setAutoBusy(kind);
+    try {
+      const r = await api.updatePatchSettings(
+        kind === 'leader' ? { update_auto_leader: next } : { update_auto_worker: next },
+      );
+      setAutoLeader(!!r.update_auto_leader);
+      setAutoWorker(!!r.update_auto_worker);
+      toast.push({
+        title: kind === 'leader' ? 'Leader' : 'Workers',
+        detail: next
+          ? 'Mise à jour automatique activée.'
+          : 'Mise à jour automatique désactivée.',
+        tone: 'ok',
+      });
+    } catch (err) {
+      toast.push({ title: 'Réglage KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setAutoBusy(null);
+    }
+  }
+
   async function togglePlacementAuto() {
     const next = !placementAuto;
     setBusy(true);
@@ -718,6 +750,39 @@ function ClusterInner() {
           <p class="text-lg font-semibold">{forges.length}</p>
         </Card>
       </div>
+
+      <Card class="mb-5">
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-sm font-medium">Mise à jour auto du leader</p>
+              <p class="text-xs text-[var(--color-ink-muted)]">
+                Installe la release et redémarre ce nœud.
+              </p>
+            </div>
+            <Switch
+              checked={autoLeader}
+              disabled={autoBusy !== null}
+              label="Mise à jour auto du leader"
+              onToggle={() => void toggleAuto('leader')}
+            />
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-sm font-medium">Mise à jour auto des workers</p>
+              <p class="text-xs text-[var(--color-ink-muted)]">
+                Met à jour les workers en ligne qui sont en retard.
+              </p>
+            </div>
+            <Switch
+              checked={autoWorker}
+              disabled={autoBusy !== null}
+              label="Mise à jour auto des workers"
+              onToggle={() => void toggleAuto('worker')}
+            />
+          </div>
+        </div>
+      </Card>
 
       {loading ? (
         <p class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)]">
@@ -1143,7 +1208,7 @@ function ClusterInner() {
                   {isLeader(selected) && (
                     <Button
                       variant="outline"
-                      onClick={() => (window.location.href = '/app/settings?tab=update')}
+                      onClick={() => (window.location.href = '/app/admin?tab=update')}
                     >
                       {nodeBehind(selected, latest)
                         ? `Mettre à jour le leader (${latest})`
@@ -1151,7 +1216,7 @@ function ClusterInner() {
                     </Button>
                   )}
                   {isLeader(selected) && (
-                    <Button variant="outline" onClick={() => (window.location.href = '/app/settings?tab=backup')}>
+                    <Button variant="outline" onClick={() => (window.location.href = '/app/admin?tab=backup')}>
                       Sauvegarde leader
                     </Button>
                   )}

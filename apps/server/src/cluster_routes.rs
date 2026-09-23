@@ -1408,14 +1408,11 @@ async fn node_update_status(
     }
 }
 
-async fn update_workers(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(body): Json<NodeUpdateBody>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    require_admin(&state, &headers).await?;
-    let target = resolve_update_target(&state, body.target_version).await?;
-    let nodes = state.cluster.list_nodes().await.map_err(map_err)?;
+pub async fn push_worker_updates(
+    state: &AppState,
+    target: &str,
+) -> Result<Vec<Value>, devforge_shared::DevForgeError> {
+    let nodes = state.cluster.list_nodes().await?;
     let mut results = Vec::new();
     for node in nodes {
         if node.role == NodeRole::Leader || node.id == "default" {
@@ -1442,35 +1439,36 @@ async fn update_workers(
             }));
             continue;
         }
-        match worker_remote(&state, &node.id).await {
-            Ok((_, client, secret)) => match client.node_update_start(&secret, Some(&target)).await
-            {
-                Ok(data) => results.push(json!({
-                    "id": node.id,
-                    "name": node.name,
-                    "ok": true,
-                    "data": data.get("data").cloned().unwrap_or(data),
-                })),
-                Err(e) => {
-                    let msg = e.to_string();
-                    if msg.contains("Déjà à jour") {
-                        results.push(json!({
-                            "id": node.id,
-                            "name": node.name,
-                            "ok": true,
-                            "skipped": true,
-                            "message": msg,
-                        }));
-                    } else {
-                        results.push(json!({
-                            "id": node.id,
-                            "name": node.name,
-                            "ok": false,
-                            "error": msg,
-                        }));
+        match worker_remote(state, &node.id).await {
+            Ok((_, client, secret)) => {
+                match client.node_update_start(&secret, Some(target)).await {
+                    Ok(data) => results.push(json!({
+                        "id": node.id,
+                        "name": node.name,
+                        "ok": true,
+                        "data": data.get("data").cloned().unwrap_or(data),
+                    })),
+                    Err(e) => {
+                        let msg = e.to_string();
+                        if msg.contains("Déjà à jour") {
+                            results.push(json!({
+                                "id": node.id,
+                                "name": node.name,
+                                "ok": true,
+                                "skipped": true,
+                                "message": msg,
+                            }));
+                        } else {
+                            results.push(json!({
+                                "id": node.id,
+                                "name": node.name,
+                                "ok": false,
+                                "error": msg,
+                            }));
+                        }
                     }
                 }
-            },
+            }
             Err((_, Json(err))) => results.push(json!({
                 "id": node.id,
                 "name": node.name,
@@ -1479,6 +1477,19 @@ async fn update_workers(
             })),
         }
     }
+    Ok(results)
+}
+
+async fn update_workers(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<NodeUpdateBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    let target = resolve_update_target(&state, body.target_version).await?;
+    let results = push_worker_updates(&state, &target)
+        .await
+        .map_err(map_err)?;
     Ok(Json(json!({
         "ok": true,
         "target_version": target,

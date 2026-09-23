@@ -193,6 +193,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    update_routes::spawn_auto_update(state.clone());
+
     // Advertise agent tools on the local MCP server surface.
     state
         .mcp
@@ -236,7 +238,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
-    // Front Astro : dossier `web/` à côté du binaire, ou DEVFORGE_STATIC_DIR (Docker).
+    // Front Astro : `web/` à côté du programme, share/devforge (Flatpak), ou DEVFORGE_STATIC_DIR.
     let mut serving_web = false;
     if let Some(root) = paths::web_dir() {
         let index = root.join("index.html");

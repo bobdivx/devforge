@@ -44,6 +44,7 @@ impl OpenAiCompatibleProvider {
             "gemini" => Some("https://generativelanguage.googleapis.com/v1beta/openai"),
             // Chat = /v1 ; listing Ollama = root + /api/tags (voir list_models_for_provider).
             "ollama" => Some("http://127.0.0.1:11434/v1"),
+            "omniroute" => Some("http://127.0.0.1:20128/v1"),
             _ => None,
         }
     }
@@ -57,6 +58,9 @@ impl OpenAiCompatibleProvider {
         let provider = provider.trim().to_lowercase();
         if provider == "ollama" {
             return Self::list_ollama_models(base_url).await;
+        }
+        if provider == "omniroute" {
+            return Self::list_openai_compatible_models("openai", base_url, api_key).await;
         }
         if provider == "auto" {
             // Proxy / LiteLLM / Ollama distant : tenter OpenAI-compat puis /api/tags.
@@ -684,6 +688,13 @@ impl OpenAiCompatibleProvider {
         model: &str,
     ) -> String {
         let trimmed = model.trim();
+        // OmniRoute expose « auto » comme routeur. Ne pas le réécrire en gpt-4o-mini.
+        if provider == "omniroute" {
+            if trimmed.is_empty() || trimmed == "auto" {
+                return "auto".into();
+            }
+            return trimmed.to_string();
+        }
         if !trimmed.is_empty() && trimmed != "auto" && trimmed != "gpt-4o-mini" {
             return trimmed.to_string();
         }
@@ -819,6 +830,26 @@ impl OpenAiCompatibleProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn omniroute_auto_is_not_rewritten() {
+        let auto = OpenAiCompatibleProvider::resolve_model(
+            "omniroute",
+            "http://127.0.0.1:20128/v1",
+            "",
+            "auto",
+        )
+        .await;
+        assert_eq!(auto, "auto");
+        let named = OpenAiCompatibleProvider::resolve_model(
+            "omniroute",
+            "http://127.0.0.1:20128/v1",
+            "",
+            "claude-sonnet",
+        )
+        .await;
+        assert_eq!(named, "claude-sonnet");
+    }
 
     // Expose strip_markdown_fences pour les tests
     use super::strip_markdown_fences;

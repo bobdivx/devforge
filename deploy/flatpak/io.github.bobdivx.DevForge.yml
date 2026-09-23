@@ -1,0 +1,48 @@
+# Flatpak DevForge. L’app-id est aussi cité dans crates/update (mise à jour).
+id: io.github.bobdivx.DevForge
+runtime: org.freedesktop.Platform
+runtime-version: "25.08"
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: devforge
+separate-locales: false
+finish-args:
+  - --share=network
+  # Données sous le dossier personnel, visibles par le Docker de la machine.
+  - --filesystem=home
+  # docker / git / npm / ssh sont ceux de l’hôte (host-tool.sh).
+  - --talk-name=org.freedesktop.Flatpak
+build-options:
+  strip: true
+  no-debuginfo: true
+  append-path: /usr/lib/sdk/rust-stable/bin
+  build-args:
+    - --share=network
+  env:
+    CARGO_HOME: /run/build/devforge/cargo-home
+    CARGO_TERM_COLOR: never
+modules:
+  - name: devforge
+    buildsystem: simple
+    build-commands:
+      - test -f apps/web/dist/index.html
+      - cargo build --release -p devforge-server
+      - install -Dm755 target/release/devforge-server /app/bin/devforge-server
+      - install -Dm755 deploy/flatpak/devforge.sh /app/bin/devforge
+      - install -Dm755 deploy/flatpak/host-tool.sh /app/bin/host-tool
+      - ln -sfn host-tool /app/bin/docker
+      - ln -sfn host-tool /app/bin/git
+      - ln -sfn host-tool /app/bin/npm
+      - ln -sfn host-tool /app/bin/npx
+      - ln -sfn host-tool /app/bin/node
+      - ln -sfn host-tool /app/bin/ssh
+      - mkdir -p /app/share/devforge/web /app/share/devforge/templates
+      - cp -a apps/web/dist/. /app/share/devforge/web/
+      - cp -a crates/templates/. /app/share/devforge/templates/
+      - install -Dm644 deploy/flatpak/io.github.bobdivx.DevForge.desktop /app/share/applications/io.github.bobdivx.DevForge.desktop
+      - install -Dm644 deploy/flatpak/io.github.bobdivx.DevForge.metainfo.xml /app/share/metainfo/io.github.bobdivx.DevForge.metainfo.xml
+      - install -Dm644 deploy/zimaos/icon.svg /app/share/icons/hicolor/scalable/apps/io.github.bobdivx.DevForge.svg
+    sources:
+      - type: dir
+        path: ../..

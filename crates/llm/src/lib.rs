@@ -139,6 +139,7 @@ pub fn provider_from_env() -> (Arc<dyn LlmProvider>, &'static str) {
         "openai" => "openai",
         "openrouter" => "openrouter",
         "ollama" => "ollama",
+        "omniroute" => "omniroute",
         _ => "stub",
     };
     (p, label)
@@ -239,6 +240,19 @@ pub fn provider_from_config(
                 "ollama".into(),
             )
         }
+        "omniroute" => {
+            let base = custom_base.unwrap_or("http://127.0.0.1:20128/v1");
+            let k = if key.is_empty() { "sk-local" } else { key };
+            let m = if model.trim().is_empty() || model == "auto" {
+                "auto"
+            } else {
+                model
+            };
+            (
+                Arc::new(OpenAiCompatibleProvider::new(base, k, m)),
+                "omniroute".into(),
+            )
+        }
         _ => {
             // auto
             if let Some(base) = custom_base {
@@ -284,4 +298,16 @@ pub fn tools_to_openai(tools: &[ToolDefinition]) -> Value {
 
 pub fn err(msg: impl Into<String>) -> DevForgeError {
     DevForgeError::Message(msg.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn omniroute_config_keeps_auto_model() {
+        let (provider, mode) = provider_from_config("omniroute", "", "auto", None);
+        assert_eq!(mode, "omniroute");
+        assert_eq!(provider.name(), "openai-compatible");
+    }
 }

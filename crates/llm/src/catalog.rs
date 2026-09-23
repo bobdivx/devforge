@@ -212,6 +212,43 @@ pub fn catalog() -> Vec<CatalogPreset> {
             icon_domain: Some("anthropic.com".into()),
         },
         CatalogPreset {
+            id: "omniroute".into(),
+            name: "OmniRoute".into(),
+            description: "Passerelle que tu lances à côté de DevForge. Un endpoint OpenAI-compatible, tes providers derrière. DevForge ne l’embarque pas.".into(),
+            category: "local".into(),
+            docs_url: Some("https://github.com/diegosouzapw/OmniRoute".into()),
+            default_url: Some("http://127.0.0.1:20128/v1".into()),
+            provider: "omniroute".into(),
+            fields: vec![
+                field(
+                    "base_url",
+                    "URL OmniRoute",
+                    false,
+                    true,
+                    Some("http://127.0.0.1:20128/v1"),
+                    Some("Après `omniroute` en local. Le modèle « auto » laisse OmniRoute choisir."),
+                ),
+                field(
+                    "api_key",
+                    "Clé (si le dashboard en exige une)",
+                    true,
+                    false,
+                    Some("omni-…"),
+                    Some("Dashboard → Endpoints. Vide si la route locale est sans clé."),
+                ),
+                field(
+                    "model",
+                    "Modèle",
+                    false,
+                    false,
+                    Some("auto"),
+                    Some("« auto » = routage OmniRoute. Ou un id de modèle exposé par la passerelle."),
+                ),
+            ],
+            popular: false,
+            icon_domain: Some("omniroute.online".into()),
+        },
+        CatalogPreset {
             id: "custom".into(),
             name: "Endpoint custom".into(),
             description: "LiteLLM, vLLM, LM Studio, Azure… tout endpoint /v1 compatible OpenAI.".into(),
@@ -257,4 +294,26 @@ pub fn find_preset(id: &str) -> Option<CatalogPreset> {
 
 pub fn catalog_as_json() -> Value {
     json!({ "data": catalog() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn omniroute_is_an_external_gateway_preset() {
+        let preset = find_preset("omniroute").expect("preset omniroute");
+        assert_eq!(preset.provider, "omniroute");
+        assert_eq!(preset.category, "local");
+        assert_eq!(
+            preset.default_url.as_deref(),
+            Some("http://127.0.0.1:20128/v1")
+        );
+        let key = preset
+            .fields
+            .iter()
+            .find(|f| f.key == "api_key")
+            .expect("champ clé");
+        assert!(!key.required);
+    }
 }

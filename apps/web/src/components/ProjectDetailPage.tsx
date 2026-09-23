@@ -7,11 +7,11 @@ import { projectNav } from '../lib/nav';
 import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { AppIcon, statusDotClass } from './AppIcon';
 import { AppShell } from './AppShell';
-import { ProjectAgentsPanel } from './ProjectAgentsPanel';
+import { ProjectAgentsHub } from './ProjectAgentsHub';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
 import { ProjectGitPanel } from './ProjectGitPanel';
 import { ProjectOidcPanel } from './ProjectOidcPanel';
-import { ProjectGroupPanel } from './GroupPage';
+import { ProjectGroupPanel, ProjectGroupSuggest } from './GroupPage';
 import { ProjectWorkspace } from './ProjectWorkspace';
 import { ProjectRulesModal } from './workspace/ProjectRulesModal';
 import { NodeSelect } from './NodeSelect';
@@ -154,6 +154,11 @@ export function ProjectDetailPage(props: Props) {
       active="projects"
       projectNav={projectNav(uuid, { workspace: workspaceBeta })}
       title={tab === 'workspace' ? undefined : titles[tab]}
+      description={
+        tab === 'agents'
+          ? 'Agents qui surveillent les déploiements, les runners et le reste du projet.'
+          : undefined
+      }
       actions={
         tab === 'overview' && project ? (
           <div class="flex flex-wrap items-center gap-2">
@@ -232,7 +237,7 @@ export function ProjectDetailPage(props: Props) {
           gitRepository={project?.git_repository}
         />
       )}
-      {tab === 'agents' && <ProjectAgentsPanel projectUuid={uuid} mode="threads" />}
+      {tab === 'agents' && <ProjectAgentsHub projectUuid={uuid} />}
       {tab === 'database' && <DatabasePanel uuid={uuid} />}
       {tab === 'env' && <EnvPanel uuid={uuid} />}
       {tab === 'backups' && <BackupsPanel projectUuid={uuid} />}
@@ -558,7 +563,7 @@ function ProjectOverview({
           </div>
         </div>
 
-        <ProjectGroupPanel project={project} onChanged={() => window.location.reload()} />
+        <ProjectGroupSuggest project={project} />
 
         {(lifeBusy || lifeDetail) && (
           <LiveStatus
@@ -2122,7 +2127,8 @@ function ProjectSettingsPanel({
   }
 
   return (
-    <FadeIn>
+    <FadeIn class="space-y-4">
+      <ProjectGroupPanel project={project} onChanged={onSaved} />
       <Card>
         <CardHeader
           title="Configuration"

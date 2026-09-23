@@ -1221,6 +1221,24 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body ?? {}),
     }),
+  updateSettings: () =>
+    request<{
+      ok: boolean;
+      update_auto_leader: boolean;
+      update_auto_worker: boolean;
+    }>('/update/settings'),
+  updatePatchSettings: (body: {
+    update_auto_leader?: boolean;
+    update_auto_worker?: boolean;
+  }) =>
+    request<{
+      ok: boolean;
+      update_auto_leader: boolean;
+      update_auto_worker: boolean;
+    }>('/update/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
 
   ssoGet: () =>
     request<{

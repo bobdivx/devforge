@@ -10,6 +10,7 @@ import {
   ProgressBar,
   PulseDot,
   Spinner,
+  Switch,
   useToast,
 } from './ui';
 
@@ -61,7 +62,7 @@ function progressOf(job: UpdateJob | null): number {
 function modeLabel(mode: string): string {
   if (mode === 'compose') return 'Docker Compose';
   if (mode === 'docker') return 'Docker';
-  if (mode === 'binary') return 'Binaire';
+  if (mode === 'binary') return 'Installateur';
   return mode;
 }
 
@@ -72,6 +73,9 @@ export function UpdateSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [autoLeader, setAutoLeader] = useState(false);
+  const [autoWorker, setAutoWorker] = useState(false);
+  const [autoBusy, setAutoBusy] = useState<'leader' | 'worker' | null>(null);
 
   async function loadCheck() {
     setLoading(true);
@@ -95,7 +99,41 @@ export function UpdateSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
       return;
     }
     loadCheck();
+    api
+      .updateSettings()
+      .then((s) => {
+        setAutoLeader(!!s.update_auto_leader);
+        setAutoWorker(!!s.update_auto_worker);
+      })
+      .catch(() => null);
   }, [isAdmin]);
+
+  async function toggleAuto(kind: 'leader' | 'worker') {
+    const nextLeader = kind === 'leader' ? !autoLeader : autoLeader;
+    const nextWorker = kind === 'worker' ? !autoWorker : autoWorker;
+    setAutoBusy(kind);
+    try {
+      const r = await api.updatePatchSettings(
+        kind === 'leader'
+          ? { update_auto_leader: nextLeader }
+          : { update_auto_worker: nextWorker },
+      );
+      setAutoLeader(!!r.update_auto_leader);
+      setAutoWorker(!!r.update_auto_worker);
+      toast.push({
+        title: kind === 'leader' ? 'Leader' : 'Workers',
+        detail:
+          (kind === 'leader' ? r.update_auto_leader : r.update_auto_worker)
+            ? 'Mise à jour automatique activée.'
+            : 'Mise à jour automatique désactivée.',
+        tone: 'ok',
+      });
+    } catch (e: unknown) {
+      toast.push({ title: 'Réglage KO', detail: String(e), tone: 'danger' });
+    } finally {
+      setAutoBusy(null);
+    }
+  }
 
   useEffect(() => {
     if (!job || (job.status !== 'running' && job.status !== 'restarting')) return;
@@ -167,6 +205,38 @@ export function UpdateSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
           <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
             Vérifier GitHub Releases et installer la dernière version sur cette instance.
           </p>
+          <div class="mb-5 space-y-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-4 py-3">
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-sm font-medium">Mise à jour auto du leader</div>
+                <p class="text-xs text-[var(--color-ink-muted)]">
+                  Une release disponible est installée sur ce nœud, qui redémarre. Contrôle
+                  environ toutes les 15 minutes.
+                </p>
+              </div>
+              <Switch
+                checked={autoLeader}
+                disabled={autoBusy !== null}
+                label="Mise à jour auto du leader"
+                onToggle={() => void toggleAuto('leader')}
+              />
+            </div>
+            <div class="flex items-center justify-between gap-3 border-t border-[var(--color-line)] pt-3">
+              <div class="min-w-0">
+                <div class="text-sm font-medium">Mise à jour auto des workers</div>
+                <p class="text-xs text-[var(--color-ink-muted)]">
+                  Les workers en ligne et en retard reçoivent la même version. Les apps déjà
+                  lancées ne sont pas recréées.
+                </p>
+              </div>
+              <Switch
+                checked={autoWorker}
+                disabled={autoBusy !== null}
+                label="Mise à jour auto des workers"
+                onToggle={() => void toggleAuto('worker')}
+              />
+            </div>
+          </div>
           {loading ? (
             <div class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)]">
               <Spinner /> Vérification…
@@ -207,10 +277,8 @@ export function UpdateSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
               {error && <Alert tone="warn">{error}</Alert>}
               {check.mode === 'binary' && (
                 <p class="text-xs text-[var(--color-ink-faint)]">
-                  Mode binaire : télécharge l’asset GitHub{' '}
-                  <code>devforge-server-&lt;triple&gt;.zip</code> puis remplace et relance le
-                  process. En prod conteneur, préfère{' '}
-                  <code>DEVFORGE_UPDATE_MODE=compose</code>.
+                  Mode installateur : télécharge l’assistant Windows ou le Flatpak Linux
+                  depuis la release GitHub, puis l’applique. Un ancien zip reste accepté.
                 </p>
               )}
               {(check.mode === 'compose' || check.mode === 'docker') && (

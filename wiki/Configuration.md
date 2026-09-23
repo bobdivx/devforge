@@ -8,9 +8,9 @@ La config **métier** (domaine, GitHub, LLM, SSO, S3 backups, SSH) est dans l’
 |----------|--------|------|
 | `DATABASE_URL` | `sqlite:devforge.db?mode=rwc` | En prod Docker : `sqlite:/data/devforge.db?mode=rwc` |
 | `HOST` / `PORT` | `0.0.0.0` / `8000` | Bind API + UI servie |
-| `DEVFORGE_DATA_DIR` | à côté du binaire (`data/`) si zip ; `/data` en Docker | SQLite workdirs, backups |
-| `DEVFORGE_STATIC_DIR` | `web/` à côté du binaire si zip ; `/app/web` en Docker | Front built |
-| `DEVFORGE_NO_BROWSER` | — | Désactive l’ouverture auto du navigateur (zip desktop) |
+| `DEVFORGE_DATA_DIR` | `data/` à côté du programme (Windows) ; dossier XDG (Flatpak) ; `/data` en Docker | SQLite workdirs, backups |
+| `DEVFORGE_STATIC_DIR` | `web/` à côté du programme, ou `share/devforge/web` (Flatpak) ; `/app/web` en Docker | Front built |
+| `DEVFORGE_NO_BROWSER` | — | Désactive l’ouverture auto du navigateur (installateur / Flatpak) |
 | `PUBLIC_SERVER_URL` | `http://127.0.0.1:8000/api/v1` | Base API côté front **dev** |
 | `DEVFORGE_DOCKER_NETWORK` | `devforge` | Réseau partagé Traefik |
 | `DEVFORGE_CORS_ORIGINS` | vide | Origines autorisées en prod |

@@ -1,6 +1,6 @@
 # Installation
 
-DevForge se publie en **image Docker** et en **binaire** Linux / Windows. La config métier (domaine, GitHub, LLM, SSO, backups) se fait dans l’UI, pas dans un long fichier d’env.
+DevForge se publie en **image Docker**, en **assistant Windows** et en **Flatpak Linux**. La config métier (domaine, GitHub, LLM, SSO, backups) se fait dans l’UI, pas dans un long fichier d’env.
 
 ## Docker Compose (recommandé)
 
@@ -36,24 +36,34 @@ Importer `deploy/zimaos/install.yaml` (Custom App). Laisse les **Variables** vid
 
 Données : `/DATA/AppData/devforge`. Socket Docker monté pour déployer les apps sur la même machine.
 
-## Binaire (Linux / Windows)
+## Windows
 
-Les zips GitHub sont un **logiciel complet** : exécutable + interface + templates.
+Télécharge `DevForge-Setup-<version>-x64.exe` depuis les releases GitHub et lance-le. L’assistant demande le dossier (par défaut le profil utilisateur), les raccourcis, puis ouvre le navigateur sur `http://127.0.0.1:8000`.
 
-- `devforge-server-x86_64-unknown-linux-gnu.zip`
-- `devforge-server-x86_64-pc-windows-msvc.zip`
+Les données restent dans le sous-dossier `data/` à côté du programme. Windows peut afficher SmartScreen (« Informations complémentaires ») tant que l’installateur n’est pas signé.
 
-```bash
-unzip devforge-server-x86_64-unknown-linux-gnu.zip
-cd x86_64-unknown-linux-gnu
-./devforge-server
-```
-
-Le navigateur s’ouvre sur `http://127.0.0.1:8000`. Les données vont dans le sous-dossier `data/` à côté du programme. **Pas de Docker dans le zip, pas de variables à coller.**
-
-**Docker** est une dépendance du *moteur* (déploiements, Traefik) : Docker Desktop sur Windows/macOS, ou `docker` + service sur Linux. Sans Docker, l’UI tourne ; les apps PaaS ne se déploient pas (sauf fallback Node pour certains projets JS). L’onboarding et Settings → Serveur affichent si le moteur est détecté.
+**Docker Desktop** sert à déployer les apps. Sans Docker, l’interface tourne ; les apps PaaS ne se déploient pas.
 
 Pour ne pas ouvrir le navigateur : `DEVFORGE_NO_BROWSER=1`.
+
+## Linux (Flatpak)
+
+```bash
+flatpak install --user ./DevForge-<version>-x86_64.flatpak
+flatpak run io.github.bobdivx.DevForge
+```
+
+Le premier lancement télécharge le runtime Freedesktop si besoin. DevForge apparaît ensuite dans le menu des applications. Les données sont dans le dossier Flatpak de l’app (`~/.var/app/io.github.bobdivx.DevForge`).
+
+Docker et Git doivent être installés **sur la machine** : le Flatpak les appelle directement (socket Docker, dépôts, clés SSH). Node sur la machine sert au repli preview des projets JS. Sans Docker, l’UI tourne ; les apps PaaS ne se déploient pas.
+
+Mise à jour :
+
+```bash
+flatpak install --user --or-update ./DevForge-<version>-x86_64.flatpak
+```
+
+L’écran Mise à jour de DevForge fait la même chose à partir de la release GitHub.
 
 ## Réseau Docker / Traefik
 

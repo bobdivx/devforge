@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=DevForge
+Comment=PaaS et builder auto-hébergé
+Comment[fr]=PaaS et builder auto-hébergé
+Exec=devforge
+Icon=io.github.bobdivx.DevForge
+Terminal=false
+Type=Application
+Categories=Development;Network;
+Keywords=paas;deploy;docker;builder;
+StartupNotify=true

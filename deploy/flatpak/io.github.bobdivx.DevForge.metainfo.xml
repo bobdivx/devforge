@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.bobdivx.DevForge</id>
+  <name>DevForge</name>
+  <summary>PaaS et builder auto-hébergé</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <developer id="io.github.bobdivx">
+    <name>DevForge</name>
+  </developer>
+  <url type="homepage">https://github.com/bobdivx/devforge</url>
+  <description>
+    <p>DevForge installe une plateforme auto-hébergée : déploiement d’applications et builder avec agents.</p>
+    <p>L’interface s’ouvre dans le navigateur. Docker et Git, installés sur la machine, servent à construire et lancer les apps.</p>
+  </description>
+  <launchable type="desktop-id">io.github.bobdivx.DevForge.desktop</launchable>
+</component>

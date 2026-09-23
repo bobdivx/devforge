@@ -10,7 +10,7 @@ Modes (`DEVFORGE_UPDATE_MODE`) :
 |------|----------------|
 | `compose` | `docker compose pull/up` sur le fichier monté (image officielle) |
 | `docker` | Recrée le conteneur `DEVFORGE_SELF_CONTAINER` |
-| `binary` | Télécharge `devforge-server-<triple>.zip` depuis les releases |
+| `binary` | Télécharge l’assistant Windows ou le Flatpak Linux (un ancien zip reste accepté) |
 | `auto` | Détecte compose vs docker vs binary |
 
 API : `GET /api/v1/update/check` · `status` · `POST /api/v1/update/start`.
@@ -24,4 +24,4 @@ Chaque nœud applique **sa** self-update (même pipeline compose/docker/binary).
 - Un worker trop ancien (sans `/internal/update`) doit être mis à jour **une première fois** sur la machine (Paramètres du nœud, ou `docker pull` + recreate). Ensuite le leader pilote les suivantes.
 - Version reportée via le heartbeat (`metrics.software_version`).
 
-Les pushes `main` publient une release (bump patch si la version Cargo est déjà taguée), images Hub + GHCR, zips Linux/Windows. Voir le workflow `.github/workflows/release.yml`.
+Les pushes `main` publient une release (bump patch si la version Cargo est déjà taguée), images Hub + GHCR. L’assistant Windows et le Flatpak sont construits une fois par jour. Voir `.github/workflows/release.yml` et `images.yml`.

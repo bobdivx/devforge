@@ -2,7 +2,16 @@
 
 ## 1. Lancer une instance
 
-**Zip Linux / Windows** (logiciel) : dézippe, lance `devforge-server` / `devforge-server.exe`, ouvre `http://127.0.0.1:8000`. Voir [[Installation]].
+**Windows** : lance `DevForge-Setup-<version>-x64.exe`. L’assistant installe DevForge et ouvre `http://127.0.0.1:8000`.
+
+**Linux** :
+
+```bash
+flatpak install --user ./DevForge-<version>-x86_64.flatpak
+flatpak run io.github.bobdivx.DevForge
+```
+
+Voir [[Installation]].
 
 **Docker :**
 

@@ -1,0 +1,147 @@
+# Installeurs : une fois par jour, et seulement s'il y a eu des commits.
+# Windows : assistant Inno Setup (.exe). Linux : bundle Flatpak.
+# Un lancement manuel (workflow_dispatch) construit même sans commit récent.
+name: Installeurs Linux et Windows
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: os-images
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "Lancement manuel"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          n="$(git rev-list --count --since='24 hours ago' HEAD)"
+          if [[ "$n" -eq 0 ]]; then
+            echo "Aucun commit dans les dernières 24 h — images non construites"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "${n} commit(s) dans les dernières 24 h"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  web:
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.tag }}
+      - name: Build UI
+        env:
+          PUBLIC_SERVER_URL: /api/v1
+        run: |
+          docker run --rm \
+            -v "$PWD/apps/web:/web" \
+            -w /web \
+            -e PUBLIC_SERVER_URL=/api/v1 \
+            node:22-bookworm \
+            bash -lc 'npm install --include=optional && npm run build'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+
+  windows:
+    needs: [gate, web]
+    if: needs.gate.outputs.build == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web-dist
+      - name: Build
+        run: cargo build -p devforge-server --release
+      - name: Préparer les fichiers
+        shell: pwsh
+        run: |
+          $stage = Join-Path $pwd "dist\windows-stage"
+          New-Item -ItemType Directory -Force -Path "$stage\web","$stage\templates" | Out-Null
+          Copy-Item "target\release\devforge-server.exe" "$stage\devforge-server.exe"
+          Copy-Item "apps\web\public\favicon.ico" "$stage\devforge.ico"
+          Copy-Item "web-dist\*" "$stage\web" -Recurse -Force
+          Copy-Item "crates\templates\*" "$stage\templates" -Recurse -Force
+      - name: Installer Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Compiler l’assistant
+        shell: pwsh
+        run: |
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "ISCC introuvable" }
+          $stage = Join-Path $pwd "dist\windows-stage"
+          $out = Join-Path $pwd "dist"
+          & $iscc "/DAppVersion=${{ needs.gate.outputs.version }}" "/DStage=$stage" "/DOutputDir=$out" "deploy\windows\devforge.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.gate.outputs.tag }}
+          files: dist/DevForge-Setup-${{ needs.gate.outputs.version }}-x64.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  linux:
+    needs: [gate, web]
+    if: needs.gate.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.tag }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: DevForge-${{ needs.gate.outputs.version }}-x86_64.flatpak
+          manifest-path: deploy/flatpak/io.github.bobdivx.DevForge.yml
+          cache-key: flatpak-${{ needs.gate.outputs.tag }}
+          upload-artifact: false
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.gate.outputs.tag }}
+          files: DevForge-${{ needs.gate.outputs.version }}-x86_64.flatpak
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

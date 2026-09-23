@@ -28,7 +28,7 @@ npm run check:forbidden
 npm run build -w apps/web
 ```
 
-CI : `.github/workflows/ci.yml`. Release : push `main` / tags `v*` → images + binaires.
+CI : `.github/workflows/ci.yml`. Release : push `main` / tags `v*` → images Docker. Installeurs : `.github/workflows/images.yml` (assistant Windows + Flatpak).
 
 ## Layout
 

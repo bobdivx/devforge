@@ -23,18 +23,33 @@ import { Alert, Badge, Button, Card, FadeIn, Input, Spinner, useToast } from './
 const ROLE_META: Record<string, { label: string; blurb: string; starters: string[] }> = {
   ops: {
     label: 'Ops',
-    blurb: 'État, logs, corrections locales',
-    starters: ['Où en est le projet ?', 'Diagnostique et corrige en local', 'Lance un smoke test'],
+    blurb: 'Santé, logs, environnement',
+    starters: ['Où en est la santé du projet ?', 'Montre les derniers logs', 'Les variables d’env sont-elles cohérentes ?'],
   },
   deploy: {
-    label: 'Deploy',
-    blurb: 'Build, déploiement, versions',
-    starters: ['Déploie la dernière version', 'Quel est le statut du dernier deploy ?'],
+    label: 'Déploiements',
+    blurb: 'Builds, versions, logs de déploiement',
+    starters: ['Quel est le statut du dernier déploiement ?', 'Pourquoi le dernier build a échoué ?', 'Quelle version est en ligne ?'],
+  },
+  runner: {
+    label: 'Runners',
+    blurb: 'Runners GitHub du dépôt',
+    starters: ['Les runners sont-ils en ligne ?', 'Un runner est-il occupé ou en erreur ?'],
+  },
+  actions: {
+    label: 'Actions',
+    blurb: 'Workflows et jobs CI',
+    starters: ['Quel est le dernier workflow ?', 'Y a-t-il un job en échec ?'],
+  },
+  crons: {
+    label: 'Crons',
+    blurb: 'Tâches planifiées du projet',
+    starters: ['Quelles tâches sont actives ?', 'La dernière exécution a-t-elle échoué ?'],
   },
   reviewer: {
-    label: 'Reviewer',
-    blurb: 'Plan, preview, PR sur validation',
-    starters: ['Propose un plan d’amélioration', 'Améliore le design en local', 'Quels risques vois-tu ?'],
+    label: 'Revue',
+    blurb: 'Risques, qualité, CI',
+    starters: ['Lance une revue sécurité du projet', 'Quels risques vois-tu ?', 'La CI est-elle verte ?'],
   },
   custom: {
     label: 'Agent',
@@ -757,7 +772,7 @@ export function ProjectAgentsPanel({
                 <p class="text-sm text-[var(--color-ink-muted)]">
                   {threadsMode
                     ? 'Décris ce que tu veux. L’assistant modifie le projet ; la preview et les fichiers sont à côté.'
-                    : 'L’agent planifie, travaille dans le dossier du projet, puis lance la preview. Une PR n’est ouverte que si tu valides.'}
+                    : 'Cet agent surveille sa partie du projet. Pose une question, ou choisis une piste.'}
                 </p>
                 <div class="flex flex-wrap gap-2">
                   {starters.map((s) => (

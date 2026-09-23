@@ -20,7 +20,7 @@ pub enum UpdateMode {
     Compose,
     /// Pull image + recreate du conteneur nommé (via inspect / run).
     Docker,
-    /// Télécharge l’asset de release et remplace le binaire courant.
+    /// Télécharge l’installateur (assistant Windows, Flatpak) ou un ancien zip.
     Binary,
 }
 
@@ -52,8 +52,8 @@ impl UpdateConfig {
     pub fn from_env() -> Self {
         let current = std::env::var("DEVFORGE_VERSION")
             .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
-        let repo = std::env::var("DEVFORGE_UPDATE_REPO")
-            .unwrap_or_else(|_| "bobdivx/devforge".into());
+        let repo =
+            std::env::var("DEVFORGE_UPDATE_REPO").unwrap_or_else(|_| "bobdivx/devforge".into());
         let (owner, name) = match repo.split_once('/') {
             Some((o, n)) => (o.to_string(), n.to_string()),
             None => ("bobdivx".into(), repo),
@@ -89,8 +89,7 @@ impl UpdateConfig {
                 .unwrap_or_else(|_| "devforge".into()),
             server_id: std::env::var("DEVFORGE_DEFAULT_SERVER_ID")
                 .unwrap_or_else(|_| "default".into()),
-            channel: std::env::var("DEVFORGE_UPDATE_CHANNEL")
-                .unwrap_or_else(|_| "stable".into()),
+            channel: std::env::var("DEVFORGE_UPDATE_CHANNEL").unwrap_or_else(|_| "stable".into()),
         }
     }
 }
@@ -424,14 +423,13 @@ impl UpdateFacade {
         )
         .await?;
 
-        match self.config.mode {
+        let downloaded = match self.config.mode {
             UpdateMode::Compose | UpdateMode::Docker => {
                 self.run_container_pipeline(job_id, target).await?;
+                None
             }
-            UpdateMode::Binary => {
-                self.run_binary_pipeline(job_id, target).await?;
-            }
-        }
+            UpdateMode::Binary => Some(self.run_binary_pipeline(job_id, target).await?),
+        };
 
         self.set_step(
             job_id,
@@ -455,13 +453,11 @@ impl UpdateFacade {
         // Laisser le temps au front de poller / redirect avant kill.
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-        match self.config.mode {
-            UpdateMode::Compose | UpdateMode::Docker => {
+        match downloaded {
+            None => {
                 // Apply a déjà recréé le conteneur ; process peut mourir ici.
             }
-            UpdateMode::Binary => {
-                self.restart_replaced_binary().await?;
-            }
+            Some(release) => self.restart_downloaded(&release).await?,
         }
 
         Ok(())
@@ -517,8 +513,13 @@ impl UpdateFacade {
                 truncate(&pull.output, 400)
             )));
         }
-        self.set_step(job_id, "pull", StepStatus::Done, &truncate(&pull.output, 180))
-            .await?;
+        self.set_step(
+            job_id,
+            "pull",
+            StepStatus::Done,
+            &truncate(&pull.output, 180),
+        )
+        .await?;
 
         self.set_step(job_id, "apply", StepStatus::Running, "Recréation…")
             .await?;
@@ -579,7 +580,10 @@ impl UpdateFacade {
 
         // Check if Traefik container exists
         let check_cmd = r#"docker inspect devforge-traefik --format '{{.State.Status}}' 2>/dev/null || echo 'missing'"#;
-        let check_res = self.executor.exec(&self.config.server_id, ".", check_cmd, 30).await?;
+        let check_res = self
+            .executor
+            .exec(&self.config.server_id, ".", check_cmd, 30)
+            .await?;
         let status = check_res.output.trim();
 
         match status {
@@ -588,7 +592,9 @@ impl UpdateFacade {
                 return Ok(());
             }
             "missing" => {
-                tracing::warn!("Traefik proxy is MISSING — recreating (critical fix for 2026-09-14 outage)");
+                tracing::warn!(
+                    "Traefik proxy is MISSING — recreating (critical fix for 2026-09-14 outage)"
+                );
             }
             _ => {
                 tracing::warn!(status = %status, "Traefik proxy is not running — restarting");
@@ -596,12 +602,16 @@ impl UpdateFacade {
         }
 
         // Ensure devforge network exists
-        let network_cmd = r#"docker network inspect devforge >/dev/null 2>&1 || docker network create devforge"#;
-        let _ = self.executor.exec(&self.config.server_id, ".", network_cmd, 30).await;
+        let network_cmd =
+            r#"docker network inspect devforge >/dev/null 2>&1 || docker network create devforge"#;
+        let _ = self
+            .executor
+            .exec(&self.config.server_id, ".", network_cmd, 30)
+            .await;
 
         // Resolve Traefik data path (host or container)
-        let data_path = std::env::var("DEVFORGE_DATA_DIR")
-            .unwrap_or_else(|_| "/var/lib/devforge".into());
+        let data_path =
+            std::env::var("DEVFORGE_DATA_DIR").unwrap_or_else(|_| "/var/lib/devforge".into());
         let traefik_dir = format!("{}/proxy", data_path);
 
         // Prepare data directory (acme.json + dynamic/)
@@ -611,7 +621,10 @@ impl UpdateFacade {
             shell_escape(&traefik_dir),
             shell_escape(&traefik_dir)
         );
-        let _ = self.executor.exec(&self.config.server_id, ".", &prep_cmd, 30).await;
+        let _ = self
+            .executor
+            .exec(&self.config.server_id, ".", &prep_cmd, 30)
+            .await;
 
         // Create or start Traefik
         if status == "missing" {
@@ -651,9 +664,15 @@ impl UpdateFacade {
   --ping.entrypoint=http"#,
                 shell_escape(&traefik_dir)
             );
-            let create_res = self.executor.exec(&self.config.server_id, ".", &create_cmd, 60).await?;
+            let create_res = self
+                .executor
+                .exec(&self.config.server_id, ".", &create_cmd, 60)
+                .await?;
             if !create_res.ok {
-                let err_msg = format!("Failed to create Traefik: {}", truncate(&create_res.output, 300));
+                let err_msg = format!(
+                    "Failed to create Traefik: {}",
+                    truncate(&create_res.output, 300)
+                );
                 tracing::error!("{}", err_msg);
                 return Err(DevForgeError::Message(err_msg));
             }
@@ -661,9 +680,15 @@ impl UpdateFacade {
         } else {
             // Container exists but stopped, start it
             let start_cmd = "docker start devforge-traefik";
-            let start_res = self.executor.exec(&self.config.server_id, ".", start_cmd, 30).await?;
+            let start_res = self
+                .executor
+                .exec(&self.config.server_id, ".", start_cmd, 30)
+                .await?;
             if !start_res.ok {
-                let err_msg = format!("Failed to start Traefik: {}", truncate(&start_res.output, 300));
+                let err_msg = format!(
+                    "Failed to start Traefik: {}",
+                    truncate(&start_res.output, 300)
+                );
                 tracing::error!("{}", err_msg);
                 return Err(DevForgeError::Message(err_msg));
             }
@@ -828,13 +853,13 @@ impl UpdateFacade {
         Ok(inspect.output)
     }
 
-    async fn run_binary_pipeline(&self, job_id: &str, target: &str) -> Result<()> {
+    async fn run_binary_pipeline(&self, job_id: &str, target: &str) -> Result<DownloadedRelease> {
         let triple = host_target_triple();
         self.set_step(
             job_id,
             "prepare",
             StepStatus::Done,
-            &format!("Binaire {triple}"),
+            &format!("Paquet {triple}"),
         )
         .await?;
 
@@ -851,7 +876,7 @@ impl UpdateFacade {
             .await
             .map_err(|e| {
                 DevForgeError::Message(format!(
-                    "{e} — publie une release avec `devforge-server-{triple}.zip` (ou .exe/.bin)."
+                    "{e} — publie DevForge-Setup-<version>-x64.exe (Windows) ou DevForge-<version>-x86_64.flatpak (Linux)."
                 ))
             })?;
 
@@ -877,24 +902,56 @@ impl UpdateFacade {
         )
         .await?;
 
-        self.set_step(
-            job_id,
-            "apply",
-            StepStatus::Running,
-            "Remplacement du binaire…",
-        )
-        .await?;
-        let installed = self
-            .install_downloaded_binary(&download_path, &current, &asset.name)
-            .await?;
-        self.set_step(
-            job_id,
-            "apply",
-            StepStatus::Done,
-            &format!("Installé → {}", installed.display()),
-        )
-        .await?;
-        Ok(())
+        let kind = release_kind(&asset.name);
+        match kind {
+            ReleaseKind::ZipOrBinary => {
+                self.set_step(
+                    job_id,
+                    "apply",
+                    StepStatus::Running,
+                    "Remplacement du programme…",
+                )
+                .await?;
+                let installed = self
+                    .install_downloaded_binary(&download_path, &current, &asset.name)
+                    .await?;
+                self.set_step(
+                    job_id,
+                    "apply",
+                    StepStatus::Done,
+                    &format!("Installé → {}", installed.display()),
+                )
+                .await?;
+                Ok(DownloadedRelease {
+                    kind,
+                    path: installed,
+                })
+            }
+            ReleaseKind::WindowsSetup => {
+                self.set_step(job_id, "apply", StepStatus::Done, "Assistant Windows prêt")
+                    .await?;
+                Ok(DownloadedRelease {
+                    kind,
+                    path: download_path,
+                })
+            }
+            ReleaseKind::Flatpak => {
+                self.set_step(job_id, "apply", StepStatus::Done, "Paquet Flatpak prêt")
+                    .await?;
+                Ok(DownloadedRelease {
+                    kind,
+                    path: download_path,
+                })
+            }
+        }
+    }
+
+    async fn restart_downloaded(&self, release: &DownloadedRelease) -> Result<()> {
+        match release.kind {
+            ReleaseKind::ZipOrBinary => self.restart_replaced_binary().await,
+            ReleaseKind::WindowsSetup => handoff_windows_setup(&release.path).await,
+            ReleaseKind::Flatpak => handoff_flatpak(&release.path).await,
+        }
     }
 
     async fn resolve_release_asset(&self, tag: &str, triple: &str) -> Result<ReleaseAsset> {
@@ -904,9 +961,8 @@ impl UpdateFacade {
         let mut last_err = DevForgeError::Message("release introuvable".into());
 
         for tag_name in &tag_variants {
-            let url = format!(
-                "https://api.github.com/repos/{owner}/{name}/releases/tags/{tag_name}"
-            );
+            let url =
+                format!("https://api.github.com/repos/{owner}/{name}/releases/tags/{tag_name}");
             let mut req = self
                 .http
                 .get(&url)
@@ -917,14 +973,13 @@ impl UpdateFacade {
                     req = req.bearer_auth(token.trim());
                 }
             }
-            let res = req.send().await.map_err(|e| {
-                DevForgeError::Message(format!("GitHub release {tag_name}: {e}"))
-            })?;
+            let res = req
+                .send()
+                .await
+                .map_err(|e| DevForgeError::Message(format!("GitHub release {tag_name}: {e}")))?;
             if !res.status().is_success() {
-                last_err = DevForgeError::Message(format!(
-                    "GitHub release {tag_name}: {}",
-                    res.status()
-                ));
+                last_err =
+                    DevForgeError::Message(format!("GitHub release {tag_name}: {}", res.status()));
                 continue;
             }
             let v: Value = res
@@ -948,9 +1003,9 @@ impl UpdateFacade {
 
     async fn download_asset(&self, asset: &ReleaseAsset, dest: &Path) -> Result<()> {
         if let Some(parent) = dest.parent() {
-            tokio::fs::create_dir_all(parent).await.map_err(|e| {
-                DevForgeError::Message(format!("mkdir download: {e}"))
-            })?;
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| DevForgeError::Message(format!("mkdir download: {e}")))?;
         }
         let mut req = self
             .http
@@ -999,9 +1054,9 @@ impl UpdateFacade {
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .join(format!("devforge-update-{}", Uuid::new_v4()));
-            tokio::fs::create_dir_all(&dir).await.map_err(|e| {
-                DevForgeError::Message(format!("mkdir extract: {e}"))
-            })?;
+            tokio::fs::create_dir_all(&dir)
+                .await
+                .map_err(|e| DevForgeError::Message(format!("mkdir extract: {e}")))?;
             extract_zip_find_binary(download, &dir).await?
         } else {
             download.to_path_buf()
@@ -1040,9 +1095,8 @@ impl UpdateFacade {
     }
 
     async fn restart_replaced_binary(&self) -> Result<()> {
-        let current = std::env::current_exe().map_err(|e| {
-            DevForgeError::Message(format!("current_exe: {e}"))
-        })?;
+        let current = std::env::current_exe()
+            .map_err(|e| DevForgeError::Message(format!("current_exe: {e}")))?;
         let args: Vec<String> = std::env::args().skip(1).collect();
         let mut cmd = tokio::process::Command::new(&current);
         cmd.args(&args).envs(std::env::vars()).kill_on_drop(false);
@@ -1111,8 +1165,40 @@ struct ReleaseAsset {
     size: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReleaseKind {
+    ZipOrBinary,
+    WindowsSetup,
+    Flatpak,
+}
+
+struct DownloadedRelease {
+    kind: ReleaseKind,
+    path: PathBuf,
+}
+
+/// Même id que `deploy/flatpak/io.github.bobdivx.DevForge.yml`.
+const FLATPAK_APP_ID: &str = "io.github.bobdivx.DevForge";
+
+fn release_kind(name: &str) -> ReleaseKind {
+    let lower = name.to_lowercase();
+    if lower.ends_with(".flatpak") {
+        ReleaseKind::Flatpak
+    } else if lower.ends_with(".msi")
+        || (lower.ends_with(".exe") && (lower.contains("setup") || lower.contains("installer")))
+    {
+        ReleaseKind::WindowsSetup
+    } else {
+        ReleaseKind::ZipOrBinary
+    }
+}
+
 fn pick_asset(assets: &[Value], triple: &str) -> Option<ReleaseAsset> {
-    let mut scored: Vec<(i32, ReleaseAsset)> = Vec::new();
+    pick_asset_for(assets, triple, std::env::consts::OS, std::env::consts::ARCH)
+}
+
+fn pick_asset_for(assets: &[Value], triple: &str, os: &str, arch: &str) -> Option<ReleaseAsset> {
+    let mut best: Option<(i32, ReleaseAsset)> = None;
     for a in assets {
         let name = a.get("name")?.as_str()?.to_string();
         let url = a
@@ -1124,39 +1210,135 @@ fn pick_asset(assets: &[Value], triple: &str) -> Option<ReleaseAsset> {
             continue;
         }
         let size = a.get("size").and_then(|s| s.as_u64()).unwrap_or(0);
-        let lower = name.to_lowercase();
-        let mut score = 0;
-        if lower.contains(triple) {
-            score += 100;
+        let score = installer_asset_score(&name.to_lowercase(), triple, os, arch);
+        if score <= 0 {
+            continue;
         }
-        if lower.contains("devforge-server") || lower.contains("devforge_server") {
-            score += 20;
-        }
-        if cfg!(windows) && (lower.ends_with(".exe") || lower.contains("windows")) {
-            score += 10;
-        }
-        if cfg!(target_os = "linux") && lower.contains("linux") {
-            score += 10;
-        }
-        if cfg!(target_os = "macos") && (lower.contains("darwin") || lower.contains("macos")) {
-            score += 10;
-        }
-        if cfg!(target_arch = "x86_64")
-            && (lower.contains("x86_64") || lower.contains("amd64") || lower.contains("x64"))
-        {
-            score += 5;
-        }
-        if cfg!(target_arch = "aarch64")
-            && (lower.contains("aarch64") || lower.contains("arm64"))
-        {
-            score += 5;
-        }
-        if score > 0 {
-            scored.push((score, ReleaseAsset { name, url, size }));
+        let replace = best.as_ref().map(|(s, _)| score > *s).unwrap_or(true);
+        if replace {
+            best = Some((score, ReleaseAsset { name, url, size }));
         }
     }
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
-    scored.into_iter().next().map(|(_, a)| a)
+    best.map(|(_, asset)| asset)
+}
+
+fn installer_asset_score(lower: &str, triple: &str, os: &str, arch: &str) -> i32 {
+    if lower.ends_with(".sha256")
+        || lower.ends_with(".asc")
+        || lower.ends_with(".sig")
+        || lower.ends_with(".yml")
+        || lower.ends_with(".yaml")
+    {
+        return 0;
+    }
+    let arch_ok = arch_matches(lower, arch);
+    let triple_ok = lower.contains(&triple.to_lowercase());
+    let mut score = 0;
+    if os == "windows" {
+        let setup =
+            lower.ends_with(".exe") && (lower.contains("setup") || lower.contains("installer"));
+        let msi = lower.ends_with(".msi");
+        if (setup || msi) && (arch_ok || triple_ok) {
+            score = if setup { 300 } else { 280 };
+        } else if lower.ends_with(".zip") && (triple_ok || (lower.contains("windows") && arch_ok)) {
+            score = 100;
+        }
+    } else if os == "linux" {
+        if lower.ends_with(".flatpak") && (arch_ok || triple_ok) {
+            score = 300;
+        } else if lower.ends_with(".zip") && (triple_ok || (lower.contains("linux") && arch_ok)) {
+            score = 100;
+        }
+    } else if lower.ends_with(".zip") && triple_ok {
+        score = 100;
+    }
+    if score > 0 && lower.contains("devforge") {
+        score += 20;
+    }
+    score
+}
+
+fn arch_matches(lower: &str, arch: &str) -> bool {
+    match arch {
+        "x86_64" => lower.contains("x86_64") || lower.contains("amd64") || lower.contains("x64"),
+        "aarch64" => lower.contains("aarch64") || lower.contains("arm64"),
+        _ => lower.contains(arch),
+    }
+}
+
+async fn handoff_windows_setup(setup: &Path) -> Result<()> {
+    let mut cmd = tokio::process::Command::new(setup);
+    cmd.args([
+        "/VERYSILENT",
+        "/SUPPRESSMSGBOXES",
+        "/FORCECLOSEAPPLICATIONS",
+        "/NORESTART",
+    ])
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+    }
+    cmd.spawn().map_err(|e| {
+        DevForgeError::Message(format!(
+            "Lancement de l’assistant {} : {e}",
+            setup.display()
+        ))
+    })?;
+    schedule_exit();
+    Ok(())
+}
+
+async fn handoff_flatpak(bundle: &Path) -> Result<()> {
+    let bundle = bundle.to_string_lossy().to_string();
+    let status = flatpak_command(&[
+        "install",
+        "--user",
+        "-y",
+        "--noninteractive",
+        "--or-update",
+        &bundle,
+    ])
+    .status()
+    .await
+    .map_err(|e| DevForgeError::Message(format!("flatpak install : {e}")))?;
+    if !status.success() {
+        return Err(DevForgeError::Message(format!(
+            "flatpak install a échoué. Commande manuelle : flatpak install --user --or-update {bundle}"
+        )));
+    }
+    flatpak_command(&["run", FLATPAK_APP_ID])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| DevForgeError::Message(format!("relance Flatpak : {e}")))?;
+    schedule_exit();
+    Ok(())
+}
+
+fn flatpak_command(args: &[&str]) -> tokio::process::Command {
+    if std::env::var_os("FLATPAK_ID").is_some() {
+        let mut cmd = tokio::process::Command::new("flatpak-spawn");
+        cmd.arg("--host").arg("flatpak");
+        cmd.args(args);
+        cmd
+    } else {
+        let mut cmd = tokio::process::Command::new("flatpak");
+        cmd.args(args);
+        cmd
+    }
+}
+
+fn schedule_exit() {
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        std::process::exit(0);
+    });
 }
 
 fn host_target_triple() -> String {
@@ -1207,9 +1389,9 @@ fn shell_join(parts: &[String]) -> String {
     parts
         .iter()
         .map(|p| {
-            if p.chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '=' | '@'))
-            {
+            if p.chars().all(|c| {
+                c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '=' | '@')
+            }) {
                 p.clone()
             } else if cfg!(windows) {
                 format!("'{}'", p.replace('\'', "''"))
@@ -1417,12 +1599,30 @@ fn b64_encode(data: &[u8]) -> String {
     out
 }
 
-fn download_path_for(current: &Path, asset_name: &str) -> PathBuf {
-    let dir = current
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-    dir.join(format!(".devforge-update-{asset_name}"))
+fn download_path_for(_current: &Path, asset_name: &str) -> PathBuf {
+    let safe: String = asset_name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    update_download_dir().join(safe)
+}
+
+fn update_download_dir() -> PathBuf {
+    if std::env::var_os("FLATPAK_ID").is_some() {
+        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+            let trimmed = xdg.trim();
+            if !trimmed.is_empty() {
+                return PathBuf::from(trimmed).join("devforge").join("updates");
+            }
+        }
+    }
+    std::env::temp_dir().join("devforge-updates")
 }
 
 async fn extract_zip_find_binary(zip_path: &Path, dest_dir: &Path) -> Result<PathBuf> {
@@ -1433,9 +1633,7 @@ async fn extract_zip_find_binary(zip_path: &Path, dest_dir: &Path) -> Result<Pat
             .args([
                 "-NoProfile",
                 "-Command",
-                &format!(
-                    "Expand-Archive -LiteralPath '{zip}' -DestinationPath '{dest}' -Force"
-                ),
+                &format!("Expand-Archive -LiteralPath '{zip}' -DestinationPath '{dest}' -Force"),
             ])
             .status()
             .await
@@ -1553,8 +1751,54 @@ mod tests {
                 "size": 10
             }),
         ];
-        let a = pick_asset(&assets, "x86_64-pc-windows-msvc").expect("asset");
+        let a =
+            pick_asset_for(&assets, "x86_64-pc-windows-msvc", "windows", "x86_64").expect("asset");
         assert!(a.name.contains("windows"));
+    }
+
+    #[test]
+    fn pick_setup_over_legacy_zip() {
+        let assets = vec![
+            json!({
+                "name": "devforge-server-x86_64-pc-windows-msvc.zip",
+                "browser_download_url": "http://x/zip",
+                "size": 10
+            }),
+            json!({
+                "name": "DevForge-Setup-2.0.102-x64.exe",
+                "browser_download_url": "http://x/setup",
+                "size": 20
+            }),
+        ];
+        let a =
+            pick_asset_for(&assets, "x86_64-pc-windows-msvc", "windows", "x86_64").expect("asset");
+        assert!(a.name.contains("Setup"));
+        assert_eq!(release_kind(&a.name), ReleaseKind::WindowsSetup);
+    }
+
+    #[test]
+    fn pick_flatpak_over_legacy_zip() {
+        let assets = vec![
+            json!({
+                "name": "devforge-server-x86_64-unknown-linux-gnu.zip",
+                "browser_download_url": "http://x/zip",
+                "size": 10
+            }),
+            json!({
+                "name": "DevForge-2.0.102-x86_64.flatpak",
+                "browser_download_url": "http://x/flatpak",
+                "size": 20
+            }),
+            json!({
+                "name": "DevForge-2.0.102-aarch64.flatpak",
+                "browser_download_url": "http://x/arm",
+                "size": 20
+            }),
+        ];
+        let a =
+            pick_asset_for(&assets, "x86_64-unknown-linux-gnu", "linux", "x86_64").expect("asset");
+        assert!(a.name.ends_with("x86_64.flatpak"));
+        assert_eq!(release_kind(&a.name), ReleaseKind::Flatpak);
     }
 
     #[test]

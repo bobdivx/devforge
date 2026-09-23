@@ -1,4 +1,5 @@
 export { Button } from './Button';
+export { Switch } from './Switch';
 export { Card, CardHeader } from './Card';
 export { HubGrid, HubTile, HubIcon, HubAddTile } from './HubTile';
 export { Input } from './Input';
