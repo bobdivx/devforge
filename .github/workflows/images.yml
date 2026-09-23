@@ -116,7 +116,7 @@ jobs:
           $stage = Join-Path $pwd "dist\windows-stage"
           New-Item -ItemType Directory -Force -Path "$stage\web","$stage\templates" | Out-Null
           Copy-Item "target\release\devforge-server.exe" "$stage\devforge-server.exe"
-          Copy-Item "apps\web\public\favicon.ico" "$stage\devforge.ico"
+          Copy-Item "deploy\windows\devforge.ico" "$stage\devforge.ico"
           Copy-Item "web-dist\*" "$stage\web" -Recurse -Force
           Copy-Item "crates\templates\*" "$stage\templates" -Recurse -Force
       - name: Installer Inno Setup
