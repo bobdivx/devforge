@@ -13,7 +13,6 @@ const USER_NAV: NavItem[] = [
 const ADMIN_NAV: NavItem[] = [
   { href: '/app', label: 'Apps', key: 'home' },
   { href: '/app/runners', label: 'Runners', key: 'runners' },
-  { href: '/app/cluster', label: 'Cluster', key: 'cluster' },
   { href: '/app/mcp', label: 'MCP', key: 'mcp' },
   { href: '/app/tokens', label: 'Tokens', key: 'tokens' },
   { href: '/app/team', label: 'Compte', key: 'team' },

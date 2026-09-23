@@ -3,6 +3,7 @@ import { api } from '../lib/api';
 import { AppShell } from './AppShell';
 import { InstanceAdminGate } from './InstanceAdminGate';
 import { InstanceDomainPanel, ServerSettingsPanel } from './AdminInfraPanels';
+import { ClusterPanel } from './ClusterPage';
 import { BackupSettingsPanel } from './BackupSettingsPanel';
 import { PostgresAdminPanel } from './PostgresAdminPanel';
 import { SsoSettingsPanel } from './SsoSettingsPanel';
@@ -76,7 +77,8 @@ type AdminSection =
   | 'sso'
   | 'backup'
   | 'update'
-  | 'domaine';
+  | 'domaine'
+  | 'cluster';
 
 const SECTION_TITLES: Record<Exclude<AdminSection, 'hub'>, string> = {
   workspaces: 'Workspaces',
@@ -89,6 +91,7 @@ const SECTION_TITLES: Record<Exclude<AdminSection, 'hub'>, string> = {
   backup: 'Sauvegardes',
   update: 'Mise à jour',
   domaine: 'Domaine instance',
+  cluster: 'Cluster',
 };
 
 const ADMIN_TABS: AdminSection[] = [
@@ -102,6 +105,7 @@ const ADMIN_TABS: AdminSection[] = [
   'backup',
   'update',
   'domaine',
+  'cluster',
 ];
 
 type BetaFeatures = {
@@ -215,48 +219,55 @@ function AdminHub() {
       />
       <HubTile
         index={3}
+        href="/app/admin?tab=cluster"
+        title="Cluster"
+        description="Leader, workers, invitations et placement des apps"
+        icon={<HubIcon name="network" />}
+      />
+      <HubTile
+        index={4}
         href="/app/admin?tab=postgres"
         title="Postgres"
         description="Base du control plane, port et répliques"
         icon={<HubIcon name="server" />}
       />
       <HubTile
-        index={4}
+        index={5}
         href="/app/admin?tab=serveur"
         title="Serveur"
         description="Docker local ou SSH distant, clés SSH"
         icon={<HubIcon name="server" />}
       />
       <HubTile
-        index={5}
+        index={6}
         href="/app/admin?tab=domaine"
         title="Domaine instance"
         description="Wildcard de repli et DNS automatique"
         icon={<HubIcon name="globe" />}
       />
       <HubTile
-        index={6}
+        index={7}
         href="/app/admin?tab=sso"
         title="SSO / OIDC"
         description="Authentification unique de l’instance"
         icon={<HubIcon name="shield" />}
       />
       <HubTile
-        index={7}
+        index={8}
         href="/app/admin?tab=backup"
         title="Sauvegardes"
         description="Sauvegardes de l’instance, locales et S3"
         icon={<HubIcon name="archive" />}
       />
       <HubTile
-        index={8}
+        index={9}
         href="/app/admin?tab=update"
         title="Mise à jour"
         description="Version de DevForge"
         icon={<HubIcon name="refresh" />}
       />
       <HubTile
-        index={9}
+        index={10}
         href="/app/admin?tab=beta"
         title="Fonctionnalités bêta"
         description="Workspace et création d’app par agent"
@@ -895,6 +906,7 @@ function AdminPageInner() {
         {section === 'sso' && <SsoSettingsPanel isAdmin />}
         {section === 'backup' && <BackupSettingsPanel isAdmin />}
         {section === 'update' && <UpdateSettingsPanel isAdmin />}
+        {section === 'cluster' && <ClusterPanel />}
       </FadeIn>
     </AppShell>
   );

@@ -3,7 +3,6 @@ import { api, type ClusterInvite, type ClusterNode, type Project } from '../lib/
 import { nodeRoleLabel, resolveNode } from '../lib/cluster-display';
 import { projectStatusMeta } from '../lib/status';
 import { AppShell } from './AppShell';
-import { InstanceAdminGate } from './InstanceAdminGate';
 import {
   Alert,
   Badge,
@@ -202,14 +201,19 @@ function inviteState(inv: ClusterInvite): { label: string; tone: 'ok' | 'warn' |
 }
 
 export function ClusterPage() {
+  useEffect(() => {
+    window.location.replace('/app/admin?tab=cluster');
+  }, []);
+
   return (
-    <InstanceAdminGate active="cluster" title="Cluster">
-      <ClusterPageInner />
-    </InstanceAdminGate>
+    <AppShell active="admin" title="Cluster">
+      <div class="h-32 animate-pulse rounded-2xl bg-white/5" />
+    </AppShell>
   );
 }
 
-function ClusterPageInner() {
+/** Contenu cluster, affiché dans Admin. */
+export function ClusterPanel() {
   return (
     <ToastProvider>
       <ClusterInner />
@@ -623,11 +627,11 @@ function ClusterInner() {
   );
 
   return (
-    <AppShell
-      active="cluster"
-      title="Cluster"
-      description="Un leader (control plane) et des workers (compute). Les apps Docker restent sur leur machine."
-      actions={
+    <div>
+      <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p class="max-w-xl text-sm text-[var(--color-ink-muted)]">
+          Un leader (control plane) et des workers (compute). Les apps Docker restent sur leur machine.
+        </p>
         <div class="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
@@ -650,8 +654,7 @@ function ClusterInner() {
             Inviter
           </Button>
         </div>
-      }
-    >
+      </div>
       {error && (
         <Alert tone="danger" class="mb-4">
           {error}
@@ -1243,7 +1246,7 @@ function ClusterInner() {
           </div>
         )}
       </Modal>
-    </AppShell>
+    </div>
   );
 }
 
