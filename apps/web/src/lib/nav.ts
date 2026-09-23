@@ -75,23 +75,15 @@ export function projectNav(uuid: string, opts?: { workspace?: boolean }): NavIte
   return items;
 }
 
-/** Sous-nav Settings. Les comptes voient domaine, GitHub et LLM ; le reste est admin. */
+/** Paramètres du compte. L'infra de l'instance est dans Admin. */
 export const SETTINGS_NAV: NavItem[] = [
-  { href: '/app/settings', label: 'Général', key: 'general' },
   { href: '/app/settings?tab=domaine', label: 'Domaine', key: 'domaine' },
   { href: '/app/settings?tab=github', label: 'GitHub', key: 'github' },
-  { href: '/app/settings?tab=serveur', label: 'Serveur', key: 'serveur' },
   { href: '/app/settings?tab=llm', label: 'Agents / LLM', key: 'llm' },
-  { href: '/app/settings?tab=sso', label: 'SSO / OIDC', key: 'sso' },
-  { href: '/app/settings?tab=backup', label: 'Sauvegardes', key: 'backup' },
-  { href: '/app/settings?tab=update', label: 'Mise à jour', key: 'update' },
 ];
 
-const USER_SETTINGS_KEYS = new Set(['domaine', 'github', 'llm']);
-
-export function settingsNavForRole(role?: string | null): NavItem[] {
-  if (role === 'instance_admin') return SETTINGS_NAV;
-  return SETTINGS_NAV.filter((item) => USER_SETTINGS_KEYS.has(item.key));
+export function settingsNavForRole(_role?: string | null): NavItem[] {
+  return SETTINGS_NAV;
 }
 
 export function projectAgentsHref(uuid: string): string {

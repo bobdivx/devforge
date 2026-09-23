@@ -1,39 +1,16 @@
-import { useEffect, useState } from 'preact/hooks';
-import { api } from '../lib/api';
-import { SETTINGS_NAV } from '../lib/nav';
+import { useEffect } from 'preact/hooks';
 import { AppShell } from './AppShell';
-import { InstanceAdminGate } from './InstanceAdminGate';
-import { UpdateSettingsPanel } from './UpdateSettingsPanel';
+import { Skeleton } from './ui';
 
+/** Ancienne page. La mise à jour de l’instance est dans Admin. */
 export function UpdatePage() {
-  return (
-    <InstanceAdminGate active="settings" title="Mise à jour">
-      <UpdatePageInner />
-    </InstanceAdminGate>
-  );
-}
-
-function UpdatePageInner() {
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [ready, setReady] = useState(false);
-
   useEffect(() => {
-    api
-      .bootstrap()
-      .then((b) => setIsAdmin(b.user?.role === 'instance_admin'))
-      .catch(() => setIsAdmin(false))
-      .finally(() => setReady(true));
+    window.location.replace('/app/admin?tab=update');
   }, []);
 
   return (
-    <AppShell
-      active="settings"
-      title="Mise à jour"
-      description="Suivi des versions DevForge et mise à jour de l’instance."
-      sideNav={SETTINGS_NAV}
-      sideNavLabel="Settings"
-    >
-      {ready ? <UpdateSettingsPanel isAdmin={isAdmin} /> : null}
+    <AppShell active="admin" title="Mise à jour">
+      <Skeleton class="h-32" />
     </AppShell>
   );
 }

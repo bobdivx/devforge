@@ -431,7 +431,7 @@ export function DnsEntrypointPanel(props: Props) {
               tunnels.
             </p>
             <a
-              href="/app/settings?tab=update"
+              href="/app/admin?tab=update"
               class="mt-2 inline-block text-sm font-medium text-[var(--color-accent)] underline"
             >
               Aller à Mise à jour →

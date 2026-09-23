@@ -1,40 +1,16 @@
-import { useEffect, useState } from 'preact/hooks';
-import { SETTINGS_NAV } from '../lib/nav';
+import { useEffect } from 'preact/hooks';
 import { AppShell } from './AppShell';
-import { InstanceAdminGate } from './InstanceAdminGate';
-import { BackupSettingsPanel } from './BackupSettingsPanel';
-import { api } from '../lib/api';
+import { Skeleton } from './ui';
 
-/** Redirect legacy /app/storage → Settings Sauvegardes. */
+/** Ancienne page. Les sauvegardes de l’instance sont dans Admin. */
 export function StoragePage() {
-  return (
-    <InstanceAdminGate active="settings" title="Sauvegardes">
-      <StoragePageInner />
-    </InstanceAdminGate>
-  );
-}
-
-function StoragePageInner() {
-  const [isAdmin, setIsAdmin] = useState(false);
-
   useEffect(() => {
-    if (typeof window !== 'undefined' && !window.location.search.includes('tab=')) {
-      window.history.replaceState({}, '', '/app/settings?tab=backup');
-    }
-    api
-      .bootstrap()
-      .then((b) => setIsAdmin(b.user?.role === 'instance_admin'))
-      .catch(() => setIsAdmin(false));
+    window.location.replace('/app/admin?tab=backup');
   }, []);
 
   return (
-    <AppShell
-      active="settings"
-      title="Sauvegardes"
-      sideNav={SETTINGS_NAV}
-      sideNavLabel="Settings"
-    >
-      <BackupSettingsPanel isAdmin={isAdmin} />
+    <AppShell active="admin" title="Sauvegardes">
+      <Skeleton class="h-32" />
     </AppShell>
   );
 }

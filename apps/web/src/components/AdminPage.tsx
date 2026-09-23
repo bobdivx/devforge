@@ -2,7 +2,11 @@ import { useEffect, useState } from 'preact/hooks';
 import { api } from '../lib/api';
 import { AppShell } from './AppShell';
 import { InstanceAdminGate } from './InstanceAdminGate';
+import { InstanceDomainPanel, ServerSettingsPanel } from './AdminInfraPanels';
+import { BackupSettingsPanel } from './BackupSettingsPanel';
 import { PostgresAdminPanel } from './PostgresAdminPanel';
+import { SsoSettingsPanel } from './SsoSettingsPanel';
+import { UpdateSettingsPanel } from './UpdateSettingsPanel';
 import {
   Alert,
   Badge,
@@ -61,7 +65,18 @@ type Health = {
   };
 };
 
-type AdminSection = 'hub' | 'workspaces' | 'proxy' | 'sante' | 'beta' | 'postgres';
+type AdminSection =
+  | 'hub'
+  | 'workspaces'
+  | 'proxy'
+  | 'sante'
+  | 'beta'
+  | 'postgres'
+  | 'serveur'
+  | 'sso'
+  | 'backup'
+  | 'update'
+  | 'domaine';
 
 const SECTION_TITLES: Record<Exclude<AdminSection, 'hub'>, string> = {
   workspaces: 'Workspaces',
@@ -69,7 +84,25 @@ const SECTION_TITLES: Record<Exclude<AdminSection, 'hub'>, string> = {
   sante: 'Santé plateforme',
   beta: 'Fonctionnalités bêta',
   postgres: 'Postgres',
+  serveur: 'Serveur',
+  sso: 'SSO / OIDC',
+  backup: 'Sauvegardes',
+  update: 'Mise à jour',
+  domaine: 'Domaine instance',
 };
+
+const ADMIN_TABS: AdminSection[] = [
+  'workspaces',
+  'proxy',
+  'sante',
+  'beta',
+  'postgres',
+  'serveur',
+  'sso',
+  'backup',
+  'update',
+  'domaine',
+];
 
 type BetaFeatures = {
   workspace: boolean;
@@ -79,7 +112,7 @@ type BetaFeatures = {
 function readSection(): AdminSection {
   if (typeof window === 'undefined') return 'hub';
   const tab = new URLSearchParams(window.location.search).get('tab');
-  if (tab === 'workspaces' || tab === 'proxy' || tab === 'sante' || tab === 'beta' || tab === 'postgres') return tab;
+  if (tab && ADMIN_TABS.includes(tab as AdminSection)) return tab as AdminSection;
   return 'hub';
 }
 
@@ -189,6 +222,41 @@ function AdminHub() {
       />
       <HubTile
         index={4}
+        href="/app/admin?tab=serveur"
+        title="Serveur"
+        description="Docker local ou SSH distant, clés SSH"
+        icon={<HubIcon name="server" />}
+      />
+      <HubTile
+        index={5}
+        href="/app/admin?tab=domaine"
+        title="Domaine instance"
+        description="Wildcard de repli et DNS automatique"
+        icon={<HubIcon name="globe" />}
+      />
+      <HubTile
+        index={6}
+        href="/app/admin?tab=sso"
+        title="SSO / OIDC"
+        description="Authentification unique de l’instance"
+        icon={<HubIcon name="shield" />}
+      />
+      <HubTile
+        index={7}
+        href="/app/admin?tab=backup"
+        title="Sauvegardes"
+        description="Sauvegardes de l’instance, locales et S3"
+        icon={<HubIcon name="archive" />}
+      />
+      <HubTile
+        index={8}
+        href="/app/admin?tab=update"
+        title="Mise à jour"
+        description="Version de DevForge"
+        icon={<HubIcon name="refresh" />}
+      />
+      <HubTile
+        index={9}
         href="/app/admin?tab=beta"
         title="Fonctionnalités bêta"
         description="Workspace et création d’app par agent"
@@ -822,6 +890,11 @@ function AdminPageInner() {
         {section === 'sante' && <AdminSante />}
         {section === 'beta' && <AdminBeta />}
         {section === 'postgres' && <PostgresAdminPanel />}
+        {section === 'serveur' && <ServerSettingsPanel />}
+        {section === 'domaine' && <InstanceDomainPanel />}
+        {section === 'sso' && <SsoSettingsPanel isAdmin />}
+        {section === 'backup' && <BackupSettingsPanel isAdmin />}
+        {section === 'update' && <UpdateSettingsPanel isAdmin />}
       </FadeIn>
     </AppShell>
   );

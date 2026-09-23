@@ -1,12 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api, type DnsRuntimeStatus, type DnsSettingsPublic } from '../lib/api';
+import { api } from '../lib/api';
 import { AppShell } from './AppShell';
-import { BackupSettingsPanel } from './BackupSettingsPanel';
-import { DnsEntrypointPanel } from './DnsEntrypointPanel';
-import { DockerEngineAlert } from './DockerEngineAlert';
 import { LlmProvidersPanel } from './LlmProvidersPanel';
-import { SsoSettingsPanel } from './SsoSettingsPanel';
-import { UpdateSettingsPanel } from './UpdateSettingsPanel';
 import {
   Alert,
   Badge,
@@ -18,7 +13,6 @@ import {
   HubIcon,
   HubTile,
   Input,
-  LiveStatus,
   PulseDot,
   Skeleton,
   useToast,
@@ -45,26 +39,18 @@ type GhUser = {
   avatar_url?: string | null;
 };
 
-type SettingsSection =
-  | 'general'
-  | 'domaine'
-  | 'github'
-  | 'serveur'
-  | 'llm'
-  | 'sso'
-  | 'backup'
-  | 'update';
+type SettingsSection = 'domaine' | 'github' | 'llm';
 
-const SECTION_KEYS: SettingsSection[] = [
-  'general',
-  'domaine',
-  'github',
-  'serveur',
-  'llm',
-  'sso',
-  'backup',
-  'update',
-];
+const SECTION_KEYS: SettingsSection[] = ['domaine', 'github', 'llm'];
+
+const ADMIN_TAB_REDIRECT: Record<string, string> = {
+  general: '/app/admin?tab=sante',
+  serveur: '/app/admin?tab=serveur',
+  sso: '/app/admin?tab=sso',
+  backup: '/app/admin?tab=backup',
+  update: '/app/admin?tab=update',
+  postgres: '/app/admin?tab=postgres',
+};
 
 type SettingCardMeta = {
   key: SettingsSection;
@@ -75,15 +61,9 @@ type SettingCardMeta = {
 
 const SETTINGS_CARDS: SettingCardMeta[] = [
   {
-    key: 'general',
-    title: 'Général',
-    description: 'État du serveur, connexions, base de données',
-    icon: 'settings',
-  },
-  {
     key: 'domaine',
     title: 'Domaine',
-    description: 'Wildcard apps et DNS auto (Cloudflare ou Porkbun)',
+    description: 'Sous-domaine utilisé par tes apps',
     icon: 'globe',
   },
   {
@@ -93,34 +73,10 @@ const SETTINGS_CARDS: SettingCardMeta[] = [
     icon: 'github',
   },
   {
-    key: 'serveur',
-    title: 'Serveur',
-    description: 'Docker local ou SSH distant, clés SSH',
-    icon: 'server',
-  },
-  {
     key: 'llm',
     title: 'Agents / LLM',
     description: 'Providers IA (OpenAI, Anthropic, local)',
     icon: 'brain',
-  },
-  {
-    key: 'sso',
-    title: 'SSO / OIDC',
-    description: 'Authentification unique (OIDC)',
-    icon: 'shield',
-  },
-  {
-    key: 'backup',
-    title: 'Sauvegardes',
-    description: 'Stratégie de backup automatique',
-    icon: 'archive',
-  },
-  {
-    key: 'update',
-    title: 'Mise à jour',
-    description: 'Mise à jour de DevForge vers la dernière version',
-    icon: 'refresh',
   },
 ];
 
@@ -132,15 +88,17 @@ function readSection(): SettingsSection | null {
 }
 
 const SECTION_TITLES: Record<SettingsSection, string> = {
-  general: 'Général',
   domaine: 'Domaine',
   github: 'GitHub',
-  serveur: 'Serveur',
   llm: 'Agents / LLM',
-  sso: 'SSO / OIDC',
-  backup: 'Sauvegardes',
-  update: 'Mise à jour',
 };
+
+function adminRedirectTarget(): string | null {
+  if (typeof window === 'undefined') return null;
+  const tab = new URLSearchParams(window.location.search).get('tab');
+  if (!tab) return null;
+  return ADMIN_TAB_REDIRECT[tab] ?? null;
+}
 
 function SettingCard({ card, index }: { card: SettingCardMeta; index: number }) {
   return (
@@ -154,9 +112,6 @@ function SettingCard({ card, index }: { card: SettingCardMeta; index: number }) 
   );
 }
 
-const USER_SETTING_KEYS = new Set(['domaine', 'github', 'llm']);
-const ADMIN_SETTING_KEYS = new Set(['general', 'serveur', 'sso', 'backup', 'update']);
-
 export function SettingsPage() {
   return <SettingsPageInner />;
 }
@@ -164,7 +119,6 @@ export function SettingsPage() {
 function SettingsPageInner() {
   const section = readSection();
   const [health, setHealth] = useState<Health | null>(null);
-  const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [ghConnected, setGhConnected] = useState(false);
   const [ghMode, setGhMode] = useState('off');
@@ -173,61 +127,10 @@ function SettingsPageInner() {
   const [token, setToken] = useState('');
   const [ghBusy, setGhBusy] = useState(false);
   const [ghError, setGhError] = useState<string | null>(null);
-  const [wildcard, setWildcard] = useState('');
   const [wildcardOwn, setWildcardOwn] = useState('');
   const [wildcardFallback, setWildcardFallback] = useState('');
-  const [instanceName, setInstanceName] = useState('');
   const [domainBusy, setDomainBusy] = useState(false);
-  const [dnsProvider, setDnsProvider] = useState('');
-  /** Provider réellement enregistré côté serveur (pas le brouillon du formulaire). */
-  const [activeDnsProvider, setActiveDnsProvider] = useState('');
-  const [dnsZone, setDnsZone] = useState('');
-  const [dnsToken, setDnsToken] = useState('');
-  const [porkbunApiKey, setPorkbunApiKey] = useState('');
-  const [porkbunSecret, setPorkbunSecret] = useState('');
-  const [cfTokenSet, setCfTokenSet] = useState(false);
-  const [porkbunKeySet, setPorkbunKeySet] = useState(false);
-  const [porkbunSecretSet, setPorkbunSecretSet] = useState(false);
-  const [inactiveCreds, setInactiveCreds] = useState<string[]>([]);
-  const [dnsStatus, setDnsStatus] = useState<DnsRuntimeStatus | null>(null);
-  const [dnsStatusLoading, setDnsStatusLoading] = useState(false);
-  const [switchTarget, setSwitchTarget] = useState<string | null>(null);
-  const [clearOnSwitch, setClearOnSwitch] = useState(true);
-  const [clearInactiveOnSave, setClearInactiveOnSave] = useState(false);
-  const [sshHost, setSshHost] = useState('');
-  const [sshUser, setSshUser] = useState('root');
-  const [sshLocal, setSshLocal] = useState(true);
-  const [sshKeyExists, setSshKeyExists] = useState(false);
-  const [sshPublicKey, setSshPublicKey] = useState('');
-  const [sshBusy, setSshBusy] = useState(false);
   const toast = useToast();
-
-  function applyDnsFlags(dns: DnsSettingsPublic) {
-    setCfTokenSet(!!(dns.cloudflare_token_set || (dns.provider === 'cloudflare' && dns.token_set)));
-    setPorkbunKeySet(!!(dns.porkbun_token_set || (dns.api_key_set && dns.secret_set)));
-    setPorkbunSecretSet(!!(dns.porkbun_token_set || (dns.api_key_set && dns.secret_set)));
-    setInactiveCreds(dns.inactive_credentials ?? []);
-    setActiveDnsProvider(dns.provider || '');
-  }
-
-  function requestProviderSwitch(next: string) {
-    if (next === dnsProvider) return;
-    // Confirmer seulement si on quitte le provider réellement enregistré.
-    if (activeDnsProvider && activeDnsProvider !== next) {
-      setClearOnSwitch(true);
-      setSwitchTarget(next);
-      return;
-    }
-    setDnsProvider(next);
-    setClearInactiveOnSave(false);
-  }
-
-  function confirmProviderSwitch() {
-    if (switchTarget === null) return;
-    setDnsProvider(switchTarget);
-    setClearInactiveOnSave(clearOnSwitch);
-    setSwitchTarget(null);
-  }
 
   async function loadGh() {
     try {
@@ -243,39 +146,9 @@ function SettingsPageInner() {
     }
   }
 
-  async function loadSsh() {
-    try {
-      const s = await api.sshStatus();
-      setSshHost(s.ssh_host || '');
-      setSshUser(s.ssh_user || 'root');
-      setSshLocal(s.local_docker);
-      setSshKeyExists(s.key_exists);
-      setSshPublicKey(s.public_key || '');
-    } catch {
-      /* ignore */
-    }
-  }
-
-  async function loadDnsStatus() {
-    setDnsStatusLoading(true);
-    try {
-      const r = await api.dnsRuntimeStatus();
-      setDnsProvider(r.dns.provider || '');
-      setDnsZone(r.dns.zone || '');
-      applyDnsFlags(r.dns);
-      setDnsStatus(r.status);
-    } catch {
-      setDnsStatus(null);
-    } finally {
-      setDnsStatusLoading(false);
-    }
-  }
-
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (new URLSearchParams(window.location.search).get('tab') === 'postgres') {
-      window.location.replace('/app/admin?tab=postgres');
-    }
+    const target = adminRedirectTarget();
+    if (target) window.location.replace(target);
   }, []);
 
   useEffect(() => {
@@ -288,26 +161,10 @@ function SettingsPageInner() {
         setIsAdmin(b.user?.role === 'instance_admin');
         setWildcardOwn(b.settings?.wildcard_own || '');
         setWildcardFallback(b.settings?.wildcard_fallback || b.settings?.wildcard_domain || '');
-        setWildcard(b.settings?.wildcard_fallback || b.settings?.wildcard_domain || '');
-        setInstanceName(b.settings?.instance_name || '');
       }),
       loadGh(),
-      loadSsh(),
-      api
-        .dnsSettings()
-        .then((r) => {
-          setDnsProvider(r.dns.provider || '');
-          setDnsZone(r.dns.zone || '');
-          applyDnsFlags(r.dns);
-        })
-        .catch(() => null),
-    ]).finally(() => setLoading(false));
+    ]);
   }, []);
-
-  useEffect(() => {
-    if (section !== 'domaine' || !isAdmin) return;
-    void loadDnsStatus();
-  }, [section, isAdmin]);
 
   async function connectGithub(e: Event) {
     e.preventDefault();
@@ -353,24 +210,10 @@ function SettingsPageInner() {
     }
   }
 
-  const backends = [
-    { key: 'database', label: 'Base', value: health?.backends?.database ?? '—' },
-    { key: 'executor', label: 'Executor', value: health?.backends?.executor ?? '—' },
-    { key: 'github', label: 'GitHub', value: health?.backends?.github ?? ghMode },
-    { key: 'storage', label: 'Storage', value: health?.backends?.storage ?? '—' },
-    { key: 'llm', label: 'LLM', value: health?.backends?.llm ?? '—' },
-    {
-      key: 'docker',
-      label: 'Docker',
-      value: health?.backends?.docker?.ok
-        ? health.backends.docker.version || 'ok'
-        : 'absent',
-    },
-  ];
-
-  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('tab') === 'postgres') {
+  const redirecting = adminRedirectTarget();
+  if (redirecting) {
     return (
-      <AppShell active="settings" title="Postgres">
+      <AppShell active="settings" title="Paramètres">
         <Skeleton class="h-32" />
       </AppShell>
     );
@@ -381,7 +224,7 @@ function SettingsPageInner() {
     return (
       <AppShell active="settings" title="Paramètres">
         <HubGrid>
-          {SETTINGS_CARDS.filter((card) => isAdmin || USER_SETTING_KEYS.has(card.key)).map((card, i) => (
+          {SETTINGS_CARDS.map((card, i) => (
             <SettingCard key={card.key} card={card} index={i} />
           ))}
         </HubGrid>
@@ -408,72 +251,6 @@ function SettingsPageInner() {
         </div>
       }
     >
-      {section && ADMIN_SETTING_KEYS.has(section) && !isAdmin && (
-        <Alert tone="warn">Réservé à l’admin instance.</Alert>
-      )}
-
-      {section === 'general' && isAdmin && (
-        <FadeIn>
-          <div class="space-y-4">
-            <div class="grid gap-4 md:grid-cols-2">
-              <Card>
-                <CardHeader title="Serveur" />
-                {loading ? (
-                  <Skeleton class="h-16" />
-                ) : (
-                  <LiveStatus
-                    busy={!health?.ok}
-                    label={health?.ok ? 'En ligne' : 'Hors ligne'}
-                    detail={health?.ok ? undefined : 'Vérifie que le serveur tourne'}
-                  />
-                )}
-              </Card>
-              <Card>
-                <CardHeader title="Base de données" />
-                <div class="mt-1">
-                  <Badge tone="accent">{health?.backends?.database ?? 'sqlite-local'}</Badge>
-                </div>
-              </Card>
-            </div>
-            <Card>
-              <CardHeader title="Connexions" />
-              <ul class="space-y-2">
-                {backends.map((b) => (
-                  <li
-                    key={b.key}
-                    class="flex min-w-0 items-center justify-between gap-2 rounded-xl border border-[var(--color-line)] px-3 py-2"
-                  >
-                    <span class="flex min-w-0 items-center gap-2 text-sm">
-                      <PulseDot
-                        tone={
-                          b.value === 'stub' || b.value === 'off' || b.value === '—'
-                            ? 'muted'
-                            : 'ok'
-                        }
-                      />
-                      <span class="truncate">{b.label}</span>
-                    </span>
-                    <Badge class="max-w-[55%] min-w-0 overflow-hidden truncate">{b.value}</Badge>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-            <div class="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={async () => {
-                  await api.logout();
-                  window.location.href = '/login';
-                }}
-              >
-                Déconnexion
-              </Button>
-            </div>
-          </div>
-        </FadeIn>
-      )}
-
       {section === 'domaine' && (
         <FadeIn>
           <Card>
@@ -544,96 +321,6 @@ function SettingsPageInner() {
               </Button>
             </form>
           </Card>
-          {isAdmin && (
-          <Card>
-            <CardHeader title="Domaine de repli (instance)" />
-            <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
-              Utilisé pour les comptes qui n’ont pas défini leur propre domaine.
-            </p>
-            <form
-              class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end"
-              onSubmit={async (e) => {
-                e.preventDefault();
-                const d = wildcard.trim().replace(/^\.+/, '').toLowerCase();
-                if (!d.includes('.')) {
-                  toast.push({
-                    title: 'Domaine invalide',
-                    detail: 'Ex. jeser.app',
-                    tone: 'warn',
-                  });
-                  return;
-                }
-                setDomainBusy(true);
-                try {
-                  await api.saveOnboarding({
-                    wildcard_domain: d,
-                    instance_name: instanceName || undefined,
-                  });
-                  setWildcard(d);
-                  setWildcardFallback(d);
-                  toast.push({
-                    title: 'Domaine d’instance enregistré',
-                    detail: `Repli → *.${d}`,
-                    tone: 'ok',
-                  });
-                } catch (err) {
-                  toast.push({
-                    title: 'Échec',
-                    detail: String((err as Error).message || err),
-                    tone: 'danger',
-                  });
-                } finally {
-                  setDomainBusy(false);
-                }
-              }}
-            >
-              <div class="min-w-0 w-full flex-1">
-                <Input
-                  label="Wildcard / domaine racine"
-                  placeholder="jeser.app"
-                  value={wildcard}
-                  onInput={(e) => setWildcard((e.target as HTMLInputElement).value)}
-                />
-              </div>
-              <Button type="submit" size="sm" class="w-full sm:w-auto" disabled={domainBusy}>
-                Enregistrer
-              </Button>
-            </form>
-          </Card>
-          )}
-          {isAdmin && (
-          <DnsEntrypointPanel
-            isAdmin={isAdmin}
-            serverVersion={health?.version}
-            dnsProvider={dnsProvider}
-            setDnsProvider={setDnsProvider}
-            activeDnsProvider={activeDnsProvider}
-            dnsZone={dnsZone}
-            setDnsZone={setDnsZone}
-            dnsToken={dnsToken}
-            setDnsToken={setDnsToken}
-            porkbunApiKey={porkbunApiKey}
-            setPorkbunApiKey={setPorkbunApiKey}
-            porkbunSecret={porkbunSecret}
-            setPorkbunSecret={setPorkbunSecret}
-            cfTokenSet={cfTokenSet}
-            porkbunKeySet={porkbunKeySet}
-            porkbunSecretSet={porkbunSecretSet}
-            inactiveCreds={inactiveCreds}
-            dnsStatus={dnsStatus}
-            setDnsStatus={setDnsStatus}
-            dnsStatusLoading={dnsStatusLoading}
-            applyDnsFlags={applyDnsFlags}
-            clearInactiveOnSave={clearInactiveOnSave}
-            setClearInactiveOnSave={setClearInactiveOnSave}
-            requestProviderSwitch={requestProviderSwitch}
-            switchTarget={switchTarget}
-            setSwitchTarget={setSwitchTarget}
-            clearOnSwitch={clearOnSwitch}
-            setClearOnSwitch={setClearOnSwitch}
-            confirmProviderSwitch={confirmProviderSwitch}
-          />
-          )}
         </FadeIn>
       )}
 
@@ -726,145 +413,6 @@ function SettingsPageInner() {
         </FadeIn>
       )}
 
-      {section === 'serveur' && isAdmin && (
-        <FadeIn>
-          <Card>
-            <CardHeader
-              title="Déploiements"
-              action={
-                sshLocal ? (
-                  <Badge tone="ok">Docker local</Badge>
-                ) : (
-                  <Badge tone="accent">SSH distant</Badge>
-                )
-              }
-            />
-            <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
-              Les apps se déploient via Docker sur cette machine, ou via SSH vers un hôte distant
-              qui a Docker. L’exécutable DevForge ne l’embarque pas.
-            </p>
-            <div class="mb-4">
-              <DockerEngineAlert docker={health?.backends?.docker} />
-            </div>
-            {!isAdmin ? (
-              <Alert tone="warn">Réservé à l’admin instance.</Alert>
-            ) : (
-              <div class="space-y-4">
-                <form
-                  class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end"
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    setSshBusy(true);
-                    try {
-                      await api.saveSsh({
-                        ssh_host: sshHost.trim(),
-                        ssh_user: sshUser.trim() || 'root',
-                      });
-                      toast.push({ title: 'Serveur enregistré', tone: 'ok' });
-                      await loadSsh();
-                    } catch (err) {
-                      toast.push({
-                        title: 'Échec',
-                        detail: String((err as Error).message || err),
-                        tone: 'danger',
-                      });
-                    } finally {
-                      setSshBusy(false);
-                    }
-                  }}
-                >
-                  <div class="min-w-0 w-full flex-1">
-                    <Input
-                      label="Host (optionnel)"
-                      placeholder="vide = Docker local"
-                      value={sshHost}
-                      onInput={(e) => setSshHost((e.target as HTMLInputElement).value)}
-                    />
-                  </div>
-                  <div class="w-full sm:w-36 sm:shrink-0">
-                    <Input
-                      label="User"
-                      value={sshUser}
-                      onInput={(e) => setSshUser((e.target as HTMLInputElement).value)}
-                    />
-                  </div>
-                  <Button type="submit" size="sm" class="w-full sm:w-auto" disabled={sshBusy}>
-                    Enregistrer
-                  </Button>
-                </form>
-
-                <div class="rounded-xl border border-[var(--color-line)] p-3">
-                  <div class="mb-2 flex items-center justify-between gap-2">
-                    <p class="text-sm font-medium">Clé SSH</p>
-                    <Badge tone={sshKeyExists ? 'ok' : 'muted'}>
-                      {sshKeyExists ? 'présente' : 'absente'}
-                    </Badge>
-                  </div>
-                  <p class="mb-3 text-xs text-[var(--color-ink-faint)]">
-                    Générée dans <code>/data/ssh/</code> — pas dans Variables ZimaOS. Ne colle jamais
-                    la clé privée dans un champ env.
-                  </p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={sshBusy}
-                    onClick={async () => {
-                      setSshBusy(true);
-                      try {
-                        const r = await api.generateSshKey();
-                        setSshKeyExists(true);
-                        setSshPublicKey(r.public_key || '');
-                        toast.push({
-                          title: r.created ? 'Clé créée' : 'Clé déjà là',
-                          detail: r.hint,
-                          tone: 'ok',
-                        });
-                      } catch (err) {
-                        toast.push({
-                          title: 'Génération KO',
-                          detail: String((err as Error).message || err),
-                          tone: 'danger',
-                        });
-                      } finally {
-                        setSshBusy(false);
-                      }
-                    }}
-                  >
-                    {sshKeyExists ? 'Afficher la clé' : 'Générer une clé'}
-                  </Button>
-                  {sshPublicKey && (
-                    <div class="mt-3 space-y-2">
-                      <p class="text-xs text-[var(--color-ink-muted)]">
-                        À coller dans <code>~/.ssh/authorized_keys</code> sur le host distant :
-                      </p>
-                      <textarea
-                        readonly
-                        class="h-24 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] p-2 font-mono text-xs"
-                        value={sshPublicKey}
-                      />
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={async () => {
-                          try {
-                            await navigator.clipboard.writeText(sshPublicKey);
-                            toast.push({ title: 'Clé publique copiée', tone: 'ok' });
-                          } catch {
-                            toast.push({ title: 'Copie impossible', tone: 'warn' });
-                          }
-                        }}
-                      >
-                        Copier
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </Card>
-        </FadeIn>
-      )}
-
       {section === 'llm' && (
         <FadeIn>
           <LlmProvidersPanel
@@ -882,9 +430,6 @@ function SettingsPageInner() {
         </FadeIn>
       )}
 
-      {section === 'sso' && isAdmin && <SsoSettingsPanel isAdmin={isAdmin} />}
-      {section === 'backup' && isAdmin && <BackupSettingsPanel isAdmin={isAdmin} />}
-      {section === 'update' && isAdmin && <UpdateSettingsPanel isAdmin={isAdmin} />}
     </AppShell>
   );
 }
