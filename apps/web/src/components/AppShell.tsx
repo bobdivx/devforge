@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { globalNavForRole, mobileBottomNav, WORKER_NAV, type NavItem } from '../lib/nav';
 import { BetaBadge } from './ui';
 import { api } from '../lib/api';
@@ -11,17 +11,25 @@ import { LaunchedAgentsSheet } from './LaunchedAgentsSheet';
 import { useLaunchedAgents } from './LaunchedAgentsMenu';
 import { pollLaunchedAgents } from '../lib/launched-agents';
 import { UpdateRecoveryOverlay } from './UpdateRecoveryOverlay';
+import { ChevronDown } from 'lucide-preact';
 
 type Props = {
   active?: string;
   children: ComponentChildren;
   /** Sous-nav sidebar (projet, settings…). Alias historique : projectNav. */
   sideNav?: NavItem[];
+  /** Label au-dessus de la sous-nav. Chaîne vide = pas de label (recommandé). */
   sideNavLabel?: string;
+  /** Onglets secondaires (menu Plus). */
+  sideNavMore?: NavItem[];
   /** @deprecated préférer sideNav */
   projectNav?: NavItem[];
+  /** @deprecated préférer sideNavMore */
+  projectNavMore?: NavItem[];
   title?: ComponentChildren;
   description?: string;
+  /** Contenu sous le titre (ex. bandeau activité). */
+  belowTitle?: ComponentChildren;
   actions?: ComponentChildren;
   skipAuth?: boolean;
 };
@@ -59,14 +67,190 @@ function shortLabel(label: string): string {
   return map[label] ?? label;
 }
 
+
+function moreItemActive(items: NavItem[]): boolean {
+  return items.some((item) => sideNavItemActive(item));
+}
+
+function SideNavLink({ item }: { item: NavItem }) {
+  const on = sideNavItemActive(item);
+  return (
+    <a
+      href={item.href}
+      class={cn(
+        'rounded-lg px-3 py-2 text-sm transition-[background-color,color,transform] duration-200',
+        on
+          ? 'bg-white/5 font-medium text-[var(--color-ink)]'
+          : 'text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
+      )}
+    >
+      <span class="flex items-center justify-between gap-2">
+        <span>{item.label}</span>
+        {item.beta && <BetaBadge />}
+      </span>
+    </a>
+  );
+}
+
+function SideNavPill({ item }: { item: NavItem }) {
+  const on = sideNavItemActive(item);
+  return (
+    <a
+      href={item.href}
+      class={cn(
+        'shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-[background-color,color,transform] duration-200 active:scale-[0.97]',
+        on
+          ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+          : 'bg-white/[0.03] text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
+      )}
+    >
+      <span class="inline-flex items-center gap-1.5">
+        {item.label}
+        {item.beta && <BetaBadge />}
+      </span>
+    </a>
+  );
+}
+
+function MoreMenu({
+  items,
+  variant,
+}: {
+  items: NavItem[];
+  variant: 'sidebar' | 'pills';
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const active = moreItemActive(items);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  if (items.length === 0) return null;
+
+  if (variant === 'sidebar') {
+    return (
+      <div class="relative mt-0.5" ref={ref}>
+        <button
+          type="button"
+          class={cn(
+            'flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-[background-color,color] duration-200',
+            active || open
+              ? 'bg-white/5 font-medium text-[var(--color-ink)]'
+              : 'text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
+          )}
+          aria-expanded={open}
+          aria-haspopup="menu"
+          onClick={() => setOpen((v) => !v)}
+        >
+          <span>Plus</span>
+          <ChevronDown
+            size={14}
+            class={cn('shrink-0 opacity-70 transition-transform', open && 'rotate-180')}
+            aria-hidden
+          />
+        </button>
+        {open && (
+          <div
+            role="menu"
+            class="mt-1 flex flex-col gap-0.5 rounded-xl border border-[var(--color-line)] bg-[var(--color-card)] p-1 shadow-xl"
+          >
+            {items.map((item) => (
+              <a
+                key={item.key}
+                role="menuitem"
+                href={item.href}
+                class={cn(
+                  'rounded-lg px-3 py-2 text-sm transition-colors',
+                  sideNavItemActive(item)
+                    ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
+                    : 'text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
+                )}
+                onClick={() => setOpen(false)}
+              >
+                <span class="flex items-center justify-between gap-2">
+                  <span>{item.label}</span>
+                  {item.beta && <BetaBadge />}
+                </span>
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div class="relative shrink-0" ref={ref}>
+      <button
+        type="button"
+        class={cn(
+          'inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium transition-[background-color,color,transform] duration-200 active:scale-[0.97]',
+          active || open
+            ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+            : 'bg-white/[0.03] text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
+        )}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((v) => !v)}
+      >
+        Plus
+        <ChevronDown size={12} class={cn('opacity-70 transition-transform', open && 'rotate-180')} aria-hidden />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          class="absolute left-0 top-full z-30 mt-1 min-w-[11rem] rounded-xl border border-[var(--color-line)] bg-[var(--color-card)] p-1 shadow-xl"
+        >
+          {items.map((item) => (
+            <a
+              key={item.key}
+              role="menuitem"
+              href={item.href}
+              class={cn(
+                'block rounded-lg px-3 py-2 text-xs font-medium transition-colors',
+                sideNavItemActive(item)
+                  ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                  : 'text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
+              )}
+              onClick={() => setOpen(false)}
+            >
+              <span class="inline-flex items-center gap-1.5">
+                {item.label}
+                {item.beta && <BetaBadge />}
+              </span>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ShellInner({
   active = 'home',
   children,
   sideNav,
-  sideNavLabel = 'Projet',
+  sideNavLabel = '',
+  sideNavMore,
   projectNav,
+  projectNavMore,
   title,
   description,
+  belowTitle,
   actions,
 }: Props) {
   const onNodePage =
@@ -80,7 +264,8 @@ function ShellInner({
   const launchedAgents = useLaunchedAgents();
   const [showRecovery, setShowRecovery] = useState(false);
   const nav = sideNav ?? projectNav;
-  const navLabel = sideNav ? sideNavLabel : projectNav ? 'Projet' : sideNavLabel;
+  const more = sideNavMore ?? projectNavMore ?? [];
+  const navLabel = sideNavLabel;
 
   useEffect(() => {
     let cancelled = false;
@@ -210,30 +395,16 @@ function ShellInner({
             </nav>
             {nav && (
               <div class="mt-8">
-                <div class="mb-2 px-3 text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--color-ink-faint)]">
-                  {navLabel}
-                </div>
-                <nav class="flex flex-col gap-0.5 pr-1">
-                  {nav.map((item) => {
-                    const on = sideNavItemActive(item);
-                    return (
-                      <a
-                        key={item.key}
-                        href={item.href}
-                        class={cn(
-                          'rounded-lg px-3 py-2 text-sm transition-[background-color,color,transform] duration-200',
-                          on
-                            ? 'bg-white/5 font-medium text-[var(--color-ink)]'
-                            : 'text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
-                        )}
-                      >
-                        <span class="flex items-center justify-between gap-2">
-                          <span>{item.label}</span>
-                          {item.beta && <BetaBadge />}
-                        </span>
-                      </a>
-                    );
-                  })}
+                {navLabel ? (
+                  <div class="mb-2 px-3 text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--color-ink-faint)]">
+                    {navLabel}
+                  </div>
+                ) : null}
+                <nav class="flex flex-col gap-0.5 pr-1" aria-label="Navigation projet">
+                  {nav.map((item) => (
+                    <SideNavLink key={item.key} item={item} />
+                  ))}
+                  <MoreMenu items={more} variant="sidebar" />
                 </nav>
               </div>
             )}
@@ -255,36 +426,24 @@ function ShellInner({
               </div>
             )}
 
-            {/* Sous-nav mobile (projet / settings) — scroll horizontal + label pour éviter confusion */}
+            {belowTitle}
+
+            {/* Sous-nav mobile (projet) — pills densifiées + menu Plus */}
             {nav && (
               <div class="-mx-4 mb-4 border-b border-[var(--color-line)] lg:hidden">
                 <div class="overflow-x-auto px-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                  <div class="mb-1.5 flex items-center gap-2">
-                    <span class="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-ink-faint)]">
-                      {navLabel}
-                    </span>
-                  </div>
-                  <nav class="flex w-max gap-1 pb-3" aria-label={navLabel}>
-                    {nav.map((item) => {
-                      const on = sideNavItemActive(item);
-                      return (
-                        <a
-                          key={item.key}
-                          href={item.href}
-                          class={cn(
-                            'shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-[background-color,color,transform] duration-200 active:scale-[0.97]',
-                            on
-                              ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                              : 'bg-white/[0.03] text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
-                          )}
-                        >
-                          <span class="inline-flex items-center gap-1.5">
-                            {item.label}
-                            {item.beta && <BetaBadge />}
-                          </span>
-                        </a>
-                      );
-                    })}
+                  {navLabel ? (
+                    <div class="mb-1.5 flex items-center gap-2">
+                      <span class="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-ink-faint)]">
+                        {navLabel}
+                      </span>
+                    </div>
+                  ) : null}
+                  <nav class="flex w-max gap-1 pb-3" aria-label="Navigation projet">
+                    {nav.map((item) => (
+                      <SideNavPill key={item.key} item={item} />
+                    ))}
+                    <MoreMenu items={more} variant="pills" />
                   </nav>
                 </div>
               </div>

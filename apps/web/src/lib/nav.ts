@@ -49,23 +49,43 @@ export function mobileAvatarNav(role?: string | null): NavItem[] {
   return globalNavForRole(role).filter((item) => !hidden.has(item.key));
 }
 
-export function projectNav(uuid: string, opts?: { workspace?: boolean }): NavItem[] {
+const PROJECT_PRIMARY_KEYS = ['overview', 'workspace', 'deployments', 'agents', 'domains'] as const;
+const PROJECT_MORE_KEYS = ['git', 'actions', 'database', 'env', 'backups', 'settings'] as const;
+
+function projectNavItems(uuid: string, opts?: { workspace?: boolean }): NavItem[] {
   const base = `/app/projects/view?uuid=${encodeURIComponent(uuid)}`;
   const items: NavItem[] = [
-    { href: `${base}&tab=overview`, label: 'Overview', key: 'overview' },
+    { href: `${base}&tab=overview`, label: 'Aperçu', key: 'overview' },
     { href: `${base}&tab=workspace`, label: 'Workspace', key: 'workspace', beta: true },
-    { href: `${base}&tab=deployments`, label: 'Deployments', key: 'deployments' },
+    { href: `${base}&tab=deployments`, label: 'Déploiements', key: 'deployments' },
+    { href: `${base}&tab=agents`, label: 'Agents', key: 'agents' },
+    { href: `${base}&tab=domains`, label: 'Domaines', key: 'domains' },
     { href: `${base}&tab=git`, label: 'Git', key: 'git' },
     { href: `${base}&tab=actions`, label: 'Actions', key: 'actions' },
-    { href: `${base}&tab=agents`, label: 'Agents', key: 'agents' },
-    { href: `${base}&tab=domains`, label: 'Domains', key: 'domains' },
-    { href: `${base}&tab=database`, label: 'Database', key: 'database' },
+    { href: `${base}&tab=database`, label: 'Base de données', key: 'database' },
     { href: `${base}&tab=env`, label: 'Env', key: 'env' },
-    { href: `${base}&tab=backups`, label: 'Backups', key: 'backups' },
-    { href: `${base}&tab=settings`, label: 'Settings', key: 'settings' },
+    { href: `${base}&tab=backups`, label: 'Sauvegardes', key: 'backups' },
+    { href: `${base}&tab=settings`, label: 'Paramètres', key: 'settings' },
   ];
   if (opts?.workspace === false) return items.filter((item) => item.key !== 'workspace');
   return items;
+}
+
+/** Tous les onglets projet (compat). */
+export function projectNav(uuid: string, opts?: { workspace?: boolean }): NavItem[] {
+  return projectNavItems(uuid, opts);
+}
+
+/** Onglets primaires visibles dans la barre projet. */
+export function projectNavPrimary(uuid: string, opts?: { workspace?: boolean }): NavItem[] {
+  const keys = new Set<string>(PROJECT_PRIMARY_KEYS);
+  return projectNavItems(uuid, opts).filter((item) => keys.has(item.key));
+}
+
+/** Onglets secondaires — menu « Plus ». */
+export function projectNavMore(uuid: string, opts?: { workspace?: boolean }): NavItem[] {
+  const keys = new Set<string>(PROJECT_MORE_KEYS);
+  return projectNavItems(uuid, opts).filter((item) => keys.has(item.key));
 }
 
 /** Paramètres du compte. L'infra de l'instance est dans Admin. */
