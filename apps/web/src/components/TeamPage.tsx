@@ -27,7 +27,23 @@ export function TeamPage() {
   const isAdmin = role === 'instance_admin';
 
   return (
-    <AppShell active="team" title="Compte">
+    <AppShell
+      active="team"
+      title={
+        <div class="flex min-w-0 items-center gap-2.5 sm:gap-3">
+          <a
+            href="/app/settings"
+            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink-muted)] transition hover:border-white/30 hover:bg-white/5 hover:text-white"
+            aria-label="Retour à Paramètres"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M19 12H5M12 19l-7-7 7-7" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </a>
+          <span class="min-w-0 truncate">Compte</span>
+        </div>
+      }
+    >
       <FadeIn>
         <Card>
           <CardHeader title="Profil" description="Identité du compte connecté" />

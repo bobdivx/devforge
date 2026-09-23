@@ -38,6 +38,12 @@ function sideNavItemActive(item: NavItem): boolean {
   return item.key === 'overview' || item.key === 'general';
 }
 
+/** Le compte s’ouvre depuis le hub Paramètres : la barre du bas reste sur cet onglet. */
+function bottomItemActive(active: string, key: string): boolean {
+  if (key === 'settings' && active === 'team') return true;
+  return active === key;
+}
+
 /** Labels courts pour la bottom bar (largeur limitée). */
 function shortLabel(label: string): string {
   const map: Record<string, string> = {
@@ -333,11 +339,11 @@ function ShellInner({
                   href={item.href}
                   class={cn(
                     'flex min-h-[44px] min-w-[3.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] leading-tight transition-[background-color,color,transform] duration-200 active:scale-[0.96]',
-                    active === item.key
+                    bottomItemActive(active, item.key)
                       ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
                       : 'text-[var(--color-ink-muted)] active:bg-white/5',
                   )}
-                  aria-current={active === item.key ? 'page' : undefined}
+                  aria-current={bottomItemActive(active, item.key) ? 'page' : undefined}
                 >
                   <span class="text-base leading-none" aria-hidden>
                     •

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { api, type ProxyStatus } from '../lib/api';
+import { api, type ClusterNode, type ManagedRunner, type ProxyStatus } from '../lib/api';
 import { AppShell } from './AppShell';
 import { InstanceAdminGate } from './InstanceAdminGate';
 import { InstanceDomainPanel, ServerSettingsPanel } from './AdminInfraPanels';
@@ -104,6 +104,65 @@ type BetaFeatures = {
   agent_builder: boolean;
 };
 
+type UpdateHint = {
+  current: string;
+  latest?: string | null;
+  update_available: boolean;
+  ahead?: boolean;
+};
+
+type TileTone = 'ok' | 'warn' | 'danger' | 'neutral' | 'accent';
+
+const TILE_PILL: Record<TileTone, string> = {
+  ok: 'bg-emerald-500 text-zinc-950',
+  warn: 'bg-amber-500 text-zinc-950',
+  danger: 'bg-red-500 text-white',
+  accent: 'bg-[var(--color-accent)] text-black',
+  neutral: 'bg-white/20 text-white',
+};
+
+const TILE_TEXT: Record<TileTone, string> = {
+  ok: 'text-[var(--color-ok)]',
+  warn: 'text-[var(--color-warn)]',
+  danger: 'text-[var(--color-danger)]',
+  accent: 'text-[var(--color-accent)]',
+  neutral: 'text-[var(--color-ink-muted)]',
+};
+
+function tileStatus(label: string, tone: TileTone, detail?: string) {
+  return {
+    badge: (
+      <span
+        class={`absolute -right-1 -top-1 max-w-[4.5rem] truncate rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ring-2 ring-[#1c1c1e] ${TILE_PILL[tone]}`}
+      >
+        {label}
+      </span>
+    ),
+    subtitle: detail ? (
+      <div class={`mt-1 line-clamp-2 text-[11px] font-medium leading-snug ${TILE_TEXT[tone]}`}>
+        {detail}
+      </div>
+    ) : undefined,
+  };
+}
+
+function countLabel(n: number, one: string, many: string) {
+  return `${n} ${n > 1 ? many : one}`;
+}
+
+function runnerBad(r: ManagedRunner) {
+  if (r.op_status === 'failed') return true;
+  const gh = (r.github_status || '').toLowerCase();
+  if (gh === 'offline') return true;
+  return r.live_state === 'exited' || r.live_state === 'dead' || r.live_state === 'missing';
+}
+
+function runnerOnline(r: ManagedRunner) {
+  const gh = (r.github_status || '').toLowerCase();
+  if (gh === 'online' || gh === 'busy') return true;
+  return r.live_state === 'running';
+}
+
 function readSection(): AdminSection {
   if (typeof window === 'undefined') return 'hub';
   const tab = new URLSearchParams(window.location.search).get('tab');
@@ -129,36 +188,128 @@ function AdminHub() {
   const [proxyStatus, setProxyStatus] = useState<ProxyStatus | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [updateHint, setUpdateHint] = useState<UpdateHint | null>(null);
+  const [nodes, setNodes] = useState<ClusterNode[] | null>(null);
+  const [clusterFlags, setClusterFlags] = useState<{ fenced: boolean; interim: boolean } | null>(
+    null,
+  );
+  const [postgres, setPostgres] = useState<{
+    ready: boolean;
+    replicas: number;
+    port?: number;
+  } | null>(null);
+  const [server, setServer] = useState<{ local: boolean; host: string } | null>(null);
+  const [runners, setRunners] = useState<ManagedRunner[] | null>(null);
+  const [sso, setSso] = useState<{ configured: boolean; login: boolean } | null>(null);
+  const [backupAuto, setBackupAuto] = useState<{ enabled: boolean; hours: number } | null>(null);
+  const [s3Ready, setS3Ready] = useState<boolean | null>(null);
+  const [dns, setDns] = useState<{ configured: boolean; zone: string } | null>(null);
+  const [wildcard, setWildcard] = useState<string | null>(null);
+  const [features, setFeatures] = useState<BetaFeatures | null>(null);
   const [loading, setLoading] = useState(true);
 
-  async function loadOverview() {
-    try {
-      const [proxyRes, healthRes, adminRes] = await Promise.allSettled([
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadOverview() {
+      const core = Promise.allSettled([
         api.proxyStatus(),
         api.health(),
         api.adminOverview(),
       ]);
+      const rest = Promise.allSettled([
+        api.clusterNodes(),
+        api.postgresStatus(),
+        api.sshStatus(),
+        api.runnersList(),
+        api.ssoGet(),
+        api.backupAutoGet(),
+        api.backupS3Get(),
+        api.dnsSettings(),
+        api.bootstrap(),
+      ]);
+      const [proxyRes, healthRes, adminRes] = await core;
+      if (cancelled) return;
 
-      if (proxyRes.status === 'fulfilled' && proxyRes.value) {
-        setProxyStatus(proxyRes.value);
-      }
-      if (healthRes.status === 'fulfilled') {
-        setHealth(healthRes.value as Health);
-      }
-      if (adminRes.status === 'fulfilled') {
-        setStats(adminRes.value.stats);
-      }
-    } catch (err) {
-      console.error('Admin hub load error:', err);
-    } finally {
+      if (proxyRes.status === 'fulfilled' && proxyRes.value) setProxyStatus(proxyRes.value);
+      if (healthRes.status === 'fulfilled') setHealth(healthRes.value as Health);
+      if (adminRes.status === 'fulfilled') setStats(adminRes.value.stats);
       setLoading(false);
-    }
-  }
 
-  useEffect(() => {
+      const [clusterRes, pgRes, sshRes, runnersRes, ssoRes, autoRes, s3Res, dnsRes, bootRes] =
+        await rest;
+      if (cancelled) return;
+      if (clusterRes.status === 'fulfilled') {
+        setNodes(clusterRes.value.nodes);
+        setClusterFlags({
+          fenced: !!clusterRes.value.writes_fenced,
+          interim: !!clusterRes.value.acting_leader,
+        });
+      }
+      if (pgRes.status === 'fulfilled') {
+        setPostgres({
+          ready: !!pgRes.value.postgres?.ready,
+          replicas: pgRes.value.postgres?.replicas_streaming ?? 0,
+          port: pgRes.value.postgres?.port,
+        });
+      }
+      if (sshRes.status === 'fulfilled') {
+        setServer({ local: !!sshRes.value.local_docker, host: sshRes.value.ssh_host || '' });
+      }
+      if (runnersRes.status === 'fulfilled') setRunners(runnersRes.value.runners ?? []);
+      if (ssoRes.status === 'fulfilled') {
+        setSso({
+          configured: !!ssoRes.value.config?.oidc_configured,
+          login: !!ssoRes.value.config?.enable_platform_login,
+        });
+      }
+      if (autoRes.status === 'fulfilled') {
+        setBackupAuto({
+          enabled: !!autoRes.value.config?.enabled,
+          hours: autoRes.value.config?.interval_hours ?? 24,
+        });
+      }
+      if (s3Res.status === 'fulfilled') setS3Ready(!!s3Res.value.config?.ready);
+      if (dnsRes.status === 'fulfilled') {
+        setDns({
+          configured: !!dnsRes.value.dns?.configured,
+          zone: dnsRes.value.dns?.zone || '',
+        });
+      }
+      if (bootRes.status === 'fulfilled') {
+        const b = bootRes.value;
+        setWildcard(b.settings?.wildcard_fallback || b.settings?.wildcard_domain || '');
+        setFeatures({
+          workspace: b.features?.workspace !== false,
+          agent_builder: b.features?.agent_builder !== false,
+        });
+      }
+    }
+
     void loadOverview();
     const interval = setInterval(() => void loadOverview(), 10000);
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadUpdate() {
+      try {
+        const r = await api.updateCheck();
+        if (!cancelled) setUpdateHint(r.data);
+      } catch {
+        /* la tuile reste neutre si GitHub ne répond pas */
+      }
+    }
+    void loadUpdate();
+    const interval = setInterval(() => void loadUpdate(), 5 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   if (loading) {
@@ -170,9 +321,135 @@ function AdminHub() {
     );
   }
 
-  const proxyTone =
-    proxyStatus?.running ? 'ok' : proxyStatus?.status === 'missing' ? 'danger' : 'warn';
-  const healthTone = health?.ok ? 'ok' : 'danger';
+  const proxy = !proxyStatus
+    ? null
+    : proxyStatus.running
+      ? tileStatus('OK', 'ok', 'En ligne')
+      : proxyStatus.status === 'missing'
+        ? tileStatus('Absent', 'danger', 'Conteneur absent')
+        : tileStatus('Stop', 'warn', 'Arrêté');
+
+  const sante = !health
+    ? null
+    : health.ok
+      ? tileStatus('OK', 'ok', health.version ? `v${health.version}` : 'Opérationnelle')
+      : tileStatus('KO', 'danger', 'Erreur');
+
+  const workspaces = stats
+    ? tileStatus(
+        String(stats.workspaces),
+        stats.plan_pro ? 'accent' : 'neutral',
+        `${stats.workspaces} clients, ${stats.users} utilisateurs`,
+      )
+    : null;
+
+  const offline = nodes?.filter((n) => n.status !== 'online').length ?? 0;
+  const drained = nodes?.filter((n) => n.status === 'online' && n.drained).length ?? 0;
+  const cluster = !nodes
+    ? null
+    : clusterFlags?.fenced
+      ? tileStatus('Figé', 'danger', 'Écritures suspendues')
+      : offline
+        ? tileStatus(
+            `${nodes.length - offline}/${nodes.length}`,
+            'warn',
+            countLabel(offline, 'hors ligne', 'hors ligne'),
+          )
+        : drained
+          ? tileStatus('Drain', 'warn', countLabel(drained, 'nœud drainé', 'nœuds drainés'))
+          : clusterFlags?.interim
+            ? tileStatus('Intérim', 'warn', 'Control plane intérimaire')
+            : nodes.length
+              ? tileStatus('OK', 'ok', countLabel(nodes.length, 'nœud', 'nœuds'))
+              : tileStatus('0', 'neutral', 'Aucun nœud');
+
+  const pg = !postgres
+    ? null
+    : postgres.ready
+      ? tileStatus(
+          'OK',
+          'ok',
+          postgres.replicas > 0
+            ? countLabel(postgres.replicas, 'réplique', 'répliques')
+            : postgres.port
+              ? `Port ${postgres.port}`
+              : 'Control plane',
+        )
+      : tileStatus('KO', 'danger', 'Indisponible');
+
+  const docker = health?.backends?.docker;
+  const serveur = server && !server.local
+    ? tileStatus('SSH', 'accent', server.host || 'Distant')
+    : docker
+      ? docker.ok
+        ? tileStatus('Docker', 'ok', docker.version ? `Docker ${docker.version}` : 'Local')
+        : tileStatus('KO', 'danger', 'Docker indisponible')
+      : server?.local
+        ? tileStatus('Docker', 'neutral', 'Local')
+        : null;
+
+  const badRunners = runners?.filter(runnerBad).length ?? 0;
+  const busyRunners =
+    runners?.filter((r) => (r.github_status || '').toLowerCase() === 'busy').length ?? 0;
+  const onlineRunners = runners?.filter(runnerOnline).length ?? 0;
+  const runnerTile = !runners
+    ? null
+    : runners.length === 0
+      ? tileStatus('0', 'neutral', 'Aucun runner')
+      : badRunners
+        ? tileStatus('KO', 'danger', countLabel(badRunners, 'en échec', 'en échec'))
+        : busyRunners
+          ? tileStatus('Job', 'accent', countLabel(busyRunners, 'occupé', 'occupés'))
+          : onlineRunners
+            ? tileStatus(String(onlineRunners), 'ok', countLabel(onlineRunners, 'en ligne', 'en ligne'))
+            : tileStatus(String(runners.length), 'warn', 'Inactifs');
+
+  const domaine =
+    dns?.configured
+      ? tileStatus('DNS', 'ok', dns.zone || 'Automatique')
+      : wildcard
+        ? tileStatus('OK', 'ok', wildcard)
+        : dns && wildcard !== null
+          ? tileStatus('Non', 'warn', 'Aucun domaine')
+          : null;
+
+  const ssoTile = !sso
+    ? null
+    : sso.configured && sso.login
+      ? tileStatus('On', 'ok', 'Actif')
+      : sso.configured
+        ? tileStatus('Off', 'warn', 'Login désactivé')
+        : tileStatus('Off', 'neutral', 'Non configuré');
+
+  const backup = backupAuto?.enabled
+    ? tileStatus('Auto', 'ok', `Toutes les ${backupAuto.hours} h`)
+    : s3Ready
+      ? tileStatus('S3', 'ok', 'Distant prêt')
+      : backupAuto
+        ? tileStatus('Local', 'neutral', 'Manuelles')
+        : null;
+
+  const update = updateHint?.update_available
+    ? tileStatus(
+        'MAJ',
+        'warn',
+        updateHint.latest ? `v${updateHint.latest} disponible` : 'Mise à jour disponible',
+      )
+    : updateHint?.ahead
+      ? tileStatus('Dev', 'accent', `v${updateHint.current}`)
+      : updateHint
+        ? tileStatus('OK', 'ok', `v${updateHint.current}`)
+        : null;
+
+  const betaOn = features ? Number(features.workspace) + Number(features.agent_builder) : null;
+  const beta =
+    betaOn == null
+      ? null
+      : betaOn === 2
+        ? tileStatus('Bêta', 'warn', '2 actives')
+        : betaOn === 1
+          ? tileStatus('1/2', 'warn', '1 active')
+          : tileStatus('Off', 'neutral', 'Masquées');
 
   return (
     <HubGrid>
@@ -182,15 +459,8 @@ function AdminHub() {
         title="Proxy / Traefik"
         description="Reverse-proxy système, routes apps"
         icon={<HubIcon name="network" />}
-        badge={
-          <Badge tone={proxyTone}>
-            {proxyStatus?.running
-              ? 'En ligne'
-              : proxyStatus?.status === 'missing'
-                ? 'Absent'
-                : 'Arrêté'}
-          </Badge>
-        }
+        badge={proxy?.badge}
+        subtitle={proxy?.subtitle}
       />
       <HubTile
         index={1}
@@ -198,15 +468,17 @@ function AdminHub() {
         title="Santé plateforme"
         description="Backends, connexions, version"
         icon={<HubIcon name="heart" />}
-        badge={<Badge tone={healthTone}>{health?.ok ? 'OK' : 'Erreur'}</Badge>}
+        badge={sante?.badge}
+        subtitle={sante?.subtitle}
       />
       <HubTile
         index={2}
         href="/app/admin?tab=workspaces"
         title="Workspaces"
-        description={`${stats?.workspaces ?? 0} clients, ${stats?.users ?? 0} utilisateurs`}
+        description="Clients et utilisateurs"
         icon={<HubIcon name="users" />}
-        badge={stats?.plan_pro ? <Badge tone="accent">{stats.plan_pro} Pro</Badge> : undefined}
+        badge={workspaces?.badge}
+        subtitle={workspaces?.subtitle}
       />
       <HubTile
         index={3}
@@ -214,6 +486,8 @@ function AdminHub() {
         title="Cluster"
         description="Leader, workers, invitations et placement des apps"
         icon={<HubIcon name="network" />}
+        badge={cluster?.badge}
+        subtitle={cluster?.subtitle}
       />
       <HubTile
         index={4}
@@ -221,6 +495,8 @@ function AdminHub() {
         title="Postgres"
         description="Base du control plane, port et répliques"
         icon={<HubIcon name="server" />}
+        badge={pg?.badge}
+        subtitle={pg?.subtitle}
       />
       <HubTile
         index={5}
@@ -228,6 +504,8 @@ function AdminHub() {
         title="Serveur"
         description="Docker local ou SSH distant, clés SSH"
         icon={<HubIcon name="server" />}
+        badge={serveur?.badge}
+        subtitle={serveur?.subtitle}
       />
       <HubTile
         index={6}
@@ -235,42 +513,53 @@ function AdminHub() {
         title="Runners"
         description="Runners GitHub self-hosted, jobs et logs"
         icon={<HubIcon name="server" />}
+        badge={runnerTile?.badge}
+        subtitle={runnerTile?.subtitle}
       />
       <HubTile
-        index={6}
+        index={7}
         href="/app/admin?tab=domaine"
         title="Domaine instance"
         description="Wildcard de repli et DNS automatique"
         icon={<HubIcon name="globe" />}
+        badge={domaine?.badge}
+        subtitle={domaine?.subtitle}
       />
       <HubTile
-        index={7}
+        index={8}
         href="/app/admin?tab=sso"
         title="SSO / OIDC"
         description="Authentification unique de l’instance"
         icon={<HubIcon name="shield" />}
+        badge={ssoTile?.badge}
+        subtitle={ssoTile?.subtitle}
       />
       <HubTile
-        index={8}
+        index={9}
         href="/app/admin?tab=backup"
         title="Sauvegardes"
         description="Sauvegardes de l’instance, locales et S3"
         icon={<HubIcon name="archive" />}
+        badge={backup?.badge}
+        subtitle={backup?.subtitle}
       />
       <HubTile
-        index={9}
+        index={10}
         href="/app/admin?tab=update"
         title="Mise à jour"
         description="Version de DevForge"
         icon={<HubIcon name="refresh" />}
+        badge={update?.badge}
+        subtitle={update?.subtitle}
       />
       <HubTile
-        index={10}
+        index={11}
         href="/app/admin?tab=beta"
         title="Fonctionnalités bêta"
         description="Workspace et création d’app par agent"
         icon={<HubIcon name="brain" />}
-        badge={<Badge tone="warn">Bêta</Badge>}
+        badge={beta?.badge}
+        subtitle={beta?.subtitle}
       />
     </HubGrid>
   );

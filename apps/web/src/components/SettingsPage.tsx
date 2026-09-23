@@ -224,8 +224,15 @@ function SettingsPageInner() {
     return (
       <AppShell active="settings" title="Paramètres">
         <HubGrid>
+          <HubTile
+            index={0}
+            href="/app/team"
+            title="Compte"
+            description="Profil, rôle et workspace"
+            icon={<HubIcon name="user" />}
+          />
           {SETTINGS_CARDS.map((card, i) => (
-            <SettingCard key={card.key} card={card} index={i} />
+            <SettingCard key={card.key} card={card} index={i + 1} />
           ))}
         </HubGrid>
       </AppShell>

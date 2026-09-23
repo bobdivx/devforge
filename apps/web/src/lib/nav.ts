@@ -30,22 +30,22 @@ export function globalNavForRole(role?: string | null): NavItem[] {
 
 /**
  * Barre du bas, sous le breakpoint desktop.
- * Apps · Agents · Compte pour tout le monde.
+ * Apps · Agents · Paramètres pour tout le monde.
  * Le centre ouvre les agents lancés sur mobile ; tablette et desktop les ont dans le header.
- * Runners, MCP, Tokens, Paramètres et Admin passent par la sidebar (desktop)
- * ou le menu avatar (mobile et tablette). Runners reste aussi dans le hub Admin.
+ * Le compte est une tuile du hub Paramètres. Runners, MCP, Tokens et Admin passent
+ * par la sidebar (desktop) ou le menu avatar (mobile et tablette).
  */
 export function mobileBottomNav(_role?: string | null): NavItem[] {
   return [
     { href: '/app', label: 'Apps', key: 'home' },
     { href: '#agents', label: 'Agents', key: 'agents' },
-    { href: '/app/team', label: 'Compte', key: 'team' },
+    { href: '/app/settings', label: 'Paramètres', key: 'settings' },
   ];
 }
 
 /** Liens du menu avatar quand la sidebar est absente. Pas de Runners : trop rare sur mobile. */
 export function mobileAvatarNav(role?: string | null): NavItem[] {
-  const hidden = new Set(['home', 'team', 'runners']);
+  const hidden = new Set(['home', 'team', 'settings', 'runners']);
   return globalNavForRole(role).filter((item) => !hidden.has(item.key));
 }
 
