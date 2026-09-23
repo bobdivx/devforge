@@ -406,15 +406,27 @@ function ProjectOverview({
     {
       key: 'errors',
       icon: 'pulse',
-      label: latestFailed ? 'Échec actif' : project.status === 'unhealthy' ? 'Injoignable' : 'Santé',
+      label: latestFailed
+        ? 'Échec actif'
+        : project.status === 'unrouted'
+          ? 'Route absente'
+          : project.status === 'unhealthy'
+            ? 'Injoignable'
+            : 'Santé',
       detail: latestFailed
         ? `${latestFailed.git_message || latestFailed.status} · ${formatWhen(latestFailed.created_at)}`
-        : project.status === 'unhealthy'
-          ? `Pas de réponse sur le port ${project.port || 3000}${latest ? ` · Deploy ${latest.status}` : ''}`
-          : latest
-            ? 'Dernier déploiement OK'
-            : 'En attente du premier deploy',
-      tone: latestFailed || project.status === 'unhealthy' ? 'danger' : latest ? 'ok' : 'neutral',
+        : project.status === 'unrouted'
+          ? 'Traefik répond à la place du site : la route Host n’est pas branchée'
+          : project.status === 'unhealthy'
+            ? `Pas de réponse sur le port ${project.port || 3000}${latest ? ` · Deploy ${latest.status}` : ''}`
+            : latest
+              ? 'Dernier déploiement OK'
+              : 'En attente du premier deploy',
+      tone: latestFailed || project.status === 'unhealthy' || project.status === 'unrouted'
+        ? 'danger'
+        : latest
+          ? 'ok'
+          : 'neutral',
       href: latestFailed
         ? `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`
         : undefined,

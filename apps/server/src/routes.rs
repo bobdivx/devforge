@@ -2848,7 +2848,16 @@ async fn auth_deployment(
     Ok((user, workspace, dep))
 }
 
-async fn fetch_http_status(url: &str) -> Result<u16, String> {
+struct HttpSample {
+    status: u16,
+    body: String,
+    /// Vrai quand le corps tient dans le préfixe lu : assez pour reconnaître
+    /// la page courte de Traefik (`404 page not found` ou `OK`).
+    complete: bool,
+    final_url: String,
+}
+
+async fn fetch_http_probe(url: &str) -> Result<HttpSample, String> {
     if url.is_empty() {
         return Err("empty".into());
     }
@@ -2859,7 +2868,39 @@ async fn fetch_http_status(url: &str) -> Result<u16, String> {
         .map_err(|e| format!("client: {}", e))?;
 
     match client.get(url).send().await {
-        Ok(resp) => Ok(resp.status().as_u16()),
+        Ok(mut resp) => {
+            let status = resp.status().as_u16();
+            let final_url = resp.url().to_string();
+            let mut buf = Vec::new();
+            let mut complete = false;
+            loop {
+                if buf.len() >= 64 {
+                    break;
+                }
+                match resp.chunk().await {
+                    Ok(Some(chunk)) => {
+                        let room = 64 - buf.len();
+                        if chunk.len() <= room {
+                            buf.extend_from_slice(&chunk);
+                        } else {
+                            buf.extend_from_slice(&chunk[..room]);
+                            break;
+                        }
+                    }
+                    Ok(None) => {
+                        complete = true;
+                        break;
+                    }
+                    Err(_) => break,
+                }
+            }
+            Ok(HttpSample {
+                status,
+                body: String::from_utf8_lossy(&buf).into_owned(),
+                complete,
+                final_url,
+            })
+        }
         Err(e) => {
             if e.is_timeout() {
                 Err("timeout".to_string())
@@ -2882,16 +2923,46 @@ fn parse_container_probe(output: &str) -> Option<u16> {
     if line == "down" {
         return None;
     }
-    line.parse::<u16>().ok().filter(|c| devforge_deploy::app_http_is_up(*c))
+    line.parse::<u16>()
+        .ok()
+        .filter(|c| devforge_deploy::app_http_is_up(*c))
 }
 
 fn project_listen_port(project: &Project) -> u16 {
     let port = project.port.clamp(0, 65535) as u16;
-    if port == 0 { 3000 } else { port }
+    if port == 0 {
+        3000
+    } else {
+        port
+    }
 }
 
-/// Même test pour chaque projet : le port d’écoute répond-il en HTTP ?
-async fn app_listens(state: &AppState, project: &Project) -> bool {
+/// `live` si l'application répond.
+/// Avec un nom public, le port vert ne suffit pas : Traefik répond `OK` à
+/// `/ping*` et `404 page not found` quand la route Host n'est pas branchée.
+async fn site_reach(state: &AppState, project: &Project) -> &'static str {
+    if let Some(url) = project
+        .production_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let target = probe_url(url);
+        return match fetch_http_probe(&target).await {
+            Ok(sample) => match devforge_deploy::classify_public_response(
+                sample.status,
+                &sample.body,
+                sample.complete,
+                &sample.final_url,
+            ) {
+                devforge_deploy::PublicReach::App => "live",
+                devforge_deploy::PublicReach::ProxyOnly => "unrouted",
+                devforge_deploy::PublicReach::Down => "unhealthy",
+            },
+            Err(_) => "unhealthy",
+        };
+    }
+
     let port = project_listen_port(project);
     let mut container_code = None;
     let server = project.server_id.as_deref().unwrap_or("").trim();
@@ -2904,27 +2975,23 @@ async fn app_listens(state: &AppState, project: &Project) -> bool {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .unwrap_or("/");
-        if let Ok(r) = state.deploy.executor().exec(server, workdir, &cmd, 12).await {
+        if let Ok(r) = state
+            .deploy
+            .executor()
+            .exec(server, workdir, &cmd, 12)
+            .await
+        {
             container_code = parse_container_probe(&r.output);
             if container_code.is_some_and(devforge_deploy::app_http_is_up) {
-                return true;
+                return "live";
             }
         }
-    }
-
-    if let Some(url) = project.production_url.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        // 502/503/504 viennent du proxy : le port de l’app n’a pas répondu.
-        if let Ok(code) = fetch_http_status(&probe_url(url)).await {
-            if devforge_deploy::app_http_is_up(code) && !matches!(code, 502 | 503 | 504) {
-                return true;
-            }
-        }
-        return false;
     }
 
     match container_code {
-        Some(c) => devforge_deploy::app_http_is_up(c),
-        None => true,
+        Some(c) if devforge_deploy::app_http_is_up(c) => "live",
+        Some(_) => "unhealthy",
+        None => "live",
     }
 }
 
@@ -2942,11 +3009,7 @@ async fn resolve_project_status(state: &AppState, project: &Project) -> Result<S
         Some("running") | Some("queued") | Some("building") => "deploying",
         Some("failed") | Some("error") => "failed",
         Some("ready") | Some("success") | Some("completed") | Some("live") => {
-            if app_listens(state, project).await {
-                "live"
-            } else {
-                "unhealthy"
-            }
+            site_reach(state, project).await
         }
         None => {
             if project.status == "ready" || project.status == "live" {
@@ -2964,7 +3027,7 @@ async fn resolve_project_status(state: &AppState, project: &Project) -> Result<S
     if derived != project.status
         && matches!(
             derived.as_str(),
-            "draft" | "live" | "failed" | "deploying" | "stopped" | "unhealthy"
+            "draft" | "live" | "failed" | "deploying" | "stopped" | "unhealthy" | "unrouted"
         )
     {
         let _ = sqlx::query("UPDATE projects SET status = $1 WHERE id = $2")

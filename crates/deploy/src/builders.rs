@@ -57,10 +57,7 @@ pub fn collect_build_envs(env_file: Option<&str>) -> Vec<(String, String)> {
 pub fn is_provider_base_image(image: &str) -> bool {
     let tag = image.rsplit('/').next().unwrap_or(image);
     let tag = tag.rsplit(':').next().unwrap_or(tag);
-    tag == "ubuntu"
-        || tag == "debian"
-        || tag.starts_with("ubuntu-")
-        || tag.starts_with("debian-")
+    tag == "ubuntu" || tag == "debian" || tag.starts_with("ubuntu-") || tag.starts_with("debian-")
 }
 
 pub fn resolve_nixpacks_image(configured: Option<&str>) -> String {
@@ -289,11 +286,7 @@ mod tests {
 
     #[test]
     fn custom_nixpacks_image_skips_bootstrap() {
-        let cmd = nixpacks_docker_build_image(
-            "ghcr.io/example/nixpacks:9",
-            "df-abc:latest",
-            &[],
-        );
+        let cmd = nixpacks_docker_build_image("ghcr.io/example/nixpacks:9", "df-abc:latest", &[]);
         assert!(!cmd.contains("docker image inspect"));
         assert!(cmd.contains("ghcr.io/example/nixpacks:9"));
     }

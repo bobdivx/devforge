@@ -192,6 +192,43 @@ pub fn app_http_is_up(code: u16) -> bool {
     (100..600).contains(&code)
 }
 
+/// Ce que renvoie le nom public, une fois le port distingué du proxy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublicReach {
+    /// L'application est derrière la route Host.
+    App,
+    /// Traefik a répondu à la place : 404 sans route, ou son `/ping`.
+    ProxyOnly,
+    /// Le proxy n'a pas joint l'application (502/503/504, code invalide).
+    Down,
+}
+
+/// Le nom public joint-il l'application ?
+///
+/// Un 404 ou un 401 de l'app comptent. La phrase exacte `404 page not found`
+/// est la page de Traefik quand aucune route `Host(...)` n'est branchée.
+/// Tout chemin qui commence par `/ping` et dont le corps est `OK` est le
+/// healthcheck de Traefik, pas le site.
+pub fn classify_public_response(code: u16, body: &str, complete: bool, url: &str) -> PublicReach {
+    if traefik_ping_path(url) && complete && body.trim().eq_ignore_ascii_case("OK") {
+        return PublicReach::ProxyOnly;
+    }
+    if code == 404 && complete && body.trim() == "404 page not found" {
+        return PublicReach::ProxyOnly;
+    }
+    if matches!(code, 502 | 503 | 504) || !app_http_is_up(code) {
+        return PublicReach::Down;
+    }
+    PublicReach::App
+}
+
+fn traefik_ping_path(url: &str) -> bool {
+    let rest = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    let path = rest.find('/').map(|i| &rest[i..]).unwrap_or("/");
+    let path = path.split(['?', '#']).next().unwrap_or(path);
+    path.starts_with("/ping")
+}
+
 fn normalize_port(port: &mut PublishedPort) -> Result<(), String> {
     if port.host == 0 || port.container == 0 {
         return Err("port 0 refusé".into());
@@ -212,7 +249,10 @@ fn validate_sidecar_name(name: &str) -> Result<(), String> {
         && name
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        && name.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric())
         && !name.ends_with('-');
     if ok {
         Ok(())
@@ -228,7 +268,11 @@ fn validate_image(image: &str) -> Result<(), String> {
         return Err("image Docker manquante".into());
     }
     if image.chars().any(|c| {
-        c.is_whitespace() || matches!(c, ';' | '&' | '|' | '`' | '$' | '"' | '\'' | '\\' | '<' | '>')
+        c.is_whitespace()
+            || matches!(
+                c,
+                ';' | '&' | '|' | '`' | '$' | '"' | '\'' | '\\' | '<' | '>'
+            )
     }) {
         return Err(format!("image Docker refusée ({image})"));
     }
@@ -312,6 +356,52 @@ mod tests {
         assert!(app_http_is_up(404));
         assert!(app_http_is_up(401));
         assert!(!app_http_is_up(0));
+    }
+
+    #[test]
+    fn traefik_default_page_is_not_the_app() {
+        let home = "https://client.popcornn.app/";
+        assert_eq!(
+            classify_public_response(404, "404 page not found\n", true, home),
+            PublicReach::ProxyOnly
+        );
+        assert_eq!(
+            classify_public_response(200, "OK", true, "https://client.popcornn.app/ping-check"),
+            PublicReach::ProxyOnly
+        );
+        assert_eq!(
+            classify_public_response(200, "OK", true, "https://client.popcornn.app/ping"),
+            PublicReach::ProxyOnly
+        );
+        assert_eq!(
+            classify_public_response(200, "<html>ok</html>", true, home),
+            PublicReach::App
+        );
+        assert_eq!(
+            classify_public_response(200, "OK", true, home),
+            PublicReach::App
+        );
+        assert_eq!(
+            classify_public_response(404, "<html>introuvable</html>", true, home),
+            PublicReach::App
+        );
+        assert_eq!(
+            classify_public_response(401, "", true, "https://api.example/"),
+            PublicReach::App
+        );
+        assert_eq!(
+            classify_public_response(502, "Bad Gateway", true, home),
+            PublicReach::Down
+        );
+        assert_eq!(
+            classify_public_response(
+                404,
+                "404 page not found — suite de la page application",
+                true,
+                home
+            ),
+            PublicReach::App
+        );
     }
 
     #[test]

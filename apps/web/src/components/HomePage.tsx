@@ -79,7 +79,7 @@ function AppCard({
 
 function aggregateStatus(members: Project[]): string {
   if (members.some((p) => ['deploying', 'building', 'queued'].includes(p.status))) return 'deploying';
-  if (members.some((p) => ['failed', 'error', 'unhealthy'].includes(p.status))) return 'unhealthy';
+  if (members.some((p) => ['failed', 'error', 'unhealthy', 'unrouted'].includes(p.status))) return 'unhealthy';
   if (members.some((p) => p.status === 'live' || p.status === 'running')) return 'live';
   return members[0]?.status || 'ready';
 }

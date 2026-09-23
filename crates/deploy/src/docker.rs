@@ -33,9 +33,15 @@ pub fn normalize_volume_mount(raw: &str) -> Result<String, String> {
         return Err("montage vide".into());
     }
     if raw.chars().any(|c| {
-        c.is_whitespace() || matches!(c, ';' | '&' | '|' | '`' | '$' | '"' | '\'' | '\\' | '\n' | '\r')
+        c.is_whitespace()
+            || matches!(
+                c,
+                ';' | '&' | '|' | '`' | '$' | '"' | '\'' | '\\' | '\n' | '\r'
+            )
     }) {
-        return Err(format!("montage refusé ({raw}) — pas d’espace ni de caractère shell"));
+        return Err(format!(
+            "montage refusé ({raw}) — pas d’espace ni de caractère shell"
+        ));
     }
     let parts: Vec<&str> = raw.split(':').collect();
     if parts.len() < 2 || parts.len() > 3 {
@@ -370,10 +376,9 @@ pub fn docker_restart(name: &str) -> String {
 pub fn docker_http_probe_cmd(container: &str, port: u16, path: &str) -> String {
     let path = if path.starts_with('/')
         && path.len() <= 200
-        && path
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '.' | '-' | '?' | '=' | '&' | '%'))
-    {
+        && path.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '.' | '-' | '?' | '=' | '&' | '%')
+        }) {
         path
     } else {
         "/"
@@ -1153,7 +1158,10 @@ mod tests {
 
     #[test]
     fn volume_mount_rejects_relative_and_accepts_popcorn_binds() {
-        assert!(normalize_volume_mount("/media/Media/Popcornn/streaming:/app/downloads/transcode_cache").is_ok());
+        assert!(normalize_volume_mount(
+            "/media/Media/Popcornn/streaming:/app/downloads/transcode_cache"
+        )
+        .is_ok());
         assert!(normalize_volume_mount("media:/app/downloads").is_err());
         assert!(normalize_volume_mount("/media/../etc:/app").is_err());
         let many = normalize_volume_mounts(&[

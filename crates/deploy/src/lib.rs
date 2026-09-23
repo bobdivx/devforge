@@ -11,7 +11,7 @@ pub mod error_parser;
 pub mod runtime;
 pub mod ssh;
 
-pub use runtime::{app_http_is_up, RuntimeSpec};
+pub use runtime::{app_http_is_up, classify_public_response, PublicReach, RuntimeSpec};
 
 pub use error_parser::{parse_deploy_error_fr, DeployError};
 pub use ssh::{LocalShellExecutor, SshRemoteExecutor, SshTarget};
@@ -1213,10 +1213,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         // CRITICAL: Start new container WITHOUT Traefik labels first (prevent Host theft #106)
         // Labels will be applied only after healthcheck passes
         if !extras.volumes.is_empty() {
-            logs.push_str(&format!(
-                "[volumes] {}\n",
-                extras.volumes.join(" ")
-            ));
+            logs.push_str(&format!("[volumes] {}\n", extras.volumes.join(" ")));
         }
         if extras.runtime.memory.is_some() || extras.runtime.cpus.is_some() {
             logs.push_str(&format!(

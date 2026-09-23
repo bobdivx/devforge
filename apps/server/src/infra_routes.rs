@@ -1699,10 +1699,16 @@ fn merge_detected_ports(raw: &str, detection: &devforge_detect::DetectionResult)
             continue;
         }
         let protocol = if port.protocol == "udp" { "udp" } else { "tcp" };
-        let host = if port.host == 0 { port.container } else { port.host };
-        if spec.ports.iter().any(|p| {
-            p.host == host && p.container == port.container && p.protocol == protocol
-        }) {
+        let host = if port.host == 0 {
+            port.container
+        } else {
+            port.host
+        };
+        if spec
+            .ports
+            .iter()
+            .any(|p| p.host == host && p.container == port.container && p.protocol == protocol)
+        {
             continue;
         }
         spec.ports.push(devforge_deploy::runtime::PublishedPort {

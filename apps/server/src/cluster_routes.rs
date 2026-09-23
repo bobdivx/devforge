@@ -808,7 +808,7 @@ async fn evacuate_stale_nodes(state: &AppState) {
         let projects = sqlx::query_as::<_, crate::state::Project>(
             r#"SELECT * FROM projects
                WHERE COALESCE(NULLIF(trim(COALESCE(server_id, '')), ''), 'default') = $1
-                 AND status IN ('live', 'unhealthy', 'failed')"#,
+                 AND status IN ('live', 'unhealthy', 'unrouted', 'failed')"#,
         )
         .bind(&from)
         .fetch_all(&state.pool)
@@ -1369,10 +1369,7 @@ async fn prepare_worker_update(
     secret: &str,
     name: &str,
 ) -> Result<(), (StatusCode, Json<Value>)> {
-    match client
-        .exec(secret, align_self_container_script(), 40)
-        .await
-    {
+    match client.exec(secret, align_self_container_script(), 40).await {
         Ok(r) if r.ok => {
             tracing::info!(node = %name, output = %r.output.trim(), "conteneur worker aligné");
             Ok(())

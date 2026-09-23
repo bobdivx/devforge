@@ -903,7 +903,17 @@ async fn resolve_llm_provider(
     pool: &PgPool,
     user_uuid: &str,
 ) -> (Arc<dyn devforge_llm::LlmProvider>, String) {
-    let rows: Vec<(String, String, String, String, String, String, i64, String, String)> = sqlx::query_as(
+    let rows: Vec<(
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        i64,
+        String,
+        String,
+    )> = sqlx::query_as(
         r#"SELECT id, name, provider, api_key, base_url, model,
                   COALESCE(healthy, 0), COALESCE(last_probe_at, ''), COALESCE(resolved_model, '')
            FROM llm_providers

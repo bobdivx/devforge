@@ -12,6 +12,8 @@ export function projectStatusMeta(status: string): {
       return { label: status === 'live' || status === 'running' ? 'En ligne' : 'OK', tone: 'ok' };
     case 'unhealthy':
       return { label: 'Injoignable', tone: 'danger' };
+    case 'unrouted':
+      return { label: 'Route absente', tone: 'danger' };
     case 'deploying':
     case 'building':
     case 'queued':
