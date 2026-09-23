@@ -405,7 +405,49 @@ fn quote_ident(name: &str) -> String {
 }
 
 fn sql_string(value: &str) -> String {
+    // Le protocole Postgres coupe la requête au premier octet nul.
+    let value = value.replace('\0', "");
     format!("'{}'", value.replace('\'', "''"))
+}
+
+/// Découpe un script généré ici. Les points-virgules entre quotes sont conservés.
+pub fn split_statements(sql: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut chars = sql.chars().peekable();
+    let mut in_str = false;
+    while let Some(c) = chars.next() {
+        if in_str {
+            cur.push(c);
+            if c == '\'' {
+                if chars.peek() == Some(&'\'') {
+                    cur.push(chars.next().unwrap());
+                } else {
+                    in_str = false;
+                }
+            }
+            continue;
+        }
+        if c == '\'' {
+            in_str = true;
+            cur.push(c);
+            continue;
+        }
+        if c == ';' {
+            let stmt = cur.trim().to_string();
+            if !stmt.is_empty() {
+                out.push(stmt);
+            }
+            cur.clear();
+            continue;
+        }
+        cur.push(c);
+    }
+    let tail = cur.trim().to_string();
+    if !tail.is_empty() {
+        out.push(tail);
+    }
+    out
 }
 
 fn safe_default(raw: &str) -> Option<String> {
@@ -494,6 +536,16 @@ mod tests {
         assert!(plan.sql.contains("session_replication_role = replica"));
         assert!(plan.sql.contains("setval"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sql_literal_drops_nul_and_split_keeps_semicolons_inside_strings() {
+        let plan_sql = "BEGIN;\nINSERT INTO t (v) VALUES ('a;b''c');\nCOMMIT;\n";
+        let parts = split_statements(plan_sql);
+        assert_eq!(parts, vec!["BEGIN", "INSERT INTO t (v) VALUES ('a;b''c')", "COMMIT"]);
+        let lit = sql_string("a\0b'c");
+        assert!(!lit.contains('\0'));
+        assert_eq!(lit, "'ab''c'");
     }
 
     #[test]

@@ -149,10 +149,13 @@ pub async fn import_legacy_sqlite(pool: &sqlx::PgPool, sqlite_file: &Path) -> Re
     if plan.tables == 0 {
         return Ok(());
     }
-    sqlx::raw_sql(&plan.sql)
-        .execute(pool)
-        .await
-        .map_err(|e| format!("import SQLite : {e}"))?;
+    let mut conn = pool.acquire().await.map_err(|e| e.to_string())?;
+    for stmt in devforge_database::split_statements(&plan.sql) {
+        if let Err(e) = sqlx::raw_sql(&stmt).execute(&mut *conn).await {
+            let preview: String = stmt.chars().take(180).collect();
+            return Err(format!("import SQLite : {e} — {preview}"));
+        }
+    }
     tracing::info!(
         file = %sqlite_file.display(),
         tables = plan.tables,
@@ -209,7 +212,15 @@ pub async fn admin_status() -> serde_json::Value {
     )
     .await
     .ok()
-    .and_then(|s| s.trim().lines().next().unwrap_or("").trim().parse::<i64>().ok())
+    .and_then(|s| {
+        s.trim()
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .parse::<i64>()
+            .ok()
+    })
     .unwrap_or(0);
     serde_json::json!({
         "ready": true,
@@ -719,10 +730,7 @@ async fn connection_url(creds: &Creds) -> Result<String, String> {
     } else if tcp_open("127.0.0.1", creds.port).await {
         ("127.0.0.1".into(), creds.port)
     } else {
-        return Err(format!(
-            "Postgres injoignable sur 127.0.0.1:{}",
-            creds.port
-        ));
+        return Err(format!("Postgres injoignable sur 127.0.0.1:{}", creds.port));
     };
     tracing::info!(%host, port, "control plane postgres joignable");
     Ok(format!(

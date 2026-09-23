@@ -5,7 +5,7 @@ pub use pg_instance::{
     apply_sql_shell, drop_shell, dump_shell, ensure_published_shell, promote_standby_shell,
     provision_shell, standby_shell, wait_shell, PgInstance,
 };
-pub use sqlite_to_pg::{plan_sqlite_file, resolve_sqlite_source, MigrationPlan};
+pub use sqlite_to_pg::{plan_sqlite_file, resolve_sqlite_source, split_statements, MigrationPlan};
 
 use serde_json::{json, Value};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
