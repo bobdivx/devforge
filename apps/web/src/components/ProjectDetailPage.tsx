@@ -24,6 +24,7 @@ import {
   CardHeader,
   FadeIn,
   HubGrid,
+  HubIcon,
   HubTile,
   Input,
   LiveStatus,
@@ -358,7 +359,17 @@ function ProjectOverview({
   const host = resolveNode(nodes, project.server_id);
   const hostOffline = host.status === 'offline';
 
-  const health: Array<HealthItem & { icon: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' }> = [
+  const gpuNvidia = project.gpu_nvidia === true || project.gpu_nvidia === 1;
+  const gpuDri = project.gpu_dri === true || project.gpu_dri === 1;
+  const gpuDetail = gpuNvidia && gpuDri
+    ? 'NVIDIA · /dev/dri'
+    : gpuNvidia
+      ? 'NVIDIA'
+      : gpuDri
+        ? 'Accès /dev/dri'
+        : 'Aucun accès';
+
+  const health: Array<HealthItem & { icon: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' | 'gpu' }> = [
     {
       key: 'deploy',
       icon: 'deploy',
@@ -459,6 +470,14 @@ function ProjectOverview({
         href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=git`,
       };
     })(),
+    {
+      key: 'gpu',
+      icon: 'gpu',
+      label: gpuNvidia ? 'GPU' : gpuDri ? 'Accès /dev/dri' : 'GPU',
+      detail: gpuDetail,
+      tone: gpuNvidia || gpuDri ? 'ok' : 'neutral',
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=settings&section=gpu`,
+    },
     {
       key: 'domain',
       icon: 'globe',
@@ -749,7 +768,7 @@ function HealthIcon({
   kind,
   tone,
 }: {
-  kind: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node';
+  kind: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' | 'gpu';
   tone: 'ok' | 'warn' | 'danger' | 'neutral';
 }) {
   const color =
@@ -803,6 +822,13 @@ function HealthIcon({
         <rect x="3" y="4" width="18" height="6" rx="1.5" />
         <rect x="3" y="14" width="18" height="6" rx="1.5" />
         <path d="M7 7h.01M7 17h.01" />
+      </>
+    ),
+    gpu: (
+      <>
+        <rect x="4" y="4" width="16" height="16" rx="2" />
+        <rect x="9" y="9" width="6" height="6" rx="1" />
+        <path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" />
       </>
     ),
   };
@@ -1977,6 +2003,41 @@ function volumeMountsOf(project: Project): string[] {
   }
 }
 
+type SettingsSection =
+  | 'git'
+  | 'build'
+  | 'ports'
+  | 'gpu'
+  | 'volumes'
+  | 'runtime'
+  | 'access'
+  | 'url'
+  | 'node'
+  | 'login'
+  | 'danger';
+
+const SETTINGS_SECTIONS: SettingsSection[] = [
+  'git',
+  'build',
+  'ports',
+  'gpu',
+  'volumes',
+  'runtime',
+  'access',
+  'url',
+  'node',
+  'login',
+  'danger',
+];
+
+function readSettingsSection(): SettingsSection | null {
+  if (typeof window === 'undefined') return null;
+  const section = new URLSearchParams(window.location.search).get('section');
+  return SETTINGS_SECTIONS.includes(section as SettingsSection)
+    ? (section as SettingsSection)
+    : null;
+}
+
 function ProjectSettingsPanel({
   project,
   isAdmin,
@@ -2024,6 +2085,22 @@ function ProjectSettingsPanel({
   const [sideName, setSideName] = useState('');
   const [sideImage, setSideImage] = useState('');
   const [sidePort, setSidePort] = useState('');
+  const [section, setSection] = useState<SettingsSection | null>(readSettingsSection);
+
+  useEffect(() => {
+    const onPop = () => setSection(readSettingsSection());
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  function gotoSection(next: SettingsSection | null) {
+    const q = new URLSearchParams(window.location.search);
+    q.set('tab', 'settings');
+    if (next) q.set('section', next);
+    else q.delete('section');
+    window.history.pushState({}, '', `${window.location.pathname}?${q}`);
+    setSection(next);
+  }
 
   useEffect(() => {
     setName(project.name);
@@ -2104,8 +2181,8 @@ function ProjectSettingsPanel({
     };
   }, [isAdmin]);
 
-  async function save(e: Event) {
-    e.preventDefault();
+  async function save(e?: Event) {
+    e?.preventDefault();
     setBusy(true);
     try {
       const r = await api.updateProject(project.uuid, {
@@ -2164,6 +2241,7 @@ function ProjectSettingsPanel({
       setBaseDir(d.base_directory || '/');
       setComposePath(d.docker_compose_location || '');
       if (d.test_command) setTestCmd(d.test_command);
+      mergeDetectedPorts(d.port, d.exposed_ports);
       setDetectInfo(
         [
           `${d.label} (${Math.round(d.confidence * 100)}%) · ${d.build_pack} · port ${d.port}${
@@ -2176,6 +2254,60 @@ function ProjectSettingsPanel({
       toast.push({
         title: 'Framework détecté',
         detail: d.label,
+        tone: 'ok',
+      });
+    } catch (err) {
+      toast.push({ title: 'Détection KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function mergeDetectedPorts(
+    httpPort: number,
+    exposed?: Array<{ host: number; container: number; protocol: string; source: string }>,
+  ) {
+    const extras = (exposed ?? []).filter(
+      (p) => !(p.container === httpPort && (p.protocol || 'tcp') === 'tcp'),
+    );
+    setRuntime((rt) => {
+      const ports = [...rt.ports];
+      for (const p of extras) {
+        const protocol = p.protocol === 'udp' ? 'udp' : 'tcp';
+        const host = p.host || p.container;
+        if (
+          ports.some(
+            (x) => x.host === host && x.container === p.container && x.protocol === protocol,
+          )
+        ) {
+          continue;
+        }
+        ports.push({ host, container: p.container, protocol });
+      }
+      return { ...rt, ports };
+    });
+  }
+
+  async function runDetectPorts() {
+    setBusy(true);
+    try {
+      const r = await api.projectDetect(project.uuid, { apply: false, from_github: true });
+      const d = r.detection;
+      setPort(d.port);
+      mergeDetectedPorts(d.port, d.exposed_ports);
+      const extra = (d.exposed_ports ?? []).filter(
+        (p) => !(p.container === d.port && (p.protocol || 'tcp') === 'tcp'),
+      );
+      setDetectInfo(
+        extra.length
+          ? `Port HTTP ${d.port}. Aussi : ${extra
+              .map((p) => `${p.host || p.container}/${p.protocol || 'tcp'} (${p.source})`)
+              .join(', ')}. Enregistre pour publier.`
+          : `Port HTTP ${d.port}. Aucun port supplémentaire dans le dépôt.`,
+      );
+      toast.push({
+        title: extra.length ? `${extra.length} port(s) en plus` : 'Port HTTP détecté',
+        detail: `:${d.port}`,
         tone: 'ok',
       });
     } catch (err) {
@@ -2202,17 +2334,135 @@ function ProjectSettingsPanel({
     }
   }
 
+  const gpuLabel = gpuNvidia && gpuDri
+    ? 'NVIDIA · /dev/dri'
+    : gpuNvidia
+      ? 'NVIDIA'
+      : gpuDri
+        ? 'Accès /dev/dri'
+        : 'Aucun accès';
+  const extraPortCount = runtime.ports.length;
+  const sectionTitle: Record<SettingsSection, string> = {
+    git: 'Git',
+    build: 'Build',
+    ports: 'Ports',
+    gpu: 'GPU',
+    volumes: 'Dossiers',
+    runtime: 'Runtime',
+    access: 'Accès',
+    url: 'URL',
+    node: 'Nœud',
+    login: 'Connexion',
+    danger: 'Supprimer',
+  };
+
+  if (!section) {
+    const tiles: Array<{
+      key: SettingsSection;
+      title: string;
+      description: string;
+      icon: string;
+      admin?: boolean;
+    }> = [
+      {
+        key: 'git',
+        title: 'Git',
+        description: repo.trim()
+          ? repo.trim().replace(/^https?:\/\/(www\.)?github\.com\//, '')
+          : 'Pas de dépôt',
+        icon: 'github',
+      },
+      { key: 'build', title: 'Build', description: buildPack, icon: 'settings' },
+      {
+        key: 'ports',
+        title: 'Ports',
+        description: extraPortCount ? `HTTP ${port} · ${extraPortCount} en plus` : `HTTP ${port}`,
+        icon: 'ports',
+      },
+      { key: 'gpu', title: 'GPU', description: gpuLabel, icon: 'cpu' },
+      {
+        key: 'volumes',
+        title: 'Dossiers',
+        description: volumes.length
+          ? `${volumes.length} montage${volumes.length > 1 ? 's' : ''}`
+          : 'Aucun montage',
+        icon: 'folder',
+      },
+      {
+        key: 'runtime',
+        title: 'Runtime',
+        description:
+          [runtime.memory, runtime.cpus ? `${runtime.cpus} cpu` : '', runtime.sidecars.length ? `${runtime.sidecars.length} service` : '']
+            .filter(Boolean)
+            .join(' · ') || 'Limites et services',
+        icon: 'server',
+      },
+      {
+        key: 'access',
+        title: 'Accès',
+        description: ownUserSystem ? 'Login propre' : `SSO ${ssoProtection}`,
+        icon: 'shield',
+      },
+      {
+        key: 'url',
+        title: 'URL',
+        description: prodUrl.trim().replace(/^https?:\/\//, '') || 'Pas d’URL',
+        icon: 'globe',
+      },
+      { key: 'node', title: 'Nœud', description: serverId || 'default', icon: 'server', admin: true },
+      { key: 'login', title: 'Connexion', description: 'OIDC du projet', icon: 'key' },
+      { key: 'danger', title: 'Supprimer', description: 'Irréversible', icon: 'heart' },
+    ];
+    return (
+      <FadeIn>
+        <ProjectGroupPanel project={project} onChanged={onSaved} />
+        <HubGrid>
+          {tiles
+            .filter((tile) => !tile.admin || isAdmin)
+            .map((tile, index) => (
+              <HubTile
+                key={tile.key}
+                index={index}
+                title={tile.title}
+                description={tile.description}
+                icon={<HubIcon name={tile.icon} />}
+                onClick={() => gotoSection(tile.key)}
+              />
+            ))}
+        </HubGrid>
+      </FadeIn>
+    );
+  }
+
   return (
     <FadeIn class="space-y-4">
-      <ProjectGroupPanel project={project} onChanged={onSaved} />
-      <Card>
+        <button
+          type="button"
+          onClick={() => gotoSection(null)}
+          class="mb-4 flex items-center gap-2 text-sm text-[var(--color-ink-muted)] hover:text-white"
+        >
+          <span aria-hidden>←</span>
+          Paramètres
+        </button>
+        {section !== 'login' && section !== 'danger' && (
+        <Card>
         <CardHeader
-          title="Configuration"
-          description="Build, runtime et Git (post-création)."
+          title={sectionTitle[section]}
+          description={
+            section === 'ports'
+              ? 'Le port HTTP passe par le nom de domaine. Les autres sont publiés sur l’hôte.'
+              : 'Appliqué au prochain déploiement, sauf Git et l’URL.'
+          }
           action={
-            <Button size="sm" variant="outline" disabled={busy} onClick={runDetect}>
-              Détecter le framework
-            </Button>
+            section === 'build' ? (
+              <Button size="sm" variant="outline" disabled={busy} onClick={runDetect}>
+                Détecter
+              </Button>
+            ) : section === 'ports' ? (
+              <Button size="sm" variant="outline" disabled={busy} onClick={runDetectPorts}>
+                Détecter les ports
+              </Button>
+            ) : undefined
           }
         />
         {detectInfo && (
@@ -2221,6 +2471,8 @@ function ProjectSettingsPanel({
           </Alert>
         )}
         <form class="grid gap-3 md:grid-cols-2" onSubmit={save}>
+          {section === 'git' && (
+          <>
           <Input label="Nom" value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
           {branches.length > 0 ? (
             <label class="flex flex-col gap-1.5 text-sm">
@@ -2252,7 +2504,9 @@ function ProjectSettingsPanel({
               onInput={(e) => setRepo((e.target as HTMLInputElement).value)}
             />
           </div>
-          {isAdmin && (
+          </>
+          )}
+          {section === 'node' && isAdmin && (
           <div class="md:col-span-2">
             <NodeSelect
               nodes={clusterNodes}
@@ -2262,6 +2516,7 @@ function ProjectSettingsPanel({
             />
           </div>
           )}
+          {section === 'build' && (
           <label class="flex flex-col gap-1.5 text-sm">
             <span class="font-medium">Build pack</span>
             <select
@@ -2276,12 +2531,16 @@ function ProjectSettingsPanel({
               ))}
             </select>
           </label>
+          )}
+          {section === 'ports' && (
           <Input
-            label="Port"
+            label="Port HTTP"
             type="number"
             value={String(port)}
             onInput={(e) => setPort(Number((e.target as HTMLInputElement).value) || 80)}
           />
+          )}
+          {section === 'build' && (
           <label class="flex items-center gap-2 text-sm md:col-span-2">
             <input
               type="checkbox"
@@ -2290,6 +2549,9 @@ function ProjectSettingsPanel({
             />
             Static site
           </label>
+          )}
+          {section === 'gpu' && (
+          <>
           <label class="flex items-center gap-2 text-sm md:col-span-2">
             <input
               type="checkbox"
@@ -2306,6 +2568,9 @@ function ProjectSettingsPanel({
             />
             /dev/dri (VAAPI) au prochain déploiement
           </label>
+          </>
+          )}
+          {section === 'volumes' && (
           <div class="space-y-2 md:col-span-2">
             <div>
               <div class="text-sm font-medium">Dossiers montés</div>
@@ -2379,7 +2644,11 @@ function ProjectSettingsPanel({
               </Button>
             </div>
           </div>
+          )}
+          {(section === 'runtime' || section === 'ports') && (
           <div class="space-y-3 rounded-xl border border-[var(--color-line)] p-3 md:col-span-2">
+            {section === 'runtime' && (
+            <>
             <div>
               <div class="text-sm font-medium">Runtime Docker</div>
               <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
@@ -2425,6 +2694,16 @@ function ProjectSettingsPanel({
                 }));
               }}
             />
+            </>
+            )}
+            {section === 'ports' && (
+            <>
+            <p class="text-xs text-[var(--color-ink-muted)]">
+              Le port HTTP ci-dessus est celui de Traefik. Ici, les ports ouverts sur l’hôte
+              (ex. popcorn <span class="font-mono">4240/tcp</span> et{' '}
+              <span class="font-mono">4240/udp</span>). La détection lit le Dockerfile, le compose
+              et les variables <span class="font-mono">*_PORT</span>.
+            </p>
             <div class="text-sm font-medium">Ports supplémentaires</div>
             {runtime.ports.length > 0 && (
               <ul class="space-y-1">
@@ -2506,6 +2785,10 @@ function ProjectSettingsPanel({
                 Ajouter le port
               </Button>
             </div>
+            </>
+            )}
+            {section === 'runtime' && (
+            <>
             <div class="text-sm font-medium">Service à côté</div>
             <p class="text-xs text-[var(--color-ink-muted)]">
               Le nom est le DNS sur le réseau du projet. FlareSolverr : nom{' '}
@@ -2587,7 +2870,12 @@ function ProjectSettingsPanel({
                 Ajouter le service
               </Button>
             </div>
+            </>
+            )}
           </div>
+          )}
+          {section === 'access' && (
+          <>
           <label class="flex items-center gap-2 text-sm md:col-span-2">
             <input
               type="checkbox"
@@ -2615,6 +2903,10 @@ function ProjectSettingsPanel({
               <option value="off">Jamais protégé</option>
             </select>
           </label>
+          </>
+          )}
+          {section === 'build' && (
+          <>
           <Input
             label="Publish directory"
             value={publishDir}
@@ -2636,25 +2928,33 @@ function ProjectSettingsPanel({
             onInput={(e) => setWorkdir((e.target as HTMLInputElement).value)}
           />
           <Input
-            label="Production URL"
-            value={prodUrl}
-            onInput={(e) => setProdUrl((e.target as HTMLInputElement).value)}
-          />
-          <Input
             label="Test command"
             value={testCmd}
             onInput={(e) => setTestCmd((e.target as HTMLInputElement).value)}
           />
+          </>
+          )}
+          {section === 'url' && (
+          <Input
+            label="Production URL"
+            value={prodUrl}
+            onInput={(e) => setProdUrl((e.target as HTMLInputElement).value)}
+          />
+          )}
+          {section !== 'login' && section !== 'danger' && (
           <div class="md:col-span-2">
             <Button type="submit" disabled={busy}>
               {busy ? 'Enregistrement…' : 'Enregistrer'}
             </Button>
           </div>
+          )}
         </form>
       </Card>
+      )}
 
-      <ProjectOidcPanel projectUuid={project.uuid} />
+      {section === 'login' && <ProjectOidcPanel projectUuid={project.uuid} />}
 
+      {section === 'danger' && (
       <Card class="mt-4 border-[var(--color-danger)]/30">
         <CardHeader
           title="Zone dangereuse"
@@ -2681,6 +2981,7 @@ function ProjectSettingsPanel({
           )}
         </div>
       </Card>
+      )}
     </FadeIn>
   );
 }

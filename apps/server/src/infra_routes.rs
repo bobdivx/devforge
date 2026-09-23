@@ -1642,12 +1642,13 @@ async fn project_detect(
     let mut applied = false;
     if body.apply.unwrap_or(false) {
         let now = crate::state::now_str();
+        let runtime_json = merge_detected_ports(&project.runtime_json, &detection);
         sqlx::query(
             r#"UPDATE projects SET
                 build_pack = $1, port = $2, is_static = $3, publish_directory = $4,
                 base_directory = $5, docker_compose_location = $6,
-                test_command = COALESCE($7, test_command), updated_at = $8
-               WHERE uuid = $9"#,
+                test_command = COALESCE($7, test_command), runtime_json = $8, updated_at = $9
+               WHERE uuid = $10"#,
         )
         .bind(&detection.build_pack)
         .bind(i64::from(detection.port))
@@ -1656,6 +1657,7 @@ async fn project_detect(
         .bind(&detection.base_directory)
         .bind(&detection.docker_compose_location)
         .bind(&detection.test_command)
+        .bind(&runtime_json)
         .bind(&now)
         .bind(&uuid)
         .execute(&state.pool)
@@ -1688,6 +1690,31 @@ async fn project_detect(
         "detection": detection,
         "project": project,
     })))
+}
+
+fn merge_detected_ports(raw: &str, detection: &devforge_detect::DetectionResult) -> String {
+    let mut spec = devforge_deploy::RuntimeSpec::from_json(raw).unwrap_or_default();
+    for port in &detection.exposed_ports {
+        if port.container == detection.port && port.protocol == "tcp" {
+            continue;
+        }
+        let protocol = if port.protocol == "udp" { "udp" } else { "tcp" };
+        let host = if port.host == 0 { port.container } else { port.host };
+        if spec.ports.iter().any(|p| {
+            p.host == host && p.container == port.container && p.protocol == protocol
+        }) {
+            continue;
+        }
+        spec.ports.push(devforge_deploy::runtime::PublishedPort {
+            host,
+            container: port.container,
+            protocol: protocol.into(),
+        });
+    }
+    if spec.normalize().is_err() {
+        return raw.to_string();
+    }
+    serde_json::to_string(&spec).unwrap_or_else(|_| raw.to_string())
 }
 
 pub(crate) fn parse_github_owner_repo(url: &str) -> Option<(String, String)> {

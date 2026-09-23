@@ -1000,6 +1000,12 @@ export const api = {
         test_command?: string | null;
         hints: string[];
         evidence: string[];
+        exposed_ports?: Array<{
+          host: number;
+          container: number;
+          protocol: string;
+          source: string;
+        }>;
       };
     }>('/github/detect', { method: 'POST', body: JSON.stringify(body) }),
   projectDetect: (uuid: string, body?: { apply?: boolean; from_github?: boolean }) =>
@@ -1020,6 +1026,12 @@ export const api = {
         test_command?: string | null;
         hints: string[];
         evidence: string[];
+        exposed_ports?: Array<{
+          host: number;
+          container: number;
+          protocol: string;
+          source: string;
+        }>;
       };
       project: Project;
     }>(`/projects/${uuid}/detect`, {

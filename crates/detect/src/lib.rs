@@ -45,6 +45,17 @@ pub struct DetectionResult {
     pub test_command: Option<String>,
     pub hints: Vec<String>,
     pub evidence: Vec<String>,
+    /// Tous les ports trouvés (HTTP compris). Les autres que `port`/tcp sont à publier.
+    #[serde(default)]
+    pub exposed_ports: Vec<ExposedPort>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExposedPort {
+    pub host: u16,
+    pub container: u16,
+    pub protocol: String,
+    pub source: String,
 }
 
 impl DetectionResult {
@@ -62,6 +73,7 @@ impl DetectionResult {
             test_command: None,
             hints: vec!["Aucun framework clair — nixpacks par défaut".into()],
             evidence: vec![],
+            exposed_ports: vec![],
         }
     }
 }
@@ -96,27 +108,37 @@ fn parse_json(content: &str) -> Option<Value> {
     serde_json::from_str(content).ok()
 }
 
-/// Last `EXPOSE <port>` wins (common pattern: build stages then runtime EXPOSE).
+/// Last TCP `EXPOSE` wins. UDP is kept in `exposed_ports`, not as the HTTP port.
 fn parse_dockerfile_expose(dockerfile: &str) -> Option<u16> {
-    let mut found = None;
+    let ports = parse_dockerfile_exposes(dockerfile);
+    ports
+        .iter()
+        .rev()
+        .find(|p| p.protocol == "tcp")
+        .map(|p| p.container)
+        .or_else(|| ports.last().map(|p| p.container))
+}
+
+fn parse_dockerfile_exposes(dockerfile: &str) -> Vec<ExposedPort> {
+    let mut found = Vec::new();
     for line in dockerfile.lines() {
         let t = line.trim();
         if t.is_empty() || t.starts_with('#') {
             continue;
         }
         let upper = t.to_ascii_uppercase();
-        if let Some(rest) = upper.strip_prefix("EXPOSE ") {
-            let port_str = rest
-                .split_whitespace()
-                .next()
-                .unwrap_or("")
-                .split('/')
-                .next()
-                .unwrap_or("");
-            if let Ok(p) = port_str.parse::<u16>() {
-                if p > 0 {
-                    found = Some(p);
-                }
+        if !upper.starts_with("EXPOSE ") {
+            continue;
+        }
+        let raw = t.split_once(char::is_whitespace).map(|(_, r)| r).unwrap_or("");
+        for token in raw.split_whitespace() {
+            if let Some((port, protocol)) = parse_port_token(token) {
+                found.push(ExposedPort {
+                    host: port,
+                    container: port,
+                    protocol,
+                    source: "Dockerfile".into(),
+                });
             }
         }
     }
@@ -127,6 +149,33 @@ fn parse_dockerfile_expose(dockerfile: &str) -> Option<u16> {
 pub fn detect(tree: &FileTree) -> DetectionResult {
     let mut result = detect_inner(tree);
     apply_listen_port(&mut result, tree);
+    let found = collect_exposed_ports(tree);
+    let pinned = result
+        .evidence
+        .iter()
+        .any(|e| e.starts_with("port:") || e.starts_with("EXPOSE "));
+    if !pinned {
+        if let Some(http) = pick_http_port(&found) {
+            if http != result.port {
+                result
+                    .hints
+                    .push(format!("Port {http} lu depuis les ports du repo"));
+            }
+            result.port = http;
+        }
+    }
+    let extra = found
+        .iter()
+        .filter(|p| !(p.container == result.port && p.protocol == "tcp"))
+        .count();
+    if extra > 0 {
+        result.hints.push(format!(
+            "{extra} port{} supplémentaire{} à publier sur l’hôte",
+            if extra > 1 { "s" } else { "" },
+            if extra > 1 { "s" } else { "" },
+        ));
+    }
+    result.exposed_ports = found;
     result
 }
 
@@ -156,6 +205,7 @@ fn detect_inner(tree: &FileTree) -> DetectionResult {
                 test_command: None,
                 hints: vec!["Stack multi-services détectée".into()],
                 evidence,
+                exposed_ports: vec![],
             };
         }
     }
@@ -196,6 +246,7 @@ fn detect_inner(tree: &FileTree) -> DetectionResult {
             test_command,
             hints: vec!["Build via Dockerfile".into()],
             evidence,
+            exposed_ports: vec![],
         };
     }
 
@@ -235,6 +286,7 @@ fn detect_inner(tree: &FileTree) -> DetectionResult {
                     "Prévoir DB + env APP_KEY".into(),
                 ],
                 evidence,
+                exposed_ports: vec![],
             };
         }
         return DetectionResult {
@@ -250,6 +302,7 @@ fn detect_inner(tree: &FileTree) -> DetectionResult {
             test_command: Some("composer test".into()),
             hints: vec!["Projet PHP (Composer)".into()],
             evidence,
+            exposed_ports: vec![],
         };
     }
 
@@ -271,6 +324,7 @@ fn detect_inner(tree: &FileTree) -> DetectionResult {
                 test_command: node.test_command,
                 hints: node.hints,
                 evidence,
+                exposed_ports: vec![],
             };
         }
     }
@@ -291,6 +345,7 @@ fn detect_inner(tree: &FileTree) -> DetectionResult {
             test_command: Some("cargo test".into()),
             hints: vec!["Cargo.toml détecté".into()],
             evidence,
+            exposed_ports: vec![],
         };
     }
 
@@ -310,6 +365,7 @@ fn detect_inner(tree: &FileTree) -> DetectionResult {
             test_command: Some("go test ./...".into()),
             hints: vec!["go.mod détecté".into()],
             evidence,
+            exposed_ports: vec![],
         };
     }
 
@@ -337,6 +393,7 @@ fn detect_inner(tree: &FileTree) -> DetectionResult {
             test_command: Some("pytest".into()),
             hints: vec!["Projet Python détecté".into()],
             evidence,
+            exposed_ports: vec![],
         };
     }
 
@@ -356,6 +413,7 @@ fn detect_inner(tree: &FileTree) -> DetectionResult {
             test_command: Some("bundle exec rspec".into()),
             hints: vec!["Gemfile détecté".into()],
             evidence,
+            exposed_ports: vec![],
         };
     }
 
@@ -375,6 +433,7 @@ fn detect_inner(tree: &FileTree) -> DetectionResult {
             test_command: None,
             hints: vec!["Site statique (index.html)".into()],
             evidence,
+            exposed_ports: vec![],
         };
     }
 
@@ -746,6 +805,176 @@ pub fn scan_local_dir(root: &std::path::Path) -> FileTree {
     tree
 }
 
+fn pick_http_port(found: &[ExposedPort]) -> Option<u16> {
+    const PREFERRED: [u16; 6] = [3000, 8080, 8000, 4321, 80, 443];
+    let tcp: Vec<u16> = found
+        .iter()
+        .filter(|p| p.protocol == "tcp")
+        .map(|p| p.container)
+        .collect();
+    PREFERRED
+        .into_iter()
+        .find(|p| tcp.contains(p))
+        .or_else(|| tcp.first().copied())
+}
+
+fn collect_exposed_ports(tree: &FileTree) -> Vec<ExposedPort> {
+    let mut found = Vec::new();
+    for name in ["Dockerfile", "dockerfile"] {
+        if let Some(body) = find_content(tree, name) {
+            found.extend(parse_dockerfile_exposes(body));
+        }
+    }
+    for name in [
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "compose.yml",
+        "compose.yaml",
+    ] {
+        if let Some(body) = find_content(tree, name) {
+            found.extend(ports_from_compose(body, name));
+        }
+    }
+    for name in [".env.example", ".env.sample", ".env.template"] {
+        if let Some(body) = find_content(tree, name) {
+            found.extend(ports_from_env(body, name));
+        }
+    }
+    dedupe_ports(found)
+}
+
+fn dedupe_ports(ports: Vec<ExposedPort>) -> Vec<ExposedPort> {
+    let mut out = Vec::new();
+    for port in ports {
+        if out.iter().any(|p: &ExposedPort| {
+            p.host == port.host && p.container == port.container && p.protocol == port.protocol
+        }) {
+            continue;
+        }
+        out.push(port);
+    }
+    out
+}
+
+fn parse_port_token(token: &str) -> Option<(u16, String)> {
+    let token = token.trim().trim_matches(|c| c == '"' || c == '\'');
+    let (main, protocol) = match token.rsplit_once('/') {
+        Some((main, proto)) if proto.eq_ignore_ascii_case("udp") => (main, "udp"),
+        Some((main, proto)) if proto.eq_ignore_ascii_case("tcp") => (main, "tcp"),
+        _ => (token, "tcp"),
+    };
+    let parts: Vec<&str> = main.split(':').filter(|p| !p.is_empty()).collect();
+    let port = match parts.as_slice() {
+        [only] => only.parse::<u16>().ok()?,
+        [host, container] => container.parse::<u16>().ok().filter(|_| host.parse::<u16>().is_ok())?,
+        [_, host, container] => {
+            container.parse::<u16>().ok().filter(|_| host.parse::<u16>().is_ok())?
+        }
+        _ => return None,
+    };
+    if port == 0 {
+        None
+    } else {
+        Some((port, protocol.into()))
+    }
+}
+
+fn parse_mapping(token: &str) -> Option<ExposedPort> {
+    let token = token.trim().trim_matches(|c| c == '"' || c == '\'');
+    let (main, protocol) = match token.rsplit_once('/') {
+        Some((main, proto)) if proto.eq_ignore_ascii_case("udp") => (main, "udp".to_string()),
+        Some((main, proto)) if proto.eq_ignore_ascii_case("tcp") => (main, "tcp".to_string()),
+        _ => (token, "tcp".to_string()),
+    };
+    let parts: Vec<&str> = main.split(':').filter(|p| !p.is_empty()).collect();
+    let (host, container) = match parts.as_slice() {
+        [only] => {
+            let port = only.parse::<u16>().ok()?;
+            (port, port)
+        }
+        [host, container] => (host.parse().ok()?, container.parse().ok()?),
+        [_, host, container] => (host.parse().ok()?, container.parse().ok()?),
+        _ => return None,
+    };
+    if host == 0 || container == 0 {
+        return None;
+    }
+    Some(ExposedPort {
+        host,
+        container,
+        protocol,
+        source: String::new(),
+    })
+}
+
+fn ports_from_compose(body: &str, source: &str) -> Vec<ExposedPort> {
+    let mut out = Vec::new();
+    let mut in_ports = false;
+    let mut ports_indent = 0usize;
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.chars().take_while(|c| *c == ' ').count();
+        if !in_ports {
+            if trimmed == "ports:" || trimmed.starts_with("ports:") {
+                in_ports = true;
+                ports_indent = indent;
+            }
+            continue;
+        }
+        if indent <= ports_indent {
+            in_ports = trimmed == "ports:" || trimmed.starts_with("ports:");
+            if in_ports {
+                ports_indent = indent;
+            }
+            continue;
+        }
+        let token = trimmed.trim_start_matches('-').trim();
+        if let Some(mut port) = parse_mapping(token) {
+            port.source = source.into();
+            out.push(port);
+        }
+    }
+    out
+}
+
+fn ports_from_env(body: &str, source: &str) -> Vec<ExposedPort> {
+    let mut out = Vec::new();
+    for line in body.lines() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') {
+            continue;
+        }
+        let t = t.strip_prefix("export ").unwrap_or(t);
+        let Some((key, value)) = t.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if !(key == "PORT" || key.ends_with("_PORT")) {
+            continue;
+        }
+        if matches!(
+            key,
+            "PGPORT" | "DB_PORT" | "REDIS_PORT" | "MYSQL_PORT" | "DATABASE_PORT"
+        ) {
+            continue;
+        }
+        let value = value.trim().trim_matches(|c| c == '"' || c == '\'');
+        let Some((port, protocol)) = parse_port_token(value) else {
+            continue;
+        };
+        out.push(ExposedPort {
+            host: port,
+            container: port,
+            protocol,
+            source: format!("{source}:{key}"),
+        });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -859,5 +1088,33 @@ mod tests {
         assert!(!d.is_static);
         assert!(d.label.contains("API"));
         assert!(d.hints.iter().any(|h| h.contains("Pas de script build")));
+    }
+
+    #[test]
+    fn detects_extra_tcp_and_udp_ports() {
+        let mut tree = FileTree::new();
+        tree.insert(
+            "docker-compose.yml".into(),
+            Some(
+                r#"services:
+  server:
+    ports:
+      - "3000:3000"
+      - "4240:4240"
+      - "4240:4240/udp"
+"#
+                .into(),
+            ),
+        );
+        let d = detect(&tree);
+        assert_eq!(d.port, 3000);
+        let extra: Vec<_> = d
+            .exposed_ports
+            .iter()
+            .filter(|p| !(p.container == 3000 && p.protocol == "tcp"))
+            .map(|p| format!("{}:{}/{}", p.host, p.container, p.protocol))
+            .collect();
+        assert!(extra.iter().any(|p| p == "4240:4240/tcp"));
+        assert!(extra.iter().any(|p| p == "4240:4240/udp"));
     }
 }

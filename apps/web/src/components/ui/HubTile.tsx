@@ -212,6 +212,25 @@ export function HubIcon({ name, size = 24 }: { name: string; size?: number }) {
         <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
       </svg>
     ),
+    ports: (
+      <svg {...props}>
+        <path d="M4 8h16M4 16h16" stroke-linecap="round" />
+        <circle cx="8" cy="8" r="2" fill="currentColor" stroke="none" />
+        <circle cx="16" cy="16" r="2" fill="currentColor" stroke="none" />
+      </svg>
+    ),
+    folder: (
+      <svg {...props}>
+        <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+      </svg>
+    ),
+    cpu: (
+      <svg {...props}>
+        <rect x="4" y="4" width="16" height="16" rx="2" />
+        <rect x="9" y="9" width="6" height="6" rx="1" />
+        <path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" />
+      </svg>
+    ),
   };
 
   return icons[name] || icons.settings;
