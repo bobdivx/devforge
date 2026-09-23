@@ -110,6 +110,9 @@ function formatWhen(iso?: string | null) {
   }
 }
 
+/** Nombre d’entrées historiques affichées par défaut (tuiles / listes). */
+const DEPLOYMENTS_VISIBLE_DEFAULT = 12;
+
 export function ProjectDetailPage(props: Props) {
   const initial = readQuery();
   const uuid = props.uuid ?? initial.uuid;
@@ -318,6 +321,7 @@ function ProjectOverview({
   const [lifeDetail, setLifeDetail] = useState<string | null>(null);
   const [deployBusy, setDeployBusy] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyShowAll, setHistoryShowAll] = useState(false);
   const [nodes, setNodes] = useState<ClusterNode[]>([]);
 
   const latest = deployments[0] ?? null;
@@ -659,42 +663,69 @@ function ProjectOverview({
 
       <Modal
         open={historyOpen}
-        onClose={() => setHistoryOpen(false)}
+        onClose={() => {
+          setHistoryOpen(false);
+          setHistoryShowAll(false);
+        }}
         title="Historique des déploiements"
-        description={`${deployments.length} entrée${deployments.length > 1 ? 's' : ''}`}
+        description={
+          deployments.length === 0
+            ? 'Aucune entrée'
+            : historyShowAll || deployments.length <= DEPLOYMENTS_VISIBLE_DEFAULT
+              ? `${deployments.length} entrée${deployments.length > 1 ? 's' : ''}`
+              : `${DEPLOYMENTS_VISIBLE_DEFAULT} plus récentes sur ${deployments.length}`
+        }
         size="lg"
         padded={false}
       >
         {deployments.length === 0 ? (
           <p class="px-4 py-8 text-sm text-[var(--color-ink-muted)] sm:px-5">Aucun déploiement.</p>
         ) : (
-          <ul class="divide-y divide-[var(--color-line)]">
-            {deployments.map((d) => (
-              <li key={d.uuid} class="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 sm:px-5">
-                <div class="min-w-0">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <Badge tone={deployTone(d.status)}>{d.status}</Badge>
-                    <span class="font-mono text-xs text-[var(--color-ink-muted)]">
-                      {d.git_sha ? d.git_sha.slice(0, 7) : '—'}
-                    </span>
-                    <span class="text-xs text-[var(--color-ink-faint)]">
-                      {formatWhen(d.created_at)}
-                    </span>
+          <>
+            <ul class="divide-y divide-[var(--color-line)]">
+              {(historyShowAll
+                ? deployments
+                : deployments.slice(0, DEPLOYMENTS_VISIBLE_DEFAULT)
+              ).map((d) => (
+                <li key={d.uuid} class="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 sm:px-5">
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <Badge tone={deployTone(d.status)}>{d.status}</Badge>
+                      <span class="font-mono text-xs text-[var(--color-ink-muted)]">
+                        {d.git_sha ? d.git_sha.slice(0, 7) : '—'}
+                      </span>
+                      <span class="text-xs text-[var(--color-ink-faint)]">
+                        {formatWhen(d.created_at)}
+                      </span>
+                    </div>
+                    <p class="mt-1 truncate text-sm text-[var(--color-ink-muted)]">
+                      {d.git_message || 'Sans message'}
+                    </p>
                   </div>
-                  <p class="mt-1 truncate text-sm text-[var(--color-ink-muted)]">
-                    {d.git_message || 'Sans message'}
-                  </p>
-                </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    href={`/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`}
+                  >
+                    Logs
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            {deployments.length > DEPLOYMENTS_VISIBLE_DEFAULT && (
+              <div class="border-t border-[var(--color-line)] px-4 py-3 sm:px-5">
                 <Button
                   size="sm"
                   variant="ghost"
-                  href={`/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`}
+                  onClick={() => setHistoryShowAll((v) => !v)}
                 >
-                  Logs
+                  {historyShowAll
+                    ? 'Voir moins'
+                    : `Voir plus (${deployments.length - DEPLOYMENTS_VISIBLE_DEFAULT})`}
                 </Button>
-              </li>
-            ))}
-          </ul>
+              </div>
+            )}
+          </>
         )}
       </Modal>
     </FadeIn>
@@ -875,9 +906,6 @@ function HealthIcon({
     </span>
   );
 }
-
-/** Nombre de tuiles déploiements affichées par défaut (grille 4 × 3). */
-const DEPLOYMENTS_VISIBLE_DEFAULT = 12;
 
 function DeploymentsPanel({
   projectUuid,
@@ -1079,6 +1107,7 @@ function BackupsPanel({ projectUuid }: { projectUuid: string }) {
     }>
   >([]);
   const [busy, setBusy] = useState(false);
+  const [showAll, setShowAll] = useState(false);
 
   async function load() {
     const r = await api.backups(projectUuid);
@@ -1115,40 +1144,104 @@ function BackupsPanel({ projectUuid }: { projectUuid: string }) {
       tone: 'info',
     });
   }
+  const visible = showAll ? items : items.slice(0, DEPLOYMENTS_VISIBLE_DEFAULT);
+  const hiddenCount = Math.max(0, items.length - DEPLOYMENTS_VISIBLE_DEFAULT);
+
+  function backupTone(status: string): 'ok' | 'warn' | 'danger' | 'neutral' {
+    if (status === 'completed' || status === 'ok' || status === 'success') return 'ok';
+    if (status === 'failed' || status === 'error') return 'danger';
+    if (status === 'running' || status === 'pending') return 'warn';
+    return 'neutral';
+  }
+
+  function formatSize(n: number) {
+    if (!n || n < 0) return '';
+    if (n < 1024) return `${n} o`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} Ko`;
+    return `${(n / (1024 * 1024)).toFixed(1)} Mo`;
+  }
 
   return (
     <FadeIn>
-      <Card>
-        <CardHeader
-          title="Backups"
-          action={
-            <Button size="sm" variant="secondary" disabled={busy} onClick={create}>
-              {busy ? <Spinner /> : null}
-              Nouveau backup
-            </Button>
-          }
-        />
+      <div class="space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h2 class="text-base font-medium tracking-tight">Backups</h2>
+            <p class="mt-0.5 text-sm text-[var(--color-ink-muted)]">
+              {items.length === 0
+                ? 'Aucun backup pour l’instant'
+                : showAll || hiddenCount === 0
+                  ? `${items.length} backup${items.length > 1 ? 's' : ''}`
+                  : `${DEPLOYMENTS_VISIBLE_DEFAULT} plus récents sur ${items.length}`}
+            </p>
+          </div>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={create}>
+            {busy ? <Spinner /> : null}
+            Nouveau backup
+          </Button>
+        </div>
+
         {items.length === 0 ? (
-          <p class="text-sm text-[var(--color-ink-muted)]">Aucun backup.</p>
+          <Card>
+            <p class="text-sm text-[var(--color-ink-muted)]">Aucun backup.</p>
+          </Card>
         ) : (
-          <ul class="divide-y divide-[var(--color-line)]">
-            {items.map((b) => (
-              <li key={b.id} class="flex flex-wrap items-center justify-between gap-2 py-3">
-                <div>
-                  <div class="font-mono text-xs">{b.id}</div>
-                  <div class="text-xs text-[var(--color-ink-muted)]">{b.message}</div>
-                </div>
-                <div class="flex items-center gap-2">
-                  <Badge tone={b.status === 'completed' ? 'ok' : 'warn'}>{b.status}</Badge>
-                  <Button size="sm" variant="ghost" onClick={() => preview(b.id)}>
-                    Preview
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <>
+            <HubGrid cols={4}>
+              {visible.map((b, index) => {
+                const tone = backupTone(b.status);
+                const size = formatSize(b.size_bytes);
+                return (
+                  <HubTile
+                    key={b.id}
+                    index={index}
+                    title={b.kind || 'Backup'}
+                    icon={<HubIcon name="archive" />}
+                    badge={
+                      tone !== 'neutral' ? (
+                        <span
+                          class={cn(
+                            'absolute -right-1 -top-1 h-3 w-3 rounded-full ring-2 ring-[#1c1c1e]',
+                            tone === 'ok' && 'bg-[var(--color-ok)]',
+                            tone === 'warn' && 'bg-[var(--color-warn)]',
+                            tone === 'danger' && 'bg-[var(--color-danger)]',
+                          )}
+                        />
+                      ) : null
+                    }
+                    subtitle={
+                      <div class="mt-1 space-y-1">
+                        <Badge tone={tone}>{b.status}</Badge>
+                        <div class="line-clamp-2 text-[11px] leading-snug text-[var(--color-ink-muted)]">
+                          {b.message || b.id}
+                        </div>
+                        {size ? (
+                          <div class="text-[11px] text-[var(--color-ink-faint)]">{size}</div>
+                        ) : null}
+                      </div>
+                    }
+                    onClick={() => void preview(b.id)}
+                  />
+                );
+              })}
+              <HubAddTile
+                index={visible.length}
+                label="Nouveau"
+                onClick={() => {
+                  if (!busy) void create();
+                }}
+              />
+            </HubGrid>
+            {hiddenCount > 0 && (
+              <div class="flex justify-center">
+                <Button size="sm" variant="ghost" onClick={() => setShowAll((v) => !v)}>
+                  {showAll ? 'Voir moins' : `Voir plus (${hiddenCount})`}
+                </Button>
+              </div>
+            )}
+          </>
         )}
-      </Card>
+      </div>
     </FadeIn>
   );
 }
@@ -3859,7 +3952,7 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
           <p class="px-4 py-8 text-sm text-[var(--color-ink-muted)] sm:px-5">Aucune exécution.</p>
         ) : (
           <ul class="divide-y divide-[var(--color-line)]">
-            {runs.map((r) => (
+            {runs.slice(0, DEPLOYMENTS_VISIBLE_DEFAULT).map((r) => (
               <li key={r.id} class="px-4 py-3.5 sm:px-5">
                 <div class="flex flex-wrap items-center gap-2">
                   <Badge tone={r.status === 'success' ? 'ok' : r.status === 'running' ? 'warn' : 'danger'}>

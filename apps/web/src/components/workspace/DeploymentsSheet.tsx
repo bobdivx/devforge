@@ -12,6 +12,9 @@ type Props = {
   variant?: 'sheet' | 'panel';
 };
 
+/** Chips visibles par défaut dans la feuille déploiements. */
+const DEPLOYMENTS_VISIBLE_DEFAULT = 12;
+
 function formatWhen(iso?: string | null) {
   if (!iso) return '—';
   try {
@@ -58,6 +61,7 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
   const [viewMode, setViewMode] = useState<'timeline' | 'raw'>('timeline');
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const isPanel = variant === 'panel';
 
   useEffect(() => {
@@ -181,7 +185,7 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
         ) : (
           <>
             <div class="mb-3 flex gap-1 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {deployments.map((d) => (
+              {(showAll ? deployments : deployments.slice(0, DEPLOYMENTS_VISIBLE_DEFAULT)).map((d) => (
                 <button
                   key={d.uuid}
                   type="button"
@@ -204,6 +208,17 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
                   </div>
                 </button>
               ))}
+              {deployments.length > DEPLOYMENTS_VISIBLE_DEFAULT && (
+                <button
+                  type="button"
+                  onClick={() => setShowAll((v) => !v)}
+                  class="shrink-0 self-center rounded-lg border border-dashed border-[var(--color-line)] px-3 py-2 text-xs text-[var(--color-ink-muted)] hover:border-[var(--color-line-strong)] hover:text-[var(--color-ink)]"
+                >
+                  {showAll
+                    ? 'Voir moins'
+                    : `Voir plus (${deployments.length - DEPLOYMENTS_VISIBLE_DEFAULT})`}
+                </button>
+              )}
             </div>
 
             {selected && (
