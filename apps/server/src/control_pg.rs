@@ -1,7 +1,8 @@
 //! Postgres du control plane.
 //!
-//! Le nœud qui écrit publie `devforge-pg` (port 5433). Chaque worker garde une
-//! réplique physique `devforge-pg-ha` : à l'élection elle est promue, sans
+//! Le nœud qui écrit lance `devforge-pg` sur le réseau Docker `devforge` (port interne 5432).
+//! Depuis un conteneur DevForge, l'accès est `devforge-pg:5432`.
+//! Chaque worker garde une réplique physique `devforge-pg-ha` : à l'élection elle est promue, sans
 //! rejouer un dump. Un `DATABASE_URL` déjà en `postgres://` reste la base du
 //! processus ; le dump de secours passe alors par `pg_dump`.
 
@@ -116,7 +117,7 @@ pub async fn ensure(legacy_url: &str) -> Result<String, String> {
     let creds = load_or_create_creds(legacy_url)?;
     let public = wants_public_primary();
     start_container(&creds, public).await?;
-    let url = connection_url(&creds);
+    let url = connection_url(&creds).await?;
     let _ = META.set(Meta {
         url: url.clone(),
         container: Some(CONTAINER.into()),
@@ -667,6 +668,12 @@ fn in_docker() -> bool {
 }
 
 fn self_container_id() -> Option<String> {
+    if let Ok(name) = std::env::var("DEVFORGE_SELF_CONTAINER") {
+        let name = name.trim();
+        if !name.is_empty() {
+            return Some(name.to_string());
+        }
+    }
     let id = std::fs::read_to_string("/etc/hostname").unwrap_or_default();
     let id = id.trim();
     if id.is_empty() {
@@ -676,41 +683,58 @@ fn self_container_id() -> Option<String> {
     }
 }
 
-/// Port d'écoute de `devforge-pg` quand il partage le réseau du conteneur DevForge.
-/// Les clients (`pg_isready`, `psql`, `pg_dump`) visent 5432 par défaut.
-fn container_listen_port(container: &str) -> Option<u16> {
-    if container != CONTAINER || !(in_docker() && self_container_id().is_some()) {
-        return None;
-    }
-    Some(
-        META.get()
-            .map(|m| m.port)
-            .filter(|p| *p != 0)
-            .unwrap_or(5433),
-    )
+/// Les outils lancés dans `devforge-pg` parlent au port interne 5432.
+fn container_listen_port(_container: &str) -> Option<u16> {
+    None
 }
 
-fn connection_url(creds: &Creds) -> String {
-    // Dans Docker, Postgres partage le réseau du conteneur DevForge.
-    // Le compose publie l'hôte 5433 vers ce port.
-    let (host, port) = if in_docker() && self_container_id().is_some() {
-        ("127.0.0.1", creds.port)
-    } else if in_docker() {
-        (CONTAINER, 5432)
+async fn tcp_open(host: &str, port: u16) -> bool {
+    let addr = format!("{host}:{port}");
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        tokio::net::TcpStream::connect(&addr),
+    )
+    .await
+    .ok()
+    .and_then(|r| r.ok())
+    .is_some()
+}
+
+async fn connection_url(creds: &Creds) -> Result<String, String> {
+    // Dans Docker, 127.0.0.1 est le conteneur DevForge, pas Postgres.
+    // On joint le conteneur par le DNS du réseau `devforge`.
+    let (host, port) = if in_docker() {
+        if tcp_open(CONTAINER, 5432).await {
+            (CONTAINER.to_string(), 5432u16)
+        } else if tcp_open("127.0.0.1", creds.port).await {
+            ("127.0.0.1".into(), creds.port)
+        } else if tcp_open("127.0.0.1", 5432).await {
+            ("127.0.0.1".into(), 5432)
+        } else {
+            return Err(format!(
+                "Postgres injoignable sur {CONTAINER}:5432 (réseau Docker devforge). \
+                 Vérifie que le conteneur DevForge est relié à ce réseau."
+            ));
+        }
+    } else if tcp_open("127.0.0.1", creds.port).await {
+        ("127.0.0.1".into(), creds.port)
     } else {
-        ("127.0.0.1", creds.port)
+        return Err(format!(
+            "Postgres injoignable sur 127.0.0.1:{}",
+            creds.port
+        ));
     };
-    format!(
+    tracing::info!(%host, port, "control plane postgres joignable");
+    Ok(format!(
         "postgres://{}:{}@{}:{}/{}?sslmode=disable",
         creds.user, creds.password, host, port, creds.database
-    )
+    ))
 }
 
 async fn start_container(creds: &Creds, public: bool) -> Result<(), String> {
     let _ = docker(&["network", "create", "devforge"]).await;
-    let shared_net = in_docker() && self_container_id().is_some();
     let want_ip = if public { "0.0.0.0" } else { "127.0.0.1" };
-    if container_needs_recreate(want_ip, creds.port, shared_net, public).await {
+    if container_needs_recreate(want_ip, creds.port, public).await {
         let _ = docker(&["stop", CONTAINER]).await;
         let _ = docker(&["rm", CONTAINER]).await;
     }
@@ -740,10 +764,9 @@ async fn start_container(creds: &Creds, public: bool) -> Result<(), String> {
         } else {
             "listen_addresses=127.0.0.1"
         };
-        let run = if let Some(id) = self_container_id().filter(|_| shared_net) {
-            let net = format!("container:{id}");
-            let pg_port = format!("port={}", creds.port);
-            let pgport = format!("PGPORT={}", creds.port);
+        // Dans Docker, le compose publie déjà 5433 sur le conteneur DevForge.
+        // Postgres reste sur le réseau `devforge`, port interne 5432, sans second -p.
+        let run = if in_docker() {
             docker(&[
                 "run",
                 "-d",
@@ -752,11 +775,11 @@ async fn start_container(creds: &Creds, public: bool) -> Result<(), String> {
                 "--restart",
                 "unless-stopped",
                 "--network",
-                &net,
+                "devforge",
+                "--network-alias",
+                CONTAINER,
                 "-v",
                 &vol,
-                "-e",
-                &pgport,
                 "-e",
                 &user,
                 "-e",
@@ -765,8 +788,6 @@ async fn start_container(creds: &Creds, public: bool) -> Result<(), String> {
                 &db,
                 IMAGE,
                 "postgres",
-                "-c",
-                &pg_port,
                 "-c",
                 listen,
                 "-c",
@@ -781,6 +802,10 @@ async fn start_container(creds: &Creds, public: bool) -> Result<(), String> {
                 "wal_keep_size=256MB",
                 "-c",
                 "wal_log_hints=on",
+                "-c",
+                "synchronous_commit=on",
+                "-c",
+                "synchronous_standby_names=",
             ])
             .await?
         } else {
@@ -809,6 +834,8 @@ async fn start_container(creds: &Creds, public: bool) -> Result<(), String> {
                 IMAGE,
                 "postgres",
                 "-c",
+                listen,
+                "-c",
                 "wal_level=replica",
                 "-c",
                 "hot_standby=on",
@@ -820,6 +847,10 @@ async fn start_container(creds: &Creds, public: bool) -> Result<(), String> {
                 "wal_keep_size=256MB",
                 "-c",
                 "wal_log_hints=on",
+                "-c",
+                "synchronous_commit=on",
+                "-c",
+                "synchronous_standby_names=",
             ])
             .await?
         };
@@ -830,31 +861,27 @@ async fn start_container(creds: &Creds, public: bool) -> Result<(), String> {
             ));
         }
     }
-    if Path::new("/.dockerenv").exists() {
-        let id = std::fs::read_to_string("/etc/hostname").unwrap_or_default();
-        let id = id.trim();
-        if !id.is_empty() {
-            let _ = docker(&["network", "connect", "devforge", id]).await;
+    if let Some(id) = self_container_id() {
+        let joined = docker(&["network", "connect", "devforge", &id]).await;
+        if let Ok(out) = joined {
+            if !out.status.success() {
+                let err = String::from_utf8_lossy(&out.stderr);
+                if !err.contains("already exists") {
+                    tracing::warn!(error = %err.trim(), "rattachement au réseau devforge");
+                }
+            }
         }
     }
-    let ready_port = if shared_net {
-        creds.port.to_string()
-    } else {
-        "5432".into()
-    };
-    let pgport_env = format!("PGPORT={ready_port}");
     let mut last = String::new();
     for _ in 0..40 {
         let ready = docker(&[
             "exec",
-            "-e",
-            &pgport_env,
             CONTAINER,
             "pg_isready",
             "-h",
             "127.0.0.1",
             "-p",
-            &ready_port,
+            "5432",
             "-U",
             &creds.user,
             "-d",
@@ -881,12 +908,7 @@ async fn start_container(creds: &Creds, public: bool) -> Result<(), String> {
     Err(format!("postgres devforge-pg pas prêt: {last} {tail}"))
 }
 
-async fn container_needs_recreate(
-    want_ip: &str,
-    port: u16,
-    shared_net: bool,
-    public: bool,
-) -> bool {
+async fn container_needs_recreate(want_ip: &str, port: u16, public: bool) -> bool {
     let fmt = "{{.HostConfig.NetworkMode}}|{{json .HostConfig.PortBindings}}|{{json .Config.Cmd}}";
     let Ok(out) = docker(&["inspect", "-f", fmt, CONTAINER]).await else {
         return false;
@@ -899,22 +921,25 @@ async fn container_needs_recreate(
     let network = parts.next().unwrap_or("");
     let bindings = parts.next().unwrap_or("");
     let cmd = parts.next().unwrap_or("");
-    let cmd_ok = cmd.contains("wal_keep_size");
-    if shared_net {
-        let listen = if public {
-            "listen_addresses=0.0.0.0"
-        } else {
-            "listen_addresses=127.0.0.1"
-        };
-        let net_ok = network.starts_with("container:");
-        let port_ok = cmd.contains(&format!("port={port}"));
-        return !net_ok || !cmd_ok || !port_ok || !cmd.contains(listen);
+    if network.starts_with("container:") || cmd.contains("port=") {
+        return true;
+    }
+    let listen = if public {
+        "listen_addresses=0.0.0.0"
+    } else {
+        "listen_addresses=127.0.0.1"
+    };
+    if !cmd.contains("wal_keep_size") || !cmd.contains(listen) {
+        return true;
+    }
+    if in_docker() {
+        return network != "devforge";
     }
     let port_s = port.to_string();
     let bind_ok = bindings.contains(&port_s)
         && (bindings.contains(want_ip)
             || (want_ip == "0.0.0.0" && bindings.contains("\"HostIp\":\"\"")));
-    !bind_ok || !cmd_ok
+    !bind_ok
 }
 
 async fn configure_primary(creds: &Creds) -> Result<(), String> {
@@ -930,6 +955,8 @@ async fn configure_primary(creds: &Creds) -> Result<(), String> {
            END IF; \
          END $$; \
          ALTER SYSTEM RESET default_transaction_read_only; \
+         ALTER SYSTEM SET synchronous_standby_names = ''; \
+         ALTER SYSTEM SET synchronous_commit = 'on'; \
          SELECT pg_reload_conf()",
         pw = creds.replication_password
     );
