@@ -676,6 +676,20 @@ fn self_container_id() -> Option<String> {
     }
 }
 
+/// Port d'écoute de `devforge-pg` quand il partage le réseau du conteneur DevForge.
+/// Les clients (`pg_isready`, `psql`, `pg_dump`) visent 5432 par défaut.
+fn container_listen_port(container: &str) -> Option<u16> {
+    if container != CONTAINER || !(in_docker() && self_container_id().is_some()) {
+        return None;
+    }
+    Some(
+        META.get()
+            .map(|m| m.port)
+            .filter(|p| *p != 0)
+            .unwrap_or(5433),
+    )
+}
+
 fn connection_url(creds: &Creds) -> String {
     // Dans Docker, Postgres partage le réseau du conteneur DevForge.
     // Le compose publie l'hôte 5433 vers ce port.
@@ -729,6 +743,7 @@ async fn start_container(creds: &Creds, public: bool) -> Result<(), String> {
         let run = if let Some(id) = self_container_id().filter(|_| shared_net) {
             let net = format!("container:{id}");
             let pg_port = format!("port={}", creds.port);
+            let pgport = format!("PGPORT={}", creds.port);
             docker(&[
                 "run",
                 "-d",
@@ -740,6 +755,8 @@ async fn start_container(creds: &Creds, public: bool) -> Result<(), String> {
                 &net,
                 "-v",
                 &vol,
+                "-e",
+                &pgport,
                 "-e",
                 &user,
                 "-e",
@@ -820,11 +837,24 @@ async fn start_container(creds: &Creds, public: bool) -> Result<(), String> {
             let _ = docker(&["network", "connect", "devforge", id]).await;
         }
     }
+    let ready_port = if shared_net {
+        creds.port.to_string()
+    } else {
+        "5432".into()
+    };
+    let pgport_env = format!("PGPORT={ready_port}");
+    let mut last = String::new();
     for _ in 0..40 {
         let ready = docker(&[
             "exec",
+            "-e",
+            &pgport_env,
             CONTAINER,
             "pg_isready",
+            "-h",
+            "127.0.0.1",
+            "-p",
+            &ready_port,
             "-U",
             &creds.user,
             "-d",
@@ -835,9 +865,20 @@ async fn start_container(creds: &Creds, public: bool) -> Result<(), String> {
             configure_primary(creds).await?;
             return Ok(());
         }
+        let err = String::from_utf8_lossy(&ready.stderr);
+        let out = String::from_utf8_lossy(&ready.stdout);
+        last = format!("{} {}", err.trim(), out.trim()).trim().to_string();
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
-    Err("postgres devforge-pg pas prêt".into())
+    let logs = docker(&["logs", "--tail", "30", CONTAINER]).await.ok();
+    let tail = logs
+        .map(|o| {
+            let mut text = String::from_utf8_lossy(&o.stderr).to_string();
+            text.push_str(&String::from_utf8_lossy(&o.stdout));
+            text.trim().to_string()
+        })
+        .unwrap_or_default();
+    Err(format!("postgres devforge-pg pas prêt: {last} {tail}"))
 }
 
 async fn container_needs_recreate(
@@ -946,8 +987,12 @@ async fn replace_volume(from: &str, to: &str) -> Result<(), String> {
 }
 
 async fn docker_dump(container: &str, user: &str, database: &str) -> Result<Vec<u8>, String> {
-    let out = docker(&[
-        "exec",
+    let port_env = container_listen_port(container).map(|p| format!("PGPORT={p}"));
+    let mut args = vec!["exec"];
+    if let Some(env) = port_env.as_deref() {
+        args.extend(["-e", env]);
+    }
+    args.extend([
         container,
         "pg_dump",
         "-U",
@@ -957,8 +1002,8 @@ async fn docker_dump(container: &str, user: &str, database: &str) -> Result<Vec<
         "--clean",
         "--if-exists",
         database,
-    ])
-    .await?;
+    ]);
+    let out = docker(&args).await?;
     if !out.status.success() {
         return Err(format!(
             "pg_dump : {}",
@@ -1020,10 +1065,14 @@ async fn psql_bytes(
     database: &str,
     sql: &[u8],
 ) -> Result<Vec<u8>, String> {
-    let mut child = Command::new("docker")
+    let port_env = container_listen_port(container).map(|p| format!("PGPORT={p}"));
+    let mut cmd = Command::new("docker");
+    cmd.arg("exec").arg("-i");
+    if let Some(env) = port_env.as_deref() {
+        cmd.arg("-e").arg(env);
+    }
+    let mut child = cmd
         .args([
-            "exec",
-            "-i",
             container,
             "psql",
             "-v",
