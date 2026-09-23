@@ -82,6 +82,7 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
   const [showAll, setShowAll] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [selectedLogs, setSelectedLogs] = useState<string>('');
   const isPanel = variant === 'panel';
 
   useEffect(() => {
@@ -110,6 +111,35 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
     }, 1500);
     return () => clearInterval(interval);
   }, [open, selectedUuid, deployments]);
+
+  const selectedRow = deployments.find((d) => d.uuid === selectedUuid) ?? null;
+  const selectedLogsSrc = selectedRow?.logs ?? null;
+  const selectedStatus = selectedRow?.status ?? null;
+
+  // Logs historiques absents de la liste (payload léger) → fetch à la sélection.
+  useEffect(() => {
+    if (!selectedUuid || !selectedRow) {
+      setSelectedLogs('');
+      return;
+    }
+    if (selectedLogsSrc) {
+      setSelectedLogs(selectedLogsSrc);
+      return;
+    }
+    let cancelled = false;
+    setSelectedLogs('…');
+    api
+      .deployment(selectedUuid)
+      .then((r) => {
+        if (!cancelled) setSelectedLogs(r.data.logs || '');
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedLogs('(logs indisponibles)');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedUuid, selectedLogsSrc, selectedStatus]);
 
   async function loadDeployments(showSpinner = true) {
     if (showSpinner) setLoading(true);
@@ -354,7 +384,7 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
 
                 <div class={cn('min-h-0', isPanel ? 'flex-1' : '')}>
                   {viewMode === 'timeline' ? (
-                    <DeployTimeline logs={selected.logs} status={selected.status} />
+                    <DeployTimeline logs={selectedLogs} status={selected.status} />
                   ) : (
                     <div class="rounded-xl border border-[var(--color-line)] bg-black/40 p-3 h-full">
                       <pre
@@ -363,7 +393,7 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
                           isPanel ? 'max-h-none h-full' : 'max-h-[50vh]',
                         )}
                       >
-                        {selected.logs || 'Aucun log disponible.'}
+                        {selectedLogs || 'Aucun log disponible.'}
                       </pre>
                     </div>
                   )}

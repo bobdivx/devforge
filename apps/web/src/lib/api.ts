@@ -510,13 +510,15 @@ export const api = {
     }),
   removeGroupMember: (uuid: string, projectUuid: string) =>
     request<{ data: AppGroup }>(`/groups/${uuid}/members/${projectUuid}`, { method: 'DELETE' }),
-  project: async (uuid: string) => {
+  project: async (uuid: string, opts?: { live?: boolean }) => {
+    const qs = opts?.live ? '?live=1' : '';
     const res = await request<{ data: Project | { project: Project; deployments: Deployment[] } }>(
-      '/projects/' + uuid,
+      '/projects/' + uuid + qs,
     );
     const data = res.data;
     if (data && typeof data === 'object' && 'project' in data) {
-      return { data: (data as { project: Project }).project };
+      const wrapped = data as { project: Project; deployments?: Deployment[] };
+      return { data: wrapped.project, deployments: wrapped.deployments };
     }
     return { data: data as Project };
   },
