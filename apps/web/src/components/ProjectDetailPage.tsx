@@ -82,6 +82,17 @@ function readQuery(): { uuid: string; tab: Tab; builder?: boolean; agent?: strin
 }
 
 function deployTone(status: string): 'ok' | 'warn' | 'danger' | 'neutral' {
+  if (status === 'deployed' || status === 'success' || status === 'ok') return 'ok';
+  if (status === 'failed' || status === 'error') return 'danger';
+  if (
+    status === 'deploying' ||
+    status === 'building' ||
+    status === 'pending' ||
+    status === 'queued' ||
+    status === 'running'
+  ) {
+    return 'warn';
+  }
   return projectStatusMeta(status).tone;
 }
 
@@ -865,6 +876,9 @@ function HealthIcon({
   );
 }
 
+/** Nombre de tuiles déploiements affichées par défaut (grille 4 × 3). */
+const DEPLOYMENTS_VISIBLE_DEFAULT = 12;
+
 function DeploymentsPanel({
   projectUuid,
   initial,
@@ -875,14 +889,20 @@ function DeploymentsPanel({
   onRefresh: (d: Deployment[]) => void;
 }) {
   const toast = useToast();
+  const logsRef = useRef<HTMLPreElement>(null);
   const [items, setItems] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [openLogs, setOpenLogs] = useState<string | null>(null);
   const [logs, setLogs] = useState('');
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     setItems(initial);
   }, [initial]);
+
+  const visible = showAll ? items : items.slice(0, DEPLOYMENTS_VISIBLE_DEFAULT);
+  const hiddenCount = Math.max(0, items.length - DEPLOYMENTS_VISIBLE_DEFAULT);
+  const selected = items.find((d) => d.uuid === openLogs) ?? null;
 
   async function reload() {
     const r = await api.deployments(projectUuid);
@@ -902,7 +922,11 @@ function DeploymentsPanel({
       });
       setOpenLogs(r.data.uuid);
       setLogs(r.data.logs || '');
+      setShowAll(false);
       await reload();
+      queueMicrotask(() =>
+        logsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }),
+      );
     } catch (e) {
       toast.push({ title: 'Deploy KO', detail: String(e), tone: 'danger' });
     } finally {
@@ -915,56 +939,129 @@ function DeploymentsPanel({
     const row = items.find((d) => d.uuid === depUuid);
     if (row?.logs) {
       setLogs(row.logs);
+      queueMicrotask(() =>
+        logsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }),
+      );
       return;
     }
+    setLogs('…');
     try {
       const r = await api.deployment(depUuid);
       setLogs(r.data.logs || '');
     } catch {
       setLogs('(logs indisponibles)');
     }
+    queueMicrotask(() =>
+      logsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }),
+    );
   }
 
   return (
     <FadeIn>
-      <Card>
-        <CardHeader
-          title="Deployments"
-          action={
-            <Button size="sm" variant="secondary" disabled={busy} onClick={deploy}>
-              {busy ? <Spinner /> : null}
-              Déployer
-            </Button>
-          }
-        />
+      <div class="space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h2 class="text-base font-medium tracking-tight">Deployments</h2>
+            <p class="mt-0.5 text-sm text-[var(--color-ink-muted)]">
+              {items.length === 0
+                ? 'Aucun déploiement pour l’instant'
+                : showAll || hiddenCount === 0
+                  ? `${items.length} déploiement${items.length > 1 ? 's' : ''} · les plus récents en premier`
+                  : `${DEPLOYMENTS_VISIBLE_DEFAULT} plus récents sur ${items.length}`}
+            </p>
+          </div>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={deploy}>
+            {busy ? <Spinner /> : null}
+            Déployer
+          </Button>
+        </div>
+
         {items.length === 0 ? (
-          <p class="text-sm text-[var(--color-ink-muted)]">
-            Aucun déploiement — lance un Deploy pour cloner et builder.
-          </p>
+          <Card>
+            <p class="text-sm text-[var(--color-ink-muted)]">
+              Aucun déploiement — lance un Deploy pour cloner et builder.
+            </p>
+          </Card>
         ) : (
-          <Table headers={['SHA', 'Message', 'Status', '']}>
-            {items.map((d) => (
-              <Tr key={d.uuid}>
-                <Td class="font-mono text-xs">{d.git_sha}</Td>
-                <Td>{d.git_message}</Td>
-                <Td>
-                  <Badge tone={deployTone(d.status)}>{d.status}</Badge>
-                </Td>
-                <Td>
-                  <Button size="sm" variant="ghost" onClick={() => showLogs(d.uuid)}>
-                    Logs
+          <>
+            <HubGrid cols={4}>
+              {visible.map((d, index) => {
+                const tone = deployTone(d.status);
+                const sha = d.git_sha ? d.git_sha.slice(0, 7) : '—';
+                const selectedTile = openLogs === d.uuid;
+                return (
+                  <HubTile
+                    key={d.uuid}
+                    index={index}
+                    title={sha}
+                    description={`${d.git_message || 'Sans message'} · ${formatWhen(d.created_at)}`}
+                    icon={<HealthIcon kind="deploy" tone={tone} />}
+                    iconClass="!bg-transparent"
+                    class={selectedTile ? '!ring-[var(--color-accent)]' : undefined}
+                    badge={
+                      tone !== 'neutral' ? (
+                        <span
+                          class={cn(
+                            'absolute -right-1 -top-1 h-3 w-3 rounded-full ring-2 ring-[#1c1c1e]',
+                            tone === 'ok' && 'bg-[var(--color-ok)]',
+                            tone === 'warn' && 'bg-[var(--color-warn)]',
+                            tone === 'danger' && 'bg-[var(--color-danger)]',
+                          )}
+                        />
+                      ) : null
+                    }
+                    subtitle={
+                      <div class="mt-1 space-y-1">
+                        <Badge tone={tone}>{d.status}</Badge>
+                        <div class="line-clamp-2 text-[11px] leading-snug text-[var(--color-ink-muted)]">
+                          {d.git_message || 'Sans message'}
+                        </div>
+                        <div class="text-[11px] text-[var(--color-ink-faint)]">
+                          {formatWhen(d.created_at)}
+                        </div>
+                      </div>
+                    }
+                    onClick={() => void showLogs(d.uuid)}
+                  />
+                );
+              })}
+            </HubGrid>
+
+            {hiddenCount > 0 && (
+              <div class="flex justify-center">
+                {showAll ? (
+                  <Button size="sm" variant="ghost" onClick={() => setShowAll(false)}>
+                    Voir moins
                   </Button>
-                </Td>
-              </Tr>
-            ))}
-          </Table>
+                ) : (
+                  <Button size="sm" variant="ghost" onClick={() => setShowAll(true)}>
+                    Voir plus ({hiddenCount})
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {openLogs && (
+              <Card>
+                <CardHeader
+                  title="Logs"
+                  description={
+                    selected
+                      ? `${selected.status} · ${selected.git_sha ? selected.git_sha.slice(0, 7) : '—'} · ${formatWhen(selected.created_at)}`
+                      : 'Sélectionne une tuile pour afficher les logs'
+                  }
+                />
+                <pre
+                  ref={logsRef}
+                  class="max-h-80 overflow-auto rounded-xl border border-[var(--color-line)] bg-black/40 p-3 font-mono text-xs whitespace-pre-wrap"
+                >
+                  {logs || '…'}
+                </pre>
+              </Card>
+            )}
+          </>
         )}
-        {openLogs && (
-          <pre class="mt-4 max-h-80 overflow-auto rounded-xl border border-[var(--color-line)] bg-black/40 p-3 font-mono text-xs whitespace-pre-wrap">
-            {logs || '…'}
-          </pre>
-        )}
-      </Card>
+      </div>
     </FadeIn>
   );
 }
