@@ -187,7 +187,7 @@ function isFinishedOk(status: string): boolean {
 }
 
 function isFailed(status: string): boolean {
-  return status === 'failed' || status === 'error';
+  return status === 'failed' || status === 'error' || status === 'cancelled' || status === 'canceled';
 }
 
 function isInProgress(status: string): boolean {

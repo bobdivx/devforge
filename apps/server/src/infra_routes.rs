@@ -1878,100 +1878,59 @@ async fn github_webhook(
         .execute(&state.pool)
         .await;
 
-        let token: Option<String> = sqlx::query_as::<_, (String,)>(
-            "SELECT github_token FROM instance_settings WHERE id = 1",
-        )
-        .fetch_optional(&state.pool)
-        .await
-        .ok()
-        .flatten()
-        .map(|(t,)| t)
-        .filter(|t| !t.trim().is_empty());
+        let _ = sqlx::query("UPDATE projects SET status = 'deploying', updated_at = $1 WHERE id = $2")
+            .bind(&now)
+            .bind(project.id)
+            .execute(&state.pool)
+            .await;
 
-        let env_rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT key, value FROM project_env_vars WHERE project_uuid = $1 ORDER BY key",
-        )
-        .bind(&project.uuid)
-        .fetch_all(&state.pool)
-        .await
-        .unwrap_or_default();
-        let env_file = if env_rows.is_empty() {
-            None
-        } else {
-            Some(devforge_env::serialize_docker_env_file(&env_rows))
-        };
-        let (env_file, group_network, group_alias) =
-            crate::group_routes::prepare_deploy_link(&state.pool, &project.uuid, env_file).await;
-
-        let req = devforge_deploy::DeployRequest {
-            project_uuid: project.uuid.clone(),
-            server_id: project
-                .server_id
-                .clone()
-                .unwrap_or_else(|| "default".into()),
-            workdir: project.workdir.clone().unwrap_or_default(),
-            git_repository: project.git_repository.clone().unwrap_or_default(),
-            git_branch: proj_branch.into(),
-            build_pack: if project.build_pack.is_empty() {
-                "nixpacks".into()
-            } else {
-                project.build_pack.clone()
-            },
-            port: project.port.clamp(1, 65535) as u16,
-            base_directory: project.base_directory.clone(),
-            docker_compose_location: project.docker_compose_location.clone(),
-            dockerfile_path: project.dockerfile_path.clone(),
-            docker_build_context: project.docker_build_context.clone(),
-            publish_directory: project.publish_directory.clone(),
-            is_static: project.is_static != 0,
-            github_token: token,
-            env_file,
-            proxy_labels: crate::routes::proxy_labels_for_project(&state, &project).await,
-            gpu_nvidia: project.gpu_nvidia != 0,
-            gpu_dri: project.gpu_dri != 0,
-            group_network,
-            group_alias,
-            volumes: devforge_deploy::docker::decode_volume_mounts(&project.volumes_json),
-            runtime: devforge_deploy::RuntimeSpec::from_json(&project.runtime_json)
-                .unwrap_or_default(),
-        };
-        let deploy = state.deploy.clone();
-        let slot_server = req.server_id.clone();
-        let result = crate::deploy_queue::run_in_node_slot(
-            &state.deploy_queue,
-            &state.pool,
-            &slot_server,
-            &dep_uuid,
-            move || {
-                let deploy = deploy.clone();
-                async move { deploy.deploy(&req).await }
-            },
-        )
-        .await;
-        crate::deploy_queue::record_event(
-            &state.pool,
-            &project.uuid,
-            "deploy",
-            if result.ok { "success" } else { "failed" },
-            &dep_uuid,
-            result.git_sha.as_deref().unwrap_or(""),
-        )
-        .await;
+        let outcome = crate::routes::run_real_deploy(&state, &project, &dep_uuid).await;
+        if outcome.cancelled {
+            deployed.push(json!({
+                "project": project.uuid,
+                "deployment": dep_uuid,
+                "ok": false,
+                "cancelled": true,
+            }));
+            continue;
+        }
+        let result = &outcome.result;
         let finished = crate::state::now_str();
         // Align with manual deploy status so sync/UI treat webhook deploys as success.
         let status = if result.ok { "success" } else { "failed" };
-        let _ = sqlx::query(
-            r#"UPDATE deployments SET status = $1, git_sha = $2, logs = $3, finished_at = $4, updated_at = $5
-               WHERE uuid = $6"#,
+        let final_sha = result
+            .git_sha
+            .as_deref()
+            .or(sha.as_deref())
+            .unwrap_or("unknown");
+        let wrote = crate::deploy_queue::finalize_if_active(
+            &state.pool,
+            &dep_uuid,
+            status,
+            final_sha,
+            &result.logs,
+            None,
+            None,
+            None,
         )
-        .bind(status)
-        .bind(result.git_sha.as_deref().or(sha.as_deref()).unwrap_or("unknown"))
-        .bind(&result.logs)
-        .bind(&finished)
-        .bind(&finished)
-        .bind(&dep_uuid)
-        .execute(&state.pool)
         .await;
+        if !wrote {
+            deployed.push(json!({
+                "project": project.uuid,
+                "deployment": dep_uuid,
+                "ok": false,
+                "cancelled": true,
+            }));
+            continue;
+        }
+
+        let project_status = if result.ok { "live" } else { "failed" };
+        let _ = sqlx::query("UPDATE projects SET status = $1, updated_at = $2 WHERE id = $3")
+            .bind(project_status)
+            .bind(&finished)
+            .bind(project.id)
+            .execute(&state.pool)
+            .await;
 
         // CRITICAL: Ensure Traefik after webhook deploy (same fix as manual deploy)
         if result.ok {

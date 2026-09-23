@@ -83,7 +83,7 @@ function readQuery(): { uuid: string; tab: Tab; builder?: boolean; agent?: strin
 
 function deployTone(status: string): 'ok' | 'warn' | 'danger' | 'neutral' {
   if (status === 'deployed' || status === 'success' || status === 'ok') return 'ok';
-  if (status === 'failed' || status === 'error') return 'danger';
+  if (status === 'failed' || status === 'error' || status === 'cancelled' || status === 'canceled') return 'danger';
   if (
     status === 'deploying' ||
     status === 'building' ||

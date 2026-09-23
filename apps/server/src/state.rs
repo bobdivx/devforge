@@ -343,6 +343,24 @@ impl ProjectStore for SqliteProjectStore {
             .await
             .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
+        {
+            let _start = self.deploy_queue.lock_project_start(project.id).await;
+            let _cancel_rx = self.deploy_queue.register_cancel(&dep_uuid).await;
+            let superseded = crate::deploy_queue::supersede_in_progress(
+                &self.deploy_queue,
+                &self.pool,
+                project.id,
+                &dep_uuid,
+            )
+            .await;
+            if !superseded.is_empty() {
+                let server = project.server_id.as_deref().unwrap_or("default");
+                self.deploy
+                    .abort_in_flight_swap(&project.uuid, server)
+                    .await;
+            }
+        }
+
         // Récupérer le token GitHub depuis instance_settings (même pattern que run_real_deploy)
         let token: Option<String> = sqlx::query_as::<_, (String,)>(
             "SELECT github_token FROM instance_settings WHERE id = 1",
@@ -401,7 +419,7 @@ impl ProjectStore for SqliteProjectStore {
 
         let server_id = req.server_id.clone();
         let deploy = self.deploy.clone();
-        let result = crate::deploy_queue::run_in_node_slot(
+        let outcome = crate::deploy_queue::run_in_node_slot(
             &self.deploy_queue,
             &self.pool,
             &server_id,
@@ -412,56 +430,92 @@ impl ProjectStore for SqliteProjectStore {
             },
         )
         .await;
-        crate::deploy_queue::record_event(
-            &self.pool,
-            &project.uuid,
-            "deploy",
-            if result.ok { "success" } else { "failed" },
-            &dep_uuid,
-            result.git_sha.as_deref().unwrap_or(""),
-        )
-        .await;
+        self.deploy_queue.unregister_cancel(&dep_uuid).await;
+
         let finished = now_str();
-        let status = if result.ok { "success" } else { "failed" };
-        let final_sha = result.git_sha.unwrap_or_else(|| "unknown".into());
-
-        // Mettre à jour le déploiement avec le résultat
-        sqlx::query(
-            r#"UPDATE deployments SET status = $1, git_sha = $2, logs = $3, finished_at = $4, updated_at = $5
-               WHERE uuid = $6"#,
-        )
-        .bind(status)
-        .bind(&final_sha)
-        .bind(&result.logs)
-        .bind(&finished)
-        .bind(&finished)
-        .bind(&dep_uuid)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
-
-        // Mettre à jour le statut du projet
-        let project_status = if result.ok { "live" } else { "failed" };
-        sqlx::query("UPDATE projects SET status = $1, updated_at = $2 WHERE id = $3")
-            .bind(project_status)
-            .bind(&finished)
-            .bind(project.id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
-
-        Ok(json!({
-            "ok": result.ok,
-            "deployment_uuid": dep_uuid,
-            "status": status,
-            "git_sha": final_sha,
-            "logs": result.logs,
-            "message": if result.ok {
-                format!("✓ Déploiement {} réussi ({})", dep_uuid, final_sha)
-            } else {
-                format!("✗ Déploiement {} échoué", dep_uuid)
+        match outcome {
+            crate::deploy_queue::SlotOutcome::Cancelled => {
+                crate::deploy_queue::record_event(
+                    &self.pool,
+                    &project.uuid,
+                    "deploy",
+                    "cancelled",
+                    &dep_uuid,
+                    "superseded",
+                )
+                .await;
+                self.deploy
+                    .abort_in_flight_swap(&project.uuid, &server_id)
+                    .await;
+                return Ok(json!({
+                    "ok": false,
+                    "cancelled": true,
+                    "deployment_uuid": dep_uuid,
+                    "status": "cancelled",
+                    "message": format!(
+                        "Déploiement {dep_uuid} annulé : remplacé par un déploiement plus récent"
+                    ),
+                }));
             }
-        }))
+            crate::deploy_queue::SlotOutcome::Completed(result) => {
+                crate::deploy_queue::record_event(
+                    &self.pool,
+                    &project.uuid,
+                    "deploy",
+                    if result.ok { "success" } else { "failed" },
+                    &dep_uuid,
+                    result.git_sha.as_deref().unwrap_or(""),
+                )
+                .await;
+                let status = if result.ok { "success" } else { "failed" };
+                let final_sha = result.git_sha.clone().unwrap_or_else(|| "unknown".into());
+
+                let wrote = crate::deploy_queue::finalize_if_active(
+                    &self.pool,
+                    &dep_uuid,
+                    status,
+                    &final_sha,
+                    &result.logs,
+                    None,
+                    None,
+                    None,
+                )
+                .await;
+                if !wrote {
+                    return Ok(json!({
+                        "ok": false,
+                        "cancelled": true,
+                        "deployment_uuid": dep_uuid,
+                        "status": "cancelled",
+                        "message": format!(
+                            "Déploiement {dep_uuid} annulé : remplacé par un déploiement plus récent"
+                        ),
+                    }));
+                }
+
+                let project_status = if result.ok { "live" } else { "failed" };
+                sqlx::query("UPDATE projects SET status = $1, updated_at = $2 WHERE id = $3")
+                    .bind(project_status)
+                    .bind(&finished)
+                    .bind(project.id)
+                    .execute(&self.pool)
+                    .await
+                    .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+
+                Ok(json!({
+                    "ok": result.ok,
+                    "deployment_uuid": dep_uuid,
+                    "status": status,
+                    "git_sha": final_sha,
+                    "logs": result.logs,
+                    "message": if result.ok {
+                        format!("✓ Déploiement {} réussi ({})", dep_uuid, final_sha)
+                    } else {
+                        format!("✗ Déploiement {} échoué", dep_uuid)
+                    }
+                }))
+            }
+        }
     }
 }
 
