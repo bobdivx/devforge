@@ -626,7 +626,18 @@ async fn public_preview_health(url: &str) -> (bool, Option<u16>, String) {
             };
             (ok, Some(status), msg)
         }
-        Err(e) => (false, None, e.to_string()),
+        Err(e) => {
+            let msg = e.to_string();
+            // Boucle 301 redirectScheme derrière tunnel CF (HTTPS déjà terminé → :80).
+            let clear = if msg.to_ascii_lowercase().contains("redirect") {
+                format!(
+                    "boucle de redirection sur {url} (ne pas forcer HTTPS sur entrypoint http) — {msg}"
+                )
+            } else {
+                msg
+            };
+            (false, None, clear)
+        }
     }
 }
 
@@ -640,25 +651,19 @@ fn host_from_preview_url(preview_url: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn write_dev_traefik_dynamic(
-    preview_url: &str,
-    project_uuid: &str,
-    port: u16,
-) -> std::result::Result<String, String> {
-    let host = host_from_preview_url(preview_url).ok_or_else(|| "hôte dev- invalide".to_string())?;
+fn dev_traefik_dynamic_yaml(host: &str, project_uuid: &str, upstream: &str) -> String {
     let short: String = project_uuid.chars().take(8).collect();
     let service = format!("dfdev-{short}");
-    let upstream = dev_preview_upstream_url(port);
-
-    let yaml = format!(
+    // Aligné sur les labels prod (`traefik_labels_for_service`) : http + https
+    // servent le même service, sans redirectScheme (sinon boucle 301 derrière
+    // Cloudflare tunnel qui termine déjà le TLS avant Traefik :80).
+    format!(
         r#"http:
   routers:
     {service}-http:
       rule: "Host(`{host}`)"
       entryPoints:
         - http
-      middlewares:
-        - {service}-redirect
       service: {service}
     {service}-https:
       rule: "Host(`{host}`)"
@@ -667,18 +672,23 @@ fn write_dev_traefik_dynamic(
       service: {service}
       tls:
         certResolver: letsencrypt
-  middlewares:
-    {service}-redirect:
-      redirectScheme:
-        scheme: https
-        permanent: true
   services:
     {service}:
       loadBalancer:
         servers:
           - url: "{upstream}"
 "#
-    );
+    )
+}
+
+fn write_dev_traefik_dynamic(
+    preview_url: &str,
+    project_uuid: &str,
+    port: u16,
+) -> std::result::Result<String, String> {
+    let host = host_from_preview_url(preview_url).ok_or_else(|| "hôte dev- invalide".to_string())?;
+    let upstream = dev_preview_upstream_url(port);
+    let yaml = dev_traefik_dynamic_yaml(&host, project_uuid, &upstream);
 
     let path = dev_preview_dynamic_file(project_uuid);
     if let Some(parent) = path.parent() {
@@ -1952,6 +1962,35 @@ mod tests {
         assert_ne!(legacy[0], canon);
         std::env::remove_var("DEVFORGE_DATA_DIR");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dev_traefik_yaml_has_no_https_redirect() {
+        let yaml = dev_traefik_dynamic_yaml(
+            "dev-bba0bc75.jeser.app",
+            "bba0bc75-a521-4618-bc92-ed595c6a601e",
+            "http://devforge:21042",
+        );
+        assert!(
+            !yaml.contains("redirectScheme"),
+            "pas de redirectScheme (boucle derrière tunnel CF)"
+        );
+        assert!(
+            !yaml.contains("redirect"),
+            "pas de middleware redirect — http sert le service comme en prod"
+        );
+        assert!(
+            !yaml.contains("middlewares:"),
+            "aucun middleware sur le routeur http preview"
+        );
+        assert!(yaml.contains("dfdev-bba0bc75-http:"));
+        assert!(yaml.contains("dfdev-bba0bc75-https:"));
+        assert!(yaml.contains("entryPoints:\n        - http"));
+        assert!(yaml.contains("entryPoints:\n        - https"));
+        assert!(yaml.contains("certResolver: letsencrypt"));
+        assert!(yaml.contains("url: \"http://devforge:21042\""));
+        // Les deux routeurs pointent vers le même service.
+        assert_eq!(yaml.matches("service: dfdev-bba0bc75").count(), 2);
     }
 
 }
