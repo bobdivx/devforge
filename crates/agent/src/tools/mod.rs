@@ -18,7 +18,8 @@ mod tests;
 mod workdir_cmd;
 
 pub use agent_threads::{
-    ListAgentMessagesTool, ListAgentToolFailuresTool, ListProjectAgentsTool,
+    CreateProjectAgentTool, ListAgentMessagesTool, ListAgentToolFailuresTool,
+    ListProjectAgentsTool,
 };
 pub use deploy::TriggerDeployTool;
 pub use deploy_logs::GetDeploymentLogsTool;

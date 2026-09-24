@@ -100,7 +100,49 @@ type ChatMessage = {
 };
 
 function metaFor(agent: ProjectAgent) {
+  if (agent.kind === 'subagent') {
+    return {
+      label: agent.name || 'Sous-agent',
+      blurb: 'Worker éphémère sous le Coordinateur',
+      starters: [] as string[],
+    };
+  }
   return ROLE_META[agent.role] || ROLE_META.custom;
+}
+
+/** Racines + enfants kind=subagent indentés sous leur parent. */
+function nestAgentRows(
+  roots: ProjectAgent[],
+  all: ProjectAgent[],
+): { agent: ProjectAgent; depth: number }[] {
+  const byParent = new Map<string, ProjectAgent[]>();
+  for (const a of all) {
+    if (a.kind !== 'subagent' || !a.parent_agent_uuid) continue;
+    const kids = byParent.get(a.parent_agent_uuid) ?? [];
+    kids.push(a);
+    byParent.set(a.parent_agent_uuid, kids);
+  }
+  for (const kids of byParent.values()) kids.sort(sortByRecent);
+
+  const seen = new Set<string>();
+  const out: { agent: ProjectAgent; depth: number }[] = [];
+  for (const root of roots) {
+    if (seen.has(root.uuid)) continue;
+    seen.add(root.uuid);
+    out.push({ agent: root, depth: 0 });
+    for (const kid of byParent.get(root.uuid) ?? []) {
+      if (seen.has(kid.uuid)) continue;
+      seen.add(kid.uuid);
+      out.push({ agent: kid, depth: 1 });
+    }
+  }
+  // Orphelins (parent hors liste) — toujours visibles
+  for (const a of all) {
+    if (a.kind !== 'subagent' || seen.has(a.uuid)) continue;
+    out.push({ agent: a, depth: 1 });
+    seen.add(a.uuid);
+  }
+  return out;
 }
 
 function sortByRecent(a: ProjectAgent, b: ProjectAgent) {
@@ -188,6 +230,16 @@ export function ProjectAgentsPanel({
   const llmReady = llmMode !== 'stub' && llmMode !== '—' && llmMode !== 'offline';
   const starters = threadsMode ? THREAD_STARTERS : currentMeta?.starters ?? [];
 
+  const displayRows = threadsMode
+    ? nestAgentRows(
+        list.filter((a) => a.kind !== 'subagent'),
+        list,
+      )
+    : nestAgentRows(
+        sortAgentsPinned(agents.filter((a) => a.kind !== 'subagent')),
+        agents,
+      );
+
   async function resolveThreads(main: ProjectAgent[]): Promise<ProjectAgent[]> {
     // Workspace = fil coordinateur permanent + tâches isolées. Ops/Reviewer restent dans Agents.
     const customs = main.filter((a) => a.kind === 'custom');
@@ -221,6 +273,7 @@ export function ProjectAgentsPanel({
 
   function threadLabel(a: ProjectAgent) {
     if (a.role === 'coordinator') return 'Coordinateur';
+    if (a.kind === 'subagent') return a.name || 'Sous-agent';
     if (a.kind === 'custom') return a.name;
     // Ne jamais afficher Ops / Deploy / Reviewer comme noms de chat
     if (a.role === 'deploy' || a.name === 'Deploy') return 'Construction';
@@ -231,11 +284,26 @@ export function ProjectAgentsPanel({
   async function loadAgents(preferUuid?: string | null) {
     try {
       const r = await api.projectAgents(projectUuid);
-      const main = (r.data ?? []).filter((a) => a.kind !== 'subagent');
-      setAgents(main);
+      const all = r.data ?? [];
+      const main = all.filter((a) => a.kind !== 'subagent');
+      // Garder aussi les subagents pour le nest UI (sélection + indentation).
+      setAgents(all);
 
       if (threadsMode) {
         let nextThreads = await resolveThreads(main);
+        // Inclure les sous-agents dont le parent est dans la liste des fils.
+        const rootIds = new Set(nextThreads.map((t) => t.uuid));
+        const nestedSubs = all
+          .filter(
+            (a) =>
+              a.kind === 'subagent' &&
+              a.parent_agent_uuid &&
+              rootIds.has(a.parent_agent_uuid),
+          )
+          .sort(sortByRecent);
+        for (const s of nestedSubs) {
+          if (!nextThreads.some((t) => t.uuid === s.uuid)) nextThreads.push(s);
+        }
 
         // Le coordinateur (seed) est le fil par défaut — pas de chat vide auto.
         if (nextThreads.length === 0 && !bootstrapped.current) {
@@ -270,7 +338,11 @@ export function ProjectAgentsPanel({
           setPollEnabled(true);
         }
       } else {
-        const ordered = sortAgentsPinned(main);
+        const orderedRoots = sortAgentsPinned(main);
+        const ordered = [
+          ...orderedRoots,
+          ...all.filter((a) => a.kind === 'subagent').sort(sortByRecent),
+        ];
         setAgents(ordered);
         const selectDefault = async (prev: string | null) => {
           if (prev && ordered.some((a) => a.uuid === prev)) return prev;
@@ -600,11 +672,14 @@ export function ProjectAgentsPanel({
     ? (current ? threadLabel(current) : 'Chat')
     : currentMeta?.label || 'Agent';
   const isCoordinator = current?.role === 'coordinator';
+  const isSubagent = current?.kind === 'subagent';
   const chatHeaderBlurb = isCoordinator
     ? 'Fil permanent du projet — contexte accumulé, workers éphémères'
-    : threadsMode
-      ? 'Assistant projet — planifie, édite en local, preview'
-      : currentMeta?.blurb;
+    : isSubagent
+      ? 'Sous-agent — tâche déléguée par le Coordinateur'
+      : threadsMode
+        ? 'Assistant projet — planifie, édite en local, preview'
+        : currentMeta?.blurb;
 
   const sidebar = threadsMode ? (
     <div class="flex flex-col gap-2">
@@ -625,14 +700,15 @@ export function ProjectAgentsPanel({
         </Alert>
       )}
       <ul class="space-y-0.5">
-        {list.map((a) => {
+        {displayRows.map(({ agent: a, depth }) => {
           const on = selected === a.uuid;
           return (
             <li key={a.uuid}>
               <button
                 type="button"
                 class={cn(
-                  'flex w-full items-start gap-2 rounded-xl px-3 py-2.5 text-left transition',
+                  'flex w-full items-start gap-2 rounded-xl py-2.5 text-left transition',
+                  depth > 0 ? 'pl-7 pr-3' : 'px-3',
                   on ? 'bg-[var(--color-accent-soft)]' : 'hover:bg-[var(--color-surface)]',
                 )}
                 onClick={() => setSelected(a.uuid)}
@@ -645,8 +721,13 @@ export function ProjectAgentsPanel({
                 />
                 <span class="min-w-0 flex-1">
                   <span class="block truncate text-sm font-medium tracking-tight">
-                    {threadLabel(a)}
+                    {depth > 0 ? `↳ ${threadLabel(a)}` : threadLabel(a)}
                   </span>
+                  {a.kind === 'subagent' && (
+                    <span class="mt-0.5 block text-[10px] text-[var(--color-ink-faint)]">
+                      Sous-agent
+                    </span>
+                  )}
                   {a.status === 'working' && (
                     <span class="mt-0.5 block text-[10px] text-[var(--color-accent)]">En cours…</span>
                   )}
@@ -656,7 +737,7 @@ export function ProjectAgentsPanel({
           );
         })}
       </ul>
-      {list.length === 0 && !error && (
+      {displayRows.length === 0 && !error && (
         <p class="px-1 text-sm text-[var(--color-ink-muted)]">Aucun chat…</p>
       )}
     </div>
@@ -671,7 +752,7 @@ export function ProjectAgentsPanel({
         </Alert>
       )}
       <ul class="space-y-1">
-        {agents.map((a) => {
+        {displayRows.map(({ agent: a, depth }) => {
           const meta = metaFor(a);
           const on = selected === a.uuid;
           return (
@@ -679,16 +760,22 @@ export function ProjectAgentsPanel({
               <button
                 type="button"
                 class={cn(
-                  'flex w-full flex-col rounded-xl px-3 py-2.5 text-left transition',
+                  'flex w-full flex-col rounded-xl py-2.5 text-left transition',
+                  depth > 0 ? 'pl-7 pr-3' : 'px-3',
                   on ? 'bg-[var(--color-accent-soft)]' : 'hover:bg-[var(--color-surface)]',
                 )}
                 onClick={() => setSelected(a.uuid)}
               >
                 <span class="flex items-center gap-2 font-medium tracking-tight">
-                  {meta.label}
+                  {depth > 0 ? `↳ ${meta.label}` : meta.label}
                   {a.role === 'coordinator' && (
                     <Badge tone="accent" class="!px-1.5 !py-0 text-[10px]">
                       Fil permanent
+                    </Badge>
+                  )}
+                  {a.kind === 'subagent' && (
+                    <Badge tone="neutral" class="!px-1.5 !py-0 text-[10px]">
+                      Sous-agent
                     </Badge>
                   )}
                 </span>
@@ -708,7 +795,7 @@ export function ProjectAgentsPanel({
     <div class={cn('mb-2 flex shrink-0 items-center gap-2', !embedded && 'lg:hidden')}>
       <div class="min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div class="flex w-max gap-1">
-          {list.map((a) => (
+          {displayRows.map(({ agent: a, depth }) => (
             <button
               key={a.uuid}
               type="button"
@@ -720,7 +807,7 @@ export function ProjectAgentsPanel({
                   : 'bg-white/[0.03] text-[var(--color-ink-muted)] hover:bg-white/5',
               )}
             >
-              {threadLabel(a)}
+              {depth > 0 ? `↳ ${threadLabel(a)}` : threadLabel(a)}
             </button>
           ))}
         </div>
@@ -766,6 +853,7 @@ export function ProjectAgentsPanel({
               <div class="flex flex-wrap items-center gap-2">
                 <span class="truncate font-medium tracking-tight">{chatHeaderTitle}</span>
                 {isCoordinator && <Badge tone="accent">Coordinateur</Badge>}
+                {isSubagent && <Badge tone="neutral">Sous-agent</Badge>}
                 <Badge tone={llmReady ? 'ok' : 'warn'}>{llmMode}</Badge>
               </div>
               {chatHeaderBlurb && (

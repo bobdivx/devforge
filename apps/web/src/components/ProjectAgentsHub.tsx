@@ -114,9 +114,10 @@ export function ProjectAgentsHub({
       .projectAgents(projectUuid)
       .then((r) => {
         if (cancelled) return;
-        const list = (r.data ?? []).filter((a) => a.kind !== 'subagent');
+        // Garder les subagents (ouverts via nest / ?open=) ; les tuiles WATCHERS filtrent.
+        const list = r.data ?? [];
         setAgents(list);
-        for (const agent of list) {
+        for (const agent of list.filter((a) => a.kind !== 'subagent')) {
           if (agent.status === 'working') {
             const watcher = WATCHERS.find((item) => item.role === agent.role);
             launchAgent({
@@ -227,6 +228,15 @@ export function ProjectAgentsHub({
                     </div>
                     <div class="truncate text-[10px] text-[var(--color-ink-faint)]">
                       {watcher.blurb}
+                      {watcher.role === 'coordinator' &&
+                        (() => {
+                          const n = agents.filter(
+                            (a) =>
+                              a.kind === 'subagent' &&
+                              a.parent_agent_uuid === agent.uuid,
+                          ).length;
+                          return n > 0 ? ` · ${n} sous-agent${n > 1 ? 's' : ''}` : '';
+                        })()}
                     </div>
                   </div>
                 }
