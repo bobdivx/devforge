@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { Activity, Clock, GitBranch, Rocket, Search, Server } from 'lucide-preact';
+import { Activity, Clock, GitBranch, MessageSquare, Rocket, Search, Server } from 'lucide-preact';
 import { api, type ProjectAgent } from '../lib/api';
 import { cn } from '../lib/cn';
 import {
@@ -20,6 +20,12 @@ type Watcher = {
 };
 
 const WATCHERS: Watcher[] = [
+  {
+    role: 'coordinator',
+    title: 'Coordinateur',
+    blurb: 'Fil permanent du projet',
+    icon: <MessageSquare size={28} strokeWidth={1.75} aria-hidden />,
+  },
   {
     role: 'deploy',
     title: 'Déploiements',
@@ -240,7 +246,11 @@ export function ProjectAgentsHub({
         open={!!open}
         onClose={() => setOpen(null)}
         title={openMeta?.title || open?.name || 'Agent'}
-        description={openMeta?.blurb}
+        description={
+          open?.role === 'coordinator'
+            ? 'Fil permanent du projet — contexte accumulé, workers éphémères'
+            : openMeta?.blurb
+        }
         size="xl"
         padded={false}
         bodyClass="overflow-hidden"

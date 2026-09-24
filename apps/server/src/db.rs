@@ -990,18 +990,31 @@ pub async fn purge_demo_data(pool: &PgPool) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-/// Agents obligatoires créés avec chaque project.
+/// Agents obligatoires créés avec chaque projet (Coordinateur = fil permanent).
+pub const REQUIRED_AGENTS: &[(&str, &str)] = &[
+    ("Coordinateur", "coordinator"),
+    ("Ops", "ops"),
+    ("Deploy", "deploy"),
+    ("Reviewer", "reviewer"),
+    ("Runners", "runner"),
+    ("Actions", "actions"),
+    ("Crons", "crons"),
+];
+
+/// Marqueur de dédup pour un wake coordinateur (échec deploy).
+pub fn coordinator_deploy_fail_marker(deployment_uuid: &str) -> String {
+    format!("COORD-WAKE:DEPLOY-FAIL:{deployment_uuid}")
+}
+
+/// Marqueur de dédup pour un wake coordinateur (santé projet).
+pub fn coordinator_health_marker(project_uuid: &str, status: &str) -> String {
+    format!("COORD-WAKE:HEALTH:{project_uuid}:{status}")
+}
+
+/// Agents obligatoires créés avec chaque project (idempotent — backfill inclus).
 pub async fn seed_required_agents(pool: &PgPool, project_uuid: &str) -> Result<(), sqlx::Error> {
     let now = chrono::Utc::now().to_rfc3339();
-    let required = [
-        ("Ops", "ops"),
-        ("Deploy", "deploy"),
-        ("Reviewer", "reviewer"),
-        ("Runners", "runner"),
-        ("Actions", "actions"),
-        ("Crons", "crons"),
-    ];
-    for (name, role) in required {
+    for (name, role) in REQUIRED_AGENTS {
         let exists: (i64,) = sqlx::query_as(
             "SELECT COUNT(*) FROM project_agents WHERE project_uuid = $1 AND role = $2 AND kind = 'required'",
         )
@@ -1028,4 +1041,42 @@ pub async fn seed_required_agents(pool: &PgPool, project_uuid: &str) -> Result<(
         .await?;
     }
     Ok(())
+}
+
+/// UUID de l'agent coordinateur (seed si besoin).
+pub async fn ensure_coordinator_agent(
+    pool: &PgPool,
+    project_uuid: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    seed_required_agents(pool, project_uuid).await?;
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT uuid FROM project_agents WHERE project_uuid = $1 AND role = 'coordinator' AND kind = 'required' LIMIT 1",
+    )
+    .bind(project_uuid)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|(u,)| u))
+}
+
+#[cfg(test)]
+mod required_agents_tests {
+    use super::*;
+
+    #[test]
+    fn required_agents_include_coordinator_first() {
+        assert_eq!(REQUIRED_AGENTS[0], ("Coordinateur", "coordinator"));
+        assert!(REQUIRED_AGENTS.iter().any(|(_, r)| *r == "ops"));
+        assert!(REQUIRED_AGENTS.iter().any(|(_, r)| *r == "deploy"));
+    }
+
+    #[test]
+    fn wake_markers_are_stable_and_unique() {
+        let a = coordinator_deploy_fail_marker("dep-1");
+        let b = coordinator_deploy_fail_marker("dep-2");
+        assert!(a.contains("DEPLOY-FAIL:dep-1"));
+        assert_ne!(a, b);
+        let h = coordinator_health_marker("proj-1", "unhealthy");
+        assert_eq!(h, "COORD-WAKE:HEALTH:proj-1:unhealthy");
+        assert_ne!(h, coordinator_health_marker("proj-1", "unrouted"));
+    }
 }

@@ -1382,6 +1382,27 @@ async fn create_deployment(
                 let _ = auto_trigger_repair(&state_clone, &dep_uuid_clone).await;
             });
         }
+        // Wake coordinateur (fil permanent) — dédupliqué par uuid de déploiement
+        {
+            let state_clone = state.clone();
+            let project_uuid = project.uuid.clone();
+            let dep_uuid_clone = dep_uuid.clone();
+            let summary = dep
+                .error_summary
+                .clone()
+                .unwrap_or_else(|| "Échec du déploiement".into());
+            let hint = dep.error_hint.clone().unwrap_or_default();
+            tokio::spawn(async move {
+                let _ = wake_coordinator_deploy_fail(
+                    &state_clone,
+                    &project_uuid,
+                    &dep_uuid_clone,
+                    &summary,
+                    &hint,
+                )
+                .await;
+            });
+        }
     }
 
     Ok((
@@ -1987,6 +2008,110 @@ async fn build_project_agent_brief(
     })
 }
 
+/// Poste un message dans le fil coordinateur et enqueue un tour (dédupe par marqueur).
+async fn wake_coordinator(
+    state: &AppState,
+    project_uuid: &str,
+    marker: &str,
+    content: &str,
+) -> Result<(), String> {
+    let already: Option<(i64,)> = sqlx::query_as(
+        "SELECT COUNT(*) FROM agent_messages WHERE project_uuid = $1 AND content LIKE $2",
+    )
+    .bind(project_uuid)
+    .bind(format!("%{marker}%"))
+    .fetch_optional(&state.pool)
+    .await
+    .ok()
+    .flatten();
+    if let Some((count,)) = already {
+        if count > 0 {
+            tracing::info!(project_uuid, marker, "wake coordinateur déjà envoyé, skip");
+            return Ok(());
+        }
+    }
+
+    let Some(agent_uuid) =
+        crate::db::ensure_coordinator_agent(&state.pool, project_uuid)
+            .await
+            .map_err(|e| e.to_string())?
+    else {
+        return Err("Aucun agent coordinateur".into());
+    };
+
+    let now = now_str();
+    let msg_uuid = new_uuid();
+    let body = format!("{marker}\n\n{content}");
+    sqlx::query(
+        r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
+           VALUES ($1, $2, $3, 'user', $4, '[]', 'system', $5)"#,
+    )
+    .bind(&msg_uuid)
+    .bind(project_uuid)
+    .bind(&agent_uuid)
+    .bind(&body)
+    .bind(&now)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    sqlx::query("UPDATE project_agents SET status = 'working', updated_at = $1 WHERE uuid = $2")
+        .bind(&now)
+        .bind(&agent_uuid)
+        .execute(&state.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let _ = trigger_agent_turn(state, project_uuid, &agent_uuid).await;
+    tracing::info!(project_uuid, marker, "wake coordinateur lancé");
+    Ok(())
+}
+
+pub(crate) async fn wake_coordinator_deploy_fail(
+    state: &AppState,
+    project_uuid: &str,
+    dep_uuid: &str,
+    summary: &str,
+    hint: &str,
+) -> Result<(), String> {
+    let marker = crate::db::coordinator_deploy_fail_marker(dep_uuid);
+    let hint_line = if hint.is_empty() {
+        String::new()
+    } else {
+        format!("\nIndice : {hint}")
+    };
+    let content = format!(
+        "Événement projet : échec de déploiement.\n\
+         Déploiement : {dep_uuid}\n\
+         Diagnostic : {summary}{hint_line}\n\n\
+         Tu es le Coordinateur (fil permanent). Analyse la situation, propose un plan, \
+         et pour une réparation lourde délègue via un sous-agent (kind=subagent, parent=toi) \
+         plutôt que de créer un nouveau fil permanent. Tu peux aussi t’appuyer sur l’agent Deploy."
+    );
+    wake_coordinator(state, project_uuid, &marker, &content).await
+}
+
+async fn wake_coordinator_health(
+    state: &AppState,
+    project_uuid: &str,
+    status: &str,
+) -> Result<(), String> {
+    let marker = crate::db::coordinator_health_marker(project_uuid, status);
+    let label = match status {
+        "unhealthy" => "santé dégradée (unhealthy)",
+        "unrouted" => "application non routée (unrouted)",
+        other => other,
+    };
+    let content = format!(
+        "Événement projet : {label}.\n\
+         Statut dérivé : {status}\n\n\
+         Tu es le Coordinateur (fil permanent). Vérifie get_project / http_smoke / logs, \
+         explique l’impact, et propose les prochaines actions. Pour un diagnostic approfondi, \
+         spawn un sous-agent (kind=subagent, parent_agent_uuid=ton uuid) plutôt qu’un nouveau chat permanent."
+    );
+    wake_coordinator(state, project_uuid, &marker, &content).await
+}
+
 /// Auto-trigger repair after failed deployment (max once per deployment uuid).
 async fn auto_trigger_repair(state: &AppState, dep_uuid: &str) -> Result<(), String> {
     // Check if repair already attempted for this deployment
@@ -2392,6 +2517,24 @@ async fn persist_resumed_deploy(
         if let Err(e) = state.proxy.ensure_traefik().await {
             tracing::error!(error = %e, project = %project.uuid, "reprise : Traefik");
         }
+    } else {
+        let state_clone = state.clone();
+        let project_uuid = project.uuid.clone();
+        let dep_uuid = deployment_uuid.to_string();
+        let summary = error_summary
+            .clone()
+            .unwrap_or_else(|| "Échec du déploiement".into());
+        let hint = error_hint.clone().unwrap_or_default();
+        tokio::spawn(async move {
+            let _ = wake_coordinator_deploy_fail(
+                &state_clone,
+                &project_uuid,
+                &dep_uuid,
+                &summary,
+                &hint,
+            )
+            .await;
+        });
     }
 }
 
@@ -3340,11 +3483,21 @@ async fn persist_derived_status(state: &AppState, project: &Project, derived: &s
             "draft" | "live" | "failed" | "deploying" | "stopped" | "unhealthy" | "unrouted"
         )
     {
+        let prev = project.status.clone();
         let _ = sqlx::query("UPDATE projects SET status = $1 WHERE id = $2")
             .bind(derived)
             .bind(project.id)
             .execute(&state.pool)
             .await;
+        // Transition vers unhealthy/unrouted → wake coordinateur (une fois par couple projet+statut)
+        if matches!(derived, "unhealthy" | "unrouted") && prev.as_str() != derived {
+            let state_clone = state.clone();
+            let project_uuid = project.uuid.clone();
+            let status = derived.to_string();
+            tokio::spawn(async move {
+                let _ = wake_coordinator_health(&state_clone, &project_uuid, &status).await;
+            });
+        }
     }
 }
 

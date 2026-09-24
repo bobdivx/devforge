@@ -776,7 +776,8 @@ async fn list_agents(
     let rows = sqlx::query_as::<_, AgentRow>(
         r#"SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status, updated_at
            FROM project_agents WHERE project_uuid = $1
-           ORDER BY updated_at DESC, name"#,
+           ORDER BY CASE WHEN role = 'coordinator' THEN 0 ELSE 1 END,
+                    updated_at DESC, name"#,
     )
     .bind(&uuid)
     .fetch_all(&state.pool)
@@ -1937,6 +1938,20 @@ async fn github_webhook(
             if let Err(e) = state.proxy.ensure_traefik().await {
                 tracing::error!(error = %e, project_uuid = %project.uuid, "Webhook deploy: failed to ensure Traefik");
             }
+        } else {
+            let state_clone = state.clone();
+            let project_uuid = project.uuid.clone();
+            let dep = dep_uuid.clone();
+            tokio::spawn(async move {
+                let _ = crate::routes::wake_coordinator_deploy_fail(
+                    &state_clone,
+                    &project_uuid,
+                    &dep,
+                    "Échec du déploiement (webhook)",
+                    "",
+                )
+                .await;
+            });
         }
 
         deployed.push(json!({

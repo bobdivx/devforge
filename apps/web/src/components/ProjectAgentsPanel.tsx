@@ -22,6 +22,15 @@ import { markLaunchedStatus } from '../lib/launched-agents';
 import { Alert, Badge, Button, Card, FadeIn, Input, Spinner, useToast } from './ui';
 
 const ROLE_META: Record<string, { label: string; blurb: string; starters: string[] }> = {
+  coordinator: {
+    label: 'Coordinateur',
+    blurb: 'Fil permanent du projet — contexte accumulé, workers éphémères',
+    starters: [
+      'Où en est le projet ?',
+      'Que s’est-il passé récemment ?',
+      'Propose un plan pour la prochaine étape',
+    ],
+  },
   ops: {
     label: 'Ops',
     blurb: 'Santé, logs, environnement',
@@ -100,6 +109,13 @@ function sortByRecent(a: ProjectAgent, b: ProjectAgent) {
   return tb.localeCompare(ta);
 }
 
+/** Coordinateur piné en tête ; le reste par activité récente. */
+function sortAgentsPinned(list: ProjectAgent[]): ProjectAgent[] {
+  const coord = list.filter((a) => a.role === 'coordinator');
+  const rest = list.filter((a) => a.role !== 'coordinator').sort(sortByRecent);
+  return [...coord, ...rest];
+}
+
 function titleFromMessage(text: string) {
   const oneLine = text.trim().replace(/\s+/g, ' ');
   if (oneLine.length <= 48) return oneLine;
@@ -173,11 +189,13 @@ export function ProjectAgentsPanel({
   const starters = threadsMode ? THREAD_STARTERS : currentMeta?.starters ?? [];
 
   async function resolveThreads(main: ProjectAgent[]): Promise<ProjectAgent[]> {
-    // Workspace = fils de travail. Ops et Reviewer restent dans l’onglet Agents.
+    // Workspace = fil coordinateur permanent + tâches isolées. Ops/Reviewer restent dans Agents.
     const customs = main.filter((a) => a.kind === 'custom');
+    const coordinator = main.find((a) => a.role === 'coordinator');
     const extras: ProjectAgent[] = [];
     const add = (agent?: ProjectAgent) => {
       if (!agent) return;
+      if (agent.role === 'coordinator') return;
       if (customs.some((c) => c.uuid === agent.uuid)) return;
       if (extras.some((e) => e.uuid === agent.uuid)) return;
       extras.push(agent);
@@ -197,14 +215,16 @@ export function ProjectAgentsPanel({
       }
     }
 
-    return [...extras, ...customs].sort(sortByRecent);
+    const rest = [...extras, ...customs].sort(sortByRecent);
+    return coordinator ? [coordinator, ...rest] : rest;
   }
 
   function threadLabel(a: ProjectAgent) {
+    if (a.role === 'coordinator') return 'Coordinateur';
     if (a.kind === 'custom') return a.name;
     // Ne jamais afficher Ops / Deploy / Reviewer comme noms de chat
     if (a.role === 'deploy' || a.name === 'Deploy') return 'Construction';
-    if (a.name === 'Nouveau chat') return a.name;
+    if (a.name === 'Nouveau chat' || a.name === 'Tâche isolée') return a.name;
     return a.name.startsWith('Chat') ? a.name : 'Chat';
   }
 
@@ -217,10 +237,11 @@ export function ProjectAgentsPanel({
       if (threadsMode) {
         let nextThreads = await resolveThreads(main);
 
+        // Le coordinateur (seed) est le fil par défaut — pas de chat vide auto.
         if (nextThreads.length === 0 && !bootstrapped.current) {
           bootstrapped.current = true;
           const created = await api.createProjectAgent(projectUuid, {
-            name: 'Nouveau chat',
+            name: 'Tâche isolée',
             role: 'custom',
             kind: 'custom',
           });
@@ -234,11 +255,12 @@ export function ProjectAgentsPanel({
         const pick =
           (preferUuid && nextThreads.some((a) => a.uuid === preferUuid) && preferUuid) ||
           (selected && nextThreads.some((a) => a.uuid === selected) && selected) ||
-          (remembered && nextThreads.some((a) => a.uuid === remembered) ? remembered : null) ||
-          nextThreads.find((a) => a.status === 'working')?.uuid ||
           (defaultAgentUuid && nextThreads.some((a) => a.uuid === defaultAgentUuid)
             ? defaultAgentUuid
             : null) ||
+          (remembered && nextThreads.some((a) => a.uuid === remembered) ? remembered : null) ||
+          nextThreads.find((a) => a.status === 'working')?.uuid ||
+          nextThreads.find((a) => a.role === 'coordinator')?.uuid ||
           nextThreads.find((a) => a.role === 'deploy')?.uuid ||
           nextThreads[0]?.uuid ||
           null;
@@ -248,11 +270,18 @@ export function ProjectAgentsPanel({
           setPollEnabled(true);
         }
       } else {
+        const ordered = sortAgentsPinned(main);
+        setAgents(ordered);
         const selectDefault = async (prev: string | null) => {
-          if (prev && main.some((a) => a.uuid === prev)) return prev;
-          const working = main.find((a) => a.status === 'working');
+          if (prev && ordered.some((a) => a.uuid === prev)) return prev;
+          if (defaultAgentUuid && ordered.some((a) => a.uuid === defaultAgentUuid)) {
+            return defaultAgentUuid;
+          }
+          const working = ordered.find((a) => a.status === 'working');
           if (working) return working.uuid;
-          const deployAgent = main.find((a) => a.role === 'deploy');
+          const coordinator = ordered.find((a) => a.role === 'coordinator');
+          if (coordinator) return coordinator.uuid;
+          const deployAgent = ordered.find((a) => a.role === 'deploy');
           if (deployAgent) {
             try {
               const msgs = await api.agentMessages(projectUuid, deployAgent.uuid);
@@ -260,9 +289,9 @@ export function ProjectAgentsPanel({
             } catch {
               // Ignorer
             }
-            if (builderMode || defaultAgentUuid) return deployAgent.uuid;
+            if (builderMode) return deployAgent.uuid;
           }
-          for (const agent of main) {
+          for (const agent of ordered) {
             if (agent.uuid === deployAgent?.uuid) continue;
             try {
               const msgs = await api.agentMessages(projectUuid, agent.uuid);
@@ -271,7 +300,7 @@ export function ProjectAgentsPanel({
               // Ignorer
             }
           }
-          return main[0]?.uuid ?? null;
+          return ordered[0]?.uuid ?? null;
         };
         setSelected(await selectDefault(preferUuid ?? selected));
       }
@@ -315,19 +344,30 @@ export function ProjectAgentsPanel({
     if (creating) return;
     setCreating(true);
     try {
+      const coordinator =
+        agents.find((a) => a.role === 'coordinator') ||
+        threads.find((a) => a.role === 'coordinator');
       const created = await api.createProjectAgent(projectUuid, {
-        name: 'Nouveau chat',
+        name: 'Tâche isolée',
         role: 'custom',
         kind: 'custom',
+        parent_agent_uuid: coordinator?.uuid,
       });
-      setAgents((prev) => [created.data, ...prev]);
-      setThreads((prev) => [created.data, ...prev.filter((t) => t.uuid !== created.data.uuid)]);
+      setAgents((prev) => sortAgentsPinned([created.data, ...prev]));
+      setThreads((prev) => {
+        const without = prev.filter((t) => t.uuid !== created.data.uuid);
+        const coord = without.find((t) => t.role === 'coordinator');
+        const rest = without.filter((t) => t.role !== 'coordinator');
+        return coord
+          ? [coord, created.data, ...rest]
+          : [created.data, ...rest];
+      });
       setSelected(created.data.uuid);
       storeThread(projectUuid, created.data.uuid);
       setMessages([]);
     } catch (e: unknown) {
       toast.push({
-        title: 'Impossible de créer le chat',
+        title: 'Impossible de créer la tâche',
         detail: String((e as Error).message || e),
         tone: 'danger',
       });
@@ -438,7 +478,7 @@ export function ProjectAgentsPanel({
     setMessages((m) => [...m, { role: 'user', content: trimmed }]);
     setInput('');
 
-    if (threadsMode && current?.name === 'Nouveau chat' && messages.length === 0) {
+    if (threadsMode && (current?.name === 'Nouveau chat' || current?.name === 'Tâche isolée') && messages.length === 0) {
       const title = titleFromMessage(trimmed);
       try {
         const renamed = await api.renameProjectAgent(projectUuid, selected, title);
@@ -559,9 +599,12 @@ export function ProjectAgentsPanel({
   const chatHeaderTitle = threadsMode
     ? (current ? threadLabel(current) : 'Chat')
     : currentMeta?.label || 'Agent';
-  const chatHeaderBlurb = threadsMode
-    ? 'Assistant projet — planifie, édite en local, preview'
-    : currentMeta?.blurb;
+  const isCoordinator = current?.role === 'coordinator';
+  const chatHeaderBlurb = isCoordinator
+    ? 'Fil permanent du projet — contexte accumulé, workers éphémères'
+    : threadsMode
+      ? 'Assistant projet — planifie, édite en local, preview'
+      : currentMeta?.blurb;
 
   const sidebar = threadsMode ? (
     <div class="flex flex-col gap-2">
@@ -574,7 +617,7 @@ export function ProjectAgentsPanel({
         class="w-full justify-start"
       >
         {creating ? <Spinner /> : <Plus size={14} strokeWidth={2} aria-hidden />}
-        Nouveau chat
+        Nouvelle tâche isolée
       </Button>
       {error && (
         <Alert tone="warn" class="mb-1">
@@ -641,7 +684,14 @@ export function ProjectAgentsPanel({
                 )}
                 onClick={() => setSelected(a.uuid)}
               >
-                <span class="font-medium tracking-tight">{meta.label}</span>
+                <span class="flex items-center gap-2 font-medium tracking-tight">
+                  {meta.label}
+                  {a.role === 'coordinator' && (
+                    <Badge tone="accent" class="!px-1.5 !py-0 text-[10px]">
+                      Fil permanent
+                    </Badge>
+                  )}
+                </span>
                 <span class="mt-0.5 text-xs text-[var(--color-ink-faint)]">{meta.blurb}</span>
               </button>
             </li>
@@ -681,8 +731,8 @@ export function ProjectAgentsPanel({
         variant="secondary"
         disabled={creating || busy}
         onClick={() => void createThread()}
-        aria-label="Nouveau chat"
-        title="Nouveau chat"
+        aria-label="Nouvelle tâche isolée"
+        title="Nouvelle tâche isolée"
       >
         {creating ? <Spinner /> : <Plus size={14} strokeWidth={2} aria-hidden />}
       </Button>
@@ -715,6 +765,7 @@ export function ProjectAgentsPanel({
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="truncate font-medium tracking-tight">{chatHeaderTitle}</span>
+                {isCoordinator && <Badge tone="accent">Coordinateur</Badge>}
                 <Badge tone={llmReady ? 'ok' : 'warn'}>{llmMode}</Badge>
               </div>
               {chatHeaderBlurb && (

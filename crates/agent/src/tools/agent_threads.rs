@@ -48,7 +48,8 @@ impl Tool for ListProjectAgentsTool {
         let rows: Vec<(String, String, String, String, String, String)> = sqlx::query_as(
             r#"SELECT uuid, name, role, kind, status, updated_at
                FROM project_agents WHERE project_uuid = $1
-               ORDER BY updated_at DESC, name"#,
+               ORDER BY CASE WHEN role = 'coordinator' THEN 0 ELSE 1 END,
+                        updated_at DESC, name"#,
         )
         .bind(project_uuid)
         .fetch_all(self.pool.as_ref())
