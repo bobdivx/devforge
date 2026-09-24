@@ -510,12 +510,21 @@ impl ProjectStore for SqliteProjectStore {
                     .await
                     .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
-                // Wake Coordinateur sur échec (même chemin que HTTP / auto / webhook / resume).
-                if !result.ok {
-                    if let Some(app) = self.app.get() {
-                        let state_clone = app.clone();
-                        let project_uuid = project.uuid.clone();
-                        let dep_uuid_clone = dep_uuid.clone();
+                // Wake agents sur succès / Coordinateur+agents sur échec.
+                if let Some(app) = self.app.get() {
+                    let state_clone = app.clone();
+                    let project_uuid = project.uuid.clone();
+                    let dep_uuid_clone = dep_uuid.clone();
+                    if result.ok {
+                        tokio::spawn(async move {
+                            let _ = crate::routes::wake_deploy_success(
+                                &state_clone,
+                                &project_uuid,
+                                &dep_uuid_clone,
+                            )
+                            .await;
+                        });
+                    } else {
                         let (summary, hint) =
                             match devforge_deploy::parse_deploy_error_fr(&result.logs) {
                                 Some(err) => (
@@ -537,12 +546,12 @@ impl ProjectStore for SqliteProjectStore {
                             )
                             .await;
                         });
-                    } else {
-                        tracing::warn!(
-                            deployment = %dep_uuid,
-                            "wake coordinateur: AppState non lié au ProjectStore"
-                        );
                     }
+                } else if !result.ok {
+                    tracing::warn!(
+                        deployment = %dep_uuid,
+                        "wake coordinateur: AppState non lié au ProjectStore"
+                    );
                 }
 
                 Ok(json!({

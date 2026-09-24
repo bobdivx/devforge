@@ -263,7 +263,7 @@ export function ProjectDetailPage(props: Props) {
       }
       description={
         tab === 'agents'
-          ? 'Agents qui surveillent les déploiements, les runners et le reste du projet.'
+          ? 'Agents autonomes réveillés par cron ou événement — le chat reste sur le Coordinateur / Workspace.'
           : undefined
       }
       belowTitle={

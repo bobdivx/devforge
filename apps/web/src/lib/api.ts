@@ -290,7 +290,21 @@ export type ProjectAgent = {
   kind: string;
   parent_agent_uuid?: string | null;
   status: string;
+  enabled?: number;
+  trigger_type?: string;
+  trigger_config?: string;
+  instructions?: string;
+  last_run_at?: string;
+  next_run_at?: string;
   updated_at?: string;
+};
+
+export type AgentTriggerType = 'cron' | 'event' | 'system' | '';
+
+export type AgentTriggerConfig = {
+  cron_expression?: string;
+  timezone?: string;
+  event?: string;
 };
 
 export const api = {
@@ -732,6 +746,10 @@ export const api = {
       role?: string;
       kind?: string;
       parent_agent_uuid?: string;
+      trigger_type?: AgentTriggerType;
+      trigger_config?: AgentTriggerConfig;
+      instructions?: string;
+      enabled?: boolean;
     },
   ) =>
     request<{ data: ProjectAgent }>(`/projects/${projectUuid}/agents`, {
@@ -743,6 +761,36 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ name }),
     }),
+  updateProjectAgent: (
+    projectUuid: string,
+    agentUuid: string,
+    body: {
+      name?: string;
+      enabled?: boolean;
+      trigger_type?: AgentTriggerType;
+      trigger_config?: AgentTriggerConfig;
+      instructions?: string;
+    },
+  ) =>
+    request<{ data: ProjectAgent }>(`/projects/${projectUuid}/agents/${agentUuid}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  enableProjectAgent: (projectUuid: string, agentUuid: string) =>
+    request<{ data: ProjectAgent }>(`/projects/${projectUuid}/agents/${agentUuid}/enable`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  disableProjectAgent: (projectUuid: string, agentUuid: string) =>
+    request<{ data: ProjectAgent }>(`/projects/${projectUuid}/agents/${agentUuid}/disable`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  runProjectAgentNow: (projectUuid: string, agentUuid: string) =>
+    request<{ ok: boolean; data: ProjectAgent }>(
+      `/projects/${projectUuid}/agents/${agentUuid}/run`,
+      { method: 'POST', body: '{}' },
+    ),
   agentChat: (
     message: string,
     extra?: {

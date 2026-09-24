@@ -60,7 +60,19 @@ pub fn router() -> Router<AppState> {
         )
         .route(
             "/api/v1/projects/{uuid}/agents/{agent_uuid}",
-            axum::routing::patch(rename_agent),
+            axum::routing::patch(update_agent),
+        )
+        .route(
+            "/api/v1/projects/{uuid}/agents/{agent_uuid}/run",
+            post(run_agent_now),
+        )
+        .route(
+            "/api/v1/projects/{uuid}/agents/{agent_uuid}/enable",
+            post(enable_agent),
+        )
+        .route(
+            "/api/v1/projects/{uuid}/agents/{agent_uuid}/disable",
+            post(disable_agent),
         )
         .route(
             "/api/v1/projects/{uuid}/agents/{agent_uuid}/messages",
@@ -756,8 +768,24 @@ struct AgentRow {
     kind: String,
     parent_agent_uuid: Option<String>,
     status: String,
+    enabled: i64,
+    trigger_type: String,
+    trigger_config: String,
+    instructions: String,
+    last_run_at: String,
+    next_run_at: String,
     updated_at: String,
 }
+
+const AGENT_SELECT: &str = r#"SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status,
+       COALESCE(enabled, 1) AS enabled,
+       COALESCE(trigger_type, '') AS trigger_type,
+       COALESCE(trigger_config, '{}') AS trigger_config,
+       COALESCE(instructions, '') AS instructions,
+       COALESCE(last_run_at, '') AS last_run_at,
+       COALESCE(next_run_at, '') AS next_run_at,
+       updated_at
+FROM project_agents"#;
 
 async fn list_agents(
     State(state): State<AppState>,
@@ -773,12 +801,11 @@ async fn list_agents(
                 Json(json!({"error": e.to_string()})),
             )
         })?;
-    let rows = sqlx::query_as::<_, AgentRow>(
-        r#"SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status, updated_at
-           FROM project_agents WHERE project_uuid = $1
+    let rows = sqlx::query_as::<_, AgentRow>(&format!(
+        "{AGENT_SELECT} WHERE project_uuid = $1
            ORDER BY CASE WHEN role = 'coordinator' THEN 0 ELSE 1 END,
-                    updated_at DESC, name"#,
-    )
+                    updated_at DESC, name"
+    ))
     .bind(&uuid)
     .fetch_all(&state.pool)
     .await
@@ -797,6 +824,12 @@ pub struct CreateAgentBody {
     pub role: Option<String>,
     pub kind: Option<String>,
     pub parent_agent_uuid: Option<String>,
+    /// cron | event | system | "" 
+    pub trigger_type: Option<String>,
+    /// JSON : { "cron_expression", "timezone", "event" }
+    pub trigger_config: Option<serde_json::Value>,
+    pub instructions: Option<String>,
+    pub enabled: Option<bool>,
 }
 
 async fn create_agent(
@@ -810,7 +843,7 @@ async fn create_agent(
     if kind == "required" {
         return Err((
             axum::http::StatusCode::BAD_REQUEST,
-            Json(json!({"ok": false, "error": "kind=required est rÃ©servÃ© au systÃ¨me"})),
+            Json(json!({"ok": false, "error": "kind=required est réservé au système"})),
         ));
     }
     if kind == "subagent"
@@ -822,16 +855,55 @@ async fn create_agent(
     {
         return Err((
             axum::http::StatusCode::BAD_REQUEST,
-            Json(json!({"ok": false, "error": "subagent nÃ©cessite parent_agent_uuid"})),
+            Json(json!({"ok": false, "error": "subagent nécessite parent_agent_uuid"})),
         ));
     }
     let agent_uuid = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
     let role = body.role.unwrap_or_else(|| "custom".into());
+    let trigger_type = body
+        .trigger_type
+        .unwrap_or_else(|| "".into())
+        .trim()
+        .to_lowercase();
+    if !trigger_type.is_empty()
+        && !matches!(trigger_type.as_str(), "cron" | "event" | "system")
+    {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"ok": false, "error": "trigger_type doit être cron, event ou system"})),
+        ));
+    }
+    let trigger_config = body
+        .trigger_config
+        .unwrap_or_else(|| json!({}))
+        .to_string();
+    let instructions = body
+        .instructions
+        .unwrap_or_default()
+        .chars()
+        .take(8000)
+        .collect::<String>();
+    let enabled: i64 = if body.enabled.unwrap_or(true) { 1 } else { 0 };
+    let next_run_at = if trigger_type == "cron" {
+        trigger_config_next_run(&trigger_config).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    if trigger_type == "cron" {
+        if let Err(e) = validate_agent_cron_config(&trigger_config) {
+            return Err((
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({"ok": false, "error": e})),
+            ));
+        }
+    }
     sqlx::query(
         r#"INSERT INTO project_agents (
-            uuid, project_uuid, name, role, kind, parent_agent_uuid, status, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, 'idle', $7, $8)"#,
+            uuid, project_uuid, name, role, kind, parent_agent_uuid, status,
+            enabled, trigger_type, trigger_config, instructions, last_run_at, next_run_at,
+            created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, 'idle', $7, $8, $9, $10, '', $11, $12, $13)"#,
     )
     .bind(&agent_uuid)
     .bind(&uuid)
@@ -839,6 +911,11 @@ async fn create_agent(
     .bind(&role)
     .bind(&kind)
     .bind(&body.parent_agent_uuid)
+    .bind(enabled)
+    .bind(&trigger_type)
+    .bind(&trigger_config)
+    .bind(&instructions)
+    .bind(&next_run_at)
     .bind(&now)
     .bind(&now)
     .execute(&state.pool)
@@ -849,11 +926,159 @@ async fn create_agent(
             Json(json!({"error": e.to_string()})),
         )
     })?;
-    let row = sqlx::query_as::<_, AgentRow>(
-        "SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status, updated_at FROM project_agents WHERE uuid = $1",
-    )
+    let row = sqlx::query_as::<_, AgentRow>(&format!("{AGENT_SELECT} WHERE uuid = $1"))
+        .bind(&agent_uuid)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+    Ok((axum::http::StatusCode::CREATED, Json(json!({"data": row}))))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct UpdateAgentBody {
+    pub name: Option<String>,
+    pub enabled: Option<bool>,
+    pub trigger_type: Option<String>,
+    pub trigger_config: Option<serde_json::Value>,
+    pub instructions: Option<String>,
+}
+
+fn validate_agent_cron_config(config_json: &str) -> Result<(), String> {
+    let v: serde_json::Value =
+        serde_json::from_str(config_json).map_err(|_| "trigger_config JSON invalide".to_string())?;
+    let expr = v
+        .get("cron_expression")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim();
+    if expr.is_empty() {
+        return Err("cron_expression requis pour un trigger cron".into());
+    }
+    devforge_cron::validate_cron_expression(expr)
+}
+
+fn trigger_config_next_run(config_json: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(config_json).ok()?;
+    let expr = v.get("cron_expression")?.as_str()?;
+    let tz = v.get("timezone").and_then(|x| x.as_str());
+    devforge_cron::next_run_time(expr, tz).map(|dt| dt.to_rfc3339())
+}
+
+async fn fetch_agent_row(
+    pool: &sqlx::PgPool,
+    agent_uuid: &str,
+) -> Result<AgentRow, (axum::http::StatusCode, Json<Value>)> {
+    sqlx::query_as::<_, AgentRow>(&format!("{AGENT_SELECT} WHERE uuid = $1"))
+        .bind(agent_uuid)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })
+}
+
+async fn update_agent(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((uuid, agent_uuid)): Path<(String, String)>,
+    Json(body): Json<UpdateAgentBody>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let _ = auth_project(&state, &headers, &uuid).await?;
+    let existing = sqlx::query_as::<_, AgentRow>(&format!(
+        "{AGENT_SELECT} WHERE uuid = $1 AND project_uuid = $2"
+    ))
     .bind(&agent_uuid)
-    .fetch_one(&state.pool)
+    .bind(&uuid)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?
+    .ok_or_else(|| {
+        (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(json!({"ok": false, "error": "agent introuvable"})),
+        )
+    })?;
+
+    let name = match body.name {
+        Some(n) => {
+            let t = n.trim();
+            if t.is_empty() {
+                return Err((
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(json!({"ok": false, "error": "name requis"})),
+                ));
+            }
+            t.chars().take(80).collect::<String>()
+        }
+        None => existing.name.clone(),
+    };
+    let enabled: i64 = body
+        .enabled
+        .map(|b| if b { 1 } else { 0 })
+        .unwrap_or(existing.enabled);
+    let trigger_type = body
+        .trigger_type
+        .map(|t| t.trim().to_lowercase())
+        .unwrap_or_else(|| existing.trigger_type.clone());
+    if !trigger_type.is_empty()
+        && !matches!(trigger_type.as_str(), "cron" | "event" | "system")
+    {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"ok": false, "error": "trigger_type doit être cron, event ou system"})),
+        ));
+    }
+    let trigger_config = body
+        .trigger_config
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| existing.trigger_config.clone());
+    if trigger_type == "cron" {
+        if let Err(e) = validate_agent_cron_config(&trigger_config) {
+            return Err((
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({"ok": false, "error": e})),
+            ));
+        }
+    }
+    let instructions = body
+        .instructions
+        .map(|s| s.chars().take(8000).collect::<String>())
+        .unwrap_or_else(|| existing.instructions.clone());
+    let next_run_at = if trigger_type == "cron" {
+        trigger_config_next_run(&trigger_config).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        r#"UPDATE project_agents SET
+            name = $1, enabled = $2, trigger_type = $3, trigger_config = $4,
+            instructions = $5, next_run_at = $6, updated_at = $7
+           WHERE uuid = $8 AND project_uuid = $9"#,
+    )
+    .bind(&name)
+    .bind(enabled)
+    .bind(&trigger_type)
+    .bind(&trigger_config)
+    .bind(&instructions)
+    .bind(&next_run_at)
+    .bind(&now)
+    .bind(&agent_uuid)
+    .bind(&uuid)
+    .execute(&state.pool)
     .await
     .map_err(|e| {
         (
@@ -861,37 +1086,26 @@ async fn create_agent(
             Json(json!({"error": e.to_string()})),
         )
     })?;
-    Ok((axum::http::StatusCode::CREATED, Json(json!({"data": row}))))
+    let row = fetch_agent_row(&state.pool, &agent_uuid).await?;
+    Ok(Json(json!({"data": row})))
 }
 
-#[derive(Debug, serde::Deserialize)]
-pub struct RenameAgentBody {
-    pub name: String,
-}
-
-async fn rename_agent(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path((uuid, agent_uuid)): Path<(String, String)>,
-    Json(body): Json<RenameAgentBody>,
+async fn set_agent_enabled(
+    state: &AppState,
+    headers: &HeaderMap,
+    uuid: &str,
+    agent_uuid: &str,
+    enabled: bool,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    let _ = auth_project(&state, &headers, &uuid).await?;
-    let name = body.name.trim();
-    if name.is_empty() {
-        return Err((
-            axum::http::StatusCode::BAD_REQUEST,
-            Json(json!({"ok": false, "error": "name requis"})),
-        ));
-    }
-    let name = name.chars().take(80).collect::<String>();
+    let _ = auth_project(state, headers, uuid).await?;
     let now = chrono::Utc::now().to_rfc3339();
     let res = sqlx::query(
-        "UPDATE project_agents SET name = $1, updated_at = $2 WHERE uuid = $3 AND project_uuid = $4",
+        "UPDATE project_agents SET enabled = $1, updated_at = $2 WHERE uuid = $3 AND project_uuid = $4",
     )
-    .bind(&name)
+    .bind(if enabled { 1i64 } else { 0i64 })
     .bind(&now)
-    .bind(&agent_uuid)
-    .bind(&uuid)
+    .bind(agent_uuid)
+    .bind(uuid)
     .execute(&state.pool)
     .await
     .map_err(|e| {
@@ -906,19 +1120,77 @@ async fn rename_agent(
             Json(json!({"ok": false, "error": "agent introuvable"})),
         ));
     }
-    let row = sqlx::query_as::<_, AgentRow>(
-        "SELECT uuid, project_uuid, name, role, kind, parent_agent_uuid, status, updated_at FROM project_agents WHERE uuid = $1",
-    )
+    let row = fetch_agent_row(&state.pool, agent_uuid).await?;
+    Ok(Json(json!({"data": row})))
+}
+
+async fn enable_agent(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((uuid, agent_uuid)): Path<(String, String)>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    set_agent_enabled(&state, &headers, &uuid, &agent_uuid, true).await
+}
+
+async fn disable_agent(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((uuid, agent_uuid)): Path<(String, String)>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    set_agent_enabled(&state, &headers, &uuid, &agent_uuid, false).await
+}
+
+async fn run_agent_now(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((uuid, agent_uuid)): Path<(String, String)>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let _ = auth_project(&state, &headers, &uuid).await?;
+    let row = sqlx::query_as::<_, AgentRow>(&format!(
+        "{AGENT_SELECT} WHERE uuid = $1 AND project_uuid = $2"
+    ))
     .bind(&agent_uuid)
-    .fetch_one(&state.pool)
+    .bind(&uuid)
+    .fetch_optional(&state.pool)
     .await
     .map_err(|e| {
         (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": e.to_string()})),
         )
+    })?
+    .ok_or_else(|| {
+        (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(json!({"ok": false, "error": "agent introuvable"})),
+        )
     })?;
-    Ok(Json(json!({"data": row})))
+    if row.enabled == 0 {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"ok": false, "error": "agent désactivé"})),
+        ));
+    }
+    crate::routes::wake_project_agent(
+        &state,
+        &uuid,
+        &agent_uuid,
+        "AGENT-WAKE:MANUAL",
+        if row.instructions.trim().is_empty() {
+            "Lancement manuel demandé depuis l’onglet Agents. Exécute ta mission pour ce projet."
+        } else {
+            row.instructions.as_str()
+        },
+    )
+    .await
+    .map_err(|e| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"ok": false, "error": e})),
+        )
+    })?;
+    let row = fetch_agent_row(&state.pool, &agent_uuid).await?;
+    Ok(Json(json!({"ok": true, "data": row})))
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]

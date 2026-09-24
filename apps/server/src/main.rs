@@ -187,6 +187,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // Agents autonomes déclenchés par cron (project_agents.trigger_type=cron).
+    {
+        let state_agents = state.clone();
+        tokio::spawn(async move {
+            routes::agent_cron_loop(state_agents).await;
+        });
+    }
+
     // Auto-deploy poller: filet si webhook GitHub non configuré sur le repo.
     {
         let state_ad = state.clone();
