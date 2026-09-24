@@ -145,7 +145,7 @@ impl Tool for RunWorkdirCommandTool {
         };
 
         let project: Option<(String, Option<String>)> = sqlx::query_as(
-            "SELECT uuid, workdir FROM projects WHERE uuid = ?",
+            "SELECT uuid, workdir FROM projects WHERE uuid = $1",
         )
         .bind(project_uuid)
         .fetch_optional(self.pool.as_ref())
