@@ -2,6 +2,16 @@ import type { ComponentChildren, JSX } from 'preact';
 import { cn } from '../../lib/cn';
 import { enterUp, interactiveLift, motion } from '../../lib/motion';
 
+/*
+ * HubGrid / HubTile product rule (list hubs):
+ * 1. Put title, status/info, and at most ONE Switch directly in the tile when possible.
+ * 2. If there is more content or multiple switches/actions, tile click opens a Modal —
+ *    never a detail Card below the grid (banned for HubTile hubs).
+ * 3. Switch on the tile must stopPropagation so toggling does not open the modal.
+ * 4. Exception: Deployments tab master-detail strip+logs panel stays as-is
+ *    (not a HubTile grid; logs need adjacent space).
+ */
+
 const TILE_CLASS =
   'group flex min-h-[8.75rem] cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 text-center ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:aspect-square sm:min-h-0 sm:gap-3 sm:px-3 sm:py-4';
 
@@ -14,7 +24,11 @@ type HubGridProps = {
   children: ComponentChildren;
 };
 
-/** Grille responsive type Settings / Home (PandaOS). List hubs should prefer HubGrid + HubTile. */
+/**
+ * Grille responsive type Settings / Home (PandaOS).
+ * List hubs: prefer HubGrid + HubTile; richer actions go in a Modal on tile click
+ * (never a detail Card under the grid). See file-top product rule.
+ */
 export function HubGrid({ class: className, cols = 4, children }: HubGridProps) {
   return (
     <div
@@ -44,6 +58,12 @@ type HubTileProps = {
   iconClass?: string;
   /** Contenu alternatif sous le titre (ex. statut coloré). */
   subtitle?: ComponentChildren;
+  /**
+   * Contenu compact sous le sous-titre (ex. un seul Switch).
+   * Wrap interactive controls with stopPropagation so they don’t open the detail Modal.
+   * When set, the tile renders as a div (role=button) to avoid nested buttons.
+   */
+  footer?: ComponentChildren;
 };
 
 export function HubTile({
@@ -57,6 +77,7 @@ export function HubTile({
   class: className,
   iconClass,
   subtitle,
+  footer,
 }: HubTileProps) {
   const body = (
     <>
@@ -64,7 +85,7 @@ export function HubTile({
         {icon}
         {badge}
       </div>
-      <div class="w-full">
+      <div class="w-full min-w-0">
         <div class="truncate text-[13px] font-medium text-white sm:text-sm">{title}</div>
         {subtitle ??
           (description ? (
@@ -72,18 +93,44 @@ export function HubTile({
               {description}
             </div>
           ) : null)}
+        {footer ? <div class="mt-2 flex justify-center">{footer}</div> : null}
       </div>
     </>
   );
 
-  const shared = cn(TILE_CLASS, className);
+  const shared = cn(TILE_CLASS, footer ? 'justify-between sm:justify-center' : undefined, className);
   const animate = motion(enterUp(Math.min(index * 0.04, 0.28)), interactiveLift());
 
-  return href ? (
-    <a href={href} onClick={onClick} class={shared} animate={animate}>
-      {body}
-    </a>
-  ) : (
+  if (href) {
+    return (
+      <a href={href} onClick={onClick} class={shared} animate={animate}>
+        {body}
+      </a>
+    );
+  }
+
+  // With footer (e.g. Switch), use div+role=button to avoid nested <button>.
+  if (footer) {
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onClick}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onClick?.(e as unknown as JSX.TargetedMouseEvent<HTMLElement>);
+          }
+        }}
+        class={cn(shared, 'w-full')}
+        animate={animate}
+      >
+        {body}
+      </div>
+    );
+  }
+
+  return (
     <button type="button" onClick={onClick} class={cn(shared, 'w-full')} animate={animate}>
       {body}
     </button>

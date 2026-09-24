@@ -482,15 +482,13 @@ function RunnersPageInner() {
         <HubGrid cols={5}>
           {runners.map((r, i) => {
             const status = runnerStatus(r);
-            const selectedCard = r.id === selected;
             return (
               <HubTile
                 key={r.id}
                 index={i}
                 title={r.runner_name}
-                onClick={() => setSelected(r.id === selected ? null : r.id)}
+                onClick={() => setSelected(r.id)}
                 icon={<HubIcon name="server" />}
-                class={selectedCard ? 'ring-1 ring-white/20' : undefined}
                 badge={
                   <span
                     class={cn(
@@ -534,122 +532,131 @@ function RunnersPageInner() {
         </p>
       )}
 
-      {detail && (
-        <FadeIn delay={40} class="mt-6 grid gap-4 lg:grid-cols-2">
-          <Card>
-            <CardHeader
-              title="Détail"
-              description={detail.container_name}
-              action={
-                <div class="flex flex-wrap gap-1.5">
-                  <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(detail.id, 'start')}>
-                    Start
-                  </Button>
-                  <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(detail.id, 'stop')}>
-                    Stop
-                  </Button>
-                  <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(detail.id, 'restart')}>
-                    Restart
-                  </Button>
-                  <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(detail.id, 'recreate')}>
-                    Recreate
-                  </Button>
-                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => void remove(detail.id)}>
-                    Delete
-                  </Button>
-                </div>
-              }
-            />
-            <div class="mb-4 flex flex-wrap gap-2">
-              <Badge tone={stateTone(detail.live_state)}>{detail.live_state}</Badge>
-              {detail.github_status && (
-                <Badge tone={ghTone(detail.github_status)}>gh:{detail.github_status}</Badge>
-              )}
-              {opLabel(detail.op_status) && (
-                <Badge tone={detail.op_status === 'failed' ? 'danger' : 'warn'}>
-                  {opLabel(detail.op_status)}
-                </Badge>
-              )}
+      <Modal
+        open={!!detail}
+        onClose={() => setSelected(null)}
+        title={detail?.runner_name || 'Runner'}
+        description={detail?.container_name}
+        size="xl"
+        footer={
+          detail ? (
+            <div class="flex flex-wrap justify-end gap-1.5">
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(detail.id, 'start')}>
+                Start
+              </Button>
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(detail.id, 'stop')}>
+                Stop
+              </Button>
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(detail.id, 'restart')}>
+                Restart
+              </Button>
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => void act(detail.id, 'recreate')}>
+                Recreate
+              </Button>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => void remove(detail.id)}>
+                Delete
+              </Button>
             </div>
-            {detail.last_error && (
-              <Alert tone="danger" class="mb-4">
-                {detail.last_error}
-              </Alert>
-            )}
-            <dl class="space-y-2 text-sm">
-              <div class="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-4">
-                <dt class="text-[var(--color-ink-muted)]">Repo</dt>
-                <dd class="break-all font-mono text-xs sm:text-right">
-                  <a href={detail.repo_url} target="_blank" rel="noreferrer" class="text-[var(--color-accent)]">
-                    {detail.owner}/{detail.repo}
-                  </a>
-                </dd>
+          ) : undefined
+        }
+      >
+        {detail && (
+          <div class="grid gap-4 lg:grid-cols-2">
+            <div>
+              <div class="mb-4 flex flex-wrap gap-2">
+                <Badge tone={stateTone(detail.live_state)}>{detail.live_state}</Badge>
+                {detail.github_status && (
+                  <Badge tone={ghTone(detail.github_status)}>gh:{detail.github_status}</Badge>
+                )}
+                {opLabel(detail.op_status) && (
+                  <Badge tone={detail.op_status === 'failed' ? 'danger' : 'warn'}>
+                    {opLabel(detail.op_status)}
+                  </Badge>
+                )}
               </div>
-              <div class="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-4">
-                <dt class="text-[var(--color-ink-muted)]">Image</dt>
-                <dd class="break-all font-mono text-xs sm:text-right">{detail.image}</dd>
-              </div>
-              <div class="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-4">
-                <dt class="text-[var(--color-ink-muted)]">Labels</dt>
-                <dd class="break-all font-mono text-xs sm:text-right">{detail.labels}</dd>
-              </div>
-              <div class="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-4">
-                <dt class="text-[var(--color-ink-muted)]">Network</dt>
-                <dd class="sm:text-right">{detail.network_mode}</dd>
-              </div>
-              {detail.volumes?.length > 0 && (
-                <div>
-                  <dt class="mb-1 text-[var(--color-ink-muted)]">Volumes</dt>
-                  <dd class="break-all font-mono text-xs text-[var(--color-ink-faint)]">
-                    {detail.volumes.map((v) => (
-                      <div key={v}>{v}</div>
-                    ))}
+              {detail.last_error && (
+                <Alert tone="danger" class="mb-4">
+                  {detail.last_error}
+                </Alert>
+              )}
+              <dl class="space-y-2 text-sm">
+                <div class="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-4">
+                  <dt class="text-[var(--color-ink-muted)]">Repo</dt>
+                  <dd class="break-all font-mono text-xs sm:text-right">
+                    <a href={detail.repo_url} target="_blank" rel="noreferrer" class="text-[var(--color-accent)]">
+                      {detail.owner}/{detail.repo}
+                    </a>
                   </dd>
                 </div>
-              )}
-            </dl>
-            <div class="mt-4">
-              <div class="mb-2 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
-                Logs
-                {logs?.runner_version ? ` · v${logs.runner_version}` : ''}
+                <div class="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-4">
+                  <dt class="text-[var(--color-ink-muted)]">Image</dt>
+                  <dd class="break-all font-mono text-xs sm:text-right">{detail.image}</dd>
+                </div>
+                <div class="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-4">
+                  <dt class="text-[var(--color-ink-muted)]">Labels</dt>
+                  <dd class="break-all font-mono text-xs sm:text-right">{detail.labels}</dd>
+                </div>
+                <div class="flex flex-col gap-1 sm:flex-row sm:justify-between sm:gap-4">
+                  <dt class="text-[var(--color-ink-muted)]">Network</dt>
+                  <dd class="sm:text-right">{detail.network_mode}</dd>
+                </div>
+                {detail.volumes?.length > 0 && (
+                  <div>
+                    <dt class="mb-1 text-[var(--color-ink-muted)]">Volumes</dt>
+                    <dd class="break-all font-mono text-xs text-[var(--color-ink-faint)]">
+                      {detail.volumes.map((v) => (
+                        <div key={v}>{v}</div>
+                      ))}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+              <div class="mt-4">
+                <div class="mb-2 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
+                  Logs
+                  {logs?.runner_version ? ` · v${logs.runner_version}` : ''}
+                </div>
+                <pre class="max-h-64 overflow-x-auto overflow-y-auto rounded-lg bg-black/30 p-3 font-mono text-[11px] leading-relaxed text-[var(--color-ink-muted)]">
+                  {logs?.available
+                    ? logs.items.map((i) => i.message).join('\n') || '(vide)'
+                    : logs?.message || 'Logs indisponibles'}
+                </pre>
               </div>
-              <pre class="max-h-64 overflow-x-auto overflow-y-auto rounded-lg bg-black/30 p-3 font-mono text-[11px] leading-relaxed text-[var(--color-ink-muted)]">
-                {logs?.available
-                  ? logs.items.map((i) => i.message).join('\n') || '(vide)'
-                  : logs?.message || 'Logs indisponibles'}
-              </pre>
             </div>
-          </Card>
-          <Card>
-            <CardHeader title="Jobs Actions" description="Filtrés sur ce runner (fetch parallèle)" />
-            {jobs.length === 0 ? (
-              <p class="text-sm text-[var(--color-ink-muted)]">Aucun job récent.</p>
-            ) : (
-              <ul class="divide-y divide-[var(--color-line)]">
-                {jobs.slice(0, 20).map((j, idx) => (
-                  <li key={`${j.run_id}-${j.job_id ?? idx}`} class="py-2">
-                    <a
-                      href={j.run_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      class="break-words text-sm font-medium text-[var(--color-accent)] hover:underline"
-                    >
-                      {j.job_name || j.run_name}
-                    </a>
-                    <div class="mt-0.5 break-words text-xs text-[var(--color-ink-faint)]">
-                      {j.job_status || j.run_status}
-                      {j.job_conclusion || j.run_conclusion
-                        ? ` · ${j.job_conclusion || j.run_conclusion}`
-                        : ''}
-                      {j.runner_name ? ` · ${j.runner_name}` : ''}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </FadeIn>
-      )}
+            <div>
+              <h3 class="mb-1 text-sm font-medium text-[var(--color-ink)]">Jobs Actions</h3>
+              <p class="mb-3 text-xs text-[var(--color-ink-muted)]">
+                Filtrés sur ce runner (fetch parallèle)
+              </p>
+              {jobs.length === 0 ? (
+                <p class="text-sm text-[var(--color-ink-muted)]">Aucun job récent.</p>
+              ) : (
+                <ul class="max-h-[min(50dvh,28rem)] divide-y divide-[var(--color-line)] overflow-y-auto">
+                  {jobs.slice(0, 20).map((j, idx) => (
+                    <li key={`${j.run_id}-${j.job_id ?? idx}`} class="py-2">
+                      <a
+                        href={j.run_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        class="break-words text-sm font-medium text-[var(--color-accent)] hover:underline"
+                      >
+                        {j.job_name || j.run_name}
+                      </a>
+                      <div class="mt-0.5 break-words text-xs text-[var(--color-ink-faint)]">
+                        {j.job_status || j.run_status}
+                        {j.job_conclusion || j.run_conclusion
+                          ? ` · ${j.job_conclusion || j.run_conclusion}`
+                          : ''}
+                        {j.runner_name ? ` · ${j.runner_name}` : ''}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={wizard}

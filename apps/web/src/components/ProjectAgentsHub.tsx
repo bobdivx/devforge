@@ -26,7 +26,6 @@ import {
   Alert,
   Badge,
   Button,
-  Card,
   FadeIn,
   HubAddTile,
   HubGrid,
@@ -181,7 +180,7 @@ export function ProjectAgentsHub({
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createForm, setCreateForm] = useState<CreateState>(emptyCreate);
-  const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
+  const [detailUuid, setDetailUuid] = useState<string | null>(null);
   const openedFromQuery = useRef(false);
   const projectNameRef = useRef(projectName);
   projectNameRef.current = projectName;
@@ -240,7 +239,7 @@ export function ProjectAgentsHub({
     const agent = agents.find((item) => item.uuid === openId && item.kind !== 'subagent');
     if (!agent) return;
     openedFromQuery.current = true;
-    setSelectedUuid(agent.uuid);
+    setDetailUuid(agent.uuid);
     if (agent.role === 'coordinator') remember(agent);
   }, [loading, agents, projectUuid, projectName]);
 
@@ -249,9 +248,9 @@ export function ProjectAgentsHub({
       if (launched.projectUuid !== projectUuid) return;
       const agent = agents.find((item) => item.uuid === launched.uuid);
       if (!agent) return;
-      setSelectedUuid(agent.uuid);
+      // Launcher shortcut: coordinator → chat; others → detail modal (Journal from there).
       if (agent.role === 'coordinator') setOpenChat(agent);
-      else void openLastActivity(agent);
+      else setDetailUuid(agent.uuid);
     });
   }, [agents, projectUuid]);
 
@@ -272,7 +271,7 @@ export function ProjectAgentsHub({
     return [...coord, ...auto];
   }, [agents]);
 
-  const selected = gridAgents.find((a) => a.uuid === selectedUuid) ?? null;
+  const detail = gridAgents.find((a) => a.uuid === detailUuid) ?? null;
 
   async function toggleEnabled(agent: ProjectAgent) {
     setBusyUuid(agent.uuid);
@@ -358,7 +357,7 @@ export function ProjectAgentsHub({
         enabled: true,
       });
       setAgents((prev) => [created.data, ...prev]);
-      setSelectedUuid(created.data.uuid);
+      setDetailUuid(created.data.uuid);
       setCreateOpen(false);
       setCreateForm(emptyCreate());
       toast.push({ title: 'Agent créé', detail: created.data.name, tone: 'ok' });
@@ -377,7 +376,6 @@ export function ProjectAgentsHub({
         </Alert>
       )}
 
-      {/* List hubs: prefer HubGrid / HubTile (+ detail on select), like Runners. */}
       <div class="mb-4">
         <p class="text-sm text-[var(--color-ink-muted)]">
           Agents autonomes réveillés par un{' '}
@@ -398,17 +396,14 @@ export function ProjectAgentsHub({
           <HubGrid cols={4}>
             {gridAgents.map((agent, i) => {
               const status = statusOf(agent);
-              const selectedCard = agent.uuid === selectedUuid;
+              const isCoord = agent.role === 'coordinator';
               return (
                 <HubTile
                   key={agent.uuid}
                   index={i}
                   title={agent.name || roleLabel(agent.role)}
-                  onClick={() =>
-                    setSelectedUuid(agent.uuid === selectedUuid ? null : agent.uuid)
-                  }
+                  onClick={() => setDetailUuid(agent.uuid)}
                   icon={agentIcon(agent)}
-                  class={selectedCard ? 'ring-1 ring-white/20' : undefined}
                   badge={
                     <span
                       class={cn(
@@ -438,6 +433,21 @@ export function ProjectAgentsHub({
                       </div>
                     </div>
                   }
+                  footer={
+                    !isCoord ? (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        <Switch
+                          checked={agent.enabled !== 0}
+                          disabled={busyUuid === agent.uuid}
+                          label={agent.enabled !== 0 ? 'Désactiver' : 'Activer'}
+                          onToggle={() => void toggleEnabled(agent)}
+                        />
+                      </div>
+                    ) : undefined
+                  }
                 />
               );
             })}
@@ -459,106 +469,111 @@ export function ProjectAgentsHub({
         </p>
       )}
 
-      {selected && (
-        <FadeIn delay={40} class="mt-6">
-          <Card padding="md">
-            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div class="min-w-0 flex-1 space-y-1.5">
-                <div class="flex flex-wrap items-center gap-2">
-                  <h3 class="truncate text-sm font-medium text-[var(--color-ink)]">
-                    {selected.name || roleLabel(selected.role)}
-                  </h3>
-                  <Badge tone="neutral">{roleLabel(selected.role)}</Badge>
-                  {(selected.role === 'coordinator' || selected.kind === 'required') && (
-                    <Badge tone="accent">Système</Badge>
-                  )}
-                  <Badge
-                    tone={
-                      statusOf(selected).tone === 'warn'
-                        ? 'warn'
-                        : statusOf(selected).tone === 'ok'
-                          ? 'ok'
-                          : 'neutral'
-                    }
-                  >
-                    {statusOf(selected).label}
-                  </Badge>
-                </div>
-                <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--color-ink-muted)]">
-                  <span class="inline-flex items-center gap-1">
-                    {selected.trigger_type === 'cron' ? (
-                      <Clock size={12} aria-hidden />
-                    ) : selected.role === 'coordinator' ? (
-                      <MessageSquare size={12} aria-hidden />
-                    ) : (
-                      <Zap size={12} aria-hidden />
-                    )}
-                    {triggerSummary(selected)}
-                  </span>
-                  {selected.role !== 'coordinator' && (
-                    <>
-                      <span class="inline-flex items-center gap-1">
-                        <Activity size={12} aria-hidden />
-                        Dernière exécution · {formatRelativeFr(selected.last_run_at)}
-                      </span>
-                      {selected.trigger_type === 'cron' && selected.next_run_at ? (
-                        <span>Prochaine · {formatRelativeFr(selected.next_run_at)}</span>
-                      ) : null}
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <div class="flex flex-wrap items-center gap-2 sm:justify-end">
-                {selected.role === 'coordinator' ? (
+      <Modal
+        open={!!detail}
+        onClose={() => setDetailUuid(null)}
+        title={detail ? detail.name || roleLabel(detail.role) : 'Agent'}
+        description={detail ? triggerSummary(detail) : undefined}
+        size="md"
+        footer={
+          detail ? (
+            <div class="flex flex-wrap items-center justify-end gap-2">
+              {detail.role === 'coordinator' ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    remember(detail);
+                    setOpenChat(detail);
+                  }}
+                >
+                  <MessageSquare size={14} aria-hidden />
+                  Ouvrir le fil
+                </Button>
+              ) : (
+                <>
+                  <Switch
+                    checked={detail.enabled !== 0}
+                    disabled={busyUuid === detail.uuid}
+                    label={detail.enabled !== 0 ? 'Désactiver' : 'Activer'}
+                    onToggle={() => void toggleEnabled(detail)}
+                  />
                   <Button
                     size="sm"
                     variant="secondary"
-                    onClick={() => {
-                      remember(selected);
-                      setOpenChat(selected);
-                    }}
+                    disabled={
+                      busyUuid === detail.uuid ||
+                      detail.enabled === 0 ||
+                      detail.status === 'working'
+                    }
+                    onClick={() => void runNow(detail)}
+                    title="Lancer maintenant"
                   >
-                    <MessageSquare size={14} aria-hidden />
-                    Ouvrir le fil
+                    <Play size={14} aria-hidden />
+                    Lancer maintenant
                   </Button>
-                ) : (
-                  <>
-                    <Switch
-                      checked={selected.enabled !== 0}
-                      disabled={busyUuid === selected.uuid}
-                      label={selected.enabled !== 0 ? 'Désactiver' : 'Activer'}
-                      onToggle={() => void toggleEnabled(selected)}
-                    />
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={
-                        busyUuid === selected.uuid ||
-                        selected.enabled === 0 ||
-                        selected.status === 'working'
-                      }
-                      onClick={() => void runNow(selected)}
-                      title="Lancer maintenant"
-                    >
-                      <Play size={14} aria-hidden />
-                      Lancer maintenant
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => void openLastActivity(selected)}
-                    >
-                      <ScrollText size={14} aria-hidden />
-                      Journal
-                    </Button>
-                  </>
-                )}
-              </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void openLastActivity(detail)}
+                  >
+                    <ScrollText size={14} aria-hidden />
+                    Journal
+                  </Button>
+                </>
+              )}
             </div>
-          </Card>
-        </FadeIn>
-      )}
+          ) : undefined
+        }
+      >
+        {detail && (
+          <div class="space-y-4">
+            <div class="flex flex-wrap items-center gap-2">
+              <Badge tone="neutral">{roleLabel(detail.role)}</Badge>
+              {(detail.role === 'coordinator' || detail.kind === 'required') && (
+                <Badge tone="accent">Système</Badge>
+              )}
+              <Badge
+                tone={
+                  statusOf(detail).tone === 'warn'
+                    ? 'warn'
+                    : statusOf(detail).tone === 'ok'
+                      ? 'ok'
+                      : 'neutral'
+                }
+              >
+                {statusOf(detail).label}
+              </Badge>
+            </div>
+            <div class="space-y-2 text-sm text-[var(--color-ink-muted)]">
+              <div class="flex items-start gap-2">
+                {detail.trigger_type === 'cron' ? (
+                  <Clock size={14} class="mt-0.5 shrink-0" aria-hidden />
+                ) : detail.role === 'coordinator' ? (
+                  <MessageSquare size={14} class="mt-0.5 shrink-0" aria-hidden />
+                ) : (
+                  <Zap size={14} class="mt-0.5 shrink-0" aria-hidden />
+                )}
+                <span>{triggerSummary(detail)}</span>
+              </div>
+              {detail.role !== 'coordinator' && (
+                <>
+                  <div class="flex items-center gap-2">
+                    <Activity size={14} class="shrink-0" aria-hidden />
+                    <span>Dernière exécution · {formatRelativeFr(detail.last_run_at)}</span>
+                  </div>
+                  {detail.trigger_type === 'cron' && detail.next_run_at ? (
+                    <div class="flex items-center gap-2">
+                      <Clock size={14} class="shrink-0" aria-hidden />
+                      <span>Prochaine · {formatRelativeFr(detail.next_run_at)}</span>
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={createOpen}
