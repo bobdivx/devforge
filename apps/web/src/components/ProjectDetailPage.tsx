@@ -274,29 +274,16 @@ export function ProjectDetailPage(props: Props) {
       }
       actions={
         tab === 'overview' && project ? (
-          <div class="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setRulesModalOpen(true)}
-              class="gap-1.5"
-            >
-              <FileCode size={14} />
-              <span>Directives AGENTS.md</span>
-            </Button>
-            {project.production_url && (
-              <Button size="sm" variant="outline" href={project.production_url} target="_blank">
-                Ouvrir l’app
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant="secondary"
-              href={`/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`}
-            >
-              Déploiements
-            </Button>
-          </div>
+          <Button
+            size="icon"
+            variant="outline"
+            onClick={() => setRulesModalOpen(true)}
+            title="Directives AGENTS.md"
+            aria-label="Directives AGENTS.md"
+          >
+            <FileCode size={14} aria-hidden />
+            <span class="hidden sm:inline">Directives</span>
+          </Button>
         ) : undefined
       }
     >
