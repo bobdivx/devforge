@@ -4,7 +4,6 @@ import {
   Clock,
   MessageSquare,
   Play,
-  Plus,
   ScrollText,
   Zap,
 } from 'lucide-preact';
@@ -28,6 +27,10 @@ import {
   Badge,
   Button,
   Card,
+  FadeIn,
+  HubAddTile,
+  HubGrid,
+  HubTile,
   Input,
   Modal,
   Skeleton,
@@ -96,6 +99,28 @@ function statusOf(agent: ProjectAgent): { label: string; tone: 'ok' | 'warn' | '
   return { label: agent.status || 'Inconnu', tone: 'neutral' };
 }
 
+
+function statusDotClass(tone: 'ok' | 'warn' | 'danger' | 'neutral' | 'accent') {
+  if (tone === 'ok') return 'bg-[var(--color-ok)]';
+  if (tone === 'warn') return 'bg-[var(--color-warn)]';
+  if (tone === 'danger') return 'bg-[var(--color-danger)]';
+  if (tone === 'accent') return 'bg-[var(--color-accent)]';
+  return 'bg-[var(--color-ink-faint)]';
+}
+
+function agentIcon(agent: ProjectAgent) {
+  if (agent.role === 'coordinator' || agent.trigger_type === 'system') {
+    return <MessageSquare size={28} strokeWidth={1.75} aria-hidden />;
+  }
+  if (agent.trigger_type === 'cron') {
+    return <Clock size={28} strokeWidth={1.75} aria-hidden />;
+  }
+  if (agent.trigger_type === 'event') {
+    return <Zap size={28} strokeWidth={1.75} aria-hidden />;
+  }
+  return <Activity size={28} strokeWidth={1.75} aria-hidden />;
+}
+
 function formatRelativeFr(iso?: string | null): string {
   if (!iso) return 'Jamais';
   const t = Date.parse(iso);
@@ -156,6 +181,7 @@ export function ProjectAgentsHub({
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createForm, setCreateForm] = useState<CreateState>(emptyCreate);
+  const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const openedFromQuery = useRef(false);
   const projectNameRef = useRef(projectName);
   projectNameRef.current = projectName;
@@ -211,15 +237,11 @@ export function ProjectAgentsHub({
     if (loading || openedFromQuery.current) return;
     const openId = new URLSearchParams(window.location.search).get('open');
     if (!openId) return;
-    const agent = agents.find((item) => item.uuid === openId);
+    const agent = agents.find((item) => item.uuid === openId && item.kind !== 'subagent');
     if (!agent) return;
     openedFromQuery.current = true;
-    if (agent.role === 'coordinator') {
-      setOpenChat(agent);
-      remember(agent);
-    } else {
-      void openLastActivity(agent);
-    }
+    setSelectedUuid(agent.uuid);
+    if (agent.role === 'coordinator') remember(agent);
   }, [loading, agents, projectUuid, projectName]);
 
   useEffect(() => {
@@ -227,14 +249,15 @@ export function ProjectAgentsHub({
       if (launched.projectUuid !== projectUuid) return;
       const agent = agents.find((item) => item.uuid === launched.uuid);
       if (!agent) return;
+      setSelectedUuid(agent.uuid);
       if (agent.role === 'coordinator') setOpenChat(agent);
       else void openLastActivity(agent);
     });
   }, [agents, projectUuid]);
 
-  const { coordinator, autonomous } = useMemo(() => {
+  const gridAgents = useMemo(() => {
     const roots = agents.filter((a) => a.kind !== 'subagent');
-    const coord = roots.find((a) => a.role === 'coordinator') ?? null;
+    const coord = roots.filter((a) => a.role === 'coordinator');
     const auto = roots
       .filter((a) => a.role !== 'coordinator')
       .slice()
@@ -246,8 +269,10 @@ export function ProjectAgentsHub({
         if (b.status === 'working' && a.status !== 'working') return 1;
         return (b.updated_at || '').localeCompare(a.updated_at || '');
       });
-    return { coordinator: coord, autonomous: auto };
+    return [...coord, ...auto];
   }, [agents]);
+
+  const selected = gridAgents.find((a) => a.uuid === selectedUuid) ?? null;
 
   async function toggleEnabled(agent: ProjectAgent) {
     setBusyUuid(agent.uuid);
@@ -333,6 +358,7 @@ export function ProjectAgentsHub({
         enabled: true,
       });
       setAgents((prev) => [created.data, ...prev]);
+      setSelectedUuid(created.data.uuid);
       setCreateOpen(false);
       setCreateForm(emptyCreate());
       toast.push({ title: 'Agent créé', detail: created.data.name, tone: 'ok' });
@@ -351,126 +377,168 @@ export function ProjectAgentsHub({
         </Alert>
       )}
 
-      <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0 flex-1">
-          <p class="text-sm text-[var(--color-ink-muted)]">
-            Agents autonomes réveillés par un{' '}
-            <span class="text-[var(--color-ink)]">cron</span> ou un{' '}
-            <span class="text-[var(--color-ink)]">événement</span> (échec deploy, santé…). Le chat
-            interactif reste sur le Coordinateur / Workspace.
-          </p>
-        </div>
-        <Button
-          size="sm"
-          onClick={() => {
-            setCreateForm(emptyCreate());
-            setCreateOpen(true);
-          }}
-        >
-          <Plus size={16} aria-hidden />
-          Nouvel agent
-        </Button>
+      {/* List hubs: prefer HubGrid / HubTile (+ detail on select), like Runners. */}
+      <div class="mb-4">
+        <p class="text-sm text-[var(--color-ink-muted)]">
+          Agents autonomes réveillés par un{' '}
+          <span class="text-[var(--color-ink)]">cron</span> ou un{' '}
+          <span class="text-[var(--color-ink)]">événement</span> (échec deploy, santé…). Le chat
+          interactif reste sur le Coordinateur / Workspace.
+        </p>
       </div>
 
       {loading ? (
-        <div class="space-y-3">
+        <HubGrid cols={4}>
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} class="h-24 rounded-2xl" />
+            <Skeleton key={i} class="min-h-[8.75rem] rounded-2xl sm:aspect-square sm:min-h-0" />
           ))}
-        </div>
+        </HubGrid>
       ) : (
-        <div class="space-y-3">
-          {coordinator && (
-            <Card class="border-[var(--color-accent)]/25 bg-[var(--color-accent-soft)]/30" padding="md">
-              <div class="flex flex-wrap items-center gap-3">
-                <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-[#2a2a2e] text-[var(--color-ink)]">
-                  <MessageSquare size={20} strokeWidth={1.75} aria-hidden />
-                </div>
-                <div class="min-w-0 flex-1">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <h3 class="text-sm font-medium text-[var(--color-ink)]">
-                      {coordinator.name || 'Coordinateur'}
-                    </h3>
-                    <Badge tone="accent">Système</Badge>
-                    <Badge tone={statusOf(coordinator).tone === 'warn' ? 'warn' : 'ok'}>
-                      {statusOf(coordinator).label}
-                    </Badge>
-                  </div>
-                  <p class="mt-0.5 text-xs text-[var(--color-ink-muted)]">
-                    Fil permanent du projet — conversation interactive (Workspace)
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    remember(coordinator);
-                    setOpenChat(coordinator);
-                  }}
-                >
-                  Ouvrir le fil
-                </Button>
-              </div>
-            </Card>
-          )}
-
-          {autonomous.map((agent) => {
-            const status = statusOf(agent);
-            const enabled = agent.enabled !== 0;
-            const busy = busyUuid === agent.uuid;
-            return (
-              <Card key={agent.uuid} padding="md">
-                <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div class="min-w-0 flex-1 space-y-1.5">
-                    <div class="flex flex-wrap items-center gap-2">
-                      <h3 class="truncate text-sm font-medium text-[var(--color-ink)]">
-                        {agent.name}
-                      </h3>
-                      <Badge tone="neutral">{roleLabel(agent.role)}</Badge>
-                      {agent.kind === 'required' && <Badge tone="accent">Système</Badge>}
-                      <Badge
-                        tone={
-                          status.tone === 'warn'
-                            ? 'warn'
-                            : status.tone === 'ok'
-                              ? 'ok'
-                              : 'neutral'
-                        }
+        <FadeIn>
+          <HubGrid cols={4}>
+            {gridAgents.map((agent, i) => {
+              const status = statusOf(agent);
+              const selectedCard = agent.uuid === selectedUuid;
+              return (
+                <HubTile
+                  key={agent.uuid}
+                  index={i}
+                  title={agent.name || roleLabel(agent.role)}
+                  onClick={() =>
+                    setSelectedUuid(agent.uuid === selectedUuid ? null : agent.uuid)
+                  }
+                  icon={agentIcon(agent)}
+                  class={selectedCard ? 'ring-1 ring-white/20' : undefined}
+                  badge={
+                    <span
+                      class={cn(
+                        'absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full ring-2 ring-[#1c1c1e]',
+                        statusDotClass(status.tone),
+                        status.tone === 'warn' ? 'animate-pulse' : '',
+                      )}
+                      title={status.label}
+                      aria-hidden
+                    />
+                  }
+                  subtitle={
+                    <div class="mt-1 space-y-0.5">
+                      <div
+                        class={cn(
+                          'text-[11px] font-medium',
+                          status.tone === 'ok' && 'text-[var(--color-ok)]',
+                          status.tone === 'warn' && 'text-[var(--color-warn)]',
+                          status.tone === 'danger' && 'text-[var(--color-danger)]',
+                          status.tone === 'neutral' && 'text-[var(--color-ink-faint)]',
+                        )}
                       >
                         {status.label}
-                      </Badge>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--color-ink-muted)]">
-                      <span class="inline-flex items-center gap-1">
-                        {agent.trigger_type === 'cron' ? (
-                          <Clock size={12} aria-hidden />
-                        ) : (
-                          <Zap size={12} aria-hidden />
-                        )}
+                      </div>
+                      <div class="line-clamp-2 text-[10px] text-[var(--color-ink-faint)]">
                         {triggerSummary(agent)}
-                      </span>
+                      </div>
+                    </div>
+                  }
+                />
+              );
+            })}
+            <HubAddTile
+              index={gridAgents.length}
+              label="Nouvel agent"
+              onClick={() => {
+                setCreateForm(emptyCreate());
+                setCreateOpen(true);
+              }}
+            />
+          </HubGrid>
+        </FadeIn>
+      )}
+
+      {!loading && !error && gridAgents.filter((a) => a.role !== 'coordinator').length === 0 && (
+        <p class="mt-6 text-center text-sm text-[var(--color-ink-muted)]">
+          Aucun agent autonome pour l’instant. Crée-en un déclenché par cron ou par événement.
+        </p>
+      )}
+
+      {selected && (
+        <FadeIn delay={40} class="mt-6">
+          <Card padding="md">
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div class="min-w-0 flex-1 space-y-1.5">
+                <div class="flex flex-wrap items-center gap-2">
+                  <h3 class="truncate text-sm font-medium text-[var(--color-ink)]">
+                    {selected.name || roleLabel(selected.role)}
+                  </h3>
+                  <Badge tone="neutral">{roleLabel(selected.role)}</Badge>
+                  {(selected.role === 'coordinator' || selected.kind === 'required') && (
+                    <Badge tone="accent">Système</Badge>
+                  )}
+                  <Badge
+                    tone={
+                      statusOf(selected).tone === 'warn'
+                        ? 'warn'
+                        : statusOf(selected).tone === 'ok'
+                          ? 'ok'
+                          : 'neutral'
+                    }
+                  >
+                    {statusOf(selected).label}
+                  </Badge>
+                </div>
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--color-ink-muted)]">
+                  <span class="inline-flex items-center gap-1">
+                    {selected.trigger_type === 'cron' ? (
+                      <Clock size={12} aria-hidden />
+                    ) : selected.role === 'coordinator' ? (
+                      <MessageSquare size={12} aria-hidden />
+                    ) : (
+                      <Zap size={12} aria-hidden />
+                    )}
+                    {triggerSummary(selected)}
+                  </span>
+                  {selected.role !== 'coordinator' && (
+                    <>
                       <span class="inline-flex items-center gap-1">
                         <Activity size={12} aria-hidden />
-                        Dernière exécution · {formatRelativeFr(agent.last_run_at)}
+                        Dernière exécution · {formatRelativeFr(selected.last_run_at)}
                       </span>
-                      {agent.trigger_type === 'cron' && agent.next_run_at ? (
-                        <span>Prochaine · {formatRelativeFr(agent.next_run_at)}</span>
+                      {selected.trigger_type === 'cron' && selected.next_run_at ? (
+                        <span>Prochaine · {formatRelativeFr(selected.next_run_at)}</span>
                       ) : null}
-                    </div>
-                  </div>
+                    </>
+                  )}
+                </div>
+              </div>
 
-                  <div class="flex flex-wrap items-center gap-2 sm:justify-end">
+              <div class="flex flex-wrap items-center gap-2 sm:justify-end">
+                {selected.role === 'coordinator' ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      remember(selected);
+                      setOpenChat(selected);
+                    }}
+                  >
+                    <MessageSquare size={14} aria-hidden />
+                    Ouvrir le fil
+                  </Button>
+                ) : (
+                  <>
                     <Switch
-                      checked={enabled}
-                      disabled={busy}
-                      label={enabled ? 'Désactiver' : 'Activer'}
-                      onToggle={() => void toggleEnabled(agent)}
+                      checked={selected.enabled !== 0}
+                      disabled={busyUuid === selected.uuid}
+                      label={selected.enabled !== 0 ? 'Désactiver' : 'Activer'}
+                      onToggle={() => void toggleEnabled(selected)}
                     />
                     <Button
                       size="sm"
                       variant="secondary"
-                      disabled={busy || !enabled || agent.status === 'working'}
-                      onClick={() => void runNow(agent)}
+                      disabled={
+                        busyUuid === selected.uuid ||
+                        selected.enabled === 0 ||
+                        selected.status === 'working'
+                      }
+                      onClick={() => void runNow(selected)}
                       title="Lancer maintenant"
                     >
                       <Play size={14} aria-hidden />
@@ -479,23 +547,17 @@ export function ProjectAgentsHub({
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => void openLastActivity(agent)}
+                      onClick={() => void openLastActivity(selected)}
                     >
                       <ScrollText size={14} aria-hidden />
                       Journal
                     </Button>
-                  </div>
-                </div>
-              </Card>
-            );
-          })}
-
-          {!error && autonomous.length === 0 && (
-            <p class="py-8 text-center text-sm text-[var(--color-ink-muted)]">
-              Aucun agent autonome pour l’instant. Crée-en un déclenché par cron ou par événement.
-            </p>
-          )}
-        </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </Card>
+        </FadeIn>
       )}
 
       <Modal

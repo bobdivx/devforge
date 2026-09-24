@@ -14,7 +14,7 @@ type HubGridProps = {
   children: ComponentChildren;
 };
 
-/** Grille responsive type Settings / Home (PandaOS). */
+/** Grille responsive type Settings / Home (PandaOS). List hubs should prefer HubGrid + HubTile. */
 export function HubGrid({ class: className, cols = 4, children }: HubGridProps) {
   return (
     <div
