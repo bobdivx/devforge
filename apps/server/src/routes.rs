@@ -2008,6 +2008,83 @@ async fn build_project_agent_brief(
     })
 }
 
+/// Réveille un agent projet : message système + tour (dédupe optionnelle par marqueur).
+pub(crate) async fn wake_project_agent(
+    state: &AppState,
+    project_uuid: &str,
+    agent_uuid: &str,
+    marker: &str,
+    content: &str,
+) -> Result<(), String> {
+    if !marker.is_empty() {
+        let already: Option<(i64,)> = sqlx::query_as(
+            "SELECT COUNT(*) FROM agent_messages WHERE project_uuid = $1 AND agent_uuid = $2 AND content LIKE $3",
+        )
+        .bind(project_uuid)
+        .bind(agent_uuid)
+        .bind(format!("%{marker}%"))
+        .fetch_optional(&state.pool)
+        .await
+        .ok()
+        .flatten();
+        if let Some((count,)) = already {
+            if count > 0 {
+                tracing::info!(project_uuid, agent_uuid, marker, "wake agent déjà envoyé, skip");
+                return Ok(());
+            }
+        }
+    }
+
+    let enabled: Option<(i64,)> = sqlx::query_as(
+        "SELECT COALESCE(enabled, 1) FROM project_agents WHERE uuid = $1 AND project_uuid = $2",
+    )
+    .bind(agent_uuid)
+    .bind(project_uuid)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some((enabled,)) = enabled else {
+        return Err("agent introuvable".into());
+    };
+    if enabled == 0 {
+        tracing::info!(project_uuid, agent_uuid, "wake agent skip (désactivé)");
+        return Ok(());
+    }
+
+    let now = now_str();
+    let msg_uuid = new_uuid();
+    let body = if marker.is_empty() {
+        content.to_string()
+    } else {
+        format!("{marker}\n\n{content}")
+    };
+    sqlx::query(
+        r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
+           VALUES ($1, $2, $3, 'user', $4, '[]', 'system', $5)"#,
+    )
+    .bind(&msg_uuid)
+    .bind(project_uuid)
+    .bind(agent_uuid)
+    .bind(&body)
+    .bind(&now)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    sqlx::query(
+        r#"UPDATE project_agents SET status = 'working', last_run_at = $1, updated_at = $1 WHERE uuid = $2"#,
+    )
+    .bind(&now)
+    .bind(agent_uuid)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let _ = trigger_agent_turn(state, project_uuid, agent_uuid).await;
+    tracing::info!(project_uuid, agent_uuid, marker, "wake agent lancé");
+    Ok(())
+}
+
 /// Poste un message dans le fil coordinateur et enqueue un tour (dédupe par marqueur).
 async fn wake_coordinator(
     state: &AppState,
@@ -2015,55 +2092,123 @@ async fn wake_coordinator(
     marker: &str,
     content: &str,
 ) -> Result<(), String> {
-    let already: Option<(i64,)> = sqlx::query_as(
-        "SELECT COUNT(*) FROM agent_messages WHERE project_uuid = $1 AND content LIKE $2",
-    )
-    .bind(project_uuid)
-    .bind(format!("%{marker}%"))
-    .fetch_optional(&state.pool)
-    .await
-    .ok()
-    .flatten();
-    if let Some((count,)) = already {
-        if count > 0 {
-            tracing::info!(project_uuid, marker, "wake coordinateur déjà envoyé, skip");
-            return Ok(());
-        }
-    }
-
-    let Some(agent_uuid) =
-        crate::db::ensure_coordinator_agent(&state.pool, project_uuid)
-            .await
-            .map_err(|e| e.to_string())?
+    let Some(agent_uuid) = crate::db::ensure_coordinator_agent(&state.pool, project_uuid)
+        .await
+        .map_err(|e| e.to_string())?
     else {
         return Err("Aucun agent coordinateur".into());
     };
+    wake_project_agent(state, project_uuid, &agent_uuid, marker, content).await
+}
 
-    let now = now_str();
-    let msg_uuid = new_uuid();
-    let body = format!("{marker}\n\n{content}");
-    sqlx::query(
-        r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
-           VALUES ($1, $2, $3, 'user', $4, '[]', 'system', $5)"#,
+/// Réveille tous les agents autonomes abonnés à un type d'événement (hors coordinateur).
+pub(crate) async fn wake_event_agents(
+    state: &AppState,
+    project_uuid: &str,
+    event: &str,
+    marker: &str,
+    content: &str,
+) -> Result<(), String> {
+    let _ = crate::db::seed_required_agents(&state.pool, project_uuid)
+        .await
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        r#"SELECT uuid, COALESCE(instructions, '')
+           FROM project_agents
+           WHERE project_uuid = $1
+             AND COALESCE(enabled, 1) = 1
+             AND kind != 'subagent'
+             AND role != 'coordinator'
+             AND trigger_type = 'event'
+             AND trigger_config LIKE $2"#,
     )
-    .bind(&msg_uuid)
     .bind(project_uuid)
-    .bind(&agent_uuid)
-    .bind(&body)
-    .bind(&now)
-    .execute(&state.pool)
+    .bind(format!("%\"event\":\"{event}\"%"))
+    .fetch_all(&state.pool)
     .await
     .map_err(|e| e.to_string())?;
 
-    sqlx::query("UPDATE project_agents SET status = 'working', updated_at = $1 WHERE uuid = $2")
+    for (agent_uuid, instructions) in rows {
+        let body = if instructions.trim().is_empty() {
+            content.to_string()
+        } else {
+            format!("{content}\n\nInstructions agent :\n{instructions}")
+        };
+        if let Err(e) = wake_project_agent(state, project_uuid, &agent_uuid, marker, &body).await {
+            tracing::warn!(project_uuid, agent_uuid, error = %e, "wake event agent échoué");
+        }
+    }
+    Ok(())
+}
+
+/// Boucle : agents à trigger cron dus → wake + recalcul next_run_at.
+pub async fn agent_cron_loop(state: AppState) {
+    tracing::info!("Démarrage scheduler agents cron");
+    loop {
+        if let Err(e) = agent_cron_tick(&state).await {
+            tracing::error!(error = %e, "Erreur cycle agents cron");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+    }
+}
+
+async fn agent_cron_tick(state: &AppState) -> Result<(), String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let due: Vec<(String, String, String, String)> = sqlx::query_as(
+        r#"SELECT uuid, project_uuid, COALESCE(trigger_config, '{}'), COALESCE(instructions, '')
+           FROM project_agents
+           WHERE COALESCE(enabled, 1) = 1
+             AND trigger_type = 'cron'
+             AND next_run_at != ''
+             AND next_run_at <= $1
+             AND kind != 'subagent'"#,
+    )
+    .bind(&now)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    for (agent_uuid, project_uuid, trigger_config, instructions) in due {
+        let content = if instructions.trim().is_empty() {
+            "Exécution planifiée (cron). Applique ta mission pour ce projet.".to_string()
+        } else {
+            instructions
+        };
+        let marker = format!(
+            "AGENT-WAKE:CRON:{}:{}",
+            agent_uuid,
+            &now[..16.min(now.len())]
+        );
+        if let Err(e) =
+            wake_project_agent(state, &project_uuid, &agent_uuid, &marker, &content).await
+        {
+            tracing::warn!(agent_uuid, error = %e, "wake cron agent échoué");
+        }
+        let next = {
+            let v: serde_json::Value =
+                serde_json::from_str(&trigger_config).unwrap_or_else(|_| serde_json::json!({}));
+            let expr = v
+                .get("cron_expression")
+                .and_then(|x| x.as_str())
+                .unwrap_or("");
+            let tz = v.get("timezone").and_then(|x| x.as_str());
+            if expr.is_empty() {
+                String::new()
+            } else {
+                devforge_cron::next_run_time(expr, tz)
+                    .map(|dt| dt.to_rfc3339())
+                    .unwrap_or_default()
+            }
+        };
+        let _ = sqlx::query(
+            "UPDATE project_agents SET next_run_at = $1, updated_at = $2 WHERE uuid = $3",
+        )
+        .bind(&next)
         .bind(&now)
         .bind(&agent_uuid)
         .execute(&state.pool)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let _ = trigger_agent_turn(state, project_uuid, &agent_uuid).await;
-    tracing::info!(project_uuid, marker, "wake coordinateur lancé");
+        .await;
+    }
     Ok(())
 }
 
@@ -2088,7 +2233,24 @@ pub(crate) async fn wake_coordinator_deploy_fail(
          et pour une réparation lourde délègue via un sous-agent (kind=subagent, parent=toi) \
          plutôt que de créer un nouveau fil permanent. Tu peux aussi t’appuyer sur l’agent Deploy."
     );
-    wake_coordinator(state, project_uuid, &marker, &content).await
+    let r = wake_coordinator(state, project_uuid, &marker, &content).await;
+    let event_marker = format!("{marker}:event-agents");
+    let _ = wake_event_agents(state, project_uuid, "deploy_fail", &event_marker, &content).await;
+    r
+}
+
+
+pub(crate) async fn wake_deploy_success(
+    state: &AppState,
+    project_uuid: &str,
+    dep_uuid: &str,
+) -> Result<(), String> {
+    let marker = format!("COORD-WAKE:DEPLOY-OK:{dep_uuid}");
+    let content = format!(
+        "Événement projet : déploiement réussi.\n         Déploiement : {dep_uuid}\n\n         Vérifie la santé / revue post-deploy si ta mission le demande."
+    );
+    // Coordinateur n'est pas réveillé sur succès (évite bruit) — agents event uniquement.
+    wake_event_agents(state, project_uuid, "deploy_success", &marker, &content).await
 }
 
 async fn wake_coordinator_health(
@@ -2109,7 +2271,11 @@ async fn wake_coordinator_health(
          explique l’impact, et propose les prochaines actions. Pour un diagnostic approfondi, \
          spawn un sous-agent (kind=subagent, parent_agent_uuid=ton uuid) plutôt qu’un nouveau chat permanent."
     );
-    wake_coordinator(state, project_uuid, &marker, &content).await
+    let r = wake_coordinator(state, project_uuid, &marker, &content).await;
+    let event_marker = format!("{marker}:event-agents");
+    let event = if status == "unrouted" { "unrouted" } else { "unhealthy" };
+    let _ = wake_event_agents(state, project_uuid, event, &event_marker, &content).await;
+    r
 }
 
 /// Auto-trigger repair after failed deployment (max once per deployment uuid).

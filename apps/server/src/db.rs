@@ -182,6 +182,12 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
             kind TEXT NOT NULL,
             parent_agent_uuid TEXT,
             status TEXT NOT NULL DEFAULT 'idle',
+            enabled BIGINT NOT NULL DEFAULT 1,
+            trigger_type TEXT NOT NULL DEFAULT '',
+            trigger_config TEXT NOT NULL DEFAULT '{}',
+            instructions TEXT NOT NULL DEFAULT '',
+            last_run_at TEXT NOT NULL DEFAULT '',
+            next_run_at TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -189,6 +195,19 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+
+    // Agents autonomes : triggers cron / événement + enable + last/next run.
+    for (col, def) in [
+        ("enabled", "BIGINT NOT NULL DEFAULT 1"),
+        ("trigger_type", "TEXT NOT NULL DEFAULT ''"),
+        ("trigger_config", "TEXT NOT NULL DEFAULT '{}'"),
+        ("instructions", "TEXT NOT NULL DEFAULT ''"),
+        ("last_run_at", "TEXT NOT NULL DEFAULT ''"),
+        ("next_run_at", "TEXT NOT NULL DEFAULT ''"),
+    ] {
+        let sql = format!("ALTER TABLE project_agents ADD COLUMN {col} {def}");
+        let _ = sqlx::query(&sql).execute(pool).await;
+    }
 
     sqlx::query(
         r#"
@@ -1011,6 +1030,20 @@ pub fn coordinator_health_marker(project_uuid: &str, status: &str) -> String {
     format!("COORD-WAKE:HEALTH:{project_uuid}:{status}")
 }
 
+/// Défauts de déclenchement pour les agents système (hors coordinateur).
+pub fn default_trigger_for_role(role: &str) -> (&'static str, &'static str) {
+    match role {
+        "coordinator" => ("system", "{}"),
+        "deploy" => ("event", r#"{"event":"deploy_fail"}"#),
+        "ops" => ("event", r#"{"event":"unhealthy"}"#),
+        "reviewer" => ("event", r#"{"event":"deploy_success"}"#),
+        "runner" => ("event", r#"{"event":"runner"}"#),
+        "actions" => ("event", r#"{"event":"workflow"}"#),
+        "crons" => ("event", r#"{"event":"schedule"}"#),
+        _ => ("", "{}"),
+    }
+}
+
 /// Agents obligatoires créés avec chaque project (idempotent — backfill inclus).
 pub async fn seed_required_agents(pool: &PgPool, project_uuid: &str) -> Result<(), sqlx::Error> {
     let now = chrono::Utc::now().to_rfc3339();
@@ -1022,19 +1055,38 @@ pub async fn seed_required_agents(pool: &PgPool, project_uuid: &str) -> Result<(
         .bind(role)
         .fetch_one(pool)
         .await?;
+        let (trigger_type, trigger_config) = default_trigger_for_role(role);
         if exists.0 > 0 {
+            // Backfill triggers sur les agents déjà créés sans config.
+            let _ = sqlx::query(
+                r#"UPDATE project_agents
+                   SET trigger_type = $1, trigger_config = $2, updated_at = $3
+                   WHERE project_uuid = $4 AND role = $5 AND kind = 'required'
+                     AND (trigger_type IS NULL OR trigger_type = '')"#,
+            )
+            .bind(trigger_type)
+            .bind(trigger_config)
+            .bind(&now)
+            .bind(project_uuid)
+            .bind(role)
+            .execute(pool)
+            .await;
             continue;
         }
         let uuid = uuid::Uuid::new_v4().to_string();
         sqlx::query(
             r#"INSERT INTO project_agents (
-                uuid, project_uuid, name, role, kind, parent_agent_uuid, status, created_at, updated_at
-            ) VALUES ($1, $2, $3, $4, 'required', NULL, 'idle', $5, $6)"#,
+                uuid, project_uuid, name, role, kind, parent_agent_uuid, status,
+                enabled, trigger_type, trigger_config, instructions, last_run_at, next_run_at,
+                created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, 'required', NULL, 'idle', 1, $5, $6, '', '', '', $7, $8)"#,
         )
         .bind(&uuid)
         .bind(project_uuid)
         .bind(name)
         .bind(role)
+        .bind(trigger_type)
+        .bind(trigger_config)
         .bind(&now)
         .bind(&now)
         .execute(pool)
@@ -1067,6 +1119,18 @@ mod required_agents_tests {
         assert_eq!(REQUIRED_AGENTS[0], ("Coordinateur", "coordinator"));
         assert!(REQUIRED_AGENTS.iter().any(|(_, r)| *r == "ops"));
         assert!(REQUIRED_AGENTS.iter().any(|(_, r)| *r == "deploy"));
+    }
+
+    #[test]
+    fn default_triggers_cover_required_roles() {
+        let (t, _) = default_trigger_for_role("coordinator");
+        assert_eq!(t, "system");
+        let (t, c) = default_trigger_for_role("deploy");
+        assert_eq!(t, "event");
+        assert!(c.contains("deploy_fail"));
+        let (t, c) = default_trigger_for_role("ops");
+        assert_eq!(t, "event");
+        assert!(c.contains("unhealthy"));
     }
 
     #[test]
