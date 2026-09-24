@@ -21,6 +21,7 @@ import {
   ExternalLink,
   FileCode,
   HeartPulse,
+  Rocket,
   RotateCw,
   Square,
 } from 'lucide-preact';
@@ -272,20 +273,6 @@ export function ProjectDetailPage(props: Props) {
           project={project}
         />
       }
-      actions={
-        tab === 'overview' && project ? (
-          <Button
-            size="icon"
-            variant="outline"
-            onClick={() => setRulesModalOpen(true)}
-            title="Directives AGENTS.md"
-            aria-label="Directives AGENTS.md"
-          >
-            <FileCode size={14} aria-hidden />
-            <span class="hidden sm:inline">Directives</span>
-          </Button>
-        ) : undefined
-      }
     >
       {error && (
         <Alert tone="warn" class="mb-4">
@@ -303,6 +290,7 @@ export function ProjectDetailPage(props: Props) {
           isAdmin={isAdmin}
           onDeployments={(d) => setDeployments(d)}
           onProject={setProject}
+          onOpenRules={() => setRulesModalOpen(true)}
         />
       )}
       {tab === 'workspace' && !workspaceBeta && (
@@ -605,6 +593,7 @@ function ProjectOverview({
   isAdmin,
   onDeployments,
   onProject,
+  onOpenRules,
 }: {
   uuid: string;
   project: Project;
@@ -612,6 +601,7 @@ function ProjectOverview({
   isAdmin: boolean;
   onDeployments: (d: Deployment[]) => void;
   onProject: (project: Project) => void;
+  onOpenRules: () => void;
 }) {
   const toast = useToast();
   const [envCount, setEnvCount] = useState<number | null>(null);
@@ -916,11 +906,9 @@ function ProjectOverview({
 
   return (
     <FadeIn>
-      <div class="space-y-6">
+      <div class="space-y-4">
         {/* En-tête compact avec statut + contrôles URL */}
-        <div
-          class="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]/70 px-4 py-4 backdrop-blur-sm sm:px-5"
-        >
+        <div class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]/70 px-4 py-3 backdrop-blur-sm sm:px-5">
           <div class="flex min-w-0 items-center gap-3">
             <StatusGlyph
               project={project}
@@ -966,6 +954,16 @@ function ProjectOverview({
                 <button
                   type="button"
                   class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] disabled:opacity-40"
+                  title="Déployer"
+                  aria-label="Déployer"
+                  disabled={deployBusy || !!lifeBusy || !project.git_repository}
+                  onClick={deployNow}
+                >
+                  {deployBusy ? <Spinner /> : <Rocket size={14} aria-hidden />}
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] disabled:opacity-40"
                   title="Redémarrer"
                   aria-label="Redémarrer"
                   disabled={!!lifeBusy || deployBusy}
@@ -991,28 +989,17 @@ function ProjectOverview({
                 >
                   <HeartPulse size={14} aria-hidden />
                 </a>
+                <button
+                  type="button"
+                  class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+                  title="Règles & Directives Agent (AGENTS.md)"
+                  aria-label="Règles & Directives Agent"
+                  onClick={onOpenRules}
+                >
+                  <FileCode size={14} aria-hidden />
+                </button>
               </div>
             </div>
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={deployBusy || !!lifeBusy || !project.git_repository}
-              onClick={deployNow}
-            >
-              {deployBusy ? <Spinner /> : null}
-              Déployer
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!!lifeBusy || deployBusy}
-              onClick={() => runLifecycle('restart')}
-            >
-              {lifeBusy === 'restart' ? <Spinner /> : null}
-              Redémarrer
-            </Button>
           </div>
         </div>
 

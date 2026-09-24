@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
+import { Settings } from 'lucide-preact';
 import { api, type AppGroup, type InstanceDomain, type Project } from '../lib/api';
 import { cn } from '../lib/cn';
 import { projectStatusMeta } from '../lib/status';
@@ -147,14 +148,21 @@ function GroupBody({ uuid }: { uuid: string }) {
   return (
     <AppShell
       active="home"
-      title={group?.name || 'Groupe'}
-      description={group ? `Réseau ${group.network}` : undefined}
-      actions={
-        group ? (
-          <Button size="sm" variant="outline" onClick={() => setSettingsOpen(true)}>
-            Réglages
-          </Button>
-        ) : undefined
+      title={
+        <span class="flex flex-wrap items-center gap-2">
+          <span class="min-w-0 break-words">{group?.name || 'Groupe'}</span>
+          {group ? (
+            <button
+              type="button"
+              class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+              title="Réglages"
+              aria-label="Réglages"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings size={14} aria-hidden />
+            </button>
+          ) : null}
+        </span>
       }
     >
       {error && (
@@ -243,11 +251,7 @@ function GroupBody({ uuid }: { uuid: string }) {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         title="Réglages du groupe"
-        description={
-          group
-            ? `Réseau ${group.network}. Les apps reçoivent DF_GROUP, DF_ROLE et DF_{ROLE}_URL au déploiement. Même nœud pour tout le groupe.`
-            : undefined
-        }
+        description="Les apps reçoivent DF_GROUP, DF_ROLE et DF_{ROLE}_URL au déploiement. Même nœud pour tout le groupe."
         size="md"
       >
         {group && (

@@ -300,11 +300,6 @@ export function HomePage() {
         </HubGrid>
       ) : (
         <>
-          <div class="mb-4 flex justify-end">
-            <Button size="sm" variant="outline" onClick={() => setGroupOpen(true)}>
-              Nouveau groupe
-            </Button>
-          </div>
           <HubGrid cols={5}>
             {groups.map((g, i) => (
               <GroupCard
@@ -449,6 +444,29 @@ export function HomePage() {
                   </div>
                   <p class="text-sm text-[var(--color-ink-muted)]">
                     Configure un repo existant : branche, build, domaine, env vars.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeWizard();
+                    setGroupOpen(true);
+                  }}
+                  class="group flex w-full flex-col gap-2 rounded-xl border border-[var(--color-line)] p-4 text-left transition-[border-color,background-color,transform] duration-200 hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-soft)] active:scale-[0.99]"
+                >
+                  <div class="flex items-center gap-2">
+                    <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-surface)] text-white transition-transform duration-200 group-hover:scale-105">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke-linecap="round" stroke-linejoin="round" />
+                        <circle cx="9" cy="7" r="4" />
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </div>
+                    <span class="font-semibold">Créer un groupe</span>
+                  </div>
+                  <p class="text-sm text-[var(--color-ink-muted)]">
+                    Regroupe plusieurs apps (site, client, serveur) sur un réseau commun.
                   </p>
                 </button>
               </div>
