@@ -351,6 +351,7 @@ name = "devforge-agent"
 version = "2.0.136"
 dependencies = [
  "async-trait",
+ "chrono",
  "devforge-database",
  "devforge-deploy",
  "devforge-env",
@@ -365,6 +366,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

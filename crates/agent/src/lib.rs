@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tools::{
-    CreateGitHubFixTool, CreateGitHubRepoTool, GetDeploymentLogsTool, GetProjectTool,
+    CreateGitHubFixTool, CreateGitHubRepoTool, CreateProjectAgentTool, GetDeploymentLogsTool, GetProjectTool,
     GitHubListPrsTool, GitHubWorkflowRunsTool, HttpSmokeTool, ListAgentMessagesTool,
     ListAgentToolFailuresTool, ListEnvVarsTool, ListProjectAgentsTool, ListProjectFilesTool,
     ListProjectsTool, LocalPreviewStatusTool, McpCallTool, McpListRemoteToolsTool,
@@ -163,6 +163,7 @@ pub fn build_core_registry(
         pool: pool.clone(),
     }));
     registry.register(Arc::new(ListAgentToolFailuresTool { pool: pool.clone() }));
+    registry.register(Arc::new(CreateProjectAgentTool { pool: pool.clone() }));
     registry.register(Arc::new(ReviewProjectSecurityTool { pool }));
     registry
 }
@@ -532,6 +533,16 @@ fn inject_tool_defaults(args: &mut Value, ctx: &AgentChatContext) {
             obj.insert("project_uuid".into(), json!(uuid));
         }
     }
+    if let Some(agent_uuid) = &ctx.agent_uuid {
+        let empty = obj
+            .get("caller_agent_uuid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .is_empty();
+        if !obj.contains_key("caller_agent_uuid") || empty {
+            obj.insert("caller_agent_uuid".into(), json!(agent_uuid));
+        }
+    }
     if let Some(owner) = &ctx.git_owner {
         let empty = obj.get("owner").and_then(|v| v.as_str()).unwrap_or("").is_empty();
         if !obj.contains_key("owner") || empty {
@@ -620,9 +631,7 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
         "ops" => format!("Tu es l'agent Ops. Priorité : santé du projet, logs, variables d'environnement, smoke HTTP (get_project, get_deployment_logs, list_env_vars, http_smoke). Corrige le workdir seulement si on te le demande.\n{local}"),
         // Coordinateur = fil permanent du projet. Les tâches lourdes passent par des subagents éphémères.
         "coordinator" => format!(
-            "Tu es le Coordinateur — fil permanent de ce projet. Tu accumules le contexte, restes proactif              sur les événements (échec deploy, santé dégradée), et orchestres.
-             WORKERS : pour une tâche lourde ou isolée, crée un agent kind=subagent avec              parent_agent_uuid=ton uuid (ne crée PAS un nouveau fil permanent / required par tâche).              Tu coordonnes Deploy / Ops / Reviewer sans les remplacer.
-             {local}"
+            "Tu es le Coordinateur — fil permanent de ce projet. Tu accumules le contexte, restes proactif sur les événements (échec deploy, santé dégradée), et orchestres.\nWORKERS : pour une tâche lourde ou isolée, appelle l’outil create_project_agent (kind=subagent, parent_agent_uuid=ton uuid injecté par défaut). Ne crée PAS un nouveau fil permanent / required par tâche. Optionnel : initial_message pour démarrer le worker. Tu coordonnes Deploy / Ops / Reviewer sans les remplacer.\n{local}"
         ),
         _ => format!("Tu es un agent DevForge : planifie, agis dans le workdir, preview, puis PR sur validation.\n{local}"),
     };
@@ -636,7 +645,7 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
     let scoped = if ctx.project_brief.is_some() || ctx.project_uuid.is_some() {
         "\nLe projet courant est déjà dans le contexte — ne demande pas l'UUID. Agis."
     } else { "" };
-    let mcp_guidance = "\n\nTOOLS LOCAUX (prioritaires, PAS du MCP) : propose_plan, list_project_files, read_project_file, write_project_file (mode=local), run_workdir_command, start_local_preview, local_preview_status, list_project_agents, list_agent_messages, list_agent_tool_failures, review_project_security (revue statique, seulement si demandée).\nIl n’existe PAS de serveur MCP « devforge-workdir » / « workdir » / « atelier » — n’invente pas ce nom, ne bloque PAS en attendant un MCP manquant, et ne demande JAMAIS à l’utilisateur de le configurer. Pour npm/build/test : run_workdir_command. Pour la preview : start_local_preview (npm install inclus).\nMCP distants (mcp_list_servers / mcp_call_tool) : uniquement GitHub, Turso, Slack… après validation PR pour GitHub. Pas besoin de lister les serveurs MCP à chaque tour.";
+    let mcp_guidance = "\n\nTOOLS LOCAUX (prioritaires, PAS du MCP) : propose_plan, list_project_files, read_project_file, write_project_file (mode=local), run_workdir_command, start_local_preview, local_preview_status, list_project_agents, list_agent_messages, list_agent_tool_failures, create_project_agent, review_project_security (revue statique, seulement si demandée).\nIl n’existe PAS de serveur MCP « devforge-workdir » / « workdir » / « atelier » — n’invente pas ce nom, ne bloque PAS en attendant un MCP manquant, et ne demande JAMAIS à l’utilisateur de le configurer. Pour npm/build/test : run_workdir_command. Pour la preview : start_local_preview (npm install inclus).\nMCP distants (mcp_list_servers / mcp_call_tool) : uniquement GitHub, Turso, Slack… après validation PR pour GitHub. Pas besoin de lister les serveurs MCP à chaque tour.";
     format!("Tu es {name} ({role}) sur DevForge. {role_focus}{nudge}{scoped}{mcp_guidance}\nRéponds en français, concret, orienté ACTION. N'invente pas de résultats. Le panneau Preview du workspace est l'endroit où l'utilisateur voit tes changements.")
 }
 

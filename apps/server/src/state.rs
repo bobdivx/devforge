@@ -169,6 +169,14 @@ pub(crate) struct SqliteProjectStore {
     pub(crate) pool: PgPool,
     pub(crate) deploy: Arc<DeployFacade>,
     pub(crate) deploy_queue: Arc<crate::deploy_queue::DeployQueue>,
+    /// Rempli après construction de `AppState` pour réveiller le Coordinateur.
+    app: std::sync::OnceLock<AppState>,
+}
+
+impl SqliteProjectStore {
+    pub(crate) fn bind_app(&self, state: AppState) {
+        let _ = self.app.set(state);
+    }
 }
 
 #[async_trait]
@@ -502,6 +510,41 @@ impl ProjectStore for SqliteProjectStore {
                     .await
                     .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
+                // Wake Coordinateur sur échec (même chemin que HTTP / auto / webhook / resume).
+                if !result.ok {
+                    if let Some(app) = self.app.get() {
+                        let state_clone = app.clone();
+                        let project_uuid = project.uuid.clone();
+                        let dep_uuid_clone = dep_uuid.clone();
+                        let (summary, hint) =
+                            match devforge_deploy::parse_deploy_error_fr(&result.logs) {
+                                Some(err) => (
+                                    err.summary,
+                                    err.hint.unwrap_or_default(),
+                                ),
+                                None => (
+                                    "Échec du déploiement (outil agent)".into(),
+                                    String::new(),
+                                ),
+                            };
+                        tokio::spawn(async move {
+                            let _ = crate::routes::wake_coordinator_deploy_fail(
+                                &state_clone,
+                                &project_uuid,
+                                &dep_uuid_clone,
+                                &summary,
+                                &hint,
+                            )
+                            .await;
+                        });
+                    } else {
+                        tracing::warn!(
+                            deployment = %dep_uuid,
+                            "wake coordinateur: AppState non lié au ProjectStore"
+                        );
+                    }
+                }
+
                 Ok(json!({
                     "ok": result.ok,
                     "deployment_uuid": dep_uuid,
@@ -733,11 +776,13 @@ impl AppState {
         let proxy = Arc::new(proxy);
         let wireguard = Arc::new(wireguard);
         let deploy_queue = Arc::new(crate::deploy_queue::DeployQueue::new());
-        let store: Arc<dyn ProjectStore> = Arc::new(SqliteProjectStore {
+        let project_store = Arc::new(SqliteProjectStore {
             pool: pool.clone(),
             deploy: deploy.clone(),
             deploy_queue: deploy_queue.clone(),
+            app: std::sync::OnceLock::new(),
         });
+        let store: Arc<dyn ProjectStore> = project_store.clone();
         let registry = Arc::new(build_core_registry(
             deploy.clone(),
             github.clone(),
@@ -783,6 +828,8 @@ impl AppState {
             deploy_queue,
             backends,
         };
+
+        project_store.bind_app(state.clone());
 
         if let Err(e) = crate::mcp_routes::load_mcp_from_db(&state).await {
             tracing::warn!(error = %e, "chargement MCP depuis SQLite");
