@@ -170,12 +170,47 @@ impl ProxyFacade {
 
         match status {
             "running" => {
-                return Ok(json!({
-                    "ok": true,
-                    "status": "already_running",
-                    "container": TRAEFIK_CONTAINER_NAME,
-                    "message": "Traefik is already running"
-                }));
+                // Si le volume file-provider pointe hors de $DATA/proxy (bug ZimaOS
+                // …/devforge/data/proxy), on recrée une fois pour aligner le mount.
+                let expected = self
+                    .resolve_traefik_host_volume_path(executor)
+                    .await
+                    .unwrap_or_default();
+                let mount_cmd = format!(
+                    r#"docker inspect {} --format '{{{{range .Mounts}}}}{{{{if eq .Destination "/traefik"}}}}{{{{.Source}}}}{{{{end}}}}{{{{end}}}}' 2>/dev/null || true"#,
+                    TRAEFIK_CONTAINER_NAME
+                );
+                let mount_res = executor.exec(server_id, "", &mount_cmd, 30).await;
+                let actual = mount_res
+                    .as_ref()
+                    .map(|r| r.output.trim().to_string())
+                    .unwrap_or_default();
+                if !expected.is_empty()
+                    && !actual.is_empty()
+                    && actual != expected
+                {
+                    eprintln!(
+                        "[ensure_traefik] volume /traefik incorrect ({actual} ≠ {expected}) — recreation"
+                    );
+                    let _ = executor
+                        .exec(
+                            server_id,
+                            "",
+                            &format!("docker rm -f {TRAEFIK_CONTAINER_NAME}"),
+                            60,
+                        )
+                        .await;
+                    // tombe dans la création ci-dessous
+                } else {
+                    return Ok(json!({
+                        "ok": true,
+                        "status": "already_running",
+                        "container": TRAEFIK_CONTAINER_NAME,
+                        "message": "Traefik is already running",
+                        "host_data_path": if expected.is_empty() { Value::Null } else { json!(expected) },
+                        "mount_source": if actual.is_empty() { Value::Null } else { json!(actual) },
+                    }));
+                }
             }
             "exited" | "created" | "paused" => {
                 // Container exists but is not running, start it
@@ -340,7 +375,7 @@ impl ProxyFacade {
     /// Strategy:
     /// 1. Check explicit env override `DEVFORGE_TRAEFIK_HOST_DIR`
     /// 2. Inspect running DevForge container's mounts where Destination matches `DEVFORGE_DATA_DIR`
-    /// 3. Append `/proxy` (or `/data/proxy` depending on mount layout)
+    /// 3. Append `/proxy` (même layout que les écritures preview)
     /// 4. Fallback to container path (bare metal / non-containerized case)
     async fn resolve_traefik_host_volume_path(
         &self,
@@ -387,15 +422,17 @@ impl ProxyFacade {
                             continue;
                         }
 
-                        // Match: Destination is /data or contains DEVFORGE_DATA_DIR
+                        // Match: Destination is /data or equals DEVFORGE_DATA_DIR
                         if dest == "/data" || dest == container_data_dir.trim_end_matches('/') {
-                            // Host path found, append /proxy (or /data/proxy if Source is parent)
-                            let host_proxy_path = if src.ends_with("/devforge") || src.ends_with("/devforge/") {
-                                format!("{}/data/proxy", src.trim_end_matches('/'))
-                            } else {
-                                format!("{}/proxy", src.trim_end_matches('/'))
-                            };
-                            return Ok(host_proxy_path);
+                            // Toujours Source/proxy : le process écrit dans $DEVFORGE_DATA_DIR/proxy/dynamic
+                            // (ex. ZimaOS /DATA/AppData/devforge:/data → host .../devforge/proxy).
+                            // Ne JAMAIS utiliser Source/data/proxy : ça pointe hors du volume monté
+                            // et Traefik ne voit aucun fichier dynamique → 404 preview.
+                            if let Some(host_proxy_path) =
+                                host_proxy_from_data_bind(src, dest, container_data_dir)
+                            {
+                                return Ok(host_proxy_path);
+                            }
                         }
                     }
                 }
@@ -557,6 +594,19 @@ fn shell_escape(s: &str) -> String {
     }
 }
 
+
+/// Chemin hôte pour le volume Traefik (`…/proxy`) à partir du bind mount data.
+/// Exposé pour les tests : ZimaOS monte `/DATA/AppData/devforge:/data`.
+fn host_proxy_from_data_bind(source: &str, destination: &str, container_data_dir: &str) -> Option<String> {
+    let dest = destination.trim_end_matches('/');
+    let data = container_data_dir.trim_end_matches('/');
+    if dest == "/data" || dest == data {
+        Some(format!("{}/proxy", source.trim_end_matches('/')))
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -568,6 +618,24 @@ mod tests {
         assert_eq!(TRAEFIK_CONTAINER_NAME, "devforge-traefik");
         assert_eq!(TRAEFIK_IMAGE, "traefik:v3.6");
         assert_eq!(TRAEFIK_NETWORK, "devforge");
+    }
+
+    #[test]
+    fn zimaos_devforge_bind_maps_to_proxy_not_data_proxy() {
+        // /DATA/AppData/devforge:/data → host .../devforge/proxy (PAS .../devforge/data/proxy)
+        assert_eq!(
+            host_proxy_from_data_bind("/DATA/AppData/devforge", "/data", "/data").as_deref(),
+            Some("/DATA/AppData/devforge/proxy")
+        );
+        assert_eq!(
+            host_proxy_from_data_bind("/DATA/AppData/devforge/data", "/data", "/data").as_deref(),
+            Some("/DATA/AppData/devforge/data/proxy")
+        );
+        assert_eq!(
+            host_proxy_from_data_bind("/opt/other", "/var/lib/devforge", "/var/lib/devforge").as_deref(),
+            Some("/opt/other/proxy")
+        );
+        assert_eq!(host_proxy_from_data_bind("/x", "/not-data", "/data"), None);
     }
 
     #[test]

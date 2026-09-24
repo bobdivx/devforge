@@ -684,13 +684,36 @@ fn write_dev_traefik_dynamic(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(&path, yaml).map_err(|e| e.to_string())?;
+    std::fs::write(&path, &yaml).map_err(|e| e.to_string())?;
+    // Compat Traefik déjà créé avec l’ancien resolve ZimaOS (…/devforge/data/proxy).
+    // Sans ce double-write, le file provider ne voit aucun routeur → HTTP 404 public.
+    for legacy in legacy_dev_preview_dynamic_files(project_uuid) {
+        if legacy == path {
+            continue;
+        }
+        if let Some(parent) = legacy.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&legacy, &yaml);
+    }
     Ok(upstream)
 }
 
 fn remove_dev_traefik_dynamic(project_uuid: &str) {
     let path = dev_preview_dynamic_file(project_uuid);
     let _ = std::fs::remove_file(path);
+    for legacy in legacy_dev_preview_dynamic_files(project_uuid) {
+        let _ = std::fs::remove_file(legacy);
+    }
+}
+
+/// Ancien chemin Traefik (bug resolve : Source se terminant par `/devforge` → `…/data/proxy`).
+fn legacy_dev_preview_dynamic_files(project_uuid: &str) -> Vec<PathBuf> {
+    let base = std::env::var("DEVFORGE_DATA_DIR").unwrap_or_else(|_| "/var/lib/devforge".into());
+    let short: String = project_uuid.chars().take(8).collect();
+    let name = format!("dev-{short}.yaml");
+    let root = PathBuf::from(base.trim_end_matches(['/', '\\']));
+    vec![root.join("data").join("proxy").join("dynamic").join(name)]
 }
 
 fn preview_pid_path(workdir: &Path) -> PathBuf {
@@ -1913,4 +1936,22 @@ mod tests {
         let _ = child.wait();
         assert!(!pid_is_alive(dead));
     }
+
+    #[test]
+    fn legacy_preview_dynamic_path_matches_zimaos_bug() {
+        let dir = std::env::temp_dir().join("df-preview-legacy-path");
+        let _ = std::fs::create_dir_all(&dir);
+        // SAFETY: test isolé — restaure ensuite
+        std::env::set_var("DEVFORGE_DATA_DIR", &dir);
+        let uuid = "bba0bc75-a521-4618-bc92-ed595c6a601e";
+        let legacy = legacy_dev_preview_dynamic_files(uuid);
+        assert_eq!(legacy.len(), 1);
+        assert!(legacy[0].ends_with("data/proxy/dynamic/dev-bba0bc75.yaml"));
+        let canon = dev_preview_dynamic_file(uuid);
+        assert!(canon.ends_with("proxy/dynamic/dev-bba0bc75.yaml"));
+        assert_ne!(legacy[0], canon);
+        std::env::remove_var("DEVFORGE_DATA_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
 }
