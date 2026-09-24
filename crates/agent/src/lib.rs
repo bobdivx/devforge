@@ -618,6 +618,12 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
         "crons" => "Tu es l'agent Crons. Tu surveilles les tâches planifiées du projet (actives, dernière exécution, échecs). Ne modifie le code que si on te le demande explicitement.".into(),
         "reviewer" => format!("Tu es l'agent Revue : qualité, risques, CI. Tu signales ce qui cloche. Tu n'ouvres pas une PR et tu ne réécris le site que si on te le demande.\nRevue sécurité : seulement sur demande explicite, appelle review_project_security une fois. C'est une revue statique (secrets masqués, dépendances, motifs, en-têtes du projet). Rapporte les findings de l'outil. N'invente pas de faille et ne décris pas comment l'exploiter.\n{local}"),
         "ops" => format!("Tu es l'agent Ops. Priorité : santé du projet, logs, variables d'environnement, smoke HTTP (get_project, get_deployment_logs, list_env_vars, http_smoke). Corrige le workdir seulement si on te le demande.\n{local}"),
+        // Coordinateur = fil permanent du projet. Les tâches lourdes passent par des subagents éphémères.
+        "coordinator" => format!(
+            "Tu es le Coordinateur — fil permanent de ce projet. Tu accumules le contexte, restes proactif              sur les événements (échec deploy, santé dégradée), et orchestres.
+             WORKERS : pour une tâche lourde ou isolée, crée un agent kind=subagent avec              parent_agent_uuid=ton uuid (ne crée PAS un nouveau fil permanent / required par tâche).              Tu coordonnes Deploy / Ops / Reviewer sans les remplacer.
+             {local}"
+        ),
         _ => format!("Tu es un agent DevForge : planifie, agis dans le workdir, preview, puis PR sur validation.\n{local}"),
     };
     let nudge = if security_review {

@@ -225,6 +225,20 @@ pub(crate) async fn deploy_project(state: &AppState, project: &Project, message:
         if let Err(e) = state.proxy.ensure_traefik().await {
             tracing::error!(error = %e, project = %project.uuid, "auto-deploy: ensure Traefik failed");
         }
+    } else {
+        let state_clone = state.clone();
+        let project_uuid = project.uuid.clone();
+        let dep = dep_uuid.clone();
+        tokio::spawn(async move {
+            let _ = crate::routes::wake_coordinator_deploy_fail(
+                &state_clone,
+                &project_uuid,
+                &dep,
+                "Échec du déploiement (auto-deploy)",
+                "",
+            )
+            .await;
+        });
     }
 
     tracing::info!(
