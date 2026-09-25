@@ -7,7 +7,7 @@
 //! processus ; le dump de secours passe alors par `pg_dump`.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -100,6 +100,54 @@ pub fn replication_advertisement(advertise_url: &str) -> Option<ReplAdvert> {
     })
 }
 
+/// Dans Docker, `devforge-pg` n'a pas de port hôte : le compose publie 5433 sur le
+/// conteneur DevForge. Sans relais, rien n'écoute derrière ce port et les workers ne
+/// peuvent jamais construire leur réplique `devforge-pg-ha` (connexion refusée).
+/// Ce relais écoute `0.0.0.0:{port}` dans le conteneur et transmet à `devforge-pg:5432`.
+fn spawn_docker_repl_relay(port: u16) {
+    static STARTED: AtomicBool = AtomicBool::new(false);
+    if STARTED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    tokio::spawn(async move {
+        let listener = match tokio::net::TcpListener::bind(("0.0.0.0", port)).await {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::warn!(port, error = %e, "relais réplication control plane indisponible");
+                STARTED.store(false, Ordering::Release);
+                return;
+            }
+        };
+        tracing::info!(port, upstream = %format!("{CONTAINER}:5432"), "relais réplication control plane");
+        loop {
+            let (mut inbound, peer) = match listener.accept().await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::debug!(error = %e, "relais réplication : accept");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+            };
+            tokio::spawn(async move {
+                let upstream = tokio::time::timeout(
+                    Duration::from_secs(5),
+                    tokio::net::TcpStream::connect((CONTAINER, 5432)),
+                )
+                .await;
+                match upstream {
+                    Ok(Ok(mut out)) => {
+                        let _ = tokio::io::copy_bidirectional(&mut inbound, &mut out).await;
+                    }
+                    Ok(Err(e)) => {
+                        tracing::debug!(%peer, error = %e, "relais réplication : upstream")
+                    }
+                    Err(_) => tracing::debug!(%peer, "relais réplication : upstream timeout"),
+                }
+            });
+        }
+    });
+}
+
 /// Démarre Postgres si besoin et renvoie une URL `postgres://`.
 pub async fn ensure(legacy_url: &str) -> Result<String, String> {
     if is_postgres_url(legacy_url) {
@@ -118,6 +166,9 @@ pub async fn ensure(legacy_url: &str) -> Result<String, String> {
     let public = wants_public_primary();
     start_container(&creds, public).await?;
     let url = connection_url(&creds).await?;
+    if in_docker() && public {
+        spawn_docker_repl_relay(creds.port);
+    }
     let _ = META.set(Meta {
         url: url.clone(),
         container: Some(CONTAINER.into()),

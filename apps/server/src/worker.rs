@@ -21,6 +21,31 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::state::AppState;
 
+/// Hôte de réplication du control plane.
+///
+/// Un leader derrière un tunnel Cloudflare annonce son domaine public : le port 5433
+/// n'y est pas joignable. Si le worker parle au leader par une adresse LAN (IP
+/// littérale, `.local`, `.lan`, `.home.arpa`, `.internal`), on réplique vers cet hôte.
+/// Sinon on garde l'hôte annoncé par le leader.
+pub(crate) fn pick_repl_host(leader_url: &str, advertised: &str) -> String {
+    if let Some(host) = crate::control_pg::advertise_host(leader_url) {
+        if is_lan_host(&host) {
+            return host;
+        }
+    }
+    advertised.trim().to_string()
+}
+
+fn is_lan_host(host: &str) -> bool {
+    let h = host.trim().to_ascii_lowercase();
+    if let Ok(ip) = h.parse::<std::net::IpAddr>() {
+        return !ip.is_loopback() && !ip.is_unspecified();
+    }
+    [".local", ".lan", ".home.arpa", ".internal"]
+        .iter()
+        .any(|suffix| h.ends_with(suffix))
+}
+
 fn spawn_standby_sync(host: String, port: u16, password: String) {
     static BUSY: AtomicBool = AtomicBool::new(false);
     if BUSY
@@ -495,15 +520,9 @@ fn spawn_worker_loop(state: AppState) {
                     let need_snap = ack.generation > local.snapshot_generation
                         || last_snap.elapsed() > std::time::Duration::from_secs(60);
                     persist_ack(&state, &local, &ack).await;
-                    if !ack.repl_host.is_empty()
-                        && ack.repl_port > 0
-                        && !ack.repl_password.is_empty()
-                    {
-                        spawn_standby_sync(
-                            ack.repl_host.clone(),
-                            ack.repl_port,
-                            ack.repl_password.clone(),
-                        );
+                    let repl_host = pick_repl_host(&local.leader_url, &ack.repl_host);
+                    if !repl_host.is_empty() && ack.repl_port > 0 && !ack.repl_password.is_empty() {
+                        spawn_standby_sync(repl_host, ack.repl_port, ack.repl_password.clone());
                     }
                     if need_snap && !crate::control_pg::standby_streaming().await {
                         let secret = if ack.failover_secret.is_empty() {
@@ -853,4 +872,42 @@ pub fn spawn_fence_watch(state: AppState) {
             maybe_reclaim_preferred(&state).await;
         }
     });
+}
+
+#[cfg(test)]
+mod repl_host_tests {
+    use super::pick_repl_host;
+
+    #[test]
+    fn lan_leader_url_wins_over_public_advert() {
+        assert_eq!(
+            pick_repl_host("http://10.1.0.58:8000", "web.jeser.app"),
+            "10.1.0.58"
+        );
+        assert_eq!(
+            pick_repl_host("http://nas.local:8000/", "web.jeser.app"),
+            "nas.local"
+        );
+    }
+
+    #[test]
+    fn public_leader_url_keeps_advert() {
+        assert_eq!(
+            pick_repl_host("https://web.jeser.app", "web.jeser.app"),
+            "web.jeser.app"
+        );
+        assert_eq!(
+            pick_repl_host("https://forge.example.com", "10.0.0.2"),
+            "10.0.0.2"
+        );
+    }
+
+    #[test]
+    fn loopback_leader_url_is_ignored() {
+        assert_eq!(
+            pick_repl_host("http://127.0.0.1:8000", "10.0.0.2"),
+            "10.0.0.2"
+        );
+        assert_eq!(pick_repl_host("http://127.0.0.1:8000", ""), "");
+    }
 }
