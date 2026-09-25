@@ -447,7 +447,9 @@ async fn heartbeat(
     }
     let mut value = serde_json::to_value(&ack).unwrap_or_else(|_| json!({"ok": true}));
     if let Ok(local) = state.cluster.local().await {
-        if let Some(ad) = crate::control_pg::replication_advertisement(&local.advertise_url) {
+        if let Some(ad) =
+            crate::control_pg::replication_advertisement(&local.advertise_url, &local.leader_url)
+        {
             value["repl_host"] = json!(ad.host);
             value["repl_port"] = json!(ad.port);
             value["repl_password"] = json!(ad.password);
@@ -1877,7 +1879,7 @@ async fn failover_quiesce(
             tracing::warn!("quiesce expiré, écritures rouvertes");
         }
     });
-    let ad = crate::control_pg::replication_advertisement(&local.advertise_url);
+    let ad = crate::control_pg::replication_advertisement(&local.advertise_url, &local.leader_url);
     Ok(Json(json!({
         "ok": true,
         "repl_host": ad.as_ref().map(|a| a.host.clone()).unwrap_or_default(),
@@ -1938,7 +1940,8 @@ async fn failover_demote(
     let st = state.clone();
     tokio::spawn(async move {
         // Rendre les hostnames basculés au leader d'origine avant de redémarrer.
-        let _ = tokio::time::timeout(Duration::from_secs(30), crate::dns_failover::restore(&st)).await;
+        let _ =
+            tokio::time::timeout(Duration::from_secs(30), crate::dns_failover::restore(&st)).await;
         tokio::time::sleep(Duration::from_millis(400)).await;
         devforge_cluster::restart_current_process();
     });
