@@ -802,10 +802,18 @@ async fn connection_url(creds: &Creds) -> Result<String, String> {
     ))
 }
 
+/// Postgres écoute toujours sur toutes les interfaces *du conteneur*.
+///
+/// `listen_addresses=127.0.0.1` dans un conteneur ne vise que son propre loopback :
+/// ni la redirection `-p 127.0.0.1:5433:5432` ni le réseau `devforge` ne l'atteignent,
+/// et DevForge échoue au démarrage (« Connection reset by peer »). L'exposition côté
+/// hôte se règle uniquement par l'IP du `-p` (127.0.0.1 hors primaire publique).
+const CONTAINER_LISTEN: &str = "listen_addresses=0.0.0.0";
+
 async fn start_container(creds: &Creds, public: bool) -> Result<(), String> {
     let _ = docker(&["network", "create", "devforge"]).await;
     let want_ip = if public { "0.0.0.0" } else { "127.0.0.1" };
-    if container_needs_recreate(want_ip, creds.port, public).await {
+    if container_needs_recreate(want_ip, creds.port).await {
         let _ = docker(&["stop", CONTAINER]).await;
         let _ = docker(&["rm", CONTAINER]).await;
     }
@@ -830,11 +838,7 @@ async fn start_container(creds: &Creds, public: bool) -> Result<(), String> {
         let user = format!("POSTGRES_USER={}", creds.user);
         let password = format!("POSTGRES_PASSWORD={}", creds.password);
         let db = format!("POSTGRES_DB={}", creds.database);
-        let listen = if public {
-            "listen_addresses=0.0.0.0"
-        } else {
-            "listen_addresses=127.0.0.1"
-        };
+        let listen = CONTAINER_LISTEN;
         // Dans Docker, le compose publie déjà 5433 sur le conteneur DevForge.
         // Postgres reste sur le réseau `devforge`, port interne 5432, sans second -p.
         let run = if in_docker() {
@@ -979,7 +983,7 @@ async fn start_container(creds: &Creds, public: bool) -> Result<(), String> {
     Err(format!("postgres devforge-pg pas prêt: {last} {tail}"))
 }
 
-async fn container_needs_recreate(want_ip: &str, port: u16, public: bool) -> bool {
+async fn container_needs_recreate(want_ip: &str, port: u16) -> bool {
     let fmt = "{{.HostConfig.NetworkMode}}|{{json .HostConfig.PortBindings}}|{{json .Config.Cmd}}";
     let Ok(out) = docker(&["inspect", "-f", fmt, CONTAINER]).await else {
         return false;
@@ -995,12 +999,7 @@ async fn container_needs_recreate(want_ip: &str, port: u16, public: bool) -> boo
     if network.starts_with("container:") || cmd.contains("port=") {
         return true;
     }
-    let listen = if public {
-        "listen_addresses=0.0.0.0"
-    } else {
-        "listen_addresses=127.0.0.1"
-    };
-    if !cmd.contains("wal_keep_size") || !cmd.contains(listen) {
+    if !cmd.contains("wal_keep_size") || !cmd.contains(CONTAINER_LISTEN) {
         return true;
     }
     if in_docker() {
@@ -1289,6 +1288,12 @@ fn ensure_volume_token(value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn container_listens_on_all_interfaces() {
+        // Le -p hôte restreint l'exposition ; dans le conteneur, 127.0.0.1 casse tout.
+        assert_eq!(CONTAINER_LISTEN, "listen_addresses=0.0.0.0");
+    }
 
     #[test]
     fn repl_advert_host_falls_back_to_leader_url() {
