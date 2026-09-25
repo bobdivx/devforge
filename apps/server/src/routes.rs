@@ -2449,7 +2449,7 @@ async fn execute_claimed_run(
     };
     let result = match owner {
         Some(uuid) => {
-            let (llm, mode) = state.llm_for_user(&uuid).await;
+            let (llm, mode) = state.llm_for_agents(&uuid).await;
             let token = crate::user_prefs::github_token(&state.pool, &uuid).await;
             devforge_github::with_token(
                 &token,

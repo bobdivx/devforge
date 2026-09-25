@@ -40,6 +40,13 @@ Sans SSH : executor **local** (Docker de la machine).
 `DEVFORGE_LLM_PROVIDER` = `auto` \| `stub` \| `openai` \| `openrouter` \| `ollama`  
 `DEVFORGE_LLM_API_KEY` / `OPENAI_API_KEY` · `DEVFORGE_LLM_MODEL` · `DEVFORGE_LLM_BASE_URL`
 
+`XAI_API_KEY` : clé de repli pour un provider **xAI (Grok)** créé sans clé (Réglages → LLM).
+Modèle par défaut `grok-4.7`, API `https://api.x.ai/v1`.
+
+Agents autonomes (Coordinateur, auto-réparation, agents cron/événement) : interrupteur
+**Agents autonomes** dans la fiche d’un provider — il passe en tête pour ces agents, les autres
+restent en repli. API : `GET/PUT /api/v1/llm/agents-provider` `{ "provider_id": "…" | null }`.
+
 ## Self-update
 
 `DEVFORGE_VERSION` · `DEVFORGE_UPDATE_MODE` (`compose` / `docker` / `binary` / `auto`)  

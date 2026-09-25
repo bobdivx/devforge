@@ -58,6 +58,14 @@ function statusDotClass(tone: 'ok' | 'warn' | 'neutral') {
   return 'bg-[var(--color-ink-faint)]';
 }
 
+type GrantRow = {
+  id: string;
+  client_id: string;
+  client_name: string;
+  created_at: string;
+  last_used_at?: string | null;
+};
+
 export function TokensPage() {
   const toast = useToast();
   const [items, setItems] = useState<TokenRow[]>([]);
@@ -70,6 +78,8 @@ export function TokensPage() {
   const [expiresDays, setExpiresDays] = useState('');
   const [createdPlain, setCreatedPlain] = useState<string | null>(null);
   const [instanceUrl, setInstanceUrl] = useState('');
+  const [grants, setGrants] = useState<GrantRow[]>([]);
+  const [grant, setGrant] = useState<GrantRow | null>(null);
 
   const mcpUrl = useMemo(() => {
     const base = (instanceUrl || (typeof window !== 'undefined' ? window.location.origin : ''))
@@ -82,6 +92,30 @@ export function TokensPage() {
     setItems(r.data ?? []);
   }
 
+  async function loadGrants() {
+    try {
+      const g = await api.oauthGrants();
+      setGrants(g.data ?? []);
+    } catch {
+      setGrants([]);
+    }
+  }
+
+  async function revokeGrant(id: string) {
+    if (!confirm('Déconnecter cette application ? Elle devra redemander l’autorisation.')) return;
+    setBusy(true);
+    try {
+      await api.oauthRevokeGrant(id);
+      toast.push({ title: 'Application déconnectée', tone: 'info' });
+      setGrant(null);
+      await loadGrants();
+    } catch (err) {
+      toast.push({ title: 'Déconnexion KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   useEffect(() => {
     Promise.all([api.listTokens(), api.bootstrap()])
       .then(([t, b]) => {
@@ -90,6 +124,7 @@ export function TokensPage() {
       })
       .catch((e) => toast.push({ title: 'Tokens KO', detail: String(e), tone: 'danger' }))
       .finally(() => setLoading(false));
+    void loadGrants();
   }, []);
 
   async function create(e: Event) {
@@ -233,6 +268,45 @@ export function TokensPage() {
         </p>
       )}
 
+      {grants.length > 0 && (
+        <div class="mt-8">
+          <h2 class="mb-3 text-sm font-medium tracking-tight">Applications connectées</h2>
+          <HubGrid cols={5}>
+            {grants.map((g, i) => (
+              <HubTile
+                key={g.id}
+                index={i}
+                title={g.client_name || 'Application'}
+                onClick={() => setGrant(g)}
+                icon={<HubIcon name="key" />}
+                badge={
+                  <span
+                    class="absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full bg-[var(--color-ok)] ring-2 ring-[#1c1c1e]"
+                    title="Connectée"
+                    aria-hidden
+                  />
+                }
+                subtitle={
+                  <div class="mt-1 text-[11px] font-medium text-[var(--color-ok)]">Connectée</div>
+                }
+              />
+            ))}
+          </HubGrid>
+        </div>
+      )}
+
+      <div class="mt-8">
+        <h2 class="mb-2 text-sm font-medium tracking-tight">Connecteur Grok / applications OAuth</h2>
+        <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
+          Dans Grok (Connecteurs → Nouveau → Personnalisé), colle l’URL{' '}
+          <code class="text-xs">{mcpUrl}</code>. La connexion passe par ton compte DevForge : aucun
+          token à copier, laisse Client ID / Secret vides.
+        </p>
+        <Button size="sm" variant="outline" onClick={() => copy(mcpUrl)}>
+          Copier l’URL MCP
+        </Button>
+      </div>
+
       <div class="mt-8">
         <h2 class="mb-2 text-sm font-medium tracking-tight">Connexion MCP (Cursor)</h2>
         <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
@@ -344,6 +418,47 @@ export function TokensPage() {
             <div class="flex justify-between gap-4">
               <dt class="text-[var(--color-ink-muted)]">Expiration</dt>
               <dd>{manage.expires_at ? formatWhen(manage.expires_at) : 'Illimité'}</dd>
+            </div>
+          </dl>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!grant}
+        onClose={() => setGrant(null)}
+        title={grant?.client_name || 'Application'}
+        description="Accès OAuth au MCP DevForge"
+        footer={
+          grant ? (
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => void revokeGrant(grant.id)}
+              >
+                Déconnecter
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => setGrant(null)}>
+                Fermer
+              </Button>
+            </>
+          ) : null
+        }
+      >
+        {grant && (
+          <dl class="space-y-3 text-sm">
+            <div class="flex justify-between gap-4">
+              <dt class="text-[var(--color-ink-muted)]">Client</dt>
+              <dd class="truncate font-mono text-xs">{grant.client_id}</dd>
+            </div>
+            <div class="flex justify-between gap-4">
+              <dt class="text-[var(--color-ink-muted)]">Autorisée</dt>
+              <dd>{formatWhen(grant.created_at)}</dd>
+            </div>
+            <div class="flex justify-between gap-4">
+              <dt class="text-[var(--color-ink-muted)]">Dernier usage</dt>
+              <dd>{formatWhen(grant.last_used_at)}</dd>
             </div>
           </dl>
         )}

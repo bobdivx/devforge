@@ -45,6 +45,7 @@ impl OpenAiCompatibleProvider {
             // Chat = /v1 ; listing Ollama = root + /api/tags (voir list_models_for_provider).
             "ollama" => Some("http://127.0.0.1:11434/v1"),
             "omniroute" => Some("http://127.0.0.1:20128/v1"),
+            "xai" => Some(crate::catalog::XAI_BASE_URL),
             _ => None,
         }
     }
@@ -61,6 +62,24 @@ impl OpenAiCompatibleProvider {
         }
         if provider == "omniroute" {
             return Self::list_openai_compatible_models("openai", base_url, api_key).await;
+        }
+        if provider == "xai" {
+            let key = crate::catalog::xai_api_key(api_key);
+            if key.is_empty() {
+                return Err(err("Clé API xAI requise (champ ou variable XAI_API_KEY)"));
+            }
+            let base = if base_url.trim().is_empty() {
+                crate::catalog::XAI_BASE_URL
+            } else {
+                base_url
+            };
+            let mut ids = Self::list_openai_compatible_models("xai", base, &key).await?;
+            // Chat/agents uniquement : écarte image, vidéo, voix.
+            ids.retain(|m| {
+                let l = m.to_lowercase();
+                !(l.contains("imagine") || l.contains("image") || l.contains("video") || l.contains("voice") || l.contains("tts"))
+            });
+            return Ok(ids);
         }
         if provider == "auto" {
             // Proxy / LiteLLM / Ollama distant : tenter OpenAI-compat puis /api/tags.
@@ -316,8 +335,10 @@ impl LlmProvider for OpenAiCompatibleProvider {
             }
         }
 
+        // Modèles de raisonnement xAI : réponses plus longues à venir (agents en tâche de fond).
+        let timeout_secs = if self.base_url.contains("api.x.ai") { 240 } else { 90 };
         let res = builder
-            .timeout(std::time::Duration::from_secs(90))
+            .timeout(std::time::Duration::from_secs(timeout_secs))
             .send()
             .await
             .map_err(|e| err(format!("LLM HTTP: {e}")))?;
@@ -735,6 +756,7 @@ impl OpenAiCompatibleProvider {
             "ollama" => "llama3.2".into(),
             "gemini" => "gemini-2.5-flash".into(),
             "openrouter" => "openai/gpt-4o-mini".into(),
+            "xai" => crate::catalog::XAI_DEFAULT_MODEL.into(),
             "anthropic" => "anthropic/claude-sonnet-4".into(),
             _ => {
                 if trimmed.is_empty() || trimmed == "auto" {

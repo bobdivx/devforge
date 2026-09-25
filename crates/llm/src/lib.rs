@@ -13,7 +13,10 @@ mod openai;
 mod resilient;
 mod stub;
 
-pub use catalog::{catalog, catalog_as_json, find_preset, CatalogField, CatalogPreset};
+pub use catalog::{
+    catalog, catalog_as_json, find_preset, xai_api_key, CatalogField, CatalogPreset, XAI_BASE_URL,
+    XAI_DEFAULT_MODEL,
+};
 pub use errors::humanize_llm_error;
 pub use health::{probe, ProbeRequest, ProbeResult};
 pub use openai::OpenAiCompatibleProvider;
@@ -140,6 +143,7 @@ pub fn provider_from_env() -> (Arc<dyn LlmProvider>, &'static str) {
         "openrouter" => "openrouter",
         "ollama" => "ollama",
         "omniroute" => "omniroute",
+        "xai" => "xai",
         _ => "stub",
     };
     (p, label)
@@ -214,6 +218,23 @@ pub fn provider_from_config(
             (
                 Arc::new(OpenAiCompatibleProvider::new(base, key, m)),
                 "anthropic".into(),
+            )
+        }
+        "xai" => {
+            let k = crate::catalog::xai_api_key(key);
+            if k.is_empty() {
+                tracing::warn!("xai sans clé (ni XAI_API_KEY) — stub");
+                return (Arc::new(StubLlmProvider), "stub".into());
+            }
+            let base = custom_base.unwrap_or(crate::catalog::XAI_BASE_URL);
+            let m = if model == "auto" || model.is_empty() || model == "gpt-4o-mini" {
+                crate::catalog::XAI_DEFAULT_MODEL
+            } else {
+                model
+            };
+            (
+                Arc::new(OpenAiCompatibleProvider::new(base, k, m)),
+                "xai".into(),
             )
         }
         "openrouter" => {
@@ -303,6 +324,17 @@ pub fn err(msg: impl Into<String>) -> DevForgeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn xai_config_defaults_to_grok_and_needs_a_key() {
+        let (provider, mode) = provider_from_config("xai", "xai-test", "auto", None);
+        assert_eq!(mode, "xai");
+        assert_eq!(provider.name(), "openai-compatible");
+        if std::env::var("XAI_API_KEY").is_err() {
+            let (_, mode) = provider_from_config("xai", "", "auto", None);
+            assert_eq!(mode, "stub");
+        }
+    }
 
     #[test]
     fn omniroute_config_keeps_auto_model() {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, ssoAuthorizeUrl } from '../lib/api';
-import { setToken, type Bootstrap } from '../lib/auth';
+import { peekReturnTo, setToken, takeReturnTo, type Bootstrap } from '../lib/auth';
 import { JoinClusterForm } from './JoinClusterForm';
 import { Alert, Button, Card, FadeIn, Input, Spinner } from './ui';
 
@@ -30,7 +30,7 @@ export function LoginPage() {
       setToken(ssoToken);
       // Nettoyage de l'URL
       window.history.replaceState({}, '', window.location.pathname);
-      window.location.href = '/app';
+      window.location.href = takeReturnTo() ?? '/app';
       return;
     }
 
@@ -47,7 +47,18 @@ export function LoginPage() {
           return;
         }
         if (b.authenticated) {
-          window.location.replace('/app');
+          window.location.replace(takeReturnTo() ?? '/app');
+          return;
+        }
+        // Retour attendu (ex. autorisation d'une application) + SSO seul : on enchaîne direct.
+        if (
+          !ssoError &&
+          peekReturnTo() &&
+          b.sso?.enabled &&
+          b.sso?.oidc_configured &&
+          b.sso?.hide_local_login
+        ) {
+          window.location.href = ssoAuthorizeUrl();
           return;
         }
         if (b.needs_setup) {
@@ -80,7 +91,9 @@ export function LoginPage() {
         window.location.href = r.onboarding?.required ? '/app/onboarding' : '/app';
       } else {
         const r = await api.login({ email, password });
-        window.location.href = r.onboarding?.required ? '/app/onboarding' : '/app';
+        window.location.href = r.onboarding?.required
+          ? '/app/onboarding'
+          : (takeReturnTo() ?? '/app');
       }
     } catch (err) {
       setError(String((err as Error).message || err));

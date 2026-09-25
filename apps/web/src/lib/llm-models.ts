@@ -33,6 +33,12 @@ export const PROVIDER_DEFAULTS: Record<string, ProviderDefaults> = {
     defaultUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     placeholderUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
   },
+  xai: {
+    needsKey: true,
+    needsUrl: false,
+    defaultUrl: 'https://api.x.ai/v1',
+    placeholderUrl: 'https://api.x.ai/v1',
+  },
   ollama: {
     needsKey: false,
     needsUrl: true,
@@ -67,6 +73,9 @@ export function isCustomEndpoint(baseUrl: string, provider: string): boolean {
   }
   if (provider === 'gemini') {
     return !url.includes('generativelanguage.googleapis.com');
+  }
+  if (provider === 'xai') {
+    return !url.includes('api.x.ai');
   }
   if (provider === 'openai' || provider === 'auto') {
     return !url.includes('api.openai.com');

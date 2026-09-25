@@ -76,3 +76,38 @@ export type Bootstrap = {
     node_name?: string;
   };
 };
+
+const RETURN_TO_KEY = 'devforge_return_to';
+const RETURN_TO_TTL_MS = 15 * 60 * 1000;
+
+/** Mémorise une page interne où revenir après la connexion (ex. consentement OAuth). */
+export function setReturnTo(path: string) {
+  if (typeof window === 'undefined') return;
+  if (!path.startsWith('/') || path.startsWith('//')) return;
+  localStorage.setItem(RETURN_TO_KEY, JSON.stringify({ path, at: Date.now() }));
+}
+
+/** Page de retour en attente (sans la consommer). */
+export function peekReturnTo(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(RETURN_TO_KEY);
+    if (!raw) return null;
+    const { path, at } = JSON.parse(raw) as { path: string; at: number };
+    if (Date.now() - at > RETURN_TO_TTL_MS || !path.startsWith('/') || path.startsWith('//')) {
+      localStorage.removeItem(RETURN_TO_KEY);
+      return null;
+    }
+    return path;
+  } catch {
+    localStorage.removeItem(RETURN_TO_KEY);
+    return null;
+  }
+}
+
+/** Consomme la page de retour en attente. */
+export function takeReturnTo(): string | null {
+  const path = peekReturnTo();
+  if (typeof window !== 'undefined') localStorage.removeItem(RETURN_TO_KEY);
+  return path;
+}

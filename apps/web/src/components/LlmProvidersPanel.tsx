@@ -13,6 +13,7 @@ import {
   Input,
   Modal,
   Skeleton,
+  Switch,
   useToast,
 } from './ui';
 
@@ -110,12 +111,14 @@ function ProviderCard({
   catalog,
   rank,
   index,
+  agents = false,
   onOpen,
 }: {
   provider: LlmProviderRow;
   catalog?: CatalogItem;
   rank: number;
   index: number;
+  agents?: boolean;
   onOpen: () => void;
 }) {
   const status = providerStatus(provider);
@@ -142,6 +145,14 @@ function ProviderCard({
           {rank === 0 && (
             <span class="absolute -bottom-1 -left-1 rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-zinc-950 ring-2 ring-[#1c1c1e]">
               #1
+            </span>
+          )}
+          {agents && (
+            <span
+              class="absolute -bottom-1 -right-1 rounded-full bg-[var(--color-ok)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-zinc-950 ring-2 ring-[#1c1c1e]"
+              title="Utilisé par les agents autonomes (Coordinateur)"
+            >
+              Agents
             </span>
           )}
         </>
@@ -224,10 +235,16 @@ export function LlmProvidersPanel({
   const [testing, setTesting] = useState(false);
   const [probing, setProbing] = useState(false);
   const [manage, setManage] = useState<LlmProviderRow | null>(null);
+  const [agentsProvider, setAgentsProvider] = useState<string | null>(null);
 
   async function load() {
     try {
-      const [c, p] = await Promise.all([api.llmCatalog(), api.llmProviders()]);
+      const [c, p, a] = await Promise.all([
+        api.llmCatalog(),
+        api.llmProviders(),
+        api.llmAgentsProvider().catch(() => ({ provider_id: null })),
+      ]);
+      setAgentsProvider(a.provider_id ?? null);
       setCatalog(c.data ?? []);
       setProviders(p.data ?? []);
       setMode(p.active_mode || 'stub');
@@ -294,7 +311,13 @@ export function LlmProvidersPanel({
       });
       setModels(r.models);
       if (r.models.length && fields.model && !r.models.includes(fields.model) && fields.model !== AUTO_MODEL_VALUE) {
-        setFields((prev) => ({ ...prev, model: r.models[0] }));
+        const pick =
+          preset.provider === 'xai'
+            ? (r.models.find((m) => m.startsWith('grok-4.7')) ??
+              r.models.find((m) => m.startsWith('grok-4')) ??
+              r.models[0])
+            : r.models[0];
+        setFields((prev) => ({ ...prev, model: pick }));
       }
       if (!silent) {
         toast.push({ title: 'Modèles', detail: `${r.models.length} trouvé(s)`, tone: 'ok' });
@@ -441,6 +464,26 @@ export function LlmProvidersPanel({
     }
   }
 
+  async function toggleAgents(id: string) {
+    const next = agentsProvider === id ? null : id;
+    setBusy(true);
+    try {
+      const r = await api.llmSetAgentsProvider(next);
+      setAgentsProvider(r.provider_id ?? null);
+      toast.push({
+        title: next ? 'Agents autonomes' : 'Agents : chaîne par défaut',
+        detail: next
+          ? 'Le Coordinateur et l’auto-réparation utiliseront ce modèle en priorité.'
+          : 'Les agents suivent l’ordre de priorité.',
+        tone: 'ok',
+      });
+    } catch (err) {
+      toast.push({ title: 'Erreur', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function goStub() {
     setBusy(true);
     try {
@@ -508,6 +551,7 @@ export function LlmProvidersPanel({
               catalog={catalog.find((c) => c.id === p.catalog_id)}
               rank={i}
               index={i}
+              agents={agentsProvider === p.id}
               onOpen={() => setManage(p)}
             />
           ))}
@@ -792,6 +836,21 @@ export function LlmProvidersPanel({
                   </span>
                 )}
               </div>
+            </div>
+
+            <div class="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-line)] px-3 py-2.5">
+              <div class="min-w-0">
+                <div class="text-sm font-medium">Agents autonomes</div>
+                <p class="text-xs text-[var(--color-ink-faint)]">
+                  Coordinateur, auto-réparation et agents planifiés utilisent ce modèle en premier.
+                </p>
+              </div>
+              <Switch
+                checked={agentsProvider === manage.id}
+                disabled={busy}
+                label="Utiliser pour les agents autonomes"
+                onToggle={() => void toggleAgents(manage.id)}
+              />
             </div>
 
             <div class="flex flex-wrap gap-2">

@@ -9,6 +9,29 @@ JSON-RPC : `POST /api/v1/mcp`.
 
 Les agents DevForge consomment déjà ce registry en interne.
 
+Transport : MCP Streamable HTTP (réponses JSON, notifications → `202`). Auth Bearer :
+
+- session `df_…` ou token API `dfat_…` (Compte → Tokens) ;
+- access token OAuth `dfoa_…` (connecteurs distants, voir ci-dessous).
+
+### Connecteur Grok (et autres clients OAuth)
+
+Dans Grok : **Connecteurs → Nouveau connecteur → Personnalisé**, URL du serveur :
+`https://<instance>/api/v1/mcp`. Laisse Client ID / Client Secret vides.
+
+Découverte OAuth 2.1 :
+
+- `401` sur le MCP + `WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource/api/v1/mcp"`
+- `GET /.well-known/oauth-protected-resource[/api/v1/mcp]` (RFC 9728)
+- `GET /.well-known/oauth-authorization-server` (RFC 8414)
+- `POST /oauth/register` (DCR, RFC 7591) — ou `client_id` en URL https (Client ID Metadata Document ; sans document JSON, la `redirect_uri` doit partager l’origine du `client_id`, ex. `https://grok.com`)
+- `GET /oauth/authorize` (PKCE S256 obligatoire) → page de consentement `/oauth/consent/` (session DevForge / Pocket ID)
+- `POST /oauth/token` (`authorization_code`, `refresh_token` tournant), `POST /oauth/revoke`
+
+Access token 1 h, refresh 90 jours. Les tokens OAuth ne valent que pour le MCP (pas l’API REST).
+Applications connectées et révocation : **Compte → Tokens**. L’URL publique vient de l’URL d’instance
+(Admin → Domaine), sinon des en-têtes `Host` / `X-Forwarded-Proto`.
+
 ## Client (serveurs distants)
 
 Page **MCP** (`/app/mcp`) :
