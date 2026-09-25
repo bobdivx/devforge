@@ -113,7 +113,7 @@ fn tunnel_name(node_id: &str) -> String {
     format!("devforge-{safe}")
 }
 
-async fn ingress_for(state: &AppState, server_id: &str) -> String {
+pub(crate) async fn ingress_for(state: &AppState, server_id: &str) -> String {
     let id = crate::cluster_routes::normalize_server_id(server_id);
     if let Ok(Some(n)) = state.cluster.store().get_node(&id).await {
         if !n.ingress_host.trim().is_empty() {
@@ -334,6 +334,14 @@ pub async fn sync_fqdn(state: &AppState, fqdn: &str, server_id: &str) -> Result<
     if !configured(&dns) {
         return Err("DNS auto non configuré".into());
     }
+    // Bascule intérim en cours sur ce hostname : ne pas le renvoyer vers le tunnel mort.
+    if crate::dns_failover::is_overridden(fqdn) {
+        if let Ok(local) = state.cluster.local().await {
+            if local.acting_leader {
+                return Ok(());
+            }
+        }
+    }
     let sid = if server_id.trim().is_empty() {
         LEADER_NODE_ID.to_string()
     } else {
@@ -371,6 +379,60 @@ pub async fn sync_fqdn(state: &AppState, fqdn: &str, server_id: &str) -> Result<
         }
         _ => Err("provider DNS inconnu".into()),
     }
+}
+
+/// Cible actuelle (CNAME / A) d'un hostname chez le provider DNS.
+pub(crate) async fn lookup_target(state: &AppState, fqdn: &str) -> Result<Option<String>, String> {
+    let dns = load(state).await;
+    match dns.provider.as_str() {
+        "cloudflare" => {
+            let cf = cloudflare_connect_for_fqdn(cf_key(&dns), fqdn)
+                .await
+                .map_err(|e| e.to_string())?;
+            cf.lookup_name(fqdn)
+                .await
+                .map(|r| r.map(|(_, content)| content))
+                .map_err(|e| e.to_string())
+        }
+        "porkbun" => {
+            let c = porkbun_creds(&dns).ok_or("Porkbun : credentials manquants")?;
+            porkbun_lookup(&c, fqdn)
+                .await
+                .map(|r| r.map(|(_, content)| content))
+                .map_err(|e| e.to_string())
+        }
+        _ => Err("DNS auto non configuré".into()),
+    }
+}
+
+/// Pointe un hostname vers une cible précise (CNAME Cloudflare / A Porkbun).
+pub(crate) async fn point_fqdn_to(state: &AppState, fqdn: &str, target: &str) -> Result<(), String> {
+    let dns = load(state).await;
+    if !configured(&dns) {
+        return Err("DNS auto non configuré".into());
+    }
+    match dns.provider.as_str() {
+        "cloudflare" => {
+            let cf = cloudflare_connect_for_fqdn(cf_key(&dns), fqdn)
+                .await
+                .map_err(|e| e.to_string())?;
+            cf.upsert_cname(fqdn, target)
+                .await
+                .map_err(|e| format!("zone {}: {e}", cf.zone))
+        }
+        "porkbun" => {
+            let c = porkbun_creds(&dns).ok_or("Porkbun : credentials manquants")?;
+            upsert_record(&c, fqdn, target)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        _ => Err("provider DNS inconnu".into()),
+    }
+}
+
+/// Domaines d'apps gérés (même liste que l'UI) : `{ fqdn, node_id, … }`.
+pub(crate) async fn managed_domains(state: &AppState) -> Vec<Value> {
+    list_managed_domains(state).await
 }
 
 pub async fn remove_fqdn(state: &AppState, fqdn: &str) {

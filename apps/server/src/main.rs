@@ -11,6 +11,7 @@ mod db;
 mod deploy_queue;
 mod detect_svc;
 mod dns;
+mod dns_failover;
 mod domain_catalog;
 mod git_routes;
 mod group_routes;
@@ -83,6 +84,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(false)
     {
         tracing::info!("mode worker — pas d’UI produit");
+        {
+            // Rétrogradé pendant une bascule DNS : remettre les cibles d'origine.
+            let st = state.clone();
+            tokio::spawn(async move { crate::dns_failover::restore(&st).await });
+        }
         if let Err(e) = state.proxy.ensure_traefik().await {
             tracing::error!(error = %e, "Traefik worker — les domaines de ce nœud peuvent être injoignables");
         } else {
@@ -154,6 +160,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     crate::dns::spawn_dns_loop(state.clone());
+    crate::dns_failover::spawn_loop(state.clone());
     routes::resume_deploy_queue(state.clone());
     routes::resume_agent_runs(state.clone());
 

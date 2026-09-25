@@ -75,11 +75,19 @@ async fn health(State(state): State<AppState>, headers: HeaderMap) -> Json<Value
         .await
         .ok()
         .is_some_and(|(user, _)| user.role == "instance_admin");
+    // `node_id` : permet à un leader intérimaire de savoir qui sert le hostname public.
+    let node_id = state
+        .cluster
+        .local()
+        .await
+        .map(|l| l.node_id)
+        .unwrap_or_default();
     if !is_admin {
         return Json(json!({
             "ok": true,
             "service": "devforge-server",
             "version": state.updater.current_version(),
+            "node_id": node_id,
         }));
     }
     let cluster = state.cluster.summary().await.ok();

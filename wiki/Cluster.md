@@ -34,6 +34,12 @@ Les tuiles affichent CPU, version DevForge, nombre d’apps, last_seen. Fiche n�
 
 Si le **leader** tombe : après ~1 min sans heartbeat, le worker au plus petit `id` (non drainé, URL connue) **est élu** et promeut sa réplique Postgres (déjà alimentée en continu). Les écritures confirmées pendant qu’une réplique streame attendent que ce WAL soit rejoué. Sans réplique encore prête, l’élu recharge le dernier `pg_dump`. Les apps Docker déjà lancées **continuent**. Quand le leader d’origine revient, il reprend une copie physique de l’intérim puis redevient le control plane.
 
+**Bascule DNS de l’intérim** (toutes les 60 s tant qu’il est intérim) :
+
+- **Control plane** (hostname de l’URL d’instance, ex. `web.jeser.app`) : si `https://…/api/v1/health` ne répond plus, l’intérim pose une route Traefik locale `Host(…) → DevForge local` puis repointe le CNAME vers **son** tunnel. Si l’URL publique répond depuis un autre nœud (partition LAN), il ne touche à rien.
+- **Apps** placées sur le leader d’origine : repointées seulement si leur tunnel est mort (Cloudflare 530 / aucune connexion). Une app encore servie (même en 502/404) reste où elle est.
+- **Retour** : la cible d’origine est mémorisée avant la bascule (`cluster-dns-failover.json`) et restaurée quand l’intérim est rétrogradé. Le leader d’origine mémorise aussi sa cible (`control-plane-dns-origin.json`) et la remet si, sain et sans intérim actif, il trouve le control plane pointé vers un worker.
+
 Un tunnel Cloudflare **uniquement sur le leader** est un point unique : les domaines publics meurent avec lui. Settings → Domaine → **Entrée publique** : un token (et le domaine si besoin).
 
 - **Cloudflare** — un tunnel `devforge-{nœud}` par machine, CNAME proxied vers `{tunnel_id}.cfargotunnel.com`. Pas de 80/443 à ouvrir.
