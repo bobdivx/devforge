@@ -1,6 +1,6 @@
 # FAQ
 
-## DevForge remplace-t-il Vercel / Coolify ?
+## DevForge remplace-t-il Vercel / Netlify ?
 
 C’est un **PaaS self-hosted** (Docker, domaines, env, backups) **plus** un builder web (agents + atelier). Tu héberges le control plane.
 
