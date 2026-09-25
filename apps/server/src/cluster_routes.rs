@@ -18,7 +18,7 @@ use devforge_cluster::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use crate::state::AppState;
@@ -614,7 +614,10 @@ async fn local_join(
         ..Default::default()
     };
     state.cluster.set_local(&next).await.map_err(map_err)?;
-    spawn_heartbeat(state.cluster.clone());
+    // Même boucle qu’au boot : heartbeat + roster + réplique/snapshot + élection intérim.
+    // L’ancienne boucle « heartbeat seul » laissait un worker enrôlé à chaud sans failover
+    // jusqu’au prochain redémarrage du process.
+    crate::worker::maybe_start_heartbeat(&state).await;
 
     Ok(Json(json!({
         "ok": true,
@@ -629,15 +632,6 @@ fn hostname_fallback() -> String {
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "worker".into())
-}
-
-pub fn spawn_heartbeat(cluster: Arc<devforge_cluster::ClusterFacade>) {
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(15)).await;
-            let _ = send_heartbeat(&cluster, false).await;
-        }
-    });
 }
 
 /// `include_advertise` : n’envoyer l’URL du nœud que lors d’un PATCH local,
