@@ -658,6 +658,44 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  oauthRequest: (id: string) =>
+    request<{
+      client_id: string;
+      client_name: string;
+      redirect_host: string;
+      scope: string;
+      expires_at: string;
+      user: { email: string; name: string };
+    }>(`/oauth/requests/${encodeURIComponent(id)}`),
+  oauthApprove: (id: string) =>
+    request<{ ok: boolean; redirect_to: string }>(
+      `/oauth/requests/${encodeURIComponent(id)}/approve`,
+      { method: 'POST', body: '{}' },
+    ),
+  oauthDeny: (id: string) =>
+    request<{ ok: boolean; redirect_to: string }>(
+      `/oauth/requests/${encodeURIComponent(id)}/deny`,
+      { method: 'POST', body: '{}' },
+    ),
+  oauthGrants: () =>
+    request<{
+      data: Array<{
+        id: string;
+        client_id: string;
+        client_name: string;
+        created_at: string;
+        last_used_at?: string | null;
+      }>;
+    }>('/oauth/grants'),
+  oauthRevokeGrant: (id: string) =>
+    request<{ ok: boolean }>(`/oauth/grants/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  llmAgentsProvider: () =>
+    request<{ provider_id: string | null }>('/llm/agents-provider'),
+  llmSetAgentsProvider: (provider_id: string | null) =>
+    request<{ ok: boolean; provider_id: string | null }>('/llm/agents-provider', {
+      method: 'PUT',
+      body: JSON.stringify({ provider_id }),
+    }),
   llmCatalog: () =>
     request<{
       data: Array<{

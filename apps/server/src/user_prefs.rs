@@ -110,3 +110,38 @@ pub async fn effective_wildcard_for_workspace(pool: &PgPool, workspace_uuid: &st
     }
     instance_wildcard(pool).await
 }
+
+/// Provider LLM choisi pour les agents autonomes (vide = ordre normal de la chaîne).
+pub async fn agents_llm_provider(pool: &PgPool, user_uuid: &str) -> String {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT COALESCE(agents_llm_provider_id, '') FROM user_settings WHERE user_uuid = $1",
+    )
+    .bind(user_uuid)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+    row.map(|(p,)| p).unwrap_or_default()
+}
+
+pub async fn set_agents_llm_provider(
+    pool: &PgPool,
+    user_uuid: &str,
+    provider_id: &str,
+) -> Result<(), sqlx::Error> {
+    let now = crate::state::now_str();
+    sqlx::query(
+        r#"
+        INSERT INTO user_settings (user_uuid, wildcard_domain, github_token, agents_llm_provider_id, updated_at)
+        VALUES ($1, '', '', $2, $3)
+        ON CONFLICT (user_uuid) DO UPDATE
+            SET agents_llm_provider_id = EXCLUDED.agents_llm_provider_id, updated_at = EXCLUDED.updated_at
+        "#,
+    )
+    .bind(user_uuid)
+    .bind(provider_id)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}

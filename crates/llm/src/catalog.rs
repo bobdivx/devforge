@@ -45,6 +45,22 @@ fn field(
     }
 }
 
+/// API xAI (Grok), compatible OpenAI.
+pub const XAI_BASE_URL: &str = "https://api.x.ai/v1";
+/// Modèle xAI par défaut : recommandé par xAI pour le code et les tâches agentiques.
+pub const XAI_DEFAULT_MODEL: &str = "grok-4.7";
+
+/// Clé xAI : celle du provider, sinon la variable d'environnement `XAI_API_KEY`.
+pub fn xai_api_key(configured: &str) -> String {
+    let k = configured.trim();
+    if !k.is_empty() {
+        return k.to_string();
+    }
+    std::env::var("XAI_API_KEY")
+        .map(|v| v.trim().to_string())
+        .unwrap_or_default()
+}
+
 /// Catalogue LLM — UX simple type MCP (cartes + modal config).
 pub fn catalog() -> Vec<CatalogPreset> {
     vec![
@@ -144,6 +160,35 @@ pub fn catalog() -> Vec<CatalogPreset> {
             ],
             popular: true,
             icon_domain: Some("google.com".into()),
+        },
+        CatalogPreset {
+            id: "xai".into(),
+            name: "xAI (Grok)".into(),
+            description: "Grok 4.x via l’API xAI (compatible OpenAI, appels d’outils). Idéal pour les agents.".into(),
+            category: "cloud".into(),
+            docs_url: Some("https://console.x.ai".into()),
+            default_url: Some(XAI_BASE_URL.into()),
+            provider: "xai".into(),
+            fields: vec![
+                field(
+                    "api_key",
+                    "Clé API xAI",
+                    true,
+                    false,
+                    Some("xai-…"),
+                    Some("console.x.ai → API Keys. Vide = variable XAI_API_KEY du serveur."),
+                ),
+                field(
+                    "model",
+                    "Modèle",
+                    false,
+                    false,
+                    Some(XAI_DEFAULT_MODEL),
+                    Some("Liste chargée depuis /v1/models. Recommandé : grok-4.7 (code, agents)."),
+                ),
+            ],
+            popular: true,
+            icon_domain: Some("x.ai".into()),
         },
         CatalogPreset {
             id: "openrouter".into(),
@@ -299,6 +344,19 @@ pub fn catalog_as_json() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn xai_preset_is_openai_compatible_cloud() {
+        let preset = find_preset("xai").expect("preset xai");
+        assert_eq!(preset.provider, "xai");
+        assert_eq!(preset.category, "cloud");
+        assert_eq!(preset.default_url.as_deref(), Some("https://api.x.ai/v1"));
+        let model = preset.fields.iter().find(|f| f.key == "model").unwrap();
+        assert_eq!(model.placeholder.as_deref(), Some("grok-4.7"));
+        // Clé facultative : repli sur XAI_API_KEY côté serveur.
+        let key = preset.fields.iter().find(|f| f.key == "api_key").unwrap();
+        assert!(key.secret && !key.required);
+    }
 
     #[test]
     fn omniroute_is_an_external_gateway_preset() {

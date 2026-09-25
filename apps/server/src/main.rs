@@ -18,6 +18,7 @@ mod group_routes;
 mod infra_routes;
 mod infra_sqlite;
 mod llm_routes;
+mod mcp_oauth;
 mod mcp_routes;
 mod paths;
 mod platform_sso;
@@ -231,6 +232,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(project_pg_routes::router())
         .merge(llm_routes::router())
         .merge(mcp_routes::router())
+        .merge(mcp_oauth::router())
         .merge(runner_routes::router())
         .merge(actions_routes::router())
         .merge(git_routes::router())

@@ -20,7 +20,7 @@ use uuid::Uuid;
 ///
 /// Retourne une erreur seulement si aucune source ne fournit une URL HTTPS valide
 /// (ou localhost pour dev).
-async fn resolve_public_base_url(
+pub(crate) async fn resolve_public_base_url(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<String, ApiError> {
@@ -104,8 +104,11 @@ pub fn router() -> Router<AppState> {
             get(list_mcp_resources),
         )
         .route("/api/v1/mcp/tools", get(list_local_mcp_tools))
-        .route("/api/v1/mcp", post(mcp_jsonrpc))
-        .route("/mcp", post(mcp_jsonrpc))
+        .route(
+            "/api/v1/mcp",
+            post(mcp_jsonrpc).get(mcp_get).delete(mcp_get),
+        )
+        .route("/mcp", post(mcp_jsonrpc).get(mcp_get).delete(mcp_get))
         .route(
             "/api/v1/projects/{uuid}/resources",
             get(list_project_resources).post(link_project_resource),
@@ -357,70 +360,222 @@ async fn list_local_mcp_tools(
 #[derive(Deserialize)]
 struct JsonRpcRequest {
     #[serde(default)]
+    #[allow(dead_code)]
     jsonrpc: Option<String>,
+    #[serde(default)]
     id: Option<Value>,
+    #[serde(default)]
     method: String,
     #[serde(default)]
     params: Option<Value>,
 }
 
-/// Endpoint MCP JSON-RPC pour clients externes (Cursor, Claude…).
-/// Auth: Bearer session `df_…` ou API token `dfat_…`.
+/// Versions du protocole MCP acceptées (la première = la plus récente).
+const MCP_PROTOCOL_VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+
+/// Renvoie la version demandée si supportée, sinon la plus récente.
+/// Sans version (anciens clients) : 2024-11-05, comme avant.
+pub(crate) fn negotiate_protocol_version(requested: Option<&str>) -> &'static str {
+    match requested {
+        Some(v) => MCP_PROTOCOL_VERSIONS
+            .iter()
+            .find(|x| **x == v)
+            .copied()
+            .unwrap_or(MCP_PROTOCOL_VERSIONS[0]),
+        None => "2024-11-05",
+    }
+}
+
+enum McpAuthError {
+    Missing,
+    Invalid,
+    Other(ApiError),
+}
+
+/// Bearer accepté sur le MCP : session `df_…`, API token `dfat_…` ou access token OAuth `dfoa_…`.
+async fn mcp_authenticate(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(crate::auth_routes::UserRow, Vec<String>), McpAuthError> {
+    let token = bearer_from(headers).ok_or(McpAuthError::Missing)?;
+    if token.starts_with(crate::mcp_oauth::ACCESS_TOKEN_PREFIX) {
+        return match crate::mcp_oauth::resolve_access_token(&state.pool, &token).await {
+            Ok(Some(found)) => Ok(found),
+            Ok(None) => Err(McpAuthError::Invalid),
+            Err(e) => Err(McpAuthError::Other(ApiError::from(e))),
+        };
+    }
+    match resolve_auth(state, &token).await {
+        Ok(Some(found)) => Ok(found),
+        Ok(None) => Err(McpAuthError::Invalid),
+        Err(err) => Err(McpAuthError::Other(ApiError::from_auth(err))),
+    }
+}
+
+fn mcp_path(uri: &axum::http::Uri) -> &'static str {
+    if uri.path().trim_end_matches('/') == "/mcp" {
+        "/mcp"
+    } else {
+        "/api/v1/mcp"
+    }
+}
+
+/// 401 + `WWW-Authenticate: Bearer resource_metadata=…` (découverte OAuth, RFC 9728).
+async fn mcp_unauthorized(
+    state: &AppState,
+    headers: &HeaderMap,
+    path: &str,
+    invalid: bool,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let message = if invalid {
+        "Token invalide ou expiré"
+    } else {
+        "Bearer token requis (dfat_… ou session)"
+    };
+    let mut res = ApiError {
+        status: axum::http::StatusCode::UNAUTHORIZED,
+        message: message.into(),
+    }
+    .into_response();
+    if let Ok(base) = resolve_public_base_url(state, headers).await {
+        if let Ok(v) = axum::http::HeaderValue::from_str(&crate::mcp_oauth::www_authenticate(
+            &base, path, invalid,
+        )) {
+            res.headers_mut()
+                .insert(axum::http::header::WWW_AUTHENTICATE, v);
+        }
+    }
+    res
+}
+
+async fn mcp_auth_or_response(
+    state: &AppState,
+    headers: &HeaderMap,
+    path: &str,
+) -> Result<(crate::auth_routes::UserRow, Vec<String>), axum::response::Response> {
+    use axum::response::IntoResponse;
+    match mcp_authenticate(state, headers).await {
+        Ok(found) => Ok(found),
+        Err(McpAuthError::Missing) => Err(mcp_unauthorized(state, headers, path, false).await),
+        Err(McpAuthError::Invalid) => Err(mcp_unauthorized(state, headers, path, true).await),
+        Err(McpAuthError::Other(e)) => Err(e.into_response()),
+    }
+}
+
+/// GET/DELETE sur l'endpoint MCP : pas de flux SSE serveur ni de session à fermer.
+async fn mcp_get(
+    State(state): State<AppState>,
+    uri: axum::http::Uri,
+    headers: HeaderMap,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if let Err(res) = mcp_auth_or_response(&state, &headers, mcp_path(&uri)).await {
+        return res;
+    }
+    let mut res = (
+        axum::http::StatusCode::METHOD_NOT_ALLOWED,
+        Json(json!({"ok": false, "error": "Utilise POST (MCP Streamable HTTP, réponses JSON)"})),
+    )
+        .into_response();
+    res.headers_mut().insert(
+        axum::http::header::ALLOW,
+        axum::http::HeaderValue::from_static("POST"),
+    );
+    res
+}
+
+/// Endpoint MCP (Streamable HTTP, réponses JSON) pour clients externes (Cursor, Claude, Grok…).
+/// Auth : Bearer session `df_…`, API token `dfat_…` ou access token OAuth `dfoa_…`.
 async fn mcp_jsonrpc(
     State(state): State<AppState>,
+    uri: axum::http::Uri,
     headers: HeaderMap,
-    Json(body): Json<JsonRpcRequest>,
-) -> Result<Json<Value>, ApiError> {
-    let token = bearer_from(&headers).ok_or_else(|| ApiError {
-        status: axum::http::StatusCode::UNAUTHORIZED,
-        message: "Bearer token requis (dfat_… ou session)".into(),
-    })?;
-    let (user, abilities) = resolve_auth(&state, &token)
-        .await
-        .map_err(|(status, Json(v))| ApiError {
-            status,
-            message: v
-                .get("error")
-                .and_then(|e| e.as_str())
-                .unwrap_or("auth")
-                .to_string(),
-        })?
-        .ok_or_else(|| ApiError {
-            status: axum::http::StatusCode::UNAUTHORIZED,
-            message: "Token invalide ou expiré".into(),
-        })?;
-    let _team = user_team(&state, &user.uuid)
-        .await
-        .map_err(|(status, Json(v))| ApiError {
-            status,
-            message: v
-                .get("error")
-                .and_then(|e| e.as_str())
-                .unwrap_or("auth")
-                .to_string(),
-        })?
-        .ok_or_else(|| ApiError {
-            status: axum::http::StatusCode::FORBIDDEN,
-            message: "Aucun workspace".into(),
-        })?;
-
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let path = mcp_path(&uri);
+    let (user, abilities) = match mcp_auth_or_response(&state, &headers, path).await {
+        Ok(found) => found,
+        Err(res) => return res,
+    };
+    match user_team(&state, &user.uuid).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return ApiError {
+                status: axum::http::StatusCode::FORBIDDEN,
+                message: "Aucun workspace".into(),
+            }
+            .into_response()
+        }
+        Err(err) => return ApiError::from_auth(err).into_response(),
+    }
     if !has_ability(&abilities, ABILITY_READ) {
-        return Err(ApiError {
+        return ApiError {
             status: axum::http::StatusCode::FORBIDDEN,
             message: "Ability `read` requise".into(),
-        });
+        }
+        .into_response();
     }
 
+    let parsed: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "jsonrpc": "2.0",
+                    "id": Value::Null,
+                    "error": { "code": -32700, "message": format!("Parse error: {e}") },
+                })),
+            )
+                .into_response()
+        }
+    };
+
+    if let Value::Array(items) = parsed {
+        let mut out = Vec::new();
+        for item in items {
+            if let Some(resp) = mcp_handle_one(&state, &abilities, item).await {
+                out.push(resp);
+            }
+        }
+        if out.is_empty() {
+            return axum::http::StatusCode::ACCEPTED.into_response();
+        }
+        return Json(Value::Array(out)).into_response();
+    }
+    match mcp_handle_one(&state, &abilities, parsed).await {
+        Some(resp) => Json(resp).into_response(),
+        None => axum::http::StatusCode::ACCEPTED.into_response(),
+    }
+}
+
+/// Traite un message JSON-RPC. `None` = notification (réponse HTTP 202 sans corps).
+async fn mcp_handle_one(state: &AppState, abilities: &[String], raw: Value) -> Option<Value> {
+    let body: JsonRpcRequest = match serde_json::from_value(raw) {
+        Ok(b) => b,
+        Err(e) => {
+            return Some(json!({
+                "jsonrpc": "2.0",
+                "id": Value::Null,
+                "error": { "code": -32600, "message": format!("Invalid Request: {e}") },
+            }))
+        }
+    };
+    if body.id.is_none() && body.method.starts_with("notifications/") {
+        return None;
+    }
     let id = body.id.clone().unwrap_or(Value::Null);
     let rpc_ok = |result: Value| {
-        Json(json!({
+        Some(json!({
             "jsonrpc": "2.0",
             "id": id,
             "result": result,
         }))
     };
     let rpc_err = |code: i64, message: &str| {
-        Json(json!({
+        Some(json!({
             "jsonrpc": "2.0",
             "id": id,
             "error": { "code": code, "message": message },
@@ -428,16 +583,25 @@ async fn mcp_jsonrpc(
     };
 
     match body.method.as_str() {
-        "initialize" => Ok(rpc_ok(json!({
-            "protocolVersion": "2024-11-05",
-            "capabilities": { "tools": { "listChanged": false } },
-            "serverInfo": {
-                "name": "devforge",
-                "version": env!("CARGO_PKG_VERSION"),
-            },
-        }))),
-        "notifications/initialized" | "notifications/cancelled" => Ok(rpc_ok(json!({}))),
-        "ping" => Ok(rpc_ok(json!({}))),
+        "initialize" => {
+            let requested = body
+                .params
+                .as_ref()
+                .and_then(|p| p.get("protocolVersion"))
+                .and_then(|v| v.as_str());
+            rpc_ok(json!({
+                "protocolVersion": negotiate_protocol_version(requested),
+                "capabilities": { "tools": { "listChanged": false } },
+                "serverInfo": {
+                    "name": "devforge",
+                    "title": "DevForge",
+                    "version": env!("CARGO_PKG_VERSION"),
+                },
+                "instructions": "DevForge : PaaS auto-hébergé. Outils pour lister les projets, lire/écrire des fichiers, déployer, lire les logs et vérifier la santé des applications.",
+            }))
+        }
+        "notifications/initialized" | "notifications/cancelled" => rpc_ok(json!({})),
+        "ping" => rpc_ok(json!({})),
         "tools/list" => {
             let payload = state.mcp.server.tools_list_payload().await;
             let tools = payload.get("tools").cloned().unwrap_or_else(|| json!([]));
@@ -457,37 +621,39 @@ async fn mcp_jsonrpc(
                     })
                 })
                 .collect();
-            Ok(rpc_ok(json!({ "tools": mapped })))
+            rpc_ok(json!({ "tools": mapped }))
         }
+        "resources/list" => rpc_ok(json!({ "resources": [] })),
+        "prompts/list" => rpc_ok(json!({ "prompts": [] })),
         "tools/call" => {
-            if !has_ability(&abilities, ABILITY_WRITE) {
-                return Ok(rpc_err(-32001, "Ability `write` requise pour tools/call"));
+            if !has_ability(abilities, ABILITY_WRITE) {
+                return rpc_err(-32001, "Ability `write` requise pour tools/call");
             }
-            let params = body.params.unwrap_or(json!({}));
+            let params = body.params.clone().unwrap_or(json!({}));
             let name = params
                 .get("name")
                 .and_then(|n| n.as_str())
                 .unwrap_or("")
                 .to_string();
             if name.is_empty() {
-                return Ok(rpc_err(-32602, "params.name requis"));
+                return rpc_err(-32602, "params.name requis");
             }
             let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
             match state.registry.execute(&name, arguments).await {
-                Ok(result) => Ok(rpc_ok(json!({
+                Ok(result) => rpc_ok(json!({
                     "content": [{
                         "type": "text",
                         "text": serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()),
                     }],
                     "isError": false,
-                }))),
-                Err(e) => Ok(rpc_ok(json!({
+                })),
+                Err(e) => rpc_ok(json!({
                     "content": [{ "type": "text", "text": e.to_string() }],
                     "isError": true,
-                }))),
+                })),
             }
         }
-        other => Ok(rpc_err(-32601, &format!("Method not found: {other}"))),
+        other => rpc_err(-32601, &format!("Method not found: {other}")),
     }
 }
 

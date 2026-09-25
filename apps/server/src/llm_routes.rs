@@ -36,6 +36,64 @@ pub fn router() -> Router<AppState> {
             post(llm_connect).delete(llm_disconnect),
         )
         .route("/api/v1/llm/models", post(llm_list_models))
+        .route(
+            "/api/v1/llm/agents-provider",
+            get(get_agents_provider).put(set_agents_provider),
+        )
+}
+
+/// Provider des agents autonomes (Coordinateur, auto-réparation…). `null` = ordre de la chaîne.
+async fn get_agents_provider(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let user_uuid = require_user(&state, &headers).await?;
+    let id = crate::user_prefs::agents_llm_provider(&state.pool, &user_uuid).await;
+    Ok(Json(json!({
+        "provider_id": if id.is_empty() { Value::Null } else { json!(id) },
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct AgentsProviderBody {
+    pub provider_id: Option<String>,
+}
+
+async fn set_agents_provider(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<AgentsProviderBody>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let user_uuid = require_user(&state, &headers).await?;
+    let id = body.provider_id.unwrap_or_default().trim().to_string();
+    if !id.is_empty() {
+        let exists: Option<(String,)> =
+            sqlx::query_as("SELECT id FROM llm_providers WHERE id = $1 AND user_uuid = $2")
+                .bind(&id)
+                .bind(&user_uuid)
+                .fetch_optional(&state.pool)
+                .await
+                .ok()
+                .flatten();
+        if exists.is_none() {
+            return Err((
+                axum::http::StatusCode::NOT_FOUND,
+                Json(json!({"error": "provider introuvable"})),
+            ));
+        }
+    }
+    crate::user_prefs::set_agents_llm_provider(&state.pool, &user_uuid, &id)
+        .await
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+    Ok(Json(json!({
+        "ok": true,
+        "provider_id": if id.is_empty() { Value::Null } else { json!(id) },
+    })))
 }
 
 async fn require_user(
@@ -829,10 +887,14 @@ async fn llm_list_models(
     let mut base_url = body.base_url.unwrap_or_default().trim().to_string();
 
     if api_key.trim().is_empty() || base_url.is_empty() {
+        // xAI : ne jamais réutiliser la clé d'un autre fournisseur.
+        let sql = if provider == "xai" {
+            "SELECT api_key, base_url FROM llm_providers WHERE user_uuid = $1 AND provider = 'xai' ORDER BY priority ASC LIMIT 1"
+        } else {
+            "SELECT api_key, base_url FROM llm_providers WHERE user_uuid = $1 AND enabled = 1 ORDER BY priority ASC LIMIT 1"
+        };
         let row: Option<(String, String)> =
-            sqlx::query_as(
-                "SELECT api_key, base_url FROM llm_providers WHERE user_uuid = $1 AND enabled = 1 ORDER BY priority ASC LIMIT 1",
-            )
+            sqlx::query_as(sql)
                 .bind(&user_uuid)
                 .fetch_optional(&state.pool)
                 .await

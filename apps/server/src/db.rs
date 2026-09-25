@@ -604,6 +604,8 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await;
 
+    crate::mcp_oauth::migrate(pool).await?;
+
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS user_settings (
@@ -616,6 +618,13 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+
+    // Provider LLM dédié aux agents autonomes (Coordinateur, auto-réparation).
+    let _ = sqlx::query(
+        "ALTER TABLE user_settings ADD COLUMN agents_llm_provider_id TEXT NOT NULL DEFAULT ''",
+    )
+    .execute(pool)
+    .await;
 
     // Providers déjà présents appartiennent à l’admin instance.
     let _ = sqlx::query(

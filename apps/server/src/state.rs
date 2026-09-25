@@ -950,7 +950,22 @@ impl AppState {
         &self,
         user_uuid: &str,
     ) -> (Arc<dyn devforge_llm::LlmProvider>, String) {
-        resolve_llm_provider(&self.pool, user_uuid).await
+        resolve_llm_provider(&self.pool, user_uuid, None).await
+    }
+
+    /// Chaîne LLM des agents autonomes (Coordinateur, auto-réparation, agents cron/événement) :
+    /// le provider choisi dans « Agents autonomes » passe en tête, les autres restent en repli.
+    pub async fn llm_for_agents(
+        &self,
+        user_uuid: &str,
+    ) -> (Arc<dyn devforge_llm::LlmProvider>, String) {
+        let preferred = crate::user_prefs::agents_llm_provider(&self.pool, user_uuid).await;
+        resolve_llm_provider(
+            &self.pool,
+            user_uuid,
+            (!preferred.is_empty()).then_some(preferred.as_str()),
+        )
+        .await
     }
 }
 
@@ -1018,9 +1033,18 @@ fn chain_entry_for(row: &LlmProviderRow, model: &str) -> Option<devforge_llm::Ch
     })
 }
 
+/// Place le provider préféré en tête sans changer l'ordre des autres.
+fn prefer_first<T>(rows: &mut Vec<T>, is_preferred: impl Fn(&T) -> bool) {
+    if let Some(pos) = rows.iter().position(is_preferred) {
+        let row = rows.remove(pos);
+        rows.insert(0, row);
+    }
+}
+
 async fn resolve_llm_provider(
     pool: &PgPool,
     user_uuid: &str,
+    preferred_id: Option<&str>,
 ) -> (Arc<dyn devforge_llm::LlmProvider>, String) {
     let rows: Vec<(
         String,
@@ -1050,6 +1074,10 @@ async fn resolve_llm_provider(
 
     let now = chrono::Utc::now();
     let now_str = now.to_rfc3339();
+    let mut rows = rows;
+    if let Some(pref) = preferred_id {
+        prefer_first(&mut rows, |r| r.0 == pref);
+    }
     let rows: Vec<LlmProviderRow> = rows
         .into_iter()
         .map(
@@ -1203,6 +1231,15 @@ pub fn new_uuid() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preferred_agent_provider_goes_first() {
+        let mut rows = vec!["ollama", "gemini", "xai"];
+        prefer_first(&mut rows, |r| *r == "xai");
+        assert_eq!(rows, vec!["xai", "ollama", "gemini"]);
+        prefer_first(&mut rows, |r| *r == "absent");
+        assert_eq!(rows, vec!["xai", "ollama", "gemini"]);
+    }
 
     #[test]
     fn fresh_probe_skips_repin_within_ten_minutes() {

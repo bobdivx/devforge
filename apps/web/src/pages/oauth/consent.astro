@@ -1,0 +1,7 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { OAuthConsentPage } from '../../components/OAuthConsentPage';
+---
+<BaseLayout title="Autoriser une application · DevForge">
+  <OAuthConsentPage client:only="preact" />
+</BaseLayout>
