@@ -1935,7 +1935,10 @@ async fn failover_demote(
     if let Ok(json) = serde_json::to_string_pretty(&local) {
         let _ = tokio::fs::write(devforge_cluster::failover_identity_path(), json).await;
     }
-    tokio::spawn(async {
+    let st = state.clone();
+    tokio::spawn(async move {
+        // Rendre les hostnames basculés au leader d'origine avant de redémarrer.
+        let _ = tokio::time::timeout(Duration::from_secs(30), crate::dns_failover::restore(&st)).await;
         tokio::time::sleep(Duration::from_millis(400)).await;
         devforge_cluster::restart_current_process();
     });
