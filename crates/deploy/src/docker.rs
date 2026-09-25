@@ -321,8 +321,15 @@ pub fn docker_stop(name: &str) -> String {
     }
 }
 
+/// Ports hôte tenus par le reverse proxy DevForge (Traefik) : une app ne doit jamais
+/// les publier ni évincer leur détenteur.
+pub fn is_proxy_reserved_host_port(port: u16) -> bool {
+    matches!(port, 0 | 80 | 443)
+}
+
 /// Stop/remove our container, then any other container publishing `host_port`
 /// (avoids `Bind for 0.0.0.0:PORT failed: port is already allocated`).
+/// Ne touche JAMAIS au reverse proxy (`devforge-traefik` / label `devforge.proxy=true`).
 pub fn docker_prepare_run(name: &str, host_port: u16) -> String {
     if cfg!(windows) {
         format!(
@@ -331,12 +338,18 @@ pub fn docker_prepare_run(name: &str, host_port: u16) -> String {
             p = host_port
         )
     } else {
+        if is_proxy_reserved_host_port(host_port) {
+            return format!("docker rm -f {} >/dev/null 2>&1 || true", shell_escape(name));
+        }
         format!(
             "docker rm -f {n} >/dev/null 2>&1 || true; \
-ids=$(docker ps -aq --filter publish={p} 2>/dev/null || true); \
-if [ -n \"$ids\" ]; then docker rm -f $ids >/dev/null 2>&1 || true; fi",
+for id in $(docker ps -aq --filter publish={p} 2>/dev/null || true); do \
+{guard} \
+docker rm -f \"$id\" >/dev/null 2>&1 || true; \
+done",
             n = shell_escape(name),
-            p = host_port
+            p = host_port,
+            guard = PROXY_GUARD_SH
         )
     }
 }
@@ -354,18 +367,26 @@ pub fn docker_prepare_run_except(except_name: &str, host_port: u16) -> String {
             except = shell_escape(except_name)
         )
     } else {
+        if is_proxy_reserved_host_port(host_port) {
+            return "true".into();
+        }
         format!(
             "for id in $(docker ps -aq --filter publish={p} 2>/dev/null || true); do \
+                {guard} \
                 n=$(docker inspect \"$id\" --format '{{{{.Name}}}}' 2>/dev/null || echo ''); \
                 if [ \"$n\" != '/{except}' ] && [ \"$n\" != '{except}' ]; then \
                     docker rm -f \"$id\" >/dev/null 2>&1 || true; \
                 fi; \
             done",
             p = host_port,
-            except = shell_escape(except_name)
+            except = shell_escape(except_name),
+            guard = PROXY_GUARD_SH
         )
     }
 }
+
+/// Fragment shell (dans une boucle `for id`) : saute le reverse proxy DevForge.
+const PROXY_GUARD_SH: &str = "case \"$(docker inspect \"$id\" --format '{{.Name}} {{index .Config.Labels \"devforge.proxy\"}}' 2>/dev/null)\" in /devforge-traefik*|*' true') continue;; esac;";
 
 pub fn docker_restart(name: &str) -> String {
     format!("docker restart {}", shell_escape(name))
@@ -1009,6 +1030,23 @@ fn shell_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepare_never_evicts_reverse_proxy() {
+        assert!(is_proxy_reserved_host_port(80));
+        assert!(is_proxy_reserved_host_port(443));
+        assert!(!is_proxy_reserved_host_port(4321));
+        if !cfg!(windows) {
+            let c = docker_prepare_run_except("df-x", 80);
+            assert!(!c.contains("publish=80"), "{c}");
+            let c = docker_prepare_run("df-x", 443);
+            assert!(!c.contains("publish=443"), "{c}");
+            let c = docker_prepare_run_except("df-x", 4321);
+            assert!(c.contains("publish=4321") && c.contains("devforge-traefik"), "{c}");
+            let c = docker_prepare_run("df-x", 4321);
+            assert!(c.contains("publish=4321") && c.contains("devforge.proxy"), "{c}");
+        }
+    }
     use serde_json::json;
 
     #[test]
