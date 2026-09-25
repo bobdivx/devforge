@@ -266,7 +266,15 @@ async fn tick(state: &AppState, ensure_webhooks: bool) {
             let _ = ensure_project_webhook(state, &project).await;
         }
 
-        // Un deploy en cours sera annulé (supersede) par run_real_deploy.
+        // Incident 2026-09-25 : le poller relançait un deploy toutes les ~3 min tant que le
+        // précédent n'avait pas réussi (le SHA déployé ne change qu'au succès), annulant
+        // (supersede) le build en cours — et le timeout du tick droppait le future du
+        // deploy. Un build nixpacks > 3 min ne pouvait donc jamais aboutir.
+        // → on ignore les projets qui ont déjà un déploiement actif récent, et le deploy
+        //   tourne dans une tâche détachée (hors du timeout du tick).
+        if has_recent_active_deployment(state, project.id).await {
+            continue;
+        }
         let Some((behind_by, tip_msg)) = project_is_behind(state, &project).await else {
             continue;
         };
@@ -275,8 +283,29 @@ async fn tick(state: &AppState, ensure_webhooks: bool) {
             "Auto-deploy ({behind_by} commit{}) — {tip_msg}",
             if behind_by > 1 { "s" } else { "" }
         );
-        deploy_project(state, &project, &message).await;
+        let st = state.clone();
+        tokio::spawn(async move {
+            deploy_project(&st, &project, &message).await;
+        });
     }
+}
+
+/// Déploiement queued/running/… créé il y a moins d'une heure (au-delà : considéré orphelin).
+async fn has_recent_active_deployment(state: &AppState, project_id: i64) -> bool {
+    let cutoff = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
+    let row: Option<(i64,)> = sqlx::query_as(
+        r#"SELECT COUNT(*) FROM deployments
+           WHERE project_id = $1
+             AND status IN ('queued', 'running', 'building', 'pending', 'deploying')
+             AND created_at > $2"#,
+    )
+    .bind(project_id)
+    .bind(&cutoff)
+    .fetch_optional(&state.pool)
+    .await
+    .ok()
+    .flatten();
+    row.is_some_and(|(n,)| n > 0)
 }
 
 pub async fn run_loop(state: AppState) {
