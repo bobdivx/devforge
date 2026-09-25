@@ -1214,15 +1214,26 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             ));
         }
 
-        // Free the host port if needed (only kill containers publishing same port, not our production container yet)
-        let prepare = docker::docker_prepare_run_except(name, host_port);
-        match self.executor.exec(server, workdir, &prepare, 60).await {
-            Ok(r) => {
-                if !r.output.trim().is_empty() {
-                    logs.push_str(&format!("[prepare] {}\n", trim_out(&r.output)));
+        // Ports hôte 80/443 = entrée du reverse proxy DevForge (Traefik). Incident 2026-09-25 :
+        // un projet static avec port=80 publiait `-p 80:80` → prepare supprimait
+        // `devforge-traefik` (il publie 80) et le site captait TOUT le trafic du nœud.
+        // Jamais de libération ni de publication de ces ports pour une app.
+        let reserved_port = docker::is_proxy_reserved_host_port(host_port);
+        if reserved_port {
+            logs.push_str(&format!(
+                "[prepare] port hôte {host_port} réservé au reverse proxy — pas de publication sur ce port\n"
+            ));
+        } else {
+            // Free the host port if needed (only kill containers publishing same port, not our production container yet)
+            let prepare = docker::docker_prepare_run_except(name, host_port);
+            match self.executor.exec(server, workdir, &prepare, 60).await {
+                Ok(r) => {
+                    if !r.output.trim().is_empty() {
+                        logs.push_str(&format!("[prepare] {}\n", trim_out(&r.output)));
+                    }
                 }
+                Err(e) => logs.push_str(&format!("[prepare] warn: {e}\n")),
             }
-            Err(e) => logs.push_str(&format!("[prepare] warn: {e}\n")),
         }
 
         // Vérifier `.env` via l’executor (local ou remote), pas seulement le FS local.
@@ -1291,6 +1302,9 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
 
         let ports = if has_traefik_labels && network.is_some() {
             vec![]
+        } else if reserved_port {
+            // Port hôte éphémère attribué par Docker (jamais 80/443).
+            vec![(0, container_port)]
         } else {
             vec![(host_port, container_port)]
         };
