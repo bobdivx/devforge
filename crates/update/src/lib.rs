@@ -637,25 +637,70 @@ impl UpdateFacade {
             .exec(&self.config.server_id, ".", network_cmd, 30)
             .await;
 
-        // Resolve Traefik data path (host or container)
+        // Chemin DATA vu par le process (conteneur) — sert à préparer les fichiers.
         let data_path =
             std::env::var("DEVFORGE_DATA_DIR").unwrap_or_else(|_| "/var/lib/devforge".into());
-        let traefik_dir = format!("{}/proxy", data_path);
+        let local_traefik_dir = format!("{}/proxy", data_path.trim_end_matches('/'));
+        // Chemin HÔTE pour `docker run -v` : le daemon résout la source côté hôte.
+        // Incident 2026-09-25 : `-v /data/proxy:/traefik` (chemin conteneur) → sur ZimaOS
+        // `mkdir /data: read-only file system`, Traefik bloqué en « created », 502 partout.
+        let traefik_dir = self.resolve_traefik_host_dir(&data_path).await;
 
-        // Prepare data directory (acme.json + dynamic/)
+        // Prepare data directory (acme.json + dynamic/) — via le chemin local au process,
+        // c'est le même répertoire que `traefik_dir` à travers le bind mount DATA.
         let prep_cmd = format!(
             r#"mkdir -p {}/dynamic && touch {}/acme.json && chmod 600 {}/acme.json"#,
-            shell_escape(&traefik_dir),
-            shell_escape(&traefik_dir),
-            shell_escape(&traefik_dir)
+            shell_escape(&local_traefik_dir),
+            shell_escape(&local_traefik_dir),
+            shell_escape(&local_traefik_dir)
         );
         let _ = self
             .executor
             .exec(&self.config.server_id, ".", &prep_cmd, 30)
             .await;
 
-        // Create or start Traefik
-        if status == "missing" {
+        let mut need_create = status == "missing";
+        if !need_create {
+            // Conteneur existant mais arrêté : vérifier le mount avant de le relancer.
+            let mount_cmd = r#"docker inspect devforge-traefik --format '{{range .Mounts}}{{if eq .Destination "/traefik"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true"#;
+            let actual = self
+                .executor
+                .exec(&self.config.server_id, ".", mount_cmd, 30)
+                .await
+                .map(|r| r.output.trim().to_string())
+                .unwrap_or_default();
+            if !actual.is_empty() && actual != traefik_dir {
+                tracing::warn!(
+                    actual = %actual,
+                    expected = %traefik_dir,
+                    "Traefik arrêté avec un volume /traefik incorrect — recréation"
+                );
+                need_create = true;
+            } else {
+                let start_res = self
+                    .executor
+                    .exec(&self.config.server_id, ".", "docker start devforge-traefik", 30)
+                    .await?;
+                if start_res.ok {
+                    tracing::info!("Traefik proxy started successfully");
+                    return Ok(());
+                }
+                tracing::warn!(
+                    output = %truncate(&start_res.output, 300),
+                    "docker start Traefik échoué — recréation"
+                );
+                need_create = true;
+            }
+            if need_create {
+                let _ = self
+                    .executor
+                    .exec(&self.config.server_id, ".", "docker rm -f devforge-traefik", 60)
+                    .await;
+            }
+        }
+
+        // Create Traefik
+        if need_create {
             let create_cmd = format!(
                 r#"docker run -d \
   --name devforge-traefik \
@@ -705,25 +750,33 @@ impl UpdateFacade {
                 return Err(DevForgeError::Message(err_msg));
             }
             tracing::info!("Traefik proxy recreated successfully");
-        } else {
-            // Container exists but stopped, start it
-            let start_cmd = "docker start devforge-traefik";
-            let start_res = self
-                .executor
-                .exec(&self.config.server_id, ".", start_cmd, 30)
-                .await?;
-            if !start_res.ok {
-                let err_msg = format!(
-                    "Failed to start Traefik: {}",
-                    truncate(&start_res.output, 300)
-                );
-                tracing::error!("{}", err_msg);
-                return Err(DevForgeError::Message(err_msg));
-            }
-            tracing::info!("Traefik proxy started successfully");
         }
 
         Ok(())
+    }
+
+    /// Chemin hôte du volume Traefik (`<source du bind DATA>/proxy`).
+    ///
+    /// 1. `DEVFORGE_TRAEFIK_HOST_DIR` explicite ;
+    /// 2. bind mount du conteneur DevForge courant dont la destination est `/data`
+    ///    ou `DEVFORGE_DATA_DIR` ;
+    /// 3. repli : `DEVFORGE_DATA_DIR/proxy` (bare metal / Flatpak, chemin = hôte).
+    async fn resolve_traefik_host_dir(&self, data_path: &str) -> String {
+        if let Ok(explicit) = std::env::var("DEVFORGE_TRAEFIK_HOST_DIR") {
+            if !explicit.trim().is_empty() {
+                return explicit.trim().to_string();
+            }
+        }
+        let name = self
+            .running_container_name()
+            .await
+            .unwrap_or_else(|| self.config.container_name.clone());
+        if let Ok(mounts) = self.docker_inspect_json(&name, "{{json .Mounts}}").await {
+            if let Some(p) = traefik_host_dir_from_mounts(&mounts, data_path) {
+                return p;
+            }
+        }
+        format!("{}/proxy", data_path.trim_end_matches('/'))
     }
 
     /// Recreate nommé via inspect ciblé (évite le JSON complet tronqué) + Mounts.
@@ -1857,6 +1910,26 @@ fn shell_escape(s: &str) -> String {
     }
 }
 
+/// `<Source>/proxy` du bind mount DATA (destination `/data` ou `data_dir`).
+fn traefik_host_dir_from_mounts(mounts: &Value, data_dir: &str) -> Option<String> {
+    let data = data_dir.trim_end_matches('/');
+    mounts.as_array()?.iter().find_map(|m| {
+        if m.get("Type").and_then(|t| t.as_str()).unwrap_or("bind") != "bind" {
+            return None;
+        }
+        let dest = m
+            .get("Destination")
+            .or_else(|| m.get("Target"))
+            .and_then(|d| d.as_str())?
+            .trim_end_matches('/');
+        let src = m.get("Source").and_then(|s| s.as_str())?.trim_end_matches('/');
+        if src.is_empty() || !(dest == "/data" || dest == data) {
+            return None;
+        }
+        Some(format!("{src}/proxy"))
+    })
+}
+
 fn truncate(s: &str, max: usize) -> String {
     let t = s.trim();
     if t.chars().count() <= max {
@@ -1869,6 +1942,22 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn traefik_host_dir_uses_host_bind_source_not_container_path() {
+        let mounts = json!([
+            {"Type": "bind", "Source": "/var/run/docker.sock", "Destination": "/var/run/docker.sock"},
+            {"Type": "bind", "Source": "/media/Docker/AppData/devforge", "Destination": "/data"}
+        ]);
+        assert_eq!(
+            traefik_host_dir_from_mounts(&mounts, "/data").as_deref(),
+            Some("/media/Docker/AppData/devforge/proxy")
+        );
+        let vol = json!([{"Type": "volume", "Source": "/var/lib/docker/volumes/x/_data", "Destination": "/data"}]);
+        assert_eq!(traefik_host_dir_from_mounts(&vol, "/data"), None);
+        assert_eq!(traefik_host_dir_from_mounts(&json!([]), "/data"), None);
+        assert_eq!(traefik_host_dir_from_mounts(&Value::Null, "/data"), None);
+    }
 
     #[test]
     fn version_compare() {

@@ -167,24 +167,28 @@ impl ProxyFacade {
         );
         let check_res = executor.exec(server_id, "", &check_cmd, 30).await?;
         let status = check_res.output.trim();
+        let is_local = server_id == self.apply_server_id.as_str()
+            || (self.apply_server_id.trim().is_empty() && server_id == "default");
 
         match status {
             "running" => {
                 // Si le volume file-provider pointe hors de $DATA/proxy (bug ZimaOS
                 // …/devforge/data/proxy), on recrée une fois pour aligner le mount.
-                let expected = self
-                    .resolve_traefik_host_volume_path(executor)
-                    .await
-                    .unwrap_or_default();
-                let mount_cmd = format!(
-                    r#"docker inspect {} --format '{{{{range .Mounts}}}}{{{{if eq .Destination "/traefik"}}}}{{{{.Source}}}}{{{{end}}}}{{{{end}}}}' 2>/dev/null || true"#,
-                    TRAEFIK_CONTAINER_NAME
-                );
-                let mount_res = executor.exec(server_id, "", &mount_cmd, 30).await;
-                let actual = mount_res
-                    .as_ref()
-                    .map(|r| r.output.trim().to_string())
-                    .unwrap_or_default();
+                // Uniquement sur le nœud local : le chemin attendu est résolu depuis
+                // le conteneur DevForge de CE nœud ; le comparer au Traefik d'un worker
+                // (ex. Flatpak ~/.var/app/…/proxy) le supprimait en boucle.
+                let expected = if is_local {
+                    self.resolve_traefik_host_volume_path(executor)
+                        .await
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let actual = if is_local {
+                    self.traefik_mount_source(executor, server_id).await
+                } else {
+                    String::new()
+                };
                 if !expected.is_empty()
                     && !actual.is_empty()
                     && actual != expected
@@ -213,23 +217,57 @@ impl ProxyFacade {
                 }
             }
             "exited" | "created" | "paused" => {
-                // Container exists but is not running, start it
-                let start_cmd = format!("docker start {}", TRAEFIK_CONTAINER_NAME);
-                let start_res = executor.exec(server_id, "", &start_cmd, 30).await?;
-                if start_res.ok {
-                    return Ok(json!({
-                        "ok": true,
-                        "status": "started",
-                        "container": TRAEFIK_CONTAINER_NAME,
-                        "previous_state": status,
-                        "message": "Traefik container was stopped, now started"
-                    }));
-                } else {
-                    return Err(DevForgeError::Message(format!(
-                        "Failed to start Traefik: {}",
-                        start_res.output
-                    )));
+                // Incident 2026-09-25 : l'update créait Traefik avec `-v /data/proxy:/traefik`
+                // (chemin CONTENEUR) → sur ZimaOS `mkdir /data: read-only file system`,
+                // conteneur bloqué en « created » et le watchdog ne faisait que `docker start`
+                // en boucle (502 sur toutes les apps). Sur le nœud local, on vérifie le mount
+                // et on recrée si le chemin hôte est faux ou si le start échoue.
+                let mut recreate = false;
+                if is_local {
+                    let expected = self
+                        .resolve_traefik_host_volume_path(executor)
+                        .await
+                        .unwrap_or_default();
+                    let actual = self.traefik_mount_source(executor, server_id).await;
+                    if !expected.is_empty() && !actual.is_empty() && actual != expected {
+                        eprintln!(
+                            "[ensure_traefik] Traefik {status} avec volume /traefik incorrect ({actual} ≠ {expected}) — recréation"
+                        );
+                        recreate = true;
+                    }
                 }
+                if !recreate {
+                    let start_cmd = format!("docker start {}", TRAEFIK_CONTAINER_NAME);
+                    let start_res = executor.exec(server_id, "", &start_cmd, 30).await?;
+                    if start_res.ok {
+                        return Ok(json!({
+                            "ok": true,
+                            "status": "started",
+                            "container": TRAEFIK_CONTAINER_NAME,
+                            "previous_state": status,
+                            "message": "Traefik container was stopped, now started"
+                        }));
+                    }
+                    if !is_local {
+                        return Err(DevForgeError::Message(format!(
+                            "Failed to start Traefik: {}",
+                            start_res.output
+                        )));
+                    }
+                    eprintln!(
+                        "[ensure_traefik] docker start échoué ({}) — recréation",
+                        start_res.output.trim()
+                    );
+                }
+                let _ = executor
+                    .exec(
+                        server_id,
+                        "",
+                        &format!("docker rm -f {TRAEFIK_CONTAINER_NAME}"),
+                        60,
+                    )
+                    .await;
+                // tombe dans la création ci-dessous
             }
             _ => {
                 // Container is missing, create it
@@ -377,6 +415,23 @@ impl ProxyFacade {
     /// 2. Inspect running DevForge container's mounts where Destination matches `DEVFORGE_DATA_DIR`
     /// 3. Append `/proxy` (même layout que les écritures preview)
     /// 4. Fallback to container path (bare metal / non-containerized case)
+    /// Source hôte du mount `/traefik` du conteneur Traefik (vide si absent/erreur).
+    async fn traefik_mount_source(
+        &self,
+        executor: &Arc<dyn RemoteExecutor>,
+        server_id: &str,
+    ) -> String {
+        let mount_cmd = format!(
+            r#"docker inspect {} --format '{{{{range .Mounts}}}}{{{{if eq .Destination "/traefik"}}}}{{{{.Source}}}}{{{{end}}}}{{{{end}}}}' 2>/dev/null || true"#,
+            TRAEFIK_CONTAINER_NAME
+        );
+        executor
+            .exec(server_id, "", &mount_cmd, 30)
+            .await
+            .map(|r| r.output.trim().to_string())
+            .unwrap_or_default()
+    }
+
     async fn resolve_traefik_host_volume_path(
         &self,
         executor: &Arc<dyn RemoteExecutor>,
