@@ -84,20 +84,32 @@ pub fn advertise_host(url: &str) -> Option<String> {
     Some(host.to_string())
 }
 
-pub fn replication_advertisement(advertise_url: &str) -> Option<ReplAdvert> {
+pub fn replication_advertisement(advertise_url: &str, leader_url: &str) -> Option<ReplAdvert> {
     let meta = META.get()?;
     if meta.container.is_none() || !meta.public_bind || meta.replication_password.is_empty() {
         return None;
     }
-    let host = advertise_host(advertise_url)?;
-    if devforge_cluster::is_loopback_advertise_url(&format!("http://{host}")) {
-        return None;
-    }
+    let host = repl_advert_host(advertise_url, leader_url)?;
     Some(ReplAdvert {
         host,
         port: meta.port,
         password: meta.replication_password.clone(),
     })
+}
+
+/// Hôte annoncé aux workers pour la réplication.
+///
+/// Un leader installé par le compose n'a souvent pas d'`advertise_url` : on retombe
+/// alors sur son `leader_url` (domaine public). Le worker remplace ce domaine par
+/// l'hôte LAN qu'il utilise pour joindre le leader (`worker::pick_repl_host`).
+/// Sans ce repli, le heartbeat ne portait aucune info de réplication et aucun worker
+/// ne construisait `devforge-pg-ha`.
+pub(crate) fn repl_advert_host(advertise_url: &str, leader_url: &str) -> Option<String> {
+    [advertise_url, leader_url]
+        .into_iter()
+        .filter(|u| !u.trim().is_empty())
+        .filter_map(advertise_host)
+        .find(|host| !devforge_cluster::is_loopback_advertise_url(&format!("http://{host}")))
 }
 
 /// Dans Docker, `devforge-pg` n'a pas de port hôte : le compose publie 5433 sur le
@@ -1277,6 +1289,24 @@ fn ensure_volume_token(value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repl_advert_host_falls_back_to_leader_url() {
+        assert_eq!(
+            repl_advert_host("", "https://web.jeser.app").as_deref(),
+            Some("web.jeser.app")
+        );
+        assert_eq!(
+            repl_advert_host("http://10.1.0.58:8000", "https://web.jeser.app").as_deref(),
+            Some("10.1.0.58")
+        );
+        assert_eq!(
+            repl_advert_host("http://127.0.0.1:8000", "https://web.jeser.app").as_deref(),
+            Some("web.jeser.app")
+        );
+        assert_eq!(repl_advert_host("", ""), None);
+        assert_eq!(repl_advert_host("", "http://localhost:8000"), None);
+    }
 
     #[test]
     fn advertise_host_keeps_the_hostname() {
