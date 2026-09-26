@@ -2,7 +2,8 @@ use crate::compat::parse_version;
 use crate::docker::{
     assert_safe_volume_mount, assert_valid_container_name, build_docker_run_command,
     build_docker_run_from_inspect, docker_inspect_json_cmd, docker_logs_cmd, docker_pull_cmd,
-    docker_restart_cmd, docker_rm_cmd, docker_start_cmd, docker_stop_cmd, parse_inspect_env,
+    docker_restart_cmd, docker_rm_cmd, docker_rm_state_volume_cmd, docker_start_cmd,
+    docker_stop_cmd, parse_inspect_env,
     slugify_runner_name, stale_network_cleanup,
 };
 use crate::events::RunnerEventBus;
@@ -256,6 +257,16 @@ impl RunnerFacade {
                 30,
             )
             .await;
+        // Recréation = nouvel enregistrement propre (jeton frais) : on jette l'ancienne config.
+        let _ = self
+            .executor
+            .exec(
+                &runner.server_id,
+                "",
+                &docker_rm_state_volume_cmd(&runner.container_name),
+                30,
+            )
+            .await;
         let cleanup = stale_network_cleanup(&runner.container_name, &runner.network_mode);
         let _ = self
             .executor
@@ -500,6 +511,16 @@ impl RunnerFacade {
                 30,
             )
             .await;
+        // Recréation = nouvel enregistrement propre (jeton frais) : on jette l'ancienne config.
+        let _ = self
+            .executor
+            .exec(
+                &runner.server_id,
+                "",
+                &docker_rm_state_volume_cmd(&runner.container_name),
+                30,
+            )
+            .await;
         let cleanup = stale_network_cleanup(&runner.container_name, &runner.network_mode);
         let _ = self
             .executor
@@ -596,6 +617,15 @@ impl RunnerFacade {
                 &runner.server_id,
                 "",
                 &docker_rm_cmd(&runner.container_name),
+                30,
+            )
+            .await;
+        let _ = self
+            .executor
+            .exec(
+                &runner.server_id,
+                "",
+                &docker_rm_state_volume_cmd(&runner.container_name),
                 30,
             )
             .await;
