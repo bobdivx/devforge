@@ -1487,6 +1487,14 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  acmeSettings: () =>
+    request<AcmeSettings>('/settings/acme'),
+  saveAcmeSettings: (acme_email: string) =>
+    request<AcmeSettings & { proxy_restarted?: boolean }>('/settings/acme', {
+      method: 'PUT',
+      body: JSON.stringify({ acme_email }),
+    }),
+
   postgresStatus: () =>
     request<{
       ok: boolean;
@@ -2206,4 +2214,18 @@ export type SystemHealth = {
       message: string;
     };
   };
+};
+
+export type AcmeSource = 'env' | 'setting' | 'admin_user' | 'none';
+
+export type AcmeSettings = {
+  ok: boolean;
+  /** Valeur enregistrée dans les réglages d’instance (peut être vide). */
+  acme_email: string;
+  /** Adresse réellement transmise à Let's Encrypt. */
+  effective: string | null;
+  source: AcmeSource;
+  env_locked?: boolean;
+  /** Repli (premier admin d’instance) si le réglage est vide. */
+  admin_email?: string | null;
 };

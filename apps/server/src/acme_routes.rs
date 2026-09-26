@@ -66,11 +66,15 @@ pub async fn refresh(pool: &sqlx::PgPool) -> Option<String> {
     acme_email()
 }
 
-fn source(setting: &str) -> &'static str {
-    if std::env::var("DEVFORGE_ACME_EMAIL")
+/// `DEVFORGE_ACME_EMAIL` valide : l’adresse est imposée par l’environnement.
+fn env_locked() -> bool {
+    std::env::var("DEVFORGE_ACME_EMAIL")
         .map(|v| is_valid_acme_email(&v))
         .unwrap_or(false)
-    {
+}
+
+fn source(setting: &str) -> &'static str {
+    if env_locked() {
         "env"
     } else if is_valid_acme_email(setting) {
         "setting"
@@ -92,6 +96,9 @@ async fn get_acme(
         "acme_email": s,
         "effective": acme_email(),
         "source": source(&s),
+        "env_locked": env_locked(),
+        // Repli utilisé si le réglage est vide (permet à l’UI de prévoir l’effet).
+        "admin_email": admin_email(&state.pool).await,
     })))
 }
 
@@ -107,6 +114,12 @@ async fn put_acme(
     Json(body): Json<PutAcme>,
 ) -> Result<Json<Value>, ApiErr> {
     require_admin(&state, &headers).await?;
+    if env_locked() {
+        return Err((
+            axum::http::StatusCode::CONFLICT,
+            Json(json!({"error": "adresse imposée par DEVFORGE_ACME_EMAIL"})),
+        ));
+    }
     let email = body.acme_email.trim().to_string();
     if !email.is_empty() && !is_valid_acme_email(&email) {
         return Err((
@@ -125,17 +138,25 @@ async fn put_acme(
                 Json(json!({"error": e.to_string()})),
             )
         })?;
+    let before = acme_email();
     let effective = refresh(&state.pool).await;
-    // Applique tout de suite (remplacement sûr du proxy si la configuration change).
-    let proxy = match state.proxy.ensure_traefik().await {
-        Ok(v) => v,
-        Err(e) => json!({"ok": false, "error": e.to_string()}),
+    // Même adresse effective : le proxy n’est pas touché (aucune coupure).
+    let restarted = before != effective;
+    let proxy = if restarted {
+        // Applique tout de suite (remplacement sûr du proxy : la configuration change).
+        match state.proxy.ensure_traefik().await {
+            Ok(v) => v,
+            Err(e) => json!({"ok": false, "error": e.to_string()}),
+        }
+    } else {
+        json!({"ok": true, "status": "unchanged"})
     };
     Ok(Json(json!({
         "ok": true,
         "acme_email": email,
         "effective": effective,
         "source": source(&email),
+        "proxy_restarted": restarted,
         "proxy": proxy,
     })))
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, type InstanceDomain } from '../lib/api';
+import { AcmeEmailTile } from './AcmeEmailTile';
 import { AppShell } from './AppShell';
 import { LlmProvidersPanel } from './LlmProvidersPanel';
 import {
@@ -258,6 +259,7 @@ function SettingsPageInner() {
               index={i + 1}
             />
           ))}
+          {isAdmin && <AcmeEmailTile index={SETTINGS_CARDS.length + 1} />}
         </HubGrid>
       </AppShell>
     );
