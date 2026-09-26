@@ -396,6 +396,24 @@ fn infer_state_from_status(status: &str) -> String {
     }
 }
 
+/// Logs d’un runner dont l’inscription locale n’est plus valable côté GitHub
+/// (supprimée, jamais finalisée, ou config résiduelle) : seule une recréation avec
+/// un jeton neuf le répare — le jeton d’inscription figé dans l’env expire en 1 h.
+pub fn runner_logs_need_reregistration(logs: &str) -> bool {
+    let l = logs.to_ascii_lowercase();
+    [
+        "registration has been deleted",
+        "runner registration has been deleted",
+        "parameter 'configuredsettings'",
+        "not configured. run config",
+        "failed to create a session",
+        "http response code: notfound from 'post",
+    ]
+    .iter()
+    .any(|m| l.contains(m))
+        || (l.contains("has already been configured") && l.contains("failed"))
+}
+
 pub fn docker_start_cmd(name: &str) -> String {
     format!("docker start {}", shell_escape(name))
 }
@@ -656,6 +674,19 @@ mod tests {
             docker_rm_state_volume_cmd("github-runner-app"),
             "docker volume rm -f 'github-runner-app-state' >/dev/null 2>&1 || true"
         );
+    }
+
+    #[test]
+    fn detects_runner_needing_reregistration() {
+        assert!(runner_logs_need_reregistration(
+            "Failed to create a session. The runner registration has been deleted from the server"
+        ));
+        assert!(runner_logs_need_reregistration(
+            "Failed: Removing runner from the server\nValue cannot be null. (Parameter 'configuredSettings')"
+        ));
+        assert!(!runner_logs_need_reregistration(
+            "Runner reusage is enabled\nThe runner has already been configured\n√ Connected to GitHub\nListening for Jobs"
+        ));
     }
 
     #[test]

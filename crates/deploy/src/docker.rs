@@ -339,7 +339,10 @@ pub fn docker_prepare_run(name: &str, host_port: u16) -> String {
         )
     } else {
         if is_proxy_reserved_host_port(host_port) {
-            return format!("docker rm -f {} >/dev/null 2>&1 || true", shell_escape(name));
+            return format!(
+                "docker rm -f {} >/dev/null 2>&1 || true",
+                shell_escape(name)
+            );
         }
         format!(
             "docker rm -f {n} >/dev/null 2>&1 || true; \
@@ -1017,6 +1020,98 @@ pub fn probe_engine() -> DockerEngineStatus {
     }
 }
 
+/// Nom sûr à insérer tel quel dans une commande (conteneur, réseau Docker).
+pub fn is_safe_docker_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 128
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// Sonde de disponibilité HTTP d’un conteneur applicatif, exécutée depuis le conteneur
+/// du reverse proxy (il partage le réseau de l’app, contrairement au serveur DevForge).
+/// Sortie : `state=<status>|<health> ip=<ip> code=<http|000|noprobe>`.
+/// `None` si un nom n’est pas sûr (on retombe alors sur le simple état du conteneur).
+pub fn docker_http_probe(container: &str, network: &str, port: u16, path: &str) -> Option<String> {
+    if !is_safe_docker_name(container) || !is_safe_docker_name(network) {
+        return None;
+    }
+    let path = if path.starts_with('/')
+        && path
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "/-_.~?=&%".contains(c))
+    {
+        path
+    } else {
+        "/"
+    };
+    Some(format!(
+        r#"ST=$(docker inspect -f '{{{{.State.Status}}}}|{{{{if .State.Health}}}}{{{{.State.Health.Status}}}}{{{{end}}}}' {c} 2>/dev/null || echo 'missing|')
+IP=$(docker inspect -f '{{{{with index .NetworkSettings.Networks "{n}"}}}}{{{{.IPAddress}}}}{{{{end}}}}' {c} 2>/dev/null)
+CODE=noprobe
+if [ -n "$IP" ] && [ "$(docker inspect -f '{{{{.State.Running}}}}' devforge-traefik 2>/dev/null)" = "true" ]; then
+  CODE=$(docker exec devforge-traefik wget -S -q -O /dev/null -T 3 "http://$IP:{port}{path}" 2>&1 | awk '/^ *HTTP\//{{c=$2}} END{{print c}}')
+  [ -n "$CODE" ] || CODE=000
+fi
+echo "state=$ST ip=$IP code=$CODE""#,
+        c = container,
+        n = network,
+    ))
+}
+
+/// Verdict d’une sonde de disponibilité (voir [`docker_http_probe`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadyProbe {
+    /// L’app répond (ou healthcheck Docker `healthy`).
+    Ready,
+    /// Pas encore prête (démarrage, 5xx, connexion refusée…).
+    Wait,
+    /// Répond 404 : attendre, puis tolérer si stable (API sans page `/`).
+    NotFound,
+    /// Conteneur arrêté / absent : inutile d’attendre.
+    Dead,
+    /// Impossible de sonder (proxy absent, pas d’IP sur le réseau).
+    NoProbe,
+}
+
+pub fn classify_ready_probe(out: &str) -> ReadyProbe {
+    let line = out
+        .lines()
+        .rev()
+        .find(|l| l.contains("state="))
+        .unwrap_or("");
+    let field = |k: &str| {
+        line.split_whitespace()
+            .find_map(|t| t.strip_prefix(k))
+            .unwrap_or("")
+            .to_string()
+    };
+    let st = field("state=");
+    let (status, health) = st.split_once('|').unwrap_or((st.as_str(), ""));
+    match status {
+        "running" => {}
+        "created" | "restarting" => return ReadyProbe::Wait,
+        _ => return ReadyProbe::Dead,
+    }
+    // Healthcheck Docker configuré sur le projet : c’est lui qui fait foi.
+    if !health.is_empty() {
+        return if health == "healthy" {
+            ReadyProbe::Ready
+        } else {
+            ReadyProbe::Wait
+        };
+    }
+    let code = field("code=");
+    if code == "noprobe" || code.is_empty() {
+        return ReadyProbe::NoProbe;
+    }
+    match code.parse::<u16>() {
+        Ok(404) => ReadyProbe::NotFound,
+        Ok(c) if (100..500).contains(&c) => ReadyProbe::Ready,
+        _ => ReadyProbe::Wait,
+    }
+}
+
 fn shell_escape(s: &str) -> String {
     if s.chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '='))
@@ -1029,6 +1124,62 @@ fn shell_escape(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn http_probe_command_and_classifier() {
+        let c = docker_http_probe("df-68e751f3-ec3-new", "devforge", 4321, "/").unwrap();
+        assert!(c.contains("http://$IP:4321/"), "{c}");
+        assert!(c.contains(r#"Networks "devforge""#), "{c}");
+        assert!(docker_http_probe("x;rm -rf /", "devforge", 80, "/").is_none());
+        let p = docker_http_probe("df-a", "net", 80, "/health").unwrap();
+        assert!(p.contains(":80/health"), "{p}");
+        let p = docker_http_probe("df-a", "net", 80, "/$(id)").unwrap();
+        assert!(p.contains(":80/\""), "{p}");
+
+        use ReadyProbe::*;
+        assert_eq!(
+            classify_ready_probe("state=running| ip=172.26.0.8 code=200"),
+            Ready
+        );
+        assert_eq!(
+            classify_ready_probe("state=running| ip=1.2.3.4 code=302"),
+            Ready
+        );
+        assert_eq!(
+            classify_ready_probe("state=running| ip=1.2.3.4 code=401"),
+            Ready
+        );
+        assert_eq!(
+            classify_ready_probe("state=running| ip=1.2.3.4 code=404"),
+            NotFound
+        );
+        assert_eq!(
+            classify_ready_probe("state=running| ip=1.2.3.4 code=502"),
+            Wait
+        );
+        assert_eq!(
+            classify_ready_probe("state=running| ip=1.2.3.4 code=000"),
+            Wait
+        );
+        assert_eq!(
+            classify_ready_probe("state=running| ip= code=noprobe"),
+            NoProbe
+        );
+        assert_eq!(classify_ready_probe("state=exited| ip= code=noprobe"), Dead);
+        assert_eq!(
+            classify_ready_probe("state=missing| ip= code=noprobe"),
+            Dead
+        );
+        assert_eq!(classify_ready_probe("state=restarting| ip= code=000"), Wait);
+        assert_eq!(
+            classify_ready_probe("state=running|starting ip=1.2.3.4 code=200"),
+            Wait
+        );
+        assert_eq!(
+            classify_ready_probe("state=running|healthy ip=1.2.3.4 code=000"),
+            Ready
+        );
+    }
+
     use super::*;
 
     #[test]
@@ -1042,9 +1193,15 @@ mod tests {
             let c = docker_prepare_run("df-x", 443);
             assert!(!c.contains("publish=443"), "{c}");
             let c = docker_prepare_run_except("df-x", 4321);
-            assert!(c.contains("publish=4321") && c.contains("devforge-traefik"), "{c}");
+            assert!(
+                c.contains("publish=4321") && c.contains("devforge-traefik"),
+                "{c}"
+            );
             let c = docker_prepare_run("df-x", 4321);
-            assert!(c.contains("publish=4321") && c.contains("devforge.proxy"), "{c}");
+            assert!(
+                c.contains("publish=4321") && c.contains("devforge.proxy"),
+                "{c}"
+            );
         }
     }
     use serde_json::json;

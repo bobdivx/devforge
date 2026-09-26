@@ -3,7 +3,8 @@ use crate::docker::{
     assert_safe_volume_mount, assert_valid_container_name, build_docker_run_command,
     build_docker_run_from_inspect, docker_inspect_json_cmd, docker_logs_cmd, docker_pull_cmd,
     docker_restart_cmd, docker_rm_cmd, docker_rm_state_volume_cmd, docker_start_cmd,
-    docker_stop_cmd, parse_inspect_env, slugify_runner_name, stale_network_cleanup,
+    docker_stop_cmd, parse_inspect_env, runner_logs_need_reregistration, slugify_runner_name,
+    stale_network_cleanup,
 };
 use crate::events::RunnerEventBus;
 use crate::models::{
@@ -740,6 +741,69 @@ impl RunnerFacade {
             .await
             .map_err(DevForgeError::Message)?;
         Ok(json!({"ok": true, "changed": n}))
+    }
+
+    /// Auto-réparation : un runner activé qui boucle (redémarrages) ou n’apparaît pas
+    /// en ligne sur GitHub, et dont les logs montrent une inscription invalide, est
+    /// recréé (jeton neuf + état effacé). Au plus une tentative / 30 min / runner.
+    pub async fn self_heal_once(&self) -> usize {
+        use std::collections::HashMap;
+        use std::sync::{Mutex, OnceLock};
+        use std::time::{Duration, Instant};
+        static LAST: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+        let last = LAST.get_or_init(|| Mutex::new(HashMap::new()));
+
+        let Ok(runners) = self.store.list().await else {
+            return 0;
+        };
+        let mut healed = 0;
+        for r in runners {
+            if !r.enabled || r.op_status != OpStatus::Idle.as_str() {
+                continue;
+            }
+            let gh_ok = matches!(r.github_status.as_deref(), Some("online") | Some("busy"));
+            let suspicious = r.live_state == "restarting"
+                || (r.live_state == "running" && !gh_ok)
+                || r.live_state == "exited";
+            if !suspicious {
+                continue;
+            }
+            let recent = last
+                .lock()
+                .ok()
+                .and_then(|m| m.get(&r.id).copied())
+                .is_some_and(|t| t.elapsed() < Duration::from_secs(30 * 60));
+            if recent {
+                continue;
+            }
+            let Ok(res) = self
+                .executor
+                .exec(
+                    &r.server_id,
+                    "",
+                    &docker_logs_cmd(&r.container_name, 60),
+                    15,
+                )
+                .await
+            else {
+                continue;
+            };
+            if !runner_logs_need_reregistration(&res.output) {
+                continue;
+            }
+            if let Ok(mut m) = last.lock() {
+                m.insert(r.id.clone(), Instant::now());
+            }
+            tracing::warn!(
+                runner_id = %r.id,
+                container = %r.container_name,
+                "runner: inscription GitHub invalide — recréation automatique"
+            );
+            if self.action(&r.id, "recreate").await.is_ok() {
+                healed += 1;
+            }
+        }
+        healed
     }
 
     async fn publish_id(&self, id: &str) {
