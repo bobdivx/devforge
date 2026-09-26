@@ -608,6 +608,28 @@ impl ProxyFacade {
         }
 
         if let Some(exec) = &self.executor {
+            // Labels déjà en place → ne pas recréer le conteneur de production (redémarrage
+            // à froid = fenêtre 404/502 à chaque déploiement, réseaux de groupe perdus).
+            let inspect = format!(
+                "docker inspect -f '{{{{range $k, $v := .Config.Labels}}}}{{{{$k}}}}={{{{$v}}}}{{{{println}}}}{{{{end}}}}' {}",
+                container
+            );
+            if let Ok(cur) = exec.exec(&self.apply_server_id, "", &inspect, 20).await {
+                if cur.ok && traefik_labels_match(&cur.output, &labels) {
+                    return Ok(json!({
+                        "ok": true,
+                        "project_uuid": project_uuid,
+                        "synced": safe_routes.len(),
+                        "hosts": safe_routes.iter().map(|r| &r.host).collect::<Vec<_>>(),
+                        "container": container,
+                        "labels": labels_val,
+                        "sso": forward_auth_address.is_some(),
+                        "conflicts": conflicts,
+                        "unchanged": true,
+                        "note": "labels déjà à jour — conteneur non recréé",
+                    }));
+                }
+            }
             let cmd = docker::docker_recreate_with_labels(&container, &labels_val);
             let res = exec
                 .exec(&self.apply_server_id, "", &cmd, 120)
@@ -662,8 +684,44 @@ fn host_proxy_from_data_bind(source: &str, destination: &str, container_data_dir
     }
 }
 
+/// Les labels `traefik.*` actuels du conteneur (sortie `key=value` par ligne)
+/// sont-ils exactement ceux voulus ?
+fn traefik_labels_match(current: &str, wanted: &serde_json::Map<String, Value>) -> bool {
+    let mut cur: Vec<(String, String)> = current
+        .lines()
+        .filter_map(|l| l.split_once('='))
+        .filter(|(k, _)| k.starts_with("traefik."))
+        .map(|(k, v)| (k.to_string(), v.trim_end_matches('\r').to_string()))
+        .collect();
+    let mut want: Vec<(String, String)> = wanted
+        .iter()
+        .filter(|(k, _)| k.starts_with("traefik."))
+        .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
+        .collect();
+    cur.sort();
+    want.sort();
+    !want.is_empty() && cur == want
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn traefik_labels_match_detects_changes() {
+        let mut want = serde_json::Map::new();
+        want.insert("traefik.enable".into(), json!("true"));
+        want.insert(
+            "traefik.http.routers.a.rule".into(),
+            json!("Host(`a.example.com`)"),
+        );
+        let cur = "maintainer=x\ntraefik.enable=true\ntraefik.http.routers.a.rule=Host(`a.example.com`)\n";
+        assert!(traefik_labels_match(cur, &want));
+        let changed = "traefik.enable=true\ntraefik.http.routers.a.rule=Host(`b.example.com`)\n";
+        assert!(!traefik_labels_match(changed, &want));
+        let extra = format!("{cur}traefik.http.routers.old.rule=Host(`old`)\n");
+        assert!(!traefik_labels_match(&extra, &want));
+        assert!(!traefik_labels_match("", &want));
+    }
+
     use super::*;
     use devforge_deploy::docker::{traefik_labels, traefik_labels_for_routes, docker_check_host_conflicts};
     use serde_json::json;
