@@ -205,6 +205,58 @@ impl ProxyFacade {
                         )
                         .await;
                     // tombe dans la création ci-dessous
+                } else if is_local && !expected.is_empty() {
+                    // Dérive de configuration (email ACME, relance, timeouts…) : remplacement
+                    // sûr — l’ancien proxy est restauré si le nouveau ne démarre pas.
+                    let acme = docker::acme_email();
+                    let want = docker::traefik_config_hash(TRAEFIK_IMAGE, TRAEFIK_NETWORK, acme.as_deref());
+                    let label_cmd = format!(
+                        r#"docker inspect {TRAEFIK_CONTAINER_NAME} --format '{{{{index .Config.Labels "{}"}}}}' 2>/dev/null || true"#,
+                        docker::TRAEFIK_CONFIG_LABEL
+                    );
+                    let cur = executor
+                        .exec(server_id, "", &label_cmd, 20)
+                        .await
+                        .map(|r| r.output.trim().to_string())
+                        .unwrap_or_default();
+                    if !cur.is_empty() && cur == want {
+                        return Ok(json!({
+                            "ok": true,
+                            "status": "already_running",
+                            "container": TRAEFIK_CONTAINER_NAME,
+                            "message": "Traefik is already running",
+                            "host_data_path": expected,
+                            "config": want,
+                        }));
+                    }
+                    eprintln!(
+                        "[ensure_traefik] configuration du proxy à jour requise ({} → {want}) — remplacement sûr",
+                        if cur.is_empty() { "?" } else { cur.as_str() }
+                    );
+                    let run = docker::traefik_run_command(
+                        TRAEFIK_CONTAINER_NAME,
+                        TRAEFIK_NETWORK,
+                        &expected,
+                        TRAEFIK_IMAGE,
+                        acme.as_deref(),
+                    );
+                    let pull = format!("docker image inspect {TRAEFIK_IMAGE} >/dev/null 2>&1 || docker pull {TRAEFIK_IMAGE}");
+                    let _ = executor.exec(server_id, "", &pull, 180).await;
+                    let res = executor
+                        .exec(
+                            server_id,
+                            "",
+                            &docker::traefik_safe_replace_command(&run, TRAEFIK_CONTAINER_NAME),
+                            120,
+                        )
+                        .await?;
+                    return Ok(json!({
+                        "ok": res.ok,
+                        "status": if res.ok { "reconfigured" } else { "reconfigure_failed_restored" },
+                        "container": TRAEFIK_CONTAINER_NAME,
+                        "config": want,
+                        "output": res.output,
+                    }));
                 } else {
                     return Ok(json!({
                         "ok": true,
@@ -293,45 +345,13 @@ impl ProxyFacade {
         executor.exec(server_id, "", &prep_cmd, 60).await?;
 
         // Create Traefik container with full production config
-        let create_cmd = format!(
-            r#"docker run -d \
-  --name {} \
-  --restart unless-stopped \
-  --network {} \
-  -p 80:80 \
-  -p 443:443 \
-  -p 443:443/udp \
-  --add-host host.docker.internal:host-gateway \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  -v {}:/traefik \
-  --label devforge.managed=true \
-  --label devforge.proxy=true \
-  --label traefik.enable=true \
-  --label 'traefik.http.routers.api.rule=Host(`traefik.local`)' \
-  --label traefik.http.routers.api.service=api@internal \
-  --label traefik.http.services.dummy.loadbalancer.server.port=9999 \
-  {} \
-  --api.dashboard=true \
-  --log.level=INFO \
-  --accesslog=false \
-  --entrypoints.http.address=:80 \
-  --entrypoints.https.address=:443 \
-  --providers.docker=true \
-  --providers.docker.exposedbydefault=false \
-  --providers.docker.network={} \
-  --providers.file.directory=/traefik/dynamic \
-  --providers.file.watch=true \
-  --certificatesresolvers.letsencrypt.acme.httpchallenge=true \
-  --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=http \
-  --certificatesresolvers.letsencrypt.acme.email=admin@devforge.local \
-  --certificatesresolvers.letsencrypt.acme.storage=/traefik/acme.json \
-  --ping=true \
-  --ping.entrypoint=http"#,
+        let acme = docker::acme_email();
+        let create_cmd = docker::traefik_run_command(
             TRAEFIK_CONTAINER_NAME,
             TRAEFIK_NETWORK,
-            shell_escape(&host_data_path),
+            &host_data_path,
             TRAEFIK_IMAGE,
-            TRAEFIK_NETWORK
+            acme.as_deref(),
         );
 
         let create_res = executor.exec(server_id, "", &create_cmd, 60).await?;

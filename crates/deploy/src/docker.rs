@@ -1033,6 +1033,193 @@ pub fn probe_engine() -> DockerEngineStatus {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Reverse proxy (Traefik) : commande de création unique, partagée par le proxy
+// (watchdog) et l’updater, avec une empreinte de configuration pour détecter la dérive.
+// ---------------------------------------------------------------------------
+
+static ACME_EMAIL: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
+
+/// Adresse de contact Let's Encrypt valable (domaine public, pas `.local` & co).
+pub fn is_valid_acme_email(email: &str) -> bool {
+    let e = email.trim();
+    let Some((user, domain)) = e.split_once('@') else {
+        return false;
+    };
+    if user.is_empty() || domain.contains('@') || !domain.contains('.') {
+        return false;
+    }
+    if !e
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "@.+-_".contains(c))
+    {
+        return false;
+    }
+    let d = domain.to_ascii_lowercase();
+    let tld = d.rsplit('.').next().unwrap_or("");
+    !(tld.len() < 2
+        || [
+            "local", "localhost", "internal", "lan", "home", "test", "example", "invalid",
+            "localdomain",
+        ]
+        .contains(&tld)
+        || d == "example.com"
+        || d.ends_with(".example.com"))
+}
+
+/// Email ACME retenu par l’instance (réglage / email admin), sans l’override d’env.
+pub fn set_acme_email(email: Option<String>) {
+    let v = email
+        .map(|e| e.trim().to_string())
+        .filter(|e| is_valid_acme_email(e));
+    if let Ok(mut g) = ACME_EMAIL.write() {
+        *g = v;
+    }
+}
+
+/// `DEVFORGE_ACME_EMAIL` (si valide) > réglage d’instance > aucun (compte sans contact,
+/// accepté par Let's Encrypt — mieux qu’une adresse invalide rejetée à chaque rechargement).
+pub fn acme_email() -> Option<String> {
+    if let Ok(v) = std::env::var("DEVFORGE_ACME_EMAIL") {
+        if is_valid_acme_email(&v) {
+            return Some(v.trim().to_string());
+        }
+    }
+    ACME_EMAIL.read().ok().and_then(|g| g.clone())
+}
+
+/// Middleware de relance déclaré sur le conteneur Traefik lui-même et appliqué à tous
+/// les routeurs des entrypoints : une requête partie vers un backend qui vient de
+/// disparaître (bascule blue-green) est relancée au lieu de pendre.
+pub const PROXY_RETRY_MIDDLEWARE: &str = "devforge-retry";
+
+/// Arguments Traefik (après l’image). Déterministes : servent à l’empreinte.
+pub fn traefik_args(network: &str, acme_email: Option<&str>) -> Vec<String> {
+    let mw = format!("{PROXY_RETRY_MIDDLEWARE}@docker");
+    let mut a: Vec<String> = vec![
+        "--api.dashboard=true".into(),
+        "--log.level=INFO".into(),
+        "--accesslog=false".into(),
+        "--entrypoints.http.address=:80".into(),
+        "--entrypoints.https.address=:443".into(),
+        format!("--entrypoints.http.http.middlewares={mw}"),
+        format!("--entrypoints.https.http.middlewares={mw}"),
+        // Backend disparu = pas de réponse ARP : échouer vite pour que la relance joue.
+        "--serverstransport.forwardingtimeouts.dialtimeout=2s".into(),
+        // Retrait/ajout d’un backend pris en compte plus vite (défaut 2 s).
+        "--providers.providersthrottleduration=500ms".into(),
+        "--providers.docker=true".into(),
+        "--providers.docker.exposedbydefault=false".into(),
+        format!("--providers.docker.network={network}"),
+        "--providers.file.directory=/traefik/dynamic".into(),
+        "--providers.file.watch=true".into(),
+        "--certificatesresolvers.letsencrypt.acme.httpchallenge=true".into(),
+        "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=http".into(),
+    ];
+    if let Some(e) = acme_email.filter(|e| is_valid_acme_email(e)) {
+        a.push(format!("--certificatesresolvers.letsencrypt.acme.email={}", e.trim()));
+    }
+    a.push("--certificatesresolvers.letsencrypt.acme.storage=/traefik/acme.json".into());
+    a.push("--ping=true".into());
+    a.push("--ping.entrypoint=http".into());
+    a
+}
+
+/// Labels du conteneur Traefik (hors empreinte).
+pub fn traefik_proxy_container_labels() -> Vec<String> {
+    let m = PROXY_RETRY_MIDDLEWARE;
+    vec![
+        "devforge.managed=true".into(),
+        "devforge.proxy=true".into(),
+        "traefik.enable=true".into(),
+        "traefik.http.routers.api.rule=Host(`traefik.local`)".into(),
+        "traefik.http.routers.api.service=api@internal".into(),
+        "traefik.http.services.dummy.loadbalancer.server.port=9999".into(),
+        format!("traefik.http.middlewares.{m}.retry.attempts=3"),
+        format!("traefik.http.middlewares.{m}.retry.initialinterval=200ms"),
+    ]
+}
+
+fn fnv1a64(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+/// Empreinte de la configuration Traefik voulue (image + args + labels).
+pub fn traefik_config_hash(image: &str, network: &str, acme_email: Option<&str>) -> String {
+    let mut all = vec![image.to_string()];
+    all.extend(traefik_args(network, acme_email));
+    all.extend(traefik_proxy_container_labels());
+    format!("{:016x}", fnv1a64(&all.join("\n")))
+}
+
+pub const TRAEFIK_CONFIG_LABEL: &str = "devforge.proxy.config";
+
+/// `docker run -d …` complet du reverse proxy (sans suppression préalable).
+pub fn traefik_run_command(
+    name: &str,
+    network: &str,
+    host_data_path: &str,
+    image: &str,
+    acme_email: Option<&str>,
+) -> String {
+    let mut parts: Vec<String> = vec![
+        "docker run -d".into(),
+        format!("--name {}", shell_escape(name)),
+        "--restart unless-stopped".into(),
+        format!("--network {}", shell_escape(network)),
+        "-p 80:80".into(),
+        "-p 443:443".into(),
+        "-p 443:443/udp".into(),
+        "--add-host host.docker.internal:host-gateway".into(),
+        "-v /var/run/docker.sock:/var/run/docker.sock:ro".into(),
+        format!("-v {}:/traefik", shell_escape(host_data_path)),
+    ];
+    for l in traefik_proxy_container_labels() {
+        parts.push(format!("--label {}", shell_escape(&l)));
+    }
+    parts.push(format!(
+        "--label {}={}",
+        TRAEFIK_CONFIG_LABEL,
+        traefik_config_hash(image, network, acme_email)
+    ));
+    parts.push(shell_escape(image));
+    for a in traefik_args(network, acme_email) {
+        parts.push(shell_escape(&a));
+    }
+    parts.join(" \\\n  ")
+}
+
+/// Remplace le Traefik en place SANS jamais laisser le nœud sans proxy : l’ancien est
+/// renommé puis arrêté (libère 80/443), le nouveau est créé ; s’il ne tourne pas après
+/// quelques secondes, il est supprimé et l’ancien est restauré.
+pub fn traefik_safe_replace_command(run_cmd: &str, name: &str) -> String {
+    let n = shell_escape(name);
+    let prev = shell_escape(&format!("{name}-prev"));
+    format!(
+        r#"docker rm -f {prev} >/dev/null 2>&1 || true
+docker rename {n} {prev} || exit 1
+docker stop -t 5 {prev} >/dev/null
+if {run_cmd} >/dev/null; then
+  sleep 4
+  if [ "$(docker inspect -f '{{{{.State.Running}}}}' {n} 2>/dev/null)" = "true" ]; then
+    docker rm -f {prev} >/dev/null 2>&1 || true
+    echo "proxy remplacé"
+    exit 0
+  fi
+fi
+echo "échec du nouveau proxy — restauration de l’ancien"
+docker logs --tail 20 {n} 2>&1 || true
+docker rm -f {n} >/dev/null 2>&1 || true
+docker rename {prev} {n} && docker start {n} >/dev/null
+exit 1"#
+    )
+}
+
 /// Nom sûr à insérer tel quel dans une commande (conteneur, réseau Docker).
 pub fn is_safe_docker_name(s: &str) -> bool {
     !s.is_empty()
@@ -1137,6 +1324,29 @@ fn shell_escape(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn acme_email_validation_and_traefik_command() {
+        assert!(is_valid_acme_email("bobdivx@gmail.com"));
+        assert!(!is_valid_acme_email("admin@devforge.local"));
+        assert!(!is_valid_acme_email("nobody"));
+        assert!(!is_valid_acme_email("a@b"));
+        assert!(!is_valid_acme_email("x@y.com; rm -rf /"));
+        let cmd = traefik_run_command("devforge-traefik", "devforge", "/DATA/x/proxy", "traefik:v3.6", Some("bobdivx@gmail.com"));
+        assert!(cmd.contains("acme.email=bobdivx@gmail.com"), "{cmd}");
+        assert!(!cmd.contains("devforge.local"), "{cmd}");
+        assert!(cmd.contains("entrypoints.http.http.middlewares=devforge-retry@docker"));
+        assert!(cmd.contains("devforge-retry.retry.attempts=3"));
+        assert!(cmd.contains("-v '/DATA/x/proxy':/traefik") || cmd.contains("-v /DATA/x/proxy:/traefik"), "{cmd}");
+        let none = traefik_run_command("devforge-traefik", "devforge", "/p", "traefik:v3.6", Some("admin@devforge.local"));
+        assert!(!none.contains("acme.email"), "{none}");
+        assert_ne!(
+            traefik_config_hash("traefik:v3.6", "devforge", Some("bobdivx@gmail.com")),
+            traefik_config_hash("traefik:v3.6", "devforge", None)
+        );
+        let r = traefik_safe_replace_command("docker run -d x", "devforge-traefik");
+        assert!(r.contains("docker rename 'devforge-traefik' 'devforge-traefik-prev'") || r.contains("docker rename devforge-traefik devforge-traefik-prev"), "{r}");
+    }
+
     #[test]
     fn http_probe_command_and_classifier() {
         let c = docker_http_probe("df-68e751f3-ec3-new", "devforge", 4321, "/").unwrap();

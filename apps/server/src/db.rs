@@ -450,6 +450,7 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         ("update_auto_worker", "BIGINT NOT NULL DEFAULT 0"),
         ("beta_workspace", "BIGINT NOT NULL DEFAULT 1"),
         ("beta_agent_builder", "BIGINT NOT NULL DEFAULT 1"),
+        ("acme_email", "TEXT NOT NULL DEFAULT ''"),
     ] {
         let sql = format!("ALTER TABLE instance_settings ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;
