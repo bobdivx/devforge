@@ -683,10 +683,23 @@ set -- "$@" --env-file "$ENV_FILE"
 # Add image
 set -- "$@" "$IMG"
 
+# Réseaux supplémentaires (groupe, sidecars) + alias : perdus sinon par la recréation.
+OLD_ID=$(docker inspect -f "{{{{.Id}}}}" "$N" | cut -c1-12)
+EXTRA_NETS=$(docker inspect -f "{{{{range \$k, \$v := .NetworkSettings.Networks}}}}{{{{\$k}}}}|{{{{range \$v.Aliases}}}}{{{{.}}}},{{{{end}}}}{{{{println}}}}{{{{end}}}}" "$N" | tail -n +2)
+
 docker stop "$N" >/dev/null
 docker rm -f "$N" >/dev/null
 CID=$(docker run "$@")
 rm -f "$ENV_FILE" "$LABEL_FILE"
+echo "$EXTRA_NETS" | while IFS="|" read -r xn xa; do
+  [ -n "$xn" ] || continue
+  [ "$xn" != "bridge" ] || continue
+  set --
+  for a in $(echo "$xa" | tr "," " "); do
+    [ "$a" = "$OLD_ID" ] || [ "$a" = "$N" ] || set -- "$@" --alias "$a"
+  done
+  docker network connect "$@" "$xn" "$CID" >/dev/null 2>&1 || true
+done
 
 # CRITICAL FIX (2026-09-14 incident C): Ensure df-* containers are connected to devforge network
 # If container name starts with df-, always connect it to devforge network for Traefik routing
