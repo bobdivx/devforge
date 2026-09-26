@@ -580,6 +580,21 @@ export const api = {
       body: JSON.stringify(body ?? { git_message: 'Manual deploy' }),
     }),
   deployment: (uuid: string) => request<{ data: Deployment }>(`/deployments/${uuid}`),
+  /** Le POST de déploiement répond tout de suite (202) : attendre l'état final. */
+  waitDeployment: async (
+    uuid: string,
+    opts: { intervalMs?: number; timeoutMs?: number } = {},
+  ): Promise<{ data: Deployment; ok?: boolean }> => {
+    const interval = opts.intervalMs ?? 3000;
+    const deadline = Date.now() + (opts.timeoutMs ?? 45 * 60 * 1000);
+    for (;;) {
+      const r = await request<{ data: Deployment }>(`/deployments/${uuid}`);
+      const st = r.data?.status;
+      if (st && !['queued', 'running', 'building', 'pending', 'deploying'].includes(st)) return r;
+      if (Date.now() > deadline) return r;
+      await new Promise((res) => setTimeout(res, interval));
+    }
+  },
   deploymentLogs: (uuid: string) =>
     request<{ data: { logs?: string; status?: string } } | { logs?: string }>(
       `/deployments/${uuid}/logs`,

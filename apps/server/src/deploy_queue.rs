@@ -79,6 +79,14 @@ impl DeployQueue {
         rx
     }
 
+    /// Vrai si une tâche vivante tient ce déploiement (son receiver d'annulation existe).
+    /// Un future droppé (timeout client/MCP) libère son receiver → plus « vivant ».
+    pub async fn has_live_task(&self, deployment_uuid: &str) -> bool {
+        let map = self.cancels.lock().await;
+        map.get(deployment_uuid)
+            .is_some_and(|tx| tx.receiver_count() > 0)
+    }
+
     pub async fn unregister_cancel(&self, deployment_uuid: &str) {
         let mut map = self.cancels.lock().await;
         map.remove(deployment_uuid);
@@ -369,6 +377,68 @@ pub async fn finalize_if_active(
     .execute(pool)
     .await;
     matches!(res, Ok(r) if r.rows_affected() == 1)
+}
+
+/// Déploiements actifs sans tâche vivante depuis plus de `older_than` → `failed`.
+/// Évite les lignes bloquées en « running » à vie (future droppé, crash de tâche).
+pub async fn reap_orphans(
+    queue: &DeployQueue,
+    pool: &PgPool,
+    older_than: chrono::Duration,
+) -> u64 {
+    let cutoff = (chrono::Utc::now() - older_than).to_rfc3339();
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        r#"SELECT uuid, project_id FROM deployments
+           WHERE status IN ('queued', 'running', 'building')
+             AND updated_at < $1"#,
+    )
+    .bind(&cutoff)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+    let mut reaped = 0u64;
+    for (uuid, project_id) in rows {
+        if queue.has_live_task(&uuid).await {
+            continue;
+        }
+        let now = now_str();
+        let res = sqlx::query(
+            r#"UPDATE deployments
+               SET status = 'failed',
+                   logs = COALESCE(logs, '') || $1,
+                   error_summary = COALESCE(error_summary, 'Déploiement interrompu : aucune tâche active'),
+                   finished_at = $2,
+                   updated_at = $2
+               WHERE uuid = $3 AND status IN ('queued', 'running', 'building')"#,
+        )
+        .bind("\n[devforge] déploiement interrompu (aucune tâche active) — marqué en échec.\n")
+        .bind(&now)
+        .bind(&uuid)
+        .execute(pool)
+        .await;
+        if !matches!(res, Ok(r) if r.rows_affected() == 1) {
+            continue;
+        }
+        reaped += 1;
+        tracing::warn!(deployment = %uuid, project_id, "Déploiement orphelin marqué en échec");
+        // Statut projet : « live » si une révision a déjà réussi, sinon « failed ».
+        let _ = sqlx::query(
+            r#"UPDATE projects SET status = CASE WHEN EXISTS (
+                   SELECT 1 FROM deployments WHERE project_id = $1 AND status = 'success'
+               ) THEN 'live' ELSE 'failed' END,
+               updated_at = $2
+               WHERE id = $1 AND status = 'deploying'
+                 AND NOT EXISTS (
+                   SELECT 1 FROM deployments WHERE project_id = $1
+                     AND status IN ('queued', 'running', 'building')
+                 )"#,
+        )
+        .bind(project_id)
+        .bind(&now)
+        .execute(pool)
+        .await;
+    }
+    reaped
 }
 
 /// Un build coupé par l’arrêt du processus redevient `queued`.

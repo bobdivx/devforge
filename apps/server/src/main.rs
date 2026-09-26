@@ -203,6 +203,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // Déploiements orphelins (aucune tâche vivante) → échec, toutes les 5 min.
+    {
+        let state_reap = state.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+            loop {
+                interval.tick().await;
+                let n = deploy_queue::reap_orphans(
+                    &state_reap.deploy_queue,
+                    &state_reap.pool,
+                    chrono::Duration::minutes(30),
+                )
+                .await;
+                if n > 0 {
+                    tracing::info!(count = n, "Déploiements orphelins nettoyés");
+                }
+            }
+        });
+    }
+
     // Auto-deploy poller: filet si webhook GitHub non configuré sur le repo.
     {
         let state_ad = state.clone();
