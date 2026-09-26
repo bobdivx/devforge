@@ -34,6 +34,7 @@ mod runner_routes;
 mod runner_store;
 mod security;
 mod sso;
+mod acme_routes;
 mod sso_routes;
 mod state;
 mod token_routes;
@@ -90,7 +91,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let st = state.clone();
             tokio::spawn(async move { crate::dns_failover::restore(&st).await });
         }
-        if let Err(e) = state.proxy.ensure_traefik().await {
+        // Email ACME valable (réglage / admin) avant toute (re)création du proxy.
+    let acme = acme_routes::refresh(&state.pool).await;
+    tracing::info!(acme_email_set = acme.is_some(), "email ACME du proxy résolu");
+    if let Err(e) = state.proxy.ensure_traefik().await {
             tracing::error!(error = %e, "Traefik worker — les domaines de ce nœud peuvent être injoignables");
         } else {
             tracing::info!("Traefik worker ready");
@@ -260,6 +264,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(infra_routes::router())
         .merge(backup_routes::router())
         .merge(sso_routes::router())
+        .merge(acme_routes::router())
         .merge(project_oidc_routes::router())
         .merge(project_pg_routes::router())
         .merge(llm_routes::router())

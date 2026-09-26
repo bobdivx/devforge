@@ -701,41 +701,13 @@ impl UpdateFacade {
 
         // Create Traefik
         if need_create {
-            let create_cmd = format!(
-                r#"docker run -d \
-  --name devforge-traefik \
-  --restart unless-stopped \
-  --network devforge \
-  -p 80:80 \
-  -p 443:443 \
-  -p 443:443/udp \
-  --add-host host.docker.internal:host-gateway \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  -v {}:/traefik \
-  --label devforge.managed=true \
-  --label devforge.proxy=true \
-  --label traefik.enable=true \
-  --label 'traefik.http.routers.api.rule=Host(`traefik.local`)' \
-  --label traefik.http.routers.api.service=api@internal \
-  --label traefik.http.services.dummy.loadbalancer.server.port=9999 \
-  traefik:v3.6 \
-  --api.dashboard=true \
-  --log.level=INFO \
-  --accesslog=false \
-  --entrypoints.http.address=:80 \
-  --entrypoints.https.address=:443 \
-  --providers.docker=true \
-  --providers.docker.exposedbydefault=false \
-  --providers.docker.network=devforge \
-  --providers.file.directory=/traefik/dynamic \
-  --providers.file.watch=true \
-  --certificatesresolvers.letsencrypt.acme.httpchallenge=true \
-  --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=http \
-  --certificatesresolvers.letsencrypt.acme.email=admin@devforge.local \
-  --certificatesresolvers.letsencrypt.acme.storage=/traefik/acme.json \
-  --ping=true \
-  --ping.entrypoint=http"#,
-                shell_escape(&traefik_dir)
+            let acme = devforge_deploy::docker::acme_email();
+            let create_cmd = devforge_deploy::docker::traefik_run_command(
+                "devforge-traefik",
+                "devforge",
+                &traefik_dir,
+                "traefik:v3.6",
+                acme.as_deref(),
             );
             let create_res = self
                 .executor
