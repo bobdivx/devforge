@@ -54,7 +54,9 @@ pub fn is_compatible(version: Option<&str>) -> bool {
 
 /// Ensure extra_env contains a compatible RUNNER_VERSION.
 pub fn with_compatible_extra_env(mut extra: Vec<EnvEntry>) -> Vec<EnvEntry> {
-    let has = extra.iter().any(|e| e.key.eq_ignore_ascii_case("RUNNER_VERSION"));
+    let has = extra
+        .iter()
+        .any(|e| e.key.eq_ignore_ascii_case("RUNNER_VERSION"));
     if !has {
         extra.push(EnvEntry {
             key: "RUNNER_VERSION".into(),

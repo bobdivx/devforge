@@ -69,7 +69,9 @@ pub fn assert_safe_volume_mount(volume: &str) -> Result<()> {
     }
     let is_docker_sock = host.contains("docker.sock") || volume.contains("docker.sock");
     if !is_docker_sock {
-        for prefix in ["/etc", "/root", "/boot", "/proc", "/sys", "/dev", "/var/run"] {
+        for prefix in [
+            "/etc", "/root", "/boot", "/proc", "/sys", "/dev", "/var/run",
+        ] {
             if host == prefix || host.starts_with(&format!("{prefix}/")) {
                 return Err(DevForgeError::Message(format!(
                     "le montage de {prefix} est interdit"
@@ -243,21 +245,23 @@ pub fn build_docker_run_command(
             auth_mode.as_str()
         ))
     ));
-    parts.push(format!(
-        "--label {}",
-        shell_escape("devforge.managed=true")
-    ));
-    parts.push(format!(
-        "--label {}",
-        shell_escape("devforge.type=service")
-    ));
+    parts.push(format!("--label {}", shell_escape("devforge.managed=true")));
+    parts.push(format!("--label {}", shell_escape("devforge.type=service")));
     parts.push(shell_escape(image));
 
     Ok(parts.join(" "))
 }
 
-pub fn discovery_command() -> &'static str {
-    "docker ps -a --filter label=com.devforge.runner=true --format '{{json .}}' ; docker ps -a --filter name=github-runner --format '{{json .}}'"
+/// `{{json .}}` fait calculer la taille de chaque conteneur par le daemon : ~20 s par
+/// appel sur le NAS, au-delà du timeout de découverte (25 s) → tous les runners
+/// affichés « missing ». On ne sérialise que les champs utiles.
+const DISCOVERY_FORMAT: &str = r#"{"ID":{{json .ID}},"Names":{{json .Names}},"Image":{{json .Image}},"State":{{json .State}},"Status":{{json .Status}},"Labels":{{json .Labels}}}"#;
+
+pub fn discovery_command() -> String {
+    format!(
+        "docker ps -a --filter label=com.devforge.runner=true --format '{f}' ; docker ps -a --filter name=github-runner --format '{f}'",
+        f = DISCOVERY_FORMAT
+    )
 }
 
 pub fn parse_docker_ps_json_lines(raw: &str) -> Vec<DockerContainerSnapshot> {
@@ -469,10 +473,7 @@ pub fn mask_sensitive_env_key(key: &str) -> bool {
 
 pub fn parse_inspect_env(inspect: &serde_json::Value) -> Vec<EnvEntry> {
     let mut out = Vec::new();
-    let Some(arr) = inspect
-        .pointer("/Config/Env")
-        .and_then(|v| v.as_array())
-    else {
+    let Some(arr) = inspect.pointer("/Config/Env").and_then(|v| v.as_array()) else {
         return out;
     };
     for line in arr {
@@ -539,7 +540,10 @@ pub fn build_docker_run_from_inspect(
         parts.push("--privileged".into());
     }
 
-    if let Some(binds) = inspect.pointer("/HostConfig/Binds").and_then(|v| v.as_array()) {
+    if let Some(binds) = inspect
+        .pointer("/HostConfig/Binds")
+        .and_then(|v| v.as_array())
+    {
         for b in binds {
             let Some(s) = b.as_str() else { continue };
             if !s.contains("docker.sock") {
@@ -560,16 +564,16 @@ pub fn build_docker_run_from_inspect(
         .unwrap_or_default();
     for line in with_compatible_runner_version_lines(env_lines) {
         if let Some((key, _)) = line.split_once('=') {
-            if key
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_')
-            {
+            if key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
                 parts.push(format!("-e {}", shell_escape(&line)));
             }
         }
     }
 
-    if let Some(labels) = inspect.pointer("/Config/Labels").and_then(|v| v.as_object()) {
+    if let Some(labels) = inspect
+        .pointer("/Config/Labels")
+        .and_then(|v| v.as_object())
+    {
         for (k, v) in labels {
             let val = v.as_str().unwrap_or("");
             parts.push(format!("--label {}", shell_escape(&format!("{k}={val}"))));
@@ -625,7 +629,10 @@ mod tests {
             &[],
         )
         .unwrap();
-        assert!(cmd.contains("github-runner-app-state:/runner-state"), "{cmd}");
+        assert!(
+            cmd.contains("github-runner-app-state:/runner-state"),
+            "{cmd}"
+        );
         assert!(cmd.contains("CONFIGURED_ACTIONS_RUNNER_FILES_DIR=/runner-state"));
         assert!(cmd.contains("DISABLE_AUTOMATIC_DEREGISTRATION=true"));
         // Autre image : pas d'injection.
@@ -649,6 +656,18 @@ mod tests {
             docker_rm_state_volume_cmd("github-runner-app"),
             "docker volume rm -f 'github-runner-app-state' >/dev/null 2>&1 || true"
         );
+    }
+
+    #[test]
+    fn discovery_avoids_size_computation_and_parses() {
+        let cmd = discovery_command();
+        assert!(!cmd.contains("{{json .}}"), "{cmd}");
+        let line = r#"{"ID":"eb756ad51fe5","Names":"github-runner-tesla-527f-runner","Image":"myoung34/github-runner:latest","State":"running","Status":"Up 2 minutes","Labels":"com.devforge.runner=true,com.devforge.runner.name=tesla-527f-runner"}"#;
+        let got = parse_docker_ps_json_lines(line);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].name, "github-runner-tesla-527f-runner");
+        assert_eq!(got[0].state, "running");
+        assert_eq!(got[0].runner_name.as_deref(), Some("tesla-527f-runner"));
     }
 
     #[test]

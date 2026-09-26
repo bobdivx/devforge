@@ -1,6 +1,4 @@
-use crate::docker::{
-    discovery_command, docker_inspect_running_cmd, parse_docker_ps_json_lines,
-};
+use crate::docker::{discovery_command, docker_inspect_running_cmd, parse_docker_ps_json_lines};
 use crate::events::RunnerEventBus;
 use crate::models::{ManagedRunner, OpStatus, RunnerEvent};
 use crate::store::RunnerStore;
@@ -59,11 +57,7 @@ impl RunnerSyncWorker {
     /// Refresh Docker + GitHub status into SQLite snapshot.
     /// If `reconcile`, attempt to recreate missing enabled runners.
     pub async fn sync_once(&self, reconcile: bool) -> Result<usize, String> {
-        let runners = self
-            .store
-            .list()
-            .await
-            .map_err(|e| e.to_string())?;
+        let runners = self.store.list().await.map_err(|e| e.to_string())?;
         let now = Utc::now().to_rfc3339();
 
         // Group by server_id for discovery.
@@ -81,7 +75,7 @@ impl RunnerSyncWorker {
         for (server_id, _) in &by_server {
             match self
                 .executor
-                .exec(server_id, "", discovery_command(), 25)
+                .exec(server_id, "", &discovery_command(), 25)
                 .await
             {
                 Ok(res) => {
@@ -123,7 +117,10 @@ impl RunnerSyncWorker {
         let futs = repos.into_iter().map(|(owner, repo)| {
             let gh = gh.clone();
             async move {
-                let list = gh.list_repo_runners(&owner, &repo).await.unwrap_or_default();
+                let list = gh
+                    .list_repo_runners(&owner, &repo)
+                    .await
+                    .unwrap_or_default();
                 ((owner, repo), list)
             }
         });
@@ -136,7 +133,11 @@ impl RunnerSyncWorker {
             let docker = docker_by_key.get(&key);
 
             let (live_state, live_status, container_id) = if let Some(c) = docker {
-                (c.state.clone(), c.status.clone(), Some(c.container_id.clone()))
+                (
+                    c.state.clone(),
+                    c.status.clone(),
+                    Some(c.container_id.clone()),
+                )
             } else if r.enabled {
                 (
                     "missing".to_string(),
@@ -144,11 +145,7 @@ impl RunnerSyncWorker {
                     None,
                 )
             } else {
-                (
-                    "stopped".to_string(),
-                    "Désactivé".to_string(),
-                    None,
-                )
+                ("stopped".to_string(), "Désactivé".to_string(), None)
             };
 
             let gh_list = gh_results
@@ -223,16 +220,12 @@ impl RunnerSyncWorker {
             if let Ok(Some(updated)) = self.store.get(&r.id).await {
                 if prev_state != updated.live_state || prev_gh != updated.github_status {
                     changed += 1;
-                    self.bus.publish(RunnerEvent::Updated {
-                        runner: updated,
-                    });
+                    self.bus.publish(RunnerEvent::Updated { runner: updated });
                 }
             }
         }
 
-        self.bus.publish(RunnerEvent::SyncDone {
-            count: changed,
-        });
+        self.bus.publish(RunnerEvent::SyncDone { count: changed });
         Ok(changed)
     }
 }
