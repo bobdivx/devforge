@@ -105,6 +105,47 @@ pub fn auth_environment_variables(
     }
 }
 
+/// Volume Docker qui conserve la configuration du runner (`.runner`, `.credentials`…).
+pub fn runner_state_volume(container_name: &str) -> String {
+    format!("{container_name}-state")
+}
+
+/// Supprime le volume d'état (recréation / suppression → nouvel enregistrement propre).
+pub fn docker_rm_state_volume_cmd(container_name: &str) -> String {
+    format!(
+        "docker volume rm -f {} >/dev/null 2>&1 || true",
+        shell_escape(&runner_state_volume(container_name))
+    )
+}
+
+/// Image myoung34 : réutiliser la config entre redémarrages.
+///
+/// Incident 2026-09-25 : tous les runners en boucle « Cannot configure the runner because
+/// it is already configured » (+ « configuredSettings null »). Le jeton d'enregistrement
+/// (valable 1 h) est figé dans l'env ; à chaque redémarrage l'entrypoint relançait
+/// `config.sh` sur un `.runner` resté dans la couche du conteneur, puis la
+/// désinscription échouait. Avec `CONFIGURED_ACTIONS_RUNNER_FILES_DIR` sur un volume et
+/// sans désinscription automatique, l'entrypoint reprend la config existante.
+fn runner_reuse_env(image: &str, extra_env: &[EnvEntry]) -> Vec<(String, String)> {
+    if !image_treats_access_token_as_pat(image) {
+        return vec![];
+    }
+    let has = |k: &str| extra_env.iter().any(|e| e.key.eq_ignore_ascii_case(k));
+    let mut out = vec![];
+    if !has("CONFIGURED_ACTIONS_RUNNER_FILES_DIR") {
+        out.push((
+            "CONFIGURED_ACTIONS_RUNNER_FILES_DIR".into(),
+            RUNNER_STATE_DIR.into(),
+        ));
+    }
+    if !has("DISABLE_AUTOMATIC_DEREGISTRATION") {
+        out.push(("DISABLE_AUTOMATIC_DEREGISTRATION".into(), "true".into()));
+    }
+    out
+}
+
+const RUNNER_STATE_DIR: &str = "/runner-state";
+
 pub fn build_docker_run_command(
     container_name: &str,
     image: &str,
@@ -136,6 +177,19 @@ pub fn build_docker_run_command(
     for volume in volumes {
         parts.push(format!("-v {}", shell_escape(volume)));
     }
+    let reuse_env = runner_reuse_env(image, extra_env);
+    if reuse_env
+        .iter()
+        .any(|(k, v)| k == "CONFIGURED_ACTIONS_RUNNER_FILES_DIR" && v == RUNNER_STATE_DIR)
+    {
+        parts.push(format!(
+            "-v {}",
+            shell_escape(&format!(
+                "{}:{RUNNER_STATE_DIR}",
+                runner_state_volume(container_name)
+            ))
+        ));
+    }
 
     let env_pairs = [
         ("REPO_URL", repo_url),
@@ -156,6 +210,9 @@ pub fn build_docker_run_command(
     }
 
     for (k, v) in auth_environment_variables(image, auth_mode, auth_token) {
+        parts.push(format!("-e {}", shell_escape(&format!("{k}={v}"))));
+    }
+    for (k, v) in &reuse_env {
         parts.push(format!("-e {}", shell_escape(&format!("{k}={v}"))));
     }
 
@@ -549,6 +606,49 @@ mod tests {
         assert!(cmd.contains("com.devforge.runner=true"));
         assert!(cmd.contains("/data/cache:/cache:rw"));
         assert!(cmd.contains("RUNNER_TOKEN=REGTOKEN"));
+    }
+
+    #[test]
+    fn myoung34_runner_reuses_config_from_state_volume() {
+        let cmd = build_docker_run_command(
+            "github-runner-app",
+            "myoung34/github-runner:latest",
+            "https://github.com/acme/app",
+            "app-runner",
+            "REGTOKEN",
+            AuthMode::Registration,
+            "self-hosted,devforge",
+            "bridge",
+            "UTC",
+            true,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert!(cmd.contains("github-runner-app-state:/runner-state"), "{cmd}");
+        assert!(cmd.contains("CONFIGURED_ACTIONS_RUNNER_FILES_DIR=/runner-state"));
+        assert!(cmd.contains("DISABLE_AUTOMATIC_DEREGISTRATION=true"));
+        // Autre image : pas d'injection.
+        let other = build_docker_run_command(
+            "github-runner-ci",
+            "ghcr.io/example/custom-runner:1",
+            "https://github.com/acme/app",
+            "ci-1",
+            "REGTOKEN",
+            AuthMode::Registration,
+            "self-hosted",
+            "bridge",
+            "UTC",
+            true,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert!(!other.contains("runner-state"));
+        assert_eq!(
+            docker_rm_state_volume_cmd("github-runner-app"),
+            "docker volume rm -f 'github-runner-app-state' >/dev/null 2>&1 || true"
+        );
     }
 
     #[test]
