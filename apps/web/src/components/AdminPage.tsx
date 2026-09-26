@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api, type ClusterNode, type ManagedRunner, type ProxyStatus } from '../lib/api';
+import { AcmeEmailTile } from './AcmeEmailTile';
 import { AppShell } from './AppShell';
 import { InstanceAdminGate } from './InstanceAdminGate';
 import { InstanceDomainPanel, ServerSettingsPanel } from './AdminInfraPanels';
@@ -561,6 +562,7 @@ function AdminHub() {
         badge={beta?.badge}
         subtitle={beta?.subtitle}
       />
+      <AcmeEmailTile index={12} />
     </HubGrid>
   );
 }
