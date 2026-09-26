@@ -1282,6 +1282,38 @@ async fn create_deployment(
         .await
         .map_err(ApiError::from)?;
 
+    // Le build tourne dans une tâche détachée : la requête HTTP (ou l'appel MCP) répond
+    // tout de suite. Avant, le handler attendait la fin du build — un client/proxy qui
+    // coupait (timeout Cloudflare/MCP) droppait le future et laissait le déploiement
+    // bloqué en « running » sans tâche vivante.
+    {
+        let state = state.clone();
+        let project = project.clone();
+        let dep_uuid = dep_uuid.clone();
+        let requested_sha = body.git_sha.clone();
+        tokio::spawn(async move {
+            finish_manual_deploy(&state, project, dep_uuid, requested_sha).await;
+        });
+    }
+
+    let dep = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = $1")
+        .bind(&dep_uuid)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(ApiError::from)?;
+    Ok((
+        axum::http::StatusCode::ACCEPTED,
+        Json(json!({"data": dep, "ok": true, "async": true})),
+    ))
+}
+
+/// Suite d'un déploiement manuel (build + finalisation + réparations), en tâche de fond.
+pub(crate) async fn finish_manual_deploy(
+    state: &AppState,
+    project: Project,
+    dep_uuid: String,
+    requested_sha: Option<String>,
+) {
     // Charger le SHA de la révision actuellement en production avant le deploy
     let live_revision_sha: Option<String> = sqlx::query_as(
         "SELECT git_sha FROM deployments WHERE project_id = $1 AND status = 'success' ORDER BY created_at DESC LIMIT 1",
@@ -1293,13 +1325,13 @@ async fn create_deployment(
     .flatten()
     .map(|(sha,)| sha);
 
-    let outcome = run_real_deploy(&state, &project, &dep_uuid).await;
+    let outcome = run_real_deploy(state, &project, &dep_uuid).await;
     let finished = now_str();
     let result = &outcome.result;
     let sha = result
         .git_sha
         .clone()
-        .or(body.git_sha)
+        .or(requested_sha)
         .unwrap_or_else(|| "unknown".into());
 
     if outcome.cancelled {
@@ -1315,15 +1347,7 @@ async fn create_deployment(
             live_revision_sha.as_deref(),
         )
         .await;
-        let dep = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = $1")
-            .bind(&dep_uuid)
-            .fetch_one(&state.pool)
-            .await
-            .map_err(ApiError::from)?;
-        return Ok((
-            axum::http::StatusCode::OK,
-            Json(json!({"data": dep, "ok": false, "cancelled": true})),
-        ));
+        return;
     }
 
     let status = if result.ok { "success" } else { "failed" };
@@ -1352,19 +1376,19 @@ async fn create_deployment(
     .await;
 
     let project_status = if result.ok { "live" } else { "failed" };
-    sqlx::query("UPDATE projects SET status = $1, updated_at = $2 WHERE id = $3")
+    let _ = sqlx::query("UPDATE projects SET status = $1, updated_at = $2 WHERE id = $3")
         .bind(project_status)
         .bind(&finished)
         .bind(project.id)
         .execute(&state.pool)
-        .await
-        .map_err(ApiError::from)?;
+        .await;
 
     let dep = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = $1")
         .bind(&dep_uuid)
-        .fetch_one(&state.pool)
+        .fetch_optional(&state.pool)
         .await
-        .map_err(ApiError::from)?;
+        .ok()
+        .flatten();
 
     // CRITICAL: Ensure Traefik is running after every successful deploy (fix for recurring disappearance)
     if result.ok {
@@ -1396,10 +1420,13 @@ async fn create_deployment(
             let project_uuid = project.uuid.clone();
             let dep_uuid_clone = dep_uuid.clone();
             let summary = dep
-                .error_summary
-                .clone()
+                .as_ref()
+                .and_then(|d| d.error_summary.clone())
                 .unwrap_or_else(|| "Échec du déploiement".into());
-            let hint = dep.error_hint.clone().unwrap_or_default();
+            let hint = dep
+                .as_ref()
+                .and_then(|d| d.error_hint.clone())
+                .unwrap_or_default();
             tokio::spawn(async move {
                 let _ = wake_coordinator_deploy_fail(
                     &state_clone,
@@ -1413,14 +1440,6 @@ async fn create_deployment(
         }
     }
 
-    Ok((
-        if result.ok {
-            axum::http::StatusCode::CREATED
-        } else {
-            axum::http::StatusCode::OK
-        },
-        Json(json!({"data": dep, "ok": result.ok})),
-    ))
 }
 
 /// Résultat d'un run : succès/échec build, ou annulé (supersede).

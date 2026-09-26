@@ -850,7 +850,8 @@ function ProjectOverview({
     setDeployBusy(true);
     toast.push({ title: 'Déploiement…', detail: 'Clone + build', tone: 'info' });
     try {
-      const r = await api.createDeployment(uuid, { git_message: 'Deploy depuis overview' });
+      const started = await api.createDeployment(uuid, { git_message: 'Deploy depuis overview' });
+      const r = started.data?.uuid ? await api.waitDeployment(started.data.uuid) : started;
       const ok = !(r.ok === false || r.data.status === 'failed');
       toast.push({
         title: ok ? 'Déployé' : 'Échec déploiement',
@@ -1413,7 +1414,12 @@ function DeploymentsPanel({
     setBusy(true);
     toast.push({ title: 'Deploy…', detail: 'Clone + build en cours', tone: 'info' });
     try {
-      const r = await api.createDeployment(projectUuid, { git_message: 'Manual deploy' });
+      const started = await api.createDeployment(projectUuid, { git_message: 'Manual deploy' });
+      if (started.data?.uuid) {
+        setSelectedUuid(started.data.uuid);
+        await reload();
+      }
+      const r = started.data?.uuid ? await api.waitDeployment(started.data.uuid) : started;
       toast.push({
         title: r.ok === false || r.data.status === 'failed' ? 'Deploy échoué' : 'Deploy terminé',
         detail: r.data.git_sha || r.data.status,
