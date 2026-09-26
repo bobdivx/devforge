@@ -92,9 +92,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tokio::spawn(async move { crate::dns_failover::restore(&st).await });
         }
         // Email ACME valable (réglage / admin) avant toute (re)création du proxy.
-    let acme = acme_routes::refresh(&state.pool).await;
-    tracing::info!(acme_email_set = acme.is_some(), "email ACME du proxy résolu");
-    if let Err(e) = state.proxy.ensure_traefik().await {
+        let acme = acme_routes::refresh(&state.pool).await;
+        tracing::info!(acme_email_set = acme.is_some(), "email ACME du proxy résolu (worker)");
+        if let Err(e) = state.proxy.ensure_traefik().await {
             tracing::error!(error = %e, "Traefik worker — les domaines de ce nœud peuvent être injoignables");
         } else {
             tracing::info!("Traefik worker ready");
@@ -139,6 +139,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Ensure Traefik reverse proxy is running (durable fix for outage 2026-09-11).
     // If the container was deleted/stopped, recreate/start it before accepting requests.
+    // Email ACME valable (réglage / admin) avant toute (re)création du proxy.
+    let acme = acme_routes::refresh(&state.pool).await;
+    tracing::info!(acme_email_set = acme.is_some(), "email ACME du proxy résolu");
     if let Err(e) = state.proxy.ensure_traefik().await {
         tracing::error!(error = %e, "Failed to ensure Traefik container — proxy may be unavailable");
     } else {
