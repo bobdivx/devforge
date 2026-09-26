@@ -178,7 +178,6 @@ fn data_dir_base() -> std::path::PathBuf {
         .join("data")
 }
 
-
 /// Join `rel` (repo-relative, `/` or `.` = root) under `workdir`.
 fn resolve_repo_subdir(workdir: &str, rel: &str) -> String {
     let r = rel.trim();
@@ -191,7 +190,10 @@ fn resolve_repo_subdir(workdir: &str, rel: &str) -> String {
 }
 
 fn normalize_repo_rel(rel: &str) -> String {
-    rel.trim().trim_start_matches("./").trim_start_matches('/').to_string()
+    rel.trim()
+        .trim_start_matches("./")
+        .trim_start_matches('/')
+        .to_string()
 }
 
 /// Path of `abs` relative to `workdir`, or `.` when equal. Falls back to `abs`.
@@ -1423,12 +1425,19 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             }
         }
 
-        // Wait for new container healthcheck
-        logs.push_str("[blue-green] Attente healthcheck nouveau conteneur...\n");
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        // Disponibilité HTTP réelle (pas seulement « running ») avant toute bascule.
+        logs.push_str("[blue-green] Attente disponibilité HTTP du nouveau conteneur...\n");
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
         let new_is_healthy = self
-            .container_is_healthy(server, workdir, &new_name, logs)
+            .wait_container_ready(
+                server,
+                workdir,
+                &new_name,
+                network.as_deref(),
+                container_port,
+                logs,
+            )
             .await;
 
         if !new_is_healthy {
@@ -1469,6 +1478,43 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
                         e
                     ));
                 }
+            }
+        }
+
+        // La pose des labels recrée le conteneur (redémarrage à froid) : il faut
+        // re-vérifier qu’il répond AVANT d’arrêter l’ancien, sinon fenêtre 404/502.
+        if has_traefik_labels {
+            if !extras.runtime.sidecars.is_empty() {
+                let cmd = docker::docker_network_attach(&side_net, &new_name, None);
+                let _ = self.executor.exec(server, workdir, &cmd, 30).await;
+            }
+            let ready = self
+                .wait_container_ready(
+                    server,
+                    workdir,
+                    &new_name,
+                    network.as_deref(),
+                    container_port,
+                    logs,
+                )
+                .await;
+            if !ready {
+                logs.push_str("[blue-green] ❌ Nouveau conteneur non disponible après pose des labels — bascule annulée\n");
+                let _ = self
+                    .executor
+                    .exec(server, workdir, &format!("docker rm -f {}", new_name), 30)
+                    .await;
+                if old_exists {
+                    logs.push_str(&format!(
+                        "[blue-green] ✅ Ancien conteneur {} reste en production (déploiement échoué, pas d'interruption)\n",
+                        name
+                    ));
+                }
+                return false;
+            }
+            if old_exists {
+                // Laisse le reverse proxy intégrer le nouveau backend avant de retirer l’ancien.
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             }
         }
 
@@ -1611,6 +1657,106 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             .ok()
             .map(|r| r.ok && !r.output.trim().is_empty())
             .unwrap_or(false)
+    }
+
+    /// Attend que `container` réponde réellement en HTTP (code ≠ 404 et < 500), ou que
+    /// son healthcheck Docker (configuré sur le projet) soit `healthy`.
+    /// Sans réseau partagé avec le reverse proxy, retombe sur l’état `running`.
+    /// Un 404 stable pendant 30 s est accepté (API sans page `/`), avec avertissement.
+    async fn wait_container_ready(
+        &self,
+        server: &str,
+        workdir: &str,
+        container: &str,
+        network: Option<&str>,
+        port: u16,
+        logs: &mut String,
+    ) -> bool {
+        use docker::ReadyProbe;
+        let Some(probe) = network.and_then(|n| docker::docker_http_probe(container, n, port, "/"))
+        else {
+            logs.push_str("[readiness] pas de réseau partagé avec le proxy — contrôle de l’état du conteneur uniquement\n");
+            return self
+                .container_is_healthy(server, workdir, container, logs)
+                .await;
+        };
+        let timeout = std::env::var("DEVFORGE_DEPLOY_READY_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|v| (5..=900).contains(v))
+            .unwrap_or(90);
+        let started = std::time::Instant::now();
+        let deadline = started + std::time::Duration::from_secs(timeout);
+        let mut first_404: Option<std::time::Instant> = None;
+        let mut noprobe = 0u32;
+        let mut last = String::new();
+        loop {
+            let out = match self.executor.exec(server, workdir, &probe, 20).await {
+                Ok(r) => r.output,
+                Err(e) => format!("error {e}"),
+            };
+            let verdict = docker::classify_ready_probe(&out);
+            let summary = out
+                .lines()
+                .rev()
+                .find(|l| l.contains("state="))
+                .unwrap_or(out.trim())
+                .to_string();
+            if summary != last {
+                logs.push_str(&format!(
+                    "[readiness] {container} t+{}s {summary}\n",
+                    started.elapsed().as_secs()
+                ));
+                last = summary;
+            }
+            match verdict {
+                ReadyProbe::Ready => {
+                    logs.push_str(&format!(
+                        "[readiness] ✅ {container} répond en HTTP (t+{}s)\n",
+                        started.elapsed().as_secs()
+                    ));
+                    return true;
+                }
+                ReadyProbe::Dead => {
+                    logs.push_str(&format!(
+                        "[readiness] ❌ {container} s’est arrêté pendant le démarrage\n"
+                    ));
+                    let tail = format!("docker logs --tail 20 {container} 2>&1");
+                    if let Ok(r) = self.executor.exec(server, workdir, &tail, 15).await {
+                        logs.push_str(&format!("[readiness] logs: {}\n", trim_out(&r.output)));
+                    }
+                    return false;
+                }
+                ReadyProbe::NoProbe => {
+                    noprobe += 1;
+                    if noprobe >= 3 {
+                        logs.push_str("[readiness] sonde HTTP indisponible (proxy absent ou pas d’IP) — contrôle de l’état uniquement\n");
+                        return self
+                            .container_is_healthy(server, workdir, container, logs)
+                            .await;
+                    }
+                }
+                ReadyProbe::NotFound => {
+                    let since = *first_404.get_or_insert_with(std::time::Instant::now);
+                    if since.elapsed() >= std::time::Duration::from_secs(30) {
+                        logs.push_str(&format!(
+                            "[readiness] ⚠️ {container} répond 404 sur / depuis 30 s — app considérée prête (pas de page racine)\n"
+                        ));
+                        return true;
+                    }
+                }
+                ReadyProbe::Wait => {
+                    first_404 = None;
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                logs.push_str(&format!(
+                    "[readiness] ❌ {container} ne répond pas en HTTP après {timeout}s (dernier état : {last}) — l’ancien conteneur reste en production\n"
+                ));
+                return false;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        }
     }
 
     async fn container_is_healthy(

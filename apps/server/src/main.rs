@@ -171,6 +171,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(async move {
             worker.run_loop().await;
         });
+        // Auto-réparation des runners dont l’inscription GitHub n’est plus valable.
+        let st = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(180)).await;
+            loop {
+                let n = st.runners.self_heal_once().await;
+                if n > 0 {
+                    tracing::info!(count = n, "runners recréés automatiquement");
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+            }
+        });
     }
 
     // Background scheduler for automatic instance backups (local + S3).
