@@ -3,8 +3,7 @@ use crate::docker::{
     assert_safe_volume_mount, assert_valid_container_name, build_docker_run_command,
     build_docker_run_from_inspect, docker_inspect_json_cmd, docker_logs_cmd, docker_pull_cmd,
     docker_restart_cmd, docker_rm_cmd, docker_rm_state_volume_cmd, docker_start_cmd,
-    docker_stop_cmd, parse_inspect_env,
-    slugify_runner_name, stale_network_cleanup,
+    docker_stop_cmd, parse_inspect_env, slugify_runner_name, stale_network_cleanup,
 };
 use crate::events::RunnerEventBus;
 use crate::models::{
@@ -142,11 +141,7 @@ impl RunnerFacade {
             .filter(|s| !s.is_empty())
             .unwrap_or(DEFAULT_LABELS)
             .to_string();
-        let network_mode = req
-            .network_mode
-            .as_deref()
-            .unwrap_or("bridge")
-            .to_string();
+        let network_mode = req.network_mode.as_deref().unwrap_or("bridge").to_string();
         let timezone = req.timezone.as_deref().unwrap_or("UTC").to_string();
         let auth_mode = AuthMode::parse(req.auth_mode.as_deref().unwrap_or("registration"));
 
@@ -227,12 +222,7 @@ impl RunnerFacade {
             self.publish_id(id).await;
             let pull = self
                 .executor
-                .exec(
-                    &runner.server_id,
-                    "",
-                    &docker_pull_cmd(&runner.image),
-                    300,
-                )
+                .exec(&runner.server_id, "", &docker_pull_cmd(&runner.image), 300)
                 .await?;
             if !pull.ok {
                 return Err(DevForgeError::Message(format!(
@@ -288,10 +278,7 @@ impl RunnerFacade {
             &runner.extra_env,
         )?;
 
-        let run = self
-            .executor
-            .exec(&runner.server_id, "", &cmd, 60)
-            .await?;
+        let run = self.executor.exec(&runner.server_id, "", &cmd, 60).await?;
         if !run.ok {
             let _ = self
                 .executor
@@ -314,17 +301,7 @@ impl RunnerFacade {
         let now = Utc::now().to_rfc3339();
         let _ = self
             .store
-            .update_live(
-                id,
-                "running",
-                "Créé",
-                None,
-                None,
-                None,
-                None,
-                &now,
-                None,
-            )
+            .update_live(id, "running", "Créé", None, None, None, None, &now, None)
             .await;
         self.publish_id(id).await;
         let _ = self.sync.sync_once(false).await;
@@ -358,10 +335,7 @@ impl RunnerFacade {
 
     pub async fn action(&self, id: &str, action: &str) -> Result<Value> {
         let action = action.to_lowercase();
-        if !matches!(
-            action.as_str(),
-            "start" | "stop" | "restart" | "recreate"
-        ) {
+        if !matches!(action.as_str(), "start" | "stop" | "restart" | "recreate") {
             return Err(DevForgeError::Message(
                 "action invalide (start|stop|restart|recreate)".into(),
             ));
@@ -421,15 +395,10 @@ impl RunnerFacade {
             _ => unreachable!(),
         };
 
-        self.store
-            .set_op_status(id, op.as_str(), None)
-            .await?;
+        self.store.set_op_status(id, op.as_str(), None).await?;
         self.publish_id(id).await;
 
-        let res = self
-            .executor
-            .exec(&runner.server_id, "", &cmd, 60)
-            .await?;
+        let res = self.executor.exec(&runner.server_id, "", &cmd, 60).await?;
         if !res.ok {
             self.store
                 .set_op_status(id, OpStatus::Failed.as_str(), Some(&res.output))
@@ -488,12 +457,7 @@ impl RunnerFacade {
 
         let pull = self
             .executor
-            .exec(
-                &runner.server_id,
-                "",
-                &docker_pull_cmd(&runner.image),
-                300,
-            )
+            .exec(&runner.server_id, "", &docker_pull_cmd(&runner.image), 300)
             .await?;
         if !pull.ok {
             return Err(DevForgeError::Message(format!(
@@ -547,10 +511,7 @@ impl RunnerFacade {
             &runner.extra_env,
         )?;
 
-        let run = self
-            .executor
-            .exec(&runner.server_id, "", &cmd, 60)
-            .await?;
+        let run = self.executor.exec(&runner.server_id, "", &cmd, 60).await?;
         if !run.ok {
             // Try inspect-based recreate as last resort
             if let Ok(ins) = self
@@ -564,13 +525,9 @@ impl RunnerFacade {
                 .await
             {
                 if let Ok(inspect) = serde_json::from_str::<Value>(ins.output.trim()) {
-                    if let Ok(alt) =
-                        build_docker_run_from_inspect(&inspect, &runner.container_name)
+                    if let Ok(alt) = build_docker_run_from_inspect(&inspect, &runner.container_name)
                     {
-                        let _ = self
-                            .executor
-                            .exec(&runner.server_id, "", &alt, 60)
-                            .await?;
+                        let _ = self.executor.exec(&runner.server_id, "", &alt, 60).await?;
                     } else {
                         return Err(DevForgeError::Message(format!(
                             "recreate échoué: {}",
