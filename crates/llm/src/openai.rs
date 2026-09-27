@@ -7,6 +7,22 @@ use crate::{
     ToolCallRequest,
 };
 
+/// Message d'erreur reqwest avec ses causes (« Connection refused », DNS…) : le
+/// `Display` seul ne donne que « error sending request for url ».
+pub(crate) fn error_chain(e: &(dyn std::error::Error + 'static)) -> String {
+    let mut out = e.to_string();
+    let mut src = e.source();
+    while let Some(s) = src {
+        let m = s.to_string();
+        if !out.contains(&m) {
+            out.push_str(": ");
+            out.push_str(&m);
+        }
+        src = s.source();
+    }
+    out
+}
+
 // Import uuid pour générer des IDs uniques
 extern crate uuid;
 
@@ -348,7 +364,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
             .timeout(std::time::Duration::from_secs(timeout_secs))
             .send()
             .await
-            .map_err(|e| err(format!("LLM HTTP: {e}")))?;
+            .map_err(|e| err(format!("LLM HTTP: {}", error_chain(&e))))?;
         let status = res.status();
         let text = res
             .text()
@@ -859,6 +875,23 @@ impl OpenAiCompatibleProvider {
 
 #[cfg(test)]
 mod tests {
+
+    #[tokio::test]
+    async fn connection_refused_is_humanized_clearly() {
+        let p = OpenAiCompatibleProvider::new("http://127.0.0.1:9/v1", "", "m");
+        let e = p
+            .chat(crate::ChatRequest {
+                messages: vec![crate::ChatMessage::user("ping")],
+                tools: vec![],
+                temperature: 0.0,
+            })
+            .await
+            .err()
+            .expect("port 9 fermé");
+        let human = crate::humanize_llm_error(&e.to_string());
+        assert!(human.contains("connexion refusée"), "{e} → {human}");
+    }
+
     use super::*;
 
     #[tokio::test]

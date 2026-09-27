@@ -66,8 +66,10 @@ pub async fn probe(req: &ProbeRequest) -> ProbeResult {
         };
     }
 
+    // Ollama local : le premier appel charge le modèle en mémoire (souvent > 20 s).
+    let ping_secs = if provider == "ollama" { 90 } else { 20 };
     let ping = tokio::time::timeout(
-        std::time::Duration::from_secs(20),
+        std::time::Duration::from_secs(ping_secs),
         chat_ping(llm.as_ref()),
     )
     .await;
@@ -100,7 +102,11 @@ pub async fn probe(req: &ProbeRequest) -> ProbeResult {
             resolved_model: resolved,
             latency_ms: elapsed_ms(started),
             message: "chat KO".into(),
-            error: Some("délai dépassé (20s)".into()),
+            error: Some(if provider == "ollama" {
+                format!("délai dépassé ({ping_secs}s) — modèle local peut-être en cours de chargement, réessaie dans une minute")
+            } else {
+                format!("délai dépassé ({ping_secs}s)")
+            }),
         },
     }
 }
