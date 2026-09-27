@@ -34,9 +34,35 @@ pub fn humanize_llm_error(raw_error: &str) -> String {
         return msg;
     }
 
-    // Pattern 401/403 - clé invalide
-    if normalized.contains("401") || normalized.contains("403") || normalized.contains("Unauthorized") || normalized.contains("Forbidden") {
+    // Fournisseur injoignable (avant les codes HTTP : une URL contient parfois « 403 »…).
+    if let Some(msg) = handle_unreachable(normalized) {
+        return msg;
+    }
+
+    // 401, ou 403 qui parle vraiment d'authentification : clé invalide.
+    let l = normalized.to_lowercase();
+    let auth_text = l.contains("api key")
+        || l.contains("api_key")
+        || l.contains("apikey")
+        || l.contains("unauthorized")
+        || l.contains("unauthenticated")
+        || l.contains("authentication")
+        || l.contains("invalid token")
+        || l.contains("incorrect token");
+    if normalized.contains("401") || (normalized.contains("403") && auth_text) {
         return "Clé API invalide ou refusée.".to_string();
+    }
+
+    // Autre 403 : accès refusé pour une autre raison (proxy, réseau, ACL) — on montre la
+    // raison donnée par le fournisseur plutôt que d'accuser la clé.
+    if normalized.contains("403") || normalized.contains("Forbidden") {
+        let detail = provider_message(normalized).unwrap_or_default();
+        let msg = if detail.is_empty() {
+            "Accès refusé par le fournisseur (403), sans rapport avec la clé.".to_string()
+        } else {
+            format!("Accès refusé par le fournisseur : {detail}")
+        };
+        return truncate(msg);
     }
 
     // Pattern 404 - modèle introuvable
@@ -44,10 +70,6 @@ pub fn humanize_llm_error(raw_error: &str) -> String {
         return "Modèle introuvable.".to_string();
     }
 
-    // Pattern timeout / réseau
-    if normalized.contains("timeout") || normalized.contains("Timeout") || normalized.contains("connection") || normalized.contains("Connection") {
-        return "Provider injoignable.".to_string();
-    }
 
     // Pattern quota sans 429 explicite
     if normalized.to_lowercase().contains("quota") || normalized.to_lowercase().contains("exceeded") {
@@ -56,6 +78,48 @@ pub fn humanize_llm_error(raw_error: &str) -> String {
 
     // Sinon : nettoyer et tronquer
     cleanup_generic_error(normalized)
+}
+
+fn handle_unreachable(error: &str) -> Option<String> {
+    let l = error.to_lowercase();
+    if l.contains("connection refused") {
+        return Some("Fournisseur injoignable : connexion refusée. Vérifie l’URL et que le service tourne.".into());
+    }
+    if l.contains("dns error") || l.contains("failed to lookup address") || l.contains("name or service not known") {
+        return Some("Fournisseur injoignable : nom d’hôte introuvable. Vérifie l’URL.".into());
+    }
+    if l.contains("no route to host") || l.contains("network is unreachable") || l.contains("host is unreachable") {
+        return Some("Fournisseur injoignable : hôte hors d’atteinte. Vérifie l’URL et le réseau.".into());
+    }
+    if l.contains("timed out") || l.contains("timeout") {
+        return Some("Fournisseur injoignable : délai dépassé.".into());
+    }
+    if l.contains("connection reset") || l.contains("connection closed") || l.contains("error sending request") || l.contains("connect error") {
+        return Some("Fournisseur injoignable : connexion interrompue. Vérifie l’URL et que le service tourne.".into());
+    }
+    None
+}
+
+/// Message lisible d'un corps d'erreur JSON (`{"error":"…"}`, `{"error":{"message":"…"}}`,
+/// `{"message":"…"}`), sinon le texte après le code HTTP.
+fn provider_message(error: &str) -> Option<String> {
+    let start = error.find('{')?;
+    let v: Value = serde_json::from_str(&error[start..]).ok()?;
+    v.get("error")
+        .and_then(|e| e.as_str().map(str::to_string))
+        .or_else(|| v.pointer("/error/message").and_then(|m| m.as_str()).map(str::to_string))
+        .or_else(|| v.get("message").and_then(|m| m.as_str()).map(str::to_string))
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
+}
+
+fn truncate(msg: String) -> String {
+    const MAX: usize = 180;
+    if msg.chars().count() > MAX {
+        format!("{}…", msg.chars().take(MAX - 1).collect::<String>())
+    } else {
+        msg
+    }
 }
 
 fn handle_billing(error: &str) -> Option<String> {
@@ -195,6 +259,25 @@ mod tests {
     }
 
     #[test]
+    fn test_loopback_only_403_is_not_invalid_key() {
+        let raw = r#"LLM 403 Forbidden: {"code":"loopback-only","error":"plaintext requests are accepted only from loopback; cluster peers must use the mTLS ingress"}"#;
+        let r = humanize_llm_error(raw);
+        assert!(r.starts_with("Accès refusé par le fournisseur : plaintext requests"), "{r}");
+        let bad = r#"LLM 403 Forbidden: {"error":{"message":"Incorrect API key provided"}}"#;
+        assert_eq!(humanize_llm_error(bad), "Clé API invalide ou refusée.");
+    }
+
+    #[test]
+    fn test_connection_refused_is_clear() {
+        let raw = "LLM HTTP: error sending request for url (http://172.17.0.1:11434/v1/chat/completions): client error (Connect): tcp connect error: Connection refused (os error 111)";
+        let r = humanize_llm_error(raw);
+        assert!(r.contains("connexion refusée"), "{r}");
+        assert!(!r.contains("Clé API"));
+        let dns = "LLM HTTP: error sending request for url (http://nope.invalid/v1): dns error: failed to lookup address information";
+        assert!(humanize_llm_error(dns).contains("nom d’hôte introuvable"));
+    }
+
+    #[test]
     fn test_404_model_not_found() {
         let raw = "LLM 404: Model 'gpt-99' not found";
         let result = humanize_llm_error(raw);
@@ -205,7 +288,7 @@ mod tests {
     fn test_timeout() {
         let raw = "LLM HTTP: connection timeout";
         let result = humanize_llm_error(raw);
-        assert_eq!(result, "Provider injoignable.");
+        assert_eq!(result, "Fournisseur injoignable : délai dépassé.");
     }
 
     #[test]
