@@ -188,7 +188,14 @@ impl OpenAiCompatibleProvider {
                     let status = res.status();
                     let body = res.text().await.unwrap_or_default();
                     if !status.is_success() {
-                        last_err = format!("HTTP {status} on {url}: {body}");
+                        // Garder l'erreur la plus parlante : un 404 sur l'URL de repli
+                        // (ex. /models sans /v1) ne doit pas masquer un 401/403 réel.
+                        let keep = status == reqwest::StatusCode::NOT_FOUND
+                            && last_err.starts_with("HTTP ")
+                            && !last_err.starts_with("HTTP 404");
+                        if !keep {
+                            last_err = format!("HTTP {status} on {url}: {body}");
+                        }
                         continue;
                     }
                     match Self::parse_openai_models_json(&body) {
