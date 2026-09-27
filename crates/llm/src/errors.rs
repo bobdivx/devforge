@@ -22,6 +22,13 @@ pub fn humanize_llm_error(raw_error: &str) -> String {
 
     let normalized = raw_error.trim();
 
+    // Crédits épuisés / plafond de dépenses (xAI 403 « used all available credits or
+    // reached its monthly spending limit », OpenAI `insufficient_quota`…) : la clé est
+    // acceptée, c'est la facturation du compte qui bloque — ne pas parler de clé invalide.
+    if let Some(msg) = handle_billing(normalized) {
+        return msg;
+    }
+
     // Pattern 429 avec extraction de retry delay
     if let Some(msg) = handle_rate_limit(normalized) {
         return msg;
@@ -49,6 +56,17 @@ pub fn humanize_llm_error(raw_error: &str) -> String {
 
     // Sinon : nettoyer et tronquer
     cleanup_generic_error(normalized)
+}
+
+fn handle_billing(error: &str) -> Option<String> {
+    let l = error.to_lowercase();
+    let billing = l.contains("credits")
+        || l.contains("spending limit")
+        || l.contains("insufficient_quota")
+        || l.contains("insufficient balance");
+    billing.then(|| {
+        "Crédits épuisés ou plafond de dépenses atteint chez le fournisseur : la clé est acceptée, recharge le compte ou relève le plafond.".to_string()
+    })
 }
 
 /// Gère les erreurs 429 (rate limit / quota) en extrayant retry seconds si présent.
@@ -165,6 +183,15 @@ mod tests {
         let raw = "LLM 401: Unauthorized";
         let result = humanize_llm_error(raw);
         assert_eq!(result, "Clé API invalide ou refusée.");
+    }
+
+    #[test]
+    fn test_xai_no_credits_is_not_invalid_key() {
+        let raw = r#"LLM 403 Forbidden: {"code":"permission-denied","error":"Your team abc has either used all available credits or reached its monthly spending limit. To continue making API requests, please purchase more credits or raise your spending limit."}"#;
+        let result = humanize_llm_error(raw);
+        assert!(result.starts_with("Crédits épuisés"), "{result}");
+        let oa = r#"LLM 429: {"error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}"#;
+        assert!(humanize_llm_error(oa).starts_with("Crédits épuisés"));
     }
 
     #[test]

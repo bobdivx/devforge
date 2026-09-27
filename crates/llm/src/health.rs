@@ -83,6 +83,8 @@ pub async fn probe(req: &ProbeRequest) -> ProbeResult {
         Ok(Err(e)) => {
             let raw_error = e.to_string();
             let human_error = humanize_llm_error(&raw_error);
+            // Erreur brute du fournisseur dans les logs (le message UI est simplifié).
+            tracing::warn!(provider = %req.provider, model = %resolved, error = %raw_error, "test LLM KO");
             ProbeResult {
                 ok: false,
                 provider: req.provider.clone(),
