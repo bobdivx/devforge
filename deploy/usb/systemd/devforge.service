@@ -1,0 +1,18 @@
+[Unit]
+Description=DevForge Node (USB / appliance)
+Documentation=https://github.com/bobdivx/devforge
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=DEVFORGE_OPT_DIR=/opt/devforge
+Environment=DEVFORGE_DATA_DIR=/var/lib/devforge
+ExecStart=/opt/devforge/scripts/firstboot.sh
+ExecStop=/bin/sh -c 'cd /opt/devforge && (docker compose -f compose.yml down || docker-compose -f compose.yml down || true)'
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

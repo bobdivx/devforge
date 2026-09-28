@@ -1,0 +1,12 @@
+[Unit]
+Description=Affiche l’URL LAN DevForge sur la console
+After=devforge.service network-online.target
+Wants=devforge.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/devforge/scripts/show-ip.sh
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

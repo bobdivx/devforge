@@ -2,6 +2,7 @@
 - [[Accueil|Home]]
 - [[Démarrage rapide|Demarrage-rapide]]
 - [[Installation]]
+- [[USB / appliance|USB]]
 - [[Premier démarrage|Premier-demarrage]]
 - [[Cluster]]
 

@@ -359,9 +359,14 @@ async fn bootstrap(
         settings_json["dns"] = crate::dns::public_json(&crate::dns::load(&state).await);
     }
 
+    let cluster_pending = count == 0
+        && (cluster_local.role != devforge_cluster::NodeRole::Worker
+            || cluster_local.node_secret.is_empty());
+
     Ok(Json(json!({
         "ok": true,
         "needs_setup": count == 0,
+        "cluster_pending": cluster_pending,
         "allow_register": count == 0 || registration_open(),
         "authenticated": user.is_some(),
         "user": user.as_ref().map(to_user),
@@ -385,6 +390,21 @@ async fn bootstrap(
             "leader_url": cluster_local.leader_url,
             "node_id": cluster_local.node_id,
             "node_name": cluster_local.node_name,
+            "pending": cluster_pending,
+            "hostname": if cluster_pending {
+                Some(devforge_cluster::machine_hostname())
+            } else {
+                None
+            },
+            "lan_urls": if cluster_pending {
+                let port: u16 = std::env::var("PORT")
+                    .ok()
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(8000);
+                Some(devforge_cluster::local_lan_urls(port))
+            } else {
+                None
+            },
         }
     })))
 }

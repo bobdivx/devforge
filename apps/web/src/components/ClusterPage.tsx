@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { api, type ClusterInvite, type ClusterNode, type Project } from '../lib/api';
+import { api, type ClusterDiscoveredPeer, type ClusterInvite, type ClusterNode, type Project } from '../lib/api';
 import { nodeRoleLabel, resolveNode } from '../lib/cluster-display';
 import { projectStatusMeta } from '../lib/status';
 import { AppShell } from './AppShell';
@@ -230,6 +230,11 @@ function ClusterInner() {
   const [error, setError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [discoverOpen, setDiscoverOpen] = useState(false);
+  const [discoverBusy, setDiscoverBusy] = useState(false);
+  const [discoverPeers, setDiscoverPeers] = useState<ClusterDiscoveredPeer[]>([]);
+  const [discoverDone, setDiscoverDone] = useState(false);
+  const [adoptingUrl, setAdoptingUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const [name, setName] = useState('');
@@ -411,6 +416,45 @@ function ClusterInner() {
       toast.push({ title: 'Invitation KO', detail: String(err), tone: 'danger' });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function openDiscover() {
+    setDiscoverOpen(true);
+    setDiscoverDone(false);
+    setDiscoverPeers([]);
+    setDiscoverBusy(true);
+    try {
+      const r = await api.clusterDiscover();
+      setDiscoverPeers(r.peers ?? []);
+      setDiscoverDone(true);
+    } catch (err) {
+      toast.push({ title: 'Scan KO', detail: String(err), tone: 'danger' });
+      setDiscoverDone(true);
+    } finally {
+      setDiscoverBusy(false);
+    }
+  }
+
+  async function adoptPeer(peer: ClusterDiscoveredPeer) {
+    setAdoptingUrl(peer.url);
+    try {
+      await api.clusterAdoptRemote({
+        target_url: peer.url,
+        name: peer.name || peer.hostname || undefined,
+        advertise_url: peer.url,
+      });
+      toast.push({
+        title: 'Nœud ajouté',
+        detail: peer.hostname || peer.url,
+        tone: 'ok',
+      });
+      setDiscoverOpen(false);
+      await load();
+    } catch (err) {
+      toast.push({ title: 'Adoption KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setAdoptingUrl(null);
     }
   }
 
@@ -741,6 +785,9 @@ function ClusterInner() {
           >
             Rebalance
           </Button>
+          <Button size="sm" disabled={busy || discoverBusy} onClick={openDiscover}>
+            Trouver des nœuds
+          </Button>
           <Button size="sm" variant="secondary" disabled={busy} onClick={createInvite}>
             Inviter
           </Button>
@@ -916,13 +963,19 @@ function ClusterInner() {
               ))}
               <HubAddTile
                 index={workers.length + 1}
+                label="Trouver des nœuds"
+                onClick={openDiscover}
+              />
+              <HubAddTile
+                index={workers.length + 2}
                 label="Inviter un worker"
                 onClick={createInvite}
               />
             </HubGrid>
             {workers.length === 0 && (
               <p class="mt-3 text-sm text-[var(--color-ink-muted)]">
-                Aucun worker. Les forges tournent sur le leader jusqu’à ce que tu enrôles une machine.
+                Aucun worker. Démarre DevForge sur une autre machine (écran En attente), puis
+                clique <strong class="text-[var(--color-ink)]">Trouver des nœuds</strong>.
               </p>
             )}
           </section>
@@ -1004,8 +1057,9 @@ function ClusterInner() {
         </div>
         {invites.length === 0 ? (
           <p class="text-sm text-[var(--color-ink-muted)]">
-            Aucune invitation. Clique <strong>Inviter un nœud</strong> : tu copies un code, tu le colles
-            sur l’autre machine.
+            Aucune invitation. Préfère <strong>Trouver des nœuds</strong> si l’autre machine est
+            en attente sur le LAN. Sinon <strong>Inviter</strong> : tu copies un code, tu le colles
+            sur la machine neuve (écran Rejoindre), avec l’URL de cette instance.
           </p>
         ) : (
           <Table headers={['ID', 'Créée', 'Expire', 'État', 'Actions']}>
@@ -1076,6 +1130,78 @@ function ClusterInner() {
             Enrôler
           </Button>
         </form>
+      </Modal>
+
+      <Modal
+        open={discoverOpen}
+        onClose={() => !adoptingUrl && setDiscoverOpen(false)}
+        title="Trouver des nœuds"
+        description="Scan du réseau local pour les instances DevForge encore en attente."
+        size="md"
+      >
+        {discoverBusy ? (
+          <div class="flex flex-col items-center gap-3 py-8 text-sm text-[var(--color-ink-muted)]">
+            <Spinner />
+            <p>Recherche sur le réseau local…</p>
+          </div>
+        ) : discoverDone && discoverPeers.length === 0 ? (
+          <div class="space-y-4">
+            <Alert tone="info">
+              Aucune instance en attente trouvée. Vérifie que l’autre machine a démarré DevForge
+              (écran « En attente ») et qu’elle est sur le même LAN.
+            </Alert>
+            <div class="flex flex-wrap gap-2">
+              <Button type="button" variant="secondary" disabled={discoverBusy} onClick={openDiscover}>
+                Rescanner
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setDiscoverOpen(false);
+                  createInvite();
+                }}
+              >
+                Inviter avec un jeton
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div class="space-y-3">
+            {discoverPeers.map((peer) => (
+              <div
+                key={peer.url}
+                class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border)] px-3 py-3"
+              >
+                <div class="min-w-0">
+                  <p class="truncate font-medium text-[var(--color-ink)]">
+                    {peer.hostname || peer.name || peer.url}
+                  </p>
+                  <p class="truncate font-mono text-xs text-[var(--color-ink-muted)]">{peer.url}</p>
+                  {(peer.version || peer.os) && (
+                    <p class="mt-0.5 text-xs text-[var(--color-ink-muted)]">
+                      {[peer.version && `v${peer.version.replace(/^v/, '')}`, peer.os, peer.arch]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={!!adoptingUrl}
+                  onClick={() => adoptPeer(peer)}
+                >
+                  {adoptingUrl === peer.url ? <Spinner /> : null}
+                  Ajouter
+                </Button>
+              </div>
+            ))}
+            <Button type="button" variant="ghost" class="w-full" disabled={discoverBusy} onClick={openDiscover}>
+              Rescanner
+            </Button>
+          </div>
+        )}
       </Modal>
 
       <Modal

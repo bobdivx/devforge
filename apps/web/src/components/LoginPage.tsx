@@ -4,7 +4,7 @@ import { peekReturnTo, setToken, takeReturnTo, type Bootstrap } from '../lib/aut
 import { JoinClusterForm } from './JoinClusterForm';
 import { Alert, Button, Card, FadeIn, Input, Spinner } from './ui';
 
-type Mode = 'setup' | 'login' | 'register' | 'join';
+type Mode = 'waiting' | 'setup' | 'login' | 'register' | 'join';
 
 export function LoginPage() {
   const [mode, setMode] = useState<Mode>('login');
@@ -61,8 +61,8 @@ export function LoginPage() {
           window.location.href = ssoAuthorizeUrl();
           return;
         }
-        if (b.needs_setup) {
-          setMode('setup');
+        if (b.needs_setup || b.cluster_pending) {
+          setMode('waiting');
         } else if (typeof window !== 'undefined' && window.location.pathname.includes('register')) {
           setMode('register');
         } else {
@@ -75,6 +75,24 @@ export function LoginPage() {
       })
       .finally(() => setChecking(false));
   }, []);
+
+  // Poll : détecte l’adoption poussée depuis un leader → worker.
+  useEffect(() => {
+    if (mode !== 'waiting' && mode !== 'setup' && mode !== 'join') return;
+    if (!bootstrap?.needs_setup && !bootstrap?.cluster_pending) return;
+    const t = window.setInterval(() => {
+      api
+        .bootstrap()
+        .then((b) => {
+          setBootstrap(b);
+          if (b.cluster?.role === 'worker') {
+            window.location.replace('/app/node');
+          }
+        })
+        .catch(() => {});
+    }, 2500);
+    return () => window.clearInterval(t);
+  }, [mode, bootstrap?.needs_setup, bootstrap?.cluster_pending]);
 
   async function submit(e: Event) {
     e.preventDefault();
@@ -116,23 +134,31 @@ export function LoginPage() {
   const ssoEnabled = bootstrap?.sso?.enabled && bootstrap?.sso?.oidc_configured;
   const hideLocalLogin = bootstrap?.sso?.hide_local_login && ssoEnabled;
   const providerLabel = bootstrap?.sso?.provider === 'pocket_id' ? 'Pocket ID' : 'SSO';
+  const hostname =
+    bootstrap?.cluster?.hostname ||
+    (typeof window !== 'undefined' ? window.location.hostname : '');
+  const lanUrls = bootstrap?.cluster?.lan_urls ?? [];
 
   const title =
-    mode === 'setup'
-      ? 'Bienvenue sur DevForge'
-      : mode === 'join'
-        ? 'Rejoindre un cluster'
-        : mode === 'register'
-        ? 'Créer un compte'
-        : 'Connexion';
+    mode === 'waiting'
+      ? 'En attente'
+      : mode === 'setup'
+        ? 'Créer une instance'
+        : mode === 'join'
+          ? 'Rejoindre un cluster'
+          : mode === 'register'
+            ? 'Créer un compte'
+            : 'Connexion';
   const subtitle =
-    mode === 'setup'
-      ? "Compte admin — tu configures l'instance."
-      : mode === 'join'
-        ? 'Jeton d’invitation, puis l’URL du leader joignable depuis cette machine.'
-        : mode === 'register'
-        ? 'Ton workspace isolé, forfait free.'
-        : 'Heureux de te revoir.';
+    mode === 'waiting'
+      ? 'Cette machine est visible sur le réseau. Depuis le leader : Cluster → Trouver des nœuds.'
+      : mode === 'setup'
+        ? "Compte admin — tu configures l'instance leader."
+        : mode === 'join'
+          ? 'Jeton d’invitation, puis l’URL du leader joignable depuis cette machine.'
+          : mode === 'register'
+            ? 'Ton workspace isolé, forfait free.'
+            : 'Heureux de te revoir.';
 
   return (
     <div class="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12">
@@ -166,11 +192,7 @@ export function LoginPage() {
 
           {ssoEnabled && mode === 'login' && (
             <div class="mb-4">
-              <Button
-                type="button"
-                class="w-full"
-                onClick={handleSsoLogin}
-              >
+              <Button type="button" class="w-full" onClick={handleSsoLogin}>
                 Continuer avec {providerLabel}
               </Button>
               {!hideLocalLogin && (
@@ -183,21 +205,87 @@ export function LoginPage() {
             </div>
           )}
 
+          {mode === 'waiting' && (
+            <div class="space-y-4">
+              <div class="flex items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--color-surface-2)] px-3 py-3">
+                <span class="relative flex h-2.5 w-2.5 shrink-0">
+                  <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-accent)] opacity-40" />
+                  <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--color-accent)]" />
+                </span>
+                <div class="min-w-0 text-sm">
+                  <p class="font-medium text-[var(--color-ink)]">En attente d’un leader</p>
+                  <p class="truncate text-[var(--color-ink-muted)]">{hostname || '—'}</p>
+                </div>
+              </div>
+              {lanUrls.length > 0 ? (
+                <div class="space-y-2">
+                  <p class="text-xs font-medium text-[var(--color-ink-muted)]">
+                    Ouvre cette adresse depuis un autre appareil
+                  </p>
+                  <ul class="space-y-2">
+                    {lanUrls.map((u) => (
+                      <li
+                        key={u}
+                        class="rounded-lg border border-[var(--border)] bg-[var(--color-bg-elevated)] px-3 py-2.5"
+                      >
+                        <a
+                          href={u}
+                          class="block truncate font-mono text-sm font-medium text-[var(--color-accent)] hover:underline"
+                        >
+                          {u}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                  <p class="text-xs text-[var(--color-ink-muted)]">
+                    Ou sur le leader : Cluster → <strong class="text-[var(--color-ink)]">Trouver des nœuds</strong>.
+                  </p>
+                </div>
+              ) : (
+                <Alert tone="info">
+                  Pas d’IP LAN détectée pour l’instant (DHCP). Branche le réseau, recharge dans quelques
+                  secondes.
+                </Alert>
+              )}
+              <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  class="w-full"
+                  onClick={() => {
+                    setMode('setup');
+                    setError(null);
+                  }}
+                >
+                  Créer une instance
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  class="w-full"
+                  onClick={() => {
+                    setMode('join');
+                    setError(null);
+                  }}
+                >
+                  Rejoindre avec un jeton
+                </Button>
+              </div>
+            </div>
+          )}
+
           {mode === 'setup' && (
-            <div class="mb-4 grid grid-cols-2 gap-2">
-              <Button type="button" variant="secondary" class="w-full" disabled>
-                Créer une instance
-              </Button>
+            <div class="mb-4 flex gap-2">
               <Button
                 type="button"
-                variant="outline"
-                class="w-full"
+                variant="ghost"
+                size="sm"
                 onClick={() => {
-                  setMode('join');
+                  setMode('waiting');
                   setError(null);
                 }}
               >
-                Rejoindre
+                ← En attente
               </Button>
             </div>
           )}
@@ -206,7 +294,7 @@ export function LoginPage() {
             <JoinClusterForm
               busy={busy}
               submitLabel="Rejoindre le cluster"
-              cancelLabel="Créer une instance à la place"
+              cancelLabel="Retour"
               context={{
                 instanceUrl: bootstrap?.settings?.instance_url,
                 wildcardDomain: bootstrap?.settings?.wildcard_domain,
@@ -219,7 +307,7 @@ export function LoginPage() {
                   : null,
               }}
               onCancel={() => {
-                setMode('setup');
+                setMode('waiting');
                 setError(null);
               }}
               onSubmit={async (body) => {
@@ -234,51 +322,51 @@ export function LoginPage() {
                 }
               }}
             />
-          ) : (
+          ) : mode === 'waiting' ? null : (
             !hideLocalLogin && (
-            <form class="space-y-3" onSubmit={submit}>
-              {(mode === 'setup' || mode === 'register') && (
-                <>
-                  <Input
-                    label="Ton nom"
-                    value={name}
-                    onInput={(e) => setName((e.target as HTMLInputElement).value)}
-                    required
-                  />
-                  {mode === 'setup' && (
+              <form class="space-y-3" onSubmit={submit}>
+                {(mode === 'setup' || mode === 'register') && (
+                  <>
                     <Input
-                      label="Nom de l'instance"
-                      value={workspace}
-                      onInput={(e) => setWorkspace((e.target as HTMLInputElement).value)}
-                      placeholder="DevForge"
+                      label="Ton nom"
+                      value={name}
+                      onInput={(e) => setName((e.target as HTMLInputElement).value)}
+                      required
                     />
-                  )}
-                </>
-              )}
-              <Input
-                label="Email"
-                type="email"
-                value={email}
-                onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
-                required
-              />
-              <Input
-                label="Mot de passe"
-                type="password"
-                value={password}
-                onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
-                required
-                hint={mode !== 'login' ? '8 caractères minimum' : undefined}
-              />
-              <Button type="submit" class="w-full" disabled={busy}>
-                {busy ? <Spinner /> : null}
-                {mode === 'login' ? 'Se connecter' : 'Créer mon compte'}
-              </Button>
-            </form>
+                    {mode === 'setup' && (
+                      <Input
+                        label="Nom de l'instance"
+                        value={workspace}
+                        onInput={(e) => setWorkspace((e.target as HTMLInputElement).value)}
+                        placeholder="DevForge"
+                      />
+                    )}
+                  </>
+                )}
+                <Input
+                  label="Email"
+                  type="email"
+                  value={email}
+                  onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
+                  required
+                />
+                <Input
+                  label="Mot de passe"
+                  type="password"
+                  value={password}
+                  onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
+                  required
+                  hint={mode !== 'login' ? '8 caractères minimum' : undefined}
+                />
+                <Button type="submit" class="w-full" disabled={busy}>
+                  {busy ? <Spinner /> : null}
+                  {mode === 'login' ? 'Se connecter' : 'Créer mon compte'}
+                </Button>
+              </form>
             )
           )}
 
-          {mode !== 'setup' && mode !== 'join' && !hideLocalLogin && (
+          {mode !== 'waiting' && mode !== 'setup' && mode !== 'join' && !hideLocalLogin && (
             <div class="mt-4 text-center text-sm text-[var(--color-ink-muted)]">
               {mode === 'login' ? (
                 bootstrap?.allow_register && (

@@ -15,12 +15,26 @@ Enrôlement **100 % UX**. Pas de variables d’environnement pour le rôle ou le
 
 Le leader s’enregistre tout seul (`id = default`).
 
+## Premier démarrage — mode « en attente »
+
+Sur une machine neuve (aucun compte admin) :
+
+1. DevForge affiche **En attente** : hostname + adresses LAN.
+2. L’instance répond à `GET /api/v1/cluster/pending` (`pending: true`) pour être trouvée sur le réseau.
+3. Depuis le **leader** : Cluster → **Trouver des nœuds** → **Ajouter** (un clic).
+4. Sinon : **Créer une instance** (devenir leader) ou **Rejoindre avec un jeton** (secours).
+
+L’écran « En attente » poll le bootstrap : dès qu’un leader adopte la machine, redirection vers `/app/node`.
+
+Pour démarrer DevForge sur une machine **via clé USB** (live ou image flashable) : [[USB]].
+
 ## Ajouter un nœud depuis le leader
 
 Page **Cluster** (`/app/cluster`, admin d’instance) :
 
-1. **Inviter un nœud** — génère un **jeton** `dfjoin_…` (TTL 24 h). Sur l’autre machine : jeton + **URL du leader joignable depuis ce nœud** (pas collée dans le jeton). Nom optionnel.
-2. **Via SSH** (avancé) — host, user, port. DevForge pousse le bootstrap. Clé SSH de Settings → Serveur.
+1. **Trouver des nœuds** — scan HTTP du LAN (sous-réseaux locaux, ports DevForge). Liste les instances encore en attente → **Ajouter**.
+2. **Inviter un nœud** — génère un **jeton** `dfjoin_…` (TTL 24 h). Sur l’autre machine : jeton + **URL du leader joignable depuis ce nœud**. Nom optionnel.
+3. **Via SSH** (avancé) — host, user, port. DevForge pousse le bootstrap. Clé SSH de Settings → Serveur.
 
 Les nœuds en cours d’enrôlement apparaissent en statut **joining**. Un second join avec le même nom / URL / SSH **réutilise** le placeholder (pas de doublon).
 
@@ -64,9 +78,13 @@ L’onglet projet **Database** crée une instance PostgreSQL (`postgres:16-alpin
 
 ## Rejoindre depuis une machine neuve
 
-Premier écran → **Rejoindre un cluster**. Colle le **jeton** `dfjoin_…`, puis l’**URL du leader** que cette machine peut joindre (DNS, IP LAN…). L’URL n’est pas dans le jeton.
+**Recommandé** : laisser l’écran **En attente**, puis **Trouver des nœuds** sur le leader.
+
+**Secours** : premier écran → **Rejoindre avec un jeton**. Colle le **jeton** `dfjoin_…`, puis l’**URL du leader** que cette machine peut joindre (DNS, IP LAN…). L’URL n’est pas dans le jeton.
 
 Côté API locale : `POST /api/v1/cluster/local` `{ token, leader_url, name? }`. Un ancien collage `dfjoin_…@https://…` est encore accepté.
+
+Adoption poussée (leader → machine en attente) : `POST /api/v1/cluster/adopt-remote` sur le leader, qui appelle `POST /api/v1/cluster/adopt` sur la cible.
 
 Après succès : rôle persisté dans SQLite (`cluster_local`), heartbeat démarré, UI worker.
 
@@ -88,11 +106,12 @@ Les adresses restent modifiables ensuite :
 - Secret de nœud : heartbeat + exec interne
 - Revocation : Cluster → invitations, ou expiration
 
-Rate-limit join : 20 tentatives / IP / minute.
+Rate-limit join / adopt : 20 tentatives / IP / minute.
 
 ## Hors v1
 
 - Mesh WireGuard entre nœuds
+- Découverte mDNS (le scan HTTP LAN suffit)
 
 Le crate `crates/cluster` + tables SQLite `cluster_*` portent le v1.
 
@@ -112,6 +131,10 @@ Le crate `crates/cluster` + tables SQLite `cluster_*` portent le v1.
 | DELETE | `/api/v1/cluster/invites/{id}` | admin |
 | POST | `/api/v1/cluster/join` | token d’invitation |
 | POST | `/api/v1/cluster/heartbeat` | secret nœud (+ métriques) |
+| GET | `/api/v1/cluster/pending` | public — `{ pending, hostname, lan_urls, … }` si instance neuve |
+| POST | `/api/v1/cluster/adopt` | public si 0 users — adoption poussée `{ leader_url, token, advertise_url? }` |
+| POST | `/api/v1/cluster/discover` | admin — scan LAN, liste des peers `pending` |
+| POST | `/api/v1/cluster/adopt-remote` | admin — `{ target_url, name? }` adopte un peer |
 | GET/POST/PATCH | `/api/v1/cluster/local` | ouvert si 0 users, sinon admin — PATCH `{ leader_url?, advertise_url? }` (aussi sur un worker) |
 | GET/POST | `/api/v1/settings/dns` | admin — `{ provider: cloudflare\|porkbun\|'', zone?, token? }` (CF) ou `{ api_key, secret }` (Porkbun) puis provision auto |
 | GET | `/api/v1/settings/dns/status` | admin — état réel (tunnels, Traefik, cloudflared, domaines) |

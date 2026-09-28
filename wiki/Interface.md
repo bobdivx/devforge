@@ -7,7 +7,7 @@ Front : **Astro + Preact** uniquement (`apps/web`). Design sombre type Plasma / 
 | Route | Rôle |
 |-------|------|
 | `/` | Landing |
-| `/login` · `/register` | Auth, setup, **Rejoindre un cluster** |
+| `/login` · `/register` | Auth, setup, **En attente** / rejoindre un cluster |
 | `/app/onboarding` | Wizard admin |
 | `/app` | Accueil apps |
 | `/app/projects` · `/app/projects/view` | Liste + détail projet |

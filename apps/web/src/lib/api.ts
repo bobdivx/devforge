@@ -2016,6 +2016,22 @@ export const api = {
     }),
   clusterRevokeInvite: (id: string) =>
     request<{ ok: boolean }>(`/cluster/invites/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  clusterDiscover: () =>
+    request<{
+      ok: boolean;
+      peers: ClusterDiscoveredPeer[];
+    }>('/cluster/discover', { method: 'POST', body: '{}' }),
+  clusterAdoptRemote: (body: { target_url: string; name?: string; advertise_url?: string }) =>
+    request<{
+      ok: boolean;
+      target_url: string;
+      advertise_url: string;
+      node?: ClusterNode | null;
+      leader_url?: string;
+    }>('/cluster/adopt-remote', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   clusterLocal: () =>
     request<{
       ok: boolean;
@@ -2109,6 +2125,17 @@ export type ClusterInvite = {
   expires_at: string;
   revoked_at: string | null;
   created_at: string;
+};
+
+export type ClusterDiscoveredPeer = {
+  url: string;
+  name: string;
+  hostname: string;
+  version: string;
+  os: string;
+  arch: string;
+  listen_port: number;
+  lan_urls: string[];
 };
 
 export type ManagedRunner = {

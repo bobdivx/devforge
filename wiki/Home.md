@@ -12,6 +12,7 @@ Pas d’Electron : tout passe par le web. Un nœud **leader** tient le control p
 | Tu veux… | Page |
 |----------|------|
 | Installer une instance | [[Installation]] |
+| Clé USB / nœud appliance | [[USB]] |
 | Passer le wizard | [[Premier-demarrage]] |
 | Ajouter des machines | [[Cluster]] |
 | Déployer une app | [[Projets]] · [[Deploiement]] |

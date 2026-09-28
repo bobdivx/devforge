@@ -2,6 +2,7 @@
 
 mod client;
 mod crypto;
+mod discovery;
 mod executor;
 mod facade;
 mod failover;
@@ -19,6 +20,10 @@ pub use client::{
 pub use crypto::{
     extract_join_token, format_join_code, hash_secret, new_join_token, new_node_id,
     new_node_secret, parse_join_invite,
+};
+pub use discovery::{
+    discover_pending_peers, discovery_ports, local_ipv4_addrs, local_lan_urls, machine_hostname,
+    DiscoveredPeer, PendingInfo, DEFAULT_DISCOVERY_PORTS,
 };
 pub use executor::ClusterAwareExecutor;
 pub use facade::{align_self_container_script, bootstrap_script, ClusterFacade};

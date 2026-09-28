@@ -74,7 +74,12 @@ export type Bootstrap = {
     leader_url?: string;
     node_id?: string;
     node_name?: string;
+    pending?: boolean;
+    hostname?: string | null;
+    lan_urls?: string[] | null;
   };
+  /** Instance neuve sans admin — adoptable depuis un leader sur le LAN. */
+  cluster_pending?: boolean;
 };
 
 const RETURN_TO_KEY = 'devforge_return_to';

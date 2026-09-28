@@ -55,6 +55,10 @@ pub fn router() -> Router<AppState> {
             "/api/v1/cluster/local",
             get(local_state).post(local_join).patch(local_patch),
         )
+        .route("/api/v1/cluster/pending", get(cluster_pending))
+        .route("/api/v1/cluster/adopt", post(cluster_adopt))
+        .route("/api/v1/cluster/discover", post(cluster_discover))
+        .route("/api/v1/cluster/adopt-remote", post(cluster_adopt_remote))
         .route(
             "/api/v1/cluster/settings",
             get(cluster_settings).patch(patch_cluster_settings),
@@ -634,6 +638,269 @@ fn hostname_fallback() -> String {
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "worker".into())
+}
+
+fn listen_port() -> u16 {
+    std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8000)
+}
+
+async fn user_count(state: &AppState) -> Result<i64, (StatusCode, Json<Value>)> {
+    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+    Ok(count.0)
+}
+
+/// Instance neuve non configurée, adoptable depuis un leader.
+async fn is_adoptable(state: &AppState) -> Result<bool, (StatusCode, Json<Value>)> {
+    let count = user_count(state).await?;
+    if count > 0 {
+        return Ok(false);
+    }
+    let local = state.cluster.local().await.map_err(map_err)?;
+    Ok(local.role != NodeRole::Worker || local.node_secret.is_empty())
+}
+
+async fn cluster_pending(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let pending = is_adoptable(&state).await?;
+    if !pending {
+        return Ok(Json(json!({ "pending": false })));
+    }
+    let hostname = devforge_cluster::machine_hostname();
+    let port = listen_port();
+    let lan_urls = devforge_cluster::local_lan_urls(port);
+    Ok(Json(json!({
+        "pending": true,
+        "name": hostname,
+        "hostname": hostname,
+        "version": state.updater.current_version(),
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "listen_port": port,
+        "lan_urls": lan_urls,
+    })))
+}
+
+#[derive(Deserialize)]
+struct AdoptBody {
+    leader_url: String,
+    token: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    advertise_url: Option<String>,
+}
+
+/// Adoption poussée par un leader : même effet que `POST /cluster/local` (join).
+async fn cluster_adopt(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<AdoptBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    rate_limit_join(&headers)?;
+    if !is_adoptable(&state).await? {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "Cette instance n’est plus en attente (déjà configurée ou worker)"
+            })),
+        ));
+    }
+    local_join(
+        State(state),
+        headers,
+        Json(LocalJoinBody {
+            leader_url: body.leader_url,
+            token: body.token,
+            name: body.name,
+            advertise_url: body.advertise_url,
+        }),
+    )
+    .await
+}
+
+async fn cluster_discover(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    let local = state.cluster.local().await.map_err(map_err)?;
+    if local.role == NodeRole::Worker && !local.acting_leader {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Découverte réservée au leader"})),
+        ));
+    }
+
+    let ports = devforge_cluster::discovery_ports(&[]);
+    let mut exclude = vec![instance_url(&state).await];
+    exclude.extend(devforge_cluster::local_lan_urls(listen_port()));
+    if !local.advertise_url.is_empty() {
+        exclude.push(local.advertise_url.clone());
+    }
+
+    let peers = devforge_cluster::discover_pending_peers(
+        &ports,
+        &exclude,
+        Duration::from_millis(400),
+        Duration::from_secs(8),
+        64,
+    )
+    .await;
+
+    Ok(Json(json!({
+        "ok": true,
+        "peers": peers.iter().map(|p| json!({
+            "url": p.url,
+            "name": p.name,
+            "hostname": p.hostname,
+            "version": p.version,
+            "os": p.os,
+            "arch": p.arch,
+            "listen_port": p.listen_port,
+            "lan_urls": p.lan_urls,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+#[derive(Deserialize)]
+struct AdoptRemoteBody {
+    target_url: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    advertise_url: Option<String>,
+}
+
+async fn cluster_adopt_remote(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<AdoptRemoteBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let admin = require_admin(&state, &headers).await?;
+    let local = state.cluster.local().await.map_err(map_err)?;
+    if local.role == NodeRole::Worker && !local.acting_leader {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Adoption réservée au leader"})),
+        ));
+    }
+
+    let target = body.target_url.trim().trim_end_matches('/').to_string();
+    if target.is_empty()
+        || !(target.starts_with("http://") || target.starts_with("https://"))
+        || devforge_cluster::is_loopback_advertise_url(&target)
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "URL cible invalide (http(s) LAN, pas localhost)"})),
+        ));
+    }
+
+    let advertise_url = body
+        .advertise_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.trim_end_matches('/').to_string())
+        .unwrap_or_else(|| target.clone());
+    let advertise_url = match devforge_cluster::validate_worker_advertise_url(&advertise_url) {
+        Ok(u) => u,
+        Err(msg) => {
+            return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": msg }))));
+        }
+    };
+
+    let mut leader_url = instance_url(&state).await;
+    if leader_url.trim().is_empty() || devforge_cluster::is_loopback_advertise_url(&leader_url) {
+        // Le worker doit joindre le leader via le LAN, pas 127.0.0.1.
+        if let Some(lan) = devforge_cluster::local_lan_urls(listen_port()).into_iter().next() {
+            leader_url = lan;
+        }
+    }
+    if leader_url.trim().is_empty() || devforge_cluster::is_loopback_advertise_url(&leader_url) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "Configure l’URL d’instance (Settings → Général) avec une adresse LAN joignable, ou fixe PORT et une interface réseau."
+            })),
+        ));
+    }
+
+    let invite = state
+        .cluster
+        .create_invite(&admin.uuid, &leader_url, 1)
+        .await
+        .map_err(map_err)?;
+
+    let name = body
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+
+    let adopt_url = format!("{target}/api/v1/cluster/adopt");
+    let resp = client
+        .post(&adopt_url)
+        .json(&json!({
+            "leader_url": invite.leader_url,
+            "token": invite.token,
+            "name": name,
+            "advertise_url": advertise_url,
+        }))
+        .send()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({
+                    "error": format!("Impossible de joindre l’instance cible : {e}")
+                })),
+            )
+        })?;
+
+    let status = resp.status();
+    let body_json: Value = resp.json().await.unwrap_or_else(|_| json!({}));
+    if !status.is_success() {
+        let err = body_json
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Adoption refusée par l’instance cible");
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": err, "target_status": status.as_u16() })),
+        ));
+    }
+
+    Ok(Json(json!({
+        "ok": true,
+        "target_url": target,
+        "advertise_url": advertise_url,
+        "node": body_json.get("node").cloned().unwrap_or(Value::Null),
+        "leader_url": body_json.get("leader_url").cloned().unwrap_or(json!(invite.leader_url)),
+    })))
 }
 
 /// `include_advertise` : n’envoyer l’URL du nœud que lors d’un PATCH local,

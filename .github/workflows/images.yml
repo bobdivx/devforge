@@ -1,5 +1,6 @@
 # Installeurs : une fois par jour, et seulement s'il y a eu des commits.
 # Windows : assistant Inno Setup (.exe). Linux : bundle Flatpak.
+# USB Node : image .img.xz flashable (Etcher / Rufus / dd).
 # Un lancement manuel (workflow_dispatch) construit même sans commit récent.
 name: Installeurs Linux et Windows
 
@@ -185,3 +186,35 @@ jobs:
           do
             gh release delete-asset "$tag" "$name" --repo "$GITHUB_REPOSITORY" --yes || true
           done
+
+  # Image USB / SSD flashable (Etcher, Rufus DD, dd).
+  # Artefact compressé : DevForge-Node-<version>-amd64.img.xz
+  usb-node:
+    needs: [gate]
+    if: needs.gate.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.ref }}
+      - name: Dépendances
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            qemu-utils libguestfs-tools wget xz-utils
+      - name: Construire l’image
+        env:
+          DEVFORGE_VERSION: ${{ needs.gate.outputs.version }}
+          LIBGUESTFS_BACKEND: direct
+        run: |
+          chmod +x deploy/usb/build-img.sh deploy/usb/bootstrap.sh deploy/usb/scripts/*.sh
+          ./deploy/usb/build-img.sh --version "${DEVFORGE_VERSION}" --size 8G
+          test -f dist/devforge-node-amd64.img.xz
+          cp dist/devforge-node-amd64.img.xz \
+            "dist/DevForge-Node-${DEVFORGE_VERSION}-amd64.img.xz"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.gate.outputs.tag }}
+          files: dist/DevForge-Node-${{ needs.gate.outputs.version }}-amd64.img.xz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -103,6 +103,10 @@ flatpak install --user --or-update ./DevForge-<version>-x86_64.flatpak
 
 L’écran Mise à jour de DevForge fait la même chose à partir de la release GitHub.
 
+## Clé USB / appliance Node
+
+Pour transformer une machine en nœud (leader ou worker) en bootant depuis une USB : [[USB]] et le kit [`deploy/usb/`](../deploy/usb/README.md) (`bootstrap.sh`, `prepare-kit.sh`, image `.img`).
+
 ## Réseau Docker / Traefik
 
 Pour que Traefik route les apps déployées, DevForge et les conteneurs `df-*` doivent partager un réseau :

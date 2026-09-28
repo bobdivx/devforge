@@ -3,6 +3,7 @@
 #   deploy/docker-compose.yml
 #   deploy/zimaos/docker-compose.yml  (App Store / Custom App)
 #   deploy/zimaos/install.yaml
+#   deploy/usb/                     (clé USB / appliance Node)
 #
 # Usage :
 #   export DEVFORGE_VERSION=2.0.10

@@ -9,6 +9,10 @@ target/
 apps/web/dist/
 apps/web/.astro/
 *.tsbuildinfo
+dist/
+deploy/usb/.build/
+deploy/usb/**/devforge-image.tar
+deploy/usb/**/devforge-image.tar.gz
 
 # Env
 .env

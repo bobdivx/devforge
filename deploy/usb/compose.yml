@@ -1,0 +1,39 @@
+# DevForge Node — appliance USB / bare-metal
+#
+# Ports : 8000 (UI+API), 5433 (réplication Postgres cluster).
+# Au premier boot l’instance reste « en attente » (0 admin) →
+# accessible via http://IP:8000 ou adoptable depuis le leader
+# (Cluster → Trouver des nœuds).
+
+services:
+  devforge:
+    image: bobdivx/devforge:${DEVFORGE_VERSION:-latest}
+    container_name: devforge
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ${DEVFORGE_DATA_DIR:-/var/lib/devforge}:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./compose.yml:/opt/devforge/docker-compose.yml:ro
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8000"
+      DATABASE_URL: sqlite:/data/devforge.db?mode=rwc
+      DEVFORGE_DATA_DIR: /data
+      DEVFORGE_VERSION: ${DEVFORGE_VERSION:-latest}
+      DEVFORGE_UPDATE_MODE: compose
+      DEVFORGE_UPDATE_COMPOSE_FILE: /opt/devforge/docker-compose.yml
+      DEVFORGE_UPDATE_COMPOSE_SERVICE: devforge
+      DEVFORGE_SELF_CONTAINER: devforge
+      DEVFORGE_UPDATE_IMAGE: bobdivx/devforge
+      DEVFORGE_UPDATE_REPO: ${DEVFORGE_UPDATE_REPO:-bobdivx/devforge}
+      DEVFORGE_EXECUTOR: local
+      DEVFORGE_STATIC_DIR: /app/web
+      DEVFORGE_DOCKER_NETWORK: ${DEVFORGE_DOCKER_NETWORK:-devforge}
+      DEVFORGE_NO_BROWSER: "1"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/api/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
