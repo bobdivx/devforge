@@ -395,6 +395,7 @@ function ShellInner({
           >
             <a
               href={isWorker ? '/app/node' : '/app'}
+              {...(isWorker ? { 'data-df-node-tab': true } : {})}
               class="mb-8 flex items-center gap-2.5 transition-opacity duration-200 hover:opacity-90"
             >
               <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition-transform duration-200 hover:scale-105">
@@ -418,6 +419,7 @@ function ShellInner({
                 <a
                   key={item.key}
                   href={item.href}
+                  {...(isWorker ? { 'data-df-node-tab': true } : {})}
                   data-active={active === item.key ? 'true' : 'false'}
                   class={cn(
                     'df-nav-active-indicator rounded-lg px-3 py-2 text-sm transition-[background-color,color,transform] duration-200',
@@ -541,6 +543,7 @@ function ShellInner({
                 <a
                   key={item.key}
                   href={item.href}
+                  {...(isWorker ? { 'data-df-node-tab': true } : {})}
                   class={cn(
                     'flex min-h-[44px] min-w-[3.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] leading-tight transition-[background-color,color,transform] duration-200 active:scale-[0.96]',
                     bottomItemActive(active, item.key)

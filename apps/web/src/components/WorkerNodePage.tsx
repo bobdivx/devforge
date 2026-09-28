@@ -149,7 +149,13 @@ export function WorkerNodePage() {
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
-  const section = sectionFromLocation();
+  const [section, setSection] = useState<'node' | 'adresses'>(sectionFromLocation);
+
+  useEffect(() => {
+    const sync = () => setSection(sectionFromLocation());
+    window.addEventListener('popstate', sync);
+    return () => window.removeEventListener('popstate', sync);
+  }, []);
 
   async function load() {
     try {
@@ -386,7 +392,7 @@ export function WorkerNodePage() {
                   ) : (
                     <>
                       <p class="mt-1 text-sm text-[var(--color-ink)]">Aucun leader enregistré.</p>
-                      <a href="/app/node?tab=adresses" class="mt-2 inline-block text-sm text-[var(--color-accent)]">
+                      <a href="/app/node?tab=adresses" data-df-node-tab class="mt-2 inline-block text-sm text-[var(--color-accent)]">
                         Renseigner l’adresse
                       </a>
                     </>

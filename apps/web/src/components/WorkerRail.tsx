@@ -105,6 +105,7 @@ export function WorkerRail({
           ) : (
             <a
               href="/app/node?tab=adresses"
+              data-df-node-tab
               class={cn(
                 'block rounded-lg text-sm text-[var(--color-accent)] hover:bg-white/5',
                 banner ? 'py-1' : 'mx-1 mt-2 px-2 py-2',
