@@ -59,6 +59,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/cluster/adopt", post(cluster_adopt))
         .route("/api/v1/cluster/discover", post(cluster_discover))
         .route("/api/v1/cluster/adopt-remote", post(cluster_adopt_remote))
+        .route("/api/v1/cluster/node-image", get(cluster_node_image))
         .route(
             "/api/v1/cluster/settings",
             get(cluster_settings).patch(patch_cluster_settings),
@@ -900,6 +901,153 @@ async fn cluster_adopt_remote(
         "advertise_url": advertise_url,
         "node": body_json.get("node").cloned().unwrap_or(Value::Null),
         "leader_url": body_json.get("leader_url").cloned().unwrap_or(json!(invite.leader_url)),
+    })))
+}
+
+fn is_node_image_asset(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.contains("devforge-node")
+        && (n.ends_with(".img.xz") || n.ends_with(".img"))
+        && !n.contains("windows")
+        && !n.contains("flatpak")
+}
+
+/// Résout l’image USB/SSD flashable publiée sur GitHub Releases.
+async fn cluster_node_image(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    let cfg = state.updater.config();
+    let owner = &cfg.repo_owner;
+    let repo = &cfg.repo_name;
+    let api = format!("https://api.github.com/repos/{owner}/{repo}/releases?per_page=15");
+
+    let mut req = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?
+        .get(&api)
+        .header("User-Agent", "DevForge-Cluster")
+        .header("Accept", "application/vnd.github+json");
+
+    // Token instance GitHub si dispo (rate-limit / repo privé).
+    if let Some(token) = state.github.instance_token() {
+        if !token.trim().is_empty() {
+            req = req.bearer_auth(token.trim());
+        }
+    }
+
+    let resp = req.send().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({"error": format!("GitHub Releases injoignable : {e}")})),
+        )
+    })?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Json(json!({
+                "error": format!(
+                    "GitHub {status}: {}",
+                    body.chars().take(180).collect::<String>()
+                )
+            })),
+        ));
+    }
+
+    let releases: Value = resp.json().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({"error": format!("JSON releases: {e}")})),
+        )
+    })?;
+    let Some(arr) = releases.as_array() else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Aucune release GitHub"})),
+        ));
+    };
+
+    for rel in arr {
+        let draft = rel.get("draft").and_then(|v| v.as_bool()).unwrap_or(false);
+        let pre = rel
+            .get("prerelease")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if draft || (cfg.channel == "stable" && pre) {
+            continue;
+        }
+        let tag = rel
+            .get("tag_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim_start_matches('v');
+        let html_url = rel.get("html_url").and_then(|v| v.as_str()).unwrap_or("");
+        let assets = rel
+            .get("assets")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut matched: Option<&Value> = None;
+        for a in &assets {
+            let name = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            if is_node_image_asset(name) {
+                // Préférer .img.xz
+                if name.to_ascii_lowercase().ends_with(".img.xz") {
+                    matched = Some(a);
+                    break;
+                }
+                if matched.is_none() {
+                    matched = Some(a);
+                }
+            }
+        }
+        if let Some(a) = matched {
+            let name = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let url = a
+                .get("browser_download_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let size = a.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+            if url.is_empty() {
+                continue;
+            }
+            return Ok(Json(json!({
+                "ok": true,
+                "available": true,
+                "version": tag,
+                "name": name,
+                "url": url,
+                "size": size,
+                "release_url": html_url,
+                "hint": "Flashe avec balenaEtcher ou Rufus (mode DD), puis boot USB. Écran En attente ou Cluster → Trouver des nœuds.",
+            })));
+        }
+    }
+
+    // Fallback URL conventionnelle sur la version courante / latest check.
+    let ver = cfg.current_version.trim_start_matches('v');
+    let fallback_name = format!("DevForge-Node-{ver}-amd64.img.xz");
+    let fallback_url = format!(
+        "https://github.com/{owner}/{repo}/releases/download/v{ver}/{fallback_name}"
+    );
+    Ok(Json(json!({
+        "ok": true,
+        "available": false,
+        "version": ver,
+        "name": fallback_name,
+        "url": fallback_url,
+        "size": 0,
+        "release_url": format!("https://github.com/{owner}/{repo}/releases"),
+        "hint": "L’image n’est pas encore attachée à une release récente. Le lien pointe vers la version courante — vérifie la page Releases si le téléchargement échoue.",
     })))
 }
 

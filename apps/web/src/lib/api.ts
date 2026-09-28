@@ -2032,6 +2032,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  clusterNodeImage: () =>
+    request<{
+      ok: boolean;
+      available: boolean;
+      version: string;
+      name: string;
+      url: string;
+      size: number;
+      release_url?: string;
+      hint?: string;
+    }>('/cluster/node-image'),
   clusterLocal: () =>
     request<{
       ok: boolean;

@@ -33,8 +33,9 @@ Pour démarrer DevForge sur une machine **via clé USB** (live ou image flashabl
 Page **Cluster** (`/app/cluster`, admin d’instance) :
 
 1. **Trouver des nœuds** — scan HTTP du LAN (sous-réseaux locaux, ports DevForge). Liste les instances encore en attente → **Ajouter**.
-2. **Inviter un nœud** — génère un **jeton** `dfjoin_…` (TTL 24 h). Sur l’autre machine : jeton + **URL du leader joignable depuis ce nœud**. Nom optionnel.
-3. **Via SSH** (avancé) — host, user, port. DevForge pousse le bootstrap. Clé SSH de Settings → Serveur.
+2. **Image USB** — télécharge `DevForge-Node-*.img.xz` depuis la page Cluster (lien GitHub Releases), flashe, boote → machine en attente.
+3. **Inviter un nœud** — génère un **jeton** `dfjoin_…` (TTL 24 h). Sur l’autre machine : jeton + **URL du leader joignable depuis ce nœud**. Nom optionnel.
+4. **Via SSH** (avancé) — host, user, port. DevForge pousse le bootstrap. Clé SSH de Settings → Serveur.
 
 Les nœuds en cours d’enrôlement apparaissent en statut **joining**. Un second join avec le même nom / URL / SSH **réutilise** le placeholder (pas de doublon).
 
@@ -135,6 +136,7 @@ Le crate `crates/cluster` + tables SQLite `cluster_*` portent le v1.
 | POST | `/api/v1/cluster/adopt` | public si 0 users — adoption poussée `{ leader_url, token, advertise_url? }` |
 | POST | `/api/v1/cluster/discover` | admin — scan LAN, liste des peers `pending` |
 | POST | `/api/v1/cluster/adopt-remote` | admin — `{ target_url, name? }` adopte un peer |
+| GET | `/api/v1/cluster/node-image` | admin — URL de téléchargement `DevForge-Node-*.img.xz` (GitHub Releases) |
 | GET/POST/PATCH | `/api/v1/cluster/local` | ouvert si 0 users, sinon admin — PATCH `{ leader_url?, advertise_url? }` (aussi sur un worker) |
 | GET/POST | `/api/v1/settings/dns` | admin — `{ provider: cloudflare\|porkbun\|'', zone?, token? }` (CF) ou `{ api_key, secret }` (Porkbun) puis provision auto |
 | GET | `/api/v1/settings/dns/status` | admin — état réel (tunnels, Traefik, cloudflared, domaines) |

@@ -2,6 +2,10 @@
 
 Transforme une machine (PC, mini-PC, vieux portable) en **nœud DevForge** en bootant depuis une clé USB.
 
+## Depuis l’admin Cluster
+
+Sur le leader : **Cluster** → bandeau **Worker via clé USB** → **Télécharger**. Même artefact que les releases GitHub (`DevForge-Node-*.img.xz`).
+
 ## Ce que tu obtiens
 
 - DevForge démarre tout seul (Docker + compose).

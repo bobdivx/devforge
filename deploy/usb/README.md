@@ -55,7 +55,11 @@ sudo bash bootstrap.sh --version 2.0.162 --offline-tar ./devforge-image.tar
 
 ## Chemin C — Image `.img` flashable (bare-metal)
 
-### Depuis les releases GitHub (recommandé)
+### Depuis la page Cluster (recommandé)
+
+Admin → **Cluster** → bandeau **Worker via clé USB** → **Télécharger** (`DevForge-Node-*.img.xz`). Flashe avec Etcher / Rufus, boote, puis **Trouver des nœuds**.
+
+### Depuis les releases GitHub
 
 Télécharge `DevForge-Node-<version>-amd64.img.xz` sur la [release](https://github.com/bobdivx/devforge/releases), décompresse, flashe avec [balenaEtcher](https://etcher.balena.io/) ou Rufus (mode DD).
 

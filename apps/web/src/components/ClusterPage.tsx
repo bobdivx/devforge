@@ -235,6 +235,16 @@ function ClusterInner() {
   const [discoverPeers, setDiscoverPeers] = useState<ClusterDiscoveredPeer[]>([]);
   const [discoverDone, setDiscoverDone] = useState(false);
   const [adoptingUrl, setAdoptingUrl] = useState<string | null>(null);
+  const [nodeImage, setNodeImage] = useState<{
+    available: boolean;
+    version: string;
+    name: string;
+    url: string;
+    size: number;
+    release_url?: string;
+    hint?: string;
+  } | null>(null);
+  const [nodeImageBusy, setNodeImageBusy] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const [name, setName] = useState('');
@@ -326,6 +336,7 @@ function ClusterInner() {
 
   useEffect(() => {
     load();
+    loadNodeImage();
     const t = window.setInterval(load, 8000);
     return () => window.clearInterval(t);
   }, []);
@@ -456,6 +467,44 @@ function ClusterInner() {
     } finally {
       setAdoptingUrl(null);
     }
+  }
+
+  async function loadNodeImage() {
+    setNodeImageBusy(true);
+    try {
+      const r = await api.clusterNodeImage();
+      const img = {
+        available: r.available,
+        version: r.version,
+        name: r.name,
+        url: r.url,
+        size: r.size,
+        release_url: r.release_url,
+        hint: r.hint,
+      };
+      setNodeImage(img);
+      return img;
+    } catch (err) {
+      setNodeImage(null);
+      toast.push({ title: 'Image USB', detail: String(err), tone: 'warn' });
+      return null;
+    } finally {
+      setNodeImageBusy(false);
+    }
+  }
+
+  async function downloadNodeImage() {
+    const img = nodeImage?.url ? nodeImage : await loadNodeImage();
+    if (!img?.url) return;
+    window.open(img.url, '_blank', 'noopener,noreferrer');
+  }
+
+  function formatBytes(n: number): string {
+    if (!n || n <= 0) return '';
+    if (n < 1024) return `${n} o`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} Ko`;
+    if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} Mo`;
+    return `${(n / (1024 * 1024 * 1024)).toFixed(2)} Go`;
   }
 
   async function copyText(label: string, value: string) {
@@ -791,6 +840,18 @@ function ClusterInner() {
           <Button size="sm" variant="secondary" disabled={busy} onClick={createInvite}>
             Inviter
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={nodeImageBusy}
+            onClick={() => {
+              void downloadNodeImage();
+            }}
+            title="Image USB flashable pour un nouveau worker"
+          >
+            {nodeImageBusy ? <Spinner /> : null}
+            Image USB
+          </Button>
         </div>
       </div>
       {error && (
@@ -799,6 +860,53 @@ function ClusterInner() {
         </Alert>
       )}
 
+      <Alert tone="info" class="mb-5">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div class="min-w-0">
+            <p class="font-medium text-[var(--color-ink)]">Worker via clé USB</p>
+            <p class="mt-1 text-[var(--color-ink-muted)]">
+              Télécharge l’image, flashe-la (Etcher / Rufus), boote la machine. Elle apparaît en
+              attente — puis <strong class="text-[var(--color-ink)]">Trouver des nœuds</strong>.
+            </p>
+            {nodeImage && (
+              <p class="mt-2 font-mono text-xs text-[var(--color-ink-muted)]">
+                {nodeImage.name}
+                {nodeImage.version ? ` · v${nodeImage.version.replace(/^v/, '')}` : ''}
+                {nodeImage.size > 0 ? ` · ${formatBytes(nodeImage.size)}` : ''}
+                {!nodeImage.available ? ' · lien estimé' : ''}
+              </p>
+            )}
+            {nodeImage?.hint && !nodeImage.available && (
+              <p class="mt-1 text-xs text-[var(--color-ink-muted)]">{nodeImage.hint}</p>
+            )}
+          </div>
+          <div class="flex shrink-0 flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={nodeImageBusy}
+              onClick={() => {
+                void downloadNodeImage();
+              }}
+            >
+              {nodeImageBusy ? <Spinner /> : null}
+              Télécharger
+            </Button>
+            {nodeImage?.release_url && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  window.open(nodeImage.release_url, '_blank', 'noopener,noreferrer')
+                }
+              >
+                Releases
+              </Button>
+            )}
+          </div>
+        </div>
+      </Alert>
       {writesFenced && (
         <Alert tone="danger" class="mb-5">
           <p class="font-medium text-[var(--color-ink)]">Écritures bloquées</p>
