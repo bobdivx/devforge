@@ -1,8 +1,10 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { globalNavForRole, mobileBottomNav, WORKER_NAV, type NavItem } from '../lib/nav';
+import { rememberedClusterRole, rememberClusterRole } from '../lib/auth';
+import { api, type ClusterLocal } from '../lib/api';
 import { BetaBadge } from './ui';
-import { api } from '../lib/api';
+import { WorkerRail } from './WorkerRail';
 import { cn } from '../lib/cn';
 import { ToastProvider } from './ui';
 import { AuthGate } from './AuthGate';
@@ -63,6 +65,8 @@ function shortLabel(label: string): string {
     MCP: 'MCP',
     Tokens: 'Tokens',
     Cluster: 'Cluster',
+    Nœud: 'Nœud',
+    Adresses: 'Adresses',
   };
   return map[label] ?? label;
 }
@@ -255,10 +259,14 @@ function ShellInner({
 }: Props) {
   const onNodePage =
     typeof window !== 'undefined' && window.location.pathname.startsWith('/app/node');
-  const [isWorker, setIsWorker] = useState(onNodePage);
+  const remembered = rememberedClusterRole();
+  const initialWorker = remembered != null ? remembered === 'worker' : onNodePage;
+  const [isWorker, setIsWorker] = useState(initialWorker);
   const [navItems, setNavItems] = useState(() =>
-    onNodePage ? WORKER_NAV : globalNavForRole(null),
+    initialWorker ? WORKER_NAV : globalNavForRole(null),
   );
+  const [workerLocal, setWorkerLocal] = useState<ClusterLocal | null>(null);
+  const [workerPhase, setWorkerPhase] = useState<'loading' | 'ready' | 'error'>('loading');
   const [userRole, setUserRole] = useState<string | null>(null);
   const [agentsSheetOpen, setAgentsSheetOpen] = useState(false);
   const launchedAgents = useLaunchedAgents();
@@ -273,6 +281,7 @@ function ShellInner({
       .bootstrap()
       .then((b) => {
         if (!cancelled) {
+          rememberClusterRole(b.cluster?.role);
           const worker = b.cluster?.role === 'worker';
           setIsWorker(worker);
           setNavItems(worker ? WORKER_NAV : globalNavForRole(b.user?.role));
@@ -290,6 +299,34 @@ function ShellInner({
   useEffect(() => {
     if (isWorker) return;
     return pollLaunchedAgents();
+  }, [isWorker]);
+
+  useEffect(() => {
+    if (!isWorker) {
+      setWorkerLocal(null);
+      setWorkerPhase('loading');
+      return;
+    }
+    let cancelled = false;
+    const load = () => {
+      api
+        .clusterLocal()
+        .then((r) => {
+          if (cancelled) return;
+          setWorkerLocal(r);
+          setWorkerPhase('ready');
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setWorkerPhase((prev) => (prev === 'ready' ? 'ready' : 'error'));
+        });
+    };
+    load();
+    const t = window.setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
   }, [isWorker]);
 
   useEffect(() => {
@@ -353,7 +390,7 @@ function ShellInner({
               'hidden shrink-0 lg:block',
               'sticky top-4 self-start max-h-[calc(100dvh-1.5rem)] overflow-y-auto overflow-x-hidden',
               'border-r border-[var(--color-line)] pr-5',
-              nav ? 'w-56' : 'w-52',
+              isWorker ? 'w-64' : nav ? 'w-56' : 'w-52',
             )}
           >
             <a
@@ -373,7 +410,10 @@ function ShellInner({
               </span>
               <span class="text-[15px] font-semibold tracking-tight">DevForge</span>
             </a>
-            <nav class="flex flex-col gap-0.5">
+            {isWorker && (
+              <WorkerRail status={workerLocal} phase={workerPhase} variant="sidebar" />
+            )}
+            <nav class="flex flex-col gap-0.5" aria-label={isWorker ? 'Actions du nœud' : 'Navigation'}>
               {navItems.map((item) => (
                 <a
                   key={item.key}
@@ -411,7 +451,12 @@ function ShellInner({
           </aside>
 
           <main class="df-page-enter min-w-0 flex-1 py-2 lg:pl-1">
-            <AppHeader worker={isWorker} />
+            {isWorker && (
+              <div class="mb-4 lg:hidden">
+                <WorkerRail status={workerLocal} phase={workerPhase} variant="banner" />
+              </div>
+            )}
+            <AppHeader worker={isWorker} workerLink={workerLocal?.link?.state} />
             {(title || actions) && (
               <div class="mb-4 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-end sm:justify-between">
                 <div class="min-w-0">

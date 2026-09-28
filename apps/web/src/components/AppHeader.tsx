@@ -62,7 +62,13 @@ function StatChip({
   );
 }
 
-export function AppHeader({ worker = false }: { worker?: boolean }) {
+export function AppHeader({
+  worker = false,
+  workerLink,
+}: {
+  worker?: boolean;
+  workerLink?: 'unknown' | 'ok' | 'down';
+}) {
   const [boot, setBoot] = useState<Bootstrap | null>(null);
   const [stats, setStats] = useState<ProjectStats | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -136,9 +142,28 @@ export function AppHeader({ worker = false }: { worker?: boolean }) {
         {worker ? (
           <div
             class="flex shrink-0 items-center gap-2 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1"
+            title={
+              workerLink === 'down'
+                ? 'Leader injoignable'
+                : workerLink === 'ok'
+                  ? 'Leader joignable'
+                  : 'Contact avec le leader en attente'
+            }
           >
-            <span class="h-1.5 w-1.5 rounded-full bg-[var(--color-ok)]" aria-hidden />
-            <span class="text-[11px] text-[var(--color-ink-muted)]">Worker</span>
+            <span
+              class={cn(
+                'h-1.5 w-1.5 rounded-full',
+                workerLink === 'ok'
+                  ? 'bg-[var(--color-ok)]'
+                  : workerLink === 'down'
+                    ? 'bg-[var(--color-danger)]'
+                    : 'bg-[var(--color-warn)]',
+              )}
+              aria-hidden
+            />
+            <span class="text-[11px] text-[var(--color-ink-muted)]">
+              {workerLink === 'down' ? 'Lien coupé' : workerLink === 'ok' ? 'Worker' : 'Connexion…'}
+            </span>
           </div>
         ) : stats ? (
           <>

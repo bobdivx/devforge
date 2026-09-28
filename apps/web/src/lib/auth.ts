@@ -74,6 +74,9 @@ export type Bootstrap = {
     leader_url?: string;
     node_id?: string;
     node_name?: string;
+    /** Vrai une fois le secret de join enregistré. */
+    joined?: boolean;
+    version?: string;
     pending?: boolean;
     hostname?: string | null;
     lan_urls?: string[] | null;
@@ -81,6 +84,17 @@ export type Bootstrap = {
   /** Instance neuve sans admin — adoptable depuis un leader sur le LAN. */
   cluster_pending?: boolean;
 };
+
+/** Dernier rôle cluster vu par la porte d’auth, pour peindre le bon shell sans flash. */
+let clusterRoleCache: string | null | undefined;
+
+export function rememberClusterRole(role?: string | null) {
+  clusterRoleCache = role ?? null;
+}
+
+export function rememberedClusterRole(): string | null | undefined {
+  return clusterRoleCache;
+}
 
 const RETURN_TO_KEY = 'devforge_return_to';
 const RETURN_TO_TTL_MS = 15 * 60 * 1000;
