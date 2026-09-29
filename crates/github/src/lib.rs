@@ -51,6 +51,9 @@ pub struct GitRelease {
     pub draft: bool,
     pub prerelease: bool,
     pub html_url: String,
+    /// Corps de la release (notes). Vide si l’API ne le fournit pas.
+    #[serde(default)]
+    pub body: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

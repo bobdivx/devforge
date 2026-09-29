@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api } from '../lib/api';
 import { Alert, Badge, Button, Card, ProgressBar, Spinner } from './ui';
+import { VersionDelta } from './VersionDelta';
 
 type StepStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
 
@@ -26,6 +27,7 @@ type VersionCheck = {
   can_apply?: boolean;
   mode: string;
   message: string;
+  notes?: string[] | null;
 };
 
 function prettyVersion(v: string): string {
@@ -184,9 +186,12 @@ export function WorkerNodeUpdate({
       </div>
       <p class="mt-2 text-sm text-[var(--color-ink-muted)]">{pathNote(mode || check?.mode || '')}</p>
       {check?.update_available && check.latest ? (
-        <p class="mt-1 text-sm text-[var(--color-ink-muted)]">
-          Version publiée {prettyVersion(check.latest)}
-        </p>
+        <div class="mt-3 space-y-2">
+          <p class="text-sm text-[var(--color-ink-muted)]">
+            Version publiée {prettyVersion(check.latest)}
+          </p>
+          <VersionDelta version={check.latest} notes={check.notes} />
+        </div>
       ) : null}
 
       {loading && !job ? (

@@ -5,7 +5,8 @@ import { cn } from '../lib/cn';
 import { AppShell } from './AppShell';
 import { AppIcon, groupFaceProject, statusDotClass } from './AppIcon';
 import { Alert, BetaBadge, Button, HubAddTile, HubGrid, Input, Portal, Skeleton } from './ui';
-import { enterUp, interactiveLift, motion } from '../lib/motion';
+import { interactiveLift, motion, settleIn } from '../lib/motion';
+import type { ComponentChildren } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { NewGithubAppWizard } from './NewGithubAppWizard';
 import { NewBuilderWizard } from './NewBuilderWizard';
@@ -41,7 +42,7 @@ function AppCard({
     <a
       href={`/app/projects/view?uuid=${encodeURIComponent(project.uuid)}`}
       class="group flex aspect-square h-full w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:gap-3 sm:px-3 sm:py-4"
-      animate={motion(enterUp(Math.min(index * 0.05, 0.35)), interactiveLift())}
+      animate={motion(settleIn(Math.min(index * 0.05, 0.32)), interactiveLift())}
     >
         <div class="relative">
           <AppIcon project={project} statusTone={status.tone} class="group-hover:scale-[1.03]" />
@@ -104,7 +105,7 @@ function GroupCard({
     <a
       href={`/app/groups/view?uuid=${encodeURIComponent(uuid)}`}
       class="group flex aspect-square h-full w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:gap-3 sm:px-3 sm:py-4"
-      animate={motion(enterUp(Math.min(index * 0.05, 0.35)), interactiveLift())}
+      animate={motion(settleIn(Math.min(index * 0.05, 0.32)), interactiveLift())}
     >
       <div class="relative">
         {face ? (
@@ -135,6 +136,84 @@ function GroupCard({
   );
 }
 
+function EmptyActionTile({
+  index,
+  title,
+  detail,
+  invite,
+  onClick,
+  icon,
+}: {
+  index: number;
+  title: string;
+  detail: string;
+  invite?: boolean;
+  onClick: () => void;
+  icon: ComponentChildren;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-df-empty-action={invite ? 'next' : 'alt'}
+      class={cn(
+        'group flex aspect-square h-full w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 text-center ring-1 transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:gap-3 sm:px-3 sm:py-4',
+        invite ? 'df-invite ring-[var(--color-accent)]/55' : 'ring-transparent hover:ring-white/15',
+      )}
+      animate={motion(settleIn(index * 0.06), interactiveLift())}
+    >
+      <div class="flex h-16 w-16 items-center justify-center rounded-[1.15rem] bg-white/10 text-white sm:h-[4.5rem] sm:w-[4.5rem]">
+        {icon}
+      </div>
+      <div class="w-full">
+        <div class="truncate text-sm font-medium text-white">{title}</div>
+        <div class="mt-1 line-clamp-2 text-[11px] leading-snug text-[var(--color-ink-muted)]">{detail}</div>
+      </div>
+    </button>
+  );
+}
+
+export function EmptyAppGrid({
+  agentBuilder,
+  onImport,
+  onAgent,
+}: {
+  agentBuilder: boolean;
+  onImport: () => void;
+  onAgent: () => void;
+}) {
+  return (
+    <>
+      {agentBuilder && (
+        <EmptyActionTile
+          index={0}
+          invite
+          title="Créer avec un agent"
+          detail="Décris l’app, l’agent prépare le projet."
+          onClick={onAgent}
+          icon={
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden>
+              <path d="M12 20h9M12 4L4 8l8 4 8-4-8-4zM4 12l8 4 8-4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          }
+        />
+      )}
+      <EmptyActionTile
+        index={agentBuilder ? 1 : 0}
+        invite={!agentBuilder}
+        title="Importer"
+        detail="Un dépôt GitHub déjà là."
+        onClick={onImport}
+        icon={
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+            <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+          </svg>
+        }
+      />
+    </>
+  );
+}
+
 export function HomePage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [nodes, setNodes] = useState<ClusterNode[]>([]);
@@ -142,6 +221,7 @@ export function HomePage() {
   const [loading, setLoading] = useState(true);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardMode, setWizardMode] = useState<'choice' | 'github' | 'builder'>('choice');
+  const [landWorkspace, setLandWorkspace] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [agentBuilder, setAgentBuilder] = useState(true);
   const [groupOpen, setGroupOpen] = useState(false);
@@ -178,6 +258,15 @@ export function HomePage() {
   // Chargement initial
   useEffect(() => {
     loadProjects();
+    const q = new URLSearchParams(window.location.search);
+    if (q.get('nouvelle') === '1') {
+      setLandWorkspace(true);
+      setWizardMode('choice');
+      setWizardOpen(true);
+      q.delete('nouvelle');
+      const next = q.toString();
+      window.history.replaceState({}, '', next ? `/app?${next}` : '/app');
+    }
   }, []);
 
   // Polling automatique avec gestion de la visibilité
@@ -242,8 +331,8 @@ export function HomePage() {
     };
   }, [loading, projects]);
 
-  function openWizard() {
-    setWizardMode('choice');
+  function openWizard(mode: 'choice' | 'github' | 'builder' = 'choice') {
+    setWizardMode(mode);
     setWizardOpen(true);
   }
 
@@ -323,7 +412,21 @@ export function HomePage() {
               />
             ))}
 
-            <HubAddTile index={groups.length + solo.length} label="Ajouter" lines={3} onClick={openWizard} />
+            {projects.length === 0 ? (
+              <EmptyAppGrid
+                agentBuilder={agentBuilder}
+                onImport={() => openWizard('github')}
+                onAgent={() => openWizard('builder')}
+              />
+            ) : (
+              <HubAddTile
+                settle
+                index={groups.length + solo.length}
+                label="Ajouter"
+                lines={3}
+                onClick={() => openWizard()}
+              />
+            )}
           </HubGrid>
         </>
       )}
@@ -370,11 +473,6 @@ export function HomePage() {
         </Portal>
       )}
 
-      {!loading && !error && projects.length === 0 && groups.length === 0 && (
-        <p class="mt-6 text-center text-sm text-[var(--color-ink-muted)]">
-          Aucune application pour l'instant. Crée-en une pour commencer.
-        </p>
-      )}
 
       {wizardOpen && (
         <Portal>
@@ -474,7 +572,7 @@ export function HomePage() {
             )}
 
             {wizardMode === 'builder' && <NewBuilderWizard bare onClose={closeWizard} />}
-            {wizardMode === 'github' && <NewGithubAppWizard bare />}
+            {wizardMode === 'github' && <NewGithubAppWizard bare landInWorkspace={landWorkspace} />}
           </div>
         </div>
         </Portal>

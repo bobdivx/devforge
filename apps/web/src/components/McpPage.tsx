@@ -15,7 +15,7 @@ import {
   useToast,
 } from './ui';
 
-type CatalogItem = {
+export type CatalogItem = {
   id: string;
   name: string;
   description: string;
@@ -214,6 +214,58 @@ function ServerCard({
   );
 }
 
+const CATEGORY_ORDER = [
+  'database',
+  'infrastructure',
+  'devops',
+  'messaging',
+  'observability',
+  'productivity',
+  'payments',
+  'other',
+];
+
+const CATEGORY_LABEL: Record<string, string> = {
+  database: 'Bases',
+  infrastructure: 'Infrastructure',
+  devops: 'Livraison',
+  messaging: 'Messages',
+  observability: 'Observabilité',
+  productivity: 'Productivité',
+  payments: 'Paiements',
+  other: 'Autres',
+};
+
+function agentCall(help?: string | null): string | null {
+  const raw = help?.trim();
+  if (!raw) return null;
+  const first = raw.split('\n').map((s) => s.trim()).find(Boolean) ?? '';
+  const sentence = first.split(/(?<=\.)\s/)[0] || first;
+  if (!sentence) return null;
+  return sentence.length > 110 ? `${sentence.slice(0, 107)}…` : sentence;
+}
+
+function groupedCatalog(items: CatalogItem[]) {
+  const map = new Map<string, CatalogItem[]>();
+  for (const item of items) {
+    const key = item.category || 'other';
+    const list = map.get(key) ?? [];
+    list.push(item);
+    map.set(key, list);
+  }
+  return [...map.keys()]
+    .sort((a, b) => {
+      const ia = CATEGORY_ORDER.indexOf(a);
+      const ib = CATEGORY_ORDER.indexOf(b);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    })
+    .map((id) => ({
+      id,
+      label: CATEGORY_LABEL[id] ?? id,
+      items: map.get(id) ?? [],
+    }));
+}
+
 function CatalogPickCard({
   item,
   index,
@@ -225,14 +277,28 @@ function CatalogPickCard({
   alreadyConnected: boolean;
   onOpen: () => void;
 }) {
+  const call = agentCall(item.tools_help);
   return (
     <HubTile
+      settle
+      layout="auto"
       index={index}
       title={item.name}
-      description={item.description || item.category}
       onClick={onOpen}
       iconClass="!bg-[#2a2a2e] !text-[var(--color-ink-muted)]"
       icon={<McpIcon id={item.id} name={item.name} size="lg" />}
+      subtitle={
+        <div class="mt-1 space-y-1">
+          <div class="line-clamp-2 text-[11px] leading-snug text-[var(--color-ink-muted)]">
+            {item.description || item.category}
+          </div>
+          {call && (
+            <div class="line-clamp-2 text-[10px] leading-snug text-[var(--color-ink-faint)]">
+              Agent · {call}
+            </div>
+          )}
+        </div>
+      }
       badge={
         alreadyConnected ? (
           <span class="absolute -right-1 -top-1 rounded-full bg-[var(--color-ok)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-zinc-950 ring-2 ring-[#1c1c1e]">
@@ -242,6 +308,40 @@ function CatalogPickCard({
       }
       class={alreadyConnected ? 'opacity-70' : undefined}
     />
+  );
+}
+
+export function McpCatalogGroups({
+  items,
+  connectedIds,
+  onOpen,
+}: {
+  items: CatalogItem[];
+  connectedIds: { has: (id: string) => boolean };
+  onOpen: (item: CatalogItem) => void;
+}) {
+  const groups = groupedCatalog(items);
+  return (
+    <div class="space-y-6">
+      {groups.map((group) => (
+        <section key={group.id} data-df-mcp-group={group.id}>
+          <h3 class="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
+            {group.label}
+          </h3>
+          <HubGrid>
+            {group.items.map((p, i) => (
+              <CatalogPickCard
+                key={p.id}
+                item={p}
+                index={i}
+                alreadyConnected={connectedIds.has(p.id)}
+                onOpen={() => onOpen(p)}
+              />
+            ))}
+          </HubGrid>
+        </section>
+      ))}
+    </div>
   );
 }
 
@@ -347,8 +447,6 @@ export function McpPage() {
   }
 
   const connectedIds = new Set(servers.map((s) => s.catalog_id).filter(Boolean));
-  const popular = catalog.filter((c) => c.popular);
-  const rest = catalog.filter((c) => !c.popular);
   const manageCatalog =
     manage?.catalog_id && catalog.find((c) => c.id === manage.catalog_id);
   const toolsHelp = manageCatalog?.tools_help || 'Liste distante JSON-RPC (tools/list).';
@@ -462,44 +560,11 @@ export function McpPage() {
         description="Choisis une intégration à connecter"
         size="xl"
       >
-        <div class="space-y-6">
-          {popular.length > 0 && (
-            <section>
-              <h3 class="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
-                Populaires
-              </h3>
-              <HubGrid>
-                {popular.map((p, i) => (
-                  <CatalogPickCard
-                    key={p.id}
-                    item={p}
-                    index={i}
-                    alreadyConnected={connectedIds.has(p.id)}
-                    onOpen={() => openPreset(p)}
-                  />
-                ))}
-              </HubGrid>
-            </section>
-          )}
-          {rest.length > 0 && (
-            <section>
-              <h3 class="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
-                Autres
-              </h3>
-              <HubGrid>
-                {rest.map((p, i) => (
-                  <CatalogPickCard
-                    key={p.id}
-                    item={p}
-                    index={i}
-                    alreadyConnected={connectedIds.has(p.id)}
-                    onOpen={() => openPreset(p)}
-                  />
-                ))}
-              </HubGrid>
-            </section>
-          )}
-        </div>
+        <McpCatalogGroups
+          items={catalog}
+          connectedIds={connectedIds}
+          onOpen={openPreset}
+        />
       </Modal>
 
       {/* Configurer un preset */}

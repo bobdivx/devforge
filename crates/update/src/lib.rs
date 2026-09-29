@@ -265,6 +265,9 @@ pub struct VersionCheck {
     pub mode: String,
     pub repo: String,
     pub message: String,
+    /// Trois premières lignes utiles du corps de la release cible.
+    #[serde(default)]
+    pub notes: Vec<String>,
 }
 
 pub struct UpdateFacade {
@@ -309,7 +312,7 @@ impl UpdateFacade {
     pub async fn check(&self) -> Result<VersionCheck> {
         let repo = format!("{}/{}", self.config.repo_owner, self.config.repo_name);
         match self.fetch_latest().await {
-            Ok((tag, name, url)) => {
+            Ok((tag, name, url, notes)) => {
                 let latest = tag.trim_start_matches('v').to_string();
                 let available = version_gt(&latest, &self.config.current_version);
                 let ahead = version_gt(&self.config.current_version, &latest);
@@ -340,6 +343,7 @@ impl UpdateFacade {
                     mode: self.config.mode.as_str().into(),
                     repo,
                     message,
+                    notes,
                 })
             }
             Err(e) => Ok(VersionCheck {
@@ -354,6 +358,7 @@ impl UpdateFacade {
                 mode: self.config.mode.as_str().into(),
                 repo,
                 message: format!("Impossible de vérifier les releases : {e}"),
+                notes: Vec::new(),
             }),
         }
     }
@@ -366,7 +371,7 @@ impl UpdateFacade {
         }
     }
 
-    async fn fetch_latest(&self) -> Result<(String, String, String)> {
+    async fn fetch_latest(&self) -> Result<(String, String, String, Vec<String>)> {
         let owner = &self.config.repo_owner;
         let name = &self.config.repo_name;
         let mut best: Option<LatestCandidate> = None;
@@ -375,7 +380,13 @@ impl UpdateFacade {
                 if r.draft || (self.config.channel == "stable" && r.prerelease) {
                     continue;
                 }
-                consider_latest(&mut best, &r.tag, &r.name, &r.html_url);
+                consider_latest(
+                    &mut best,
+                    &r.tag,
+                    &r.name,
+                    &r.html_url,
+                    &release_note_lines(&r.body),
+                );
             }
         }
         // L’image Docker est publiée sur le tag git, parfois sans page GitHub Release.
@@ -383,12 +394,12 @@ impl UpdateFacade {
             if let Ok(tags) = self.github.list_tags(owner, name).await {
                 for t in tags {
                     let url = format!("https://github.com/{owner}/{name}/tree/{}", t.name);
-                    consider_latest(&mut best, &t.name, &t.name, &url);
+                    consider_latest(&mut best, &t.name, &t.name, &url, &[]);
                 }
             }
         }
         if let Some(best) = best {
-            return Ok((best.tag, best.name, best.url));
+            return Ok((best.tag, best.name, best.url, best.notes));
         }
         let url = format!("https://api.github.com/repos/{owner}/{name}/releases/latest");
         let res = self
@@ -426,7 +437,8 @@ impl UpdateFacade {
             .and_then(|t| t.as_str())
             .unwrap_or("")
             .to_string();
-        Ok((tag, name, html))
+        let notes = release_note_lines(v.get("body").and_then(|b| b.as_str()).unwrap_or(""));
+        Ok((tag, name, html, notes))
     }
 
     pub async fn start(&self, target: Option<String>) -> Result<UpdateJob> {
@@ -2189,11 +2201,40 @@ struct LatestCandidate {
     tag: String,
     name: String,
     url: String,
+    notes: Vec<String>,
+}
+
+/// Trois lignes utiles du corps de release, sans titre markdown.
+pub fn release_note_lines(body: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in body.lines() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') {
+            continue;
+        }
+        let t =
+            t.trim_start_matches(|c: char| c == '-' || c == '*' || c == '•' || c.is_whitespace());
+        let t = t.trim();
+        if t.is_empty() {
+            continue;
+        }
+        out.push(t.chars().take(180).collect());
+        if out.len() == 3 {
+            break;
+        }
+    }
+    out
 }
 
 /// Garde la plus haute version `major.minor.patch`. Une égalité conserve la première
 /// (la page GitHub Release, avant le tag git).
-fn consider_latest(best: &mut Option<LatestCandidate>, tag: &str, name: &str, url: &str) {
+fn consider_latest(
+    best: &mut Option<LatestCandidate>,
+    tag: &str,
+    name: &str,
+    url: &str,
+    notes: &[String],
+) {
     let Some(ver) = release_semver(tag) else {
         return;
     };
@@ -2214,6 +2255,7 @@ fn consider_latest(best: &mut Option<LatestCandidate>, tag: &str, name: &str, ur
         tag: shown,
         name: label,
         url: url.to_string(),
+        notes: notes.to_vec(),
     });
 }
 
@@ -2385,10 +2427,16 @@ mod tests {
     #[test]
     fn highest_tag_beats_older_release() {
         let mut best = None;
-        consider_latest(&mut best, "v2.0.108", "DevForge v2.0.108", "http://release");
-        consider_latest(&mut best, "v2.0.99", "old", "http://old");
-        consider_latest(&mut best, "v2.0.109", "v2.0.109", "http://tag");
-        consider_latest(&mut best, "v2.0.110-rc1", "rc", "http://rc");
+        consider_latest(
+            &mut best,
+            "v2.0.108",
+            "DevForge v2.0.108",
+            "http://release",
+            &[],
+        );
+        consider_latest(&mut best, "v2.0.99", "old", "http://old", &[]);
+        consider_latest(&mut best, "v2.0.109", "v2.0.109", "http://tag", &[]);
+        consider_latest(&mut best, "v2.0.110-rc1", "rc", "http://rc", &[]);
         let b = best.expect("candidate");
         assert_eq!(b.tag, "2.0.109");
         assert_eq!(b.url, "http://tag");
@@ -2397,11 +2445,34 @@ mod tests {
     #[test]
     fn equal_version_keeps_release_page() {
         let mut best = None;
-        consider_latest(&mut best, "v2.0.109", "DevForge v2.0.109", "http://release");
-        consider_latest(&mut best, "v2.0.109", "v2.0.109", "http://tag");
+        let notes = vec!["Correctif du routage".to_string()];
+        consider_latest(
+            &mut best,
+            "v2.0.109",
+            "DevForge v2.0.109",
+            "http://release",
+            &notes,
+        );
+        consider_latest(&mut best, "v2.0.109", "v2.0.109", "http://tag", &[]);
         let b = best.expect("candidate");
         assert_eq!(b.url, "http://release");
         assert_eq!(b.name, "DevForge v2.0.109");
+        assert_eq!(b.notes, notes);
+    }
+
+    #[test]
+    fn release_notes_keep_three_lines() {
+        let notes = release_note_lines(
+            "# 2.0.174\n\n- Correctif du routage\n- Notes avant mise à jour\n* Grille d'accueil\n- quatrième ignorée\n",
+        );
+        assert_eq!(
+            notes,
+            vec![
+                "Correctif du routage".to_string(),
+                "Notes avant mise à jour".to_string(),
+                "Grille d'accueil".to_string(),
+            ]
+        );
     }
 
     #[test]
