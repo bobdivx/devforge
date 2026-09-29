@@ -1657,6 +1657,57 @@ fn installer_lookup_error(
     }
 }
 
+/// Mise à jour d’un worker Docker/compose, exécutée **dans** le conteneur
+/// (socket Docker monté). Ne consulte pas GitHub : `docker compose pull` ou
+/// `docker pull`. Un nœud sans Docker affiche `DEVFORGE_UPDATE_HOST`.
+pub fn remote_container_update_script(target: &str) -> String {
+    let target = target.trim().trim_start_matches('v');
+    if target.is_empty()
+        || !target
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+    {
+        return "echo DEVFORGE_UPDATE_FAIL version cible invalide\nexit 1\n".into();
+    }
+    include_str!("remote_container_update.sh").replace("@@TARGET@@", target)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoteContainerUpdate {
+    /// Pas de Docker : installeur Windows / Flatpak.
+    NotContainer,
+    Already,
+    Started,
+    Failed(String),
+}
+
+pub fn interpret_remote_container_update(output: &str, ok: bool) -> RemoteContainerUpdate {
+    if output.contains("DEVFORGE_UPDATE_FAIL") {
+        let detail: String = output.trim().chars().take(400).collect();
+        return RemoteContainerUpdate::Failed(detail);
+    }
+    if output.contains("DEVFORGE_UPDATE_HOST") {
+        return RemoteContainerUpdate::NotContainer;
+    }
+    if output.contains("DEVFORGE_UPDATE_ALREADY") {
+        return RemoteContainerUpdate::Already;
+    }
+    if output.contains("DEVFORGE_UPDATE_STARTED") || output.contains("DEVFORGE_UPDATE_OK") {
+        return RemoteContainerUpdate::Started;
+    }
+    let detail = output.trim();
+    let detail = if detail.is_empty() {
+        if ok {
+            "mise à jour conteneur sans résultat".to_string()
+        } else {
+            "échec mise à jour conteneur".to_string()
+        }
+    } else {
+        detail.chars().take(400).collect()
+    };
+    RemoteContainerUpdate::Failed(detail)
+}
+
 async fn handoff_windows_setup(setup: &Path) -> Result<()> {
     let mut cmd = tokio::process::Command::new(setup);
     cmd.args([
@@ -2690,6 +2741,75 @@ mod tests {
         assert!(joined.contains("DEVFORGE_VERSION=2.0.9"));
         assert!(joined.contains("-v /DATA/AppData/devforge:/data"));
         assert!(joined.ends_with("bobdivx/devforge:2.0.9"));
+    }
+
+    #[test]
+    fn remote_container_script_pulls_without_github() {
+        let script = remote_container_update_script("v2.0.163");
+        assert!(script.contains("target=2.0.163"));
+        assert!(script.contains("docker compose"));
+        assert!(script.contains("pull"));
+        assert!(script.contains("docker pull"));
+        assert!(script.contains("DEVFORGE_UPDATE_ALREADY"));
+        assert!(script.contains("DEVFORGE_UPDATE_HOST"));
+        assert!(script.contains("DEVFORGE_UPDATE_STARTED"));
+        assert!(script.contains("bobdivx/devforge"));
+        assert!(script.contains("/opt/devforge/docker-compose.yml"));
+        assert!(!script.contains("github.com"));
+        assert!(!script.contains("flatpak"));
+        assert!(!script.contains("DevForge-Setup"));
+        assert!(!script.contains("@@TARGET@@"));
+        let path = std::env::temp_dir().join("devforge-remote-update-test.sh");
+        std::fs::write(&path, &script).unwrap();
+        let out = std::process::Command::new("sh")
+            .arg("-n")
+            .arg(&path)
+            .output()
+            .expect("sh");
+        assert!(
+            out.status.success(),
+            "sh -n: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn remote_container_script_rejects_injection() {
+        let script = remote_container_update_script("2.0.163; rm -rf /");
+        assert!(script.contains("DEVFORGE_UPDATE_FAIL"));
+        assert!(!script.contains("rm -rf"));
+    }
+
+    #[test]
+    fn interpret_remote_container_markers() {
+        assert_eq!(
+            interpret_remote_container_update("DEVFORGE_UPDATE_HOST\n", true),
+            RemoteContainerUpdate::NotContainer
+        );
+        assert_eq!(
+            interpret_remote_container_update(
+                "DEVFORGE_UPDATE_ALREADY bobdivx/devforge:2.0.163\n",
+                true
+            ),
+            RemoteContainerUpdate::Already
+        );
+        assert_eq!(
+            interpret_remote_container_update("pull ok\nDEVFORGE_UPDATE_STARTED\n", true),
+            RemoteContainerUpdate::Started
+        );
+        // Un échec prime sur un STARTED résiduel.
+        match interpret_remote_container_update(
+            "DEVFORGE_UPDATE_STARTED\nDEVFORGE_UPDATE_FAIL échec du pull compose\n",
+            false,
+        ) {
+            RemoteContainerUpdate::Failed(d) => assert!(d.contains("pull compose")),
+            other => panic!("{other:?}"),
+        }
+        match interpret_remote_container_update("", false) {
+            RemoteContainerUpdate::Failed(d) => assert!(d.contains("échec")),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
