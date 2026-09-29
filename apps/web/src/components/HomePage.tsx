@@ -10,6 +10,16 @@ import { useEffect, useState } from 'preact/hooks';
 import { NewGithubAppWizard } from './NewGithubAppWizard';
 import { NewBuilderWizard } from './NewBuilderWizard';
 
+function statusLineClass(tone: string) {
+  return cn(
+    'mt-1 text-[11px] font-medium leading-[14px]',
+    tone === 'ok' && 'text-[var(--color-ok)]',
+    tone === 'warn' && 'text-[var(--color-warn)]',
+    tone === 'danger' && 'text-[var(--color-danger)]',
+    tone === 'neutral' && 'text-[var(--color-ink-faint)]',
+  );
+}
+
 function AppCard({
   project,
   index,
@@ -30,7 +40,7 @@ function AppCard({
   return (
     <a
       href={`/app/projects/view?uuid=${encodeURIComponent(project.uuid)}`}
-      class="group flex aspect-square h-full w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl bg-[#1c1c1e] px-3 py-4 ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)]"
+      class="group flex aspect-square h-full w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:gap-3 sm:px-3 sm:py-4"
       animate={motion(enterUp(Math.min(index * 0.05, 0.35)), interactiveLift())}
     >
         <div class="relative">
@@ -40,7 +50,7 @@ function AppCard({
             class={cn(
               'absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full ring-2 ring-[#1c1c1e]',
               statusDotClass(status.tone),
-              status.tone === 'ok' || status.tone === 'warn' ? 'animate-pulse' : '',
+              status.tone === 'warn' ? 'animate-pulse' : '',
             )}
             title={status.label}
             aria-hidden
@@ -58,20 +68,10 @@ function AppCard({
 
         <div class="w-full text-center">
           <div class="truncate text-sm font-medium text-white">{project.name}</div>
-          <div
-            class={cn(
-              'mt-1 text-[11px] font-medium',
-              badgeTone === 'ok' && 'text-[var(--color-ok)]',
-              badgeTone === 'warn' && 'text-[var(--color-warn)]',
-              badgeTone === 'danger' && 'text-[var(--color-danger)]',
-              badgeTone === 'neutral' && 'text-[var(--color-ink-faint)]',
-            )}
-          >
-            {status.label}
+          <div class={statusLineClass(badgeTone)}>{status.label}</div>
+          <div class="mt-0.5 truncate text-[10px] leading-[14px] text-[var(--color-ink-faint)]">
+            {showNode ? node : '\u00a0'}
           </div>
-          {showNode && (
-            <div class="mt-0.5 truncate text-[10px] text-[var(--color-ink-faint)]">{node}</div>
-          )}
         </div>
     </a>
   );
@@ -103,31 +103,32 @@ function GroupCard({
   return (
     <a
       href={`/app/groups/view?uuid=${encodeURIComponent(uuid)}`}
-      class="group flex aspect-square h-full w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl bg-[#1c1c1e] px-3 py-4 ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)]"
+      class="group flex aspect-square h-full w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:gap-3 sm:px-3 sm:py-4"
       animate={motion(enterUp(Math.min(index * 0.05, 0.35)), interactiveLift())}
     >
-      {face ? (
-        <AppIcon project={face} statusTone={meta.tone} class="group-hover:scale-[1.03]" />
-      ) : (
-        <div class="flex h-16 w-16 items-center justify-center rounded-[1.15rem] bg-white/10 text-lg font-semibold text-white sm:h-[4.5rem] sm:w-[4.5rem]">
-          {name.slice(0, 1).toUpperCase()}
-        </div>
-      )}
+      <div class="relative">
+        {face ? (
+          <AppIcon project={face} statusTone={meta.tone} class="group-hover:scale-[1.03]" />
+        ) : (
+          <div class="flex h-16 w-16 items-center justify-center rounded-[1.15rem] bg-white/10 text-lg font-semibold text-white sm:h-[4.5rem] sm:w-[4.5rem]">
+            {name.slice(0, 1).toUpperCase()}
+          </div>
+        )}
+        <span
+          class={cn(
+            'absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full ring-2 ring-[#1c1c1e]',
+            statusDotClass(meta.tone),
+            meta.tone === 'warn' ? 'animate-pulse' : '',
+          )}
+          title={meta.label}
+          aria-hidden
+        />
+      </div>
       <div class="w-full text-center">
         <div class="truncate text-sm font-medium text-white">{name}</div>
-        <div class="mt-1 truncate text-[11px] text-[var(--color-ink-faint)]">
+        <div class={statusLineClass(meta.tone)}>{meta.label}</div>
+        <div class="mt-0.5 truncate text-[10px] leading-[14px] text-[var(--color-ink-faint)]">
           {roles.length ? roles.join(' · ') : 'Groupe'}
-        </div>
-        <div
-          class={cn(
-            'mt-1 text-[11px] font-medium',
-            meta.tone === 'ok' && 'text-[var(--color-ok)]',
-            meta.tone === 'warn' && 'text-[var(--color-warn)]',
-            meta.tone === 'danger' && 'text-[var(--color-danger)]',
-            meta.tone === 'neutral' && 'text-[var(--color-ink-faint)]',
-          )}
-        >
-          {meta.label}
         </div>
       </div>
     </a>
@@ -322,7 +323,7 @@ export function HomePage() {
               />
             ))}
 
-            <HubAddTile index={groups.length + solo.length} label="Ajouter" onClick={openWizard} />
+            <HubAddTile index={groups.length + solo.length} label="Ajouter" lines={3} onClick={openWizard} />
           </HubGrid>
         </>
       )}
