@@ -451,23 +451,47 @@ impl Tool for CreateProjectAgentTool {
             .execute(self.pool.as_ref())
             .await;
 
-            // Enqueue pending — un tour sera repris au boot / par le worker de runs.
-            let run_uuid = uuid::Uuid::new_v4().to_string();
-            let inserted = sqlx::query(
-                r#"INSERT INTO agent_runs (
-                    uuid, project_uuid, agent_uuid, message_uuid, status, error, created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, 'pending', NULL, $5, $6)
-                ON CONFLICT (message_uuid) DO NOTHING"#,
+            let existing: Option<(String,)> = sqlx::query_as(
+                "SELECT uuid FROM agent_runs WHERE message_uuid = $1",
             )
-            .bind(&run_uuid)
-            .bind(project_uuid)
-            .bind(&agent_uuid)
             .bind(&msg_uuid)
-            .bind(&now)
-            .bind(&now)
-            .execute(self.pool.as_ref())
-            .await;
-            enqueued = inserted.is_ok();
+            .fetch_optional(self.pool.as_ref())
+            .await
+            .ok()
+            .flatten();
+            if existing.is_some() {
+                enqueued = true;
+            } else {
+                let run_uuid = uuid::Uuid::new_v4().to_string();
+                match sqlx::query(
+                    r#"INSERT INTO agent_runs (
+                        uuid, project_uuid, agent_uuid, message_uuid, status, error, created_at, updated_at
+                    ) VALUES ($1, $2, $3, $4, 'pending', NULL, $5, $6)"#,
+                )
+                .bind(&run_uuid)
+                .bind(project_uuid)
+                .bind(&agent_uuid)
+                .bind(&msg_uuid)
+                .bind(&now)
+                .bind(&now)
+                .execute(self.pool.as_ref())
+                .await
+                {
+                    Ok(_) => enqueued = true,
+                    Err(e) => {
+                        return Ok(json!({
+                            "ok": false,
+                            "error": format!("message enregistré mais tour non planifié : {e}"),
+                            "agent": {
+                                "uuid": agent_uuid,
+                                "project_uuid": project_uuid,
+                                "name": name,
+                                "role": role,
+                            }
+                        }));
+                    }
+                }
+            }
         }
 
         Ok(json!({

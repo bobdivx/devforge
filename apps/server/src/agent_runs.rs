@@ -231,6 +231,53 @@ pub fn assistant_content_with_tools(content: &str, tools_json: &str) -> String {
     }
 }
 
+/// Marqueur du tour qui force les outils après une auto-réparation narrée.
+pub const DEPLOY_REPAIR_FOLLOWUP: &str = "[réparation déploiement]";
+
+/// Si l'auto-réparation a été racontée sans `npm install` ou sans redéploiement, un tour de plus.
+pub fn deploy_repair_followup(user_message: &str, tools_json: &str) -> Option<String> {
+    let lower = user_message.to_lowercase();
+    let repair = lower.contains("auto-réparation") || lower.contains("auto-reparation");
+    if !repair {
+        return None;
+    }
+    if user_message.contains("Pousse uniquement package-lock.json") {
+        return None;
+    }
+    let calls: Vec<Value> = serde_json::from_str(tools_json).unwrap_or_default();
+    let ran_install = calls.iter().any(|call| {
+        call.get("name").and_then(|v| v.as_str()) == Some("run_workdir_command")
+            && call
+                .get("arguments")
+                .and_then(|a| a.get("command"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .contains("npm install")
+            && call
+                .get("result")
+                .and_then(|r| r.get("ok"))
+                .and_then(|v| v.as_bool())
+                == Some(true)
+    });
+    let deployed = calls
+        .iter()
+        .any(|call| call.get("name").and_then(|v| v.as_str()) == Some("trigger_deploy"));
+    if !ran_install {
+        if user_message.contains("Appelle maintenant l'outil run_workdir_command") {
+            return None;
+        }
+        return Some(format!(
+            "{DEPLOY_REPAIR_FOLLOWUP}\nAUTO-RÉPARATION\nTu as décrit la correction sans l'exécuter. Appelle maintenant l'outil run_workdir_command avec command=\"npm install\". N'écris pas package-lock.json à la main. N'invente aucune variable d'environnement."
+        ));
+    }
+    if !deployed {
+        return Some(
+            "Pousse uniquement package-lock.json avec sync_workdir_to_github (paths: [\"package-lock.json\"], commit_message: \"fix: resynchroniser package-lock.json\"), puis appelle trigger_deploy. Ne synchronise pas le reste du dépôt. AUTO-RÉPARATION".into(),
+        );
+    }
+    None
+}
+
 /// Un seul correctif auto par demande. Rien si l'utilisateur doit agir (domaine, secret).
 pub fn preview_repair_prompt(user_message: &str, tools_json: &str) -> Option<String> {
     if user_message.trim_start().starts_with(PREVIEW_REPAIR_PREFIX) {
@@ -464,5 +511,23 @@ mod tests {
         assert!(preview_repair_prompt("go", green).is_none());
         let domain = r#"[{"name":"start_local_preview","arguments":{},"result":{"ok":false,"error":"Domaine wildcard manquant"}}]"#;
         assert!(preview_repair_prompt("go", domain).is_none());
+    }
+
+    #[test]
+    fn deploy_repair_followup_forces_npm_then_stops() {
+        let narrated = deploy_repair_followup(
+            "AUTO-RÉPARATION DÉPLOIEMENT\npackage-lock désynchronisé",
+            "[]",
+        )
+        .unwrap();
+        assert!(narrated.contains("run_workdir_command"));
+        assert!(deploy_repair_followup(&narrated, "[]").is_none());
+        let installed = r#"[{"name":"run_workdir_command","arguments":{"command":"npm install"},"result":{"ok":true}}]"#;
+        let next =
+            deploy_repair_followup("AUTO-RÉPARATION DÉPLOIEMENT\npackage-lock", installed).unwrap();
+        assert!(next.contains("package-lock.json"));
+        assert!(deploy_repair_followup(&next, installed).is_none());
+        let done = r#"[{"name":"run_workdir_command","arguments":{"command":"npm install"},"result":{"ok":true}},{"name":"trigger_deploy","arguments":{},"result":{"ok":true}}]"#;
+        assert!(deploy_repair_followup("AUTO-RÉPARATION", done).is_none());
     }
 }

@@ -1741,19 +1741,43 @@ fn extract_meaningful_error_logs(raw_logs: &str, max_lines: usize, max_chars: us
 
 fn build_repair_prompt(dep_uuid: &str, summary: &str, hint: &str, raw_logs: &str) -> String {
     let logs_tail = extract_meaningful_error_logs(raw_logs, 100, 6000);
+    let hint_line = if hint.is_empty() {
+        "Aucun indice spécifique"
+    } else {
+        hint
+    };
+    let logs_lower = logs_tail.to_lowercase();
+    let summary_lower = summary.to_lowercase();
+    let lockfile = summary_lower.contains("package-lock")
+        || summary_lower.contains("désynchronisation")
+        || (logs_lower.contains("package-lock.json") && logs_lower.contains("npm ci"));
+    if lockfile {
+        return format!(
+            "AUTO-RÉPARATION DÉPLOIEMENT\n\n\
+             Le déploiement {dep_uuid} a échoué.\n\
+             Diagnostic : {summary}\n\
+             Indice : {hint_line}\n\n\
+             Logs :\n```\n{logs_tail}\n```\n\n\
+             Le lockfile se régénère, il ne s'écrit pas à la main.\n\
+             INTERDIT : répondre sans appeler d'outil. INTERDIT : write_project_file sur package-lock.json. INTERDIT : inventer une variable d'environnement.\n\
+             Appelle ces outils, dans cet ordre :\n\
+             1. run_workdir_command avec command=\"npm install\"\n\
+             2. sync_workdir_to_github avec paths=[\"package-lock.json\"] et commit_message=\"fix: resynchroniser package-lock.json\"\n\
+             3. trigger_deploy\n\
+             « up to date » veut dire que le workdir est déjà cohérent : pousse quand même le lockfile, puis redéploie.\n\
+             Ne dis pas que c'est corrigé avant le résultat de trigger_deploy."
+        );
+    }
     format!(
-        "🔧 AUTO-RÉPARATION DÉPLOIEMENT (PLAYBOOK)\n\n\
+        "AUTO-RÉPARATION DÉPLOIEMENT\n\n\
         Le déploiement {dep_uuid} a échoué.\n\n\
-        **Diagnostic rapide** : {summary}\n\
-        **Indice de remédiation** : {}\n\n\
-        **Dernières lignes de logs & Stack Trace (tail extract)** :\n```\n{logs_tail}\n```\n\n\
-        📋 **PLAYBOOK D'AUTO-RÉPARATION DÉTERMINISTE** :\n\
-        Suis rigoureusement ces 4 étapes dans cet ordre précis :\n\
-        1. **Diagnostiquer** : Identifie la cause racine exacte dans la stack trace ou le message d'erreur.\n\
-        2. **Inspecter** : Utilise `read_project_file` pour examiner le code source ou la configuration défaillante.\n\
-        3. **Corriger** : Utilise `write_project_file` pour appliquer la correction minimale nécessaire (ou `create_github_fix` / git tools si repo distant).\n\
-        4. **Relancer & Valider** : Appelle le tool `trigger_deploy` pour relancer immédiatement le déploiement et confirmer la résolution, puis résume tes actions à l'utilisateur.",
-        if hint.is_empty() { "Aucun indice spécifique" } else { hint }
+        Diagnostic : {summary}\n\
+        Indice : {hint_line}\n\n\
+        Logs :\n```\n{logs_tail}\n```\n\n\
+        N'écris pas que c'est fait tant que les outils n'ont pas répondu.\n\
+        1. Identifie la cause dans les logs.\n\
+        2. Corrige avec l'outil adapté (run_workdir_command, write_project_file). Ne réécris pas un lockfile à la main.\n\
+        3. trigger_deploy, puis résume le résultat réel."
     )
 }
 
@@ -2527,21 +2551,82 @@ fn schedule_preview_repair(
     user_message: String,
     tools_json: String,
 ) {
-    let Some(prompt) = crate::agent_runs::preview_repair_prompt(&user_message, &tools_json) else {
+    if let Some(prompt) = crate::agent_runs::preview_repair_prompt(&user_message, &tools_json) {
+        let state = state.clone();
+        let project_uuid = project_uuid.clone();
+        let agent_uuid = agent_uuid.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::agent_runs::record_user_turn(
+                &state.pool,
+                &project_uuid,
+                &agent_uuid,
+                &prompt,
+            )
+            .await
+            {
+                tracing::error!(error = %e, "message de réparation preview");
+                return;
+            }
+            if let Err(e) = trigger_agent_turn(&state, &project_uuid, &agent_uuid).await {
+                tracing::error!(error = %e, "tour de réparation preview");
+            }
+        });
+    }
+    if let Some(prompt) = crate::agent_runs::deploy_repair_followup(&user_message, &tools_json) {
+        let state = state.clone();
+        let project_uuid = project_uuid.clone();
+        let agent_uuid = agent_uuid.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::agent_runs::record_user_turn(
+                &state.pool,
+                &project_uuid,
+                &agent_uuid,
+                &prompt,
+            )
+            .await
+            {
+                tracing::error!(error = %e, "message de réparation déploiement");
+                return;
+            }
+            if let Err(e) = trigger_agent_turn(&state, &project_uuid, &agent_uuid).await {
+                tracing::error!(error = %e, "tour de réparation déploiement");
+            }
+        });
+    }
+    let Ok(calls) = serde_json::from_str::<Vec<serde_json::Value>>(&tools_json) else {
         return;
     };
-    tokio::spawn(async move {
-        if let Err(e) =
-            crate::agent_runs::record_user_turn(&state.pool, &project_uuid, &agent_uuid, &prompt)
-                .await
-        {
-            tracing::error!(error = %e, "message de réparation preview");
-            return;
+    for call in calls {
+        if call.get("name").and_then(|v| v.as_str()) != Some("create_project_agent") {
+            continue;
         }
-        if let Err(e) = trigger_agent_turn(&state, &project_uuid, &agent_uuid).await {
-            tracing::error!(error = %e, "tour de réparation preview");
+        let result = call.get("result");
+        if result.and_then(|r| r.get("ok")).and_then(|v| v.as_bool()) != Some(true) {
+            continue;
         }
-    });
+        let Some(child) = result
+            .and_then(|r| r.get("agent"))
+            .and_then(|a| a.get("uuid"))
+            .and_then(|v| v.as_str())
+        else {
+            continue;
+        };
+        let Some(child_project) = result
+            .and_then(|r| r.get("agent"))
+            .and_then(|a| a.get("project_uuid"))
+            .and_then(|v| v.as_str())
+        else {
+            continue;
+        };
+        let state = state.clone();
+        let child = child.to_string();
+        let child_project = child_project.to_string();
+        tokio::spawn(async move {
+            if let Err(e) = trigger_agent_turn(&state, &child_project, &child).await {
+                tracing::error!(error = %e, agent_uuid = %child, "démarrage du sous-agent");
+            }
+        });
+    }
 }
 
 async fn load_agent_context(

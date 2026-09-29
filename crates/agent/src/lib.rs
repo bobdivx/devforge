@@ -588,7 +588,7 @@ fn is_security_review_request(msg: &str) -> bool {
 
 fn is_publish_request(msg: &str) -> bool {
     let t = normalize_user_text(msg);
-    const NEEDLES: &[&str] = &["crée une pr", "creer une pr", "crée la pr", "creer la pr", "ouvre une pr", "ouvrir une pr", "open a pr", "pull request", "publie", "publier", "valide et crée", "valider et créer", "valide les changements", "merge ça", "déploie en prod", "deploie en prod", "déploie en production", "create_github_fix"];
+    const NEEDLES: &[&str] = &["crée une pr", "creer une pr", "crée la pr", "creer la pr", "ouvre une pr", "ouvrir une pr", "open a pr", "pull request", "publie", "publier", "valide et crée", "valider et créer", "valide les changements", "merge ça", "déploie en prod", "deploie en prod", "déploie en production", "create_github_fix", "auto-réparation", "auto-reparation"];
     NEEDLES.iter().any(|n| t.contains(n))
 }
 
