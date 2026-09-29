@@ -131,6 +131,9 @@ pub fn worker_router(state: AppState) -> Router {
             get(worker_local).patch(worker_local_patch),
         )
         .route("/api/v1/cluster/local/reset", post(worker_local_reset))
+        .route("/api/v1/update/check", get(worker_update_check))
+        .route("/api/v1/update/status", get(worker_update_status))
+        .route("/api/v1/update/start", post(worker_update_start))
         .route("/internal/exec", post(internal_exec))
         .route("/internal/update/status", get(internal_update_status))
         .route("/internal/update/start", post(internal_update_start))
@@ -390,6 +393,51 @@ async fn internal_update_start(
     Json(body): Json<InternalUpdateStart>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let _ = require_node_secret(&state, &headers).await?;
+    let job = state
+        .updater
+        .start(body.target_version)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+    Ok(Json(json!({
+        "ok": true,
+        "data": job,
+    })))
+}
+
+/// Mise à jour de ce processus worker (Compose pull si le nœud tourne via
+/// deploy/usb, sinon l’installateur local). Pas de secret : l’UI worker n’a pas de session.
+async fn worker_update_check(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let check = state.updater.check().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+    Ok(Json(json!({
+        "data": check,
+        "job": state.updater.current_job().await,
+    })))
+}
+
+async fn worker_update_status(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({
+        "data": state.updater.current_job().await,
+        "version": state.updater.current_version(),
+        "mode": state.updater.config().mode.as_str(),
+    }))
+}
+
+async fn worker_update_start(
+    State(state): State<AppState>,
+    Json(body): Json<InternalUpdateStart>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let job = state
         .updater
         .start(body.target_version)

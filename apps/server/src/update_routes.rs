@@ -113,11 +113,25 @@ async fn require_admin(
     Ok(())
 }
 
+/// Leader : admin d'instance. Nœud déjà worker (join à chaud, avant redémarrage) :
+/// la mise à jour est celle de cette machine, comme sur le process worker.
+async fn require_update_operator(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(), (axum::http::StatusCode, Json<Value>)> {
+    if let Ok(local) = state.cluster.local().await {
+        if crate::worker::is_worker_role(&local) {
+            return Ok(());
+        }
+    }
+    require_admin(state, headers).await
+}
+
 async fn update_check(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    require_admin(&state, &headers).await?;
+    require_update_operator(&state, &headers).await?;
     let check = state.updater.check().await.map_err(|e| {
         (
             axum::http::StatusCode::BAD_GATEWAY,
@@ -149,7 +163,7 @@ async fn update_start(
     headers: HeaderMap,
     Json(body): Json<StartBody>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    require_admin(&state, &headers).await?;
+    require_update_operator(&state, &headers).await?;
     let job = state
         .updater
         .start(body.target_version)

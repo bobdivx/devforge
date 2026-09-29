@@ -3,6 +3,7 @@ import { api, type ClusterLocal, type ClusterNodeMetrics, type WorkerWorkload } 
 import type { Bootstrap } from '../lib/auth';
 import { AppShell } from './AppShell';
 import { JoinClusterForm } from './JoinClusterForm';
+import { WorkerNodeUpdate } from './WorkerNodeUpdate';
 import { Alert, Badge, Button, Card, Input, Spinner } from './ui';
 
 function pct(used?: number | null, total?: number | null): string {
@@ -443,6 +444,8 @@ export function WorkerNodePage() {
                 </Alert>
               )}
 
+              <WorkerNodeUpdate versionHint={version} />
+
               <Card padding="lg">
                 <h2 class="text-sm font-semibold text-[var(--color-ink)]">Ce que fait ce nœud</h2>
                 <p class="mt-1 mb-4 text-sm text-[var(--color-ink-muted)]">
@@ -452,9 +455,9 @@ export function WorkerNodePage() {
               </Card>
 
               <Alert tone="info">
-                Depuis ce nœud tu peux suivre la santé, corriger les adresses et quitter le
-                cluster. Tu ne crées pas d’apps, d’agents, de jetons ni de comptes ici — et les
-                mises à jour de ce nœud partent du leader.
+                Depuis ce nœud tu peux suivre la santé, mettre DevForge à jour, corriger les
+                adresses et quitter le cluster. Tu ne crées pas d’apps, d’agents, de jetons ni de
+                comptes ici.
               </Alert>
             </>
           )}
