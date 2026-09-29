@@ -1828,6 +1828,24 @@ fn container_update_recent(node_id: &str) -> bool {
         .is_some_and(|t| t.elapsed() < Duration::from_secs(20 * 60))
 }
 
+/// Fichier écrit par le helper détaché (`running`, `ok`, `fail …`).
+async fn container_update_marker(client: &LeaderClient, secret: &str) -> Option<String> {
+    let r = client
+        .exec(
+            secret,
+            "cat /data/devforge-container-update.status 2>/dev/null || true",
+            8,
+        )
+        .await
+        .ok()?;
+    let line = r.output.lines().next()?.trim().to_string();
+    if line.is_empty() {
+        None
+    } else {
+        Some(line)
+    }
+}
+
 /// Le poll UI lit le job du worker. Pendant un pull lancé par le leader, un
 /// échec d’installeur encore en mémoire (release vide) n’est plus le résultat.
 fn mask_stale_installer_failure(node_id: &str, data: &mut Value) {
@@ -1865,7 +1883,8 @@ async fn launch_worker_update(
         return Err(msg.to_string());
     }
     let script = devforge_update::remote_container_update_script(target);
-    match client.exec(secret, &script, 600).await {
+    // Le pull est détaché dans le script. Rester sous le délai Cloudflare (~100 s).
+    match client.exec(secret, &script, 40).await {
         Ok(r) => match devforge_update::interpret_remote_container_update(&r.output, r.ok) {
             devforge_update::RemoteContainerUpdate::NotContainer => {}
             devforge_update::RemoteContainerUpdate::Already => {
@@ -1961,7 +1980,25 @@ async fn node_update_status(
     match client.node_update_status(&secret).await {
         Ok(data) => {
             let mut job = data.get("data").cloned().unwrap_or(Value::Null);
-            mask_stale_installer_failure(&node.id, &mut job);
+            if container_update_recent(&node.id) {
+                if let Some(marker) = container_update_marker(&client, &secret).await {
+                    if let Some(detail) = marker.strip_prefix("fail") {
+                        job = json!({
+                            "status": "failed",
+                            "message": format!("Mise à jour Docker : {}", detail.trim()),
+                        });
+                    } else if marker.starts_with("running") {
+                        job = json!({
+                            "status": "running",
+                            "message": "Pull de l’image Docker en cours…",
+                        });
+                    } else {
+                        mask_stale_installer_failure(&node.id, &mut job);
+                    }
+                } else {
+                    mask_stale_installer_failure(&node.id, &mut job);
+                }
+            }
             Ok(Json(json!({
                 "ok": true,
                 "reachable": true,
