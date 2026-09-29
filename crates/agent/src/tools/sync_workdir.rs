@@ -59,6 +59,11 @@ impl Tool for SyncWorkdirToGitHubTool {
                 "branch": {
                     "type": "string",
                     "description": "Branche cible (défaut: main)"
+                },
+                "paths": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Chemins relatifs à pousser seulement (ex. package-lock.json). Vide = tout le workdir."
                 }
             },
             "required": ["project_uuid"]
@@ -79,6 +84,17 @@ impl Tool for SyncWorkdirToGitHubTool {
             .get("branch")
             .and_then(|v| v.as_str())
             .unwrap_or("main");
+        let only_paths: Vec<String> = arguments
+            .get("paths")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(|s| s.trim().trim_start_matches("./").replace('\\', "/"))
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
 
         if project_uuid.is_empty() {
             return Ok(json!({
@@ -169,11 +185,27 @@ impl Tool for SyncWorkdirToGitHubTool {
             }
         };
 
+        let files = if only_paths.is_empty() {
+            files
+        } else {
+            files
+                .into_iter()
+                .filter(|(rel, _)| only_paths.iter().any(|want| rel == want))
+                .collect::<Vec<_>>()
+        };
+
         if files.is_empty() {
+            if only_paths.is_empty() {
+                return Ok(json!({
+                    "ok": true,
+                    "files_synced": 0,
+                    "message": "Workdir vide, rien à synchroniser."
+                }));
+            }
             return Ok(json!({
-                "ok": true,
+                "ok": false,
                 "files_synced": 0,
-                "message": "Workdir vide, rien à synchroniser."
+                "error": format!("Aucun fichier correspondant à paths : {}", only_paths.join(", "))
             }));
         }
 
