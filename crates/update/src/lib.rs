@@ -111,6 +111,68 @@ fn running_in_container() -> bool {
             .unwrap_or(false)
 }
 
+/// Indices runtime pour ne pas envoyer un nœud Docker/compose vers l’installeur.
+struct RuntimeHints {
+    flatpak: bool,
+    in_container: bool,
+    /// `DEVFORGE_UPDATE_COMPOSE_FILE` est défini (USB : `/opt/devforge/docker-compose.yml`).
+    compose_file_explicit: bool,
+    /// Le fichier compose référence l’image `bobdivx/devforge` (ou GHCR).
+    compose_file_is_devforge: bool,
+    self_container_set: bool,
+}
+
+fn runtime_hints(config: &UpdateConfig) -> RuntimeHints {
+    let explicit = std::env::var("DEVFORGE_UPDATE_COMPOSE_FILE")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let path = explicit
+        .clone()
+        .unwrap_or_else(|| config.compose_file.clone());
+    RuntimeHints {
+        flatpak: std::env::var_os("FLATPAK_ID").is_some(),
+        in_container: running_in_container(),
+        compose_file_explicit: explicit.is_some(),
+        compose_file_is_devforge: compose_file_is_devforge(Path::new(&path)),
+        self_container_set: std::env::var("DEVFORGE_SELF_CONTAINER")
+            .ok()
+            .is_some_and(|s| !s.trim().is_empty()),
+    }
+}
+
+fn compose_file_is_devforge(path: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let lower = text.to_ascii_lowercase();
+    lower.contains("bobdivx/devforge")
+        || (lower.contains("ghcr.io/") && lower.contains("/devforge"))
+}
+
+/// Windows / Flatpak restent sur l’installeur GitHub.
+/// Un nœud USB ou Docker (même si le mode configuré est `binary`) passe par
+/// `docker compose pull` ou `docker pull`, jamais par le 404 des assets.
+fn effective_update_mode(configured: UpdateMode, hints: &RuntimeHints) -> UpdateMode {
+    if hints.flatpak {
+        return UpdateMode::Binary;
+    }
+    match configured {
+        UpdateMode::Compose => UpdateMode::Compose,
+        UpdateMode::Docker => UpdateMode::Docker,
+        UpdateMode::Binary => {
+            if hints.compose_file_explicit && (hints.compose_file_is_devforge || hints.in_container)
+            {
+                UpdateMode::Compose
+            } else if hints.in_container || hints.self_container_set {
+                UpdateMode::Docker
+            } else {
+                UpdateMode::Binary
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StepStatus {
@@ -438,17 +500,20 @@ impl UpdateFacade {
         )
         .await?;
 
+        // Le mode effectif peut différer du mode configuré : un nœud USB / compose
+        // (image bobdivx/devforge) ne doit jamais chercher un .exe ou un Flatpak.
+        let mode = effective_update_mode(self.config.mode, &runtime_hints(&self.config));
         self.set_step(
             job_id,
             "prepare",
             StepStatus::Running,
-            &format!("Mode {}…", self.config.mode.as_str()),
+            &format!("Mode {}…", mode.as_str()),
         )
         .await?;
 
-        let downloaded = match self.config.mode {
+        let downloaded = match mode {
             UpdateMode::Compose | UpdateMode::Docker => {
-                self.run_container_pipeline(job_id, target).await?;
+                self.run_container_pipeline(job_id, target, mode).await?;
                 None
             }
             UpdateMode::Binary => Some(self.run_binary_pipeline(job_id, target).await?),
@@ -486,7 +551,12 @@ impl UpdateFacade {
         Ok(())
     }
 
-    async fn run_container_pipeline(&self, job_id: &str, target: &str) -> Result<()> {
+    async fn run_container_pipeline(
+        &self,
+        job_id: &str,
+        target: &str,
+        mode: UpdateMode,
+    ) -> Result<()> {
         let probe = self
             .executor
             .exec(
@@ -513,7 +583,7 @@ impl UpdateFacade {
         self.set_step(job_id, "pull", StepStatus::Running, "Pull image…")
             .await?;
 
-        let pull_cmd = if self.config.mode == UpdateMode::Compose {
+        let pull_cmd = if mode == UpdateMode::Compose {
             compose_cmd(
                 &self.config.compose_file,
                 target,
@@ -547,7 +617,7 @@ impl UpdateFacade {
         self.set_step(job_id, "apply", StepStatus::Running, "Recréation…")
             .await?;
 
-        if self.config.mode == UpdateMode::Compose {
+        if mode == UpdateMode::Compose {
             let apply_cmd = compose_cmd(
                 &self.config.compose_file,
                 target,
@@ -679,7 +749,12 @@ impl UpdateFacade {
             } else {
                 let start_res = self
                     .executor
-                    .exec(&self.config.server_id, ".", "docker start devforge-traefik", 30)
+                    .exec(
+                        &self.config.server_id,
+                        ".",
+                        "docker start devforge-traefik",
+                        30,
+                    )
                     .await?;
                 if start_res.ok {
                     tracing::info!("Traefik proxy started successfully");
@@ -694,7 +769,12 @@ impl UpdateFacade {
             if need_create {
                 let _ = self
                     .executor
-                    .exec(&self.config.server_id, ".", "docker rm -f devforge-traefik", 60)
+                    .exec(
+                        &self.config.server_id,
+                        ".",
+                        "docker rm -f devforge-traefik",
+                        60,
+                    )
                     .await;
             }
         }
@@ -759,10 +839,7 @@ impl UpdateFacade {
     /// *puis* démarre le nouveau — le process courant peut mourir sans bloquer.
     async fn recreate_docker_container(&self, target: &str) -> Result<String> {
         let configured = self.config.container_name.clone();
-        let name_owned = self
-            .running_container_name()
-            .await
-            .unwrap_or(configured);
+        let name_owned = self.running_container_name().await.unwrap_or(configured);
         let name = name_owned.as_str();
         let image_ref = format!("{}:{}", self.config.image, target);
 
@@ -948,14 +1025,20 @@ impl UpdateFacade {
         )
         .await?;
 
-        let asset = self
-            .resolve_release_asset(target, &triple)
-            .await
-            .map_err(|e| {
-                DevForgeError::Message(format!(
-                    "{e} — publie DevForge-Setup-<version>-x64.exe (Windows) ou DevForge-<version>-x86_64.flatpak (Linux)."
-                ))
-            })?;
+        let choice = self.resolve_release_asset(target, &triple).await?;
+        let requested = target.trim().trim_start_matches('v');
+        if choice.version != requested {
+            self.note_resolved_version(
+                job_id,
+                &choice.version,
+                &format!(
+                    "Release v{requested} sans installeur — installation de v{} ({})",
+                    choice.version, choice.asset.name
+                ),
+            )
+            .await?;
+        }
+        let asset = &choice.asset;
 
         let current = std::env::current_exe().map_err(|e| {
             DevForgeError::Message(format!("Impossible de résoudre le binaire courant : {e}"))
@@ -970,7 +1053,7 @@ impl UpdateFacade {
         )
         .await?;
 
-        self.download_asset(&asset, &download_path).await?;
+        self.download_asset(asset, &download_path).await?;
         self.set_step(
             job_id,
             "pull",
@@ -1031,51 +1114,105 @@ impl UpdateFacade {
         }
     }
 
-    async fn resolve_release_asset(&self, tag: &str, triple: &str) -> Result<ReleaseAsset> {
+    fn github_get(&self, url: &str) -> reqwest::RequestBuilder {
+        let mut req = self
+            .http
+            .get(url)
+            .header("User-Agent", "DevForge-Update")
+            .header("Accept", "application/vnd.github+json");
+        if let Ok(token) = std::env::var("DEVFORGE_GITHUB_TOKEN") {
+            let token = token.trim();
+            if !token.is_empty() {
+                req = req.bearer_auth(token);
+            }
+        }
+        req
+    }
+
+    /// Tags à interroger, dans l’ordre. Le tag publié est `vX.Y.Z`.
+    /// Le tag nu n’est tenté que si le tag canonique répond 404 — un 200
+    /// sans installeur ne doit pas être remplacé par ce 404.
+    fn release_tag_candidates(version: &str) -> Vec<String> {
+        let version = version.trim().trim_start_matches('v');
+        let prefixed = format!("v{version}");
+        if version.is_empty() || prefixed == version {
+            vec![prefixed]
+        } else {
+            vec![prefixed, version.to_string()]
+        }
+    }
+
+    fn tag_status_is_missing(status: u16) -> bool {
+        status == 404
+    }
+
+    async fn fetch_release_list(&self) -> Result<Vec<Value>> {
         let owner = &self.config.repo_owner;
         let name = &self.config.repo_name;
-        let tag_variants = [format!("v{tag}"), tag.to_string()];
-        let mut last_err = DevForgeError::Message("release introuvable".into());
+        let url = format!("https://api.github.com/repos/{owner}/{name}/releases?per_page=20");
+        let res = self
+            .github_get(&url)
+            .send()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("GitHub releases : {e}")))?;
+        if !res.status().is_success() {
+            return Err(DevForgeError::Message(format!(
+                "GitHub releases : {}",
+                res.status()
+            )));
+        }
+        let v: Value = res
+            .json()
+            .await
+            .map_err(|e| DevForgeError::Message(format!("JSON releases : {e}")))?;
+        Ok(v.as_array().cloned().unwrap_or_default())
+    }
 
-        for tag_name in &tag_variants {
+    async fn fetch_release_tag(&self, version: &str) -> Result<Option<Value>> {
+        let owner = &self.config.repo_owner;
+        let name = &self.config.repo_name;
+        for tag_name in Self::release_tag_candidates(version) {
             let url =
                 format!("https://api.github.com/repos/{owner}/{name}/releases/tags/{tag_name}");
-            let mut req = self
-                .http
-                .get(&url)
-                .header("User-Agent", "DevForge-Update")
-                .header("Accept", "application/vnd.github+json");
-            if let Ok(token) = std::env::var("DEVFORGE_GITHUB_TOKEN") {
-                if !token.trim().is_empty() {
-                    req = req.bearer_auth(token.trim());
-                }
-            }
-            let res = req
-                .send()
-                .await
-                .map_err(|e| DevForgeError::Message(format!("GitHub release {tag_name}: {e}")))?;
-            if !res.status().is_success() {
-                last_err =
-                    DevForgeError::Message(format!("GitHub release {tag_name}: {}", res.status()));
+            let res =
+                self.github_get(&url).send().await.map_err(|e| {
+                    DevForgeError::Message(format!("GitHub release {tag_name} : {e}"))
+                })?;
+            let status = res.status();
+            if Self::tag_status_is_missing(status.as_u16()) {
                 continue;
+            }
+            if !status.is_success() {
+                return Err(DevForgeError::Message(format!(
+                    "GitHub release {tag_name} : {status}"
+                )));
             }
             let v: Value = res
                 .json()
                 .await
-                .map_err(|e| DevForgeError::Message(format!("JSON release: {e}")))?;
-            let assets = v
-                .get("assets")
-                .and_then(|a| a.as_array())
-                .cloned()
-                .unwrap_or_default();
-            if let Some(asset) = pick_asset(&assets, triple) {
-                return Ok(asset);
-            }
-            last_err = DevForgeError::Message(format!(
-                "Aucun asset compatible ({triple}) sur la release {tag_name}"
-            ));
+                .map_err(|e| DevForgeError::Message(format!("JSON release : {e}")))?;
+            return Ok(Some(v));
         }
-        Err(last_err)
+        Ok(None)
+    }
+
+    async fn resolve_release_asset(&self, tag: &str, triple: &str) -> Result<InstallerChoice> {
+        let mut releases = self.fetch_release_list().await?;
+        if !releases_include_version(&releases, tag) {
+            if let Some(rel) = self.fetch_release_tag(tag).await? {
+                releases.push(rel);
+            }
+        }
+        select_installer(
+            &releases,
+            tag,
+            &self.config.current_version,
+            triple,
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            self.config.channel != "stable",
+        )
+        .map_err(DevForgeError::Message)
     }
 
     async fn download_asset(&self, asset: &ReleaseAsset, dest: &Path) -> Result<()> {
@@ -1193,6 +1330,22 @@ impl UpdateFacade {
         Ok(())
     }
 
+    async fn note_resolved_version(
+        &self,
+        job_id: &str,
+        version: &str,
+        message: &str,
+    ) -> Result<()> {
+        let mut guard = self.job.write().await;
+        let job = guard
+            .as_mut()
+            .filter(|j| j.id == job_id)
+            .ok_or_else(|| DevForgeError::Message("job introuvable".into()))?;
+        job.target_version = version.to_string();
+        job.message = message.to_string();
+        Ok(())
+    }
+
     async fn set_step(
         &self,
         job_id: &str,
@@ -1235,11 +1388,18 @@ impl UpdateFacade {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ReleaseAsset {
     name: String,
     url: String,
     size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InstallerChoice {
+    asset: ReleaseAsset,
+    /// Version semver de la release qui porte l’installeur (sans `v`).
+    version: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1268,10 +1428,6 @@ fn release_kind(name: &str) -> ReleaseKind {
     } else {
         ReleaseKind::ZipOrBinary
     }
-}
-
-fn pick_asset(assets: &[Value], triple: &str) -> Option<ReleaseAsset> {
-    pick_asset_for(assets, triple, std::env::consts::OS, std::env::consts::ARCH)
 }
 
 fn pick_asset_for(assets: &[Value], triple: &str, os: &str, arch: &str) -> Option<ReleaseAsset> {
@@ -1341,6 +1497,215 @@ fn arch_matches(lower: &str, arch: &str) -> bool {
         "aarch64" => lower.contains("aarch64") || lower.contains("arm64"),
         _ => lower.contains(arch),
     }
+}
+
+fn release_version_str(tag: &str) -> Option<String> {
+    let (major, minor, patch) = release_semver(tag)?;
+    Some(format!("{major}.{minor}.{patch}"))
+}
+
+fn releases_include_version(releases: &[Value], version: &str) -> bool {
+    let want = version.trim().trim_start_matches('v');
+    releases.iter().any(|rel| {
+        rel.get("tag_name")
+            .and_then(|t| t.as_str())
+            .and_then(release_version_str)
+            .as_deref()
+            == Some(want)
+    })
+}
+
+fn release_asset_names(rel: &Value) -> Vec<String> {
+    rel.get("assets")
+        .and_then(|a| a.as_array())
+        .map(|assets| {
+            assets
+                .iter()
+                .filter_map(|a| a.get("name").and_then(|n| n.as_str()).map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Choisit l’installeur Windows ou Linux.
+/// La release demandée est utilisée si elle contient un paquet compatible.
+/// Sinon, la plus récente release ≤ cible qui publie un installeur (et plus
+/// récente que la version courante) est retenue — les pages GitHub sans
+/// fichier ne bloquent pas une release déjà publiée.
+fn select_installer(
+    releases: &[Value],
+    requested: &str,
+    current: &str,
+    triple: &str,
+    os: &str,
+    arch: &str,
+    allow_prerelease: bool,
+) -> std::result::Result<InstallerChoice, String> {
+    let requested = requested.trim().trim_start_matches('v');
+    let requested_ver = release_semver(requested);
+    let mut exact_found = false;
+    let mut exact_assets: Vec<String> = Vec::new();
+    let mut best: Option<((u64, u64, u64), InstallerChoice)> = None;
+    let mut latest_installer: Option<((u64, u64, u64), String, String)> = None;
+
+    for rel in releases {
+        if rel.get("draft").and_then(|d| d.as_bool()).unwrap_or(false) {
+            continue;
+        }
+        let prerelease = rel
+            .get("prerelease")
+            .and_then(|d| d.as_bool())
+            .unwrap_or(false);
+        if prerelease && !allow_prerelease {
+            continue;
+        }
+        let tag = rel.get("tag_name").and_then(|t| t.as_str()).unwrap_or("");
+        let Some(ver) = release_semver(tag) else {
+            continue;
+        };
+        let ver_str = format!("{}.{}.{}", ver.0, ver.1, ver.2);
+        let assets = rel
+            .get("assets")
+            .and_then(|a| a.as_array())
+            .map(|a| a.as_slice())
+            .unwrap_or(&[]);
+        let picked = pick_asset_for(assets, triple, os, arch);
+
+        if ver_str == requested {
+            exact_found = true;
+            exact_assets = release_asset_names(rel);
+            if let Some(asset) = picked.clone() {
+                return Ok(InstallerChoice {
+                    asset,
+                    version: ver_str,
+                });
+            }
+        }
+
+        if let Some(asset) = picked {
+            if latest_installer
+                .as_ref()
+                .map(|(v, _, _)| ver > *v)
+                .unwrap_or(true)
+            {
+                latest_installer = Some((ver, ver_str.clone(), asset.name.clone()));
+            }
+            let within_target = requested_ver.is_some_and(|want| ver <= want);
+            if within_target && version_gt(&ver_str, current) {
+                if best.as_ref().map(|(v, _)| ver > *v).unwrap_or(true) {
+                    best = Some((
+                        ver,
+                        InstallerChoice {
+                            asset,
+                            version: ver_str,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+
+    if let Some((_, choice)) = best {
+        return Ok(choice);
+    }
+
+    Err(installer_lookup_error(
+        requested,
+        triple,
+        exact_found,
+        &exact_assets,
+        latest_installer
+            .as_ref()
+            .map(|(_, ver, name)| (ver.as_str(), name.as_str())),
+        current,
+    ))
+}
+
+fn installer_lookup_error(
+    requested: &str,
+    triple: &str,
+    exact_found: bool,
+    exact_assets: &[String],
+    latest: Option<(&str, &str)>,
+    current: &str,
+) -> String {
+    let expected = format!(
+        "Attendu : DevForge-Setup-{requested}-x64.exe (Windows) ou DevForge-{requested}-x86_64.flatpak (Linux)."
+    );
+    let latest_note = match latest {
+        Some((ver, name)) => format!(" Dernier installeur publié : {name} (v{ver})."),
+        None => String::new(),
+    };
+    let current_note = if latest.is_some_and(|(ver, _)| !version_gt(ver, current)) {
+        format!(" Cette instance ({current}) n’a pas de paquet plus récent à installer.")
+    } else {
+        String::new()
+    };
+
+    if !exact_found {
+        return format!("Release GitHub v{requested} introuvable (404). {expected}{latest_note}");
+    }
+    if exact_assets.is_empty() {
+        format!(
+            "Release GitHub v{requested} : aucun installeur publié. {expected}{latest_note}{current_note}"
+        )
+    } else {
+        format!(
+            "Release GitHub v{requested} : aucun installeur compatible ({triple}). Fichiers : {}. {expected}{latest_note}{current_note}",
+            exact_assets.join(", ")
+        )
+    }
+}
+
+/// Mise à jour d’un worker Docker/compose, exécutée **dans** le conteneur
+/// (socket Docker monté). Ne consulte pas GitHub : `docker compose pull` ou
+/// `docker pull`. Un nœud sans Docker affiche `DEVFORGE_UPDATE_HOST`.
+pub fn remote_container_update_script(target: &str) -> String {
+    let target = target.trim().trim_start_matches('v');
+    if target.is_empty()
+        || !target
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+    {
+        return "echo DEVFORGE_UPDATE_FAIL version cible invalide\nexit 1\n".into();
+    }
+    include_str!("remote_container_update.sh").replace("@@TARGET@@", target)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoteContainerUpdate {
+    /// Pas de Docker : installeur Windows / Flatpak.
+    NotContainer,
+    Already,
+    Started,
+    Failed(String),
+}
+
+pub fn interpret_remote_container_update(output: &str, ok: bool) -> RemoteContainerUpdate {
+    if output.contains("DEVFORGE_UPDATE_FAIL") {
+        let detail: String = output.trim().chars().take(400).collect();
+        return RemoteContainerUpdate::Failed(detail);
+    }
+    if output.contains("DEVFORGE_UPDATE_HOST") {
+        return RemoteContainerUpdate::NotContainer;
+    }
+    if output.contains("DEVFORGE_UPDATE_ALREADY") {
+        return RemoteContainerUpdate::Already;
+    }
+    if output.contains("DEVFORGE_UPDATE_STARTED") || output.contains("DEVFORGE_UPDATE_OK") {
+        return RemoteContainerUpdate::Started;
+    }
+    let detail = output.trim();
+    let detail = if detail.is_empty() {
+        if ok {
+            "mise à jour conteneur sans résultat".to_string()
+        } else {
+            "échec mise à jour conteneur".to_string()
+        }
+    } else {
+        detail.chars().take(400).collect()
+    };
+    RemoteContainerUpdate::Failed(detail)
 }
 
 async fn handoff_windows_setup(setup: &Path) -> Result<()> {
@@ -1508,7 +1873,8 @@ fn cluster_role_is_worker() -> bool {
 
 fn read_cluster_identity() -> String {
     let dir = std::env::var("DEVFORGE_DATA_DIR").unwrap_or_else(|_| "/data".into());
-    std::fs::read_to_string(std::path::Path::new(&dir).join("cluster-identity.json")).unwrap_or_default()
+    std::fs::read_to_string(std::path::Path::new(&dir).join("cluster-identity.json"))
+        .unwrap_or_default()
 }
 
 fn role_is_worker(raw: &str) -> bool {
@@ -1894,7 +2260,10 @@ fn traefik_host_dir_from_mounts(mounts: &Value, data_dir: &str) -> Option<String
             .or_else(|| m.get("Target"))
             .and_then(|d| d.as_str())?
             .trim_end_matches('/');
-        let src = m.get("Source").and_then(|s| s.as_str())?.trim_end_matches('/');
+        let src = m
+            .get("Source")
+            .and_then(|s| s.as_str())?
+            .trim_end_matches('/');
         if src.is_empty() || !(dest == "/data" || dest == data) {
             return None;
         }
@@ -1929,6 +2298,79 @@ mod tests {
         assert_eq!(traefik_host_dir_from_mounts(&vol, "/data"), None);
         assert_eq!(traefik_host_dir_from_mounts(&json!([]), "/data"), None);
         assert_eq!(traefik_host_dir_from_mounts(&Value::Null, "/data"), None);
+    }
+
+    fn usb_compose_hints() -> RuntimeHints {
+        RuntimeHints {
+            flatpak: false,
+            in_container: true,
+            compose_file_explicit: true,
+            compose_file_is_devforge: true,
+            self_container_set: true,
+        }
+    }
+
+    #[test]
+    fn usb_compose_file_points_at_hub_image() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy/usb/compose.yml");
+        assert!(
+            compose_file_is_devforge(&path),
+            "deploy/usb/compose.yml doit publier bobdivx/devforge"
+        );
+    }
+
+    #[test]
+    fn usb_compose_node_uses_compose_pull_not_installer() {
+        let hints = usb_compose_hints();
+        assert_eq!(
+            effective_update_mode(UpdateMode::Compose, &hints),
+            UpdateMode::Compose
+        );
+        // Mode mal étiqueté `binary` (web à côté du binaire) : quand même compose.
+        assert_eq!(
+            effective_update_mode(UpdateMode::Binary, &hints),
+            UpdateMode::Compose
+        );
+    }
+
+    #[test]
+    fn docker_worker_uses_image_pull_not_installer() {
+        let hints = RuntimeHints {
+            flatpak: false,
+            in_container: true,
+            compose_file_explicit: false,
+            compose_file_is_devforge: false,
+            self_container_set: true,
+        };
+        assert_eq!(
+            effective_update_mode(UpdateMode::Binary, &hints),
+            UpdateMode::Docker
+        );
+        assert_eq!(
+            effective_update_mode(UpdateMode::Docker, &hints),
+            UpdateMode::Docker
+        );
+    }
+
+    #[test]
+    fn windows_and_flatpak_keep_installer_lookup() {
+        let windows = RuntimeHints {
+            flatpak: false,
+            in_container: false,
+            compose_file_explicit: false,
+            compose_file_is_devforge: false,
+            self_container_set: false,
+        };
+        assert_eq!(
+            effective_update_mode(UpdateMode::Binary, &windows),
+            UpdateMode::Binary
+        );
+        let mut flatpak = usb_compose_hints();
+        flatpak.flatpak = true;
+        assert_eq!(
+            effective_update_mode(UpdateMode::Binary, &flatpak),
+            UpdateMode::Binary
+        );
     }
 
     #[test]
@@ -1998,6 +2440,228 @@ mod tests {
     }
 
     #[test]
+    fn release_tag_candidates_prefer_v_prefix() {
+        assert_eq!(
+            UpdateFacade::release_tag_candidates("2.0.163"),
+            vec!["v2.0.163".to_string(), "2.0.163".to_string()]
+        );
+        assert_eq!(
+            UpdateFacade::release_tag_candidates("v2.0.163"),
+            vec!["v2.0.163".to_string(), "2.0.163".to_string()]
+        );
+        // Un 200 sur le tag canonique ne doit pas enchaîner sur le tag nu (404).
+        assert!(!UpdateFacade::tag_status_is_missing(200));
+        assert!(UpdateFacade::tag_status_is_missing(404));
+    }
+
+    fn gh_asset(name: &str, version: &str) -> Value {
+        json!({
+            "name": name,
+            "browser_download_url": format!(
+                "https://github.com/bobdivx/devforge/releases/download/v{version}/{name}"
+            ),
+            "size": 100
+        })
+    }
+
+    fn gh_release(tag: &str, assets: Value) -> Value {
+        json!({
+            "tag_name": tag,
+            "draft": false,
+            "prerelease": false,
+            "assets": assets
+        })
+    }
+
+    /// Noms réellement publiés (release v2.0.162, API GitHub).
+    fn published_162() -> Value {
+        gh_release(
+            "v2.0.162",
+            json!([
+                gh_asset("DevForge-2.0.162-x86_64.flatpak", "2.0.162"),
+                gh_asset("DevForge-Setup-2.0.162-x64.exe", "2.0.162"),
+            ]),
+        )
+    }
+
+    fn select_linux(
+        releases: &[Value],
+        requested: &str,
+        current: &str,
+    ) -> std::result::Result<InstallerChoice, String> {
+        select_installer(
+            releases,
+            requested,
+            current,
+            "x86_64-unknown-linux-gnu",
+            "linux",
+            "x86_64",
+            false,
+        )
+    }
+
+    fn select_windows(
+        releases: &[Value],
+        requested: &str,
+        current: &str,
+    ) -> std::result::Result<InstallerChoice, String> {
+        select_installer(
+            releases,
+            requested,
+            current,
+            "x86_64-pc-windows-msvc",
+            "windows",
+            "x86_64",
+            false,
+        )
+    }
+
+    #[test]
+    fn exact_release_uses_published_installer_names() {
+        let releases = vec![
+            gh_release(
+                "v2.0.163",
+                json!([
+                    gh_asset("DevForge-2.0.163-x86_64.flatpak", "2.0.163"),
+                    gh_asset("DevForge-Setup-2.0.163-x64.exe", "2.0.163"),
+                ]),
+            ),
+            published_162(),
+        ];
+        let linux = select_linux(&releases, "2.0.163", "2.0.160").expect("linux");
+        assert_eq!(linux.version, "2.0.163");
+        assert_eq!(linux.asset.name, "DevForge-2.0.163-x86_64.flatpak");
+        assert_eq!(
+            linux.asset.url,
+            "https://github.com/bobdivx/devforge/releases/download/v2.0.163/DevForge-2.0.163-x86_64.flatpak"
+        );
+        let windows = select_windows(&releases, "2.0.163", "2.0.160").expect("windows");
+        assert_eq!(windows.asset.name, "DevForge-Setup-2.0.163-x64.exe");
+        assert!(windows.asset.url.contains("/download/v2.0.163/"));
+    }
+
+    #[test]
+    fn empty_release_falls_back_to_previous_published_installer() {
+        // v2.0.163 est publiée sans fichier ; les installeurs sont sur v2.0.162.
+        let releases = vec![
+            gh_release("v2.0.163", json!([])),
+            published_162(),
+            gh_release("v2.0.161", json!([])),
+        ];
+        let linux = select_linux(&releases, "2.0.163", "2.0.160").expect("linux");
+        assert_eq!(linux.version, "2.0.162");
+        assert_eq!(linux.asset.name, "DevForge-2.0.162-x86_64.flatpak");
+        assert_eq!(
+            linux.asset.url,
+            "https://github.com/bobdivx/devforge/releases/download/v2.0.162/DevForge-2.0.162-x86_64.flatpak"
+        );
+        assert_eq!(release_kind(&linux.asset.name), ReleaseKind::Flatpak);
+
+        let windows = select_windows(&releases, "2.0.163", "2.0.160").expect("windows");
+        assert_eq!(windows.version, "2.0.162");
+        assert_eq!(windows.asset.name, "DevForge-Setup-2.0.162-x64.exe");
+        assert_eq!(
+            windows.asset.url,
+            "https://github.com/bobdivx/devforge/releases/download/v2.0.162/DevForge-Setup-2.0.162-x64.exe"
+        );
+        assert_eq!(release_kind(&windows.asset.name), ReleaseKind::WindowsSetup);
+    }
+
+    #[test]
+    fn empty_release_error_names_real_gap_not_bare_tag_404() {
+        let releases = vec![gh_release("v2.0.163", json!([])), published_162()];
+        let err = select_linux(&releases, "2.0.163", "2.0.162").expect_err("pas plus récent");
+        assert!(
+            !err.contains("404"),
+            "le 404 du tag nu ne doit pas masquer une release vide : {err}"
+        );
+        assert!(err.contains("v2.0.163"));
+        assert!(err.contains("aucun installeur publié"));
+        assert!(err.contains("DevForge-Setup-2.0.163-x64.exe"));
+        assert!(err.contains("DevForge-2.0.163-x86_64.flatpak"));
+        assert!(err.contains("DevForge-2.0.162-x86_64.flatpak"));
+        assert!(!err.contains("Déjà à jour"));
+
+        let win = select_windows(&releases, "2.0.163", "2.0.162").expect_err("windows");
+        assert!(win.contains("DevForge-Setup-2.0.162-x64.exe"));
+        assert!(!win.contains("404"));
+    }
+
+    #[tokio::test]
+    #[ignore = "appelle l’API GitHub publique"]
+    async fn live_github_release_installer_lookup() {
+        let client = reqwest::Client::new();
+        let res = client
+            .get("https://api.github.com/repos/bobdivx/devforge/releases?per_page=8")
+            .header("User-Agent", "DevForge-Update")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .expect("api github");
+        assert!(res.status().is_success(), "{}", res.status());
+        let releases: Vec<Value> = res.json().await.expect("json");
+        let tag_163 = releases
+            .iter()
+            .find(|r| r.get("tag_name").and_then(|t| t.as_str()) == Some("v2.0.163"));
+        let rel = tag_163.expect("release v2.0.163");
+        let names = release_asset_names(rel);
+        if names
+            .iter()
+            .any(|n| n.ends_with(".flatpak") || n.ends_with(".exe"))
+        {
+            let linux = select_linux(&releases, "2.0.163", "2.0.100").expect("linux");
+            assert_eq!(linux.version, "2.0.163");
+            assert!(linux.asset.name.contains("2.0.163"));
+            assert!(linux.asset.url.contains("/download/v2.0.163/"));
+        } else {
+            let linux = select_linux(&releases, "2.0.163", "2.0.100").expect("linux");
+            assert_ne!(linux.version, "2.0.163");
+            assert!(
+                linux.asset.name.ends_with(".flatpak"),
+                "{}",
+                linux.asset.name
+            );
+            assert!(linux.asset.url.contains("/download/v"));
+            let windows = select_windows(&releases, "2.0.163", "2.0.100").expect("windows");
+            assert!(
+                windows.asset.name.contains("Setup"),
+                "{}",
+                windows.asset.name
+            );
+            assert!(windows.asset.name.ends_with(".exe"));
+            let err =
+                select_linux(&releases, "2.0.163", &linux.version).expect_err("déjà l’installeur");
+            assert!(
+                !err.contains("GitHub release 2.0.163:"),
+                "pas le 404 du tag nu : {err}"
+            );
+            assert!(err.contains("aucun installeur publié"), "{err}");
+            assert!(err.contains(&linux.asset.name), "{err}");
+        }
+    }
+
+    #[test]
+    fn missing_release_reports_not_found() {
+        let err = select_linux(&[], "2.0.163", "2.0.160").expect_err("absente");
+        assert!(err.contains("introuvable"));
+        assert!(err.contains("404"));
+        assert!(err.contains("v2.0.163"));
+    }
+
+    #[test]
+    fn incompatible_assets_list_published_names() {
+        let releases = vec![gh_release(
+            "v2.0.163",
+            json!([gh_asset("DevForge-Node-2.0.163-amd64.img.xz", "2.0.163")]),
+        )];
+        let err = select_linux(&releases, "2.0.163", "2.0.160").expect_err("image usb");
+        assert!(err.contains("aucun installeur compatible"));
+        assert!(err.contains("DevForge-Node-2.0.163-amd64.img.xz"));
+        assert!(err.contains("x86_64-unknown-linux-gnu"));
+        assert!(!err.contains("GitHub release 2.0.163: 404"));
+    }
+
+    #[test]
     fn pick_flatpak_over_legacy_zip() {
         let assets = vec![
             json!({
@@ -2031,7 +2695,10 @@ mod tests {
 
     #[test]
     fn container_name_strips_docker_slash() {
-        assert_eq!(container_name_from_inspect(" /devforge-worker\n"), "devforge-worker");
+        assert_eq!(
+            container_name_from_inspect(" /devforge-worker\n"),
+            "devforge-worker"
+        );
         assert_eq!(container_name_from_inspect("/devforge"), "devforge");
     }
 
@@ -2074,6 +2741,86 @@ mod tests {
         assert!(joined.contains("DEVFORGE_VERSION=2.0.9"));
         assert!(joined.contains("-v /DATA/AppData/devforge:/data"));
         assert!(joined.ends_with("bobdivx/devforge:2.0.9"));
+    }
+
+    #[test]
+    fn remote_container_script_pulls_without_github() {
+        let script = remote_container_update_script("v2.0.163");
+        assert!(script.contains("target=2.0.163"));
+        assert!(script.contains("docker compose"));
+        assert!(script.contains("pull"));
+        assert!(script.contains("docker pull"));
+        // Le pull est dans le helper détaché, pas une commande bloquante du script principal.
+        assert!(script.contains("sleep 2\nif ! docker pull"));
+        assert!(script.contains("devforge-container-update.status"));
+        let pull_at = script.find("docker pull").expect("pull");
+        let started_at = script
+            .find("echo DEVFORGE_UPDATE_STARTED")
+            .expect("started");
+        assert!(
+            pull_at > started_at,
+            "le pull Docker doit être planifié après la réponse STARTED du chemin compose"
+        );
+        assert!(script.contains("DEVFORGE_UPDATE_ALREADY"));
+        assert!(script.contains("DEVFORGE_UPDATE_HOST"));
+        assert!(script.contains("DEVFORGE_UPDATE_STARTED"));
+        assert!(script.contains("bobdivx/devforge"));
+        assert!(script.contains("/opt/devforge/docker-compose.yml"));
+        assert!(!script.contains("github.com"));
+        assert!(!script.contains("flatpak"));
+        assert!(!script.contains("DevForge-Setup"));
+        assert!(!script.contains("@@TARGET@@"));
+        let path = std::env::temp_dir().join("devforge-remote-update-test.sh");
+        std::fs::write(&path, &script).unwrap();
+        let out = std::process::Command::new("sh")
+            .arg("-n")
+            .arg(&path)
+            .output()
+            .expect("sh");
+        assert!(
+            out.status.success(),
+            "sh -n: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn remote_container_script_rejects_injection() {
+        let script = remote_container_update_script("2.0.163; rm -rf /");
+        assert!(script.contains("DEVFORGE_UPDATE_FAIL"));
+        assert!(!script.contains("rm -rf"));
+    }
+
+    #[test]
+    fn interpret_remote_container_markers() {
+        assert_eq!(
+            interpret_remote_container_update("DEVFORGE_UPDATE_HOST\n", true),
+            RemoteContainerUpdate::NotContainer
+        );
+        assert_eq!(
+            interpret_remote_container_update(
+                "DEVFORGE_UPDATE_ALREADY bobdivx/devforge:2.0.163\n",
+                true
+            ),
+            RemoteContainerUpdate::Already
+        );
+        assert_eq!(
+            interpret_remote_container_update("pull ok\nDEVFORGE_UPDATE_STARTED\n", true),
+            RemoteContainerUpdate::Started
+        );
+        // Un échec prime sur un STARTED résiduel.
+        match interpret_remote_container_update(
+            "DEVFORGE_UPDATE_STARTED\nDEVFORGE_UPDATE_FAIL échec du pull compose\n",
+            false,
+        ) {
+            RemoteContainerUpdate::Failed(d) => assert!(d.contains("pull compose")),
+            other => panic!("{other:?}"),
+        }
+        match interpret_remote_container_update("", false) {
+            RemoteContainerUpdate::Failed(d) => assert!(d.contains("échec")),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

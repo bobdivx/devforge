@@ -1,15 +1,33 @@
-use devforge_backup::{InstanceBackupService, BackupScheduler};
+use devforge_backup::InstanceBackupService;
 use devforge_storage::StorageFacade;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 use tempfile::TempDir;
+
+/// Vraie base SQLite : un en-tête trop court est refusé (`snapshot_ok` exige ≥ 100 octets).
+async fn write_sqlite(path: &Path) {
+    let url = format!("sqlite:{}?mode=rwc", path.display());
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO t (v) VALUES ('backup')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+}
 
 #[tokio::test]
 async fn test_local_backup_creation() {
     let temp_dir = TempDir::new().unwrap();
     let db_path = temp_dir.path().join("test.db");
-    
-    tokio::fs::write(&db_path, b"SQLite format 3\0test data").await.unwrap();
+    write_sqlite(&db_path).await;
     
     let storage = Arc::new(StorageFacade::memory());
     let svc = InstanceBackupService::new(storage, db_path.clone());
@@ -29,8 +47,7 @@ async fn test_local_backup_creation() {
 async fn test_local_backup_list() {
     let temp_dir = TempDir::new().unwrap();
     let db_path = temp_dir.path().join("test.db");
-    
-    tokio::fs::write(&db_path, b"SQLite format 3\0test data").await.unwrap();
+    write_sqlite(&db_path).await;
     
     let storage = Arc::new(StorageFacade::memory());
     let svc = InstanceBackupService::new(storage, db_path.clone());
@@ -46,8 +63,7 @@ async fn test_local_backup_list() {
 async fn test_backup_retention() {
     let temp_dir = TempDir::new().unwrap();
     let db_path = temp_dir.path().join("test.db");
-    
-    tokio::fs::write(&db_path, b"SQLite format 3\0test data").await.unwrap();
+    write_sqlite(&db_path).await;
     
     let storage = Arc::new(StorageFacade::memory());
     let svc = InstanceBackupService::new(storage, db_path.clone());
@@ -74,8 +90,7 @@ async fn test_backup_retention() {
 async fn test_s3_fallback_to_local() {
     let temp_dir = TempDir::new().unwrap();
     let db_path = temp_dir.path().join("test.db");
-    
-    tokio::fs::write(&db_path, b"SQLite format 3\0test data").await.unwrap();
+    write_sqlite(&db_path).await;
     
     let storage = Arc::new(StorageFacade::memory());
     let svc = InstanceBackupService::new(storage.clone(), db_path.clone());
