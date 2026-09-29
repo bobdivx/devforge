@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "devforge": {
+      "url": "${DEVFORGE_MCP_URL}"
+    }
+  }
+}
