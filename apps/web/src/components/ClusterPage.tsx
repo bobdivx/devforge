@@ -1,3 +1,4 @@
+import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { api, type ClusterDiscoveredPeer, type ClusterInvite, type ClusterNode, type Project } from '../lib/api';
 import { nodeRoleLabel, resolveNode } from '../lib/cluster-display';
@@ -111,6 +112,20 @@ function NodeHubCard({
   const ver = nodeVersion(n);
   const behind = nodeBehind(n, latest);
   const badgeText = interim ? 'Intérim' : leader ? 'Leader' : 'Worker';
+  const warn = !leader && n.advertise_ok === false
+    ? { label: 'URL loopback', tone: 'danger' as const }
+    : behind
+      ? { label: 'MAJ', tone: 'warn' as const }
+      : !leader && n.ingress_ready === false
+        ? { label: 'Ingress', tone: 'warn' as const }
+        : null;
+  const meta = [
+    ver ? `v${ver}` : '',
+    typeof cpu === 'number' ? `CPU ${Math.round(cpu)}%` : '',
+    n.project_count ? `${n.project_count} app${n.project_count > 1 ? 's' : ''}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
   return (
     <HubTile
       index={index}
@@ -134,28 +149,10 @@ function NodeHubCard({
           <Badge tone={statusTone(n.status, n.drained)}>
             {statusLabel(n.status, n.drained)}
           </Badge>
-          <span class="text-[11px] text-[var(--color-ink-muted)]">
-            {interim ? 'Control plane intérimaire' : leader ? 'Control plane' : 'Compute'}
-            {ver ? ` · v${ver}` : ''}
-            {typeof cpu === 'number' ? ` · CPU ${Math.round(cpu)}%` : ''}
-            {n.project_count
-              ? ` · ${n.project_count} app${n.project_count > 1 ? 's' : ''}`
-              : ''}
+          <span class="max-w-full truncate text-[11px] text-[var(--color-ink-muted)]">
+            {meta || (leader ? 'Control plane' : 'Compute')}
           </span>
-          {behind ? (
-            <Badge tone="warn">MAJ</Badge>
-          ) : null}
-          {n.advertise_url ? (
-            <span class="max-w-full truncate font-mono text-[10px] text-[var(--color-ink-muted)]">
-              {n.advertise_url.replace(/^https?:\/\//, '')}
-            </span>
-          ) : null}
-          {!leader && n.advertise_ok === false ? (
-            <Badge tone="danger">URL loopback</Badge>
-          ) : null}
-          {!leader && n.ingress_ready === false ? (
-            <Badge tone="warn">Ingress</Badge>
-          ) : null}
+          {warn ? <Badge tone={warn.tone}>{warn.label}</Badge> : null}
         </span>
       }
       onClick={() => onOpen(n)}
@@ -192,6 +189,26 @@ function fmtBytes(n?: number | null): string {
 function pct(used?: number | null, total?: number | null): number | null {
   if (used == null || total == null || total <= 0) return null;
   return Math.round((used / total) * 100);
+}
+
+function SettingRow({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint?: ComponentChildren;
+  children?: ComponentChildren;
+}) {
+  return (
+    <div class="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5">
+      <div class="min-w-0">
+        <p class="text-sm font-medium text-[var(--color-ink)]">{title}</p>
+        {hint ? <div class="mt-0.5 text-xs leading-relaxed text-[var(--color-ink-muted)]">{hint}</div> : null}
+      </div>
+      {children ? <div class="flex shrink-0 flex-wrap items-center gap-2">{children}</div> : null}
+    </div>
+  );
 }
 
 function inviteState(inv: ClusterInvite): { label: string; tone: 'ok' | 'warn' | 'danger' | 'neutral' } {
@@ -811,76 +828,258 @@ function ClusterInner() {
   );
 
   return (
-    <div>
-      <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p class="max-w-xl text-sm text-[var(--color-ink-muted)]">
-          Un leader (control plane) et des workers (compute). Les apps Docker restent sur leur machine.
-        </p>
-        <div class="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={busy}
-            onClick={togglePlacementAuto}
-            title="Placement automatique des forges"
-          >
-            Placement {placementAuto ? 'auto' : 'manuel'}
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={busy || rebalanceBusy}
-            onClick={() => runRebalance(false)}
-          >
-            Rebalance
-          </Button>
-          <Button size="sm" disabled={busy || discoverBusy} onClick={openDiscover}>
-            Trouver des nœuds
-          </Button>
-          <Button size="sm" variant="secondary" disabled={busy} onClick={createInvite}>
-            Inviter
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={nodeImageBusy}
-            onClick={() => {
-              void downloadNodeImage();
-            }}
-            title="Image USB flashable pour un nouveau worker"
-          >
-            {nodeImageBusy ? <Spinner /> : null}
-            Image USB
-          </Button>
-        </div>
-      </div>
+    <div class="space-y-8">
       {error && (
-        <Alert tone="danger" class="mb-4">
+        <Alert tone="danger">
           {error}
         </Alert>
       )}
 
-      <Alert tone="info" class="mb-5">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      {writesFenced && (
+        <Alert tone="danger">
+          <p class="font-medium text-[var(--color-ink)]">Écritures bloquées</p>
+          <p class="mt-1 text-[var(--color-ink-muted)]">
+            Ce nœud a cédé le control plane à un leader intérimaire. Les réglages et les autres
+            modifications sont refusés. La reprise rouvre les écritures ici, sans SQL.
+          </p>
+          <div class="mt-3">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={reopenBusy}
+              onClick={reopenWrites}
+            >
+              {reopenBusy ? 'Reprise…' : 'Reprendre les écritures'}
+            </Button>
+          </div>
+        </Alert>
+      )}
+
+      {actingLeader && (
+        <Alert tone="warn">
+          <p class="font-medium text-[var(--color-ink)]">Leader intérimaire</p>
+          <p class="mt-1 text-[var(--color-ink-muted)]">
+            Le leader d’origine est injoignable.{' '}
+            {actingNode?.name ? `« ${actingNode.name} »` : 'Un worker'} sert le panel avec la
+            dernière copie SQLite (retard ~30–60 s). Au retour du leader d’origine, les écritures
+            de l’intérim sont reprises.
+          </p>
+        </Alert>
+      )}
+
+      <section>
+        <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div class="min-w-0">
-            <p class="font-medium text-[var(--color-ink)]">Worker via clé USB</p>
-            <p class="mt-1 text-[var(--color-ink-muted)]">
-              Télécharge l’image, flashe-la (Etcher / Rufus), boote la machine. Elle apparaît en
-              attente — puis <strong class="text-[var(--color-ink)]">Trouver des nœuds</strong>.
+            <h2 class="text-sm font-medium text-[var(--color-ink)]">Nœuds</h2>
+            <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
+              {leaderNode ? '1 leader' : 'Aucun leader'}
+              {' · '}
+              {workers.length} worker{workers.length > 1 ? 's' : ''}
+              {' · '}
+              {online} en ligne
+              {' · '}
+              {forges.length} forge{forges.length > 1 ? 's' : ''}
+              {workersBehind.length > 0
+                ? ` · ${workersBehind.length} en retard`
+                : ''}
             </p>
-            {nodeImage && (
-              <p class="mt-2 font-mono text-xs text-[var(--color-ink-muted)]">
-                {nodeImage.name}
-                {nodeImage.version ? ` · v${nodeImage.version.replace(/^v/, '')}` : ''}
-                {nodeImage.size > 0 ? ` · ${formatBytes(nodeImage.size)}` : ''}
-                {!nodeImage.available ? ' · lien estimé' : ''}
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            {workersBehind.length > 0 && (
+              <Button size="sm" disabled={busy} onClick={updateAllWorkers}>
+                Mettre à jour {workersBehind.length} worker
+                {workersBehind.length > 1 ? 's' : ''}
+              </Button>
+            )}
+            <Button size="sm" variant="secondary" disabled={busy} onClick={createInvite}>
+              Inviter
+            </Button>
+            <Button
+              size="sm"
+              variant={workersBehind.length > 0 ? 'secondary' : 'primary'}
+              disabled={busy || discoverBusy}
+              onClick={openDiscover}
+            >
+              Trouver des nœuds
+            </Button>
+          </div>
+        </div>
+
+        {loading ? (
+          <p class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)]">
+            <Spinner /> Chargement des nœuds…
+          </p>
+        ) : (
+          <>
+            <HubGrid cols={4}>
+              {leaderNode ? (
+                <NodeHubCard
+                  n={leaderNode}
+                  index={0}
+                  latest={latest}
+                  interim={actingLeader && leaderNode.id === actingNodeId}
+                  onOpen={setSelected}
+                />
+              ) : (
+                <p class="col-span-full text-sm text-[var(--color-ink-muted)]">
+                  Aucun leader enregistré.
+                </p>
+              )}
+              {workers.map((n, i) => (
+                <NodeHubCard
+                  key={n.id}
+                  n={n}
+                  index={i + 1}
+                  latest={latest}
+                  interim={actingLeader && n.id === actingNodeId}
+                  onOpen={setSelected}
+                />
+              ))}
+              <HubAddTile
+                index={workers.length + 1}
+                label="Ajouter"
+                onClick={openDiscover}
+              />
+            </HubGrid>
+            {workers.length === 0 && (
+              <p class="mt-3 text-sm text-[var(--color-ink-muted)]">
+                Aucun worker. Une machine en attente sur le réseau se trouve avec{' '}
+                <strong class="text-[var(--color-ink)]">Trouver des nœuds</strong>.
               </p>
             )}
-            {nodeImage?.hint && !nodeImage.available && (
-              <p class="mt-1 text-xs text-[var(--color-ink-muted)]">{nodeImage.hint}</p>
-            )}
+          </>
+        )}
+      </section>
+
+      {!loading && (
+        <section>
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-sm font-medium text-[var(--color-ink)]">Forges</h2>
+            <p class="text-xs text-[var(--color-ink-muted)]">
+              {forges.length} projet{forges.length > 1 ? 's' : ''} · un nœud par forge
+            </p>
           </div>
-          <div class="flex shrink-0 flex-wrap gap-2">
+          {forges.length === 0 ? (
+            <p class="text-sm text-[var(--color-ink-muted)]">
+              Aucune forge. Elles apparaîtront ici avec le nœud qui les héberge.
+            </p>
+          ) : (
+            <Table headers={['Forge', 'Nœud', 'Rôle', 'Statut app', 'Statut nœud']}>
+              {forges.map((p) => {
+                const host = resolveNode(nodes, p.server_id);
+                const offline = host.status === 'offline' || host.status === 'joining';
+                const st = projectStatusMeta(p.status);
+                return (
+                  <Tr key={p.uuid}>
+                    <Td>
+                      <a
+                        class="font-medium hover:underline"
+                        href={`/app/projects/view?uuid=${encodeURIComponent(p.uuid)}`}
+                      >
+                        {p.name}
+                      </a>
+                    </Td>
+                    <Td>
+                      <button
+                        type="button"
+                        class="text-left hover:underline"
+                        onClick={() => {
+                          const full = nodes.find((n) => n.id === host.id);
+                          if (full) setSelected(full);
+                        }}
+                      >
+                        {host.name}
+                      </button>
+                    </Td>
+                    <Td>{nodeRoleLabel(host)}</Td>
+                    <Td>
+                      <Badge tone={st.tone}>{st.label}</Badge>
+                    </Td>
+                    <Td>
+                      <Badge tone={offline ? 'danger' : host.drained ? 'warn' : 'ok'}>
+                        {host.drained ? 'Drain' : host.status === 'online' ? 'En ligne' : host.status}
+                      </Badge>
+                    </Td>
+                  </Tr>
+                );
+              })}
+            </Table>
+          )}
+        </section>
+      )}
+
+      <section>
+        <h2 class="mb-3 text-sm font-medium text-[var(--color-ink)]">Réglages</h2>
+        <Card padding="none" class="divide-y divide-[var(--color-line)]">
+          <SettingRow
+            title="Placement automatique"
+            hint="Les nouvelles forges vont sur le meilleur nœud sain. Chaque forge reste sur un seul nœud."
+          >
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy || rebalanceBusy}
+              onClick={() => runRebalance(false)}
+            >
+              Rebalance
+            </Button>
+            <Switch
+              checked={placementAuto}
+              disabled={busy}
+              label="Placement automatique"
+              onToggle={() => void togglePlacementAuto()}
+            />
+          </SettingRow>
+          <SettingRow
+            title="Mise à jour du leader"
+            hint="Installe la release et redémarre ce nœud."
+          >
+            <Switch
+              checked={autoLeader}
+              disabled={autoBusy !== null}
+              label="Mise à jour auto du leader"
+              onToggle={() => void toggleAuto('leader')}
+            />
+          </SettingRow>
+          <SettingRow
+            title="Mise à jour des workers"
+            hint="Met à jour les workers en ligne qui sont en retard."
+          >
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy || workers.length === 0}
+              onClick={updateAllWorkers}
+            >
+              Mettre à jour
+            </Button>
+            <Switch
+              checked={autoWorker}
+              disabled={autoBusy !== null}
+              label="Mise à jour auto des workers"
+              onToggle={() => void toggleAuto('worker')}
+            />
+          </SettingRow>
+          <SettingRow
+            title="Image USB"
+            hint={
+              <>
+                Flashe l’image, boote la machine, puis trouve-la sur le réseau.
+                {nodeImage ? (
+                  <span class="mt-1 block font-mono">
+                    {nodeImage.name}
+                    {nodeImage.version ? ` · v${nodeImage.version.replace(/^v/, '')}` : ''}
+                    {nodeImage.size > 0 ? ` · ${formatBytes(nodeImage.size)}` : ''}
+                    {!nodeImage.available ? ' · lien estimé' : ''}
+                  </span>
+                ) : null}
+                {nodeImage?.hint && !nodeImage.available ? (
+                  <span class="mt-1 block">{nodeImage.hint}</span>
+                ) : null}
+              </>
+            }
+          >
             <Button
               type="button"
               size="sm"
@@ -904,296 +1103,50 @@ function ClusterInner() {
                 Releases
               </Button>
             )}
-          </div>
-        </div>
-      </Alert>
-      {writesFenced && (
-        <Alert tone="danger" class="mb-5">
-          <p class="font-medium text-[var(--color-ink)]">Écritures bloquées</p>
-          <p class="mt-1 text-[var(--color-ink-muted)]">
-            Ce nœud a cédé le control plane à un leader intérimaire. Les réglages et les autres
-            modifications sont refusés. La reprise rouvre les écritures ici, sans SQL.
-          </p>
-          <div class="mt-3">
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              disabled={reopenBusy}
-              onClick={reopenWrites}
-            >
-              {reopenBusy ? 'Reprise…' : 'Reprendre les écritures'}
-            </Button>
-          </div>
-        </Alert>
-      )}
-
-      {actingLeader && (
-        <Alert tone="warn" class="mb-5">
-          <p class="font-medium text-[var(--color-ink)]">Leader intérimaire</p>
-          <p class="mt-1 text-[var(--color-ink-muted)]">
-            Le leader d’origine est injoignable.{' '}
-            {actingNode?.name ? `« ${actingNode.name} »` : 'Un worker'} sert le panel avec la
-            dernière copie SQLite (retard ~30–60 s). Au retour du leader d’origine, les écritures
-            de l’intérim sont reprises.
-          </p>
-        </Alert>
-      )}
-
-      <Alert tone="info" class="mb-5">
-        <p class="font-medium text-[var(--color-ink)]">Placement, pas de réplica d’apps</p>
-        <ul class="mt-2 list-disc space-y-1 pl-4 text-[var(--color-ink-muted)]">
-          <li>
-            Chaque forge tourne sur <strong class="text-[var(--color-ink)]">un seul nœud</strong>{' '}
-            (leader ou worker). Il n’y a pas de copie automatique des conteneurs.
-          </li>
-          <li>
-            <strong class="text-[var(--color-ink)]">Placement auto</strong>{' '}
-            {placementAuto ? 'ON' : 'OFF'} — créations / deploys sans nœud fixe choisissent le
-            meilleur worker sain (pénalité leader si workers dispo). Rebalance pour répartir.
-          </li>
-          <li>
-            <strong class="text-[var(--color-ink)]">Leader</strong> — UI, API, SQLite. Les workers
-            gardent une copie récente. S’il tombe : un worker est élu jusqu’au retour (perte max
-            ~1 min). Un tunnel Cloudflare seulement sur le leader reste un SPOF DNS — un tunnel
-            par nœud + placement corrige ça (Phase 2).
-          </li>
-          <li>
-            <strong class="text-[var(--color-ink)]">Worker</strong> — compute. URL d’annonce
-            saisie manuellement (domaine si Cloudflare / Porkbun, sinon IP LAN — pas 127.0.0.1).
-            S’il tombe : seules les forges de <em>ce</em> nœud
-            s’arrêtent.
-          </li>
-        </ul>
-      </Alert>
-
-      <div class="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Card padding="sm">
-          <p class="text-xs text-[var(--color-ink-muted)]">Leader</p>
-          <p class="text-lg font-semibold">{leaderNode ? 1 : 0}</p>
-        </Card>
-        <Card padding="sm">
-          <p class="text-xs text-[var(--color-ink-muted)]">Workers</p>
-          <p class="text-lg font-semibold">{workers.length}</p>
-        </Card>
-        <Card padding="sm">
-          <p class="text-xs text-[var(--color-ink-muted)]">En ligne</p>
-          <p class="text-lg font-semibold">{online}</p>
-        </Card>
-        <Card padding="sm">
-          <p class="text-xs text-[var(--color-ink-muted)]">Forges</p>
-          <p class="text-lg font-semibold">{forges.length}</p>
-        </Card>
-      </div>
-
-      <Card class="mb-5">
-        <div class="grid gap-4 sm:grid-cols-2">
-          <div class="flex items-center justify-between gap-3">
-            <div class="min-w-0">
-              <p class="text-sm font-medium">Mise à jour auto du leader</p>
+          </SettingRow>
+          <div class="px-4 py-3.5 sm:px-5">
+            <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p class="text-sm font-medium text-[var(--color-ink)]">Invitations</p>
+              <button
+                type="button"
+                class="text-xs text-[var(--color-ink-muted)] hover:underline"
+                onClick={() => setAddOpen(true)}
+              >
+                SSH
+              </button>
+            </div>
+            {invites.length === 0 ? (
               <p class="text-xs text-[var(--color-ink-muted)]">
-                Installe la release et redémarre ce nœud.
+                Aucune invitation. Le jeton se crée avec Inviter.
               </p>
-            </div>
-            <Switch
-              checked={autoLeader}
-              disabled={autoBusy !== null}
-              label="Mise à jour auto du leader"
-              onToggle={() => void toggleAuto('leader')}
-            />
-          </div>
-          <div class="flex items-center justify-between gap-3">
-            <div class="min-w-0">
-              <p class="text-sm font-medium">Mise à jour auto des workers</p>
-              <p class="text-xs text-[var(--color-ink-muted)]">
-                Met à jour les workers en ligne qui sont en retard.
-              </p>
-            </div>
-            <Switch
-              checked={autoWorker}
-              disabled={autoBusy !== null}
-              label="Mise à jour auto des workers"
-              onToggle={() => void toggleAuto('worker')}
-            />
-          </div>
-        </div>
-      </Card>
-
-      {loading ? (
-        <p class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)]">
-          <Spinner /> Chargement des nœuds…
-        </p>
-      ) : (
-        <div class="space-y-8">
-          <section>
-            <h2 class="mb-3 text-sm font-medium">Control plane</h2>
-            <HubGrid cols={4}>
-              {leaderNode ? (
-                <NodeHubCard
-                  n={leaderNode}
-                  index={0}
-                  latest={latest}
-                  interim={actingLeader && leaderNode.id === actingNodeId}
-                  onOpen={setSelected}
-                />
-              ) : (
-                <p class="col-span-full text-sm text-[var(--color-ink-muted)]">
-                  Aucun leader enregistré.
-                </p>
-              )}
-            </HubGrid>
-          </section>
-          <section>
-            <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h2 class="text-sm font-medium">Workers</h2>
-              {workersBehind.length > 0 && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={updateAllWorkers}
-                >
-                  Mettre à jour {workersBehind.length} worker
-                  {workersBehind.length > 1 ? 's' : ''}
-                </Button>
-              )}
-            </div>
-            <HubGrid cols={4}>
-              {workers.map((n, i) => (
-                <NodeHubCard
-                  key={n.id}
-                  n={n}
-                  index={i + 1}
-                  latest={latest}
-                  interim={actingLeader && n.id === actingNodeId}
-                  onOpen={setSelected}
-                />
-              ))}
-              <HubAddTile
-                index={workers.length + 1}
-                label="Trouver des nœuds"
-                onClick={openDiscover}
-              />
-              <HubAddTile
-                index={workers.length + 2}
-                label="Inviter un worker"
-                onClick={createInvite}
-              />
-            </HubGrid>
-            {workers.length === 0 && (
-              <p class="mt-3 text-sm text-[var(--color-ink-muted)]">
-                Aucun worker. Démarre DevForge sur une autre machine (écran En attente), puis
-                clique <strong class="text-[var(--color-ink)]">Trouver des nœuds</strong>.
-              </p>
+            ) : (
+              <ul class="divide-y divide-[var(--color-line)]">
+                {invites.map((inv) => {
+                  const st = inviteState(inv);
+                  return (
+                    <li key={inv.id} class="flex flex-wrap items-center justify-between gap-2 py-2.5 first:pt-1">
+                      <div class="min-w-0">
+                        <p class="truncate font-mono text-xs text-[var(--color-ink)]">{inv.id}</p>
+                        <p class="text-xs text-[var(--color-ink-muted)]">
+                          {ago(inv.created_at)} · expire le {new Date(inv.expires_at).toLocaleString()}
+                        </p>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <Badge tone={st.tone}>{st.label}</Badge>
+                        {st.label === 'Active' && (
+                          <Button size="sm" variant="ghost" disabled={busy} onClick={() => revoke(inv.id)}>
+                            Révoquer
+                          </Button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
-          </section>
-        </div>
-      )}
-
-      {!loading && (
-      <div class="mt-8">
-        <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h2 class="text-sm font-medium">Forges</h2>
-          <p class="text-xs text-[var(--color-ink-muted)]">
-            {forges.length} projet{forges.length > 1 ? 's' : ''} · un nœud par forge
-          </p>
-        </div>
-        {forges.length === 0 ? (
-          <p class="text-sm text-[var(--color-ink-muted)]">
-            Aucune forge. Elles apparaîtront ici avec le nœud qui les héberge.
-          </p>
-        ) : (
-          <Table headers={['Forge', 'Nœud', 'Rôle', 'Statut app', 'Statut nœud']}>
-            {forges.map((p) => {
-              const host = resolveNode(nodes, p.server_id);
-              const offline = host.status === 'offline' || host.status === 'joining';
-              const st = projectStatusMeta(p.status);
-              return (
-                <Tr key={p.uuid}>
-                  <Td>
-                    <a
-                      class="font-medium hover:underline"
-                      href={`/app/projects/view?uuid=${encodeURIComponent(p.uuid)}`}
-                    >
-                      {p.name}
-                    </a>
-                  </Td>
-                  <Td>
-                    <button
-                      type="button"
-                      class="text-left hover:underline"
-                      onClick={() => {
-                        const full = nodes.find((n) => n.id === host.id);
-                        if (full) setSelected(full);
-                      }}
-                    >
-                      {host.name}
-                    </button>
-                  </Td>
-                  <Td>{nodeRoleLabel(host)}</Td>
-                  <Td>
-                    <Badge tone={st.tone}>{st.label}</Badge>
-                  </Td>
-                  <Td>
-                    <Badge tone={offline ? 'danger' : host.drained ? 'warn' : 'ok'}>
-                      {host.drained ? 'Drain' : host.status === 'online' ? 'En ligne' : host.status}
-                    </Badge>
-                  </Td>
-                </Tr>
-              );
-            })}
-          </Table>
-        )}
-      </div>
-      )}
-
-      <div class="mt-8">
-        <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h2 class="text-sm font-medium">Invitations</h2>
-          <div class="flex items-center gap-3">
-            <Button size="sm" variant="secondary" disabled={busy} onClick={createInvite}>
-              Nouvelle
-            </Button>
-            <button
-              type="button"
-              class="text-xs text-[var(--color-ink-muted)] hover:underline"
-              onClick={() => setAddOpen(true)}
-            >
-              SSH
-            </button>
           </div>
-        </div>
-        {invites.length === 0 ? (
-          <p class="text-sm text-[var(--color-ink-muted)]">
-            Aucune invitation. Préfère <strong>Trouver des nœuds</strong> si l’autre machine est
-            en attente sur le LAN. Sinon <strong>Inviter</strong> : tu copies un code, tu le colles
-            sur la machine neuve (écran Rejoindre), avec l’URL de cette instance.
-          </p>
-        ) : (
-          <Table headers={['ID', 'Créée', 'Expire', 'État', 'Actions']}>
-            {invites.map((inv) => {
-              const st = inviteState(inv);
-              return (
-                <Tr key={inv.id}>
-                  <Td class="font-mono text-xs">{inv.id}</Td>
-                  <Td>{ago(inv.created_at)}</Td>
-                  <Td>{new Date(inv.expires_at).toLocaleString()}</Td>
-                  <Td>
-                    <Badge tone={st.tone}>{st.label}</Badge>
-                  </Td>
-                  <Td>
-                    {st.label === 'Active' && (
-                      <Button size="sm" variant="ghost" disabled={busy} onClick={() => revoke(inv.id)}>
-                        Révoquer
-                      </Button>
-                    )}
-                  </Td>
-                </Tr>
-              );
-            })}
-          </Table>
-        )}
-      </div>
+        </Card>
+      </section>
 
       <Modal
         open={addOpen}
