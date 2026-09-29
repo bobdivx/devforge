@@ -23,10 +23,11 @@ const ADMIN_NAV: NavItem[] = [
 /**
  * Nav du worker : identité et lien leader vivent dans le rail.
  * Ici, seulement ce qu’un nœud peut faire lui-même.
+ * `?tab=adresses` reste accepté par la page (ancien lien).
  */
 export const WORKER_NAV: NavItem[] = [
   { href: '/app/node', label: 'Nœud', key: 'node' },
-  { href: '/app/node?tab=adresses', label: 'Adresses', key: 'adresses' },
+  { href: '/app/node?tab=reglages', label: 'Paramètres', key: 'reglages' },
 ];
 
 export function globalNavForRole(role?: string | null): NavItem[] {

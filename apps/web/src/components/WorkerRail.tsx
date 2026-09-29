@@ -104,7 +104,7 @@ export function WorkerRail({
             </a>
           ) : (
             <a
-              href="/app/node?tab=adresses"
+              href="/app/node?tab=reglages"
               data-df-node-tab
               class={cn(
                 'block rounded-lg text-sm text-[var(--color-accent)] hover:bg-white/5',
