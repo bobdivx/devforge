@@ -8,11 +8,27 @@ on:
 jobs:
   rust:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: devforge
+          POSTGRES_PASSWORD: devforge
+          POSTGRES_DB: postgres
+        ports:
+          - 54329:5432
+        options: >-
+          --health-cmd "pg_isready -U devforge -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Test workspace
+        env:
+          DEVFORGE_TEST_PG: postgres://devforge:devforge@127.0.0.1:54329/postgres?sslmode=disable
         run: cargo test --workspace
 
   web:
