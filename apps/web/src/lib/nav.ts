@@ -20,8 +20,14 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/app/admin', label: 'Admin', key: 'admin' },
 ];
 
-/** Nav du worker : pas d’UI produit, uniquement la fiche nœud. */
-export const WORKER_NAV: NavItem[] = [{ href: '/app/node', label: 'Nœud', key: 'node' }];
+/**
+ * Nav du worker : identité et lien leader vivent dans le rail.
+ * Ici, seulement ce qu’un nœud peut faire lui-même.
+ */
+export const WORKER_NAV: NavItem[] = [
+  { href: '/app/node', label: 'Nœud', key: 'node' },
+  { href: '/app/node?tab=adresses', label: 'Adresses', key: 'adresses' },
+];
 
 export function globalNavForRole(role?: string | null): NavItem[] {
   if (role === 'instance_admin') return ADMIN_NAV;

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { api } from '../lib/api';
-import type { Bootstrap } from '../lib/auth';
+import { rememberClusterRole, type Bootstrap } from '../lib/auth';
 import { Spinner } from './ui';
 
 type Props = {
@@ -19,6 +19,7 @@ export function AuthGate({ children, allowOnboarding = false }: Props) {
       try {
         const b: Bootstrap = await api.bootstrap();
         if (cancelled) return;
+        rememberClusterRole(b.cluster?.role);
         if (b.cluster?.role === 'worker') {
           const onNode = window.location.pathname.startsWith('/app/node');
           if (!onNode) {

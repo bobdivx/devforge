@@ -390,6 +390,8 @@ async fn bootstrap(
             "leader_url": cluster_local.leader_url,
             "node_id": cluster_local.node_id,
             "node_name": cluster_local.node_name,
+            "joined": cluster_local.role == devforge_cluster::NodeRole::Worker
+                && !cluster_local.node_secret.is_empty(),
             "pending": cluster_pending,
             "hostname": if cluster_pending {
                 Some(devforge_cluster::machine_hostname())

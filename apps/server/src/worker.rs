@@ -18,6 +18,7 @@ use serde_json::{json, Value};
 use tower_http::services::{ServeDir, ServeFile};
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 use crate::state::AppState;
 
@@ -130,6 +131,9 @@ pub fn worker_router(state: AppState) -> Router {
             get(worker_local).patch(worker_local_patch),
         )
         .route("/api/v1/cluster/local/reset", post(worker_local_reset))
+        .route("/api/v1/update/check", get(worker_update_check))
+        .route("/api/v1/update/status", get(worker_update_status))
+        .route("/api/v1/update/start", post(worker_update_start))
         .route("/internal/exec", post(internal_exec))
         .route("/internal/update/status", get(internal_update_status))
         .route("/internal/update/start", post(internal_update_start))
@@ -177,21 +181,15 @@ async fn worker_bootstrap(State(state): State<AppState>) -> Json<Value> {
             "leader_url": l.leader_url,
             "node_id": l.node_id,
             "node_name": l.node_name,
+            "joined": is_worker_role(l),
+            "version": state.updater.current_version(),
         })),
     }))
 }
 
 async fn worker_local(State(state): State<AppState>) -> Json<Value> {
-    let local = state.cluster.local().await.ok();
-    Json(json!({
-        "ok": true,
-        "role": local.as_ref().map(|l| l.role),
-        "leader_url": local.as_ref().map(|l| l.leader_url.clone()).unwrap_or_default(),
-        "advertise_url": local.as_ref().map(|l| l.advertise_url.clone()).unwrap_or_default(),
-        "node_id": local.as_ref().map(|l| l.node_id.clone()).unwrap_or_default(),
-        "node_name": local.as_ref().map(|l| l.node_name.clone()).unwrap_or_default(),
-        "metrics": collect_node_metrics(),
-    }))
+    let local = state.cluster.local().await.unwrap_or_default();
+    Json(local_status_value(&local, state.updater.current_version()))
 }
 
 #[derive(Deserialize)]
@@ -411,6 +409,51 @@ async fn internal_update_start(
     })))
 }
 
+/// Mise à jour de ce processus worker (Compose pull si le nœud tourne via
+/// deploy/usb, sinon l’installateur local). Pas de secret : l’UI worker n’a pas de session.
+async fn worker_update_check(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let check = state.updater.check().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+    Ok(Json(json!({
+        "data": check,
+        "job": state.updater.current_job().await,
+    })))
+}
+
+async fn worker_update_status(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({
+        "data": state.updater.current_job().await,
+        "version": state.updater.current_version(),
+        "mode": state.updater.config().mode.as_str(),
+    }))
+}
+
+async fn worker_update_start(
+    State(state): State<AppState>,
+    Json(body): Json<InternalUpdateStart>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let job = state
+        .updater
+        .start(body.target_version)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+    Ok(Json(json!({
+        "ok": true,
+        "data": job,
+    })))
+}
+
 pub fn with_static_fallback(mut app: Router) -> Router {
     if let Some(root) = crate::paths::web_dir() {
         let index = root.join("index.html");
@@ -426,6 +469,196 @@ pub fn with_static_fallback(mut app: Router) -> Router {
 
 pub fn is_worker_role(local: &LocalClusterState) -> bool {
     local.role == NodeRole::Worker && !local.node_secret.is_empty()
+}
+
+#[derive(Clone, Debug)]
+struct LeaderLinkState {
+    state: &'static str,
+    checked_at: Option<String>,
+    detail: Option<String>,
+}
+
+static LEADER_LINK: Mutex<LeaderLinkState> = Mutex::new(LeaderLinkState {
+    state: "unknown",
+    checked_at: None,
+    detail: None,
+});
+
+#[derive(Clone, Debug)]
+struct LeaderLinkView {
+    pub state: &'static str,
+    pub checked_at: Option<String>,
+    pub detail: Option<String>,
+}
+
+impl LeaderLinkView {
+    fn unknown() -> Self {
+        Self {
+            state: "unknown",
+            checked_at: None,
+            detail: None,
+        }
+    }
+}
+
+fn note_leader_link(ok: bool, detail: Option<String>) {
+    let detail = detail.map(|raw| {
+        let mut s = raw.replace(['\n', '\r'], " ");
+        if s.chars().count() > 180 {
+            s = s.chars().take(180).collect();
+        }
+        s
+    });
+    let Ok(mut guard) = LEADER_LINK.lock() else {
+        return;
+    };
+    guard.state = if ok { "ok" } else { "down" };
+    guard.checked_at = Some(chrono::Utc::now().to_rfc3339());
+    guard.detail = if ok { None } else { detail };
+}
+
+fn leader_link_view() -> LeaderLinkView {
+    LEADER_LINK
+        .lock()
+        .map(|guard| LeaderLinkView {
+            state: guard.state,
+            checked_at: guard.checked_at.clone(),
+            detail: guard.detail.clone(),
+        })
+        .unwrap_or_else(|_| LeaderLinkView::unknown())
+}
+
+struct Workload {
+    name: String,
+    status: String,
+    state: String,
+    kind: &'static str,
+}
+
+fn workload_kind(name: &str) -> &'static str {
+    if name.starts_with("df-dev-") {
+        "preview"
+    } else if name.starts_with("df-") {
+        "app"
+    } else if name == "devforge-traefik" || name.starts_with("devforge-traefik-") {
+        "proxy"
+    } else {
+        "other"
+    }
+}
+
+fn workload_visible(name: &str) -> bool {
+    name.starts_with("df-") || name == "devforge-traefik" || name.starts_with("devforge-traefik-")
+}
+
+fn parse_workload_line(line: &str) -> Option<Workload> {
+    let mut parts = line.splitn(3, '\t');
+    let name = parts.next()?.trim();
+    if name.is_empty() || !workload_visible(name) {
+        return None;
+    }
+    let status = parts.next().unwrap_or("").trim().to_string();
+    let state = parts.next().unwrap_or("").trim().to_string();
+    Some(Workload {
+        kind: workload_kind(name),
+        name: name.to_string(),
+        status,
+        state,
+    })
+}
+
+fn list_local_workloads() -> Vec<Workload> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let out = std::process::Command::new("docker")
+            .args([
+                "ps",
+                "-a",
+                "--format",
+                "{{.Names}}\t{{.Status}}\t{{.State}}",
+            ])
+            .output();
+        let _ = tx.send(out);
+    });
+    let Ok(Ok(out)) = rx.recv_timeout(std::time::Duration::from_secs(2)) else {
+        return Vec::new();
+    };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(parse_workload_line)
+        .take(40)
+        .collect()
+}
+
+/// État public du nœud. Jamais le secret. Les charges ne sont listées qu’une fois le join fait.
+fn local_public_json(
+    local: &LocalClusterState,
+    version: &str,
+    metrics: &devforge_cluster::NodeMetrics,
+    link: &LeaderLinkView,
+    workloads: &[Workload],
+) -> Value {
+    let joined = is_worker_role(local);
+    let link_state = if joined { link.state } else { "unknown" };
+    let checked_at = if joined {
+        link.checked_at.clone()
+    } else {
+        None
+    };
+    let detail = if joined { link.detail.clone() } else { None };
+    let workload_json: Vec<Value> = if joined {
+        workloads
+            .iter()
+            .map(|w| {
+                json!({
+                    "name": w.name,
+                    "status": w.status,
+                    "state": w.state,
+                    "kind": w.kind,
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    json!({
+        "ok": true,
+        "joined": joined,
+        "role": local.role,
+        "leader_url": local.leader_url,
+        "advertise_url": local.advertise_url,
+        "node_id": local.node_id,
+        "node_name": local.node_name,
+        "version": version,
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "hostname": devforge_cluster::machine_hostname(),
+        "metrics": metrics,
+        "link": {
+            "state": link_state,
+            "checked_at": checked_at,
+            "detail": detail,
+        },
+        "workloads": workload_json,
+    })
+}
+
+pub fn local_status_value(local: &LocalClusterState, version: &str) -> Value {
+    let joined = is_worker_role(local);
+    let link = if joined {
+        leader_link_view()
+    } else {
+        LeaderLinkView::unknown()
+    };
+    let workloads = if joined {
+        list_local_workloads()
+    } else {
+        Vec::new()
+    };
+    local_public_json(local, version, &collect_node_metrics(), &link, &workloads)
 }
 
 pub async fn apply_promote_flag(state: &AppState) {
@@ -516,6 +749,7 @@ fn spawn_worker_loop(state: AppState) {
                 .await
             {
                 Ok(ack) => {
+                    note_leader_link(true, None);
                     fail = 0;
                     let need_snap = ack.generation > local.snapshot_generation
                         || last_snap.elapsed() > std::time::Duration::from_secs(60);
@@ -543,7 +777,8 @@ fn spawn_worker_loop(state: AppState) {
                         }
                     }
                 }
-                Err(_) => {
+                Err(e) => {
+                    note_leader_link(false, Some(e.to_string()));
                     fail += 1;
                     let preferred = if local.preferred_leader_url.trim().is_empty() {
                         local.leader_url.clone()
@@ -909,5 +1144,76 @@ mod repl_host_tests {
             "10.0.0.2"
         );
         assert_eq!(pick_repl_host("http://127.0.0.1:8000", ""), "");
+    }
+}
+
+#[cfg(test)]
+mod local_status_tests {
+    use super::{local_public_json, parse_workload_line, LeaderLinkView};
+    use devforge_cluster::{LocalClusterState, NodeMetrics, NodeRole};
+
+    #[test]
+    fn parse_workload_keeps_devforge_containers() {
+        let app = parse_workload_line("df-abc123\tUp 2 hours\trunning").unwrap();
+        assert_eq!(app.kind, "app");
+        assert_eq!(app.state, "running");
+        let preview = parse_workload_line("df-dev-abc\tUp 1 minute\trunning").unwrap();
+        assert_eq!(preview.kind, "preview");
+        let proxy = parse_workload_line("devforge-traefik\tUp 3 days\trunning").unwrap();
+        assert_eq!(proxy.kind, "proxy");
+        assert!(parse_workload_line("nginx\tUp\trunning").is_none());
+        assert!(parse_workload_line("\t\t").is_none());
+    }
+
+    #[test]
+    fn joined_worker_json_hides_secret_and_lists_work() {
+        let mut local = LocalClusterState::default();
+        local.role = NodeRole::Worker;
+        local.node_secret = "sekret-xyz".into();
+        local.node_id = "node-1".into();
+        local.node_name = "atelier".into();
+        local.leader_url = "https://leader.example".into();
+        local.advertise_url = "http://10.0.0.8:8000".into();
+        let workloads = vec![parse_workload_line("df-abc\tUp\trunning").unwrap()];
+        let value = local_public_json(
+            &local,
+            "2.0.163",
+            &NodeMetrics::default(),
+            &LeaderLinkView {
+                state: "ok",
+                checked_at: Some("2026-09-28T00:00:00Z".into()),
+                detail: None,
+            },
+            &workloads,
+        );
+        let raw = value.to_string();
+        assert!(!raw.contains("sekret-xyz"));
+        assert_eq!(value["joined"], true);
+        assert_eq!(value["role"], "worker");
+        assert_eq!(value["link"]["state"], "ok");
+        assert_eq!(value["workloads"][0]["kind"], "app");
+        assert_eq!(value["version"], "2.0.163");
+    }
+
+    #[test]
+    fn standalone_json_is_not_a_joined_worker() {
+        let local = LocalClusterState::default();
+        let workloads = vec![parse_workload_line("df-abc\tUp\trunning").unwrap()];
+        let value = local_public_json(
+            &local,
+            "2.0.163",
+            &NodeMetrics::default(),
+            &LeaderLinkView {
+                state: "ok",
+                checked_at: Some("2026-09-28T00:00:00Z".into()),
+                detail: Some("ne doit pas fuiter".into()),
+            },
+            &workloads,
+        );
+        assert_eq!(value["joined"], false);
+        assert_eq!(value["role"], "leader");
+        assert_eq!(value["link"]["state"], "unknown");
+        assert!(value["link"]["detail"].is_null());
+        assert_eq!(value["workloads"].as_array().map(|a| a.len()), Some(0));
     }
 }

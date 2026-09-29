@@ -2043,16 +2043,7 @@ export const api = {
       release_url?: string;
       hint?: string;
     }>('/cluster/node-image'),
-  clusterLocal: () =>
-    request<{
-      ok: boolean;
-      role: 'leader' | 'worker';
-      leader_url: string;
-      advertise_url?: string;
-      node_id: string;
-      node_name: string;
-      metrics?: ClusterNodeMetrics;
-    }>('/cluster/local'),
+  clusterLocal: () => request<ClusterLocal>('/cluster/local'),
   clusterJoinLocal: (body: {
     token: string;
     leader_url?: string;
@@ -2091,6 +2082,37 @@ export const api = {
   proxyRestart: () => request<{ ok: boolean; container: string; message: string; output: string }>('/system/proxy/restart', { method: 'POST', body: '{}' }),
   proxyEnsure: () => request<{ ok: boolean; status: string; container: string; message: string }>('/system/proxy/ensure', { method: 'POST', body: '{}' }),
   systemHealth: () => request<SystemHealth>('/system/health'),
+};
+
+export type WorkerLinkState = 'unknown' | 'ok' | 'down';
+
+export type WorkerWorkload = {
+  name: string;
+  status: string;
+  state: string;
+  kind: string;
+};
+
+/** Fiche locale : autonome ou worker déjà rattaché. */
+export type ClusterLocal = {
+  ok: boolean;
+  joined?: boolean;
+  role: 'leader' | 'worker';
+  leader_url: string;
+  advertise_url?: string;
+  node_id: string;
+  node_name: string;
+  version?: string;
+  os?: string;
+  arch?: string;
+  hostname?: string;
+  metrics?: ClusterNodeMetrics;
+  link?: {
+    state: WorkerLinkState;
+    checked_at?: string | null;
+    detail?: string | null;
+  };
+  workloads?: WorkerWorkload[];
 };
 
 export type ClusterNode = {

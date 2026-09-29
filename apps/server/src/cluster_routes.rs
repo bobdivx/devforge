@@ -472,15 +472,10 @@ async fn local_state(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let local = state.cluster.local().await.map_err(map_err)?;
-    Ok(Json(json!({
-        "ok": true,
-        "role": local.role,
-        "leader_url": local.leader_url,
-        "advertise_url": local.advertise_url,
-        "node_id": local.node_id,
-        "node_name": local.node_name,
-        "metrics": collect_node_metrics(),
-    })))
+    Ok(Json(crate::worker::local_status_value(
+        &local,
+        state.updater.current_version(),
+    )))
 }
 
 #[derive(Deserialize)]

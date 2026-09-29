@@ -24,6 +24,37 @@ const { title = 'DevForge', description = 'Deploy with clarity. Agents that work
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <script is:inline>
+      // Avant le routeur : un clic Nœud ↔ Adresses ne doit pas fondre les deux écrans.
+      document.addEventListener(
+        'click',
+        function (event) {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          var node = event.target;
+          if (!node || !node.closest) return;
+          var link = node.closest('a[data-df-node-tab]');
+          if (!link || link.getAttribute('target') === '_blank') return;
+          var href = link.getAttribute('href');
+          if (!href) return;
+          var url;
+          try {
+            url = new URL(href, location.href);
+          } catch (e) {
+            return;
+          }
+          if (url.origin !== location.origin || url.pathname !== '/app/node') return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+          var next = url.pathname + url.search;
+          if (location.pathname + location.search !== next) {
+            history.pushState(null, '', next);
+          }
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        },
+        true,
+      );
+    </script>
     <ClientRouter />
     <script is:inline>
       (function () {
