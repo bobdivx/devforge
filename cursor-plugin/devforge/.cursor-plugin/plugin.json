@@ -1,0 +1,23 @@
+{
+  "name": "devforge-mcp",
+  "version": "1.0.0",
+  "description": "Connecte Cursor à une instance DevForge auto-hébergée : projets, déploiements, journaux et outils agent via MCP.",
+  "author": {
+    "name": "DevForge"
+  },
+  "homepage": "https://github.com/bobdivx/devforge/blob/main/cursor-plugin/devforge/README.md",
+  "repository": "https://github.com/bobdivx/devforge",
+  "keywords": ["mcp", "devforge", "paas", "self-hosted", "deploy"],
+  "logo": "assets/logo.svg",
+  "variables": {
+    "type": "object",
+    "properties": {
+      "DEVFORGE_MCP_URL": {
+        "type": "string",
+        "title": "URL MCP",
+        "description": "URL MCP de ton instance, par exemple https://devforge.exemple/api/v1/mcp. Le bouton Connect ouvre ensuite la page de consentement DevForge."
+      }
+    },
+    "required": ["DEVFORGE_MCP_URL"]
+  }
+}

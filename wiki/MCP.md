@@ -32,6 +32,14 @@ Access token 1 h, refresh 90 jours. Les tokens OAuth ne valent que pour le MCP (
 Applications connectées et révocation : **Compte → Tokens**. L’URL publique vient de l’URL d’instance
 (Admin → Domaine), sinon des en-têtes `Host` / `X-Forwarded-Proto`.
 
+### Plugin Cursor
+
+Le dépôt embarque le plugin `devforge-mcp` (`cursor-plugin/devforge/`, manifeste
+`.cursor-plugin/marketplace.json`). L’URL MCP est une variable `DEVFORGE_MCP_URL`
+(`https://<hôte>/api/v1/mcp`) : chaque instance est la sienne. Cursor s’enregistre
+en OAuth (PKCE) ; la redirection `cursor://anysphere.cursor-mcp/oauth/callback` est acceptée.
+Mode d’emploi : [`cursor-plugin/devforge/README.md`](../cursor-plugin/devforge/README.md).
+
 ## Client (serveurs distants)
 
 Page **MCP** (`/app/mcp`) :

@@ -1,0 +1,18 @@
+{
+  "name": "devforge",
+  "owner": {
+    "name": "DevForge"
+  },
+  "metadata": {
+    "description": "Plugin MCP pour une instance DevForge auto-hébergée."
+  },
+  "plugins": [
+    {
+      "name": "devforge-mcp",
+      "source": "cursor-plugin/devforge",
+      "description": "Connecte Cursor au serveur MCP d’une instance DevForge.",
+      "keywords": ["mcp", "devforge", "paas", "self-hosted"],
+      "logo": "cursor-plugin/devforge/assets/logo.svg"
+    }
+  ]
+}
