@@ -245,7 +245,7 @@ ENV NODE_ENV=production HOST=0.0.0.0 PORT={port} \
     PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1
 COPY --from=build /app /app
 EXPOSE {port}
-CMD sh -c 'if node -e "const p=require(\"./package.json\"); process.exit(p.scripts&&p.scripts.start?0:1)"; then exec npm run start; elif [ -f server.js ]; then exec node server.js; elif [ -f index.js ]; then exec node index.js; else echo "[devforge] ni script start, ni server.js, ni index.js"; exit 1; fi'
+CMD sh -c 'if [ -f .output/server/index.mjs ]; then exec node .output/server/index.mjs; elif [ -f .output/server/index.js ]; then exec node .output/server/index.js; elif node -e "const p=require(\"./package.json\"); process.exit(p.scripts&&p.scripts.start?0:1)"; then exec npm run start; elif [ -f server.js ]; then exec node server.js; elif [ -f index.js ]; then exec node index.js; else echo "[devforge] ni script start, ni server.js, ni index.js"; exit 1; fi'
 "#,
         port = port
     )
@@ -262,7 +262,7 @@ pub fn npm_build_if_present_shell() -> &'static str {
 
 /// Host shell used when Docker is unavailable: `npm start`, else a JS entrypoint.
 pub fn npm_start_if_present_shell() -> &'static str {
-    r#"if node -e 'const p=require("./package.json"); process.exit(p.scripts&&p.scripts.start?0:1)'; then exec npm run start; elif [ -f server.js ]; then exec node server.js; elif [ -f index.js ]; then exec node index.js; else echo "[devforge] ni script start, ni server.js, ni index.js"; exit 1; fi"#
+    r#"if [ -f .output/server/index.mjs ]; then exec node .output/server/index.mjs; elif [ -f .output/server/index.js ]; then exec node .output/server/index.js; elif node -e 'const p=require("./package.json"); process.exit(p.scripts&&p.scripts.start?0:1)'; then exec npm run start; elif [ -f server.js ]; then exec node server.js; elif [ -f index.js ]; then exec node index.js; else echo "[devforge] ni script start, ni server.js, ni index.js"; exit 1; fi"#
 }
 
 pub fn docker_build_from_content(image: &str, dockerfile: &str) -> String {
@@ -282,9 +282,12 @@ pub fn docker_build_from_content(image: &str, dockerfile: &str) -> String {
 }
 
 /// Static site: npm build then nginx (publish_directory relative to workdir, default dist).
+/// Cherche aussi `build`, `out` et `.vercel/output/static` si le dossier demandé n’existe pas.
+/// Un build Nitro (serveur) fait échouer cette image : nginx ne peut pas le publier.
 pub fn static_inline_dockerfile(publish_directory: &str) -> String {
     let pub_dir = publish_directory.trim().trim_start_matches('/');
     let pub_dir = if pub_dir.is_empty() { "dist" } else { pub_dir };
+    let pub_dir = pub_dir.replace('"', "");
     format!(
         r#"FROM node:22-bookworm-slim AS build
 WORKDIR /app
@@ -292,21 +295,83 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 ENV PUPPETEER_SKIP_DOWNLOAD=1 \
-    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1 \
+    DEVFORGE_PUBLISH_DIR="{pub_dir}"
 COPY package.json package-lock.json* npm-shrinkwrap.json* yarn.lock* pnpm-lock.yaml* ./
 RUN if [ -f package-lock.json ]; then npm ci; \
   elif [ -f yarn.lock ]; then corepack enable && yarn install --frozen-lockfile; \
   elif [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install --frozen-lockfile; \
   else npm install; fi
 COPY . .
-RUN npm run build
+RUN npm run build \
+ && if [ -f .output/server/index.mjs ] || [ -f .vercel/output/nitro.json ]; then \
+      echo "[devforge] application serveur (Nitro) — le pack statique nginx ne la publie pas" >&2; \
+      exit 1; \
+    fi \
+ && src="" \
+ && for c in "$DEVFORGE_PUBLISH_DIR" dist build out .output/public .vercel/output/static public; do \
+      if [ -d "$c" ]; then src="$c"; break; fi; \
+    done \
+ && if [ -z "$src" ]; then echo "[devforge] répertoire de publication introuvable ($DEVFORGE_PUBLISH_DIR)" >&2; exit 1; fi \
+ && echo "[devforge] publication $src" \
+ && mkdir -p /devforge-static \
+ && cp -a "$src"/. /devforge-static/
 
 FROM nginx:alpine
-COPY --from=build /app/{pub_dir} /usr/share/nginx/html
+COPY --from=build /devforge-static /usr/share/nginx/html
 EXPOSE 80
 "#,
         pub_dir = pub_dir
     )
+}
+
+/// `true` si package.json dépend de Nitro ou TanStack Start (serveur, pas un site statique).
+pub fn package_json_is_nitro_server(text: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(text) else {
+        return false;
+    };
+    const KEYS: &[&str] = &["nitro", "@tanstack/react-start", "@tanstack/start"];
+    for section in ["dependencies", "devDependencies"] {
+        let Some(obj) = value.get(section).and_then(|v| v.as_object()) else {
+            continue;
+        };
+        if KEYS.iter().any(|k| obj.contains_key(*k)) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Image Node pour Nitro / TanStack Start.
+/// Un preset serverless figé dans la config (`vercel`, `netlify`, …) est réécrit
+/// en `node_server` le temps du build : le PaaS a besoin d’un processus qui écoute.
+pub fn nitro_node_dockerfile(port: u16) -> String {
+    r#"FROM node:22-bookworm-slim
+WORKDIR /app
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+ENV PUPPETEER_SKIP_DOWNLOAD=1 \
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1 \
+    NITRO_PRESET=node_server \
+    NODE_ENV=production \
+    HOST=0.0.0.0 \
+    NITRO_HOST=0.0.0.0 \
+    PORT=%%PORT%% \
+    NITRO_PORT=%%PORT%%
+COPY package.json package-lock.json* npm-shrinkwrap.json* yarn.lock* pnpm-lock.yaml* ./
+RUN if [ -f package-lock.json ]; then npm ci; \
+  elif [ -f yarn.lock ]; then corepack enable && yarn install --frozen-lockfile; \
+  elif [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install --frozen-lockfile; \
+  else npm install; fi
+COPY . .
+RUN node --input-type=module -e "import fs from 'node:fs'; const files=['vite.config.ts','vite.config.js','vite.config.mjs','vite.config.mts','nitro.config.ts','nitro.config.js','nitro.config.mjs']; const re=/preset\\s*:\\s*([\"'])(?:vercel|netlify|netlify_edge|cloudflare|cloudflare_module|cloudflare_pages|aws_lambda|deno_deploy)\\1/g; for (const f of files) { if (!fs.existsSync(f)) continue; const s=fs.readFileSync(f,'utf8'); const n=s.replace(re,'preset: \"node_server\"'); if (n!==s) { fs.writeFileSync(f,n); console.log('[devforge] preset node_server dans '+f); } }"
+RUN if node -e 'const p=require("./package.json"); process.exit(p.scripts&&p.scripts.build?1:0)'; then echo "[nitro] pas de script build"; else npm run build; fi \
+ && if [ -f .output/server/index.mjs ] || [ -f .output/server/index.js ]; then echo "[nitro] serveur OK"; else echo "[devforge] .output/server introuvable après le build" >&2; exit 1; fi
+EXPOSE %%PORT%%
+CMD ["sh", "-c", "if [ -f .output/server/index.mjs ]; then exec node .output/server/index.mjs; else exec node .output/server/index.js; fi"]
+"#
+    .replace("%%PORT%%", &port.to_string())
 }
 
 pub fn docker_stop(name: &str) -> String {
@@ -1404,6 +1469,30 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn nitro_package_is_not_a_static_site() {
+        let pkg = r#"{"dependencies":{"vite":"^8","nitro":"3.0.0","@tanstack/react-start":"1.0.0"}}"#;
+        assert!(package_json_is_nitro_server(pkg));
+        assert!(package_json_is_nitro_server(
+            r#"{"devDependencies":{"@tanstack/start":"1.0.0"}}"#
+        ));
+        assert!(!package_json_is_nitro_server(
+            r#"{"devDependencies":{"vite":"^5"}}"#
+        ));
+        let df = nitro_node_dockerfile(80);
+        assert!(df.contains("NITRO_PRESET=node_server"), "{df}");
+        assert!(df.contains("PORT=80"), "{df}");
+        assert!(df.contains("preset: \\\"node_server\\\""));
+        assert!(df.contains("vite.config.ts"));
+        assert!(df.contains(".output/server/index.mjs"));
+        assert!(!df.contains("%%PORT%%"));
+        let static_df = static_inline_dockerfile("dist");
+        assert!(static_df.contains("DEVFORGE_PUBLISH_DIR=\"dist\""));
+        assert!(static_df.contains(".vercel/output/static"));
+        assert!(static_df.contains("COPY --from=build /devforge-static"));
+        assert!(!static_df.contains("COPY --from=build /app/dist"));
+    }
 
     #[test]
     fn prepare_never_evicts_reverse_proxy() {

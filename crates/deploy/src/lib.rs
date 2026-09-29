@@ -400,8 +400,18 @@ fn spawn_local_runtime(build_dir: &str, port: u16) -> std::result::Result<u32, S
     let dir = std::path::Path::new(build_dir);
     let out = std::fs::File::create(dir.join(".devforge.out")).map_err(|e| e.to_string())?;
     let err = std::fs::File::create(dir.join(".devforge.err")).map_err(|e| e.to_string())?;
+    let nitro_mjs = dir.join(".output/server/index.mjs");
+    let nitro_js = dir.join(".output/server/index.js");
     let entry = dir.join("dist/server/entry.mjs");
-    let mut cmd = if entry.is_file() {
+    let mut cmd = if nitro_mjs.is_file() {
+        let mut c = Command::new("node");
+        c.arg(&nitro_mjs);
+        c
+    } else if nitro_js.is_file() {
+        let mut c = Command::new("node");
+        c.arg(&nitro_js);
+        c
+    } else if entry.is_file() {
         let mut c = Command::new("node");
         c.arg(&entry);
         c
@@ -435,28 +445,6 @@ fn spawn_local_runtime(build_dir: &str, port: u16) -> std::result::Result<u32, S
     // Detach: drop Child without wait
     std::mem::forget(child);
     Ok(pid)
-}
-
-fn pid_is_alive(build_dir: &str) -> bool {
-    let Ok(txt) = std::fs::read_to_string(pid_path(build_dir)) else {
-        return false;
-    };
-    let Ok(pid) = txt.trim().parse::<u32>() else {
-        return false;
-    };
-    #[cfg(windows)]
-    {
-        std::process::Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-            .output()
-            .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
-            .unwrap_or(false)
-    }
-    #[cfg(not(windows))]
-    {
-        std::path::Path::new(&format!("/proc/{pid}")).exists()
-    }
 }
 
 async fn probe_local_http(port: u16) -> std::result::Result<String, String> {
@@ -776,6 +764,12 @@ impl DeployFacade {
             };
         }
 
+        let package_json = self.read_package_json(server, &build_dir).await;
+        let nitro_server = package_json
+            .as_deref()
+            .is_some_and(docker::package_json_is_nitro_server);
+        let explicit_pack = matches!(req.build_pack.as_str(), "dockercompose" | "dockerfile");
+
         let extras = ContainerExtras {
             gpu_nvidia: req.gpu_nvidia,
             gpu_dri: req.gpu_dri,
@@ -785,7 +779,20 @@ impl DeployFacade {
             runtime: req.runtime.clone(),
         };
 
-        let build_ok = match req.build_pack.as_str() {
+        let build_ok = if nitro_server && !explicit_pack {
+            self.deploy_nitro_node(
+                server,
+                &build_dir,
+                &image,
+                &name,
+                port,
+                req.proxy_labels.as_ref(),
+                &mut logs,
+                &extras,
+            )
+            .await
+        } else {
+            match req.build_pack.as_str() {
             "dockercompose" => {
                 if extras.gpu_nvidia || extras.gpu_dri || extras.group_network.is_some() {
                     logs.push_str(
@@ -1034,17 +1041,14 @@ impl DeployFacade {
                     }
                 }
             }
+        }
         };
 
-        let build_ok = if build_ok {
-            true
-        } else {
+        if !build_ok {
             logs.push_str(
-                "[fallback] Docker build KO — tentative runtime Node local (dernier recours)\n",
+                "[fallback] image Docker non démarrée — pas de processus local (il ne crée pas de route publique)\n",
             );
-            self.try_local_node_runtime(server, &build_dir, port, &mut logs)
-                .await
-        };
+        }
 
         logs.push_str(if build_ok {
             "[devforge] deploy OK\n"
@@ -1056,6 +1060,68 @@ impl DeployFacade {
             ok: build_ok,
             git_sha: sha,
             logs,
+        }
+    }
+
+    async fn read_package_json(&self, server: &str, dir: &str) -> Option<String> {
+        let local = std::path::Path::new(dir).join("package.json");
+        if let Ok(text) = std::fs::read_to_string(&local) {
+            if !text.trim().is_empty() {
+                return Some(text);
+            }
+        }
+        match self.executor.exec(server, dir, "cat package.json", 20).await {
+            Ok(r) if r.ok && !r.output.trim().is_empty() => Some(r.output),
+            _ => None,
+        }
+    }
+
+    /// Nitro / TanStack Start : image Node qui écoute le port du projet.
+    /// Traefik cible ce port ; on ne publie pas 80/443 sur l’hôte.
+    async fn deploy_nitro_node(
+        &self,
+        server: &str,
+        build_dir: &str,
+        image: &str,
+        name: &str,
+        port: u16,
+        proxy_labels: Option<&serde_json::Value>,
+        logs: &mut String,
+        extras: &ContainerExtras,
+    ) -> bool {
+        logs.push_str(
+            "[nitro] serveur Node (TanStack Start / Nitro) — image node_server, pas nginx/dist\n",
+        );
+        let df = docker::nitro_node_dockerfile(port);
+        let cmd = docker::docker_build_from_content(image, &df);
+        match self.executor.exec(server, build_dir, &cmd, 900).await {
+            Ok(r) => {
+                logs.push_str(&format!(
+                    "[nitro-build] exit={} {}\n",
+                    r.exit_code,
+                    trim_out(&r.output)
+                ));
+                if r.ok {
+                    self.docker_restart_container(
+                        server,
+                        build_dir,
+                        name,
+                        image,
+                        port,
+                        port,
+                        proxy_labels,
+                        logs,
+                        extras,
+                    )
+                    .await
+                } else {
+                    false
+                }
+            }
+            Err(e) => {
+                logs.push_str(&format!("[nitro-build] error: {e}\n"));
+                false
+            }
         }
     }
 
@@ -1161,21 +1227,26 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             }
         }
 
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        match probe_local_http(port).await {
-            Ok(code) => {
-                logs.push_str(&format!("[local-node] probe http={code}\n"));
-                matches!(
-                    code.as_str(),
-                    "200" | "301" | "302" | "307" | "308" | "alive"
-                )
-            }
-            Err(e) => {
-                logs.push_str(&format!("[local-node] probe error: {e}\n"));
-                // Process may still be booting — accept if pid file exists and process alive
-                pid_is_alive(build_dir)
+        let mut refused = String::new();
+        for attempt in 1..=8 {
+            match probe_local_http(port).await {
+                Ok(code) => {
+                    logs.push_str(&format!("[local-node] probe http={code}\n"));
+                    return matches!(
+                        code.as_str(),
+                        "200" | "301" | "302" | "307" | "308" | "alive"
+                    );
+                }
+                Err(e) => {
+                    refused = e;
+                    if attempt < 8 {
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                }
             }
         }
+        logs.push_str(&format!("[local-node] probe error: {refused}\n"));
+        false
     }
 
     async fn docker_restart_container(
