@@ -80,6 +80,54 @@ pre {
   }
 }
 
+@keyframes df-invite-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(167 139 250 / 0);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgb(167 139 250 / 0.45);
+  }
+}
+
+@keyframes df-fiche-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes df-delta-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.df-invite {
+  animation: df-invite-ring 2.2s ease-in-out 2;
+}
+
+.df-fiche-in {
+  animation: df-fiche-in 0.28s ease both;
+}
+
+.df-delta-in {
+  animation: df-delta-in 0.32s ease both;
+}
+
+.df-delta-line {
+  animation: df-fiche-in 0.28s ease both;
+}
+
 @keyframes df-pulse-soft {
   0%,
   100% {
@@ -427,7 +475,11 @@ pre {
   .df-breathe,
   .df-status-spin,
   .df-status-live,
-  .df-status-fail {
+  .df-status-fail,
+  .df-invite,
+  .df-fiche-in,
+  .df-delta-in,
+  .df-delta-line {
     animation: none !important;
   }
 

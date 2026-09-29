@@ -1,6 +1,6 @@
 import type { ComponentChildren, JSX } from 'preact';
 import { cn } from '../../lib/cn';
-import { enterUp, interactiveLift, motion } from '../../lib/motion';
+import { enterUp, interactiveLift, motion, settleIn } from '../../lib/motion';
 
 /*
  * HubGrid / HubTile product rule (list hubs):
@@ -72,6 +72,8 @@ type HubTileProps = {
    * `auto` grandit avec le contenu pour ne pas recouvrir le titre de section.
    */
   layout?: 'square' | 'auto';
+  /** Pose courte dans la grille (accueil, catalogue). */
+  settle?: boolean;
 };
 
 export function HubTile({
@@ -87,6 +89,7 @@ export function HubTile({
   subtitle,
   footer,
   layout = 'square',
+  settle = false,
 }: HubTileProps) {
   const body = (
     <>
@@ -113,7 +116,8 @@ export function HubTile({
     footer && layout !== 'auto' ? 'justify-between sm:justify-center' : undefined,
     className,
   );
-  const animate = motion(enterUp(Math.min(index * 0.04, 0.28)), interactiveLift());
+  const enter = settle ? settleIn : enterUp;
+  const animate = motion(enter(Math.min(index * 0.045, 0.32)), interactiveLift());
 
   if (href) {
     return (
@@ -157,6 +161,7 @@ export function HubAddTile({
   index = 0,
   lines = 2,
   layout = 'square',
+  settle = false,
   onClick,
 }: {
   label?: string;
@@ -165,6 +170,7 @@ export function HubAddTile({
   lines?: 2 | 3;
   /** `auto` : même hauteur de ligne que les tuiles à contenu long, sans carré forcé. */
   layout?: 'square' | 'auto';
+  settle?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -175,7 +181,7 @@ export function HubAddTile({
         'group flex h-full min-h-[8.75rem] w-full cursor-pointer flex-col items-center gap-2 rounded-2xl border border-dashed border-white/15 bg-[#1c1c1e] px-2.5 py-3 transition-[background-color,border-color,box-shadow] duration-200 hover:border-white/30 hover:bg-[#252528] hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:gap-3 sm:px-3 sm:py-4',
         layout === 'auto' ? 'justify-start' : 'justify-center sm:aspect-square sm:min-h-0',
       )}
-      animate={motion(enterUp(Math.min(index * 0.04, 0.28)), interactiveLift())}
+      animate={motion((settle ? settleIn : enterUp)(Math.min(index * 0.045, 0.32)), interactiveLift())}
     >
       <div class="flex h-16 w-16 shrink-0 items-center justify-center rounded-[1.15rem] border border-dashed border-white/20 text-[var(--color-ink-muted)] transition group-hover:scale-[1.03] group-hover:border-white/30 group-hover:text-white sm:h-[4.5rem] sm:w-[4.5rem]">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden>

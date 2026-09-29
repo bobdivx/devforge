@@ -529,6 +529,11 @@ impl GitHubClient for HttpGitHubClient {
                         .and_then(|u| u.as_str())
                         .unwrap_or("")
                         .to_string(),
+                    body: r
+                        .get("body")
+                        .and_then(|b| b.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                 })
             })
             .collect())

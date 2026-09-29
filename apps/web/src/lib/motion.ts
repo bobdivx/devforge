@@ -41,6 +41,24 @@ export function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+/**
+ * Les tuiles se posent dans la grille : court, un peu de scale, puis le repos.
+ * Pas de boucle.
+ */
+export function settleIn(delay = 0): AnimateLifecycleProps | undefined {
+  if (prefersReducedMotion()) return undefined;
+  return {
+    initial: { opacity: '0', transform: 'translateY(14px) scale(0.96)' },
+    enter: {
+      opacity: 1,
+      transform: 'translateY(0px) scale(1)',
+      duration: 0.38,
+      delay,
+      ease: EASE_OUT,
+    },
+  };
+}
+
 /** Entrée bien visible (opacity + translateY). */
 export function enterUp(delay = 0): AnimateLifecycleProps | undefined {
   if (prefersReducedMotion()) return undefined;

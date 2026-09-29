@@ -1,0 +1,10 @@
+---
+if (!import.meta.env.DEV) {
+  return Astro.redirect('/');
+}
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { FluxPreview } from '../../components/FluxPreview';
+---
+<BaseLayout title="Flux · DevForge">
+  <FluxPreview client:only="preact" />
+</BaseLayout>

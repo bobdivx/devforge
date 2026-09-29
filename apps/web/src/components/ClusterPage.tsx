@@ -4,6 +4,9 @@ import { api, type ClusterDiscoveredPeer, type ClusterInvite, type ClusterNode, 
 import { nodeRoleLabel, resolveNode } from '../lib/cluster-display';
 import { projectStatusMeta } from '../lib/status';
 import { AppShell } from './AppShell';
+import { DiagFiches } from './DiagFiches';
+import { ModelSentence } from './ModelSentence';
+import { VersionDelta } from './VersionDelta';
 import {
   Alert,
   Badge,
@@ -288,6 +291,7 @@ function ClusterInner() {
     expires_at: string;
   } | null>(null);
   const [latest, setLatest] = useState<string | null>(null);
+  const [latestNotes, setLatestNotes] = useState<string[]>([]);
   const [updating, setUpdating] = useState<Record<string, string>>({});
   const updateFailed = useRef(new Set<string>());
   const [forges, setForges] = useState<Project[]>([]);
@@ -329,6 +333,7 @@ function ClusterInner() {
       setInvites(i?.invites ?? []);
       setForges(p?.data ?? []);
       if (chk?.data?.latest) setLatest(chk.data.latest.replace(/^v/, ''));
+      setLatestNotes(chk?.data?.notes?.filter(Boolean) ?? []);
       const lat = chk?.data?.latest?.replace(/^v/, '') || latest;
       setUpdating((cur) => {
         const next = { ...cur };
@@ -885,6 +890,11 @@ function ClusterInner() {
                 ? ` · ${workersBehind.length} en retard`
                 : ''}
             </p>
+            {workersBehind.length > 0 && latest && latestNotes.length > 0 && (
+              <div class="mt-3 max-w-md">
+                <VersionDelta version={latest} notes={latestNotes} />
+              </div>
+            )}
           </div>
           <div class="flex flex-wrap items-center gap-2">
             {workersBehind.length > 0 && (
@@ -1343,6 +1353,7 @@ function ClusterInner() {
 
             {tab === 'info' && (
               <div class="space-y-3 text-sm">
+                <ModelSentence />
                 <Alert tone={isLeader(selected) ? 'info' : 'ok'}>
                   {isLeader(selected)
                     ? 'Control plane : UI, API, SQLite. Les forges ciblées ici tournent sur cette machine. Pas de copie automatique vers les workers.'
@@ -1410,6 +1421,9 @@ function ClusterInner() {
                       : ''}
                     {latest && nodeBehind(selected, latest) ? ` (cible v${latest})` : ''}
                   </p>
+                )}
+                {latest && nodeBehind(selected, latest) && (
+                  <VersionDelta version={latest} notes={latestNotes} />
                 )}
                 {updating[selected.id] && (
                   <Alert tone="info">
@@ -1557,9 +1571,12 @@ function ClusterInner() {
                   Capturer uptime / disque / docker
                 </Button>
                 {logs && (
-                  <pre class="max-h-80 overflow-auto rounded-xl bg-black/40 p-3 font-mono text-xs whitespace-pre-wrap">
-                    {logs}
-                  </pre>
+                  <>
+                    <DiagFiches text={logs} />
+                    <pre class="max-h-80 overflow-auto rounded-xl bg-black/40 p-3 font-mono text-xs whitespace-pre-wrap">
+                      {logs}
+                    </pre>
+                  </>
                 )}
               </div>
             )}

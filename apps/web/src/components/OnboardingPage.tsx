@@ -18,10 +18,16 @@ import {
   ToastProvider,
 } from './ui';
 
-type StepId = 'welcome' | 'instance' | 'domain' | 'github' | 'finish';
+type Door = 'choose' | 'fast' | 'custom';
+type StepId = 'docker' | 'suite' | 'instance' | 'domain' | 'github' | 'finish';
 
-const STEPS: { id: StepId; label: string }[] = [
-  { id: 'welcome', label: 'Accueil' },
+const FAST_STEPS: { id: StepId; label: string }[] = [
+  { id: 'docker', label: 'Docker' },
+  { id: 'domain', label: 'Domaine' },
+  { id: 'suite', label: 'Première app' },
+];
+
+const CUSTOM_STEPS: { id: StepId; label: string }[] = [
   { id: 'instance', label: 'Instance' },
   { id: 'domain', label: 'Domaine' },
   { id: 'github', label: 'GitHub' },
@@ -38,9 +44,10 @@ export function OnboardingPage() {
   );
 }
 
-function OnboardingWizard() {
+export function OnboardingWizard() {
   const toast = useToast();
-  const [step, setStep] = useState<StepId>('welcome');
+  const [door, setDoor] = useState<Door>('choose');
+  const [step, setStep] = useState<StepId>('docker');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [boot, setBoot] = useState<Bootstrap | null>(null);
@@ -52,8 +59,9 @@ function OnboardingWizard() {
   const [joinMode, setJoinMode] = useState(false);
   const [docker, setDocker] = useState<DockerEngineInfo | null>(null);
 
-  const idx = STEPS.findIndex((s) => s.id === step);
-  const progress = Math.round(((idx + 1) / STEPS.length) * 100);
+  const steps = door === 'fast' ? FAST_STEPS : CUSTOM_STEPS;
+  const idx = Math.max(0, steps.findIndex((s) => s.id === step));
+  const progress = door === 'choose' ? 0 : Math.round(((idx + 1) / steps.length) * 100);
 
   useEffect(() => {
     api.bootstrap().then((b) => {
@@ -86,7 +94,11 @@ function OnboardingWizard() {
     }
   }
 
-  async function next() {
+  function domainOk() {
+    return domain.trim().includes('.');
+  }
+
+  async function nextCustom() {
     try {
       if (step === 'instance') {
         if (!instanceName.trim() || !instanceUrl.trim()) {
@@ -99,7 +111,7 @@ function OnboardingWizard() {
         });
       }
       if (step === 'domain') {
-        if (!domain.trim() || !domain.includes('.')) {
+        if (!domainOk()) {
           setError('Domaine invalide (ex. apps.example.com)');
           return;
         }
@@ -110,14 +122,14 @@ function OnboardingWizard() {
           await savePartial({ github_token: githubToken });
         }
       }
-      const nextStep = STEPS[idx + 1];
+      const nextStep = steps[idx + 1];
       if (nextStep) setStep(nextStep.id);
     } catch {
       /* error already set */
     }
   }
 
-  async function finish() {
+  async function finishCustom() {
     setBusy(true);
     setError(null);
     try {
@@ -130,23 +142,53 @@ function OnboardingWizard() {
     }
   }
 
-  function skip() {
-    const nextStep = STEPS[idx + 1];
-    if (nextStep) setStep(nextStep.id);
+  async function finishFast() {
+    if (!domainOk()) {
+      setError('Domaine invalide (ex. apps.example.com)');
+      setStep('domain');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.saveOnboarding({
+        instance_name: instanceName.trim() || 'DevForge',
+        instance_url: instanceUrl.trim() || 'http://localhost:8000',
+        wildcard_domain: domain.trim(),
+      });
+      await api.completeOnboarding();
+      window.location.href = '/app?nouvelle=1';
+    } catch (e) {
+      setError(String((e as Error).message || e));
+      setBusy(false);
+    }
+  }
+
+  function skipGithub() {
+    setStep('finish');
+  }
+
+  function choose(next: Door) {
+    setError(null);
+    setJoinMode(false);
+    setDoor(next);
+    setStep(next === 'fast' ? 'docker' : 'instance');
   }
 
   return (
     <div class="mx-auto flex min-h-screen max-w-xl flex-col justify-center px-4 py-12">
       <FadeIn>
-        <div class="mb-6">
-          <div class="mb-2 flex items-center justify-between text-xs text-[var(--color-ink-faint)]">
-            <span>
-              {idx + 1} / {STEPS.length}
-            </span>
-            <span>{STEPS[idx]?.label}</span>
+        {door !== 'choose' && (
+          <div class="mb-6">
+            <div class="mb-2 flex items-center justify-between text-xs text-[var(--color-ink-faint)]">
+              <span>
+                {idx + 1} / {steps.length}
+              </span>
+              <span>{steps[idx]?.label}</span>
+            </div>
+            <ProgressBar value={progress} />
           </div>
-          <ProgressBar value={progress} />
-        </div>
+        )}
 
         <Card padding="lg">
           {error && (
@@ -155,19 +197,41 @@ function OnboardingWizard() {
             </Alert>
           )}
 
-          {step === 'welcome' && !joinMode && (
-            <div class="space-y-4">
+          {door === 'choose' && !joinMode && (
+            <div class="space-y-4" data-df-doors>
               <h1 class="text-2xl font-semibold tracking-tight">
                 Salut{boot?.user ? `, ${boot.user.name}` : ''}
               </h1>
               <p class="text-sm leading-relaxed text-[var(--color-ink-muted)]">
-                Instance, domaine apps, GitHub. Les déploiements PaaS utilisent Docker installé sur
-                cette machine — pas embarqué dans l’exécutable.
+                Deux portes. Le démarrage rapide enchaîne le minimum, puis la première app.
               </p>
-              <DockerEngineAlert docker={docker} />
-              <Button onClick={next} class="w-full">
-                Créer une instance
-              </Button>
+              <button
+                type="button"
+                class="df-invite group w-full rounded-2xl border border-[var(--color-accent)]/40 bg-[var(--color-accent-soft)] p-4 text-left"
+                data-df-door="fast"
+                onClick={() => choose('fast')}
+              >
+                <div class="flex items-center gap-2">
+                  <span class="text-base font-semibold">Démarrage rapide</span>
+                  <Badge tone="accent">Recommandé</Badge>
+                </div>
+                <ol class="mt-2 space-y-1 text-sm text-[var(--color-ink-muted)]">
+                  <li>1 · Docker</li>
+                  <li>2 · Domaine</li>
+                  <li>3 · Première app, dans le workspace</li>
+                </ol>
+              </button>
+              <button
+                type="button"
+                class="w-full rounded-2xl border border-[var(--color-line)] p-4 text-left hover:border-white/20"
+                data-df-door="custom"
+                onClick={() => choose('custom')}
+              >
+                <div class="text-base font-semibold">Instance et cluster</div>
+                <p class="mt-1 text-sm text-[var(--color-ink-muted)]">
+                  Nom, URL, domaine, GitHub. Tu peux sauter GitHub.
+                </p>
+              </button>
               <Button
                 variant="outline"
                 class="w-full"
@@ -181,7 +245,7 @@ function OnboardingWizard() {
             </div>
           )}
 
-          {step === 'welcome' && joinMode && (
+          {joinMode && (
             <div class="space-y-4">
               <h1 class="text-2xl font-semibold tracking-tight">Rejoindre un cluster</h1>
               <p class="text-sm text-[var(--color-ink-muted)]">
@@ -221,7 +285,82 @@ function OnboardingWizard() {
             </div>
           )}
 
-          {step === 'instance' && (
+          {door === 'fast' && step === 'docker' && (
+            <div class="space-y-4">
+              <h2 class="text-xl font-semibold tracking-tight">1 · Docker</h2>
+              <p class="text-sm text-[var(--color-ink-muted)]">
+                Les déploiements utilisent Docker sur cette machine. Il n’est pas embarqué.
+              </p>
+              <DockerEngineAlert docker={docker} />
+              {docker && docker.ok === false && (
+                <ul class="space-y-1 text-sm text-[var(--color-ink-muted)]">
+                  <li>Vérifie que le service Docker tourne.</li>
+                  <li>Recharge cette page une fois le moteur joignable.</li>
+                </ul>
+              )}
+              <div class="flex gap-2">
+                <Button variant="ghost" onClick={() => setDoor('choose')}>
+                  Retour
+                </Button>
+                <Button class="flex-1" onClick={() => setStep('domain')}>
+                  Continuer
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {door === 'fast' && step === 'domain' && (
+            <div class="space-y-4">
+              <h2 class="text-xl font-semibold tracking-tight">2 · Domaine</h2>
+              <p class="text-sm text-[var(--color-ink-muted)]">
+                Les apps seront servies sous <code>*.ton-domaine</code>
+              </p>
+              <Input
+                label="Wildcard"
+                placeholder="apps.example.com"
+                value={domain}
+                onInput={(e) => setDomain((e.target as HTMLInputElement).value)}
+              />
+              <div class="flex gap-2">
+                <Button variant="ghost" onClick={() => setStep('docker')}>
+                  Retour
+                </Button>
+                <Button
+                  class="flex-1"
+                  onClick={() => {
+                    if (!domainOk()) {
+                      setError('Domaine invalide (ex. apps.example.com)');
+                      return;
+                    }
+                    setError(null);
+                    setStep('suite');
+                  }}
+                >
+                  Continuer
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {door === 'fast' && step === 'suite' && (
+            <div class="space-y-4">
+              <h2 class="text-xl font-semibold tracking-tight">3 · Première app</h2>
+              <p class="text-sm text-[var(--color-ink-muted)]">
+                Importe un dépôt ou décris l’app. Tu arrives dans le workspace.
+              </p>
+              <div class="flex gap-2">
+                <Button variant="ghost" onClick={() => setStep('domain')}>
+                  Retour
+                </Button>
+                <Button class="flex-1" disabled={busy} onClick={finishFast}>
+                  {busy ? <Spinner /> : null}
+                  Ouvrir la première app
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {door === 'custom' && step === 'instance' && (
             <div class="space-y-4">
               <h2 class="text-xl font-semibold tracking-tight">Ton instance</h2>
               <Input
@@ -236,10 +375,10 @@ function OnboardingWizard() {
                 hint="Ex. https://forge.example.com"
               />
               <div class="flex gap-2">
-                <Button variant="ghost" onClick={() => setStep('welcome')}>
+                <Button variant="ghost" onClick={() => setDoor('choose')}>
                   Retour
                 </Button>
-                <Button class="flex-1" disabled={busy} onClick={next}>
+                <Button class="flex-1" disabled={busy} onClick={nextCustom}>
                   {busy ? <Spinner /> : null}
                   Continuer
                 </Button>
@@ -247,7 +386,7 @@ function OnboardingWizard() {
             </div>
           )}
 
-          {step === 'domain' && (
+          {door === 'custom' && step === 'domain' && (
             <div class="space-y-4">
               <h2 class="text-xl font-semibold tracking-tight">Domaine apps</h2>
               <p class="text-sm text-[var(--color-ink-muted)]">
@@ -263,7 +402,7 @@ function OnboardingWizard() {
                 <Button variant="ghost" onClick={() => setStep('instance')}>
                   Retour
                 </Button>
-                <Button class="flex-1" disabled={busy} onClick={next}>
+                <Button class="flex-1" disabled={busy} onClick={nextCustom}>
                   {busy ? <Spinner /> : null}
                   Continuer
                 </Button>
@@ -271,7 +410,7 @@ function OnboardingWizard() {
             </div>
           )}
 
-          {step === 'github' && (
+          {door === 'custom' && step === 'github' && (
             <div class="space-y-4">
               <h2 class="text-xl font-semibold tracking-tight">GitHub</h2>
               <p class="text-sm text-[var(--color-ink-muted)]">
@@ -294,10 +433,10 @@ function OnboardingWizard() {
                 <Button variant="ghost" onClick={() => setStep('domain')}>
                   Retour
                 </Button>
-                <Button variant="outline" onClick={skip}>
+                <Button variant="outline" onClick={skipGithub}>
                   Plus tard
                 </Button>
-                <Button class="flex-1" disabled={busy} onClick={next}>
+                <Button class="flex-1" disabled={busy} onClick={nextCustom}>
                   {busy ? <Spinner /> : null}
                   Continuer
                 </Button>
@@ -305,7 +444,7 @@ function OnboardingWizard() {
             </div>
           )}
 
-          {step === 'finish' && (
+          {door === 'custom' && step === 'finish' && (
             <div class="space-y-4">
               <h2 class="text-xl font-semibold tracking-tight">Tout est en place</h2>
               <ul class="space-y-2 text-sm text-[var(--color-ink-muted)]">
@@ -330,7 +469,7 @@ function OnboardingWizard() {
                 <Button variant="ghost" onClick={() => setStep('github')}>
                   Retour
                 </Button>
-                <Button class="flex-1" disabled={busy} onClick={finish}>
+                <Button class="flex-1" disabled={busy} onClick={finishCustom}>
                   {busy ? <Spinner /> : null}
                   Ouvrir DevForge
                 </Button>

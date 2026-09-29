@@ -70,8 +70,11 @@ function countEnvKeys(content: string): number {
 
 export function NewGithubAppWizard({
   bare = false,
+  landInWorkspace = false,
 }: {
   bare?: boolean;
+  /** Porte recommandée : après création, ouvrir le workspace. */
+  landInWorkspace?: boolean;
 } = {}) {
   const toast = useToast();
   const [step, setStep] = useState<Step>('repo');
@@ -257,7 +260,8 @@ export function NewGithubAppWizard({
         detail: p.data.production_url || productionUrl || `${selected.full_name}@${branch}`,
         tone: 'ok',
       });
-      window.location.href = `/app/projects/view?uuid=${encodeURIComponent(p.data.uuid)}&tab=overview`;
+      const tab = landInWorkspace ? 'workspace' : 'overview';
+      window.location.href = `/app/projects/view?uuid=${encodeURIComponent(p.data.uuid)}&tab=${tab}`;
     } catch (e) {
       setError(String((e as Error).message || e));
       setBusy(false);

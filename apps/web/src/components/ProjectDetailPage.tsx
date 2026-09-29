@@ -7,6 +7,7 @@ import { projectNavMore, projectNavPrimary } from '../lib/nav';
 import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { AppIcon, statusDotClass } from './AppIcon';
 import { AppShell } from './AppShell';
+import { ModelSentence } from './ModelSentence';
 import { ProjectAgentsHub } from './ProjectAgentsHub';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
 import { ProjectGitPanel } from './ProjectGitPanel';
@@ -1003,6 +1004,8 @@ function ProjectOverview({
             </div>
           </div>
         </div>
+
+        <ModelSentence />
 
         <ProjectGroupSuggest project={project} onJoined={onProject} />
 

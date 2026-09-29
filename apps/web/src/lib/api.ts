@@ -1361,6 +1361,7 @@ export const api = {
         mode: string;
         repo: string;
         message: string;
+        notes?: string[] | null;
       };
       job?: {
         id: string;
