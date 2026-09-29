@@ -111,6 +111,68 @@ fn running_in_container() -> bool {
             .unwrap_or(false)
 }
 
+/// Indices runtime pour ne pas envoyer un nœud Docker/compose vers l’installeur.
+struct RuntimeHints {
+    flatpak: bool,
+    in_container: bool,
+    /// `DEVFORGE_UPDATE_COMPOSE_FILE` est défini (USB : `/opt/devforge/docker-compose.yml`).
+    compose_file_explicit: bool,
+    /// Le fichier compose référence l’image `bobdivx/devforge` (ou GHCR).
+    compose_file_is_devforge: bool,
+    self_container_set: bool,
+}
+
+fn runtime_hints(config: &UpdateConfig) -> RuntimeHints {
+    let explicit = std::env::var("DEVFORGE_UPDATE_COMPOSE_FILE")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let path = explicit
+        .clone()
+        .unwrap_or_else(|| config.compose_file.clone());
+    RuntimeHints {
+        flatpak: std::env::var_os("FLATPAK_ID").is_some(),
+        in_container: running_in_container(),
+        compose_file_explicit: explicit.is_some(),
+        compose_file_is_devforge: compose_file_is_devforge(Path::new(&path)),
+        self_container_set: std::env::var("DEVFORGE_SELF_CONTAINER")
+            .ok()
+            .is_some_and(|s| !s.trim().is_empty()),
+    }
+}
+
+fn compose_file_is_devforge(path: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let lower = text.to_ascii_lowercase();
+    lower.contains("bobdivx/devforge")
+        || (lower.contains("ghcr.io/") && lower.contains("/devforge"))
+}
+
+/// Windows / Flatpak restent sur l’installeur GitHub.
+/// Un nœud USB ou Docker (même si le mode configuré est `binary`) passe par
+/// `docker compose pull` ou `docker pull`, jamais par le 404 des assets.
+fn effective_update_mode(configured: UpdateMode, hints: &RuntimeHints) -> UpdateMode {
+    if hints.flatpak {
+        return UpdateMode::Binary;
+    }
+    match configured {
+        UpdateMode::Compose => UpdateMode::Compose,
+        UpdateMode::Docker => UpdateMode::Docker,
+        UpdateMode::Binary => {
+            if hints.compose_file_explicit && (hints.compose_file_is_devforge || hints.in_container)
+            {
+                UpdateMode::Compose
+            } else if hints.in_container || hints.self_container_set {
+                UpdateMode::Docker
+            } else {
+                UpdateMode::Binary
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StepStatus {
@@ -438,17 +500,20 @@ impl UpdateFacade {
         )
         .await?;
 
+        // Le mode effectif peut différer du mode configuré : un nœud USB / compose
+        // (image bobdivx/devforge) ne doit jamais chercher un .exe ou un Flatpak.
+        let mode = effective_update_mode(self.config.mode, &runtime_hints(&self.config));
         self.set_step(
             job_id,
             "prepare",
             StepStatus::Running,
-            &format!("Mode {}…", self.config.mode.as_str()),
+            &format!("Mode {}…", mode.as_str()),
         )
         .await?;
 
-        let downloaded = match self.config.mode {
+        let downloaded = match mode {
             UpdateMode::Compose | UpdateMode::Docker => {
-                self.run_container_pipeline(job_id, target).await?;
+                self.run_container_pipeline(job_id, target, mode).await?;
                 None
             }
             UpdateMode::Binary => Some(self.run_binary_pipeline(job_id, target).await?),
@@ -486,7 +551,12 @@ impl UpdateFacade {
         Ok(())
     }
 
-    async fn run_container_pipeline(&self, job_id: &str, target: &str) -> Result<()> {
+    async fn run_container_pipeline(
+        &self,
+        job_id: &str,
+        target: &str,
+        mode: UpdateMode,
+    ) -> Result<()> {
         let probe = self
             .executor
             .exec(
@@ -513,7 +583,7 @@ impl UpdateFacade {
         self.set_step(job_id, "pull", StepStatus::Running, "Pull image…")
             .await?;
 
-        let pull_cmd = if self.config.mode == UpdateMode::Compose {
+        let pull_cmd = if mode == UpdateMode::Compose {
             compose_cmd(
                 &self.config.compose_file,
                 target,
@@ -547,7 +617,7 @@ impl UpdateFacade {
         self.set_step(job_id, "apply", StepStatus::Running, "Recréation…")
             .await?;
 
-        if self.config.mode == UpdateMode::Compose {
+        if mode == UpdateMode::Compose {
             let apply_cmd = compose_cmd(
                 &self.config.compose_file,
                 target,
@@ -2177,6 +2247,79 @@ mod tests {
         assert_eq!(traefik_host_dir_from_mounts(&vol, "/data"), None);
         assert_eq!(traefik_host_dir_from_mounts(&json!([]), "/data"), None);
         assert_eq!(traefik_host_dir_from_mounts(&Value::Null, "/data"), None);
+    }
+
+    fn usb_compose_hints() -> RuntimeHints {
+        RuntimeHints {
+            flatpak: false,
+            in_container: true,
+            compose_file_explicit: true,
+            compose_file_is_devforge: true,
+            self_container_set: true,
+        }
+    }
+
+    #[test]
+    fn usb_compose_file_points_at_hub_image() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy/usb/compose.yml");
+        assert!(
+            compose_file_is_devforge(&path),
+            "deploy/usb/compose.yml doit publier bobdivx/devforge"
+        );
+    }
+
+    #[test]
+    fn usb_compose_node_uses_compose_pull_not_installer() {
+        let hints = usb_compose_hints();
+        assert_eq!(
+            effective_update_mode(UpdateMode::Compose, &hints),
+            UpdateMode::Compose
+        );
+        // Mode mal étiqueté `binary` (web à côté du binaire) : quand même compose.
+        assert_eq!(
+            effective_update_mode(UpdateMode::Binary, &hints),
+            UpdateMode::Compose
+        );
+    }
+
+    #[test]
+    fn docker_worker_uses_image_pull_not_installer() {
+        let hints = RuntimeHints {
+            flatpak: false,
+            in_container: true,
+            compose_file_explicit: false,
+            compose_file_is_devforge: false,
+            self_container_set: true,
+        };
+        assert_eq!(
+            effective_update_mode(UpdateMode::Binary, &hints),
+            UpdateMode::Docker
+        );
+        assert_eq!(
+            effective_update_mode(UpdateMode::Docker, &hints),
+            UpdateMode::Docker
+        );
+    }
+
+    #[test]
+    fn windows_and_flatpak_keep_installer_lookup() {
+        let windows = RuntimeHints {
+            flatpak: false,
+            in_container: false,
+            compose_file_explicit: false,
+            compose_file_is_devforge: false,
+            self_container_set: false,
+        };
+        assert_eq!(
+            effective_update_mode(UpdateMode::Binary, &windows),
+            UpdateMode::Binary
+        );
+        let mut flatpak = usb_compose_hints();
+        flatpak.flatpak = true;
+        assert_eq!(
+            effective_update_mode(UpdateMode::Binary, &flatpak),
+            UpdateMode::Binary
+        );
     }
 
     #[test]
