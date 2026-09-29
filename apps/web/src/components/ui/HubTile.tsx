@@ -13,10 +13,13 @@ import { enterUp, interactiveLift, motion } from '../../lib/motion';
  */
 
 const TILE_CLASS =
-  'group flex min-h-[8.75rem] cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 text-center ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:aspect-square sm:min-h-0 sm:gap-3 sm:px-3 sm:py-4';
+  'group flex h-full min-h-[8.75rem] w-full cursor-pointer flex-col items-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 text-center ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:gap-3 sm:px-3 sm:py-4';
+
+const TILE_SQUARE = 'justify-center sm:aspect-square sm:min-h-0';
+const TILE_AUTO = 'justify-start';
 
 const ICON_WRAP =
-  'relative flex h-16 w-16 items-center justify-center rounded-[1.15rem] bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition-transform duration-200 ease-out group-hover:scale-[1.06] sm:h-[4.5rem] sm:w-[4.5rem]';
+  'relative flex h-16 w-16 shrink-0 items-center justify-center rounded-[1.15rem] bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition-transform duration-200 ease-out group-hover:scale-[1.06] sm:h-[4.5rem] sm:w-[4.5rem]';
 
 type HubGridProps = {
   class?: string;
@@ -64,6 +67,11 @@ type HubTileProps = {
    * When set, the tile renders as a div (role=button) to avoid nested buttons.
    */
   footer?: ComponentChildren;
+  /**
+   * `square` garde le carré des hubs courts.
+   * `auto` grandit avec le contenu pour ne pas recouvrir le titre de section.
+   */
+  layout?: 'square' | 'auto';
 };
 
 export function HubTile({
@@ -78,6 +86,7 @@ export function HubTile({
   iconClass,
   subtitle,
   footer,
+  layout = 'square',
 }: HubTileProps) {
   const body = (
     <>
@@ -85,7 +94,7 @@ export function HubTile({
         {icon}
         {badge}
       </div>
-      <div class="w-full min-w-0">
+      <div class="w-full min-w-0 shrink-0">
         <div class="truncate text-[13px] font-medium text-white sm:text-sm">{title}</div>
         {subtitle ??
           (description ? (
@@ -98,7 +107,12 @@ export function HubTile({
     </>
   );
 
-  const shared = cn(TILE_CLASS, footer ? 'justify-between sm:justify-center' : undefined, className);
+  const shared = cn(
+    TILE_CLASS,
+    layout === 'auto' ? TILE_AUTO : TILE_SQUARE,
+    footer && layout !== 'auto' ? 'justify-between sm:justify-center' : undefined,
+    className,
+  );
   const animate = motion(enterUp(Math.min(index * 0.04, 0.28)), interactiveLift());
 
   if (href) {
@@ -142,19 +156,25 @@ export function HubAddTile({
   label = 'Ajouter',
   index = 0,
   lines = 2,
+  layout = 'square',
   onClick,
 }: {
   label?: string;
   index?: number;
   /** Lignes de texte à réserver pour aligner l’icône sur les tuiles voisines. */
   lines?: 2 | 3;
+  /** `auto` : même hauteur de ligne que les tuiles à contenu long, sans carré forcé. */
+  layout?: 'square' | 'auto';
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      class="group flex min-h-[8.75rem] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-white/15 bg-[#1c1c1e] px-2.5 py-3 transition-[background-color,border-color,box-shadow] duration-200 hover:border-white/30 hover:bg-[#252528] hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:aspect-square sm:min-h-0 sm:gap-3 sm:px-3 sm:py-4"
+      class={cn(
+        'group flex h-full min-h-[8.75rem] w-full cursor-pointer flex-col items-center gap-2 rounded-2xl border border-dashed border-white/15 bg-[#1c1c1e] px-2.5 py-3 transition-[background-color,border-color,box-shadow] duration-200 hover:border-white/30 hover:bg-[#252528] hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:gap-3 sm:px-3 sm:py-4',
+        layout === 'auto' ? 'justify-start' : 'justify-center sm:aspect-square sm:min-h-0',
+      )}
       animate={motion(enterUp(Math.min(index * 0.04, 0.28)), interactiveLift())}
     >
       <div class="flex h-16 w-16 shrink-0 items-center justify-center rounded-[1.15rem] border border-dashed border-white/20 text-[var(--color-ink-muted)] transition group-hover:scale-[1.03] group-hover:border-white/30 group-hover:text-white sm:h-[4.5rem] sm:w-[4.5rem]">
