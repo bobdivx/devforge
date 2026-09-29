@@ -19,6 +19,7 @@ pub enum FrameworkKind {
     Remix,
     Astro,
     ViteStatic,
+    Nitro,
     NestJs,
     Express,
     Node,
@@ -670,6 +671,32 @@ fn detect_node(pkg: &Value, evidence: &mut Vec<String>) -> NodeHit {
             }],
         };
     }
+    if dep_has(pkg, "nitro")
+        || dep_has(pkg, "@tanstack/react-start")
+        || dep_has(pkg, "@tanstack/start")
+    {
+        evidence.push("dep:nitro".into());
+        let tanstack =
+            dep_has(pkg, "@tanstack/react-start") || dep_has(pkg, "@tanstack/start");
+        return NodeHit {
+            framework: FrameworkKind::Nitro,
+            label: if tanstack {
+                "TanStack Start (Nitro)".into()
+            } else {
+                "Nitro".into()
+            },
+            confidence: 0.9,
+            build_pack: "nixpacks".into(),
+            port: 3000,
+            is_static: false,
+            publish_directory: None,
+            test_command,
+            hints: vec![
+                "Serveur Node — pas un site statique. Publication : node .output/server/index.mjs."
+                    .into(),
+            ],
+        };
+    }
     if dep_has(pkg, "@nestjs/core") {
         evidence.push("dep:nestjs".into());
         return NodeHit {
@@ -1012,6 +1039,24 @@ mod tests {
         let d = detect(&tree);
         assert_eq!(d.framework, FrameworkKind::DockerCompose);
         assert_eq!(d.build_pack, "dockercompose");
+    }
+
+    #[test]
+    fn detects_tanstack_nitro_not_static() {
+        let mut tree = FileTree::new();
+        tree.insert(
+            "package.json".into(),
+            Some(
+                r#"{"dependencies":{"vite":"^8.0.0","nitro":"3.0.0","@tanstack/react-start":"1.0.0"}}"#
+                    .into(),
+            ),
+        );
+        let d = detect(&tree);
+        assert_eq!(d.framework, FrameworkKind::Nitro);
+        assert!(!d.is_static, "Nitro / TanStack Start n’est pas un site statique");
+        assert_eq!(d.build_pack, "nixpacks");
+        assert_eq!(d.port, 3000);
+        assert!(d.publish_directory.is_none());
     }
 
     #[test]
