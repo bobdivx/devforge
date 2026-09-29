@@ -188,7 +188,7 @@ function GroupBody({ uuid }: { uuid: string }) {
                 index={index}
               />
             ))}
-            <HubAddTile index={group.members.length} label="Ajouter" onClick={() => setAddOpen(true)} />
+            <HubAddTile index={group.members.length} label="Ajouter" lines={3} onClick={() => setAddOpen(true)} />
           </HubGrid>
         )
       )}
@@ -370,17 +370,17 @@ function MemberTile({
           class={cn(
             'absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full ring-2 ring-[#1c1c1e]',
             statusDotClass(status.tone),
-            status.tone === 'ok' || status.tone === 'warn' ? 'animate-pulse' : '',
+            status.tone === 'warn' ? 'animate-pulse' : '',
           )}
           title={status.label}
           aria-hidden
         />
       }
       subtitle={
-        <div class="mt-1 space-y-0.5">
+        <div class="mt-1">
           <div
             class={cn(
-              'text-[11px] font-medium',
+              'text-[11px] font-medium leading-[14px]',
               status.tone === 'ok' && 'text-[var(--color-ok)]',
               status.tone === 'warn' && 'text-[var(--color-warn)]',
               status.tone === 'danger' && 'text-[var(--color-danger)]',
@@ -389,7 +389,9 @@ function MemberTile({
           >
             {status.label}
           </div>
-          <div class="truncate text-[10px] text-[var(--color-ink-faint)]">{roleLabel(member.role)}</div>
+          <div class="mt-0.5 truncate text-[10px] leading-[14px] text-[var(--color-ink-faint)]">
+            {roleLabel(member.role)}
+          </div>
         </div>
       }
     />

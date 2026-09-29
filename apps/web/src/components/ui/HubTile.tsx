@@ -141,10 +141,13 @@ export function HubTile({
 export function HubAddTile({
   label = 'Ajouter',
   index = 0,
+  lines = 2,
   onClick,
 }: {
   label?: string;
   index?: number;
+  /** Lignes de texte à réserver pour aligner l’icône sur les tuiles voisines. */
+  lines?: 2 | 3;
   onClick: () => void;
 }) {
   return (
@@ -154,7 +157,7 @@ export function HubAddTile({
       class="group flex min-h-[8.75rem] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-white/15 bg-[#1c1c1e] px-2.5 py-3 transition-[background-color,border-color,box-shadow] duration-200 hover:border-white/30 hover:bg-[#252528] hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:aspect-square sm:min-h-0 sm:gap-3 sm:px-3 sm:py-4"
       animate={motion(enterUp(Math.min(index * 0.04, 0.28)), interactiveLift())}
     >
-      <div class="flex h-16 w-16 items-center justify-center rounded-[1.15rem] border border-dashed border-white/20 text-[var(--color-ink-muted)] transition group-hover:scale-[1.03] group-hover:border-white/30 group-hover:text-white sm:h-[4.5rem] sm:w-[4.5rem]">
+      <div class="flex h-16 w-16 shrink-0 items-center justify-center rounded-[1.15rem] border border-dashed border-white/20 text-[var(--color-ink-muted)] transition group-hover:scale-[1.03] group-hover:border-white/30 group-hover:text-white sm:h-[4.5rem] sm:w-[4.5rem]">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden>
           <path d="M12 5v14M5 12h14" stroke-linecap="round" />
         </svg>
@@ -163,9 +166,14 @@ export function HubAddTile({
         <div class="text-sm font-medium text-[var(--color-ink-muted)] group-hover:text-white">
           {label}
         </div>
-        <div class="mt-1 text-[11px] font-medium text-transparent" aria-hidden>
+        <div class="mt-1 text-[11px] font-medium leading-[14px] text-transparent" aria-hidden>
           &nbsp;
         </div>
+        {lines > 2 ? (
+          <div class="mt-0.5 truncate text-[10px] leading-[14px] text-transparent" aria-hidden>
+            &nbsp;
+          </div>
+        ) : null}
       </div>
     </button>
   );
