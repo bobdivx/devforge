@@ -2750,6 +2750,17 @@ mod tests {
         assert!(script.contains("docker compose"));
         assert!(script.contains("pull"));
         assert!(script.contains("docker pull"));
+        // Le pull est dans le helper détaché, pas une commande bloquante du script principal.
+        assert!(script.contains("sleep 2\nif ! docker pull"));
+        assert!(script.contains("devforge-container-update.status"));
+        let pull_at = script.find("docker pull").expect("pull");
+        let started_at = script
+            .find("echo DEVFORGE_UPDATE_STARTED")
+            .expect("started");
+        assert!(
+            pull_at > started_at,
+            "le pull Docker doit être planifié après la réponse STARTED du chemin compose"
+        );
         assert!(script.contains("DEVFORGE_UPDATE_ALREADY"));
         assert!(script.contains("DEVFORGE_UPDATE_HOST"));
         assert!(script.contains("DEVFORGE_UPDATE_STARTED"));

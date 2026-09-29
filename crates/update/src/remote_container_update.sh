@@ -61,20 +61,35 @@ helper_image_for() {
   fi
 }
 
+# Le pull reste dans un conteneur détaché : la requête HTTP du leader doit
+# revenir avant le délai Cloudflare (~100 s), sinon le navigateur voit un 502.
+data_host=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' "$name" 2>/dev/null || true)
+status_mount=""
+if [ -n "$data_host" ]; then
+  mkdir -p /data 2>/dev/null || true
+  printf '%s\n' "running" > /data/devforge-container-update.status 2>/dev/null || true
+  status_mount="-v ${data_host}:/data"
+fi
+
 if [ -n "$file" ] && [ -f "$file" ]; then
-  if ! DEVFORGE_VERSION="$target" docker compose -f "$file" pull "$svc"; then
-    echo "DEVFORGE_UPDATE_FAIL échec du pull compose"
-    exit 1
-  fi
   hostfile=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "'"$file"'"}}{{.Source}}{{end}}{{end}}' "$name" 2>/dev/null || true)
   mount=""
   if [ -n "$hostfile" ]; then
     mount="-v ${hostfile}:${file}:ro"
   fi
   helper_image=$(helper_image_for "${image}:${target}")
-  if ! printf '%s\n' "set -e
+  if ! printf '%s\n' "set +e
 sleep 2
-DEVFORGE_VERSION=$target docker compose -f $file up -d --no-deps --force-recreate $svc" | schedule_helper "$helper_image" "$mount"; then
+if ! DEVFORGE_VERSION=$target docker compose -f $file pull $svc; then
+  printf '%s\n' 'fail échec du pull compose' > /data/devforge-container-update.status 2>/dev/null || true
+  exit 1
+fi
+if ! DEVFORGE_VERSION=$target docker compose -f $file up -d --no-deps --force-recreate $svc; then
+  printf '%s\n' 'fail échec de la recréation compose' > /data/devforge-container-update.status 2>/dev/null || true
+  exit 1
+fi
+printf '%s\n' ok > /data/devforge-container-update.status 2>/dev/null || true
+exit 0" | schedule_helper "$helper_image" "$status_mount $mount"; then
     echo "DEVFORGE_UPDATE_FAIL impossible de planifier la recréation compose"
     exit 1
   fi
@@ -83,10 +98,6 @@ DEVFORGE_VERSION=$target docker compose -f $file up -d --no-deps --force-recreat
 fi
 
 image_ref="${image}:${target}"
-if ! docker pull "$image_ref"; then
-  echo "DEVFORGE_UPDATE_FAIL échec du pull Docker"
-  exit 1
-fi
 if ! docker inspect "$name" >/dev/null 2>&1; then
   echo "DEVFORGE_UPDATE_FAIL conteneur introuvable"
   exit 1
@@ -179,16 +190,23 @@ fi
 helper_image=$(helper_image_for "$image_ref")
 if ! printf '%s\n' "set +e
 sleep 2
+if ! docker pull $image_ref; then
+  printf '%s\n' 'fail échec du pull Docker' > /data/devforge-container-update.status 2>/dev/null || true
+  docker rename $old $name >/dev/null 2>&1 || true
+  exit 1
+fi
 docker stop $old >/dev/null 2>&1
 docker rm -f $name >/dev/null 2>&1
 if $run_cmd; then
   docker rm -f $old >/dev/null 2>&1
+  printf '%s\n' ok > /data/devforge-container-update.status 2>/dev/null || true
   exit 0
 fi
 docker rm -f $name >/dev/null 2>&1
 docker rename $old $name >/dev/null 2>&1
 docker start $name >/dev/null 2>&1
-exit 1" | schedule_helper "$helper_image" ""; then
+printf '%s\n' 'fail échec de la recréation Docker' > /data/devforge-container-update.status 2>/dev/null || true
+exit 1" | schedule_helper "$helper_image" "$status_mount"; then
   docker rename "$old" "$name" >/dev/null 2>&1 || true
   echo "DEVFORGE_UPDATE_FAIL impossible de planifier la recréation Docker"
   exit 1
