@@ -2770,6 +2770,8 @@ mod tests {
         assert!(!script.contains("flatpak"));
         assert!(!script.contains("DevForge-Setup"));
         assert!(!script.contains("@@TARGET@@"));
+        assert!(script.contains("node - \"$inspect_file\""));
+        assert!(!script.contains("process.env.INSPECT"));
         let path = std::env::temp_dir().join("devforge-remote-update-test.sh");
         std::fs::write(&path, &script).unwrap();
         let out = std::process::Command::new("sh")

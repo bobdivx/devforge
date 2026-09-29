@@ -106,14 +106,28 @@ if ! command -v node >/dev/null 2>&1; then
   echo "DEVFORGE_UPDATE_FAIL node absent pour reconstruire le conteneur"
   exit 1
 fi
-inspect_file=$(mktemp)
-docker inspect "$name" > "$inspect_file"
-run_cmd=$(TARGET="$target" IMAGE_REF="$image_ref" NAME="$name" INSPECT="$inspect_file" node <<'NODE'
+inspect_file=$(mktemp) || {
+  echo "DEVFORGE_UPDATE_FAIL mktemp impossible"
+  exit 1
+}
+if ! docker inspect "$name" > "$inspect_file"; then
+  echo "DEVFORGE_UPDATE_FAIL docker inspect a échoué"
+  rm -f "$inspect_file"
+  exit 1
+fi
+# Arguments, pas des variables préfixées : dash (image Debian) ne les passe
+# pas à node quand la commande a un heredoc dans $(...).
+run_cmd=$(node - "$inspect_file" "$target" "$image_ref" "$name" <<'NODE'
 const fs = require("fs");
-const c = JSON.parse(fs.readFileSync(process.env.INSPECT, "utf8"))[0];
-const target = process.env.TARGET;
-const image = process.env.IMAGE_REF;
-const name = process.env.NAME;
+const inspect = process.argv[2];
+const target = process.argv[3];
+const image = process.argv[4];
+const name = process.argv[5];
+if (!inspect || !target || !image || !name) {
+  process.stderr.write("arguments node manquants\n");
+  process.exit(1);
+}
+const c = JSON.parse(fs.readFileSync(inspect, "utf8"))[0];
 const args = ["docker", "run", "-d", "--name", name];
 const hc = c.HostConfig || {};
 const restart = (hc.RestartPolicy && hc.RestartPolicy.Name) || "";
