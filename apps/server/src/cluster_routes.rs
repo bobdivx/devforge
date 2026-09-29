@@ -31,6 +31,21 @@ static JOIN_HITS: once_cell::sync::Lazy<Mutex<HashMap<String, (u32, Instant)>>> 
 static CONTAINER_UPDATE_AT: once_cell::sync::Lazy<Mutex<HashMap<String, Instant>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
 
+/// Lancement distant : la requête du navigateur ne doit pas attendre le pull.
+/// Cloudflare (web.jeser.app) rend un 502 si l’origine ne répond pas en ~100 s.
+enum RemoteLaunch {
+    Pending,
+    Failed(String),
+}
+
+struct RemoteLaunchNote {
+    at: Instant,
+    state: RemoteLaunch,
+}
+
+static REMOTE_LAUNCH: once_cell::sync::Lazy<Mutex<HashMap<String, RemoteLaunchNote>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/cluster/nodes", get(list_nodes).post(add_node))
@@ -1815,6 +1830,66 @@ fn note_container_update(node_id: &str) {
     }
 }
 
+fn note_launch(node_id: &str, state: RemoteLaunch) {
+    if let Ok(mut guard) = REMOTE_LAUNCH.lock() {
+        guard.insert(
+            node_id.to_string(),
+            RemoteLaunchNote {
+                at: Instant::now(),
+                state,
+            },
+        );
+    }
+}
+
+fn remote_launch(node_id: &str) -> Option<RemoteLaunch> {
+    let mut guard = REMOTE_LAUNCH.lock().ok()?;
+    let at = guard.get(node_id)?.at;
+    if at.elapsed() >= Duration::from_secs(20 * 60) {
+        guard.remove(node_id);
+        return None;
+    }
+    Some(match &guard.get(node_id)?.state {
+        RemoteLaunch::Pending => RemoteLaunch::Pending,
+        RemoteLaunch::Failed(msg) => RemoteLaunch::Failed(msg.clone()),
+    })
+}
+
+fn clear_launch(node_id: &str) {
+    if let Ok(mut guard) = REMOTE_LAUNCH.lock() {
+        guard.remove(node_id);
+    }
+}
+
+/// Répond tout de suite au navigateur. Le pull Docker reste sur le worker.
+fn spawn_worker_update(
+    node_id: String,
+    client: LeaderClient,
+    secret: String,
+    name: String,
+    target: String,
+) {
+    note_container_update(&node_id);
+    note_launch(&node_id, RemoteLaunch::Pending);
+    tokio::spawn(async move {
+        match launch_worker_update(&client, &secret, &name, &target).await {
+            Ok(WorkerUpdateLaunch::StartedContainer) => {
+                note_container_update(&node_id);
+                clear_launch(&node_id);
+                tracing::info!(node = %name, target = %target, "MAJ worker lancée");
+            }
+            Ok(WorkerUpdateLaunch::StartedInstaller) | Ok(WorkerUpdateLaunch::Already(_)) => {
+                clear_launch(&node_id);
+                tracing::info!(node = %name, target = %target, "MAJ worker partie");
+            }
+            Err(msg) => {
+                tracing::warn!(node = %name, error = %msg, "MAJ worker");
+                note_launch(&node_id, RemoteLaunch::Failed(msg));
+            }
+        }
+    });
+}
+
 fn container_update_recent(node_id: &str) -> bool {
     CONTAINER_UPDATE_AT
         .lock()
@@ -1939,30 +2014,19 @@ async fn node_update_start(
             "message": format!("{} est déjà en {}", node.name, current),
         })));
     }
-    match launch_worker_update(&client, &secret, &node.name, &target).await {
-        Ok(WorkerUpdateLaunch::StartedContainer) => {
-            note_container_update(&node.id);
-            Ok(Json(json!({
-                "ok": true,
-                "node_id": node.id,
-                "target_version": target,
-                "message": format!("Pull de l’image {target} lancé sur {}.", node.name),
-            })))
-        }
-        Ok(WorkerUpdateLaunch::StartedInstaller) => Ok(Json(json!({
-            "ok": true,
-            "node_id": node.id,
-            "target_version": target,
-        }))),
-        Ok(WorkerUpdateLaunch::Already(message)) => Ok(Json(json!({
-            "ok": true,
-            "skipped": true,
-            "node_id": node.id,
-            "target_version": target,
-            "message": message,
-        }))),
-        Err(msg) => Err((StatusCode::BAD_GATEWAY, Json(json!({"error": msg})))),
-    }
+    let node_id = node.id.clone();
+    let node_name = node.name.clone();
+    spawn_worker_update(node_id.clone(), client, secret, node_name, target.clone());
+    Ok(Json(json!({
+        "ok": true,
+        "accepted": true,
+        "node_id": node_id,
+        "target_version": target,
+        "message": format!(
+            "Mise à jour de {} vers {target} lancée. Le pull continue sur le nœud.",
+            node.name
+        ),
+    })))
 }
 
 async fn node_update_status(
@@ -1972,6 +2036,30 @@ async fn node_update_status(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     require_admin(&state, &headers).await?;
     let (node, client, secret) = worker_remote(&state, &id).await?;
+    if let Some(RemoteLaunch::Failed(msg)) = remote_launch(&node.id) {
+        return Ok(Json(json!({
+            "ok": true,
+            "reachable": true,
+            "node_id": node.id,
+            "version": node.metrics.software_version,
+            "data": {
+                "status": "failed",
+                "message": msg,
+            },
+        })));
+    }
+    if matches!(remote_launch(&node.id), Some(RemoteLaunch::Pending)) {
+        return Ok(Json(json!({
+            "ok": true,
+            "reachable": true,
+            "node_id": node.id,
+            "version": node.metrics.software_version,
+            "data": {
+                "status": "running",
+                "message": "Le leader contacte le nœud…",
+            },
+        })));
+    }
     match client.node_update_status(&secret).await {
         Ok(data) => {
             let mut job = data.get("data").cloned().unwrap_or(Value::Null);
@@ -2009,7 +2097,7 @@ async fn node_update_status(
             "version": node.metrics.software_version,
             "data": {
                 "status": "restarting",
-                "message": "Nœud injoignable — redémarrage probable."
+                "message": "Nœud injoignable — redémarrage probable.",
             },
         }))),
     }
@@ -2046,36 +2134,26 @@ pub async fn push_worker_updates(
             }));
             continue;
         }
+        if matches!(remote_launch(&node.id), Some(RemoteLaunch::Pending)) {
+            results.push(json!({
+                "id": node.id,
+                "name": node.name,
+                "ok": true,
+                "skipped": true,
+                "message": "mise à jour déjà lancée",
+            }));
+            continue;
+        }
         match worker_remote(state, &node.id).await {
             Ok((_, client, secret)) => {
-                match launch_worker_update(&client, &secret, &node.name, target).await {
-                    Ok(WorkerUpdateLaunch::StartedContainer) => {
-                        note_container_update(&node.id);
-                        results.push(json!({
-                            "id": node.id,
-                            "name": node.name,
-                            "ok": true,
-                        }));
-                    }
-                    Ok(WorkerUpdateLaunch::StartedInstaller) => results.push(json!({
-                        "id": node.id,
-                        "name": node.name,
-                        "ok": true,
-                    })),
-                    Ok(WorkerUpdateLaunch::Already(message)) => results.push(json!({
-                        "id": node.id,
-                        "name": node.name,
-                        "ok": true,
-                        "skipped": true,
-                        "message": message,
-                    })),
-                    Err(msg) => results.push(json!({
-                        "id": node.id,
-                        "name": node.name,
-                        "ok": false,
-                        "error": msg,
-                    })),
-                }
+                let id = node.id.clone();
+                let name = node.name.clone();
+                spawn_worker_update(id.clone(), client, secret, name, target.to_string());
+                results.push(json!({
+                    "id": id,
+                    "name": node.name,
+                    "ok": true,
+                }));
             }
             Err((_, Json(err))) => results.push(json!({
                 "id": node.id,
