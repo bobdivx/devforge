@@ -486,6 +486,7 @@ function RunnersPageInner() {
               <HubTile
                 key={r.id}
                 index={i}
+                layout="auto"
                 title={r.runner_name}
                 onClick={() => setSelected(r.id)}
                 icon={<HubIcon name="server" />}
@@ -522,7 +523,7 @@ function RunnersPageInner() {
               />
             );
           })}
-          <HubAddTile index={runners.length} label="Ajouter" onClick={() => openWizard()} />
+          <HubAddTile index={runners.length} label="Ajouter" layout="auto" lines={3} onClick={() => openWizard()} />
         </HubGrid>
       </FadeIn>
 

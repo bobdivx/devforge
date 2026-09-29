@@ -129,6 +129,7 @@ function NodeHubCard({
   return (
     <HubTile
       index={index}
+      layout="auto"
       title={n.name}
       icon={nodeIcon(n)}
       class={leader || interim ? 'ring-1 ring-[var(--color-accent)]/45' : undefined}
@@ -939,6 +940,7 @@ function ClusterInner() {
               <HubAddTile
                 index={workers.length + 1}
                 label="Ajouter"
+                layout="auto"
                 onClick={openDiscover}
               />
             </HubGrid>
