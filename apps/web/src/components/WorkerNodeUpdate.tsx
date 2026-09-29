@@ -78,7 +78,14 @@ function activeJob(job: UpdateJob | null): boolean {
   return job?.status === 'running' || job?.status === 'restarting';
 }
 
-export function WorkerNodeUpdate({ versionHint }: { versionHint: string }) {
+export function WorkerNodeUpdate({
+  versionHint,
+  embedded = false,
+}: {
+  versionHint: string;
+  /** Sans carte : le contenu vit dans un Modal. */
+  embedded?: boolean;
+}) {
   const [check, setCheck] = useState<VersionCheck | null>(null);
   const [job, setJob] = useState<UpdateJob | null>(null);
   const [mode, setMode] = useState('');
@@ -146,7 +153,7 @@ export function WorkerNodeUpdate({ versionHint }: { versionHint: string }) {
   const running = activeJob(job);
   const failed = job?.status === 'failed';
   const succeeded = job?.status === 'done' || job?.status === 'restarting';
-  const showEmpty = !loading && !job;
+  const showEmpty = !loading && !job && !check?.update_available;
 
   let badge: { tone: 'ok' | 'warn' | 'danger' | 'accent'; label: string } | null = null;
   if (running) badge = { tone: 'accent', label: 'En cours' };
@@ -162,11 +169,13 @@ export function WorkerNodeUpdate({ versionHint }: { versionHint: string }) {
 
   const state = running ? 'progress' : failed || actionError ? 'error' : succeeded ? 'success' : 'empty';
 
-  return (
-    <Card padding="lg">
+  const body = (
+    <>
       <div data-df-update-state={state} class="flex items-start justify-between gap-3">
         <div class="min-w-0">
-          <h2 class="text-sm font-semibold text-[var(--color-ink)]">Version de ce nœud</h2>
+          {embedded ? null : (
+            <h2 class="text-sm font-semibold text-[var(--color-ink)]">Version de ce nœud</h2>
+          )}
           <p class="mt-1 text-lg font-semibold text-[var(--color-ink)]" data-df-node-version>
             {current}
           </p>
@@ -236,6 +245,9 @@ export function WorkerNodeUpdate({ versionHint }: { versionHint: string }) {
           Mettre à jour
         </Button>
       </div>
-    </Card>
+    </>
   );
+
+  if (embedded) return body;
+  return <Card padding="lg">{body}</Card>;
 }

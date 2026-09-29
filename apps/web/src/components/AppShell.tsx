@@ -66,6 +66,7 @@ function shortLabel(label: string): string {
     Tokens: 'Tokens',
     Cluster: 'Cluster',
     Nœud: 'Nœud',
+    Paramètres: 'Réglages',
     Adresses: 'Adresses',
   };
   return map[label] ?? label;
