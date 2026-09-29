@@ -26,6 +26,11 @@ use crate::state::AppState;
 static JOIN_HITS: once_cell::sync::Lazy<Mutex<HashMap<String, (u32, Instant)>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
 
+/// Pull Docker lancé par le leader : le job d’installeur encore en mémoire sur
+/// l’ancien worker ne doit pas réafficher le 404 GitHub pendant le pull.
+static CONTAINER_UPDATE_AT: once_cell::sync::Lazy<Mutex<HashMap<String, Instant>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/cluster/nodes", get(list_nodes).post(add_node))
@@ -826,7 +831,10 @@ async fn cluster_adopt_remote(
     let mut leader_url = instance_url(&state).await;
     if leader_url.trim().is_empty() || devforge_cluster::is_loopback_advertise_url(&leader_url) {
         // Le worker doit joindre le leader via le LAN, pas 127.0.0.1.
-        if let Some(lan) = devforge_cluster::local_lan_urls(listen_port()).into_iter().next() {
+        if let Some(lan) = devforge_cluster::local_lan_urls(listen_port())
+            .into_iter()
+            .next()
+        {
             leader_url = lan;
         }
     }
@@ -1036,9 +1044,8 @@ async fn cluster_node_image(
     // Fallback URL conventionnelle sur la version courante / latest check.
     let ver = cfg.current_version.trim_start_matches('v');
     let fallback_name = format!("DevForge-Node-{ver}-amd64.img.xz");
-    let fallback_url = format!(
-        "https://github.com/{owner}/{repo}/releases/download/v{ver}/{fallback_name}"
-    );
+    let fallback_url =
+        format!("https://github.com/{owner}/{repo}/releases/download/v{ver}/{fallback_name}");
     Ok(Json(json!({
         "ok": true,
         "available": false,
@@ -1807,6 +1814,97 @@ async fn prepare_worker_update(
     }
 }
 
+fn note_container_update(node_id: &str) {
+    if let Ok(mut guard) = CONTAINER_UPDATE_AT.lock() {
+        guard.insert(node_id.to_string(), Instant::now());
+    }
+}
+
+fn container_update_recent(node_id: &str) -> bool {
+    CONTAINER_UPDATE_AT
+        .lock()
+        .ok()
+        .and_then(|guard| guard.get(node_id).copied())
+        .is_some_and(|t| t.elapsed() < Duration::from_secs(20 * 60))
+}
+
+/// Le poll UI lit le job du worker. Pendant un pull lancé par le leader, un
+/// échec d’installeur encore en mémoire (release vide) n’est plus le résultat.
+fn mask_stale_installer_failure(node_id: &str, data: &mut Value) {
+    if !container_update_recent(node_id) {
+        return;
+    }
+    if data.get("status").and_then(|s| s.as_str()) != Some("failed") {
+        return;
+    }
+    if let Some(obj) = data.as_object_mut() {
+        obj.insert("status".into(), json!("running"));
+        obj.insert("message".into(), json!("Pull de l’image Docker en cours…"));
+    }
+}
+
+enum WorkerUpdateLaunch {
+    StartedContainer,
+    StartedInstaller,
+    Already(String),
+}
+
+/// Docker/compose : `docker pull` / `compose pull` via `/internal/exec`.
+/// Sans Docker (Windows, Flatpak) : l’installeur du worker.
+async fn launch_worker_update(
+    client: &LeaderClient,
+    secret: &str,
+    name: &str,
+    target: &str,
+) -> Result<WorkerUpdateLaunch, String> {
+    if let Err((_, Json(err))) = prepare_worker_update(client, secret, name).await {
+        let msg = err
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("alignement conteneur");
+        return Err(msg.to_string());
+    }
+    let script = devforge_update::remote_container_update_script(target);
+    match client.exec(secret, &script, 600).await {
+        Ok(r) => match devforge_update::interpret_remote_container_update(&r.output, r.ok) {
+            devforge_update::RemoteContainerUpdate::NotContainer => {}
+            devforge_update::RemoteContainerUpdate::Already => {
+                return Ok(WorkerUpdateLaunch::Already(format!(
+                    "{name} est déjà sur l’image {target}"
+                )));
+            }
+            devforge_update::RemoteContainerUpdate::Started => {
+                return Ok(WorkerUpdateLaunch::StartedContainer);
+            }
+            devforge_update::RemoteContainerUpdate::Failed(detail) => {
+                return Err(format!("{name} : {detail}"));
+            }
+        },
+        Err(e) => {
+            let msg = e.to_string();
+            if !msg.contains("404") {
+                return Err(format!("{name} : {msg}"));
+            }
+        }
+    }
+    match client.node_update_start(secret, Some(target)).await {
+        Ok(_) => Ok(WorkerUpdateLaunch::StartedInstaller),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("Déjà à jour") {
+                return Ok(WorkerUpdateLaunch::Already(msg));
+            }
+            if msg.contains("404") {
+                Err(format!(
+                    "{name} : ce nœud n’a pas encore l’API de MAJ distante (version trop ancienne). Fais une première mise à jour locale sur le worker, ensuite le leader pourra piloter les suivantes."
+                ))
+            } else {
+                Err(format!("{name} : {msg}"))
+            }
+        }
+    }
+}
+
 async fn node_update_start(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1827,35 +1925,29 @@ async fn node_update_start(
             "message": format!("{} est déjà en {}", node.name, current),
         })));
     }
-    prepare_worker_update(&client, &secret, &node.name).await?;
-    match client.node_update_start(&secret, Some(&target)).await {
-        Ok(data) => Ok(Json(json!({
+    match launch_worker_update(&client, &secret, &node.name, &target).await {
+        Ok(WorkerUpdateLaunch::StartedContainer) => {
+            note_container_update(&node.id);
+            Ok(Json(json!({
+                "ok": true,
+                "node_id": node.id,
+                "target_version": target,
+                "message": format!("Pull de l’image {target} lancé sur {}.", node.name),
+            })))
+        }
+        Ok(WorkerUpdateLaunch::StartedInstaller) => Ok(Json(json!({
             "ok": true,
             "node_id": node.id,
             "target_version": target,
-            "data": data.get("data").cloned().unwrap_or(data),
         }))),
-        Err(e) => {
-            let msg = e.to_string();
-            if msg.contains("Déjà à jour") {
-                return Ok(Json(json!({
-                    "ok": true,
-                    "skipped": true,
-                    "node_id": node.id,
-                    "target_version": target,
-                    "message": msg,
-                })));
-            }
-            let msg = if msg.contains("404") {
-                format!(
-                    "{} : ce nœud n’a pas encore l’API de MAJ distante (version trop ancienne). Fais une première mise à jour locale sur le worker, ensuite le leader pourra piloter les suivantes.",
-                    node.name
-                )
-            } else {
-                format!("{} : {msg}", node.name)
-            };
-            Err((StatusCode::BAD_GATEWAY, Json(json!({"error": msg}))))
-        }
+        Ok(WorkerUpdateLaunch::Already(message)) => Ok(Json(json!({
+            "ok": true,
+            "skipped": true,
+            "node_id": node.id,
+            "target_version": target,
+            "message": message,
+        }))),
+        Err(msg) => Err((StatusCode::BAD_GATEWAY, Json(json!({"error": msg})))),
     }
 }
 
@@ -1867,13 +1959,17 @@ async fn node_update_status(
     require_admin(&state, &headers).await?;
     let (node, client, secret) = worker_remote(&state, &id).await?;
     match client.node_update_status(&secret).await {
-        Ok(data) => Ok(Json(json!({
-            "ok": true,
-            "reachable": true,
-            "node_id": node.id,
-            "version": data.get("version").cloned().unwrap_or(Value::Null),
-            "data": data.get("data").cloned().unwrap_or(Value::Null),
-        }))),
+        Ok(data) => {
+            let mut job = data.get("data").cloned().unwrap_or(Value::Null);
+            mask_stale_installer_failure(&node.id, &mut job);
+            Ok(Json(json!({
+                "ok": true,
+                "reachable": true,
+                "node_id": node.id,
+                "version": data.get("version").cloned().unwrap_or(Value::Null),
+                "data": job,
+            })))
+        }
         Err(_) => Ok(Json(json!({
             "ok": true,
             "reachable": false,
@@ -1920,43 +2016,33 @@ pub async fn push_worker_updates(
         }
         match worker_remote(state, &node.id).await {
             Ok((_, client, secret)) => {
-                if let Err((_, Json(err))) =
-                    prepare_worker_update(&client, &secret, &node.name).await
-                {
-                    results.push(json!({
-                        "id": node.id,
-                        "name": node.name,
-                        "ok": false,
-                        "error": err.get("error").and_then(|v| v.as_str()).unwrap_or("alignement conteneur"),
-                    }));
-                    continue;
-                }
-                match client.node_update_start(&secret, Some(target)).await {
-                    Ok(data) => results.push(json!({
+                match launch_worker_update(&client, &secret, &node.name, target).await {
+                    Ok(WorkerUpdateLaunch::StartedContainer) => {
+                        note_container_update(&node.id);
+                        results.push(json!({
+                            "id": node.id,
+                            "name": node.name,
+                            "ok": true,
+                        }));
+                    }
+                    Ok(WorkerUpdateLaunch::StartedInstaller) => results.push(json!({
                         "id": node.id,
                         "name": node.name,
                         "ok": true,
-                        "data": data.get("data").cloned().unwrap_or(data),
                     })),
-                    Err(e) => {
-                        let msg = e.to_string();
-                        if msg.contains("Déjà à jour") {
-                            results.push(json!({
-                                "id": node.id,
-                                "name": node.name,
-                                "ok": true,
-                                "skipped": true,
-                                "message": msg,
-                            }));
-                        } else {
-                            results.push(json!({
-                                "id": node.id,
-                                "name": node.name,
-                                "ok": false,
-                                "error": msg,
-                            }));
-                        }
-                    }
+                    Ok(WorkerUpdateLaunch::Already(message)) => results.push(json!({
+                        "id": node.id,
+                        "name": node.name,
+                        "ok": true,
+                        "skipped": true,
+                        "message": message,
+                    })),
+                    Err(msg) => results.push(json!({
+                        "id": node.id,
+                        "name": node.name,
+                        "ok": false,
+                        "error": msg,
+                    })),
                 }
             }
             Err((_, Json(err))) => results.push(json!({
