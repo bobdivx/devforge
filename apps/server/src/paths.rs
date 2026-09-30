@@ -152,17 +152,23 @@ pub fn templates_dir() -> Option<PathBuf> {
     None
 }
 
-/// Ouvre le navigateur une fois le serveur prêt (installateur / Flatpak, pas Docker).
-pub fn maybe_open_browser(url: &str) {
-    if !is_packaged_app() {
-        return;
+/// `--background` : icône seule, sans ouvrir le navigateur (session Windows / Flatpak).
+pub fn background_requested<I, S>(args: I) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    args.into_iter().any(|a| a.as_ref() == "--background")
+}
+
+pub fn apply_launch_flags() {
+    if background_requested(std::env::args()) {
+        set_if_unset("DEVFORGE_NO_BROWSER", "1");
     }
-    if std::env::var_os("DEVFORGE_NO_BROWSER").is_some() {
-        return;
-    }
-    if Path::new("/.dockerenv").exists() {
-        return;
-    }
+}
+
+/// Ouvre l’URL dans le navigateur, sans tenir compte du mode installé.
+pub fn open_browser(url: &str) {
     let url = url.to_string();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(400));
@@ -188,6 +194,20 @@ pub fn maybe_open_browser(url: &str) {
     });
 }
 
+/// Ouvre le navigateur une fois le serveur prêt (installateur / Flatpak, pas Docker).
+pub fn maybe_open_browser(url: &str) {
+    if !is_packaged_app() {
+        return;
+    }
+    if std::env::var_os("DEVFORGE_NO_BROWSER").is_some() {
+        return;
+    }
+    if Path::new("/.dockerenv").exists() {
+        return;
+    }
+    open_browser(url);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,6 +224,12 @@ mod tests {
             Some("/home/a"),
         );
         assert_eq!(dir, PathBuf::from("/home/a/.var/app/id/data/devforge"));
+    }
+
+    #[test]
+    fn background_flag_skips_browser_on_login() {
+        assert!(background_requested(["devforge-server", "--background"]));
+        assert!(!background_requested(["devforge-server"]));
     }
 
     #[test]

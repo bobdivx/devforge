@@ -40,6 +40,8 @@ Données : `/DATA/AppData/devforge`. Socket Docker monté pour déployer les app
 
 Télécharge `DevForge-Setup-<version>-x64.exe` depuis les releases GitHub et lance-le. L’assistant demande le dossier (par défaut le profil utilisateur), les raccourcis, puis ouvre le navigateur sur `http://127.0.0.1:8000`.
 
+DevForge apparaît dans les applications Windows. Une icône reste à côté de l’horloge : un clic ouvre la page, un clic droit propose **Ouvrir**, **Redémarrer** et **Arrêter**. À l’ouverture de session, l’icône revient sans rouvrir le navigateur (case cochée dans l’assistant).
+
 Les données restent dans le sous-dossier `data/` à côté du programme. Windows peut afficher SmartScreen (« Informations complémentaires ») tant que l’installateur n’est pas signé.
 
 **Docker Desktop** sert à déployer les apps. Sans Docker, l’interface tourne ; les apps PaaS ne se déploient pas.
@@ -91,7 +93,7 @@ xdg-mime query default application/vnd.flatpak
 
 Puis réassocie à Discover une fois installé, ou continue uniquement en ligne de commande.
 
-Le premier lancement télécharge le runtime Freedesktop si besoin. DevForge apparaît ensuite dans le menu des applications. Les données sont dans le dossier Flatpak de l’app (`~/.var/app/io.github.bobdivx.DevForge`).
+Le premier lancement télécharge le runtime Freedesktop si besoin. DevForge apparaît dans le menu des applications, et une icône se place à côté de l’horloge : un clic ouvre la page, un clic droit propose **Ouvrir**, **Redémarrer** et **Arrêter**. L’ouverture de session relance l’icône sans rouvrir le navigateur. Les données sont dans le dossier Flatpak de l’app (`~/.var/app/io.github.bobdivx.DevForge`).
 
 Docker et Git doivent être installés **sur la machine** : le Flatpak les appelle directement (socket Docker, dépôts, clés SSH). Node sur la machine sert au repli preview des projets JS. Sans Docker, l’UI tourne ; les apps PaaS ne se déploient pas.
 

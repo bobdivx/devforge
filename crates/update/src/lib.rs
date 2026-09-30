@@ -372,6 +372,14 @@ impl UpdateFacade {
     }
 
     async fn fetch_latest(&self) -> Result<(String, String, String, Vec<String>)> {
+        // Flatpak / Windows : seule une release AVEC installeur est applicable.
+        // Les pages GitHub créées par le workflow Docker n’ont souvent aucun asset.
+        if matches!(self.config.mode, UpdateMode::Binary) {
+            if let Ok(Some(found)) = self.fetch_latest_with_installer().await {
+                return Ok(found);
+            }
+        }
+
         let owner = &self.config.repo_owner;
         let name = &self.config.repo_name;
         let mut best: Option<LatestCandidate> = None;
@@ -439,6 +447,20 @@ impl UpdateFacade {
             .to_string();
         let notes = release_note_lines(v.get("body").and_then(|b| b.as_str()).unwrap_or(""));
         Ok((tag, name, html, notes))
+    }
+
+    /// Dernière release GitHub qui publie un Flatpak / Setup compatible avec cette machine.
+    async fn fetch_latest_with_installer(
+        &self,
+    ) -> Result<Option<(String, String, String, Vec<String>)>> {
+        let releases = self.fetch_release_list().await?;
+        Ok(latest_release_with_installer(
+            &releases,
+            &host_target_triple(),
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            self.config.channel != "stable",
+        ))
     }
 
     pub async fn start(&self, target: Option<String>) -> Result<UpdateJob> {
@@ -685,7 +707,7 @@ impl UpdateFacade {
     /// - Always call ensure_traefik() after successful DevForge container update
     /// - If Traefik is missing or stopped, recreate/start it
     /// - Log success/failure to update job detail
-    async fn ensure_traefik_after_update(&self, job_id: &str) -> Result<()> {
+    async fn ensure_traefik_after_update(&self, _job_id: &str) -> Result<()> {
         tracing::info!("Ensuring Traefik proxy after DevForge update…");
 
         // Check if Traefik container exists
@@ -1514,6 +1536,42 @@ fn arch_matches(lower: &str, arch: &str) -> bool {
 fn release_version_str(tag: &str) -> Option<String> {
     let (major, minor, patch) = release_semver(tag)?;
     Some(format!("{major}.{minor}.{patch}"))
+}
+
+fn latest_release_with_installer(
+    releases: &[Value],
+    triple: &str,
+    os: &str,
+    arch: &str,
+    allow_prerelease: bool,
+) -> Option<(String, String, String, Vec<String>)> {
+    let mut best: Option<LatestCandidate> = None;
+    for rel in releases {
+        if rel.get("draft").and_then(|d| d.as_bool()).unwrap_or(false) {
+            continue;
+        }
+        let prerelease = rel
+            .get("prerelease")
+            .and_then(|d| d.as_bool())
+            .unwrap_or(false);
+        if prerelease && !allow_prerelease {
+            continue;
+        }
+        let tag = rel.get("tag_name").and_then(|t| t.as_str()).unwrap_or("");
+        let assets = rel
+            .get("assets")
+            .and_then(|a| a.as_array())
+            .map(|a| a.as_slice())
+            .unwrap_or(&[]);
+        if pick_asset_for(assets, triple, os, arch).is_none() {
+            continue;
+        }
+        let name = rel.get("name").and_then(|n| n.as_str()).unwrap_or(tag);
+        let url = rel.get("html_url").and_then(|u| u.as_str()).unwrap_or("");
+        let notes = release_note_lines(rel.get("body").and_then(|b| b.as_str()).unwrap_or(""));
+        consider_latest(&mut best, tag, name, url, &notes);
+    }
+    best.map(|b| (b.tag, b.name, b.url, b.notes))
 }
 
 fn releases_include_version(releases: &[Value], version: &str) -> bool {
@@ -2656,6 +2714,33 @@ mod tests {
         let win = select_windows(&releases, "2.0.163", "2.0.162").expect_err("windows");
         assert!(win.contains("DevForge-Setup-2.0.162-x64.exe"));
         assert!(!win.contains("404"));
+    }
+
+    #[test]
+    fn binary_check_ignores_docker_only_releases() {
+        let releases = vec![
+            gh_release("v2.0.176", json!([])),
+            gh_release("v2.0.175", json!([])),
+            published_162(),
+        ];
+        let (tag, name, url, _) = latest_release_with_installer(
+            &releases,
+            "x86_64-unknown-linux-gnu",
+            "linux",
+            "x86_64",
+            false,
+        )
+        .expect("installeur");
+        assert_eq!(tag.trim_start_matches('v'), "2.0.162");
+        assert!(name.contains("2.0.162") || url.contains("2.0.162"));
+        assert!(latest_release_with_installer(
+            &releases,
+            "x86_64-pc-windows-msvc",
+            "windows",
+            "x86_64",
+            false,
+        )
+        .is_some());
     }
 
     #[tokio::test]

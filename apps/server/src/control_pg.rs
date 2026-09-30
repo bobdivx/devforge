@@ -329,6 +329,13 @@ pub async fn restore_snapshot(bytes: &[u8]) -> Result<(), String> {
         .strip_prefix(SNAPSHOT_HEADER.as_bytes())
         .ok_or("snapshot postgres invalide")?;
     let meta = META.get().ok_or("postgres control plane non initialisé")?;
+    // Un dump `--clean` peut faire `DROP INDEX` alors que la cible a encore la
+    // contrainte UNIQUE du même nom (CREATE TABLE … UNIQUE) → ON_ERROR_STOP abort.
+    // On repart d'un schéma public vide pour appliquer le snapshot tel quel.
+    const RESET: &str = "DROP SCHEMA IF EXISTS public CASCADE; \
+         CREATE SCHEMA public; \
+         GRANT ALL ON SCHEMA public TO public; \
+         GRANT ALL ON SCHEMA public TO CURRENT_USER";
     if let Some(container) = &meta.container {
         let _ = psql(
             container,
@@ -337,10 +344,12 @@ pub async fn restore_snapshot(bytes: &[u8]) -> Result<(), String> {
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()",
         )
         .await;
+        psql(container, &meta.user, &meta.database, RESET).await?;
         psql_bytes(container, &meta.user, &meta.database, sql)
             .await
             .map(|_| ())
     } else if !meta.url.is_empty() {
+        psql_url(&meta.url, RESET.as_bytes()).await?;
         psql_url(&meta.url, sql).await
     } else {
         Err("restauration snapshot : postgres absent".into())
@@ -1186,10 +1195,12 @@ async fn psql_bytes(
         .spawn()
         .map_err(|e| format!("docker exec psql : {e}"))?;
     if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(sql)
-            .await
-            .map_err(|e| format!("envoi SQL : {e}"))?;
+        // psql peut fermer stdin dès la 1re erreur ON_ERROR_STOP — Broken pipe ≠ cause.
+        if let Err(e) = stdin.write_all(sql).await {
+            if e.kind() != std::io::ErrorKind::BrokenPipe {
+                return Err(format!("envoi SQL : {e}"));
+            }
+        }
     }
     let out = child
         .wait_with_output()
@@ -1222,10 +1233,11 @@ async fn psql_url(url: &str, sql: &[u8]) -> Result<(), String> {
         .spawn()
         .map_err(|e| format!("psql : {e}"))?;
     if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(sql)
-            .await
-            .map_err(|e| format!("envoi SQL : {e}"))?;
+        if let Err(e) = stdin.write_all(sql).await {
+            if e.kind() != std::io::ErrorKind::BrokenPipe {
+                return Err(format!("envoi SQL : {e}"));
+            }
+        }
     }
     let out = child
         .wait_with_output()

@@ -45,14 +45,14 @@ Name: "french"; MessagesFile: "compiler:Languages\French.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
-french.WelcomeLabel2=Cet assistant installe DevForge sur ce PC.%n%nLe programme est copié dans ton dossier utilisateur. Tes données restent dans un sous-dossier data, à côté du programme. À la fin, le navigateur s’ouvre sur http://127.0.0.1:8000.%n%nDocker (Docker Desktop) sert à déployer les apps. Sans Docker, l’interface démarre quand même.
-english.WelcomeLabel2=This wizard installs DevForge on this PC.%n%nThe program is copied into your user folder. Your data stays in a data folder next to the program. When it finishes, the browser opens http://127.0.0.1:8000.%n%nDocker Desktop is used to deploy apps. Without Docker, the interface still starts.
+french.WelcomeLabel2=Cet assistant installe DevForge sur ce PC.%n%nLe programme est copié dans ton dossier utilisateur et apparaît dans les applications. Une icône reste à côté de l’horloge : un clic ouvre la page, un clic droit permet de redémarrer ou d’arrêter. Tes données restent dans un sous-dossier data. À la fin, le navigateur s’ouvre sur http://127.0.0.1:8000.%n%nDocker (Docker Desktop) sert à déployer les apps. Sans Docker, l’interface démarre quand même.
+english.WelcomeLabel2=This wizard installs DevForge on this PC.%n%nThe program is copied into your user folder and shows up in the app list. An icon stays next to the clock: click it to open the page, right-click to restart or stop. Your data stays in a data folder. When it finishes, the browser opens http://127.0.0.1:8000.%n%nDocker Desktop is used to deploy apps. Without Docker, the interface still starts.
 
 [CustomMessages]
 french.DesktopIcon=Créer un raccourci sur le bureau
 english.DesktopIcon=Create a desktop shortcut
-french.Autostart=Lancer DevForge à l’ouverture de session (ouvre le navigateur)
-english.Autostart=Start DevForge when Windows starts (opens the browser)
+french.Autostart=Garder l’icône DevForge à côté de l’horloge à l’ouverture de session
+english.Autostart=Keep the DevForge icon next to the clock when Windows starts
 french.ExtraIcons=Raccourcis :
 english.ExtraIcons=Shortcuts:
 french.LaunchApp=Lancer DevForge
@@ -60,7 +60,7 @@ english.LaunchApp=Launch DevForge
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:DesktopIcon}"; GroupDescription: "{cm:ExtraIcons}"; Flags: checkedonce
-Name: "autostart"; Description: "{cm:Autostart}"; GroupDescription: "{cm:ExtraIcons}"; Flags: unchecked
+Name: "autostart"; Description: "{cm:Autostart}"; GroupDescription: "{cm:ExtraIcons}"; Flags: checkedonce
 
 [Files]
 Source: "{#Stage}\devforge-server.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -74,7 +74,7 @@ Name: "{group}\Désinstaller DevForge"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\DevForge"; Filename: "{app}\devforge-server.exe"; IconFilename: "{app}\devforge.ico"; Tasks: desktopicon
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "DevForge"; ValueData: """{app}\devforge-server.exe"""; Tasks: autostart; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "DevForge"; ValueData: """{app}\devforge-server.exe"" --background"; Tasks: autostart; Flags: uninsdeletevalue
 
 [Run]
 Filename: "{app}\devforge-server.exe"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent

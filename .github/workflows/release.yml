@@ -1,7 +1,8 @@
 name: Release
 
 # Auto-bump + tag + image Docker + page GitHub Releases.
-# L’assistant Windows et le Flatpak Linux sont dans images.yml (une fois par jour, s'il y a eu des commits).
+# L’assistant Windows et le Flatpak Linux sont dans images.yml (déclenché après
+# chaque Release réussie, plus un filet quotidien).
 # Si la version Cargo.toml est déjà publiée, GitHub incrémente le patch automatiquement.
 # Les pushes faits avec GITHUB_TOKEN ne re-déclenchent pas de workflow (pas de boucle).
 on:

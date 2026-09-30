@@ -1,3 +1,9 @@
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
+mod acme_routes;
 mod actions_routes;
 mod agent_runs;
 mod auth_routes;
@@ -34,10 +40,10 @@ mod runner_routes;
 mod runner_store;
 mod security;
 mod sso;
-mod acme_routes;
 mod sso_routes;
 mod state;
 mod token_routes;
+mod tray;
 mod update_routes;
 mod user_prefs;
 mod worker;
@@ -55,17 +61,73 @@ async fn api_root() -> Json<Value> {
     Json(json!({"name":"DevForge Server","docs":"/api/v1/health"}))
 }
 
+fn listen_port() -> u16 {
+    std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8000)
+}
+
+fn listen_addr() -> (SocketAddr, u16) {
+    let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
+    let port = listen_port();
+    let addr = format!("{host}:{port}")
+        .parse()
+        .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], port)));
+    (addr, port)
+}
+
+async fn endpoint_is_up(port: u16) -> bool {
+    let url = format!("http://127.0.0.1:{port}/api/v1/health");
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(400))
+        .build()
+    else {
+        return false;
+    };
+    client
+        .get(url)
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
+async fn serve_http(app: Router, label: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let (addr, port) = listen_addr();
+    tracing::info!("DevForge {label} listening on http://{addr}");
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let public = format!("http://127.0.0.1:{port}");
+    let shutdown = tray::start(&public);
+    paths::maybe_open_browser(&public);
+    axum::serve(listener, app)
+        .with_graceful_shutdown(tray::until_exit(shutdown))
+        .await?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
+    paths::apply_launch_flags();
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "devforge_server=debug,devforge_llm=info,tower_http=info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                "devforge_server=debug,devforge_llm=info,tower_http=info".into()
+            }),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
     paths::apply_install_layout();
+
+    if paths::is_packaged_app() {
+        let port = listen_port();
+        if endpoint_is_up(port).await {
+            tracing::info!("DevForge tourne déjà");
+            paths::maybe_open_browser(&format!("http://127.0.0.1:{port}"));
+            return Ok(());
+        }
+    }
 
     let database_url =
         std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:devforge.db?mode=rwc".into());
@@ -93,7 +155,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         // Email ACME valable (réglage / admin) avant toute (re)création du proxy.
         let acme = acme_routes::refresh(&state.pool).await;
-        tracing::info!(acme_email_set = acme.is_some(), "email ACME du proxy résolu (worker)");
+        tracing::info!(
+            acme_email_set = acme.is_some(),
+            "email ACME du proxy résolu (worker)"
+        );
         if let Err(e) = state.proxy.ensure_traefik().await {
             tracing::error!(error = %e, "Traefik worker — les domaines de ce nœud peuvent être injoignables");
         } else {
@@ -113,21 +178,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         }
         let mut app = worker::worker_router(state.clone())
+            .layer(middleware::from_fn(security::static_cache_headers))
             .layer(security::cors_layer())
             .layer(TraceLayer::new_for_http());
         app = worker::with_static_fallback(app);
-        let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
-        let port: u16 = std::env::var("PORT")
-            .ok()
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(8000);
-        let addr: SocketAddr = format!("{host}:{port}")
-            .parse()
-            .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], port)));
-        tracing::info!("DevForge worker listening on http://{addr}");
-        let listener = tokio::net::TcpListener::bind(addr).await?;
-        paths::maybe_open_browser(&format!("http://127.0.0.1:{port}"));
-        axum::serve(listener, app).await?;
+        serve_http(app, "worker").await?;
         return Ok(());
     }
 
@@ -141,7 +196,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // If the container was deleted/stopped, recreate/start it before accepting requests.
     // Email ACME valable (réglage / admin) avant toute (re)création du proxy.
     let acme = acme_routes::refresh(&state.pool).await;
-    tracing::info!(acme_email_set = acme.is_some(), "email ACME du proxy résolu");
+    tracing::info!(
+        acme_email_set = acme.is_some(),
+        "email ACME du proxy résolu"
+    );
     if let Err(e) = state.proxy.ensure_traefik().await {
         tracing::error!(error = %e, "Failed to ensure Traefik container — proxy may be unavailable");
     } else {
@@ -294,6 +352,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.clone(),
             worker::fence_stale_leader,
         ))
+        .layer(middleware::from_fn(security::static_cache_headers))
         .layer(security::cors_layer())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -315,18 +374,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         app = app.route("/", get(api_root));
     }
 
-    let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
-    let port: u16 = std::env::var("PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(8000);
-    let addr: SocketAddr = format!("{host}:{port}")
-        .parse()
-        .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], port)));
-    tracing::info!("DevForge server listening on http://{addr}");
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    let public = format!("http://127.0.0.1:{port}");
-    paths::maybe_open_browser(&public);
-    axum::serve(listener, app).await?;
+    serve_http(app, "server").await?;
     Ok(())
 }

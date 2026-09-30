@@ -1,12 +1,15 @@
-# Installeurs : une fois par jour, et seulement s'il y a eu des commits.
+# Installeurs : après chaque Release Docker réussie, une fois par jour s’il y a
+# eu des commits, et à la demande.
 # Windows : assistant Inno Setup (.exe). Linux : bundle Flatpak.
-# USB Node : image .img.xz flashable (Etcher / Rufus / dd).
-# Un lancement manuel (workflow_dispatch) construit même sans commit récent.
+# USB Node : image .img.xz flashable (Etcher / Rufus / dd) — best-effort.
 name: Installeurs Linux et Windows
 
 on:
   schedule:
     - cron: "0 4 * * *"
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
@@ -24,6 +27,10 @@ concurrency:
 jobs:
   gate:
     runs-on: ubuntu-latest
+    # Pas de rebuild si la Release Docker a échoué.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     outputs:
       build: ${{ steps.check.outputs.build }}
       tag: ${{ steps.check.outputs.tag }}
@@ -58,11 +65,13 @@ jobs:
           fi
           echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            echo "Lancement manuel"
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          case "${GITHUB_EVENT_NAME}" in
+            workflow_dispatch|workflow_run)
+              echo "Déclenché par ${GITHUB_EVENT_NAME} — construction des installeurs pour ${TAG}"
+              echo "build=true" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
 
           n="$(git rev-list --count --since='24 hours ago' HEAD)"
           if [[ "$n" -eq 0 ]]; then
@@ -189,10 +198,12 @@ jobs:
 
   # Image USB / SSD flashable (Etcher, Rufus DD, dd).
   # Artefact compressé : DevForge-Node-<version>-amd64.img.xz
+  # Best-effort : un échec libguestfs ne doit pas bloquer Flatpak / Windows.
   usb-node:
     needs: [gate]
     if: needs.gate.outputs.build == 'true'
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:

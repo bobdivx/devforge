@@ -91,6 +91,17 @@ const { title = 'DevForge', description = 'Deploy with clarity. Agents that work
             } catch (e) {}
           });
         });
+
+        // Filet : îlot client:only resté vide → forcer un rechargement unique.
+        window.addEventListener('DOMContentLoaded', function () {
+          window.setTimeout(function () {
+            var island = document.querySelector('astro-island');
+            if (!island || island.childElementCount > 0 || (island.textContent || '').trim()) return;
+            if (sessionStorage.getItem('df-island-reload')) return;
+            sessionStorage.setItem('df-island-reload', '1');
+            location.reload();
+          }, 1200);
+        });
       })();
     </script>
     <title>{title}</title>

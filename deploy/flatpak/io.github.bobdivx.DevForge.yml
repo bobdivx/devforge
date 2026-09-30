@@ -13,6 +13,9 @@ finish-args:
   - --filesystem=home
   # docker / git / npm / ssh sont ceux de l’hôte (host-tool.sh).
   - --talk-name=org.freedesktop.Flatpak
+  # Icône à côté de l’horloge (StatusNotifierItem). Le nom réel contient le pid.
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --own-name=org.kde.*
 build-options:
   strip: true
   no-debuginfo: true

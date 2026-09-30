@@ -1,6 +1,10 @@
 //! CORS + static web assets for production hardening.
 
-use axum::http::{HeaderValue, Method};
+use axum::{
+    body::Body,
+    http::{header, HeaderValue, Method, Request, Response},
+    middleware::Next,
+};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 /// Origins autorisées :
@@ -43,4 +47,25 @@ pub fn cors_layer() -> CorsLayer {
             axum::http::header::CONTENT_TYPE,
             axum::http::header::ACCEPT,
         ])
+}
+
+/// HTML / routes app : pas de cache (évite page blanche après MAJ Flatpak).
+/// Assets fingerprinted `/_astro/*` : cache long.
+pub async fn static_cache_headers(req: Request<Body>, next: Next) -> Response {
+    let path = req.uri().path().to_string();
+    let mut res = next.run(req).await;
+    let value = if path.starts_with("/_astro/") {
+        "public, max-age=31536000, immutable"
+    } else if path.ends_with(".html")
+        || path.ends_with('/')
+        || !path.rsplit('/').next().is_some_and(|s| s.contains('.'))
+    {
+        "no-cache"
+    } else {
+        return res;
+    };
+    if let Ok(v) = HeaderValue::from_str(value) {
+        res.headers_mut().insert(header::CACHE_CONTROL, v);
+    }
+    res
 }

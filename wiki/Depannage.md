@@ -60,5 +60,6 @@ Vérifie `DEVFORGE_UPDATE_MODE`, le compose monté en lecture, et que le process
 | `pacman` 404 sur `discover` / `archlinux-appstream-data` | Bases miroir obsolètes → `sudo pacman -Syu` puis réinstaller |
 | Le `.flatpak` ouvre CachyOS Package Installer | Mauvais défaut MIME : retirer `application/vnd.flatpak=cachyos-pi.desktop` dans `~/.config/mimeapps.list`, ou installer via `flatpak install --user ./DevForge-….flatpak` |
 | Discover introuvable | Paquet `discover` non installé (`sudo pacman -S discover`) — optionnel si tu utilises le terminal |
+| Pas d’icône à côté de l’horloge | Le processus n’est pas lancé (menu des applications, ou session). Sous Flatpak, le bureau doit accepter StatusNotifier (`org.kde.StatusNotifierWatcher`). Clic : ouvre la page. Clic droit : Ouvrir, Redémarrer, Arrêter |
 
 Voir [[Installation]] § Linux (Flatpak).
