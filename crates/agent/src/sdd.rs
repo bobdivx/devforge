@@ -297,9 +297,11 @@ pub fn reject(workdir: &Path, slug: &str, note: &str) -> Result<FeatureStatus, S
         ));
     }
     status.phase = PHASE_REJECTED.to_string();
+    // Une spec refusée quitte la liste tout de suite (pas d'étape « Retirer » en plus).
+    status.dismissed = true;
     let note = note.trim();
     status.note = if note.is_empty() {
-        "Spec rejetée. Aucun code.".into()
+        "Spec refusée. Aucun code.".into()
     } else {
         note.to_string()
     };
@@ -685,12 +687,25 @@ pub fn is_internal_control(status: &FeatureStatus) -> bool {
         || note.contains("ne pas rester en attente")
 }
 
+/// Une spec peut quitter la liste dès qu'elle n'est plus utile (échec, refus,
+/// essai bloqué, ou finie). L'attente d'accord se retire aussi d'un geste.
+pub fn can_dismiss(status: &FeatureStatus) -> bool {
+    !status.dismissed
+        && matches!(
+            status.phase.as_str(),
+            PHASE_AWAITING | PHASE_IMPLEMENT | PHASE_CONVERGED | PHASE_FAILED | PHASE_REJECTED
+        )
+}
+
 pub fn dismiss(workdir: &Path, slug: &str) -> Result<FeatureStatus, String> {
     let Some(mut status) = read_status(workdir, slug)? else {
         return Err("spec introuvable".into());
     };
-    if status.phase != PHASE_FAILED && status.phase != PHASE_REJECTED {
-        return Err("seule une spec échouée ou refusée peut être retirée".into());
+    if status.dismissed {
+        return Ok(status);
+    }
+    if !can_dismiss(&status) {
+        return Err("cette spec ne peut pas être retirée".into());
     }
     status.dismissed = true;
     status.updated_at = now_stamp();
@@ -1103,7 +1118,33 @@ mod tests {
         let created = specify(&dir, "Brouillon", "Pas prêt.").unwrap();
         let rejected = reject(&dir, &created.slug, "à reformuler").unwrap();
         assert_eq!(rejected.phase, PHASE_REJECTED);
+        assert!(rejected.dismissed);
         assert!(approve(&dir, &created.slug).is_err());
+        assert!(list_features(&dir).unwrap().is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dismiss_removes_stuck_and_finished_specs() {
+        let dir = scratch();
+        let a = specify(&dir, "Test boucle", "Essai.").unwrap();
+        let mut stuck = approve(&dir, &a.slug).unwrap();
+        stuck.provider = "Demeter".into();
+        write_status(&dir, &stuck).unwrap();
+        assert_eq!(list_features(&dir).unwrap().len(), 1);
+        assert!(can_dismiss(&stuck));
+        dismiss(&dir, &a.slug).unwrap();
+        assert!(list_features(&dir).unwrap().is_empty());
+
+        let b = specify(&dir, "Test boucle 3", "Essai fini.").unwrap();
+        let mut done = approve(&dir, &b.slug).unwrap();
+        done.phase = PHASE_CONVERGED.to_string();
+        done.note = NOTE_READY.into();
+        done.provider = "Gemini".into();
+        write_status(&dir, &done).unwrap();
+        assert_eq!(list_features(&dir).unwrap().len(), 1);
+        dismiss(&dir, &b.slug).unwrap();
+        assert!(list_features(&dir).unwrap().is_empty());
         let _ = fs::remove_dir_all(&dir);
     }
 }

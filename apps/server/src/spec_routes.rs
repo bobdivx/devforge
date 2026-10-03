@@ -145,6 +145,7 @@ async fn decide_spec(
             status.worker_uuid = worker.clone();
             status.note = sdd::NOTE_IN_PROGRESS.into();
             status.blocker.clear();
+            assign_spec_provider(&state, &uuid, &mut status).await;
             sdd::write_status(&root, &status).map_err(ApiError::message)?;
             let marker = format!("SDD-APPROVED:{slug}:{}", now_str());
             let content = format!(
@@ -187,6 +188,7 @@ async fn retry_spec(
     let worker = spawn_worker(&state, &uuid, &status).await?;
     status.worker_uuid = worker;
     status.note = sdd::NOTE_IN_PROGRESS.into();
+    assign_spec_provider(&state, &uuid, &mut status).await;
     sdd::write_status(&root, &status).map_err(ApiError::message)?;
     Ok(Json(json!({"data": status})))
 }
@@ -211,6 +213,20 @@ async fn converge_spec(
     let root = project_root(&state, &uuid).await?;
     let status = advance(&state, &uuid, &root, &slug, None, None).await?;
     Ok(Json(json!({"data": status})))
+}
+
+
+async fn assign_spec_provider(state: &AppState, project_uuid: &str, status: &mut FeatureStatus) {
+    let Some(owner) = project_owner(state, project_uuid).await else {
+        return;
+    };
+    let Some((_, label)) = state.llm_for_spec_worker(&owner).await else {
+        return;
+    };
+    let label = label.trim();
+    if !label.is_empty() {
+        status.provider = label.to_string();
+    }
 }
 
 async fn spawn_worker(
