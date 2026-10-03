@@ -333,7 +333,11 @@ impl AgentRunner {
             let mut args = force_args.unwrap_or_else(|| json!({}));
             inject_tool_defaults(&mut args, &ctx);
             emit(&progress, AgentEvent::ToolStart { name: tool.to_string(), arguments: args.clone() });
-            let result = self.registry.execute(tool, args.clone()).await?;
+            let result = if let Some(blocked) = refuse_bare_spec_approval(tool, &args, message) {
+                blocked
+            } else {
+                self.registry.execute(tool, args.clone()).await?
+            };
             let ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
             emit(&progress, AgentEvent::ToolDone { name: tool.to_string(), ok, arguments: args.clone(), result: result.clone() });
             return Ok(AgentReply {
@@ -436,7 +440,10 @@ impl AgentRunner {
                 let mut args = call.arguments.clone();
                 inject_tool_defaults(&mut args, &ctx);
                 emit(&progress, AgentEvent::ToolStart { name: call.name.clone(), arguments: args.clone() });
-                let result = match self.registry.execute(&call.name, args.clone()).await {
+                let result = if let Some(blocked) = refuse_bare_spec_approval(&call.name, &args, message) {
+                    blocked
+                } else {
+                    match self.registry.execute(&call.name, args.clone()).await {
                     Ok(v) => v,
                     Err(e) => match e {
                         devforge_shared::DevForgeError::NeedsUserAction { kind, message_fr, settings_href, resume_hint } => {
@@ -444,6 +451,7 @@ impl AgentRunner {
                         }
                         _ => json!({ "ok": false, "error": e.to_string() }),
                     },
+                    }
                 };
                 let ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
                 emit(&progress, AgentEvent::ToolDone { name: call.name.clone(), ok, arguments: args.clone(), result: result.clone() });
@@ -527,6 +535,20 @@ fn normalize_tool_call(tool_name: &str, args: &Value) -> String {
     }
 }
 
+fn refuse_bare_spec_approval(tool: &str, args: &Value, user_message: &str) -> Option<Value> {
+    if tool != "sdd_loop" {
+        return None;
+    }
+    let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("").trim();
+    if action != "approve" || !is_execute_nudge(user_message) {
+        return None;
+    }
+    Some(json!({
+        "ok": false,
+        "error": "« oui » et « go » ne valident pas la spec. Il faut une approbation explicite, par exemple « j'approuve la spec »."
+    }))
+}
+
 fn inject_tool_defaults(args: &mut Value, ctx: &AgentChatContext) {
     let Some(obj) = args.as_object_mut() else { return; };
     if let Some(uuid) = &ctx.project_uuid {
@@ -608,7 +630,7 @@ fn sdd_overlay(role: &str, latest: &str) -> String {
         return "\nSDD : la spec est dans specs/<slug>/spec.md. ARRÊT. Pas de code, pas de create_project_agent, pas de dépôt, pas de publication, pas de déploiement. Demande une validation explicite de la spec. « oui » et « go » ne suffisent pas.\n".into();
     }
     if latest.contains("SDD-APPROVED:") {
-        return "\nSDD : spec validée, plan.md et tasks.md sont écrits. Si un worker est déjà indiqué, n'en crée pas un second. Sinon create_project_agent (role=worker) avec le message d'implémentation locale. Publication toujours interdite.\n".into();
+        return "\nSDD : spec validée, plan.md et tasks.md sont écrits. Le worker local est déjà lancé : n'appelle pas create_project_agent. Publication toujours interdite.\n".into();
     }
     if latest.contains("SDD-REJECT:") {
         return "\nSDD : spec rejetée. Pas de code. Attends une nouvelle description.\n".into();
@@ -620,7 +642,7 @@ fn sdd_overlay(role: &str, latest: &str) -> String {
         return "\nSDD : boucle terminée. Résume le résultat. N'ouvre pas de pull request sans une demande explicite et séparée.\n".into();
     }
     if role == "coordinator" {
-        "\nSDD : pour une fonctionnalité, sdd_loop action=specify (titre + description). Cela écrit specs/constitution.md une fois et specs/<slug>/spec.md, puis tu t'arrêtes. « oui » et « go » ne valident pas la spec. Après un « j'approuve la spec », sdd_loop action=approve puis create_project_agent (role=worker, initial_message=implement_prompt). Le worker écrit specs/<slug>/convergence.md. Tu restes en local.\n".into()
+        "\nSDD : pour une fonctionnalité, sdd_loop action=specify (titre + description). Cela écrit specs/constitution.md une fois et specs/<slug>/spec.md, puis tu t'arrêtes. « oui » et « go » ne valident pas la spec. Après un « j'approuve la spec », sdd_loop action=approve : DevForge crée le worker local et lance l'implémentation. N'appelle pas create_project_agent pour ça. Le worker écrit specs/<slug>/convergence.md. Tu restes en local.\n".into()
     } else {
         String::new()
     }
@@ -700,6 +722,22 @@ pub fn parse_github_repo(git_url: &str) -> Option<(String, String)> {
 
 #[cfg(test)]
 mod scaffold_chain_test;
+
+#[cfg(test)]
+mod approval_gate {
+    use super::*;
+
+    #[test]
+    fn bare_oui_or_go_does_not_approve_spec() {
+        let args = json!({"action": "approve", "slug": "compteur"});
+        assert!(refuse_bare_spec_approval("sdd_loop", &args, "oui").is_some());
+        assert!(refuse_bare_spec_approval("sdd_loop", &args, "go").is_some());
+        assert!(refuse_bare_spec_approval("sdd_loop", &args, "OK").is_some());
+        assert!(refuse_bare_spec_approval("sdd_loop", &args, "j'approuve la spec").is_none());
+        assert!(refuse_bare_spec_approval("sdd_loop", &json!({"action": "specify"}), "oui").is_none());
+        assert!(refuse_bare_spec_approval("create_project_agent", &args, "oui").is_none());
+    }
+}
 
 fn summarize(tool: &str, result: &Value) -> String {
     let pretty = serde_json::to_string_pretty(result).unwrap_or_else(|_| "{}".into());

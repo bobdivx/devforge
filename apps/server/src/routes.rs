@@ -2577,6 +2577,11 @@ fn schedule_preview_repair(
         return;
     };
     for call in calls {
+        if call.get("name").and_then(|v| v.as_str()) == Some("sdd_loop") {
+            if let Some(result) = call.get("result") {
+                crate::spec_routes::schedule_started_worker(state.clone(), result);
+            }
+        }
         if call.get("name").and_then(|v| v.as_str()) != Some("create_project_agent") {
             continue;
         }
@@ -3153,6 +3158,7 @@ async fn agent_execute_tool(
         .execute(&tool, args)
         .await
         .map_err(|e| ApiError::message(e.to_string()))?;
+    crate::spec_routes::schedule_started_worker(state, &result);
     Ok(Json(json!({"data": result})))
 }
 
