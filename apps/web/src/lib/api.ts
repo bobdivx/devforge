@@ -289,6 +289,9 @@ export type SpecFeature = {
   attempts: number;
   worker_uuid?: string;
   note?: string;
+  provider?: string;
+  dismissed?: boolean;
+  blocker?: string;
   updated_at: string;
 };
 
@@ -634,6 +637,16 @@ export const api = {
     }),
   convergeProjectSpec: (projectUuid: string, slug: string) =>
     request<{ data: SpecFeature }>(`/projects/${projectUuid}/specs/${slug}/converge`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  retryProjectSpec: (projectUuid: string, slug: string) =>
+    request<{ data: SpecFeature }>(`/projects/${projectUuid}/specs/${slug}/retry`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  dismissProjectSpec: (projectUuid: string, slug: string) =>
+    request<{ data: SpecFeature }>(`/projects/${projectUuid}/specs/${slug}/dismiss`, {
       method: 'POST',
       body: '{}',
     }),

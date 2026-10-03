@@ -141,6 +141,26 @@ async fn approve_and_start(
         },
     };
 
+    match spec_worker_configured(pool, project_uuid).await {
+        Ok(false) => {
+            let blocked = sdd::block_no_tool_provider(&status);
+            if let Err(e) = sdd::write_status(root, &blocked) {
+                return Ok(json!({"ok": false, "error": e}));
+            }
+            return Ok(json!({
+                "ok": true,
+                "feature": blocked,
+                "project_uuid": project_uuid,
+                "worker_started": false,
+                "message": sdd::NOTE_NO_TOOL_PROVIDER
+            }));
+        }
+        Ok(true) => {}
+        Err(_) => {
+            // Schéma incomplet (tests) : le tour refusera Ollama au moment de l'appel.
+        }
+    }
+
     let worker = match enqueue_implement_worker(pool, project_uuid, &status).await {
         Ok(uuid) => uuid,
         Err(e) => {
@@ -151,11 +171,8 @@ async fn approve_and_start(
         }
     };
     status.worker_uuid = worker.clone();
-    status.note = format!(
-        "Spec validée. Worker {worker} lancé en local (essai {}/{}).",
-        status.attempts,
-        sdd::MAX_ATTEMPTS
-    );
+    status.note = sdd::NOTE_IN_PROGRESS.into();
+    status.blocker.clear();
     if let Err(e) = sdd::write_status(root, &status) {
         return Ok(json!({
             "ok": false,
@@ -172,6 +189,41 @@ async fn approve_and_start(
         "worker_started": true,
         "message": "Spec validée. Worker local lancé. N'appelle pas create_project_agent. Reste en local : pas de dépôt, pas de pull request, pas de déploiement."
     }))
+}
+
+async fn spec_worker_configured(
+    pool: &PgPool,
+    project_uuid: &str,
+) -> std::result::Result<bool, String> {
+    let ws: Option<(String,)> =
+        sqlx::query_as("SELECT workspace_uuid FROM projects WHERE uuid = $1")
+            .bind(project_uuid)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    let Some((ws,)) = ws else {
+        return Ok(false);
+    };
+    let owner: Option<(String,)> = sqlx::query_as(
+        "SELECT user_uuid FROM team_members WHERE team_uuid = $1 AND role = 'owner' ORDER BY created_at ASC LIMIT 1",
+    )
+    .bind(&ws)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some((owner,)) = owner else {
+        return Ok(false);
+    };
+    let rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT name, provider, COALESCE(catalog_id, '') FROM llm_providers WHERE enabled = 1 AND user_uuid = $1",
+    )
+    .bind(&owner)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(rows
+        .iter()
+        .any(|(name, provider, catalog)| sdd::provider_can_run_spec(name, provider, catalog)))
 }
 
 /// Crée le sous-agent et laisse un tour `pending`. Aucun `caller_agent_uuid` :

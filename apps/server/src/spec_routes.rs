@@ -27,6 +27,14 @@ pub fn router() -> Router<AppState> {
             "/api/v1/projects/{uuid}/specs/{slug}/converge",
             post(converge_spec),
         )
+        .route(
+            "/api/v1/projects/{uuid}/specs/{slug}/retry",
+            post(retry_spec),
+        )
+        .route(
+            "/api/v1/projects/{uuid}/specs/{slug}/dismiss",
+            post(dismiss_spec),
+        )
 }
 
 fn workdir_of(project_uuid: &str, raw: Option<&str>) -> PathBuf {
@@ -126,13 +134,17 @@ async fn decide_spec(
     match body.decision.trim() {
         "approve" => {
             let mut status = sdd::approve(&root, &slug).map_err(ApiError::message)?;
+            if !spec_worker_ready(&state, &uuid).await {
+                status = sdd::block_no_tool_provider(&status);
+                sdd::write_status(&root, &status).map_err(ApiError::message)?;
+                let marker = format!("SDD-FAILED:{slug}:{}", now_str());
+                wake_coordinator_later(state, uuid, marker, status.note.clone());
+                return Ok(Json(json!({"data": status})));
+            }
             let worker = spawn_worker(&state, &uuid, &status).await?;
             status.worker_uuid = worker.clone();
-            status.note = format!(
-                "Spec validée. Worker {worker} lancé en local (essai {}/{}).",
-                status.attempts,
-                sdd::MAX_ATTEMPTS
-            );
+            status.note = sdd::NOTE_IN_PROGRESS.into();
+            status.blocker.clear();
             sdd::write_status(&root, &status).map_err(ApiError::message)?;
             let marker = format!("SDD-APPROVED:{slug}:{}", now_str());
             let content = format!(
@@ -159,6 +171,37 @@ async fn decide_spec(
     }
 }
 
+async fn retry_spec(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((uuid, slug)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let _ = crate::routes::auth_project(&state, &headers, &uuid).await?;
+    let root = project_root(&state, &uuid).await?;
+    let mut status = sdd::reopen_for_retry(&root, &slug).map_err(ApiError::message)?;
+    if !spec_worker_ready(&state, &uuid).await {
+        status = sdd::block_no_tool_provider(&status);
+        sdd::write_status(&root, &status).map_err(ApiError::message)?;
+        return Ok(Json(json!({"data": status})));
+    }
+    let worker = spawn_worker(&state, &uuid, &status).await?;
+    status.worker_uuid = worker;
+    status.note = sdd::NOTE_IN_PROGRESS.into();
+    sdd::write_status(&root, &status).map_err(ApiError::message)?;
+    Ok(Json(json!({"data": status})))
+}
+
+async fn dismiss_spec(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((uuid, slug)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let _ = crate::routes::auth_project(&state, &headers, &uuid).await?;
+    let root = project_root(&state, &uuid).await?;
+    let status = sdd::dismiss(&root, &slug).map_err(ApiError::message)?;
+    Ok(Json(json!({"data": status})))
+}
+
 async fn converge_spec(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -166,7 +209,7 @@ async fn converge_spec(
 ) -> Result<Json<Value>, ApiError> {
     let _ = crate::routes::auth_project(&state, &headers, &uuid).await?;
     let root = project_root(&state, &uuid).await?;
-    let status = advance(&state, &uuid, &root, &slug, None).await?;
+    let status = advance(&state, &uuid, &root, &slug, None, None).await?;
     Ok(Json(json!({"data": status})))
 }
 
@@ -240,11 +283,61 @@ fn wake_coordinator_later(state: AppState, project_uuid: String, marker: String,
 }
 
 /// Après le tour d'un worker marqué SDD-IMPLEMENT, compare le résultat à la spec.
+pub async fn block_spec_no_provider(state: &AppState, project_uuid: &str, content: &str) {
+    let Some(slug) = content
+        .split("SDD-IMPLEMENT:")
+        .nth(1)
+        .and_then(|rest| rest.split([':', ' ', '\n']).next())
+        .map(|s| s.to_string())
+    else {
+        return;
+    };
+    if !sdd::is_slug(&slug) {
+        return;
+    }
+    let Ok(root) = project_root(state, project_uuid).await else {
+        return;
+    };
+    let Ok(Some(current)) = sdd::read_status(&root, &slug) else {
+        return;
+    };
+    if current.blocker == "no_provider" {
+        return;
+    }
+    if current.phase != sdd::PHASE_IMPLEMENT && current.phase != sdd::PHASE_FAILED {
+        return;
+    }
+    let next = sdd::block_no_tool_provider(&current);
+    let _ = sdd::write_status(&root, &next);
+}
+
+async fn spec_worker_ready(state: &AppState, project_uuid: &str) -> bool {
+    let Some(owner) = project_owner(state, project_uuid).await else {
+        return false;
+    };
+    state.llm_for_spec_worker(&owner).await.is_some()
+}
+
+async fn project_owner(state: &AppState, project_uuid: &str) -> Option<String> {
+    let ws: Option<(String,)> =
+        sqlx::query_as("SELECT workspace_uuid FROM projects WHERE uuid = $1")
+            .bind(project_uuid)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten();
+    let (ws,) = ws?;
+    crate::user_prefs::workspace_owner(&state.pool, &ws).await
+}
+
 pub fn schedule_after_implement(
     state: AppState,
     project_uuid: String,
     agent_uuid: String,
     content: String,
+    reply: String,
+    tools_json: String,
+    provider: String,
 ) {
     if !content.contains("SDD-IMPLEMENT:") {
         return;
@@ -263,8 +356,19 @@ pub fn schedule_after_implement(
     tokio::spawn(async move {
         match project_root(&state, &project_uuid).await {
             Ok(root) => {
-                if let Err(e) =
-                    advance(&state, &project_uuid, &root, &slug, Some(&agent_uuid)).await
+                if let Err(e) = advance(
+                    &state,
+                    &project_uuid,
+                    &root,
+                    &slug,
+                    Some(&agent_uuid),
+                    Some(sdd::TurnReport {
+                        reply,
+                        write_paths: sdd::write_paths_from_tools(&tools_json),
+                        provider,
+                    }),
+                )
+                .await
                 {
                     tracing::warn!(error = %e.message, slug, "convergence spec");
                 }
@@ -280,6 +384,7 @@ async fn advance(
     root: &std::path::Path,
     slug: &str,
     worker_hint: Option<&str>,
+    turn: Option<sdd::TurnReport>,
 ) -> Result<FeatureStatus, ApiError> {
     let Some(current) = sdd::read_status(root, slug).map_err(ApiError::message)? else {
         return Err(ApiError::not_found("spec"));
@@ -288,7 +393,7 @@ async fn advance(
         return Ok(current);
     }
     let verdict = sdd::read_verdict(root, slug).map_err(ApiError::message)?;
-    if matches!(verdict, sdd::Verdict::Missing) {
+    if turn.is_none() && matches!(verdict, sdd::Verdict::Missing) {
         let worker = if !current.worker_uuid.is_empty() {
             current.worker_uuid.clone()
         } else {
@@ -308,7 +413,9 @@ async fn advance(
             }
         }
     }
-    let mut next = sdd::apply_verdict(&current, verdict).map_err(ApiError::message)?;
+    let report = turn.unwrap_or_default();
+    let mut next =
+        sdd::apply_implement_turn(&current, verdict, &report).map_err(ApiError::message)?;
     if next.worker_uuid.is_empty() {
         if let Some(hint) = worker_hint {
             next.worker_uuid = hint.to_string();
