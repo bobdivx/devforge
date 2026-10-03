@@ -792,6 +792,19 @@ impl AppState {
         resolve_llm_provider(&self.pool, user_uuid, None).await
     }
 
+    /// Worker de spec. Ne passe pas par la chaîne des agents : celle-ci ne garde que les
+    /// providers dont la sonde est OK, met « Ollama NAS » en tête (préférence Agents),
+    /// et s'arrête sur la première réponse non vide. Ollama a donc répondu seul
+    /// (colonne provider = « Ollama NAS ») avec un JSON d'exemple, sans appeler les outils.
+    /// Ici on appelle les autres modèles configurés, même si leur sonde n'est plus fraîche.
+    pub async fn llm_for_spec_worker(
+        &self,
+        user_uuid: &str,
+    ) -> Option<(Arc<dyn devforge_llm::LlmProvider>, String)> {
+        let preferred = crate::user_prefs::agents_llm_provider(&self.pool, user_uuid).await;
+        resolve_spec_worker_provider(&self.pool, user_uuid, &preferred).await
+    }
+
     /// Chaîne LLM des agents autonomes (Coordinateur, auto-réparation, agents cron/événement) :
     /// le provider choisi dans « Agents autonomes » passe en tête, les autres restent en repli.
     pub async fn llm_for_agents(
@@ -880,6 +893,85 @@ fn prefer_first<T>(rows: &mut Vec<T>, is_preferred: impl Fn(&T) -> bool) {
     }
 }
 
+
+/// Chaîne de la spec : modèles configurés qui savent appeler des outils.
+/// Ollama est listé dans les logs puis écarté, sans servir de repli.
+async fn resolve_spec_worker_provider(
+    pool: &PgPool,
+    user_uuid: &str,
+    preferred_id: &str,
+) -> Option<(Arc<dyn devforge_llm::LlmProvider>, String)> {
+    let rows: Vec<(String, String, String, String, String, String, String, String, i64)> = sqlx::query_as(
+        r#"SELECT id, name, provider, api_key, base_url, model,
+                  COALESCE(resolved_model, ''), COALESCE(catalog_id, ''), enabled
+           FROM llm_providers
+           WHERE user_uuid = $1
+           ORDER BY priority ASC, name ASC"#,
+    )
+    .bind(user_uuid)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let brief: Vec<(&str, &str, &str, &str, bool)> = rows
+        .iter()
+        .map(|r| (r.0.as_str(), r.1.as_str(), r.2.as_str(), r.7.as_str(), r.8 != 0))
+        .collect();
+    let (order, skipped) = devforge_agent::sdd::choose_spec_providers(&brief, preferred_id);
+    if !skipped.is_empty() {
+        let why: Vec<String> = skipped
+            .iter()
+            .map(|(name, reason)| format!("{name}: {reason}"))
+            .collect();
+        tracing::info!(skipped = %why.join(" | "), "spec : fournisseurs écartés");
+    }
+    let mut entries = Vec::new();
+    let mut labels = Vec::new();
+    for decision in order {
+        let Some(row) = rows.iter().find(|r| r.0 == decision.id) else {
+            continue;
+        };
+        let model = if row.6.trim().is_empty() {
+            row.5.trim()
+        } else {
+            row.6.trim()
+        };
+        let model = if model.is_empty() { "auto" } else { model };
+        let built = LlmProviderRow {
+            id: row.0.clone(),
+            name: row.1.clone(),
+            provider: row.2.clone(),
+            key: row.3.clone(),
+            base: row.4.clone(),
+            model: model.to_string(),
+            healthy: 1,
+            last_probe_at: String::new(),
+            resolved_model: model.to_string(),
+        };
+        let Some(entry) = chain_entry_for(&built, model) else {
+            tracing::info!(provider = %row.1, "spec : configuration incomplète, écarté");
+            continue;
+        };
+        labels.push(entry.label.clone());
+        entries.push(entry);
+    }
+    if entries.is_empty() {
+        tracing::warn!(user = %user_uuid, "spec : aucun modèle à outils utilisable");
+        return None;
+    }
+    tracing::info!(used = %labels.join(" > "), "spec : modèles appelés");
+    if entries.len() == 1 {
+        let label = labels.remove(0);
+        return Some((entries.remove(0).provider, label));
+    }
+    let mode = devforge_agent::sdd::provider_label_for_user(&format!(
+        "chain:{}",
+        labels.join(">")
+    ));
+    let resilient = Arc::new(devforge_llm::ResilientLlmProvider::new(entries));
+    Some((resilient, mode))
+}
+
 async fn resolve_llm_provider(
     pool: &PgPool,
     user_uuid: &str,
@@ -895,9 +987,11 @@ async fn resolve_llm_provider(
         i64,
         String,
         String,
+        String,
     )> = sqlx::query_as(
         r#"SELECT id, name, provider, api_key, base_url, model,
-                  COALESCE(healthy, 0), COALESCE(last_probe_at, ''), COALESCE(resolved_model, '')
+                  COALESCE(healthy, 0), COALESCE(last_probe_at, ''), COALESCE(resolved_model, ''),
+                  COALESCE(catalog_id, '')
            FROM llm_providers
            WHERE enabled = 1 AND user_uuid = $1
            ORDER BY priority ASC, name ASC"#,
@@ -907,20 +1001,19 @@ async fn resolve_llm_provider(
     .await
     .unwrap_or_default();
 
-    if rows.is_empty() {
-        return devforge_llm::provider_from_config("stub", "", "gpt-4o-mini", None);
-    }
-
     let now = chrono::Utc::now();
     let now_str = now.to_rfc3339();
     let mut rows = rows;
+    if rows.is_empty() {
+        return devforge_llm::provider_from_config("stub", "", "gpt-4o-mini", None);
+    }
     if let Some(pref) = preferred_id {
         prefer_first(&mut rows, |r| r.0 == pref);
     }
     let rows: Vec<LlmProviderRow> = rows
         .into_iter()
         .map(
-            |(id, name, provider, key, base, model, healthy, last_probe_at, resolved_model)| {
+            |(id, name, provider, key, base, model, healthy, last_probe_at, resolved_model, _catalog)| {
                 LlmProviderRow {
                     id,
                     name,

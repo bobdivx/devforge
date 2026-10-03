@@ -335,6 +335,8 @@ impl AgentRunner {
             emit(&progress, AgentEvent::ToolStart { name: tool.to_string(), arguments: args.clone() });
             let result = if let Some(blocked) = refuse_bare_spec_approval(tool, &args, message) {
                 blocked
+            } else if let Some(blocked) = refuse_spec_publish(tool, message) {
+                blocked
             } else {
                 self.registry.execute(tool, args.clone()).await?
             };
@@ -442,6 +444,8 @@ impl AgentRunner {
                 emit(&progress, AgentEvent::ToolStart { name: call.name.clone(), arguments: args.clone() });
                 let result = if let Some(blocked) = refuse_bare_spec_approval(&call.name, &args, message) {
                     blocked
+                } else if let Some(blocked) = refuse_spec_publish(&call.name, message) {
+                    blocked
                 } else {
                     match self.registry.execute(&call.name, args.clone()).await {
                     Ok(v) => v,
@@ -532,6 +536,30 @@ fn normalize_tool_call(tool_name: &str, args: &Value) -> String {
         format!("{path}::{mode}")
     } else {
         serde_json::to_string(args).unwrap_or_default()
+    }
+}
+
+fn refuse_spec_publish(tool: &str, user_message: &str) -> Option<Value> {
+    let spec = user_message.contains("SDD-IMPLEMENT:")
+        || user_message.contains("SDD-SPECIFY:")
+        || user_message.contains("SDD-APPROVED:");
+    if !spec {
+        return None;
+    }
+    const BLOCKED: &[&str] = &[
+        "create_github_repo",
+        "create_github_fix",
+        "publish_to_github",
+        "sync_workdir_to_github",
+        "trigger_deploy",
+    ];
+    if BLOCKED.contains(&tool) {
+        Some(json!({
+            "ok": false,
+            "error": "Interdit pendant la spec : pas de dépôt, pas de pull request, pas de déploiement."
+        }))
+    } else {
+        None
     }
 }
 
@@ -636,7 +664,7 @@ fn sdd_overlay(role: &str, latest: &str) -> String {
         return "\nSDD : spec rejetée. Pas de code. Attends une nouvelle description.\n".into();
     }
     if latest.contains("SDD-IMPLEMENT:") {
-        return "\nSDD : tu es le worker de cette spec. Implémente seulement en local. Interdit : dépôt, pull request, publication, déploiement. Termine par specs/<slug>/convergence.md, première ligne CONVERGED: yes ou CONVERGED: no (ou CONVERGED: fail si blocage clair).\n".into();
+        return "\nSDD : tu es le worker de cette spec. Appelle les outils, n'écris pas leur JSON. Lis la spec, écris les fichiers de la fonctionnalité (pas seulement README), lance la preview locale, puis specs/<slug>/convergence.md. Première ligne CONVERGED: yes seulement si ces fichiers sont écrits, CONVERGED: no s'il reste un écart, CONVERGED: fail si tu es bloqué. Interdit : dépôt, pull request, publication, déploiement.\n".into();
     }
     if latest.contains("SDD-CONVERGED:") || latest.contains("SDD-FAILED:") {
         return "\nSDD : boucle terminée. Résume le résultat. N'ouvre pas de pull request sans une demande explicite et séparée.\n".into();
@@ -736,6 +764,16 @@ mod approval_gate {
         assert!(refuse_bare_spec_approval("sdd_loop", &args, "j'approuve la spec").is_none());
         assert!(refuse_bare_spec_approval("sdd_loop", &json!({"action": "specify"}), "oui").is_none());
         assert!(refuse_bare_spec_approval("create_project_agent", &args, "oui").is_none());
+    }
+
+    #[test]
+    fn spec_implement_does_not_open_a_repo_or_deploy() {
+        let msg = "SDD-IMPLEMENT:page:attempt=1\nÉcris la page.";
+        assert!(refuse_spec_publish("create_github_repo", msg).is_some());
+        assert!(refuse_spec_publish("trigger_deploy", msg).is_some());
+        assert!(refuse_spec_publish("publish_to_github", msg).is_some());
+        assert!(refuse_spec_publish("write_project_file", msg).is_none());
+        assert!(refuse_spec_publish("create_github_repo", "ajoute une page").is_none());
     }
 }
 

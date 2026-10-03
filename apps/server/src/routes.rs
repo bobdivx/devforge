@@ -2464,7 +2464,46 @@ async fn execute_claimed_run(
             None => None,
         }
     };
+    let spec_turn = run.content.contains("SDD-IMPLEMENT:");
     let result = match owner {
+        Some(uuid) if spec_turn => match state.llm_for_spec_worker(&uuid).await {
+            Some((llm, mode)) => {
+                let token = crate::user_prefs::github_token(&state.pool, &uuid).await;
+                devforge_github::with_token(
+                    &token,
+                    state.agent.handle_with_provider(
+                        &run.content,
+                        None,
+                        None,
+                        ctx,
+                        None,
+                        Some((llm, mode)),
+                    ),
+                )
+                .await
+            }
+            None => {
+                crate::spec_routes::block_spec_no_provider(
+                    &state,
+                    &run.project_uuid,
+                    &run.content,
+                )
+                .await;
+                let note = devforge_agent::sdd::NOTE_NO_TOOL_PROVIDER;
+                crate::agent_runs::save_assistant_and_finish(
+                    &state.pool,
+                    &run.uuid,
+                    &run.project_uuid,
+                    &run.agent_uuid,
+                    note,
+                    "[]",
+                    "",
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+        },
         Some(uuid) => {
             let (llm, mode) = state.llm_for_agents(&uuid).await;
             let token = crate::user_prefs::github_token(&state.pool, &uuid).await;
@@ -2480,6 +2519,23 @@ async fn execute_claimed_run(
                 ),
             )
             .await
+        }
+        None if spec_turn => {
+            crate::spec_routes::block_spec_no_provider(&state, &run.project_uuid, &run.content)
+                .await;
+            let note = devforge_agent::sdd::NOTE_NO_TOOL_PROVIDER;
+            crate::agent_runs::save_assistant_and_finish(
+                &state.pool,
+                &run.uuid,
+                &run.project_uuid,
+                &run.agent_uuid,
+                note,
+                "[]",
+                "",
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            return Ok(());
         }
         None => {
             state
@@ -2513,13 +2569,16 @@ async fn execute_claimed_run(
         run.project_uuid.clone(),
         run.agent_uuid.clone(),
         run.content.clone(),
-        tools_json,
+        tools_json.clone(),
     );
     crate::spec_routes::schedule_after_implement(
         state.clone(),
         run.project_uuid.clone(),
         run.agent_uuid.clone(),
         run.content.clone(),
+        result.reply.clone(),
+        tools_json,
+        result.provider.clone(),
     );
     Ok(())
 }
