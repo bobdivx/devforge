@@ -1120,7 +1120,7 @@ function AdminBeta() {
               <Badge tone="warn">Bêta</Badge>
             </div>
             <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
-              Option « Créer avec un agent » dans Nouvelle application.
+              Active « Nouvelle application » sur l’accueil : spec locale, pas de dépôt.
             </p>
           </div>
           <FeatureSwitch

@@ -397,6 +397,7 @@ Tu implémentes la fonctionnalité « {title} » (essai {attempt}/{max}).
 Lis specs/constitution.md, specs/{slug}/spec.md, specs/{slug}/plan.md et specs/{slug}/tasks.md.
 Travaille uniquement dans le workdir local (write_project_file mode=local, run_workdir_command).
 Interdit : créer un dépôt, une pull request, publier, ou déployer.
+Quand les fichiers sont en place, appelle start_local_preview pour une preview locale.
 Quand tu as fini, écris specs/{slug}/convergence.md.
 La première ligne doit être exactement `CONVERGED: yes` ou `CONVERGED: no`.
 Si un blocage clair empêche de continuer, écris `CONVERGED: fail` et la raison.

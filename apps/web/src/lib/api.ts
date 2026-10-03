@@ -566,7 +566,7 @@ export const api = {
     template?: string;
     server_id?: string;
   }) =>
-    request<{ data: { project: Project; agent: ProjectAgent } }>('/projects/scaffold', {
+    request<{ data: { project: Project; agent: ProjectAgent; spec?: SpecFeature | null } }>('/projects/scaffold', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

@@ -78,15 +78,14 @@ export function NewBuilderWizard({
         ...(isAdmin ? { server_id: serverId || 'default' } : {}),
       });
 
+      const slug = res.data.spec?.slug;
       toast.push({
-        title: 'Projet créé',
-        detail: `${cleanTitle} — l'agent va démarrer`,
+        title: 'Spec écrite',
+        detail: 'Prochaine étape : Approuver la spec. Aucun dépôt créé.',
         tone: 'ok',
       });
-
-      // Redirect to workspace tab in builder mode
-      const agentUuid = res.data.agent?.uuid || '';
-      window.location.href = `/app/projects/view?uuid=${encodeURIComponent(res.data.project.uuid)}&tab=workspace&builder=1${agentUuid ? `&agent=${encodeURIComponent(agentUuid)}` : ''}`;
+      const specQ = slug ? `&spec=${encodeURIComponent(slug)}` : '';
+      window.location.href = `/app/projects/view?uuid=${encodeURIComponent(res.data.project.uuid)}&tab=overview${specQ}`;
     } catch (err: unknown) {
       const msg = String((err as Error).message || err);
       setError(msg);
@@ -127,7 +126,7 @@ export function NewBuilderWizard({
           required
         />
         <span class="text-xs text-[var(--color-ink-faint)]">
-          L'agent DevForge va scaffolder le projet et configurer le build.
+          Prochaine étape : approuver la spec. « oui » et « go » ne lancent pas le code. Preview locale ensuite.
         </span>
       </label>
 
@@ -171,7 +170,7 @@ export function NewBuilderWizard({
           </Button>
         )}
         <Button type="submit" variant="secondary" size="sm" disabled={busy} class="ml-auto">
-          {busy ? 'Création en cours…' : 'Créer avec un agent'}
+          {busy ? 'Écriture de la spec…' : 'Écrire la spec'}
         </Button>
       </div>
     </form>
@@ -183,9 +182,9 @@ export function NewBuilderWizard({
         body
       ) : (
         <div class="rounded-2xl bg-[var(--color-card)] p-6 shadow-2xl">
-          <h2 class="mb-1 text-xl font-semibold">Nouvelle app avec l'agent</h2>
+          <h2 class="mb-1 text-xl font-semibold">Nouvelle application</h2>
           <p class="mb-4 text-sm text-[var(--color-ink-muted)]">
-            Décris ce que tu veux, DevForge scaffold le projet.
+            La spec est écrite en local. Tu l’approuves avant tout code métier.
           </p>
           {body}
         </div>

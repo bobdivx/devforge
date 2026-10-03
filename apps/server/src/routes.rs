@@ -558,9 +558,6 @@ async fn scaffold_project(
         new_id
     };
 
-    // Seed first message with the user prompt
-    let msg_uuid = new_uuid();
-
     // Apply template if provided
     let template_name = body.template.as_deref().unwrap_or("astro-preact-sqlite");
     let template_applied = if let Err(e) = apply_template(
@@ -576,31 +573,35 @@ async fn scaffold_project(
         true
     };
 
-    let seed_content = if template_applied {
-        format!(
-            "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\n✅ Template {} déjà appliqué (Astro + Preact + Tailwind + DaisyUI + SQLite).\nLa connexion Pocket ID est déjà dans le template (`/api/auth/login`, callback `/api/auth/callback/pocket-id`). Ne supprime pas ces routes : un compte Pocket ID doit pouvoir entrer dans l'app.\n\n🎯 TON RÔLE : Prépare une preview atelier testable.\n\n🚨 WORKFLOW OBLIGATOIRE :\n1. Le template est déjà dans le workdir — NE réécris PAS les fichiers de base\n2. Customisations : write_project_file mode='local'\n3. Appelle TOUJOURS start_local_preview (outil) pour exposer https://dev-…. Ne lance PAS npm à la main.\n\n❌ INTERDIT (l'utilisateur n'a PAS encore validé) :\n- create_github_repo / sync_workdir_to_github / trigger_deploy\n\n✅ APRÈS validation utilisateur : publication GitHub + deploy via le bouton Publier.",
-            body.title, body.prompt, template_name
-        )
-    } else {
-        format!(
-            "Nouveau projet DevForge : {}\n\nObjectif :\n{}\n\nScaffold ce projet en LOCAL. Prépare une preview testable. NE crée PAS de repo GitHub avant validation utilisateur.",
-            body.title, body.prompt
-        )
-    };
-
-    sqlx::query(
-        r#"INSERT INTO agent_messages (
-            uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at
-        ) VALUES ($1, $2, $3, 'user', $4, '[]', 'system', $5)"#,
-    )
-    .bind(&msg_uuid)
-    .bind(&uuid)
-    .bind(&agent_uuid)
-    .bind(&seed_content)
-    .bind(&now)
-    .execute(&state.pool)
-    .await
-    .map_err(ApiError::from)?;
+    let workdir = std::path::PathBuf::from(devforge_deploy::resolve_project_workdir(
+        &format!("/data/devforge/applications/{uuid}"),
+        &uuid,
+    ));
+    let spec = devforge_agent::sdd::specify(&workdir, &body.title, &body.prompt);
+    if let Ok(status) = &spec {
+        let marker = format!("SDD-SPECIFY:{}:{}", status.slug, now_str());
+        let model = if template_applied {
+            "Le modèle local est en place."
+        } else {
+            "Le modèle n'a pas été copié. La spec est quand même écrite."
+        };
+        let content = format!(
+            "Nouvelle application « {title} ». La spec est dans specs/{slug}/spec.md.\n\
+             {model} ARRÊT : pas de code métier, pas de worker, pas de dépôt.\n\
+             L'utilisateur doit approuver la spec (pas un simple « oui » ou « go »). Ensuite seulement : plan, tâches, worker local, preview.",
+            title = status.title,
+            slug = status.slug
+        );
+        let state_wake = state.clone();
+        let project_uuid = uuid.clone();
+        tokio::spawn(async move {
+            if let Err(e) = wake_coordinator(&state_wake, &project_uuid, &marker, &content).await {
+                eprintln!("[scaffold] coordinateur : {e}");
+            }
+        });
+    } else if let Err(e) = &spec {
+        eprintln!("[scaffold] spec : {e}");
+    }
 
     let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1")
         .bind(&uuid)
@@ -612,15 +613,13 @@ async fn scaffold_project(
         eprintln!("[scaffold] SQLite projet : {e}");
     }
 
-    // Return agent info as simple JSON value
     let agent_info = serde_json::json!({
         "uuid": agent_uuid,
         "project_uuid": uuid,
         "role": "deploy"
     });
 
-    // Preview atelier : démarre en arrière-plan (workdir déjà scaffoldé).
-    // L’utilisateur n’a pas à demander à l’agent de le faire.
+    // Preview du modèle local seulement. Le code de la spec attend l'approbation.
     {
         let registry = state.registry.clone();
         let project_uuid = uuid.clone();
@@ -634,38 +633,13 @@ async fn scaffold_project(
         });
     }
 
-    // Le prompt est déjà en base : le tour part tout de suite (fichiers locaux + preview).
-    sqlx::query("UPDATE project_agents SET status = 'working', updated_at = $1 WHERE uuid = $2")
-        .bind(&now)
-        .bind(&agent_uuid)
-        .execute(&state.pool)
-        .await
-        .map_err(ApiError::from)?;
-    {
-        let state_clone = state.clone();
-        let project_uuid = uuid.clone();
-        let agent_uuid_clone = agent_uuid.clone();
-        tokio::spawn(async move {
-            if let Err(e) = trigger_agent_turn(&state_clone, &project_uuid, &agent_uuid_clone).await
-            {
-                eprintln!("[scaffold] tour agent : {e}");
-                let now = now_str();
-                let _ = sqlx::query(
-                    "UPDATE project_agents SET status = 'idle', updated_at = $1 WHERE uuid = $2 AND status = 'working'",
-                )
-                .bind(&now)
-                .bind(&agent_uuid_clone)
-                .execute(&state_clone.pool)
-                .await;
-            }
-        });
-    }
-
+    let spec_json = spec.ok();
     Ok((
         axum::http::StatusCode::CREATED,
-        Json(json!({ "data": { "project": project, "agent": agent_info } })),
+        Json(json!({ "data": { "project": project, "agent": agent_info, "spec": spec_json } })),
     ))
 }
+
 
 #[derive(Deserialize, Default)]
 struct GetProjectQuery {

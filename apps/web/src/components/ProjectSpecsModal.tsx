@@ -27,12 +27,12 @@ export function ProjectSpecsTile({
     <>
       <HubTile
         index={index}
-        title="Spécifications"
+        title="Nouvelle fonctionnalité"
         onClick={() => setOpen(true)}
         icon={<FileText size={22} aria-hidden />}
         subtitle={
           <div class="mt-1 text-[11px] font-medium text-[var(--color-ink-muted)]">
-            Spec, plan, tâches
+            Écrire la spec
           </div>
         }
       />
@@ -41,7 +41,7 @@ export function ProjectSpecsTile({
   );
 }
 
-function ProjectSpecsModal({
+export function ProjectSpecsModal({
   projectUuid,
   open,
   onClose,
@@ -133,11 +133,11 @@ function ProjectSpecsModal({
       open={open}
       onClose={onClose}
       size="lg"
-      title="Spécifications"
+      title="Nouvelle fonctionnalité"
       description={
         waiting > 0
-          ? `${waiting} en attente de validation. Aucun code avant ton accord.`
-          : 'Une constitution, puis spec, plan et tâches. Le code reste local.'
+          ? `${waiting} spec en attente. Prochaine étape : Approuver la spec. « oui » et « go » ne comptent pas.`
+          : 'Prochaine étape : écrire la spec, puis l’approuver. Aucun dépôt n’est créé.'
       }
     >
       <div class="space-y-5">
