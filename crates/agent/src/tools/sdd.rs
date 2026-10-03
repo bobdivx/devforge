@@ -97,7 +97,13 @@ impl Tool for SddLoopTool {
             "reject" => {
                 let slug = arguments.get("slug").and_then(|v| v.as_str()).unwrap_or("");
                 let note = arguments.get("note").and_then(|v| v.as_str()).unwrap_or("");
-                sdd::reject(root, slug, note).map(|status| json!({"ok": true, "feature": status}))
+                sdd::reject(root, slug, note).map(|status| {
+                    json!({
+                        "ok": true,
+                        "feature": status,
+                        "message": "Spec refusée. Elle quitte la liste. Aucun code."
+                    })
+                })
             }
             _ => Err("action inconnue (specify, approve, reject, list)".into()),
         };
@@ -141,8 +147,9 @@ async fn approve_and_start(
         },
     };
 
-    match spec_worker_configured(pool, project_uuid).await {
-        Ok(false) => {
+    let mut planned_label = String::new();
+    match spec_worker_plan(pool, project_uuid).await {
+        Ok((false, _)) => {
             let blocked = sdd::block_no_tool_provider(&status);
             if let Err(e) = sdd::write_status(root, &blocked) {
                 return Ok(json!({"ok": false, "error": e}));
@@ -155,7 +162,9 @@ async fn approve_and_start(
                 "message": sdd::NOTE_NO_TOOL_PROVIDER
             }));
         }
-        Ok(true) => {}
+        Ok((true, label)) => {
+            planned_label = label;
+        }
         Err(_) => {
             // Schéma incomplet (tests) : le tour refusera Ollama au moment de l'appel.
         }
@@ -173,6 +182,9 @@ async fn approve_and_start(
     status.worker_uuid = worker.clone();
     status.note = sdd::NOTE_IN_PROGRESS.into();
     status.blocker.clear();
+    if !planned_label.is_empty() {
+        status.provider = planned_label;
+    }
     if let Err(e) = sdd::write_status(root, &status) {
         return Ok(json!({
             "ok": false,
@@ -191,10 +203,11 @@ async fn approve_and_start(
     }))
 }
 
-async fn spec_worker_configured(
+/// `(prêt, libellé affiché)` — le libellé est le ou les modèles qui vont écrire (Demeter, Gemini…).
+async fn spec_worker_plan(
     pool: &PgPool,
     project_uuid: &str,
-) -> std::result::Result<bool, String> {
+) -> std::result::Result<(bool, String), String> {
     let ws: Option<(String,)> =
         sqlx::query_as("SELECT workspace_uuid FROM projects WHERE uuid = $1")
             .bind(project_uuid)
@@ -202,7 +215,7 @@ async fn spec_worker_configured(
             .await
             .map_err(|e| e.to_string())?;
     let Some((ws,)) = ws else {
-        return Ok(false);
+        return Ok((false, String::new()));
     };
     let owner: Option<(String,)> = sqlx::query_as(
         "SELECT user_uuid FROM team_members WHERE team_uuid = $1 AND role = 'owner' ORDER BY created_at ASC LIMIT 1",
@@ -212,18 +225,37 @@ async fn spec_worker_configured(
     .await
     .map_err(|e| e.to_string())?;
     let Some((owner,)) = owner else {
-        return Ok(false);
+        return Ok((false, String::new()));
     };
-    let rows: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT name, provider, COALESCE(catalog_id, '') FROM llm_providers WHERE enabled = 1 AND user_uuid = $1",
+    let preferred: String = sqlx::query_scalar(
+        "SELECT COALESCE(agents_llm_provider_id, '') FROM user_settings WHERE user_uuid = $1",
+    )
+    .bind(&owner)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None)
+    .unwrap_or_default();
+    let rows: Vec<(String, String, String, String, i64)> = sqlx::query_as(
+        "SELECT id, name, provider, COALESCE(catalog_id, ''), enabled FROM llm_providers WHERE user_uuid = $1 ORDER BY priority ASC, name ASC",
     )
     .bind(&owner)
     .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())?;
-    Ok(rows
+    let brief: Vec<(&str, &str, &str, &str, bool)> = rows
         .iter()
-        .any(|(name, provider, catalog)| sdd::provider_can_run_spec(name, provider, catalog)))
+        .map(|r| (r.0.as_str(), r.1.as_str(), r.2.as_str(), r.3.as_str(), r.4 != 0))
+        .collect();
+    let (used, _) = sdd::choose_spec_providers(&brief, &preferred);
+    if used.is_empty() {
+        return Ok((false, String::new()));
+    }
+    let label = used
+        .iter()
+        .map(|d| d.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok((true, label))
 }
 
 /// Crée le sous-agent et laisse un tour `pending`. Aucun `caller_agent_uuid` :
